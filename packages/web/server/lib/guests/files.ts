@@ -1,18 +1,36 @@
 import defaultFs from 'node:fs/promises';
 import defaultPath from 'node:path';
+import type { Dirent } from 'node:fs';
+import { hasErrorCode } from './input-guards.js';
 
 import { GUEST_FILE_CONTENT_MAX, GUEST_FILE_LIST_MAX, GUEST_FILE_PATH_MAX, guestFileScope } from '@openchamber/sdk';
 
 
-const failure = (code, message) => ({ ok: false, code, message });
+type FileFailure = { ok: false; code: string; message: string };
+type FileResult<T> = FileFailure | { ok: true; result: T };
+type FilePathOptions = {
+  path: string;
+  projectDirectory?: string | null | undefined;
+  patterns?: string[] | undefined;
+  homeDir: string;
+  fsPromises?: typeof defaultFs;
+  nodePath?: typeof defaultPath;
+};
+type FileOperationOptions = FilePathOptions & {
+  op: string;
+  content?: string | null | undefined;
+  grants?: string[];
+};
 
-const isGlobChar = (segment) => segment.includes('*') || segment.includes('?');
+const failure = (code: string, message: string): FileFailure => ({ ok: false, code, message });
 
-const escapeRegExp = (value) => value.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+const isGlobChar = (segment: string) => segment.includes('*') || segment.includes('?');
 
-const toPosix = (value, nodePath) => (nodePath.sep === '/' ? value : value.split(nodePath.sep).join('/'));
+const escapeRegExp = (value: string) => value.replace(/[.+^${}()|[\]\\]/g, '\\$&');
 
-export const expandHome = (pattern, homeDir) => {
+const toPosix = (value: string, nodePath: typeof defaultPath) => (nodePath.sep === '/' ? value : value.split(nodePath.sep).join('/'));
+
+export const expandHome = (pattern: string, homeDir: string) => {
   if (pattern === '~') {
     return homeDir;
   }
@@ -22,11 +40,11 @@ export const expandHome = (pattern, homeDir) => {
   return pattern;
 };
 
-export const globToRegExp = (pattern) => {
+export const globToRegExp = (pattern: string) => {
   let source = '^';
   let index = 0;
   while (index < pattern.length) {
-    const char = pattern[index];
+    const char = pattern.charAt(index);
     if (char === '*' && pattern[index + 1] === '*') {
       const afterSlash = index === 0 || pattern[index - 1] === '/';
       const beforeSlash = pattern[index + 2] === '/';
@@ -61,12 +79,12 @@ export const globToRegExp = (pattern) => {
   return new RegExp(`${source}$`);
 };
 
-export const matchesFilesystemPattern = (canonicalPath, patterns, homeDir, nodePath = defaultPath) => {
+export const matchesFilesystemPattern = (canonicalPath: string, patterns: string[], homeDir: string, nodePath = defaultPath) => {
   const candidate = toPosix(canonicalPath, nodePath);
   return patterns.some((pattern) => globToRegExp(expandHome(pattern, homeDir)).test(candidate));
 };
 
-const canonicalize = async (absolute, fsPromises, nodePath) => {
+const canonicalize = async (absolute: string, fsPromises: typeof defaultFs, nodePath: typeof defaultPath) => {
   let current = absolute;
   const tail = [];
   for (;;) {
@@ -74,7 +92,7 @@ const canonicalize = async (absolute, fsPromises, nodePath) => {
       const real = await fsPromises.realpath(current);
       return tail.length > 0 ? nodePath.join(real, ...tail) : real;
     } catch (error) {
-      if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') {
+      if (!(hasErrorCode(error) && (error.code === 'ENOENT' || error.code === 'ENOTDIR'))) {
         throw error;
       }
     }
@@ -87,7 +105,7 @@ const canonicalize = async (absolute, fsPromises, nodePath) => {
   }
 };
 
-const canonicalizePattern = async (pattern, homeDir, fsPromises, nodePath) => {
+const canonicalizePattern = async (pattern: string, homeDir: string, fsPromises: typeof defaultFs, nodePath: typeof defaultPath) => {
   const expanded = expandHome(pattern, homeDir);
   const segments = expanded.split('/');
   const firstGlob = segments.findIndex(isGlobChar);
@@ -98,11 +116,11 @@ const canonicalizePattern = async (pattern, homeDir, fsPromises, nodePath) => {
   return rest.length > 0 ? `${canonical.replace(/\/+$/, '')}/${rest.join('/')}` : canonical;
 };
 
-const isInside = (candidate, root, nodePath) => (
+const isInside = (candidate: string, root: string, nodePath: typeof defaultPath) => (
   candidate === root || candidate.startsWith(root.endsWith(nodePath.sep) ? root : `${root}${nodePath.sep}`)
 );
 
-const hasDotDot = (value) => value.split('/').some((segment) => segment === '..');
+const hasDotDot = (value: string) => value.split('/').some((segment) => segment === '..');
 
 export const resolveGuestFilePath = async ({
   path: rawPath,
@@ -111,7 +129,7 @@ export const resolveGuestFilePath = async ({
   homeDir,
   fsPromises = defaultFs,
   nodePath = defaultPath,
-}) => {
+}: FilePathOptions): Promise<FileFailure | { ok: true; scope: 'project' | 'filesystem'; absolute: string }> => {
   if (
     rawPath.length === 0
     || rawPath.length > GUEST_FILE_PATH_MAX
@@ -147,14 +165,14 @@ export const resolveGuestFilePath = async ({
   return { ok: true, scope: 'filesystem', absolute };
 };
 
-const entryKind = (dirent) => {
+const entryKind = (dirent: Dirent): 'other' | 'file' | 'directory' => {
   if (dirent.isSymbolicLink()) return 'other';
   if (dirent.isFile()) return 'file';
   if (dirent.isDirectory()) return 'directory';
   return 'other';
 };
 
-const readOperation = async (absolute, fsPromises) => {
+const readOperation = async (absolute: string, fsPromises: typeof defaultFs): Promise<FileResult<{ content: string }>> => {
   const stat = await fsPromises.stat(absolute);
   if (stat.isDirectory()) {
     return failure('BAD_PATH', 'That path is a directory.');
@@ -169,7 +187,7 @@ const readOperation = async (absolute, fsPromises) => {
   return { ok: true, result: { content } };
 };
 
-const writeOperation = async (absolute, content, fsPromises, nodePath) => {
+const writeOperation = async (absolute: string, content: string | null | undefined, fsPromises: typeof defaultFs, nodePath: typeof defaultPath): Promise<FileResult<{ written: true }>> => {
   if (content === undefined || content === null) {
     return failure('BAD_PATH', 'Write needs content.');
   }
@@ -188,7 +206,7 @@ const writeOperation = async (absolute, content, fsPromises, nodePath) => {
   return { ok: true, result: { written: true } };
 };
 
-const listOperation = async (absolute, fsPromises) => {
+const listOperation = async (absolute: string, fsPromises: typeof defaultFs): Promise<FileResult<{ entries: Array<{ name: string; kind: 'other' | 'file' | 'directory' }> }>> => {
   const dirents = await fsPromises.readdir(absolute, { withFileTypes: true });
   const entries = dirents
     .map((dirent) => ({ name: dirent.name, kind: entryKind(dirent) }))
@@ -197,12 +215,12 @@ const listOperation = async (absolute, fsPromises) => {
   return { ok: true, result: { entries } };
 };
 
-const statOperation = async (absolute, fsPromises) => {
+const statOperation = async (absolute: string, fsPromises: typeof defaultFs): Promise<FileResult<{ kind: 'missing' | 'file' | 'directory' | 'other'; size: number; mtime: number }>> => {
   let stat;
   try {
     stat = await fsPromises.stat(absolute);
   } catch (error) {
-    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') {
+    if (hasErrorCode(error) && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
       return { ok: true, result: { kind: 'missing', size: 0, mtime: 0 } };
     }
     throw error;
@@ -211,7 +229,7 @@ const statOperation = async (absolute, fsPromises) => {
   return { ok: true, result: { kind, size: stat.size, mtime: Math.floor(stat.mtimeMs) } };
 };
 
-const mapFsError = (error) => {
+const mapFsError = (error: { code: unknown } | null) => {
   const code = error?.code;
   if (code === 'ENOENT') {
     return failure('NOT_FOUND', 'No file at that path.');
@@ -235,7 +253,7 @@ export const runGuestFileOperation = async ({
   homeDir,
   fsPromises = defaultFs,
   nodePath = defaultPath,
-}) => {
+}: FileOperationOptions) => {
   const needed = guestFileScope(rawPath) === 'project' ? 'files' : 'filesystem';
   if (!(grants ?? []).includes(needed)) {
     return failure(
@@ -249,7 +267,7 @@ export const runGuestFileOperation = async ({
   try {
     resolved = await resolveGuestFilePath({ path: rawPath, projectDirectory, patterns, homeDir, fsPromises, nodePath });
   } catch (error) {
-    const mapped = mapFsError(error);
+    const mapped = mapFsError(hasErrorCode(error) ? error : null);
     if (mapped) return mapped;
     throw error;
   }
@@ -270,7 +288,7 @@ export const runGuestFileOperation = async ({
         return failure('BAD_PATH', 'Unknown file operation.');
     }
   } catch (error) {
-    const mapped = mapFsError(error);
+    const mapped = mapFsError(hasErrorCode(error) ? error : null);
     if (mapped) return mapped;
     throw error;
   }

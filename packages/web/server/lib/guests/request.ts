@@ -9,10 +9,14 @@ import { dropGuestTokens } from './auth-store.js';
 import { resolveHostAccessToken } from './host-session.js';
 import { GuestOAuthError, guestAuthorizationHeader, refreshGuestAccessToken, takeUsableGuestAuth } from './oauth.js';
 import { readBoundedResponseText } from './response-body.js';
+import type { GuestRecord, JsonObject } from './contracts.js';
+import type { TrackerRegistry } from '../trackers/tracker-contract.js';
+import { isString } from './input-guards.js';
 
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
+type AuthorizedHeaders = { Accept: string; Authorization: string; 'Content-Type'?: string };
 
-export const joinGuestRequestUrl = (apiOrigin, path, query) => {
+export const joinGuestRequestUrl = (apiOrigin: string, path: string, query?: JsonObject) => {
   if (!isGuestRequestPath(path)) {
     return null;
   }
@@ -27,7 +31,7 @@ export const joinGuestRequestUrl = (apiOrigin, path, query) => {
   }
   if (query) {
     for (const [key, value] of Object.entries(query)) {
-      if (typeof key !== 'string' || typeof value !== 'string') {
+      if (!isString(value)) {
         return null;
       }
       url.searchParams.set(key, value);
@@ -36,7 +40,7 @@ export const joinGuestRequestUrl = (apiOrigin, path, query) => {
   return url;
 };
 
-const readCappedBody = async (response) => {
+const readCappedBody = async (response: Response) => {
   const body = await readBoundedResponseText(response, GUEST_REQUEST_RESPONSE_MAX);
   if (body.tooLarge) {
     throw new GuestOAuthError(
@@ -47,25 +51,34 @@ const readCappedBody = async (response) => {
   return body.text;
 };
 
-const sendAuthorized = async (url, method, body, accessToken, authorization) => {
-  const headers = {
+const sendAuthorized = async (url: URL, method: string, body: string | undefined, accessToken: string, authorization: string) => {
+  const headers: AuthorizedHeaders = {
     Accept: 'application/json',
     Authorization: guestAuthorizationHeader(accessToken, authorization),
   };
   if (body !== undefined && method !== 'GET') {
     headers['Content-Type'] = 'application/json';
   }
-  return fetch(url, {
+  const request: RequestInit = {
     method,
     headers,
-    body: method === 'GET' || body === undefined ? undefined : body,
     redirect: 'manual',
     signal: AbortSignal.timeout(GUEST_REQUEST_TIMEOUT_MS),
-  });
+  };
+  if (method !== 'GET' && body !== undefined) request.body = body;
+  return fetch(url, request);
 };
 
-export const proxyGuestRequest = async ({ guest, trackers = null, persistPath, method, path, query, body }) => {
-  const api = resolveIntegrationApi(guest.integration ?? {});
+export const proxyGuestRequest = async ({ guest, trackers = null, persistPath, method, path, query, body }: {
+  guest: GuestRecord;
+  trackers?: TrackerRegistry | null;
+  persistPath: string;
+  method: string;
+  path: string;
+  query?: JsonObject;
+  body?: string;
+}) => {
+  const api = guest.integration ? resolveIntegrationApi(guest.integration) : null;
   if (!api) {
     throw new GuestOAuthError('This guest does not declare an API origin.', 'NO_INTEGRATION');
   }

@@ -22,6 +22,29 @@ import {
   readExtensionStore,
   updateExtensionStore,
 } from './persist.js';
+import type { GitOrigin, ExtensionStore } from './persist.js';
+import type { GuestPackage, JsonValue } from './contracts.js';
+import type { PublicGuest } from './catalog.js';
+import type { AddressLookup, PublicAddress } from './clone.js';
+import type { TcpNetConnectOpts } from 'node:net';
+import { isString } from './input-guards.js';
+
+type InstallOptions = { openchamberVersion?: string | undefined; replace?: boolean };
+type GitInstallOptions = InstallOptions & {
+  gitBinary?: string | undefined;
+  gitIdentityId?: string | undefined;
+  ref?: string | undefined;
+  lookup?: AddressLookup | undefined;
+};
+type InstallFailure = { ok: false; code: string; id?: string; reason?: string; required?: string; capabilities?: string[] };
+type InstallResult = { ok: true; guest: PublicGuest; replaced: boolean } | InstallFailure;
+type PrepareResult = { ok: true; root?: string } | InstallFailure;
+type CopiedInstallOptions = InstallOptions & {
+  source: 'zip' | 'git';
+  prepare: (staging: string) => Promise<PrepareResult>;
+  persistPath: string;
+  origin?: GitOrigin | null;
+};
 
 const MAX_ZIP_BYTES = 20 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 60_000;
@@ -33,12 +56,12 @@ const installBodySchema = z.object({
   replace: z.boolean().optional(),
 }).refine((value) => Boolean(value.path) !== Boolean(value.url));
 
-export const parseInstallRequest = (body) => {
+export const parseInstallRequest = (body: JsonValue | undefined) => {
   const parsed = installBodySchema.safeParse(body);
   return parsed.success ? parsed.data : null;
 };
 
-const persistGuest = async (guest, root, source, persistPath, { replace = false, origin = null } = {}) => {
+const persistGuest = async (guest: GuestPackage, root: string, source: 'path' | 'git' | 'zip', persistPath: string, { replace = false, origin = null }: { replace?: boolean; origin?: GitOrigin | null } = {}): Promise<InstallResult> => {
   if (isReservedBuiltInId(guest.id)) return { ok: false, code: 'reserved-id' };
   const stored = await readExtensionStore(persistPath);
   const storedRoots = await Promise.all(stored.paths.map((entry) => resolveGuestPackageRoot(entry)));
@@ -70,7 +93,7 @@ const persistGuest = async (guest, root, source, persistPath, { replace = false,
       return removed;
     }
   }
-  let storageId;
+  let storageId: NonNullable<ExtensionStore['storageIds']>[string];
   await updateExtensionStore(persistPath, (after) => {
     storageId = after.storageIds?.[guest.id] ?? randomUUID();
     return {
@@ -88,11 +111,11 @@ const persistGuest = async (guest, root, source, persistPath, { replace = false,
   };
 };
 
-const removeDir = async (dir) => {
+const removeDir = async (dir: string) => {
   await fs.rm(dir, { recursive: true, force: true });
 };
 
-const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVersion, replace = false, origin = null }) => {
+const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVersion, replace = false, origin = null }: CopiedInstallOptions): Promise<InstallResult> => {
   const copies = guestCopiesDir(persistPath);
   await fs.mkdir(copies, { recursive: true });
   const staging = path.join(copies, `.tmp-${process.pid}-${Date.now()}`);
@@ -150,7 +173,7 @@ const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVer
   }
 };
 
-const isHttpsRedirectUrl = (value) => {
+const isHttpsRedirectUrl = (value: string) => {
   try {
     const parsed = new URL(value);
     return parsed.protocol === 'https:' && parsed.username === '' && parsed.password === '' && isPublicHostname(parsed.hostname);
@@ -159,7 +182,7 @@ const isHttpsRedirectUrl = (value) => {
   }
 };
 
-const readLocalZip = async (filePath) => {
+const readLocalZip = async (filePath: string) => {
   try {
     const stat = await fs.stat(filePath);
     if (!stat.isFile() || stat.size > MAX_ZIP_BYTES) {
@@ -173,21 +196,10 @@ const readLocalZip = async (filePath) => {
 
 const MAX_ZIP_REDIRECTS = 5;
 
-/**
- * One https request pinned to an address the caller already checked. The
- * socket goes to `address`; TLS still verifies the certificate against the
- * URL's hostname. Redirects are not followed: the status and `location` come
- * back for the caller to check. The body is capped while it streams.
- * @param {string} url
- * @param {{ address: string, family: 4 | 6 }} target
- * @param {number} maxBytes
- * @returns {Promise<{ status: number, location: string | null, body: Buffer | null }>}
- */
-const requestHttpsPinned = (url, target, maxBytes) => new Promise((resolve, reject) => {
+const requestHttpsPinned = (url: string, target: PublicAddress, maxBytes: number) => new Promise<{ status: number; location: string | null; body: Buffer | null }>((resolve, reject) => {
   const parsed = new URL(url);
-  const request = https.request(parsed, {
+  const options: https.RequestOptions & Pick<TcpNetConnectOpts, 'autoSelectFamily'> = {
     method: 'GET',
-    // external: https://nodejs.org/api/net.html#socketconnectoptions-connectlistener Parallel address-family attempts request all addresses; return only the checked address.
     lookup: (_hostname, options, callback) => (
       options?.all
         ? callback(null, [{ address: target.address, family: target.family }])
@@ -196,9 +208,10 @@ const requestHttpsPinned = (url, target, maxBytes) => new Promise((resolve, reje
     autoSelectFamily: false,
     headers: { 'User-Agent': 'openchamber' },
     timeout: DOWNLOAD_TIMEOUT_MS,
-  }, (response) => {
+  };
+  const request = https.request(parsed, options, (response) => {
     const status = response.statusCode ?? 0;
-    const location = typeof response.headers.location === 'string' ? response.headers.location : null;
+    const location = isString(response.headers.location) ? response.headers.location : null;
     if (status >= 300 && status < 400) {
       response.resume();
       resolve({ status, location, body: null });
@@ -210,8 +223,7 @@ const requestHttpsPinned = (url, target, maxBytes) => new Promise((resolve, reje
       resolve({ status, location, body: null });
       return;
     }
-    /** @type {Buffer[]} */
-    const chunks = [];
+    const chunks: Buffer[] = [];
     let received = 0;
     response.on('data', (chunk) => {
       received += chunk.length;
@@ -230,15 +242,7 @@ const requestHttpsPinned = (url, target, maxBytes) => new Promise((resolve, reje
   request.end();
 });
 
-/**
- * Fetch the archive by hand, one hop at a time. A public URL can redirect to
- * a private one, so every hop is checked (https, public host, public DNS
- * answer) before the request is made, and the request goes to the address
- * that was checked, not to whatever a second lookup would say.
- * @param {string} url
- * @param {{ request?: typeof requestHttpsPinned, lookup?: Parameters<typeof publicAddressesOf>[1] }} [options]
- */
-export const downloadZip = async (url, { request = requestHttpsPinned, lookup } = {}) => {
+export const downloadZip = async (url: string, { request = requestHttpsPinned, lookup }: { request?: typeof requestHttpsPinned; lookup?: AddressLookup } = {}) => {
   let current = url;
   for (let hop = 0; hop <= MAX_ZIP_REDIRECTS; hop += 1) {
     if (!isHttpsZipUrl(current) && !isHttpsRedirectUrl(current)) {
@@ -248,7 +252,9 @@ export const downloadZip = async (url, { request = requestHttpsPinned, lookup } 
     if (!addresses) {
       return null;
     }
-    const response = await request(current, addresses[0], MAX_ZIP_BYTES);
+    const [target] = addresses;
+    if (!target) throw new Error('Public DNS answer has no addresses');
+    const response = await request(current, target, MAX_ZIP_BYTES);
     if (response.status >= 300 && response.status < 400) {
       if (!response.location) {
         return null;
@@ -264,7 +270,7 @@ export const downloadZip = async (url, { request = requestHttpsPinned, lookup } 
   return null;
 };
 
-export const installGuestFromZipBuffer = async (buffer, persistPath, { openchamberVersion, replace = false } = {}) => (
+export const installGuestFromZipBuffer = async (buffer: Buffer, persistPath: string, { openchamberVersion, replace = false }: InstallOptions = {}) => (
   installCopiedGuest({
     source: 'zip',
     persistPath,
@@ -277,7 +283,7 @@ export const installGuestFromZipBuffer = async (buffer, persistPath, { openchamb
   })
 );
 
-export const installGuestFromPath = async (rawPath, persistPath, { openchamberVersion, replace = false } = {}) => {
+export const installGuestFromPath = async (rawPath: string, persistPath: string, { openchamberVersion, replace = false }: InstallOptions = {}): Promise<InstallResult> => {
   if (!path.isAbsolute(rawPath)) {
     return { ok: false, code: 'invalid-path' };
   }
@@ -309,7 +315,7 @@ export const installGuestFromPath = async (rawPath, persistPath, { openchamberVe
   return persistGuest(inspected.guest, root, 'path', persistPath, { replace });
 };
 
-export const installGuestFromUrl = async (rawUrl, persistPath, { openchamberVersion, replace = false, gitBinary, gitIdentityId } = {}) => {
+export const installGuestFromUrl = async (rawUrl: string, persistPath: string, { openchamberVersion, replace = false, gitBinary, gitIdentityId }: GitInstallOptions = {}): Promise<InstallResult> => {
   if (isHttpsZipUrl(rawUrl)) {
     try {
       const buffer = await downloadZip(rawUrl);
@@ -328,8 +334,8 @@ export const installGuestFromUrl = async (rawUrl, persistPath, { openchamberVers
   return installGuestFromGitSource(gitSource.url, persistPath, { openchamberVersion, replace, gitBinary, ref: gitSource.ref, gitIdentityId });
 };
 
-export const installGuestFromGitSource = async (source, persistPath, { openchamberVersion, replace = false, gitBinary, ref, gitIdentityId, lookup } = {}) => {
-  const origin = { url: source };
+export const installGuestFromGitSource = async (source: string, persistPath: string, { openchamberVersion, replace = false, gitBinary, ref, gitIdentityId, lookup }: GitInstallOptions = {}) => {
+  const origin: GitOrigin = { url: source };
   if (ref) origin.ref = ref;
   if (gitIdentityId) origin.gitIdentityId = gitIdentityId;
   return installCopiedGuest({
@@ -345,15 +351,16 @@ export const installGuestFromGitSource = async (source, persistPath, { openchamb
   });
 };
 
-export const installGuest = async (request, persistPath, { openchamberVersion, gitBinary } = {}) => {
+export const installGuest = async (request: z.infer<typeof installBodySchema>, persistPath: string, { openchamberVersion, gitBinary }: GitInstallOptions = {}) => {
   const replace = Boolean(request.replace);
   if (request.url) {
     return installGuestFromUrl(request.url, persistPath, { openchamberVersion, replace, gitBinary, gitIdentityId: request.gitIdentityId });
   }
+  if (request.path === undefined) throw Object.assign(new TypeError('The "path" argument must be of type string. Received undefined'), { code: 'ERR_INVALID_ARG_TYPE' });
   return installGuestFromPath(request.path, persistPath, { openchamberVersion, replace });
 };
 
-export const uninstallGuest = async (id, persistPath, { preserveStorageId = false } = {}) => {
+export const uninstallGuest = async (id: string, persistPath: string, { preserveStorageId = false } = {}): Promise<{ ok: true } | InstallFailure> => {
   const existing = await listInstalledGuests({ persistPath });
   const guest = existing.find((entry) => entry.id === id);
   if (!guest) {
@@ -363,11 +370,11 @@ export const uninstallGuest = async (id, persistPath, { preserveStorageId = fals
     return { ok: false, code: 'bundled' };
   }
 
-  let removedRoot = null;
+  let removedRoot: string | null = null;
   await updateExtensionStore(persistPath, async (stored) => {
     const kept = [];
-    const sources = {};
-    const gitOrigins = {};
+    const sources: ExtensionStore['sources'] = {};
+    const gitOrigins: ExtensionStore['gitOrigins'] = {};
     for (const entry of stored.paths) {
       const root = await resolveGuestPackageRoot(entry);
       if (root === guest.packageRoot) {

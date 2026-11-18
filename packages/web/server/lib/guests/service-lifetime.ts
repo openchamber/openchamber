@@ -10,49 +10,53 @@ import {
   isGuestApproved,
   requestedGuestCapabilities,
 } from '@openchamber/sdk';
+import type { ServiceScheduleEntry } from '@openchamber/sdk';
+import type { GuestRecord } from './contracts.js';
+import type { GuestServiceRequest } from './service.js';
+import { hasErrorCode } from './input-guards.js';
 
 
 const CHECK_INTERVAL_MS = 15_000;
 const RESTART_DELAY_MIN_MS = 5_000;
 const RESTART_DELAY_MAX_MS = 5 * 60_000;
-// external: https://nodejs.org/api/timers.html#settimeoutcallback-delay-args Delays above 2147483647 become 1 ms, so distant runs rearm the timer.
 const TIMER_MAX_MS = 2 ** 31 - 1;
 const RESULT_MAX = 4_096;
 const HEALTH_PATH = '/health';
 
-const eligible = (guest) => {
+type ServiceGuest = GuestRecord & { service: NonNullable<GuestRecord['service']> };
+type KeptService = { guest: ServiceGuest; release: () => void; starting: boolean; failures: number; nextAttemptAt: number };
+type RequestOptions = Pick<GuestServiceRequest, 'method' | 'path' | 'body' | 'timeoutMs' | 'idleStopMs'> & { responseMax: number };
+type LifetimeOptions = {
+  listGuests: () => Promise<GuestRecord[]>;
+  proxyServiceRequest: (params: GuestServiceRequest & { responseMax: number }) => Promise<{ status: number; body: string }>;
+  holdService: (guestId: string) => () => void;
+  serviceStatus: (guestId: string) => string;
+  persistPath: string;
+  now?: () => number;
+  timers?: Pick<typeof globalThis, 'setTimeout' | 'clearTimeout' | 'setInterval' | 'clearInterval'>;
+  createId?: () => string;
+  warn?: (...args: unknown[]) => void;
+};
+
+const eligible = (guest: GuestRecord | undefined): guest is ServiceGuest => {
   const granted = Array.isArray(guest?.capabilityGrants) ? guest.capabilityGrants : [];
-  return Boolean(guest?.service)
+  return !!guest?.service
     && guest.enabled !== false
     && granted.includes('service')
     && isGuestApproved({ requested: requestedGuestCapabilities(guest), granted });
 };
 
-const nextRunAt = (entry, from) => {
+const nextRunAt = (entry: ServiceScheduleEntry, from: number) => {
   try {
-    const iterator = CronExpressionParser.parse(entry.cron, {
-      currentDate: new Date(from),
-      ...(entry.timezone ? { tz: entry.timezone } : {}),
-    });
+    const options: NonNullable<Parameters<typeof CronExpressionParser.parse>[1]> = { currentDate: new Date(from) };
+    if (entry.timezone) options.tz = entry.timezone;
+    const iterator = CronExpressionParser.parse(entry.cron, options);
     return iterator.next().getTime();
   } catch {
     return null;
   }
 };
 
-/**
- * @param {{
- *   listGuests: () => Promise<object[]>,
- *   proxyServiceRequest: (params: object) => Promise<{ status: number, body: string }>,
- *   holdService: (guestId: string) => () => void,
- *   serviceStatus: (guestId: string) => string,
- *   persistPath: string,
- *   now?: () => number,
- *   timers?: { setTimeout: typeof setTimeout, clearTimeout: typeof clearTimeout, setInterval: typeof setInterval, clearInterval: typeof clearInterval },
- *   createId?: () => string,
- *   warn?: (...args: unknown[]) => void,
- * }} deps
- */
 export const createServiceLifetime = ({
   listGuests,
   proxyServiceRequest,
@@ -63,13 +67,13 @@ export const createServiceLifetime = ({
   timers = { setTimeout, clearTimeout, setInterval, clearInterval },
   createId = () => randomUUID(),
   warn = (...args) => console.warn(...args),
-}) => {
-  const kept = new Map();
-  const armed = new Map();
-  let checkTimer = null;
+}: LifetimeOptions) => {
+  const kept = new Map<string, KeptService>();
+  const armed = new Map<string, { timer: ReturnType<typeof setTimeout>; cron: string; timezone: string | null }>();
+  let checkTimer: ReturnType<typeof setInterval> | null = null;
   let stopped = false;
 
-  const request = (guest, params) => proxyServiceRequest({
+  const request = (guest: ServiceGuest, params: RequestOptions) => proxyServiceRequest({
     guestId: guest.id,
     guestName: guest.name,
     packageRoot: guest.packageRoot,
@@ -79,38 +83,38 @@ export const createServiceLifetime = ({
     ...params,
   });
 
-  const startKept = async (entry) => {
+  const startKept = async (entry: KeptService) => {
     entry.starting = true;
     try {
       await request(entry.guest, { method: 'GET', path: HEALTH_PATH, responseMax: RESULT_MAX });
       entry.failures = 0;
       entry.nextAttemptAt = 0;
     } catch (error) {
-      if (error?.code === 'DISABLED' || stopped) return;
+      if ((hasErrorCode(error) && error.code === 'DISABLED') || stopped) return;
       entry.failures += 1;
       const delay = Math.min(RESTART_DELAY_MAX_MS, RESTART_DELAY_MIN_MS * 2 ** (entry.failures - 1));
       entry.nextAttemptAt = now() + delay;
-      if (entry.failures === 1) warn(`[service-lifetime] ${entry.guest.id}: its service could not be started (${error?.code ?? 'error'}); trying again`);
+      if (entry.failures === 1) warn(`[service-lifetime] ${entry.guest.id}: its service could not be started (${hasErrorCode(error) ? error.code ?? 'error' : 'error'}); trying again`);
     } finally {
       entry.starting = false;
     }
   };
 
-  const needsStart = (entry) => !entry.starting && now() >= entry.nextAttemptAt && serviceStatus(entry.guest.id) !== 'ready';
+  const needsStart = (entry: KeptService) => !entry.starting && now() >= entry.nextAttemptAt && serviceStatus(entry.guest.id) !== 'ready';
 
   const checkKept = () => {
     for (const entry of kept.values()) if (needsStart(entry)) void startKept(entry);
   };
 
-  const releaseKept = (guestId) => {
+  const releaseKept = (guestId: string) => {
     const entry = kept.get(guestId);
     if (!entry) return;
     entry.release();
     kept.delete(guestId);
   };
 
-  const reconcileKept = (guests) => {
-    const wanted = new Map(guests.filter((guest) => eligible(guest) && guest.service.keepRunning).map((guest) => [guest.id, guest]));
+  const reconcileKept = (guests: GuestRecord[]) => {
+    const wanted = new Map(guests.filter((guest): guest is ServiceGuest => !!(eligible(guest) && guest.service.keepRunning)).map((guest) => [guest.id, guest]));
     for (const id of [...kept.keys()]) if (!wanted.has(id)) releaseKept(id);
     for (const [id, guest] of wanted) {
       const entry = kept.get(id);
@@ -133,14 +137,14 @@ export const createServiceLifetime = ({
     checkKept();
   };
 
-  const disarm = (key) => {
+  const disarm = (key: string) => {
     const slot = armed.get(key);
     if (!slot) return;
     timers.clearTimeout(slot.timer);
     armed.delete(key);
   };
 
-  const runEntry = async (guestId, entry, at) => {
+  const runEntry = async (guestId: string, entry: ServiceScheduleEntry, at: number) => {
     let guests;
     try {
       guests = await listGuests();
@@ -162,11 +166,11 @@ export const createServiceLifetime = ({
         warn(`[service-lifetime] ${guestId}: the scheduled run "${entry.id}" was answered with HTTP ${answer.status}`);
       }
     } catch (error) {
-      warn(`[service-lifetime] ${guestId}: the scheduled run "${entry.id}" failed (${error?.code ?? 'error'})`);
+      warn(`[service-lifetime] ${guestId}: the scheduled run "${entry.id}" failed (${hasErrorCode(error) ? error.code ?? 'error' : 'error'})`);
     }
   };
 
-  const arm = (guestId, entry) => {
+  const arm = (guestId: string, entry: ServiceScheduleEntry) => {
     const key = `${guestId}:${entry.id}`;
     const at = nextRunAt(entry, now());
     if (at === null) {
@@ -184,8 +188,8 @@ export const createServiceLifetime = ({
     armed.set(key, { timer, cron: entry.cron, timezone: entry.timezone ?? null });
   };
 
-  const reconcileSchedules = (guests) => {
-    const wanted = new Map();
+  const reconcileSchedules = (guests: GuestRecord[]) => {
+    const wanted = new Map<string, { guestId: string; entry: ServiceScheduleEntry }>();
     for (const guest of guests) {
       if (!eligible(guest)) continue;
       for (const entry of guest.service.schedule ?? []) wanted.set(`${guest.id}:${entry.id}`, { guestId: guest.id, entry });

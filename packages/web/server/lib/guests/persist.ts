@@ -5,8 +5,9 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import { GUEST_CAPABILITIES } from '@openchamber/sdk';
+import type { GuestCapability } from '@openchamber/sdk';
 
-const GUEST_SOURCES = ['path', 'zip', 'git'];
+const GUEST_SOURCES = ['path', 'zip', 'git'] as const;
 
 const storeSchema = z.object({
   paths: z.array(z.string().min(1).refine((entry) => !entry.includes('\0'))),
@@ -71,9 +72,10 @@ const capabilityScopeSchema = z.object({
   }).optional(),
 });
 
-/** @returns {Record<string, { filesystem?: string[], apiOrigin?: string, service?: { exec: string[], sockets: string[], sourceControl?: { defaultInstances: string[], custom: boolean }, sessionEvents?: { events: string[], content: boolean } } }>} */
-const knownScopesOnly = (scopes) => {
-  const cleaned = {};
+export type CapabilityScope = z.infer<typeof capabilityScopeSchema>;
+
+const knownScopesOnly = (scopes: NonNullable<z.infer<typeof storeSchema>['capabilityScopes']>) => {
+  const cleaned: Record<string, CapabilityScope> = {};
   for (const [guestId, raw] of Object.entries(scopes)) {
     const parsed = capabilityScopeSchema.safeParse(raw);
     if (parsed.success) {
@@ -89,10 +91,10 @@ const gitOriginSchema = z.object({
   gitIdentityId: z.string().trim().min(1).max(128).optional(),
 });
 
-/** @returns {Record<string, { url: string, ref?: string, gitIdentityId?: string }>} */
-const knownGitOriginsOnly = (origins) => {
-  /** @type {Record<string, { url: string, ref?: string, gitIdentityId?: string }>} */
-  const cleaned = {};
+export type GitOrigin = z.infer<typeof gitOriginSchema>;
+
+const knownGitOriginsOnly = (origins: NonNullable<z.infer<typeof storeSchema>['gitOrigins']>) => {
+  const cleaned: Record<string, GitOrigin> = {};
   for (const [installPath, raw] of Object.entries(origins)) {
     const parsed = gitOriginSchema.safeParse(raw);
     if (!parsed.success) {
@@ -103,11 +105,11 @@ const knownGitOriginsOnly = (origins) => {
   return cleaned;
 };
 
-const knownStorageIdsOnly = (storageIds) => Object.fromEntries(
+const knownStorageIdsOnly = (storageIds: NonNullable<z.infer<typeof storeSchema>['storageIds']>) => Object.fromEntries(
   Object.entries(storageIds).filter(([, storageId]) => z.string().uuid().safeParse(storageId).success),
 );
 
-const parseStore = (raw) => {
+const parseStore = (raw: string) => {
   try {
     const parsed = storeSchema.safeParse(JSON.parse(raw));
     return parsed.success ? parsed.data : null;
@@ -118,7 +120,7 @@ const parseStore = (raw) => {
 
 const dataDirSchema = z.string().min(1).refine((entry) => !entry.includes('\0') && path.isAbsolute(entry));
 
-export const extensionsPersistPath = (dataDir) => {
+export const extensionsPersistPath = (dataDir: string) => {
   const parsed = dataDirSchema.safeParse(dataDir);
   if (!parsed.success) {
     throw new Error('Guest persist needs an absolute OpenChamber data dir');
@@ -126,9 +128,9 @@ export const extensionsPersistPath = (dataDir) => {
   return path.join(parsed.data, 'extensions.json');
 };
 
-export const guestCopiesDir = (persistPath) => path.join(path.dirname(persistPath), 'extensions');
+export const guestCopiesDir = (persistPath: string) => path.join(path.dirname(persistPath), 'extensions');
 
-const realOrResolved = (value) => {
+const realOrResolved = (value: string) => {
   try {
     return fsSync.realpathSync(value);
   } catch {
@@ -136,13 +138,25 @@ const realOrResolved = (value) => {
   }
 };
 
-export const isCopiedGuestRoot = (root, persistPath) => {
+export const isCopiedGuestRoot = (root: string, persistPath: string) => {
   const copies = realOrResolved(guestCopiesDir(persistPath));
   const resolved = realOrResolved(root);
   return resolved === copies || resolved.startsWith(`${copies}${path.sep}`);
 };
 
-const emptyStore = () => ({
+export type ExtensionStore = {
+  paths: string[];
+  sources: Record<string, 'path' | 'zip' | 'git'>;
+  gitOrigins: Record<string, GitOrigin>;
+  capabilityGrants: Record<string, GuestCapability[]>;
+  capabilityScopes: Record<string, CapabilityScope>;
+  disabledGuests: Record<string, true>;
+  serviceSocketOverrides: Record<string, Record<string, string>>;
+  storageIds?: NonNullable<z.infer<typeof storeSchema>['storageIds']>;
+};
+type StoreWrite = Pick<ExtensionStore, 'paths'> & Partial<Omit<ExtensionStore, 'paths'>>;
+
+const emptyStore = (): ExtensionStore => ({
   paths: [],
   sources: {},
   gitOrigins: {},
@@ -154,18 +168,20 @@ const emptyStore = () => ({
 
 const knownCapabilities = new Set(GUEST_CAPABILITIES);
 
-const knownGrantsOnly = (grants) => Object.fromEntries(
-  Object.entries(grants).map(([guestId, list]) => [guestId, list.filter((capability) => knownCapabilities.has(capability))]),
+const isKnownCapability = (capability: string): capability is GuestCapability => [...knownCapabilities].some((known) => known === capability);
+
+const knownGrantsOnly = (grants: Record<string, string[]>) => Object.fromEntries(
+  Object.entries(grants).map(([guestId, list]) => [guestId, list.filter(isKnownCapability)]),
 );
 
-export const readExtensionStore = async (persistPath) => {
+export const readExtensionStore = async (persistPath: string): Promise<ExtensionStore> => {
   try {
     const raw = await fs.readFile(persistPath, 'utf8');
     const parsed = parseStore(raw);
     if (!parsed) {
       throw new Error('Invalid extensions store');
     }
-    const store = {
+    const store: ExtensionStore = {
       paths: parsed.paths,
       sources: parsed.sources ?? {},
       gitOrigins: knownGitOriginsOnly(parsed.gitOrigins ?? {}),
@@ -185,7 +201,7 @@ export const readExtensionStore = async (persistPath) => {
 };
 
 const writeExtensionStoreUnlocked = async (
-  persistPath,
+  persistPath: string,
   {
     paths,
     sources = {},
@@ -195,11 +211,10 @@ const writeExtensionStoreUnlocked = async (
     disabledGuests = {},
     serviceSocketOverrides = {},
     storageIds = {},
-  },
+  }: StoreWrite,
 ) => {
-  const cleaned = {};
-  /** @type {Record<string, { url: string, ref?: string }>} */
-  const origins = {};
+  const cleaned: ExtensionStore['sources'] = {};
+  const origins: Record<string, GitOrigin> = {};
   for (const entry of paths) {
     const source = sources[entry];
     if (source && source !== 'path') {
@@ -211,31 +226,29 @@ const writeExtensionStoreUnlocked = async (
       origins[entry] = parsedOrigin.data;
     }
   }
-  const grants = {};
+  const grants: ExtensionStore['capabilityGrants'] = {};
   for (const [id, granted] of Object.entries(capabilityGrants)) {
     if (Array.isArray(granted) && granted.length > 0) {
       grants[id] = [...granted];
     }
   }
-  const scopes = {};
+  const scopes: ExtensionStore['capabilityScopes'] = {};
   for (const [id, scope] of Object.entries(capabilityScopes)) {
     if (grants[id] && capabilityScopeSchema.safeParse(scope).success) {
       scopes[id] = scope;
     }
   }
-  const disabled = {};
+  const disabled: ExtensionStore['disabledGuests'] = {};
   for (const [id, isDisabled] of Object.entries(disabledGuests)) {
     if (isDisabled) {
       disabled[id] = true;
     }
   }
-  /** @type {Record<string, Record<string, string>>} */
-  const socketOverrides = {};
+  const socketOverrides: ExtensionStore['serviceSocketOverrides'] = {};
   for (const [guestId, bySocket] of Object.entries(serviceSocketOverrides)) {
-    /** @type {Record<string, string>} */
-    const cleanedSockets = {};
+    const cleanedSockets: Record<string, string> = {};
     for (const [socketId, socketPath] of Object.entries(bySocket ?? {})) {
-      if (typeof socketPath === 'string' && socketPath.trim() && !socketPath.includes('\0')) {
+      if (socketPath.trim() && !socketPath.includes('\0')) {
         cleanedSockets[socketId] = socketPath.trim();
       }
     }
@@ -243,7 +256,7 @@ const writeExtensionStoreUnlocked = async (
       socketOverrides[guestId] = cleanedSockets;
     }
   }
-  const payload = { paths };
+  const payload: StoreWrite = { paths };
   if (Object.keys(cleaned).length > 0) {
     payload.sources = cleaned;
   }
@@ -262,7 +275,7 @@ const writeExtensionStoreUnlocked = async (
   if (Object.keys(socketOverrides).length > 0) {
     payload.serviceSocketOverrides = socketOverrides;
   }
-  const identities = {};
+  const identities: Record<string, string> = {};
   for (const [guestId, storageId] of Object.entries(storageIds)) {
     const parsedIdentity = z.string().uuid().safeParse(storageId);
     if (parsedIdentity.success) identities[guestId] = parsedIdentity.data;
@@ -276,19 +289,11 @@ const writeExtensionStoreUnlocked = async (
   for (const listener of writeListeners) listener(persistPath);
 };
 
-export const writeExtensionStore = (persistPath, store) => (
+export const writeExtensionStore = (persistPath: string, store: StoreWrite) => (
   withStoreWriteLock(persistPath, () => writeExtensionStoreUnlocked(persistPath, store))
 );
 
-/**
- * Read, change, and write the store as one step under the write lock, so two
- * changes made at the same time (Allow in one window, Pause in another) both
- * land instead of the second one writing over a stale copy of the first.
- * `mutate` returns the next store, or `null` to leave the file alone.
- * @param {string} persistPath
- * @param {(current: Awaited<ReturnType<typeof readExtensionStore>>) => Promise<object | null> | object | null} mutate
- */
-export const updateExtensionStore = (persistPath, mutate) => (
+export const updateExtensionStore = (persistPath: string, mutate: (current: ExtensionStore) => Promise<StoreWrite | null> | StoreWrite | null) => (
   withStoreWriteLock(persistPath, async () => {
     const current = await readExtensionStore(persistPath);
     const next = await mutate(current);
@@ -298,8 +303,8 @@ export const updateExtensionStore = (persistPath, mutate) => (
   })
 );
 
-export const ensureGuestStorageIds = async (persistPath, descriptors) => {
-  const resolved = {};
+export const ensureGuestStorageIds = async (persistPath: string, descriptors: Array<{ id: string; storedPath: string | null; builtIn: boolean }>) => {
+  const resolved: NonNullable<ExtensionStore['storageIds']> = {};
   await updateExtensionStore(persistPath, (current) => {
     const storageIds = { ...current.storageIds };
     let changed = false;
@@ -317,17 +322,15 @@ export const ensureGuestStorageIds = async (persistPath, descriptors) => {
 };
 
 let writeSequence = 0;
-/** @type {Set<(persistPath: string) => void>} */
-const writeListeners = new Set();
+const writeListeners = new Set<(persistPath: string) => void>();
 
-export const onExtensionStoreWrite = (listener) => {
+export const onExtensionStoreWrite = (listener: (persistPath: string) => void) => {
   writeListeners.add(listener);
   return () => writeListeners.delete(listener);
 };
-/** @type {Map<string, Promise<void>>} */
-const writeChains = new Map();
+const writeChains = new Map<string, Promise<void>>();
 
-const withStoreWriteLock = (persistPath, write) => {
+const withStoreWriteLock = (persistPath: string, write: () => Promise<void>) => {
   const previous = writeChains.get(persistPath) ?? Promise.resolve();
   const next = previous.catch(() => undefined).then(write);
   writeChains.set(persistPath, next.finally(() => {
@@ -337,14 +340,14 @@ const withStoreWriteLock = (persistPath, write) => {
   return next;
 };
 
-export const readExtensionPaths = async (persistPath) => {
+export const readExtensionPaths = async (persistPath: string) => {
   const store = await readExtensionStore(persistPath);
   return store.paths;
 };
 
-export const writeExtensionPaths = (paths, persistPath) => updateExtensionStore(persistPath, (current) => {
-  const sources = {};
-  const gitOrigins = {};
+export const writeExtensionPaths = (paths: string[], persistPath: string) => updateExtensionStore(persistPath, (current) => {
+  const sources: ExtensionStore['sources'] = {};
+  const gitOrigins: ExtensionStore['gitOrigins'] = {};
   for (const entry of paths) {
     if (current.sources[entry]) {
       sources[entry] = current.sources[entry];
@@ -356,15 +359,7 @@ export const writeExtensionPaths = (paths, persistPath) => updateExtensionStore(
   return { ...current, paths, sources, gitOrigins };
 });
 
-/**
- * Record the user's approval for one guest. `granted` replaces the previous
- * list; an empty list withdraws approval. Callers pass the requested list
- * verbatim, so approval is all-or-nothing per install.
- * @param {string} guestId
- * @param {string} persistPath
- * @param {string[]} granted
- */
-export const setCapabilityGrants = (guestId, persistPath, granted, scope = null) => updateExtensionStore(persistPath, (current) => {
+export const setCapabilityGrants = (guestId: string, persistPath: string, granted: GuestCapability[], scope: CapabilityScope | null = null) => updateExtensionStore(persistPath, (current) => {
   const capabilityGrants = { ...current.capabilityGrants };
   const capabilityScopes = { ...current.capabilityScopes };
   if (granted.length > 0) {

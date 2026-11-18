@@ -25,50 +25,73 @@ import {
 } from './service-registry.js';
 import { resolveServiceSocketEnv } from './sockets.js';
 import { guestDataDir } from './storage.js';
+import type { ChildProcess } from 'node:child_process';
+import type { ServiceContribution } from '@openchamber/sdk';
+import type { createGuestOpenCodeProvider } from './opencode-provider/index.js';
+import { hasErrorMessage, isString } from './input-guards.js';
 
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const SERVICE_READY_TIMEOUT_MS = 15_000;
 const SERVICE_KILL_TIMEOUT_MS = 5_000;
 const SERVICE_HEALTH_PATH = '/health';
 const OPENCHAMBER_SERVICE_AUTH_HEADER = 'authorization';
+type ServiceHeaders = { Accept: string; authorization: string; 'Content-Type'?: string };
 
-/**
- * @typedef {{
- *   child: import('node:child_process').ChildProcess,
- *   port: number,
- *   token: string,
- *   status: 'starting' | 'ready' | 'failed' | 'stopped',
- *   packageRoot: string,
- *   entry: string,
- *   released: Promise<void>,
- * }} ServiceRuntime
- */
+type ServiceRuntime = {
+  child: ChildProcess;
+  port: number;
+  token: string;
+  status: 'starting' | 'ready' | 'failed' | 'stopped';
+  packageRoot: string;
+  entry: string;
+  released: Promise<void>;
+};
+type HostLifecycle = {
+  accepting: boolean;
+  registryDir: string | null;
+  orphansReaped: Promise<void | Awaited<ReturnType<typeof reapOrphanedGuestServices>>>;
+};
+type ServiceStart = {
+  guestId: string;
+  packageRoot: string;
+  entry: string;
+  socketBindings?: NonNullable<NonNullable<ServiceContribution['permissions']>['sockets']>;
+  socketOverrides?: Record<string, string>;
+  dataDir: string;
+  openCode?: boolean;
+  epoch: number;
+  lifecycle: HostLifecycle;
+};
+export type GuestServiceRequest = {
+  guestId: string;
+  guestName?: string | undefined;
+  packageRoot: string;
+  service: ServiceContribution;
+  granted: string[] | undefined;
+  persistPath: string;
+  method: string;
+  path: string;
+  query?: Record<string, string> | undefined;
+  body?: string | undefined;
+  accept?: string;
+  headers?: Record<string, string>;
+  timeoutMs?: number;
+  idleStopMs?: number | undefined;
+  signal?: AbortSignal | undefined;
+};
+const runtimes = new Map<string, ServiceRuntime>();
+const startingByGuest = new Map<string, Promise<ServiceRuntime>>();
+const stoppingByGuest = new Map<string, Promise<void>>();
 
-/** @type {Map<string, ServiceRuntime>} */
-const runtimes = new Map();
+let hostLifecycle: HostLifecycle = { accepting: true, registryDir: null, orphansReaped: Promise.resolve() };
+let openCodeProvider: ReturnType<typeof createGuestOpenCodeProvider> | null = null;
 
-/** @type {Map<string, Promise<ServiceRuntime>>} */
-const startingByGuest = new Map();
-
-/** @type {Map<string, Promise<void>>} */
-const stoppingByGuest = new Map();
-
-let hostLifecycle = { accepting: true, registryDir: null, orphansReaped: Promise.resolve() };
-
-let openCodeProvider = null;
-
-export const configureGuestOpenCodeProvider = (provider) => {
+export const configureGuestOpenCodeProvider = (provider: ReturnType<typeof createGuestOpenCodeProvider>) => {
   if (openCodeProvider) throw new Error('Stop the previous OpenCode provider before replacing it.');
   openCodeProvider = provider;
 };
 
-/**
- * Opens service admission for a new host. With `registryDir` every spawn is
- * recorded there (`service-registry.js`), and the services a host that died
- * without stopping them left running are stopped before this host spawns one.
- * @param {{ registryDir?: string | null }} [options]
- */
-export const beginGuestServiceHost = ({ registryDir = null } = {}) => {
+export const beginGuestServiceHost = ({ registryDir = null }: { registryDir?: string | null } = {}) => {
   if (runtimes.size || startingByGuest.size || stoppingByGuest.size) {
     throw new Error('Guest services must finish stopping before a new host starts.');
   }
@@ -87,34 +110,26 @@ export const beginGuestServiceShutdown = () => {
   openCodeProvider?.revokeAll();
 };
 
-const assertGuestHostActive = (lifecycle) => {
+const assertGuestHostActive = (lifecycle: HostLifecycle) => {
   if (!lifecycle.accepting) {
     throw new GuestServiceError('The host is shutting down.', 'NO_SERVICE');
   }
 };
 
 export class GuestServiceError extends Error {
-  /**
-   * @param {string} message
-   * @param {'NO_SERVICE' | 'SERVICE_FAILED' | 'REQUEST_FAILED' | 'RESPONSE_TOO_LARGE' | 'BAD_PATH' | 'BAD_METHOD' | 'DISABLED' | 'CANCELLED'} code
-   * `SERVICE_FAILED` is a service that never became ready: nothing was sent
-   * to it. `REQUEST_FAILED` is a request that was sent and got no usable
-   * answer (timeout, dropped connection, unreadable body): the service may
-   * have acted on it. `RESPONSE_TOO_LARGE` is an answer over `responseMax`:
-   * the service did act on the request.
-   */
-  constructor(message, code) {
+  code: 'NO_SERVICE' | 'SERVICE_FAILED' | 'REQUEST_FAILED' | 'RESPONSE_TOO_LARGE' | 'BAD_PATH' | 'BAD_METHOD' | 'DISABLED' | 'CANCELLED';
+  constructor(message: string, code: GuestServiceError['code']) {
     super(message);
     this.name = 'GuestServiceError';
     this.code = code;
   }
 }
 
-const reserveLoopbackPort = () => new Promise((resolve, reject) => {
+const reserveLoopbackPort = () => new Promise<number>((resolve, reject) => {
   const server = net.createServer();
   server.listen(0, '127.0.0.1', () => {
     const address = server.address();
-    if (!address || !('port' in address)) {
+    if (!address || isString(address) || !('port' in address)) {
       server.close();
       reject(new Error('Could not reserve a loopback port'));
       return;
@@ -131,15 +146,11 @@ const reserveLoopbackPort = () => new Promise((resolve, reject) => {
   server.on('error', reject);
 });
 
-const sleep = (ms) => new Promise((resolve) => {
+const sleep = (ms: number) => new Promise<void>((resolve) => {
   setTimeout(resolve, ms);
 });
 
-/**
- * @param {number} port
- * @param {string} token
- */
-const waitForServiceReady = async (port, token, shouldStop = () => false) => {
+const waitForServiceReady = async (port: number, token: string, shouldStop = () => false) => {
   const deadline = Date.now() + SERVICE_READY_TIMEOUT_MS;
   while (Date.now() < deadline && !shouldStop()) {
     try {
@@ -155,23 +166,15 @@ const waitForServiceReady = async (port, token, shouldStop = () => false) => {
         return true;
       }
     } catch {
-      // keep polling
+      await sleep(200);
+      continue;
     }
     await sleep(200);
   }
   return false;
 };
 
-/**
- * @param {string} guestId
- * @param {string} persistPath
- */
-/**
- * @param {string} guestId
- * @param {string} persistPath
- * @param {boolean} enabled
- */
-export const setGuestEnabled = async (guestId, persistPath, enabled) => {
+export const setGuestEnabled = async (guestId: string, persistPath: string, enabled: boolean) => {
   await updateExtensionStore(persistPath, (store) => {
     const disabledGuests = { ...(store.disabledGuests ?? {}) };
     if (enabled) {
@@ -186,17 +189,11 @@ export const setGuestEnabled = async (guestId, persistPath, enabled) => {
   }
 };
 
-/**
- * @param {string} guestId
- * @param {string} socketId
- * @param {string} persistPath
- * @param {string | null} socketPath empty/null clears the override
- */
-export const setServiceSocketOverride = async (guestId, socketId, persistPath, socketPath) => {
+export const setServiceSocketOverride = async (guestId: string, socketId: string, persistPath: string, socketPath: string | null) => {
   await updateExtensionStore(persistPath, (store) => {
     const serviceSocketOverrides = { ...(store.serviceSocketOverrides ?? {}) };
     const forGuest = { ...(serviceSocketOverrides[guestId] ?? {}) };
-    const trimmed = typeof socketPath === 'string' ? socketPath.trim() : '';
+    const trimmed = socketPath?.trim() ?? '';
     if (trimmed) {
       forGuest[socketId] = trimmed;
     } else {
@@ -212,23 +209,15 @@ export const setServiceSocketOverride = async (guestId, socketId, persistPath, s
   await stopGuestService(guestId);
 };
 
-/**
- * @param {string} guestId
- */
-/**
- * Why a service last stopped working, for the extension's card: the end of its
- * output, in memory only. A service that starts cleanly clears it.
- * @type {Map<string, { at: number, output: string }>}
- */
-const lastFailures = new Map();
+const lastFailures = new Map<string, { at: number; output: string }>();
 
-export const getServiceFailure = (guestId) => lastFailures.get(guestId) ?? null;
+export const getServiceFailure = (guestId: string) => lastFailures.get(guestId) ?? null;
 
-export const forgetServiceFailure = (guestId) => {
+export const forgetServiceFailure = (guestId: string) => {
   lastFailures.delete(guestId);
 };
 
-export const getServiceStatus = (guestId) => {
+export const getServiceStatus = (guestId: string): ServiceRuntime['status'] => {
   const runtime = runtimes.get(guestId);
   if (!runtime) {
     return 'stopped';
@@ -236,39 +225,22 @@ export const getServiceStatus = (guestId) => {
   return runtime.status;
 };
 
-/**
- * @param {string} guestId
- */
-/**
- * Bumped by every stop. A start that began before the bump is cancelled: it
- * checks the epoch after each await and kills whatever it spawned, so Pause
- * during the seconds before the process is registered still stops it.
- * @type {Map<string, number>}
- */
-const stopEpochs = new Map();
+const stopEpochs = new Map<string, number>();
 
-const stopEpochOf = (guestId) => stopEpochs.get(guestId) ?? 0;
+const stopEpochOf = (guestId: string) => stopEpochs.get(guestId) ?? 0;
 
-/**
- * Services the host starts on its own (a provider role) have no panel whose
- * closing would end them, so they end themselves: a request arms a timer, the
- * next request re-arms it, and when it fires with nothing in flight the
- * process goes away. The next request starts it again. Panel requests do the
- * same; a service that holds state or a connection sets `keepRunning`.
- * @type {Map<string, { timer: ReturnType<typeof setTimeout>, inflight: number, idleMs: number }>}
- */
-const idleStops = new Map();
+const idleStops = new Map<string, { timer: ReturnType<typeof setTimeout>; inflight: number; idleMs: number }>();
 
-const clearIdleStop = (guestId) => {
+const clearIdleStop = (guestId: string) => {
   const entry = idleStops.get(guestId);
   if (!entry) return;
   clearTimeout(entry.timer);
   idleStops.delete(guestId);
 };
 
-const holds = new Map();
+const holds = new Map<string, number>();
 
-const armIdleStop = (guestId, idleMs) => {
+const armIdleStop = (guestId: string, idleMs: number) => {
   const previous = idleStops.get(guestId);
   const inflight = previous?.inflight ?? 0;
   if (previous) clearTimeout(previous.timer);
@@ -284,12 +256,7 @@ const armIdleStop = (guestId, idleMs) => {
   idleStops.set(guestId, { timer, inflight, idleMs });
 };
 
-/**
- * Keeps an idle-stopping service alive while the returned release function
- * has not been called. Releasing the last hold restarts the idle window.
- * @param {string} guestId
- */
-export const holdGuestService = (guestId) => {
+export const holdGuestService = (guestId: string) => {
   holds.set(guestId, (holds.get(guestId) ?? 0) + 1);
   let released = false;
   return () => {
@@ -306,31 +273,20 @@ export const holdGuestService = (guestId) => {
   };
 };
 
-const trackInflight = (guestId, delta) => {
+const trackInflight = (guestId: string, delta: number) => {
   const entry = idleStops.get(guestId);
   if (!entry) return;
   entry.inflight = Math.max(0, entry.inflight + delta);
 };
 
-/**
- * A user-facing stop (Pause, Remove, withdrawn approval, socket change,
- * host quit): ends the process and cancels any request or start in flight.
- * @param {string} guestId
- */
-export const stopGuestService = async (guestId) => {
+export const stopGuestService = async (guestId: string) => {
   stopEpochs.set(guestId, stopEpochOf(guestId) + 1);
   openCodeProvider?.revokeGuest(guestId);
   clearIdleStop(guestId);
   await discardRuntime(guestId);
 };
 
-/**
- * Internal cleanup of a runtime that is dead or failed, before a restart.
- * Does not bump the epoch: replacing a crashed process is not a Pause and
- * must not cancel the request that triggered the restart.
- * @param {string} guestId
- */
-const discardRuntime = async (guestId) => {
+const discardRuntime = async (guestId: string) => {
   const stopping = stoppingByGuest.get(guestId);
   if (stopping) return stopping;
   const runtime = runtimes.get(guestId);
@@ -346,7 +302,7 @@ const discardRuntime = async (guestId) => {
     await runtime.released;
     return;
   }
-  const stopped = new Promise((resolve) => {
+  const stopped = new Promise<void>((resolve) => {
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       resolve(undefined);
@@ -366,47 +322,33 @@ const discardRuntime = async (guestId) => {
   }
 };
 
-/**
- * The extension a callback bearer names: the token its running service was
- * started with, or `null` for a process no longer running.
- * @param {string} token
- */
-export const guestIdOfServiceToken = (token) => {
+export const guestIdOfServiceToken = (token: string) => {
   for (const [guestId, runtime] of runtimes) {
     if (runtime.status !== 'stopped' && runtime.status !== 'failed' && runtime.token === token) return guestId;
   }
   return null;
 };
 
-/** @type {Set<(guestId: string) => void>} */
-const serviceEndedListeners = new Set();
+const serviceEndedListeners = new Set<(guestId: string) => void>();
 
-/**
- * Calls `listener` when a guest's service token stops naming it: the process
- * exited, was stopped, or stopped answering. What the host held for that
- * process alone goes then. A listener reads which process is live itself: by
- * the time it runs a newer one may already hold the guest.
- * @param {(guestId: string) => void} listener
- * @returns {() => void} removes the listener
- */
-export const onGuestServiceEnded = (listener) => {
+export const onGuestServiceEnded = (listener: (guestId: string) => void) => {
   serviceEndedListeners.add(listener);
   return () => {
     serviceEndedListeners.delete(listener);
   };
 };
 
-const announceServiceEnded = (guestId) => {
+const announceServiceEnded = (guestId: string) => {
   for (const listener of serviceEndedListeners) {
     try {
       listener(guestId);
     } catch (error) {
-      console.warn('[guest-service] a service-ended listener failed:', error?.message ?? error);
+      console.warn('[guest-service] a service-ended listener failed:', hasErrorMessage(error) ? error.message ?? error : error);
     }
   }
 };
 
-export const readServicePid = (guestId) => runtimes.get(guestId)?.child.pid ?? null;
+export const readServicePid = (guestId: string) => runtimes.get(guestId)?.child.pid ?? null;
 
 export const stopAllGuestServices = async () => {
   const starts = [...startingByGuest.values()];
@@ -418,32 +360,21 @@ export const stopAllGuestServices = async () => {
   await provider?.stop();
 };
 
-/**
- * Records the child for a later host's reaper and drops the record once the
- * child exits. Resolves after the drop.
- * @param {string | null} registryDir
- * @param {import('node:child_process').ChildProcess} child
- * @param {{ guestId: string, token: string, entry: string }} service
- */
-const recordServiceProcess = (registryDir, child, service) => {
+const recordServiceProcess = (registryDir: string | null, child: ChildProcess, service: { guestId: string; token: string; entry: string }) => {
   const { pid } = child;
-  if (!registryDir || !Number.isInteger(pid)) return Promise.resolve();
+  if (!registryDir || pid === undefined || !Number.isInteger(pid)) return Promise.resolve();
   const recorded = recordGuestService(registryDir, { pid, ...service });
-  const exited = new Promise((resolve) => {
+  const exited = new Promise<number | null>((resolve) => {
     child.once('exit', resolve);
   });
   return Promise.all([recorded, exited]).then(() => releaseGuestService(registryDir, pid));
 };
 
-/**
- * @param {import('node:child_process').ChildProcess} child
- * @param {number} maxChars
- */
-const collectProcessOutput = (child, maxChars = 2_000) => {
+const collectProcessOutput = (child: ChildProcess, maxChars = 2_000) => {
   let stdout = '';
   let stderr = '';
-  const append = (/** @type {'stdout' | 'stderr'} */ stream, chunk) => {
-    const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+  const append = (stream: 'stdout' | 'stderr', chunk: string | Buffer) => {
+    const text = isString(chunk) ? chunk : chunk.toString('utf8');
     if (stream === 'stdout') {
       stdout = `${stdout}${text}`.slice(-maxChars);
       return;
@@ -462,16 +393,6 @@ const collectProcessOutput = (child, maxChars = 2_000) => {
   };
 };
 
-/**
- * @param {{
- *   guestId: string,
- *   packageRoot: string,
- *   entry: string,
- *   socketBindings?: Array<{ id: string, candidatesByPlatform?: Partial<Record<'linux' | 'darwin' | 'win32', string[]>> }>,
- *   socketOverrides?: Record<string, string>,
- *   dataDir: string,
- * }} params
- */
 const startGuestService = async ({
   guestId,
   packageRoot,
@@ -482,7 +403,7 @@ const startGuestService = async ({
   openCode = false,
   epoch,
   lifecycle,
-}) => {
+}: ServiceStart) => {
   assertGuestHostActive(lifecycle);
   await lifecycle.orphansReaped;
   assertGuestHostActive(lifecycle);
@@ -525,7 +446,7 @@ const startGuestService = async ({
   if (cancelled()) {
     throw stoppedError();
   }
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...inheritedServiceEnv(process.env),
     OPENCHAMBER_SERVICE_PORT: String(port),
     [SERVICE_TOKEN_ENV]: token,
@@ -553,8 +474,7 @@ const startGuestService = async ({
   const released = recordServiceProcess(lifecycle.registryDir, child, { guestId, token, entry: absoluteEntry });
   const output = collectProcessOutput(child);
 
-  /** @type {ServiceRuntime} */
-  const runtime = {
+  const runtime: ServiceRuntime = {
     child,
     port,
     token,
@@ -602,16 +522,6 @@ const startGuestService = async ({
   return runtime;
 };
 
-/**
- * One spawn in flight per guest. Parallel panel requests must not kill each other.
- * @param {{
- *   guestId: string,
- *   packageRoot: string,
- *   entry: string,
- *   socketBindings?: Array<{ id: string, candidatesByPlatform?: Partial<Record<'linux' | 'darwin' | 'win32', string[]>> }>,
- *   socketOverrides?: Record<string, string>,
- * }} params
- */
 const INHERITED_SERVICE_ENV_NAMES = new Set([
   'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'TEMP', 'TMP', 'TZ',
   'LANG', 'LANGUAGE', 'LC_ALL', 'LC_CTYPE', 'LC_MESSAGES',
@@ -620,19 +530,17 @@ const INHERITED_SERVICE_ENV_NAMES = new Set([
   'SYSTEMROOT', 'SYSTEMDRIVE', 'COMSPEC', 'PATHEXT', 'WINDIR',
 ]);
 
-/** @param {NodeJS.ProcessEnv} source */
-const inheritedServiceEnv = (source) => {
-  /** @type {Record<string, string>} */
-  const env = {};
+const inheritedServiceEnv = (source: NodeJS.ProcessEnv) => {
+  const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(source)) {
-    if (typeof value === 'string' && INHERITED_SERVICE_ENV_NAMES.has(name.toUpperCase())) {
+    if (isString(value) && INHERITED_SERVICE_ENV_NAMES.has(name.toUpperCase())) {
       env[name] = value;
     }
   }
   return env;
 };
 
-const ensureGuestService = async (params) => {
+const ensureGuestService = async (params: ServiceStart) => {
   const existing = runtimes.get(params.guestId);
   if (existing?.status === 'ready' && existing.child.exitCode === null && !existing.child.signalCode) {
     return existing;
@@ -650,34 +558,6 @@ const ensureGuestService = async (params) => {
   return pending;
 };
 
-/**
- * Starts the guest's service if needed and sends it one HTTP request, giving
- * back the raw `Response`. This is the one place a host-driven caller (a
- * provider role, a shared surface) or a panel proxy talks to the loopback:
- * the enabled check, the grant, the spawn, the epoch, and the bearer live
- * here. The caller reads the body as it needs it (text, JSON, image bytes).
- *
- * @param {{
- *   guestId: string,
- *   guestName?: string,
- *   packageRoot: string,
- *   service: { entry: string, permissions?: { sockets?: Array<{ id: string, candidatesByPlatform?: Partial<Record<'linux' | 'darwin' | 'win32', string[]>> }>, exec?: string[] } },
- *   granted: string[],
- *   persistPath: string,
- *   method: string,
- *   path: string,
- *   query?: Record<string, string>,
- *   body?: string,
- *   accept?: string,
- *   headers?: Record<string, string>,
- *   timeoutMs?: number,
- *   idleStopMs?: number,
- *   signal?: AbortSignal,
- * }} params `timeoutMs` is for host-driven calls; a panel's `serviceRequest`
- * keeps the SDK limits. With `idleStopMs` the
- * service stops itself after that long without a request; `holdGuestService`
- * suspends that while a long-lived consumer (a surface viewer) is attached.
- */
 export const openGuestServiceRequest = async ({
   guestId,
   guestName,
@@ -694,7 +574,7 @@ export const openGuestServiceRequest = async ({
   timeoutMs = GUEST_REQUEST_TIMEOUT_MS,
   idleStopMs,
   signal,
-}) => {
+}: GuestServiceRequest) => {
   const lifecycle = hostLifecycle;
   assertGuestHostActive(lifecycle);
   if (!METHODS.has(method)) {
@@ -707,7 +587,7 @@ export const openGuestServiceRequest = async ({
   const store = await readExtensionStore(persistPath);
   assertGuestHostActive(lifecycle);
   if (store.disabledGuests?.[guestId]) {
-    const label = typeof guestName === 'string' && guestName.trim() ? guestName.trim() : 'This extension';
+    const label = guestName?.trim() ? guestName.trim() : 'This extension';
     throw new GuestServiceError(
       `${label} is disabled in Settings → Extensions.`,
       'DISABLED',
@@ -759,8 +639,7 @@ export const openGuestServiceRequest = async ({
     }
   }
 
-  /** @type {Record<string, string>} */
-  const headers = {
+  const headers: ServiceHeaders = {
     ...extraHeaders,
     Accept: accept,
     [OPENCHAMBER_SERVICE_AUTH_HEADER]: `Bearer ${runtime.token}`,
@@ -780,13 +659,14 @@ export const openGuestServiceRequest = async ({
   };
   let response;
   try {
-    response = await fetch(url, {
+    const request: RequestInit = {
       method,
       headers,
-      body: method === 'GET' || body === undefined ? undefined : body,
       redirect: 'manual',
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
-    });
+    };
+    if (method !== 'GET' && body !== undefined) request.body = body;
+    response = await fetch(url, request);
   } catch {
     settleIdle();
     if (signal?.aborted) {
@@ -802,7 +682,7 @@ export const openGuestServiceRequest = async ({
   };
 };
 
-export const proxyGuestServiceRequest = async ({ responseMax = GUEST_REQUEST_RESPONSE_MAX, ...params }) => {
+export const proxyGuestServiceRequest = async ({ responseMax = GUEST_REQUEST_RESPONSE_MAX, ...params }: GuestServiceRequest & { responseMax?: number }) => {
   const { response, finished } = await openGuestServiceRequest(params);
   let body;
   try {

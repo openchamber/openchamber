@@ -14,10 +14,13 @@ import { buildPublicSocketBindings } from './sockets.js';
 import { isReservedBuiltInId, readBuiltInRegistry } from './builtins.js';
 import { resolveOpenCodePluginFolder } from './opencode-plugin.js';
 import { toPublicLinks } from './links.js';
+import type { GuestCapability } from '@openchamber/sdk';
+import type { GuestPackage, GuestRecord } from './contracts.js';
+import { hasErrorMessage, isString } from './input-guards.js';
 
-const builtInsByStore = new Map();
+const builtInsByStore = new Map<string, Awaited<ReturnType<typeof readBuiltInRegistry>>>();
 
-export const registerBuiltInGuests = async ({ persistPath, root }) => {
+export const registerBuiltInGuests = async ({ persistPath, root }: { persistPath: string; root?: string }) => {
   const registry = await readBuiltInRegistry(root);
   builtInsByStore.set(persistPath, registry);
   invalidateGuestCatalog(persistPath);
@@ -38,10 +41,11 @@ const MIME_BY_EXT = {
   '.json': 'application/json',
   '.png': 'image/png',
 };
+const isGuestAssetExtension = (extension: string): extension is keyof typeof MIME_BY_EXT => extension in MIME_BY_EXT;
 
-export const isGuestPanelId = (value) => typeof value === 'string' && PANEL_ID.test(value);
+export const isGuestPanelId = (value: unknown): value is string => typeof value === 'string' && PANEL_ID.test(value);
 
-const isGuestPackageFolder = async (packageRoot, relativePath) => {
+const isGuestPackageFolder = async (packageRoot: string, relativePath: string) => {
   try {
     const rootReal = await fs.realpath(packageRoot);
     const candidate = await fs.realpath(path.resolve(rootReal, relativePath));
@@ -51,8 +55,8 @@ const isGuestPackageFolder = async (packageRoot, relativePath) => {
   }
 };
 
-export const resolveGuestAssetPath = async (packageRoot, relativePath) => {
-  if (typeof relativePath !== 'string' || relativePath.includes('\0') || relativePath.includes('\\')) {
+export const resolveGuestAssetPath = async (packageRoot: string, relativePath: string | undefined) => {
+  if (!isString(relativePath) || relativePath.includes('\0') || relativePath.includes('\\')) {
     return null;
   }
   const segments = relativePath.split('/');
@@ -84,15 +88,16 @@ export const resolveGuestAssetPath = async (packageRoot, relativePath) => {
   }
 };
 
-export const guestAssetContentType = (filePath) => {
-  return MIME_BY_EXT[path.extname(filePath).toLowerCase()] ?? null;
+export const guestAssetContentType = (filePath: string) => {
+  const extension = path.extname(filePath).toLowerCase();
+  return isGuestAssetExtension(extension) ? MIME_BY_EXT[extension] ?? null : null;
 };
 
-const isGuestFrameContentType = (contentType) => (
+const isGuestFrameContentType = (contentType: string) => (
   contentType.startsWith('text/html') || contentType.startsWith('text/javascript')
 );
 
-export const resolveGuestServedFile = async (packageRoot, relativePath, { hasRuntime = true } = {}) => {
+export const resolveGuestServedFile = async (packageRoot: string, relativePath: string, { hasRuntime = true } = {}) => {
   const filePath = await resolveGuestAssetPath(packageRoot, relativePath);
   const contentType = filePath ? guestAssetContentType(filePath) : null;
   if (contentType && !hasRuntime && isGuestFrameContentType(contentType)) {
@@ -114,7 +119,7 @@ export const resolveGuestServedFile = async (packageRoot, relativePath, { hasRun
   };
 };
 
-export const resolveGuestPackageRoot = async (rawPath) => {
+export const resolveGuestPackageRoot = async (rawPath: string | null | undefined) => {
   if (rawPath === '' || rawPath == null) {
     return null;
   }
@@ -134,7 +139,7 @@ export const resolveGuestPackageRoot = async (rawPath) => {
   }
 };
 
-const guestBuiltScriptsReady = async (packageRoot, entry) => {
+const guestBuiltScriptsReady = async (packageRoot: string, entry: string) => {
   const entryPath = await resolveGuestAssetPath(packageRoot, entry);
   if (!entryPath) {
     return false;
@@ -153,14 +158,17 @@ const guestBuiltScriptsReady = async (packageRoot, entry) => {
   return true;
 };
 
-const isDrawableProviderLogo = async (packageRoot, relativePath) => {
+const isDrawableProviderLogo = async (packageRoot: string, relativePath: string) => {
   const resolved = await resolveGuestAssetPath(packageRoot, relativePath);
   if (!resolved) return false;
   const { size } = await fs.stat(resolved);
   return size > 0 && size <= GUEST_PROVIDER_LOGO_BYTES_MAX;
 };
 
-export const inspectGuestPackage = async (packageRoot, { openchamberVersion, skipEngineCheck } = {}) => {
+type InspectionOptions = { openchamberVersion?: string | undefined; skipEngineCheck?: boolean };
+type InspectionResult = { ok: true; guest: GuestPackage } | { ok: false; code: string; reason?: string; required?: string };
+
+export const inspectGuestPackage = async (packageRoot: string, { openchamberVersion, skipEngineCheck }: InspectionOptions = {}): Promise<InspectionResult> => {
   let raw;
   try {
     raw = await fs.readFile(path.join(packageRoot, 'package.json'), 'utf8');
@@ -176,7 +184,7 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   }
   const engine = parsed.manifest.engines?.openchamber;
   if (engine && !skipEngineCheck) {
-    const hostVersion = typeof openchamberVersion === 'string' ? openchamberVersion : '';
+    const hostVersion = openchamberVersion ?? '';
     if (!hostMeetsOpenChamberEngine(hostVersion, engine)) {
       return {
         ok: false,
@@ -201,7 +209,7 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (panel.entry && !await guestBuiltScriptsReady(packageRoot, panel.entry)) {
     return { ok: false, code: 'missing-build' };
   }
-  const guest = {
+  const guest: GuestPackage = {
     id: panel.id,
     name: panel.name,
     icon: panel.icon,
@@ -390,31 +398,26 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   return { ok: true, guest };
 };
 
-const loadGuestFromPackageRoot = async (packageRoot, options) => {
+const loadGuestFromPackageRoot = async (packageRoot: string, options: InspectionOptions) => {
   const result = await inspectGuestPackage(packageRoot, options);
   return result.ok ? result.guest : null;
 };
 
-const withSource = (guest, source, displayPath) => ({
+const withSource = (guest: GuestPackage, source: string, displayPath: string | null) => ({
   ...guest,
   source,
   path: displayPath,
 });
 
-export const hasGuestFrame = (guest) => Boolean(
+export const hasGuestFrame = (guest: GuestPackage) => Boolean(
   guest.entry || guest.backgroundEntry || guest.pageEntry || guest.statusEntry
     || (Array.isArray(guest.fileEditors) && guest.fileEditors.length > 0)
     || (Array.isArray(guest.blocks) && guest.blocks.length > 0),
 );
 
-const configurationNotes = new Map();
+const configurationNotes = new Map<string, string>();
 
-/**
- * @param {string} guestId
- * @param {string | null} message `null` clears it
- * @returns {boolean} whether the card changed
- */
-export const setGuestConfigurationNote = (guestId, message) => {
+export const setGuestConfigurationNote = (guestId: string, message: string | null) => {
   const previous = configurationNotes.get(guestId) ?? null;
   if (previous === message) return false;
   if (message === null) configurationNotes.delete(guestId);
@@ -422,8 +425,31 @@ export const setGuestConfigurationNote = (guestId, message) => {
   return true;
 };
 
-export const toPublicGuest = (guest, toolLinkSettings = null) => {
-  const row = {
+export type PublicGuest = Omit<GuestRecord, 'source' | 'packageRoot' | 'service' | 'sourceControl' | 'sessionEvents' | 'waits' | 'notifications' | 'tracker' | 'quota' | 'integration' | 'links' | 'skills' | 'opencodePlugin' | 'capabilities' | 'sessionControl' | 'mentions'> & {
+  source: string | undefined;
+  path: string | null;
+  enabled: boolean;
+  service?: NonNullable<ReturnType<typeof toPublicService>>;
+  sourceControl?: ReturnType<typeof toPublicSourceControl>;
+  sessionEvents?: ReturnType<typeof toPublicSessionEvents>;
+  waits?: ReturnType<typeof toPublicWaits>;
+  notifications?: ReturnType<typeof toPublicNotifications>;
+  tracker?: ReturnType<typeof toPublicTracker>;
+  quota?: ReturnType<typeof toPublicQuota>;
+  integration?: ReturnType<typeof toPublicIntegration>;
+  links?: ReturnType<typeof toPublicLinks>;
+  capabilities?: { requested: GuestCapability[]; granted: GuestCapability[] };
+  skills?: true;
+  opencodePlugin?: true;
+  sessionControl?: { content: boolean };
+  mentions?: { label: string };
+  toolLinkSettings?: Record<string, string>;
+  origin?: { url: string; ref?: string };
+  needsConfiguration?: string;
+};
+
+export const toPublicGuest = (guest: GuestRecord, toolLinkSettings: Record<string, string> | null = null) => {
+  const row: PublicGuest = {
     id: guest.id,
     name: guest.name,
     icon: guest.icon,
@@ -440,7 +466,7 @@ export const toPublicGuest = (guest, toolLinkSettings = null) => {
   if (guest.entryDock) {
     row.entryDock = guest.entryDock;
   }
-  if (typeof guest.entrySize === 'number') {
+  if (guest.entrySize !== undefined) {
     row.entrySize = guest.entrySize;
   }
   if (guest.entryMobile === true) {
@@ -449,18 +475,18 @@ export const toPublicGuest = (guest, toolLinkSettings = null) => {
   if (guest.backgroundEntry) {
     row.backgroundEntry = guest.backgroundEntry;
   }
-  if (typeof guest.version === 'string' && guest.version) {
+  if (guest.version) {
     row.version = guest.version;
   }
-  if (guest.revision > 0) {
+  if (guest.revision !== undefined && guest.revision > 0) {
     row.revision = guest.revision;
   }
-  if (guest.source === 'git' && guest.gitOrigin && typeof guest.gitOrigin.url === 'string') {
+  if (guest.source === 'git' && guest.gitOrigin) {
     row.origin = guest.gitOrigin.ref
       ? { url: guest.gitOrigin.url, ref: guest.gitOrigin.ref }
       : { url: guest.gitOrigin.url };
   }
-  if (guest.update && typeof guest.update.version === 'string' && guest.update.version) {
+  if (guest.update?.version) {
     row.update = { version: guest.update.version };
   }
   const attach = resolveAttachMode(guest.attach);
@@ -470,13 +496,13 @@ export const toPublicGuest = (guest, toolLinkSettings = null) => {
   if (guest.statusEntry) row.statusEntry = guest.statusEntry;
   if (guest.statusSource) row.statusSource = { path: guest.statusSource.path, interval: guest.statusSource.interval };
   if (guest.statusTitle) row.statusTitle = guest.statusTitle;
-  if (Number.isInteger(guest.statusHeight)) row.statusHeight = guest.statusHeight;
+  if (guest.statusHeight !== undefined && Number.isInteger(guest.statusHeight)) row.statusHeight = guest.statusHeight;
   if (guest.statusDefaultExpanded !== undefined) row.statusDefaultExpanded = guest.statusDefaultExpanded;
   if (guest.statusRequiresProject !== undefined) row.statusRequiresProject = guest.statusRequiresProject;
   if (attach) {
     row.attach = attach;
   }
-  if (attach === 'dialog' && typeof guest.attachEntry === 'string' && guest.attachEntry) {
+  if (attach === 'dialog' && guest.attachEntry) {
     row.attachEntry = guest.attachEntry;
   }
   if (guest.integration) {
@@ -565,7 +591,7 @@ export const toPublicGuest = (guest, toolLinkSettings = null) => {
     try {
       row.links = toPublicLinks(guest.links);
     } catch (error) {
-      console.warn(`[guests] links of ${guest.id} left out: ${error?.message ?? error}`);
+      console.warn(`[guests] links of ${guest.id} left out: ${hasErrorMessage(error) ? error.message ?? error : error}`);
     }
   }
   const configurationNote = configurationNotes.get(guest.id);
@@ -576,19 +602,12 @@ export const toPublicGuest = (guest, toolLinkSettings = null) => {
 };
 
 const CATALOG_CACHE_TTL_MS = 5_000;
-/** @type {Map<string, { expiresAt: number, guests: Awaited<ReturnType<typeof listInstalledGuestsUncached>> }>} */
-const catalogCache = new Map();
-/**
- * Bumped on every invalidation. A listing remembers the version it started
- * at and only caches its result if nothing changed meanwhile, so a read that
- * straddled a store write (old file, new grants) never sticks for the TTL.
- * @type {Map<string, number>}
- */
-const catalogVersions = new Map();
+const catalogCache = new Map<string, { expiresAt: number; guests: InstalledGuest[] }>();
+const catalogVersions = new Map<string, number>();
 
-const catalogVersionOf = (persistPath) => catalogVersions.get(persistPath) ?? 0;
+const catalogVersionOf = (persistPath: string) => catalogVersions.get(persistPath) ?? 0;
 
-export const invalidateGuestCatalog = (persistPath) => {
+export const invalidateGuestCatalog = (persistPath?: string) => {
   if (persistPath) {
     catalogCache.delete(persistPath);
     catalogVersions.set(persistPath, catalogVersionOf(persistPath) + 1);
@@ -601,35 +620,24 @@ export const invalidateGuestCatalog = (persistPath) => {
 };
 onExtensionStoreWrite(invalidateGuestCatalog);
 
-/**
- * How many times each package's files changed under this host: an install
- * over it, a Git update, or an edit to a folder install. Frames key on it, so
- * an open panel loads the new files. Kept in memory: it starts at 0 with the
- * host, which reloads a frame at most once after a restart.
- * @type {Map<string, Map<string, number>>}
- */
-const packageRevisions = new Map();
+const packageRevisions = new Map<string, Map<string, number>>();
 
-/**
- * The last row each package root loaded with in this host run, and whether
- * the root fails to load now and is listed from that row instead.
- * shortcut: a folder that stays broken keeps its old row until the host restarts; age it out if that confuses anyone.
- * @type {Map<string, { guest: NonNullable<Awaited<ReturnType<typeof loadGuestFromPackageRoot>>>, unloaded: boolean }>}
- */
-const lastLoadedGuests = new Map();
+const lastLoadedGuests = new Map<string, { guest: GuestPackage; unloaded: boolean }>();
 
-export const lastLoadedGuestAt = (packageRoot) => lastLoadedGuests.get(packageRoot)?.guest ?? null;
+export const lastLoadedGuestAt = (packageRoot: string) => lastLoadedGuests.get(packageRoot)?.guest ?? null;
 
-export const isGuestPackageUnloaded = (packageRoot) => lastLoadedGuests.get(packageRoot)?.unloaded === true;
+export const isGuestPackageUnloaded = (packageRoot: string) => lastLoadedGuests.get(packageRoot)?.unloaded === true;
 
-export const noteGuestPackageChanged = (persistPath, id) => {
+export const noteGuestPackageChanged = (persistPath: string, id: string) => {
   const revisions = packageRevisions.get(persistPath) ?? new Map();
   revisions.set(id, (revisions.get(id) ?? 0) + 1);
   packageRevisions.set(persistPath, revisions);
   invalidateGuestCatalog(persistPath);
 };
 
-const withEnterprisePolicy = (guests) => {
+export type InstalledGuest = GuestRecord & { source: string; capabilityGrants: GuestCapability[] };
+
+const withEnterprisePolicy = (guests: InstalledGuest[]) => {
   const policy = readEnterprisePolicy();
   if (!policy.enterpriseMode) return guests;
   return guests.map((guest) => {
@@ -643,7 +651,7 @@ const withEnterprisePolicy = (guests) => {
   });
 };
 
-export const listInstalledGuests = async ({ persistPath } = {}) => {
+export const listInstalledGuests = async ({ persistPath }: { persistPath: string }) => {
   const cached = persistPath ? catalogCache.get(persistPath) : undefined;
   if (cached && cached.expiresAt > Date.now()) {
     return withEnterprisePolicy(cached.guests);
@@ -656,8 +664,8 @@ export const listInstalledGuests = async ({ persistPath } = {}) => {
   return withEnterprisePolicy(guests);
 };
 
-const listInstalledGuestsUncached = async ({ persistPath } = {}) => {
-  const guests = [];
+const listInstalledGuestsUncached = async ({ persistPath }: { persistPath: string }): Promise<InstalledGuest[]> => {
+  const guests: Array<InstalledGuest & { storageDescriptor?: { id: string; storedPath: string | null; builtIn: boolean } }> = [];
   const seen = new Set();
 
   const stored = await readExtensionStore(persistPath);
@@ -694,7 +702,8 @@ const listInstalledGuestsUncached = async ({ persistPath } = {}) => {
     }
     const loaded = await loadGuestFromPackageRoot(root, { skipEngineCheck: true });
     const previous = lastLoadedGuests.get(root);
-    if (loaded || previous) lastLoadedGuests.set(root, { guest: loaded ?? previous.guest, unloaded: !loaded });
+    if (loaded) lastLoadedGuests.set(root, { guest: loaded, unloaded: false });
+    else if (previous) lastLoadedGuests.set(root, { guest: previous.guest, unloaded: true });
     const guest = loaded ?? previous?.guest;
     if (!guest || seen.has(guest.id) || isReservedBuiltInId(guest.id)) {
       continue;
@@ -725,7 +734,7 @@ const listInstalledGuestsUncached = async ({ persistPath } = {}) => {
     });
   }
 
-  const descriptors = guests.map((guest) => guest.storageDescriptor);
+  const descriptors = guests.flatMap((guest) => guest.storageDescriptor ? [guest.storageDescriptor] : []);
   if (descriptors.some(({ id }) => !stored.storageIds?.[id])) {
     try {
       const identities = await ensureGuestStorageIds(persistPath, descriptors);
@@ -740,7 +749,7 @@ const listInstalledGuestsUncached = async ({ persistPath } = {}) => {
   return guests;
 };
 
-export const findInstalledGuest = async (id, persistPath) => {
+export const findInstalledGuest = async (id: string, persistPath: string) => {
   if (!isGuestPanelId(id)) {
     return null;
   }

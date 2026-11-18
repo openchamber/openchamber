@@ -6,11 +6,22 @@ import { parseManifestJson } from '@openchamber/sdk/schemas';
 
 import { listRelativeGuestAssetHrefs, resolveGuestHtmlRelativePath } from './html-tokens.js';
 import { createFolderChangeWatch } from '../fs/folder-change-watch.js';
+import { hasErrorMessage } from './input-guards.js';
 
 const POLL_MS = 500;
 const SCRIPT_MODULE = /\.[cm]?js$/;
 
-const serviceModules = async (root, folder, fs) => {
+type FolderWatchOptions = Parameters<typeof createFolderChangeWatch>[0];
+type PackageWatchOptions = {
+  listFolderInstalls: () => Promise<string[]>;
+  onChange: (root: string) => void;
+  pollMs?: number;
+  fsPromises?: typeof fs;
+  fsWatch?: FolderWatchOptions['fsWatch'];
+  timers?: FolderWatchOptions['timers'];
+};
+
+const serviceModules = async (root: string, folder: string, fs: typeof import('node:fs/promises')): Promise<string[]> => {
   const found = [];
   const entries = await fs.readdir(path.join(root, folder), { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
@@ -22,7 +33,7 @@ const serviceModules = async (root, folder, fs) => {
   return found;
 };
 
-const loadedFiles = async (root, fs) => {
+const loadedFiles = async (root: string, fs: typeof import('node:fs/promises')) => {
   const files = ['package.json'];
   const raw = await fs.readFile(path.join(root, 'package.json'), 'utf8').catch(() => null);
   const parsed = raw === null ? null : parseManifestJson(raw);
@@ -37,7 +48,7 @@ const loadedFiles = async (root, fs) => {
     resolvePageEntry(contributes),
     resolveStatusSectionEntry(contributes),
     ...(contributes.fileEditors ?? []).map((editor) => editor.entry),
-  ].filter(Boolean);
+  ].filter((page): page is string => !!page);
   for (const page of pages) {
     files.push(page);
     const html = await fs.readFile(path.join(root, page), 'utf8').catch(() => '');
@@ -52,7 +63,7 @@ const loadedFiles = async (root, fs) => {
   return [...new Set(files)];
 };
 
-const fingerprint = async (root, fs) => {
+const fingerprint = async (root: string, fs: typeof import('node:fs/promises')) => {
   const files = await loadedFiles(root, fs);
   const stamps = await Promise.all(files.map((file) => fs.stat(path.join(root, file)).then(
     (stat) => `${stat.mtimeMs}:${stat.size}`,
@@ -61,8 +72,8 @@ const fingerprint = async (root, fs) => {
   return files.map((file, index) => `${file}=${stamps[index]}`).join('\n');
 };
 
-export const createGuestPackageWatch = ({ listFolderInstalls, onChange, pollMs = POLL_MS, fsPromises = fs, fsWatch, timers }) => {
-  const watched = new Map();
+export const createGuestPackageWatch = ({ listFolderInstalls, onChange, pollMs = POLL_MS, fsPromises = fs, fsWatch, timers }: PackageWatchOptions) => {
+  const watched = new Map<string, ReturnType<typeof createFolderChangeWatch>>();
   let syncing = Promise.resolve();
   let stopped = false;
 
@@ -88,7 +99,7 @@ export const createGuestPackageWatch = ({ listFolderInstalls, onChange, pollMs =
 
   const sync = () => {
     syncing = syncing.then(apply).catch((error) => {
-      console.warn('Failed to watch extension folders:', error?.message ?? error);
+      console.warn('Failed to watch extension folders:', hasErrorMessage(error) ? error.message ?? error : error);
     });
     return syncing;
   };

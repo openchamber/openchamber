@@ -10,14 +10,23 @@ import {
 } from '@openchamber/sdk';
 
 import { dropGuestTokens, getGuestAuth, patchGuestAuth } from './auth-store.js';
+import type { GuestAuthEntry } from './auth-store.js';
+import type { IntegrationContribution } from '@openchamber/sdk';
+import type { GuestRecord, JsonValue, JsonObject } from './contracts.js';
+import { isString, isJsonObject as isPlainObject } from './input-guards.js';
 
 const PENDING_AUTHORIZATION_TTL_MS = 10 * 60_000;
 
-const pendingByState = new Map();
-const pendingByGuestId = new Map();
+type CredentialTarget = NonNullable<GuestAuthEntry['target']>;
+type PendingAuthorization = { guestId: string; codeVerifier: string; redirectUri: string; target: CredentialTarget; expiresAt: number };
+type GuestAuthOptions = { guest: GuestRecord; persistPath: string };
+type Integration = IntegrationContribution | undefined;
+const pendingByState = new Map<string, PendingAuthorization>();
+const pendingByGuestId = new Map<string, PendingAuthorization & { state: string }>();
 
 export class GuestOAuthError extends Error {
-  constructor(message, code = 'GUEST_OAUTH_FAILED') {
+  code: string;
+  constructor(message: string, code = 'GUEST_OAUTH_FAILED') {
     super(message);
     this.name = 'GuestOAuthError';
     this.code = code;
@@ -44,7 +53,7 @@ const pruneExpiredPending = (now = Date.now()) => {
   }
 };
 
-const dropPendingForGuest = (guestId) => {
+const dropPendingForGuest = (guestId: string) => {
   const current = pendingByGuestId.get(guestId);
   if (current?.state) {
     pendingByState.delete(current.state);
@@ -52,13 +61,13 @@ const dropPendingForGuest = (guestId) => {
   pendingByGuestId.delete(guestId);
 };
 
-const rememberPending = (state, entry) => {
+const rememberPending = (state: string, entry: PendingAuthorization) => {
   dropPendingForGuest(entry.guestId);
   pendingByState.set(state, entry);
   pendingByGuestId.set(entry.guestId, { ...entry, state });
 };
 
-const takePending = (guestId, state) => {
+const takePending = (guestId: string, state: string | undefined) => {
   const trimmed = readTrimmedString(state);
   if (!trimmed) {
     return null;
@@ -74,19 +83,17 @@ const takePending = (guestId, state) => {
   return pending;
 };
 
-const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const readTrimmedString = (value: JsonValue | undefined) => (isString(value) ? value.trim() : '');
 
-const readTrimmedString = (value) => (typeof value === 'string' ? value.trim() : '');
-
-const readExpiresAt = (expiresIn, now = Date.now()) => {
-  const seconds = typeof expiresIn === 'number' && Number.isFinite(expiresIn) ? expiresIn : Number(expiresIn);
+const readExpiresAt = (expiresIn: JsonValue | undefined, now = Date.now()) => {
+  const seconds = Number(expiresIn);
   if (!Number.isFinite(seconds) || seconds <= 0) {
     return now + 24 * 60 * 60 * 1000;
   }
   return now + Math.floor(seconds) * 1000;
 };
 
-const parseTokenPayload = (payload) => {
+const parseTokenPayload = (payload: JsonValue) => {
   if (!isPlainObject(payload)) {
     throw new GuestOAuthError('Token response was empty');
   }
@@ -108,14 +115,14 @@ const parseTokenPayload = (payload) => {
   };
 };
 
-const readTokenError = (payload, status) => {
+const readTokenError = (payload: JsonValue, status: number) => {
   const description = isPlainObject(payload)
     ? (readTrimmedString(payload.error_description) || readTrimmedString(payload.error))
     : '';
   return description || `Token request failed (${status})`;
 };
 
-const postForm = async (url, body) => {
+const postForm = async (url: string, body: Record<string, string>) => {
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -125,14 +132,14 @@ const postForm = async (url, body) => {
     body: new URLSearchParams(body).toString(),
     signal: AbortSignal.timeout(GUEST_REQUEST_TIMEOUT_MS),
   });
-  const payload = await response.json().catch(() => null);
+  const payload: JsonValue = await response.json().catch(() => null);
   if (!response.ok) {
     throw new GuestOAuthError(readTokenError(payload, response.status));
   }
   return parseTokenPayload(payload);
 };
 
-const postJson = async (url, body) => {
+const postJson = async (url: string, body: JsonObject) => {
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -142,14 +149,14 @@ const postJson = async (url, body) => {
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(GUEST_REQUEST_TIMEOUT_MS),
   });
-  const payload = await response.json().catch(() => null);
+  const payload: JsonValue = await response.json().catch(() => null);
   if (!response.ok) {
     throw new GuestOAuthError(readTokenError(payload, response.status));
   }
   return parseTokenPayload(payload);
 };
 
-const exchangeAuthorizationCode = async (tokenUrl, formBody, jsonBody) => {
+const exchangeAuthorizationCode = async (tokenUrl: string, formBody: Record<string, string>, jsonBody: JsonObject) => {
   try {
     return await postForm(tokenUrl, formBody);
   } catch (first) {
@@ -161,7 +168,7 @@ const exchangeAuthorizationCode = async (tokenUrl, formBody, jsonBody) => {
   }
 };
 
-export const guestAuthorizationHeader = (token, authorization) => {
+export const guestAuthorizationHeader = (token: string, authorization: string) => {
   if (authorization === 'bearer') {
     return `Bearer ${token}`;
   }
@@ -171,46 +178,46 @@ export const guestAuthorizationHeader = (token, authorization) => {
   return token;
 };
 
-export const encodeBasicCredential = (username, token) => Buffer.from(`${username}:${token}`, 'utf8').toString('base64');
+export const encodeBasicCredential = (username: string, token: string) => Buffer.from(`${username}:${token}`, 'utf8').toString('base64');
 
-export const guestRedirectUri = (origin, guestId) => `${origin.replace(/\/+$/, '')}/api/guests/${guestId}/oauth/callback`;
+export const guestRedirectUri = (origin: string, guestId: string) => `${origin.replace(/\/+$/, '')}/api/guests/${guestId}/oauth/callback`;
 
-export const toPublicGuestAuth = (entry, integration) => {
-  const stored = entry?.settings && typeof entry.settings === 'object' ? entry.settings : {};
+export const toPublicGuestAuth = (entry: GuestAuthEntry | null, integration: Integration) => {
+  const stored = entry?.settings ?? {};
   const declared = integration?.settings ?? [];
   const secretIds = new Set(declared.filter((field) => field.secret).map((field) => field.id));
   const publicIds = new Set(declared.filter((field) => !field.secret).map((field) => field.id));
   return {
     connected: Boolean(entry?.accessToken),
-    account: typeof entry?.account === 'string' ? entry.account : '',
+    account: entry?.account ?? '',
     hasClient: integration ? Boolean(usableClientCredentials(entry, integration).clientId) : Boolean(entry?.clientId),
     settings: Object.fromEntries(Object.entries(stored).filter(([key]) => publicIds.has(key))),
     secretsSet: Object.keys(stored).filter((key) => secretIds.has(key) && stored[key]),
   };
 };
 
-export const toolLinkSettingsOf = (entry, guest) => {
+export const toolLinkSettingsOf = (entry: GuestAuthEntry | null, guest: GuestRecord) => {
   const visible = toPublicGuestAuth(entry, guest.integration).settings;
   return Object.fromEntries(guestToolLinkSettingIds(guest.tools)
-    .filter((id) => Object.hasOwn(visible, id) && typeof visible[id] === 'string' && visible[id] !== '')
+    .filter((id) => Object.hasOwn(visible, id) && isString(visible[id]) && visible[id] !== '')
     .map((id) => [id, visible[id]]));
 };
 
-const readAccountLabel = (payload, name) => {
-  if (!isPlainObject(payload) || typeof name !== 'string' || name === '') {
+const readAccountLabel = (payload: JsonValue, name: string | undefined) => {
+  if (!isPlainObject(payload) || name === undefined || name === '') {
     return '';
   }
-  let current = payload;
+  let current: JsonValue | undefined = payload;
   for (const part of name.split('.')) {
     if (!isPlainObject(current) || !(part in current)) {
       return '';
     }
     current = current[part];
   }
-  return typeof current === 'string' ? current.trim().slice(0, GUEST_ACCOUNT_MAX) : '';
+  return isString(current) ? current.trim().slice(0, GUEST_ACCOUNT_MAX) : '';
 };
 
-const fetchAccountLabel = async (api, accessToken) => {
+const fetchAccountLabel = async (api: NonNullable<ReturnType<typeof resolveIntegrationApi>>, accessToken: string) => {
   if (!api.account) {
     return { ok: true, account: '' };
   }
@@ -231,21 +238,16 @@ const fetchAccountLabel = async (api, accessToken) => {
   if (!response.ok) {
     return { ok: false, account: '' };
   }
-  const payload = await response.json().catch(() => null);
+  const payload: JsonValue = await response.json().catch(() => null);
   return { ok: true, account: readAccountLabel(payload, api.account.name) };
 };
 
-/**
- * The addresses credentials for this integration go to: the API origin and,
- * for OAuth, the authorize and token endpoints.
- * @returns {{ apiOrigin: string, authorizeUrl?: string, tokenUrl?: string } | null}
- */
-export const credentialTarget = (integration) => {
-  const api = resolveIntegrationApi(integration ?? {});
+export const credentialTarget = (integration: Integration) => {
+  const api = integration ? resolveIntegrationApi(integration) : null;
   if (!api) {
     return null;
   }
-  const target = { apiOrigin: api.apiOrigin };
+  const target: CredentialTarget = { apiOrigin: api.apiOrigin };
   if (integration?.oauth) {
     target.authorizeUrl = integration.oauth.authorizeUrl;
     target.tokenUrl = integration.oauth.tokenUrl;
@@ -253,21 +255,16 @@ export const credentialTarget = (integration) => {
   return target;
 };
 
-const sameTarget = (a, b) => Boolean(a && b)
+const sameTarget = (a: CredentialTarget | null | undefined, b: CredentialTarget | null | undefined) => !!(a && b)
   && a.apiOrigin === b.apiOrigin
   && (a.authorizeUrl ?? null) === (b.authorizeUrl ?? null)
   && (a.tokenUrl ?? null) === (b.tokenUrl ?? null);
 
-export const storedTokensUsable = (stored, integration) => (
-  Boolean(stored?.accessToken) && sameTarget(stored.target, credentialTarget(integration))
+export const storedTokensUsable = (stored: GuestAuthEntry | null, integration: Integration) => (
+  !!stored?.accessToken && sameTarget(stored.target, credentialTarget(integration))
 );
 
-/**
- * The client id and secret, only when they were entered for the endpoints
- * the package names now. Anything else is treated as missing.
- * @returns {{ clientId: string, clientSecret: string }}
- */
-const usableClientCredentials = (stored, integration) => {
+const usableClientCredentials = (stored: GuestAuthEntry | null, integration: Integration) => {
   if (!sameTarget(stored?.clientTarget, credentialTarget(integration))) {
     return { clientId: '', clientSecret: '' };
   }
@@ -277,12 +274,7 @@ const usableClientCredentials = (stored, integration) => {
   };
 };
 
-/**
- * Tokens that no longer match the package's addresses are dropped, so the
- * card shows disconnected and nothing is sent to the new addresses.
- * @returns {Promise<object | null>} the stored entry when its tokens are usable
- */
-export const takeUsableGuestAuth = async (guest, persistPath) => {
+export const takeUsableGuestAuth = async (guest: GuestRecord, persistPath: string) => {
   const stored = await getGuestAuth(guest.id, persistPath);
   if (!stored?.accessToken) {
     return stored;
@@ -294,7 +286,7 @@ export const takeUsableGuestAuth = async (guest, persistPath) => {
   return getGuestAuth(guest.id, persistPath);
 };
 
-export const saveGuestOAuthClient = async ({ guest, persistPath, clientId, clientSecret }) => {
+export const saveGuestOAuthClient = async ({ guest, persistPath, clientId, clientSecret }: GuestAuthOptions & { clientId: string; clientSecret?: string | undefined }) => {
   if (resolveIntegrationAuth(guest.integration ?? {}) !== 'oauth') {
     throw new GuestOAuthError('This guest does not declare OAuth.', 'NO_INTEGRATION');
   }
@@ -304,8 +296,9 @@ export const saveGuestOAuthClient = async ({ guest, persistPath, clientId, clien
     throw new GuestOAuthError('Client id is missing.', 'CLIENT_MISSING');
   }
   const clientTarget = credentialTarget(guest.integration);
+  if (!clientTarget) throw new GuestOAuthError('This guest does not declare OAuth.', 'NO_INTEGRATION');
   return patchGuestAuth(guest.id, (current) => {
-    const next = { clientId: id, clientTarget };
+    const next: GuestAuthEntry = { clientId: id, clientTarget };
     if (secret) {
       next.clientSecret = secret;
     } else if (readTrimmedString(current?.clientId) !== id || !sameTarget(current?.clientTarget, clientTarget)) {
@@ -315,11 +308,11 @@ export const saveGuestOAuthClient = async ({ guest, persistPath, clientId, clien
   }, persistPath);
 };
 
-export const saveGuestAccessToken = async ({ guest, persistPath, token, username }) => {
+export const saveGuestAccessToken = async ({ guest, persistPath, token, username }: GuestAuthOptions & { token: string; username?: string | undefined }) => {
   if (resolveIntegrationAuth(guest.integration ?? {}) !== 'token') {
     throw new GuestOAuthError('This guest does not accept a pasted token.', 'NO_TOKEN_AUTH');
   }
-  const api = resolveIntegrationApi(guest.integration);
+  const api = guest.integration ? resolveIntegrationApi(guest.integration) : null;
   const pastedToken = readTrimmedString(token);
   if (!api || !pastedToken) {
     throw new GuestOAuthError('API token is missing.', 'TOKEN_MISSING');
@@ -336,6 +329,8 @@ export const saveGuestAccessToken = async ({ guest, persistPath, token, username
     throw new GuestOAuthError('That API token was refused.', 'TOKEN_INVALID');
   }
   const account = probed.account || (api.authorization === 'basic' ? pastedUsername.slice(0, GUEST_ACCOUNT_MAX) : '');
+  const target = credentialTarget(guest.integration);
+  if (!target) throw new GuestOAuthError('API token is missing.', 'TOKEN_MISSING');
   await patchGuestAuth(guest.id, {
     accessToken,
     refreshToken: null,
@@ -343,12 +338,12 @@ export const saveGuestAccessToken = async ({ guest, persistPath, token, username
     expiresAt: null,
     account,
     authorizedAt: Date.now(),
-    target: credentialTarget(guest.integration),
+    target,
   }, persistPath);
   return { connected: true, account };
 };
 
-export const startGuestAuthorization = async ({ guest, persistPath, origin }) => {
+export const startGuestAuthorization = async ({ guest, persistPath, origin }: GuestAuthOptions & { origin: string }) => {
   const oauth = guest.integration?.oauth;
   if (resolveIntegrationAuth(guest.integration ?? {}) !== 'oauth' || !oauth) {
     throw new GuestOAuthError('This guest does not declare OAuth.', 'NO_INTEGRATION');
@@ -362,11 +357,13 @@ export const startGuestAuthorization = async ({ guest, persistPath, origin }) =>
   const { verifier, challenge } = createPkcePair();
   const state = crypto.randomBytes(32).toString('base64url');
   const redirectUri = guestRedirectUri(origin, guest.id);
+  const target = credentialTarget(guest.integration);
+  if (!target) throw new GuestOAuthError('This guest does not declare OAuth.', 'NO_INTEGRATION');
   rememberPending(state, {
     guestId: guest.id,
     codeVerifier: verifier,
     redirectUri,
-    target: credentialTarget(guest.integration),
+    target,
     expiresAt: Date.now() + PENDING_AUTHORIZATION_TTL_MS,
   });
 
@@ -387,7 +384,7 @@ export const startGuestAuthorization = async ({ guest, persistPath, origin }) =>
   };
 };
 
-export const consumeGuestAuthorization = async ({ guest, persistPath, code, state, error, errorDescription }) => {
+export const consumeGuestAuthorization = async ({ guest, persistPath, code, state, error, errorDescription }: GuestAuthOptions & { code?: string; state?: string; error?: string; errorDescription?: string }) => {
   pruneExpiredPending();
   if (readTrimmedString(error)) {
     dropPendingForGuest(guest.id);
@@ -406,7 +403,7 @@ export const consumeGuestAuthorization = async ({ guest, persistPath, code, stat
     throw new GuestOAuthError('Authorization code or client credentials were missing.');
   }
   const tokens = await exchangeAuthorizationCode(
-    pending.target.tokenUrl,
+    requiredTokenUrl(pending.target),
     {
       grant_type: 'authorization_code',
       code,
@@ -423,7 +420,7 @@ export const consumeGuestAuthorization = async ({ guest, persistPath, code, stat
   );
   let account = '';
   try {
-    const api = resolveIntegrationApi(guest.integration);
+    const api = guest.integration ? resolveIntegrationApi(guest.integration) : null;
     if (api) {
       const probed = await fetchAccountLabel(api, tokens.accessToken);
       account = probed.account;
@@ -448,19 +445,25 @@ export const consumeGuestAuthorization = async ({ guest, persistPath, code, stat
   return { connected: true, account };
 };
 
-export const refreshGuestAccessToken = async ({ guest, persistPath }) => {
+const requiredTokenUrl = (target: CredentialTarget): string => {
+  if (target.tokenUrl === undefined) throw new Error('OAuth credential target has no token URL');
+  return target.tokenUrl;
+};
+
+export const refreshGuestAccessToken = async ({ guest, persistPath }: GuestAuthOptions) => {
   if (resolveIntegrationAuth(guest.integration ?? {}) !== 'oauth' || !guest.integration?.oauth) {
     return null;
   }
   const stored = await takeUsableGuestAuth(guest, persistPath);
   const refreshToken = readTrimmedString(stored?.refreshToken);
   const { clientId, clientSecret } = usableClientCredentials(stored, guest.integration);
-  if (!refreshToken || !clientId) {
+  if (!refreshToken || !clientId || !stored) {
     return null;
   }
   const target = stored.target;
+  if (!target) throw new Error('Usable OAuth credentials have no target');
   const previousAccessToken = stored.accessToken;
-  const tokens = await postForm(target.tokenUrl, {
+  const tokens = await postForm(requiredTokenUrl(target), {
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
     client_id: clientId,
@@ -482,7 +485,7 @@ export const refreshGuestAccessToken = async ({ guest, persistPath }) => {
   return tokens.accessToken;
 };
 
-export const disconnectGuestAuth = async (guestId, persistPath) => {
+export const disconnectGuestAuth = async (guestId: string, persistPath: string) => {
   await dropGuestTokens(guestId, persistPath);
 };
 
