@@ -1,4 +1,46 @@
 import crypto from 'crypto';
+import type { NextFunction, Request, Response } from '../shared/http-contracts.js';
+
+interface BootstrapRecord {
+  id: string;
+  tunnelId: string;
+  tokenHash: string;
+  issuedAt: number;
+  expiresAt: number | null;
+  usedAt: number | null;
+  revokedAt: number | null;
+}
+
+export interface TunnelSession {
+  sessionId: string;
+  tunnelId: string;
+  mode: string | null;
+  publicUrl: string | null;
+  createdAt: number;
+  lastSeenAt: number;
+  expiresAt: number;
+  revokedAt: number | null;
+  revokedReason: string | null;
+  expiredAt: number | null;
+}
+
+interface ConnectRateLimitRecord {
+  count: number;
+  lastAttempt: number;
+  lockedUntil: number | null;
+}
+
+export interface TunnelSessionSummary extends Omit<TunnelSession, 'revokedReason' | 'expiredAt'> {
+  status: 'active' | 'inactive';
+  inactiveReason: string | null;
+}
+
+export type BootstrapExchangeResult =
+  | { ok: true; sessionExpiresAt: number }
+  | { ok: false; reason: 'rate-limited'; retryAfter: number }
+  | { ok: false; reason: 'inactive' | 'missing-token' | 'expired' | 'tunnel-mismatch' | 'invalid-token' };
+
+const isText = (value: unknown): value is string => typeof value === 'string';
 
 const BOOTSTRAP_TOKEN_COOKIE_SAFE_BYTES = 32;
 const TUNNEL_SESSION_COOKIE_NAME = 'oc_tunnel_session';
@@ -8,12 +50,12 @@ const CONNECT_RATE_LIMIT_LOCK_MS = 10 * 60 * 1000;
 const CONNECT_RATE_LIMIT_MAX_ATTEMPTS = 20;
 const CONNECT_RATE_LIMIT_NO_IP_MAX_ATTEMPTS = 5;
 
-const parseCookies = (cookieHeader) => {
-  if (!cookieHeader || typeof cookieHeader !== 'string') {
+const parseCookies = (cookieHeader: Request['headers']['cookie']) => {
+  if (!cookieHeader || !isText(cookieHeader)) {
     return {};
   }
 
-  return cookieHeader.split(';').reduce((acc, segment) => {
+  return cookieHeader.split(';').reduce<Record<string, string>>((acc, segment) => {
     const [name, ...rest] = segment.split('=');
     if (!name) {
       return acc;
@@ -28,19 +70,24 @@ const parseCookies = (cookieHeader) => {
   }, {});
 };
 
-const isSecureRequest = (req) => {
+const isSecureRequest = (req: Request) => {
   if (req.secure) {
     return true;
   }
   const forwardedProto = req.headers['x-forwarded-proto'];
-  if (typeof forwardedProto === 'string') {
+  if (isText(forwardedProto)) {
     const firstProto = forwardedProto.split(',')[0]?.trim().toLowerCase();
     return firstProto === 'https';
   }
   return false;
 };
 
-const buildCookie = ({ name, value, maxAge, secure }) => {
+const buildCookie = ({ name, value, maxAge, secure }: {
+  name: string;
+  value: string;
+  maxAge: number;
+  secure: boolean;
+}) => {
   const attributes = [
     `${name}=${value}`,
     'Path=/',
@@ -48,9 +95,7 @@ const buildCookie = ({ name, value, maxAge, secure }) => {
     'SameSite=Lax',
   ];
 
-  if (typeof maxAge === 'number') {
-    attributes.push(`Max-Age=${Math.max(0, Math.floor(maxAge))}`);
-  }
+  attributes.push(`Max-Age=${Math.max(0, Math.floor(maxAge))}`);
 
   const expires = maxAge === 0
     ? 'Thu, 01 Jan 1970 00:00:00 GMT'
@@ -67,10 +112,10 @@ const buildCookie = ({ name, value, maxAge, secure }) => {
 
 const nowTs = () => Date.now();
 
-const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
+const hashToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
 
-const normalizeHost = (candidate) => {
-  if (typeof candidate !== 'string') {
+const normalizeHost = (candidate: string | null | undefined) => {
+  if (!isText(candidate)) {
     return null;
   }
   const trimmed = candidate.trim().toLowerCase();
@@ -80,8 +125,8 @@ const normalizeHost = (candidate) => {
   return trimmed.replace(/:\d+$/, '');
 };
 
-const normalizeIpCandidate = (candidate) => {
-  if (typeof candidate !== 'string') {
+const normalizeIpCandidate = (candidate: string | null | undefined) => {
+  if (!isText(candidate)) {
     return null;
   }
 
@@ -109,12 +154,12 @@ const normalizeIpCandidate = (candidate) => {
   return withoutZone;
 };
 
-const getSocketRemoteIp = (req) => {
+const getSocketRemoteIp = (req: Request) => {
   const remoteAddress = req?.socket?.remoteAddress || req?.connection?.remoteAddress;
   return normalizeIpCandidate(remoteAddress);
 };
 
-const isPrivateOrLoopbackIpv4 = (candidate) => {
+const isPrivateOrLoopbackIpv4 = (candidate: string) => {
   const octets = candidate.split('.').map((part) => Number(part));
   if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
     return false;
@@ -127,7 +172,7 @@ const isPrivateOrLoopbackIpv4 = (candidate) => {
   if (first === 10) {
     return true;
   }
-  if (first === 172 && second >= 16 && second <= 31) {
+  if (first === 172 && second !== undefined && second >= 16 && second <= 31) {
     return true;
   }
   if (first === 192 && second === 168) {
@@ -139,7 +184,7 @@ const isPrivateOrLoopbackIpv4 = (candidate) => {
   return false;
 };
 
-const isPrivateOrLoopbackIpv6 = (candidate) => {
+const isPrivateOrLoopbackIpv6 = (candidate: string) => {
   if (candidate === '::1') {
     return true;
   }
@@ -154,7 +199,7 @@ const isPrivateOrLoopbackIpv6 = (candidate) => {
     || candidate.startsWith('feb');
 };
 
-const isPrivateOrLoopbackIp = (candidate) => {
+const isPrivateOrLoopbackIp = (candidate: string | null | undefined) => {
   const normalized = normalizeIpCandidate(candidate);
   if (!normalized) {
     return false;
@@ -167,7 +212,7 @@ const isPrivateOrLoopbackIp = (candidate) => {
   return isPrivateOrLoopbackIpv4(normalized);
 };
 
-const isLocalHost = (host, req) => {
+const isLocalHost = (host: string | null, req: Request) => {
   if (!host) {
     return false;
   }
@@ -178,12 +223,12 @@ const isLocalHost = (host, req) => {
   return isLocalHostname && isPrivateOrLoopbackIp(getSocketRemoteIp(req));
 };
 
-const isLoopbackIp = (candidate) => {
+const isLoopbackIp = (candidate: string) => {
   const normalized = normalizeIpCandidate(candidate);
   return normalized === '::1' || Boolean(normalized?.startsWith('127.'));
 };
 
-const isForwardedForRemoteClient = (req) => {
+const isForwardedForRemoteClient = (req: Request) => {
   const header = req?.headers?.['x-forwarded-for'];
   const value = Array.isArray(header) ? header.join(',') : header;
   if (!value) {
@@ -192,7 +237,7 @@ const isForwardedForRemoteClient = (req) => {
   return value.split(',').some((entry) => entry.trim() && !isLoopbackIp(entry));
 };
 
-const getClientIp = (req) => {
+const getClientIp = (req: Request) => {
   const ip = req.ip || req.socket?.remoteAddress;
   if (ip) {
     if (ip.startsWith('::ffff:')) {
@@ -203,7 +248,7 @@ const getClientIp = (req) => {
   return null;
 };
 
-const getRateLimitKey = (req) => {
+const getRateLimitKey = (req: Request) => {
   const ip = getClientIp(req);
   if (ip) {
     return ip;
@@ -211,7 +256,7 @@ const getRateLimitKey = (req) => {
   return 'connect-rate-limit:no-ip';
 };
 
-const rateLimitMaxForKey = (key) => {
+const rateLimitMaxForKey = (key: string) => {
   if (key === 'connect-rate-limit:no-ip') {
     return CONNECT_RATE_LIMIT_NO_IP_MAX_ATTEMPTS;
   }
@@ -219,16 +264,16 @@ const rateLimitMaxForKey = (key) => {
 };
 
 export const createTunnelAuth = () => {
-  let activeTunnelId = null;
-  let activeTunnelHost = null;
-  let activeTunnelMode = null;
-  let activeTunnelPublicUrl = null;
-  let bootstrapRecord = null;
+  let activeTunnelId: string | null = null;
+  let activeTunnelHost: string | null = null;
+  let activeTunnelMode: string | null = null;
+  let activeTunnelPublicUrl: string | null = null;
+  let bootstrapRecord: BootstrapRecord | null = null;
 
-  const tunnelSessions = new Map();
-  const connectRateLimiter = new Map();
+  const tunnelSessions = new Map<string, TunnelSession>();
+  const connectRateLimiter = new Map<string, ConnectRateLimitRecord>();
 
-  const clearTunnelSessionCookie = (req, res) => {
+  const clearTunnelSessionCookie = (req: Request, res: Response) => {
     const secure = isSecureRequest(req);
     const header = buildCookie({
       name: TUNNEL_SESSION_COOKIE_NAME,
@@ -239,7 +284,7 @@ export const createTunnelAuth = () => {
     res.setHeader('Set-Cookie', header);
   };
 
-  const setTunnelSessionCookie = (req, res, sessionId, ttlMs) => {
+  const setTunnelSessionCookie = (req: Request, res: Response, sessionId: string, ttlMs: number) => {
     const secure = isSecureRequest(req);
     const maxAge = Math.max(0, Math.floor(ttlMs / 1000));
     const header = buildCookie({
@@ -251,9 +296,9 @@ export const createTunnelAuth = () => {
     res.setHeader('Set-Cookie', header);
   };
 
-  const classifyRequestScope = (req) => {
-    const hostHeader = normalizeHost(typeof req.headers.host === 'string' ? req.headers.host : '');
-    const reqHost = normalizeHost(typeof req.hostname === 'string' ? req.hostname : '') || hostHeader;
+  const classifyRequestScope = (req: Request) => {
+    const hostHeader = normalizeHost(isText(req.headers.host) ? req.headers.host : '');
+    const reqHost = normalizeHost(isText(req.hostname) ? req.hostname : '') || hostHeader;
 
     if (activeTunnelHost && reqHost === activeTunnelHost) {
       return 'tunnel';
@@ -283,7 +328,7 @@ export const createTunnelAuth = () => {
     return 1;
   };
 
-  const invalidateTunnelSessions = (tunnelId, reason = 'tunnel-stopped') => {
+  const invalidateTunnelSessions = (tunnelId: string, reason = 'tunnel-stopped') => {
     const revokedAt = nowTs();
     let count = 0;
     for (const record of tunnelSessions.values()) {
@@ -296,7 +341,7 @@ export const createTunnelAuth = () => {
     return count;
   };
 
-  const revokeTunnelArtifacts = (tunnelId) => {
+  const revokeTunnelArtifacts = (tunnelId: string) => {
     const revokedBootstrapCount = bootstrapRecord && bootstrapRecord.tunnelId === tunnelId
       ? revokeBootstrapToken()
       : 0;
@@ -304,7 +349,11 @@ export const createTunnelAuth = () => {
     return { revokedBootstrapCount, invalidatedSessionCount };
   };
 
-  const setActiveTunnel = ({ tunnelId, publicUrl, mode = null }) => {
+  const setActiveTunnel = ({ tunnelId, publicUrl, mode = null }: {
+    tunnelId: string;
+    publicUrl: string;
+    mode?: string | null;
+  }) => {
     activeTunnelId = tunnelId;
     activeTunnelMode = mode;
     activeTunnelPublicUrl = publicUrl || null;
@@ -326,17 +375,17 @@ export const createTunnelAuth = () => {
     bootstrapRecord = null;
   };
 
-  const isBootstrapRecordUsable = (record) => {
+  const isBootstrapRecordUsable = (record: BootstrapRecord | null): record is BootstrapRecord => {
     if (!record || record.revokedAt || record.usedAt) {
       return false;
     }
-    if (typeof record.expiresAt === 'number' && nowTs() >= record.expiresAt) {
+    if (record.expiresAt !== null && nowTs() >= record.expiresAt) {
       return false;
     }
     return true;
   };
 
-  const issueBootstrapToken = ({ ttlMs }) => {
+  const issueBootstrapToken = ({ ttlMs }: { ttlMs: number | null }) => {
     if (!activeTunnelId) {
       throw new Error('Tunnel is not active');
     }
@@ -345,7 +394,7 @@ export const createTunnelAuth = () => {
 
     const token = crypto.randomBytes(BOOTSTRAP_TOKEN_COOKIE_SAFE_BYTES).toString('base64url');
     const issuedAt = nowTs();
-    const expiresAt = Number.isFinite(ttlMs) && ttlMs > 0 ? issuedAt + ttlMs : null;
+    const expiresAt = Number.isFinite(ttlMs) && ttlMs !== null && ttlMs > 0 ? issuedAt + ttlMs : null;
 
     bootstrapRecord = {
       id: crypto.randomUUID(),
@@ -377,7 +426,7 @@ export const createTunnelAuth = () => {
     };
   };
 
-  const checkConnectRateLimit = (req) => {
+  const checkConnectRateLimit = (req: Request) => {
     const key = getRateLimitKey(req);
     const now = nowTs();
     const maxAttempts = rateLimitMaxForKey(key);
@@ -410,7 +459,7 @@ export const createTunnelAuth = () => {
     return { allowed: true, retryAfter: 0 };
   };
 
-  const recordConnectFailedAttempt = (req) => {
+  const recordConnectFailedAttempt = (req: Request) => {
     const key = getRateLimitKey(req);
     const now = nowTs();
     const record = connectRateLimiter.get(key);
@@ -427,12 +476,12 @@ export const createTunnelAuth = () => {
     });
   };
 
-  const clearConnectRateLimit = (req) => {
+  const clearConnectRateLimit = (req: Request) => {
     const key = getRateLimitKey(req);
     connectRateLimiter.delete(key);
   };
 
-  const getTunnelSessionFromRequest = (req) => {
+  const getTunnelSessionFromRequest = (req: Request) => {
     const cookies = parseCookies(req.headers.cookie);
     const token = cookies[TUNNEL_SESSION_COOKIE_NAME];
     if (!token) {
@@ -458,7 +507,7 @@ export const createTunnelAuth = () => {
     return session;
   };
 
-  const requireTunnelSession = (req, res, next) => {
+  const requireTunnelSession = (req: Request, res: Response, next: NextFunction) => {
     const session = getTunnelSessionFromRequest(req);
     if (session) {
       return next();
@@ -472,7 +521,12 @@ export const createTunnelAuth = () => {
     });
   };
 
-  const exchangeBootstrapToken = ({ req, res, token, sessionTtlMs }) => {
+  const exchangeBootstrapToken = ({ req, res, token, sessionTtlMs }: {
+    req: Request;
+    res: Response;
+    token: unknown;
+    sessionTtlMs: number;
+  }): BootstrapExchangeResult => {
     const rateLimit = checkConnectRateLimit(req);
     if (!rateLimit.allowed) {
       return {
@@ -487,7 +541,7 @@ export const createTunnelAuth = () => {
       return { ok: false, reason: 'inactive' };
     }
 
-    if (!token || typeof token !== 'string') {
+    if (!token || !isText(token)) {
       recordConnectFailedAttempt(req);
       return { ok: false, reason: 'missing-token' };
     }
@@ -543,7 +597,7 @@ export const createTunnelAuth = () => {
   const listTunnelSessions = () => {
     const now = nowTs();
 
-    const sessions = [];
+    const sessions: TunnelSessionSummary[] = [];
     for (const record of tunnelSessions.values()) {
       const isExpired = record.expiresAt <= now;
       if (isExpired && !record.expiredAt) {
