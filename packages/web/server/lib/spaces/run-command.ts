@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Duplex } from 'node:stream';
+import type { ChildProcess, ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { CommandOptions, CommandResult } from './command-contracts.js';
 
 import { SpaceError } from './errors.js';
 
@@ -10,9 +12,41 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const KILL_WAIT_MS = 5_000;
 
-// external: https://github.com/libuv/libuv/blob/v1.x/src/win/process.c Silent breakaway leaves subprocesses outside the Node job object.
-const liveTrees = new Set();
+const liveTrees = new Set<ChildProcess>();
 let exitHandlerInstalled = false;
+
+export interface KillTreeOptions {
+  platform?: NodeJS.Platform;
+  kill?: (pid: number, signal: NodeJS.Signals) => void;
+  systemRoot?: string;
+}
+
+export interface KillLiveTreesOptions extends KillTreeOptions {
+  children?: Iterable<Pick<ChildProcess, 'pid'>>;
+  spawnSyncProcess?: typeof spawnSync;
+}
+
+export interface KillProcessTreeOptions extends KillTreeOptions {
+  spawnProcess?: typeof spawn;
+  waitMs?: number;
+}
+
+interface ErrorFile {
+  folder: string;
+  fd: number;
+}
+
+const isInteger = (value: unknown): value is number => Number.isInteger(value);
+const hasErrorFields = (value: unknown): value is { message?: unknown; code?: unknown } => value != null;
+const errorField = <Cause>(error: Cause, key: 'message' | 'code') => {
+  if (!hasErrorFields(error)) throw new TypeError(`Cannot read properties of ${error} (reading '${key}')`);
+  return error[key];
+};
+const firstChunk = (chunks: Buffer[]) => {
+  const chunk = chunks[0];
+  if (chunk === undefined) throw new TypeError("Cannot read properties of undefined (reading 'length')");
+  return chunk;
+};
 
 export const liveTreeCount = () => liveTrees.size;
 
@@ -22,10 +56,10 @@ export function killLiveTrees({
   kill = (pid, signal) => process.kill(pid, signal),
   spawnSyncProcess = spawnSync,
   systemRoot = process.env.SystemRoot,
-} = {}) {
+}: KillLiveTreesOptions = {}) {
   for (const child of children) {
     const pid = child?.pid;
-    if (!Number.isInteger(pid) || pid <= 1) continue;
+    if (!isInteger(pid) || pid <= 1) continue;
     try {
       if (platform === 'win32') {
         if (systemRoot) {
@@ -37,7 +71,7 @@ export function killLiveTrees({
         kill(-pid, 'SIGKILL');
       }
     } catch {
-      // Already gone, or nothing more can be done from an exit handler.
+      continue;
     }
   }
   if (children === liveTrees) liveTrees.clear();
@@ -45,7 +79,7 @@ export function killLiveTrees({
 
 const killLiveTreesAtExit = () => killLiveTrees();
 
-const trackTree = (child) => {
+const trackTree = (child: ChildProcess) => {
   if (!exitHandlerInstalled) {
     exitHandlerInstalled = true;
     process.prependListener('exit', killLiveTreesAtExit);
@@ -53,11 +87,11 @@ const trackTree = (child) => {
   liveTrees.add(child);
 };
 
-const abortReason = (signal, file, args) => (signal.reason instanceof SpaceError
+const abortReason = (signal: AbortSignal, file: string, args: string[]) => (signal.reason instanceof SpaceError
   ? signal.reason
   : new SpaceError('command_aborted', `${file} ${args[0] ?? ''} was stopped by its caller`));
 
-export function runCommand(file, args, options = {}) {
+export function runCommand(file: string, args: string[], options: CommandOptions = {}) {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
   const keepTail = options.keepTail === true;
@@ -67,15 +101,15 @@ export function runCommand(file, args, options = {}) {
   const killWaitMs = options.killWaitMs ?? KILL_WAIT_MS;
   const abortSignal = options.signal;
 
-  return new Promise((resolve, reject) => {
+  return new Promise<CommandResult>((resolve, reject) => {
     if (abortSignal?.aborted) {
       reject(abortReason(abortSignal, file, args));
       return;
     }
-    let errorFile = null;
+    let errorFile: ErrorFile | null = null;
     const closeErrorFile = () => {
       if (errorFile === null) return;
-      try { fs.closeSync(errorFile.fd); } catch { /* already closed */ }
+      try { fs.closeSync(errorFile.fd); } catch { void 0; }
       fs.rmSync(errorFile.folder, { recursive: true, force: true });
       errorFile = null;
     };
@@ -84,7 +118,7 @@ export function runCommand(file, args, options = {}) {
         const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-stderr-'));
         errorFile = { folder, fd: fs.openSync(path.join(folder, 'stderr'), 'w+') };
       } catch (error) {
-        reject(new SpaceError('command_spawn_failed', `Could not start ${file}: no file for its output: ${error.message}`, { errno: error.code ?? null }));
+        reject(new SpaceError('command_spawn_failed', `Could not start ${file}: no file for its output: ${errorField(error, 'message')}`, { errno: errorField(error, 'code') ?? null }));
         return;
       }
     }
@@ -95,27 +129,26 @@ export function runCommand(file, args, options = {}) {
         windowsHide: true,
         cwd: options.cwd,
         env: options.env,
-        // external: https://nodejs.org/api/child_process.html#optionsdetached On Windows detached gives the child its own console.
         detached: killTree && process.platform !== 'win32',
         stdio: errorFile === null ? ['pipe', 'pipe', 'pipe'] : ['pipe', 'ignore', errorFile.fd],
       });
     } catch (error) {
       closeErrorFile();
-      reject(new SpaceError('command_spawn_failed', `Could not start ${file}: ${error.message}`, { errno: error.code ?? null }));
+      reject(new SpaceError('command_spawn_failed', `Could not start ${file}: ${errorField(error, 'message')}`, { errno: errorField(error, 'code') ?? null }));
       return;
     }
 
     if (killTree && !keepAtExit) trackTree(child);
     if (errorFile !== null) fs.rmSync(errorFile.folder, { recursive: true, force: true });
 
-    const stdoutChunks = [];
-    const stderrChunks = [];
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
     let capturedBytes = 0;
     const heldBytes = new Map([[stdoutChunks, 0], [stderrChunks, 0]]);
     let settled = false;
     let closed = false;
-    const closeWaiters = [];
-    const waitForClose = () => new Promise((resolveWait) => {
+    const closeWaiters: (() => void)[] = [];
+    const waitForClose = () => new Promise<void>((resolveWait) => {
       if (closed) {
         resolveWait();
         return;
@@ -124,7 +157,7 @@ export function runCommand(file, args, options = {}) {
       closeWaiters.push(() => { clearTimeout(bound); resolveWait(); });
     });
 
-    const fail = (error) => {
+    const fail = (error: SpaceError<unknown>) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -140,20 +173,28 @@ export function runCommand(file, args, options = {}) {
     const timer = setTimeout(() => {
       fail(new SpaceError('command_timeout', `${file} ${args[0] ?? ''} did not finish within ${timeoutMs} ms and was stopped`));
     }, timeoutMs);
-    const stop = () => fail(abortReason(abortSignal, file, args));
+    const stop = () => {
+      if (abortSignal) fail(abortReason(abortSignal, file, args));
+    };
     abortSignal?.addEventListener('abort', stop, { once: true });
 
-    const window = (chunks) => (chunk) => {
+    const window = (chunks: Buffer[]) => (chunk: Buffer) => {
       chunks.push(chunk);
-      let held = heldBytes.get(chunks) + chunk.length;
-      while (held - chunks[0].length >= maxOutputBytes) held -= chunks.shift().length;
+      const previous = heldBytes.get(chunks);
+      if (previous === undefined) throw new TypeError('Missing output buffer byte count');
+      let held = previous + chunk.length;
+      while (held - firstChunk(chunks).length >= maxOutputBytes) {
+        const removed = chunks.shift();
+        if (removed === undefined) throw new TypeError("Cannot read properties of undefined (reading 'length')");
+        held -= removed.length;
+      }
       if (held > maxOutputBytes) {
-        chunks[0] = chunks[0].subarray(held - maxOutputBytes);
+        chunks[0] = firstChunk(chunks).subarray(held - maxOutputBytes);
         held = maxOutputBytes;
       }
       heldBytes.set(chunks, held);
     };
-    const capture = (chunks) => (keepTail ? window(chunks) : (chunk) => {
+    const capture = (chunks: Buffer[]) => (keepTail ? window(chunks) : (chunk: Buffer) => {
       capturedBytes += chunk.length;
       if (capturedBytes > maxOutputBytes) {
         fail(new SpaceError('command_output_too_large', `${file} ${args[0] ?? ''} printed more than ${maxOutputBytes} bytes and was stopped`));
@@ -164,7 +205,7 @@ export function runCommand(file, args, options = {}) {
 
     child.stdout?.on('data', capture(stdoutChunks));
     child.stderr?.on('data', capture(stderrChunks));
-    const readErrorFile = () => {
+    const readErrorFile = (errorFile: ErrorFile) => {
       const size = fs.fstatSync(errorFile.fd).size;
       const kept = Buffer.alloc(Math.min(size, maxOutputBytes));
       fs.readSync(errorFile.fd, kept, 0, kept.length, size - kept.length);
@@ -174,7 +215,7 @@ export function runCommand(file, args, options = {}) {
     child.on('error', (error) => {
       liveTrees.delete(child);
       closeErrorFile();
-      fail(new SpaceError('command_spawn_failed', `Could not start ${file}: ${error.message}`, { errno: error.code ?? null }));
+      fail(new SpaceError('command_spawn_failed', `Could not start ${file}: ${error.message}`, { errno: errorField(error, 'code') ?? null }));
     });
 
     child.on('exit', () => {
@@ -199,9 +240,9 @@ export function runCommand(file, args, options = {}) {
       if (errorFile !== null) {
         let read;
         try {
-          read = readErrorFile();
+          read = readErrorFile(errorFile);
         } catch (error) {
-          reject(new SpaceError('command_output_unreadable', `The output of ${file} ${args[0] ?? ''} could not be read back: ${error.message}`, { exitCode: code }));
+          reject(new SpaceError('command_output_unreadable', `The output of ${file} ${args[0] ?? ''} could not be read back: ${errorField(error, 'message')}`, { exitCode: code }));
           return;
         } finally {
           closeErrorFile();
@@ -219,27 +260,29 @@ export function runCommand(file, args, options = {}) {
       });
     });
 
-    child.stdin.on('error', () => {});
-    child.stdin.end(stdin);
+    const input = child.stdin;
+    if (input === null) throw new TypeError("Cannot read properties of null (reading 'on')");
+    input.on('error', () => {});
+    input.end(stdin);
   });
 }
 
-export async function killProcessTree(child, {
+export async function killProcessTree(child: Pick<ChildProcess, 'pid' | 'kill'>, {
   platform = process.platform,
   kill = (pid, signal) => process.kill(pid, signal),
   spawnProcess = spawn,
   systemRoot = process.env.SystemRoot,
   waitMs = KILL_WAIT_MS,
-} = {}) {
+}: KillProcessTreeOptions = {}) {
   const pid = child?.pid;
-  if (!Number.isInteger(pid) || pid <= 1) {
+  if (!isInteger(pid) || pid <= 1) {
     return false;
   }
   const killChildOnly = () => {
     try {
       child.kill('SIGKILL');
     } catch {
-      // Already gone.
+      return;
     }
   };
   if (platform === 'win32') {
@@ -247,7 +290,7 @@ export async function killProcessTree(child, {
       killChildOnly();
       return true;
     }
-    await new Promise((resolveKill) => {
+    await new Promise<void>((resolveKill) => {
       const bound = setTimeout(resolveKill, waitMs);
       const done = () => { clearTimeout(bound); resolveKill(); };
       try {
@@ -276,16 +319,17 @@ export async function killProcessTree(child, {
 const STREAM_STDERR_BYTES = 4 * 1024;
 
 export class CommandStream extends Duplex {
-  #child;
-  #file;
-  #args;
-  #stderr = [];
+  #child: ChildProcessWithoutNullStreams;
+  #file: string;
+  #args: string[];
+  #stderr: Buffer[] = [];
   #stderrBytes = 0;
   #receivedBytes = 0;
   #closed = false;
-  #timer = null;
+  #timer: ReturnType<typeof setTimeout> | null = null;
+  timeout: number;
 
-  constructor(child, file, args) {
+  constructor(child: ChildProcessWithoutNullStreams, file: string, args: string[]) {
     super({ allowHalfOpen: false });
     this.#child = child;
     this.#file = file;
@@ -293,22 +337,22 @@ export class CommandStream extends Duplex {
     this.timeout = 0;
     this.on('error', () => {});
 
-    child.stdout.on('data', (chunk) => {
+    child.stdout.on('data', (chunk: Buffer) => {
       this.#receivedBytes += chunk.length;
       this.#touch();
       if (!this.push(chunk)) child.stdout.pause();
     });
-    child.stderr.on('data', (chunk) => {
+    child.stderr.on('data', (chunk: Buffer) => {
       if (this.#stderrBytes >= STREAM_STDERR_BYTES) return;
       this.#stderr.push(chunk.subarray(0, STREAM_STDERR_BYTES - this.#stderrBytes));
       this.#stderrBytes += chunk.length;
     });
     child.stdin.on('error', (error) => {
-      if (!this.#closed) this.destroy(this.#failure(`its input closed: ${error.code ?? error.message}`));
+      if (!this.#closed) this.destroy(this.#failure(`its input closed: ${errorField(error, 'code') ?? error.message}`));
     });
     child.on('error', (error) => {
       this.#closed = true;
-      this.destroy(new SpaceError('command_spawn_failed', `Could not start ${file}: ${error.message}`, { errno: error.code ?? null }));
+      this.destroy(new SpaceError('command_spawn_failed', `Could not start ${file}: ${error.message}`, { errno: errorField(error, 'code') ?? null }));
     });
     child.on('close', (code, signal) => {
       this.#closed = true;
@@ -326,7 +370,7 @@ export class CommandStream extends Duplex {
     return Buffer.concat(this.#stderr).toString('utf8').trim();
   }
 
-  #failure(what) {
+  #failure(what: string) {
     return new SpaceError('command_stream_failed', `${this.#file} ${this.#args[0] ?? ''} ${what}`);
   }
 
@@ -334,11 +378,11 @@ export class CommandStream extends Duplex {
     if (this.timeout > 0) this.setTimeout(this.timeout);
   }
 
-  _read() {
+  override _read() {
     this.#child.stdout.resume();
   }
 
-  _write(chunk, _encoding, callback) {
+  override _write(chunk: Buffer | string, _encoding: BufferEncoding, callback: (error?: Error | null) => void) {
     this.#touch();
     if (this.#closed) {
       callback(this.#failure('has ended'));
@@ -347,7 +391,7 @@ export class CommandStream extends Duplex {
     this.#child.stdin.write(chunk, callback);
   }
 
-  _final(callback) {
+  override _final(callback: (error?: Error | null) => void) {
     if (this.#closed) {
       callback();
       return;
@@ -355,19 +399,19 @@ export class CommandStream extends Duplex {
     this.#child.stdin.end(callback);
   }
 
-  _destroy(error, callback) {
+  override _destroy(error: Error | null, callback: (error: Error | null) => void) {
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
     this.#child.stdout.removeAllListeners('data');
     try {
       this.#child.kill('SIGKILL');
     } catch {
-      // Already gone.
+      void 0;
     }
     callback(error);
   }
 
-  setTimeout(milliseconds, callback) {
+  setTimeout(milliseconds: number, callback?: () => void) {
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
     this.timeout = milliseconds;
@@ -391,12 +435,12 @@ export class CommandStream extends Duplex {
   unref() { return this; }
 }
 
-export function openCommandStream(file, args) {
+export function openCommandStream(file: string, args: string[]) {
   let child;
   try {
     child = spawn(file, args, { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   } catch (error) {
-    throw new SpaceError('command_spawn_failed', `Could not start ${file}: ${error.message}`, { errno: error.code ?? null });
+    throw new SpaceError('command_spawn_failed', `Could not start ${file}: ${errorField(error, 'message')}`, { errno: errorField(error, 'code') ?? null });
   }
   return new CommandStream(child, file, args);
 }
