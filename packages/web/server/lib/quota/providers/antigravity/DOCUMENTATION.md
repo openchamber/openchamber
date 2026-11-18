@@ -24,7 +24,14 @@ module and implements its own quota reader.
 
 The shared `readJsonFile` utility returns unchecked JSON. Account-file guards
 establish only objects and the existing array check; their fields remain unknown.
-`client.js` and `transforms.js` remain JavaScript. VS Code's
+`client.js` and `transforms.js` remain JavaScript. Their exact unchecked operations
+are `isThirdPartyGroup` in `client.js`, and `parseBucket` and `transformSummary`
+in `transforms.js`: each calls `.toLowerCase()` on a truthy JSON field without a
+string check. `boundaries.test.js` requires native `TypeError` failures for numeric
+display names, windows and bucket ids, and accepts false display names and null
+buckets. The fallback expressions must retain those acceptance and failure rules.
+
+VS Code's
 `fetchAntigravityQuotaSummary` casts unchecked HTTP JSON to `QuotaSummaryPayload`. The
 transforms also call string methods on unchecked display names and bucket labels.
 Introducing validation would change the existing malformed-input failures;
@@ -52,3 +59,12 @@ HTTP boundary would allow a shared checked summary type, but would change the
 current malformed-input failures. The transforms also receive unchecked model
 data from the web HTTP boundary. These unchecked operations cannot acquire string
 types merely because neighbouring implementations are TypeScript.
+
+Correcting or exporting another server module's declared types cannot establish
+these missing checks: `fetchAntigravityModels` and
+`fetchAntigravityQuotaSummary` already return the honest `JsonValue` type.
+Narrowing either return to a provider interface would contradict its unchanged
+JSON pass-through behavior. No untyped helper or dependency declaration owns the
+string operations, so helper conversion and dependency augmentation cannot resolve
+this boundary either. VS Code's unchecked `QuotaSummaryPayload` cast supplies no
+runtime evidence for a narrower shared client parameter.
