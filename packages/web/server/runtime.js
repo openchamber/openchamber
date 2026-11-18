@@ -21,7 +21,7 @@ import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
 import { createCloudflareTunnelProvider } from './lib/tunnels/providers/cloudflare.js';
 import { createNgrokTunnelProvider } from './lib/tunnels/providers/ngrok.js';
 import { createTailscaleTunnelProvider } from './lib/tunnels/providers/tailscale.js';
-import { allowsLocalDevOrigins, buildFrameAncestorsPolicy, createRequestSecurityRuntime, isLocalDevClientOrigin } from './lib/security/request-security.js';
+import { allowsLocalDevOrigins, buildCorsOriginSet, buildFrameAncestorsPolicy, createRequestSecurityRuntime, isLocalDevClientOrigin } from './lib/security/request-security.js';
 import {
   getUnauthenticatedLanErrorMessage,
   isLoopbackBindHost,
@@ -2556,12 +2556,7 @@ async function main(options = {}) {
 
   const app = express();
   const serverStartedAt = new Date().toISOString();
-  const packagedClientOrigins = new Set([
-    'openchamber-ui://app',
-    'capacitor://localhost',
-    'http://localhost',
-    'https://localhost',
-  ]);
+  const packagedClientOrigins = buildCorsOriginSet();
   const allowLocalDevOrigins = allowsLocalDevOrigins(process.env);
   const frameAncestorsPolicy = buildFrameAncestorsPolicy({
     allowLocalDevOrigins,

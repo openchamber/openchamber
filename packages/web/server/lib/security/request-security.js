@@ -9,7 +9,21 @@ export const isOpaqueOriginRequest = (req) => {
 export const allowsLocalDevOrigins = (env) => env.OPENCHAMBER_ELECTRON_DEV === '1' || env.OPENCHAMBER_ALLOW_DEV_ORIGINS === '1';
 export const isLocalDevClientOrigin = (origin) => /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
 
-const PACKAGED_FRAME_ANCESTORS = ['openchamber-ui://app', 'capacitor://localhost', 'https://localhost'];
+// One list for every surface that has to recognize the packaged clients: the
+// socket origin check, the CORS allowlist and the frame-ancestors policy. A new
+// runtime must reach all three at once or its transport breaks.
+export const PACKAGED_CLIENT_ORIGINS = Object.freeze([
+  'openchamber-ui://app',
+  'capacitor://localhost',
+  'https://localhost',
+]);
+
+// Plain http://localhost is a CORS client only: it is the local server's own
+// origin for the Android Capacitor build. It is deliberately not a socket origin
+// or a frame ancestor.
+export const buildCorsOriginSet = () => new Set([...PACKAGED_CLIENT_ORIGINS, 'http://localhost']);
+
+const PACKAGED_FRAME_ANCESTORS = PACKAGED_CLIENT_ORIGINS;
 const FRAME_ANCESTOR_SOURCE = /^(?:\*|https?:\/\/[a-z0-9.-]+(?::(?:\d{1,5}|\*))?)$/i;
 
 export const buildFrameAncestorsPolicy = ({ allowLocalDevOrigins = false, extra = '' } = {}) => {
@@ -30,11 +44,7 @@ export const isPasswordlessSocketOriginAllowed = async (req, isRequestOriginAllo
 
 export const createRequestSecurityRuntime = (deps) => {
   const { readSettingsFromDiskMigrated, allowLocalDevOrigins = false } = deps;
-  const packagedClientOrigins = new Set([
-    'openchamber-ui://app',
-    'capacitor://localhost',
-    'https://localhost',
-  ]);
+  const packagedClientOrigins = new Set(PACKAGED_CLIENT_ORIGINS);
 
   const getUiSessionTokenFromRequest = (req) => {
     const cookieHeader = req?.headers?.cookie;
