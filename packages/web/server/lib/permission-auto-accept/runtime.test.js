@@ -522,6 +522,20 @@ describe('permission auto-accept runtime', () => {
     await expect(runtime.isPermissionAutoAnswered('root', '/project', 'p')).resolves.toBe(true);
   });
 
+  it('forwards unchecked pending-permission fields to the safety net unchanged', async () => {
+    const permission = { id: 'pending', sessionID: 'root', action: 42, resources: 'unchecked' };
+    const evaluatePermission = vi.fn(async () => ({ action: 'hold' }));
+    const { runtime } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: 'safety' } } },
+      fetchImpl: async () => Response.json([permission]),
+      evaluatePermission,
+    });
+
+    await runtime.reconcilePending({ directories: ['/project'] });
+
+    expect(evaluatePermission).toHaveBeenCalledWith(permission, '/project');
+  });
+
   it('leaves a safety request for the user when the safety net gives no verdict', async () => {
     const fetchImpl = vi.fn(async () => new Response('[]'));
     const { runtime, emit } = createRuntime({

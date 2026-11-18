@@ -81,9 +81,16 @@ For forks initiated in the VS Code UI, the shared fork action refreshes the exte
 ### Runtime conversion contracts
 
 The event hub and translator are typed, and translated properties expose `info`,
-`directory` and `requestID`. After checking that `id` and `sessionID` are present,
-the runtime passes permission properties unchanged to `evaluatePermission`.
+`directory` and `requestID`. Pending permissions also arrive directly from HTTP
+JSON. That path checks only that the list is an array and the request ids are
+truthy. The runtime passes permission properties unchanged to
+`evaluatePermission`, including unchecked `action` and `resources`.
 
-`RoutingPermission` in `../routing/jev.ts` accepts checked string ids, optional
-action, optional JSON-valued resources and arbitrary JSON metadata. Conversion
-preserves that forwarding without filtering or coercing the fields.
+`RoutingPermission` in `../routing/jev.ts`, consumed by `evaluatePermission` in
+`../routing/runtime.ts`, requires string ids, an optional string action and an
+optional JSON-valued resources array. The HTTP path does not establish those
+types. Its action and resources can each be any JSON value; its truthy ids can
+also be non-string JSON values. That external contract must represent the
+unchecked input before this runtime can convert without stronger validation or
+coercion. `runtime.test.js` pins forwarding of a numeric action and string
+resources from the HTTP pending list.
