@@ -193,6 +193,32 @@ Unicode categories express the control range without a lint suppression;
 tab, newline and carriage return remain outside that removal range. Escape
 and bell delimiters still consume complete terminal sequences.
 
+Space event payloads retain the SSE parser's JSON contract. Queue items stay
+unchecked after the queue schema's array check. Event source callbacks and the
+session index share their owning contracts; session records remain unchecked
+after the JavaScript proxy sanitizer. The index reads only their id field and
+does not claim that the sanitizer validates every retained field.
+
+### Why space streams accept Node web streams
+
+The space transport uses `Readable.toWeb` on an HTTP client response. Node's
+web-stream declarations differ from the DOM declarations on completed reads,
+but the upstream reader consumes both through `getReader`, `read` and `cancel`.
+Its response contract accepts both stream types. HTTP client responses have a
+numeric status code; the dispatcher's response type distinguishes them from
+server-side requests covered by Node's general `IncomingMessage` declaration.
+
+### Why unchecked Docker consumers remain JavaScript
+
+`hardening.js` calls `filter`, `map`, `some` and `includes` on nested inspect
+fields without checking their shapes. `docker-engine.inspect` returns an
+unchecked first entry. Declaring its `Config.Env`, `HostConfig` arrays, mounts
+or network entries as validated objects would overstate that boundary.
+`host.js` also passes the Docker label parser's unchecked ids and project values
+into string-only space and directory operations. The label parser deliberately
+accepts coercible ids and passes other label values through. Neither boundary
+can become a checked shape through a type-only correction.
+
 ### Why control ranges use Unicode categories
 
 Transfer arguments reject ASCII controls only, while Windows names reject

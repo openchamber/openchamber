@@ -1,7 +1,11 @@
 import { parseSseEventEnvelope } from './protocol.js';
 import type { SseEnvelope, TimeoutMs, UpstreamEvent } from './contracts.js';
 
-export type UpstreamResponse = Pick<Response, 'ok' | 'status' | 'body'>;
+export interface UpstreamResponse {
+  ok: boolean;
+  status: number;
+  body: Response['body'] | import('node:stream/web').ReadableStream<Uint8Array>;
+}
 interface UpstreamHeaders extends Record<string, string> {
   Accept: string;
   'Cache-Control': string;

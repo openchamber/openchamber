@@ -5,6 +5,50 @@ import { z } from 'zod';
 
 import { UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS, createUpstreamSseReader } from '../event-stream/upstream-reader.js';
 import { SPACE_TASK_TITLE_EVENT, SPACE_TASK_TITLE_ROUTE, sanitizeSpaceTaskTitle } from './task-title.js';
+import { spaceErrorProperty } from './errors.js';
+import type { createSpaceDispatcher } from './dispatcher.js';
+import type { createSpaceSessionIndex } from './space-sessions.js';
+import type { createGlobalMessageStreamHub } from '../event-stream/global-hub.js';
+import type { JsonValue, TimeoutMs } from '../event-stream/contracts.js';
+import type { UpstreamFetch } from '../event-stream/upstream-reader.js';
+import type { IncomingMessage } from 'node:http';
+
+type Reader = ReturnType<typeof createUpstreamSseReader>;
+type RequestInside = ReturnType<typeof createSpaceDispatcher>['requestInside'];
+type WithSpace<Event extends { properties: object }> = Omit<Event, 'properties'> & { properties: Event['properties'] & { spaceId: string } };
+type UiEvent =
+  | { type: 'openchamber:space-queue-stream'; properties: { spaceId: string; status: 'connected' } }
+  | WithSpace<z.infer<typeof queueUpdateSchema>>
+  | WithSpace<z.infer<typeof autoReviewUpdateSchema>>;
+type GlobalUiEvent =
+  | { type: 'openchamber:space-permission-stream'; properties: { spaceId: string; status: 'connected' } }
+  | WithSpace<z.infer<typeof leftForUserSchema>>
+  | WithSpace<z.infer<typeof modesUpdateSchema>> & { properties: { sessions: Record<string, boolean> } };
+
+export interface SpaceEventSourcesOptions {
+  requestInside: RequestInside;
+  index: Pick<ReturnType<typeof createSpaceSessionIndex>, 'acceptSpaceEvent' | 'spaceSessionDropCode' | 'forget'>;
+  hub: Pick<ReturnType<typeof createGlobalMessageStreamHub>, 'injectEvent'>;
+  broadcastUiEvent?: ((event: UiEvent) => void) | null;
+  broadcastGlobalUiEvent?: ((event: GlobalUiEvent) => void) | null;
+  onTaskTitle?: ((spaceId: string, title: string) => void) | null;
+  logger?: { warn?: (message: string) => void };
+  stallTimeoutMs?: TimeoutMs;
+  stateStallTimeoutMs?: TimeoutMs;
+  now?: () => number;
+}
+
+interface SpaceSource {
+  failures: number;
+  everConnected: boolean;
+  reader: Reader | null;
+  controller: AbortController;
+  titleRevision: number;
+  stateReaders?: Reader[];
+}
+
+const payloadType = (value: unknown): value is { type?: unknown } => value != null;
+const errorSummary = <Cause>(error: Cause) => spaceErrorProperty(error, 'code') ?? spaceErrorProperty(error, 'message') ?? error;
 
 const EVENT_PATH = '/api/event';
 const CONTROL_PATH = '/api/openchamber/events';
@@ -20,7 +64,7 @@ const MAX_STATUS_BYTES = 4 * 1024 * 1024;
 
 const RECONNECT_BASE_MS = 1_000;
 export const RECONNECT_CAP_MS = 60_000;
-export const reconnectDelayAfter = (failures) => Math.min(RECONNECT_CAP_MS, RECONNECT_BASE_MS * 2 ** Math.max(0, failures - 1));
+export const reconnectDelayAfter = (failures: number) => Math.min(RECONNECT_CAP_MS, RECONNECT_BASE_MS * 2 ** Math.max(0, failures - 1));
 
 const liveStatusSchema = z.object({ status: z.enum(['busy', 'idle']) });
 const statusSchema = z.object({ sessions: z.record(z.string(), z.unknown()).default({}) }).passthrough();
@@ -68,10 +112,10 @@ const autoReviewUpdateSchema = z.object({
   }),
 });
 
-const readBody = (response, cap) => new Promise((resolve, reject) => {
-  const chunks = [];
+const readBody = (response: IncomingMessage, cap: number) => new Promise<string>((resolve, reject) => {
+  const chunks: Buffer[] = [];
   let size = 0;
-  response.on('data', (chunk) => {
+  response.on('data', (chunk: Buffer) => {
     size += chunk.length;
     if (size > cap) {
       response.destroy();
@@ -84,27 +128,27 @@ const readBody = (response, cap) => new Promise((resolve, reject) => {
   response.on('error', reject);
 });
 
-export function createSpaceEventSources({ requestInside, index, hub, broadcastUiEvent = null, broadcastGlobalUiEvent = null, onTaskTitle = null, logger = console, stallTimeoutMs, stateStallTimeoutMs = SPACE_STATE_STALL_TIMEOUT_MS, now = Date.now }) {
-  const sources = new Map();
+export function createSpaceEventSources({ requestInside, index, hub, broadcastUiEvent = null, broadcastGlobalUiEvent = null, onTaskTitle = null, logger = console, stallTimeoutMs, stateStallTimeoutMs = SPACE_STATE_STALL_TIMEOUT_MS, now = Date.now }: SpaceEventSourcesOptions) {
+  const sources = new Map<string, SpaceSource>();
   const titleProposalSchema = z.object({ properties: z.object({ spaceId: z.string(), title: z.unknown() }) });
-  const takeTaskTitle = (spaceId, title) => {
+  const takeTaskTitle = <Title>(spaceId: string, title: Title) => {
     const clean = sanitizeSpaceTaskTitle(title);
     if (clean) onTaskTitle?.(spaceId, clean);
   };
-  const seedTaskTitle = async (spaceId, isCurrent) => {
+  const seedTaskTitle = async (spaceId: string, isCurrent: () => boolean) => {
     const response = await requestInside(spaceId, { path: SPACE_TASK_TITLE_ROUTE, headers: { accept: 'application/json' }, timeoutMs: STATUS_TIMEOUT_MS });
     if (response.statusCode !== 200) { response.resume(); return; }
     const body = z.object({ title: z.unknown() }).safeParse(JSON.parse(await readBody(response, 1024)));
     if (body.success && isCurrent()) takeTaskTitle(spaceId, body.data.title);
   };
 
-  const inject = (spaceId, payload, directory) => hub.injectEvent({ payload, directory, spaceId });
+  const inject = (spaceId: string, payload: JsonValue, directory: string) => hub.injectEvent({ payload, directory, spaceId });
 
-  const announce = (spaceId, status, wasReady) => {
+  const announce = (spaceId: string, status: 'connected' | 'disconnected', wasReady: boolean) => {
     inject(spaceId, { type: 'openchamber:space-stream', properties: { spaceId, status, wasReady, timestamp: now() } }, 'global');
   };
 
-  const seedStatus = async (spaceId) => {
+  const seedStatus = async (spaceId: string) => {
     const response = await requestInside(spaceId, { path: STATUS_PATH, headers: { accept: 'application/json' }, timeoutMs: STATUS_TIMEOUT_MS });
     if (response.statusCode !== 200) {
       response.resume();
@@ -120,7 +164,7 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
     }
   };
 
-  const fetchInside = (spaceId, path) => async (_url, { headers, signal }) => {
+  const fetchInside = (spaceId: string, path: string): UpstreamFetch => async (_url, { headers, signal }) => {
     const response = await requestInside(spaceId, { path, headers });
     const stop = () => response.destroy();
     if (signal?.aborted) { stop(); throw new Error('aborted'); }
@@ -130,10 +174,10 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
     return { ok, status: response.statusCode, body: ok ? Readable.toWeb(response) : null };
   };
 
-  const start = (spaceId) => {
+  const start = (spaceId: string) => {
     if (sources.has(spaceId)) return;
     const controller = new AbortController();
-    const source = { failures: 0, everConnected: false, reader: null, controller, titleRevision: 0 };
+    const source: SpaceSource = { failures: 0, everConnected: false, reader: null, controller, titleRevision: 0 };
     source.reader = createUpstreamSseReader({
       signal: controller.signal,
       fetchImpl: fetchInside(spaceId, EVENT_PATH),
@@ -145,7 +189,7 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
         const wasReady = source.everConnected;
         source.everConnected = true;
         announce(spaceId, 'connected', wasReady);
-        seedStatus(spaceId).catch((error) => logger.warn?.(`[spaces] could not read the status of space ${spaceId}: ${error?.code ?? error?.message ?? error}`));
+        seedStatus(spaceId).catch((error) => logger.warn?.(`[spaces] could not read the status of space ${spaceId}: ${errorSummary(error)}`));
       },
       onDisconnect({ reason }) {
         source.failures += 1;
@@ -158,7 +202,7 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
       },
       onError(error) {
         if (controller.signal.aborted) return;
-        logger.warn?.(`[spaces] event stream of space ${spaceId}: ${error?.type ?? 'error'} ${error?.status ?? error?.error?.code ?? ''}`.trim());
+        logger.warn?.(`[spaces] event stream of space ${spaceId}: ${error?.type ?? 'error'} ${'status' in error ? error.status : spaceErrorProperty(error.error, 'code') ?? ''}`.trim());
       },
     });
     source.stateReaders = [];
@@ -170,13 +214,14 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
           if (onTaskTitle) {
             const revision = ++source.titleRevision;
             seedTaskTitle(spaceId, () => !controller.signal.aborted && revision === source.titleRevision)
-              .catch((error) => logger.warn?.(`[spaces] could not read the task title of space ${spaceId}: ${error?.code ?? error?.message ?? error}`));
+              .catch((error) => logger.warn?.(`[spaces] could not read the task title of space ${spaceId}: ${errorSummary(error)}`));
           }
         },
         forward: (payload) => {
-          if (payload?.type === QUEUE_UPDATED) forwardQueueUpdate(spaceId, payload);
-          else if (payload?.type === AUTO_REVIEW_UPDATED) forwardAutoReviewUpdate(spaceId, payload);
-          else if (payload?.type === SPACE_TASK_TITLE_EVENT && onTaskTitle) {
+          const type = payloadType(payload) ? payload.type : undefined;
+          if (type === QUEUE_UPDATED) forwardQueueUpdate(spaceId, payload);
+          else if (type === AUTO_REVIEW_UPDATED) forwardAutoReviewUpdate(spaceId, payload);
+          else if (type === SPACE_TASK_TITLE_EVENT && onTaskTitle) {
             const proposal = titleProposalSchema.safeParse(payload);
             if (!proposal.success || proposal.data.properties.spaceId !== spaceId) return;
             source.titleRevision += 1;
@@ -190,8 +235,9 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
         path: NOTIFICATIONS_PATH,
         announce: () => broadcastGlobalUiEvent({ type: 'openchamber:space-permission-stream', properties: { spaceId, status: 'connected' } }),
         forward: (payload) => {
-          if (payload?.type === MODES_UPDATED) forwardModesUpdate(spaceId, payload);
-          else if (payload?.type === LEFT_FOR_USER) forwardLeftForUser(spaceId, payload);
+          const type = payloadType(payload) ? payload.type : undefined;
+          if (type === MODES_UPDATED) forwardModesUpdate(spaceId, payload);
+          else if (type === LEFT_FOR_USER) forwardLeftForUser(spaceId, payload);
         },
       }));
     }
@@ -199,21 +245,21 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
     void source.reader.start();
   };
 
-  const speaksFor = (spaceId, what, sessionId, directory = null) => {
+  const speaksFor = (spaceId: string, what: string, sessionId: string, directory: string | null = null) => {
     const code = index.spaceSessionDropCode(spaceId, sessionId, directory);
     if (code !== null) logger.warn?.(`[spaces] dropped ${what} of space ${spaceId}: ${code}`);
     return code === null;
   };
 
-  const forwardQueueUpdate = (spaceId, payload) => {
+  const forwardQueueUpdate = <Payload>(spaceId: string, payload: Payload) => {
     const parsed = queueUpdateSchema.safeParse(payload);
     if (!parsed.success) return;
     const { revision, session } = parsed.data.properties;
     if (!speaksFor(spaceId, 'a queue update', session.sessionId, session.directory)) return;
-    broadcastUiEvent({ type: QUEUE_UPDATED, properties: { revision, session, spaceId } });
+    broadcastUiEvent?.({ type: QUEUE_UPDATED, properties: { revision, session, spaceId } });
   };
 
-  const forwardAutoReviewUpdate = (spaceId, payload) => {
+  const forwardAutoReviewUpdate = <Payload>(spaceId: string, payload: Payload) => {
     const parsed = autoReviewUpdateSchema.safeParse(payload);
     if (!parsed.success) return;
     const { revision, originalSessionID, directory, run } = parsed.data.properties;
@@ -225,31 +271,31 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
       }
       if (!speaksFor(spaceId, 'an auto-review update', run.reviewSessionID, directory)) return;
     }
-    broadcastUiEvent({ type: AUTO_REVIEW_UPDATED, properties: { revision, originalSessionID, directory, run, spaceId } });
+    broadcastUiEvent?.({ type: AUTO_REVIEW_UPDATED, properties: { revision, originalSessionID, directory, run, spaceId } });
   };
 
-  const forwardModesUpdate = (spaceId, payload) => {
+  const forwardModesUpdate = <Payload>(spaceId: string, payload: Payload) => {
     const parsed = modesUpdateSchema.safeParse(payload);
     if (!parsed.success) return;
-    const modes = {};
-    const sessions = {};
+    const modes: Record<string, 'ask' | 'safety' | 'auto'> = {};
+    const sessions: Record<string, boolean> = {};
     for (const [sessionId, mode] of Object.entries(parsed.data.properties.modes)) {
       if (!speaksFor(spaceId, 'a permission mode', sessionId)) continue;
       modes[sessionId] = mode;
       sessions[sessionId] = mode !== 'ask';
     }
-    broadcastGlobalUiEvent({ type: MODES_UPDATED, properties: { sessions, modes, revision: parsed.data.properties.revision, spaceId } });
+    broadcastGlobalUiEvent?.({ type: MODES_UPDATED, properties: { sessions, modes, revision: parsed.data.properties.revision, spaceId } });
   };
 
-  const forwardLeftForUser = (spaceId, payload) => {
+  const forwardLeftForUser = <Payload>(spaceId: string, payload: Payload) => {
     const parsed = leftForUserSchema.safeParse(payload);
     if (!parsed.success) return;
     const { permissionId, sessionId, directory } = parsed.data.properties;
     if (!speaksFor(spaceId, 'a request left for the user', sessionId, directory)) return;
-    broadcastGlobalUiEvent({ type: LEFT_FOR_USER, properties: { permissionId, sessionId, directory, spaceId } });
+    broadcastGlobalUiEvent?.({ type: LEFT_FOR_USER, properties: { permissionId, sessionId, directory, spaceId } });
   };
 
-  const startStateReader = (spaceId, signal, { path, announce, forward }) => {
+  const startStateReader = (spaceId: string, signal: AbortSignal, { path, announce, forward }: { path: string; announce: () => void; forward: (payload: JsonValue) => void }) => {
     const state = { failures: 0 };
     const reader = createUpstreamSseReader({
       signal,
@@ -265,24 +311,24 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
       onEvent({ payload }) { forward(payload); },
       onError(error) {
         if (signal.aborted) return;
-        logger.warn?.(`[spaces] stream ${path} of space ${spaceId}: ${error?.type ?? 'error'} ${error?.status ?? error?.error?.code ?? ''}`.trim());
+        logger.warn?.(`[spaces] stream ${path} of space ${spaceId}: ${error?.type ?? 'error'} ${'status' in error ? error.status : spaceErrorProperty(error.error, 'code') ?? ''}`.trim());
       },
     });
     void reader.start();
     return reader;
   };
 
-  const stop = (spaceId) => {
+  const stop = (spaceId: string) => {
     const source = sources.get(spaceId);
     if (!source) return;
     sources.delete(spaceId);
     source.controller.abort();
-    source.reader.stop();
-    for (const reader of source.stateReaders) reader.stop();
+    source.reader?.stop();
+    for (const reader of source.stateReaders ?? []) reader.stop();
   };
 
   return {
-    sync(spaceIds, { paused = new Set() } = {}) {
+    sync(spaceIds: Iterable<string>, { paused = new Set<string>() }: { paused?: ReadonlySet<string> } = {}) {
       const wanted = new Set(spaceIds);
       for (const spaceId of Array.from(sources.keys())) {
         if (!wanted.has(spaceId)) {
@@ -296,7 +342,7 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
         if (!paused.has(spaceId)) start(spaceId);
       }
     },
-    has: (spaceId) => sources.has(spaceId),
+    has: (spaceId: string) => sources.has(spaceId),
     close() {
       for (const spaceId of Array.from(sources.keys())) stop(spaceId);
     },
