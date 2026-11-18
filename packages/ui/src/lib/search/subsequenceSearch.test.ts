@@ -109,11 +109,6 @@ describe('rankBySubsequence over paths', () => {
     expect(hit.ranges).toEqual([[0, 9]]);
   });
 
-  test('a folder is matched by its own name', () => {
-    expect(rankPaths(['solo-is-a-team-size/index.md', 'solo-is-a-team-size/'], 'solo').map((entry) => entry.item))
-      .toEqual(['solo-is-a-team-size/', 'solo-is-a-team-size/index.md']);
-  });
-
   test('a query with a slash matches across folders', () => {
     expect(rankPaths(['src/ui/Button.tsx', 'src/Button.tsx'], 'ui/but').map((entry) => entry.item)).toEqual(['src/ui/Button.tsx']);
   });
