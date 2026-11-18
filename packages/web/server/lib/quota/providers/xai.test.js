@@ -15,6 +15,42 @@ const usageResponse = (usedPercent) => {
 const authWith = (entry) => () => ({ xai: { type: 'oauth', ...entry } });
 
 describe('xAI quota provider', () => {
+  it.each([
+    { bytes: [], error: 'empty protobuf response' },
+    { bytes: [0, 0, 0, 0, 1], error: 'malformed gRPC-web framing' },
+    { bytes: [0, 0, 0, 0, 0, 1], error: 'malformed gRPC-web framing' },
+    { bytes: [0x0d, 0], error: 'malformed protobuf' },
+    { bytes: [0x08, 0x80], error: 'malformed protobuf' },
+  ])('preserves binary boundary failures for $bytes', async ({ bytes, error }) => {
+    const result = await fetchQuota({
+      readAuth: authWith({ access: 'valid-access', refresh: '', expires: Date.now() + 3_600_000 }),
+      fetchImpl: async () => new Response(new Uint8Array(bytes)),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain(error);
+  });
+
+  it('reads a big-endian gRPC-web frame length and a successful trailer', async () => {
+    const payload = new Uint8Array(await usageResponse(42).arrayBuffer());
+    const trailer = Buffer.from('grpc-status: 0\r\n');
+    const frame = Buffer.alloc(5 + payload.length + 5 + trailer.length);
+    frame.writeUInt32BE(payload.length, 1);
+    frame.set(payload, 5);
+    const trailerOffset = 5 + payload.length;
+    frame[trailerOffset] = 0x80;
+    frame.writeUInt32BE(trailer.length, trailerOffset + 1);
+    frame.set(trailer, trailerOffset + 5);
+
+    const result = await fetchQuota({
+      readAuth: authWith({ access: 'valid-access', refresh: '', expires: Date.now() + 3_600_000 }),
+      fetchImpl: async () => new Response(frame),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.usedPercent).toBe(42);
+  });
+
   it('reads usage with the stored access token while it is still valid', async () => {
     const requests = [];
     const result = await fetchQuota({
