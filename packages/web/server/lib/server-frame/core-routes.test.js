@@ -2,8 +2,9 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { createTunnelAuth } from '../tunnels/tunnel-auth.js';
-import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerHttpResponseDiagnostics, registerServerStatusRoutes } from './core-routes.js';
+import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerHttpResponseDiagnostics, registerServerStatusRoutes, registerSettingsUtilityRoutes } from './core-routes.js';
 import { createServerDiagnosticJournal } from '../diagnostics/server-journal.js';
+import { createUiAuth } from '../ui-auth/ui-auth.js';
 
 describe('core-routes', () => {
   it('captures the final response status, including missing routes and parser errors, without request data', async () => {
@@ -29,6 +30,24 @@ describe('core-routes', () => {
     app.get('/api/aborted', (_req, res) => res.destroy());
     await expect(request(app).get('/api/aborted')).rejects.toThrow();
     expect(journal.snapshot().events).toEqual([]);
+  });
+
+  it('retains the configuration reload error path for null and undefined rejections', async () => {
+    for (const rejection of [null, undefined]) {
+      const app = express();
+      registerSettingsUtilityRoutes(app, {
+        refreshOpenCodeAfterConfigChange: async () => { throw rejection; },
+      });
+      app.use((error, _req, res, _next) => {
+        res.json({ status: res.statusCode, error: error.message, type: error.name });
+      });
+      const response = await request(app).post('/api/config/reload').expect(500);
+      expect(response.body).toEqual({
+        status: 500,
+        error: `Cannot read properties of ${rejection} (reading 'message')`,
+        type: 'TypeError',
+      });
+    }
   });
 
   it('requires authentication for local file diagnostics', async () => {
@@ -1122,6 +1141,19 @@ describe('client auth routes', () => {
 
     expect(dependencies.testHooks.requireSessionAuth).toHaveBeenCalledTimes(1);
     expect(dependencies.testHooks.requireAuth).not.toHaveBeenCalled();
+  });
+
+  it('forwards the missing rename handler error when UI password protection is off', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    dependencies.uiAuthController = createUiAuth();
+    registerAuthAndAccessRoutes(app, dependencies);
+    app.use((error, _req, res, _next) => res.status(500).json({ error: error.message, type: error.name }));
+
+    await request(app).patch('/api/passkeys/credential-1').send({ label: 'Office laptop' }).expect(500, {
+      error: 'uiAuthController.handlePasskeyRename is not a function',
+      type: 'TypeError',
+    });
   });
 
   it('keeps passkey renames off the tunnel scope', async () => {

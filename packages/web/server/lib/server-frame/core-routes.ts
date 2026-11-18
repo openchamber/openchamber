@@ -5,8 +5,114 @@ import { collectLocalFileDiagnostics } from '../diagnostics/local-files.js';
 import { serverDiagnosticJournal } from '../diagnostics/server-journal.js';
 import { getBearerTokenFromRequest } from '../ui-auth/ui-auth.js';
 import { candidateUrlType, isLocalOnlyCandidateSet, isLoopbackCandidateUrl, normalizeCandidateUrl } from '../client-auth/pairing-candidates.js';
+import { isBoolean, isString } from '../shared/object-guards.js';
+import type { AddressInfo, Server } from 'node:net';
+import type { Application, ExpressFactory, NextFunction, Request, RequestHandler, Response } from '../shared/http-contracts.js';
+import type { DiagnosticJournal, OpenCodeLoad } from '../diagnostics/contracts.js';
+import type { AuthContext, createUiAuth } from '../ui-auth/ui-auth.js';
+import type { createTunnelAuth } from '../tunnels/tunnel-auth.js';
+import type { createRemoteClientAuthRuntime } from '../client-auth/remote-clients.js';
+import type { createClientPairingRuntime } from '../client-auth/pairing.js';
+import type { ClientInput, PairingInput, RedemptionInput } from '../client-auth/contracts.js';
+import type { RelayPairingCandidate } from '../relay/service.js';
+import type { TunnelRoutesDependencies } from '../tunnels/routes.js';
+import type { createThemeRuntime } from '../appearance/theme-runtime.js';
+import type { createClientPushAccess } from '../notifications/client-push-access.js';
+import type { createOpenCodeLifecycleRuntime } from '../opencode/lifecycle.js';
 
-export const registerHttpResponseDiagnostics = (app, journal = serverDiagnosticJournal) => {
+type UiAuthController = ReturnType<typeof createUiAuth>;
+type TunnelAuthController = ReturnType<typeof createTunnelAuth>;
+type ManagementAuthContext = Pick<AuthContext, 'type' | 'client' | 'clientId'>;
+type ThemeRuntime = ReturnType<typeof createThemeRuntime>;
+
+export interface RequestAuthorizationDependencies {
+  tunnelAuthController: TunnelAuthController | null;
+  uiAuthController: UiAuthController | null;
+}
+
+export interface ServerStatusDependencies {
+  express: ExpressFactory;
+  process: NodeJS.Process;
+  openchamberVersion: string;
+  runtimeName: string;
+  serverStartedAt: string;
+  gracefulShutdown: (options: { exitProcess: boolean }) => Promise<void>;
+  getHealthSnapshot: () => object;
+  getServerPort?: () => number | null;
+  getTunnelUrl?: () => string | null;
+  getServerId?: () => Promise<string | null>;
+  tunnelAuthController?: TunnelAuthController | null;
+  uiAuthController?: UiAuthController | null;
+  readOpenCodeLoad?: (() => Promise<OpenCodeLoad>) | null;
+}
+
+export interface DirectPairingCandidate {
+  type: 'lan' | 'tunnel';
+  url: string;
+  priority: number;
+}
+
+export interface AuthAndAccessDependencies {
+  express: ExpressFactory;
+  tunnelAuthController: TunnelAuthController;
+  uiAuthController: UiAuthController;
+  remoteClientAuthRuntime: ReturnType<typeof createRemoteClientAuthRuntime>;
+  clientPairingRuntime: ReturnType<typeof createClientPairingRuntime>;
+  readSettingsFromDiskMigrated: TunnelRoutesDependencies['readSettingsFromDiskMigrated'];
+  normalizeTunnelSessionTtlMs: TunnelRoutesDependencies['normalizeTunnelSessionTtlMs'];
+  getRelayPairingCandidate?: (options: { ensureEnabled: boolean }) => RelayPairingCandidate | null | Promise<RelayPairingCandidate | null>;
+  reconcileRelay?: () => Promise<void>;
+  removeClientPushDevices?: ReturnType<typeof createClientPushAccess>['removeDevicesOfClients'];
+  getPairingTransports?: (req: Request) => { local: string | null; lan: string | null; relayAvailable: boolean };
+  getDirectCandidateUrls?: (req: Request) => string[];
+  getServerId?: () => Promise<string | null>;
+  getServerLabel?: () => string;
+}
+
+export interface SettingsUtilityDependencies {
+  readCustomThemesFromDisk: ThemeRuntime['readCustomThemesFromDisk'];
+  saveImportedTheme: ThemeRuntime['saveImportedTheme'];
+  deleteImportedTheme: ThemeRuntime['deleteImportedTheme'];
+  refreshOpenCodeAfterConfigChange: ReturnType<typeof createOpenCodeLifecycleRuntime>['refreshOpenCodeAfterConfigChange'];
+  clientReloadDelayMs: number;
+}
+
+export interface CommonRequestDependencies {
+  express: ExpressFactory;
+  verboseRequestLogs?: boolean;
+  skipBodyParsing?: (req: Request) => boolean;
+}
+
+interface RouteInput extends ClientInput, PairingInput, RedemptionInput {
+  previewUrls?: unknown;
+  pairingId?: unknown;
+  serverUrl?: unknown;
+  includeRelay?: unknown;
+  includeDirect?: unknown;
+  url?: unknown;
+  theme?: unknown;
+}
+
+interface ServerIdentity {
+  serverId?: string;
+}
+
+interface ServerInfo {
+  openchamberVersion: string;
+  runtime: string;
+  pid: number;
+  startedAt: string;
+  port?: number | null;
+  tunnelUrl?: string | null;
+}
+
+const hasRouteInput = (value: unknown): value is RouteInput => value != null;
+const readBody = (req: Request) => hasRouteInput(req.body) ? req.body : undefined;
+const hasErrorDetails = (value: unknown): value is { message?: unknown; statusCode?: unknown } => value != null;
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+const isAddressInfo = (value: ReturnType<Server['address']>): value is AddressInfo => Boolean(value) && typeof value === 'object';
+
+export const registerHttpResponseDiagnostics = (app: Application, journal: DiagnosticJournal = serverDiagnosticJournal) => {
   app.use((req, res, next) => {
     res.once('finish', () => {
       journal.recordHttpResponse(req.method, req.path, res.statusCode);
@@ -15,8 +121,8 @@ export const registerHttpResponseDiagnostics = (app, journal = serverDiagnosticJ
   });
 };
 
-const parseLoopbackUrl = (rawUrl) => {
-  if (typeof rawUrl !== 'string') {
+const parseLoopbackUrl = (rawUrl: RouteInput['url']) => {
+  if (!isString(rawUrl)) {
     return null;
   }
 
@@ -39,16 +145,16 @@ const parseLoopbackUrl = (rawUrl) => {
   return url;
 };
 
-export const isRequestAuthorized = async (req, res, { tunnelAuthController, uiAuthController }) => {
+export const isRequestAuthorized = async (req: Request, res: Response, { tunnelAuthController, uiAuthController }: RequestAuthorizationDependencies) => {
   const scope = tunnelAuthController?.classifyRequestScope?.(req);
   if (scope === 'tunnel' || scope === 'unknown-public') {
-    return Boolean(tunnelAuthController.getTunnelSessionFromRequest(req));
+    return Boolean(tunnelAuthController?.getTunnelSessionFromRequest(req));
   }
   if (!uiAuthController) return false;
   return Boolean(await uiAuthController.resolveAuthContext(req, res, { allowUrlToken: false }));
 };
 
-export const registerServerStatusRoutes = (app, dependencies) => {
+export const registerServerStatusRoutes = (app: Application, dependencies: ServerStatusDependencies) => {
   const {
     express,
     process,
@@ -65,12 +171,12 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     readOpenCodeLoad = null,
   } = dependencies;
 
-  let cachedServerId = null;
+  let cachedServerId: string | null = null;
   const resolveServerId = async () => {
     if (cachedServerId) return cachedServerId;
     try {
       const value = await getServerId();
-      cachedServerId = typeof value === 'string' && value.trim() ? value.trim() : null;
+      cachedServerId = value && value.trim() ? value.trim() : null;
     } catch {
       cachedServerId = null;
     }
@@ -79,13 +185,13 @@ export const registerServerStatusRoutes = (app, dependencies) => {
 
   const allocateLoopbackPort = async () => {
     const net = await import('node:net');
-    return await new Promise((resolve, reject) => {
+    return await new Promise<number>((resolve, reject) => {
       const server = net.createServer();
       server.on('error', reject);
       server.listen(0, '127.0.0.1', () => {
         try {
           const address = server.address();
-          const port = address && typeof address === 'object' ? address.port : 0;
+          const port = isAddressInfo(address) ? address.port : 0;
           server.close(() => {
             resolve(port);
           });
@@ -93,6 +199,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
           try {
             server.close();
           } catch {
+            void 0;
           }
           reject(error);
         }
@@ -119,22 +226,22 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     return process.env.OPENCHAMBER_DEV_SHUTDOWN === 'true';
   };
 
-  const isSameOriginRequest = (req) => {
-    const rawOrigin = typeof req.get === 'function' ? req.get('origin') : '';
-    const rawHost = typeof req.get === 'function' ? req.get('host') : '';
+  const isSameOriginRequest = (req: Request) => {
+    const rawOrigin = req.get('origin');
+    const rawHost = req.get('host');
     if (!rawOrigin || !rawHost) {
       return false;
     }
     try {
-      const origin = new URL(rawOrigin);
+      const origin = new URL(String(rawOrigin));
       return origin.host === rawHost;
     } catch {
       return false;
     }
   };
 
-  const resolveProcessGroupId = async (pid) => {
-    if (!pid || typeof pid !== 'number' || !Number.isFinite(pid) || pid <= 0) {
+  const resolveProcessGroupId = async (pid: number | null) => {
+    if (!pid || !Number.isFinite(pid) || pid <= 0) {
       return null;
     }
     if (process.platform === 'win32') {
@@ -154,8 +261,8 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     }
   };
 
-  const parseLoopbackPort = (rawUrl) => {
-    if (typeof rawUrl !== 'string') {
+  const parseLoopbackPort = (rawUrl: RouteInput['previewUrls']) => {
+    if (!isString(rawUrl)) {
       return null;
     }
     let url;
@@ -178,7 +285,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     return port;
   };
 
-  const killListenPort = async (port) => {
+  const killListenPort = async (port: number) => {
     if (!Number.isFinite(port) || port <= 0) {
       return;
     }
@@ -202,6 +309,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
         try {
           process.kill(pid, 'SIGTERM');
         } catch {
+          void 0;
         }
       }
       if (pids.length > 0) {
@@ -210,30 +318,33 @@ export const registerServerStatusRoutes = (app, dependencies) => {
             try {
               process.kill(pid, 'SIGKILL');
             } catch {
+              void 0;
             }
           }
         }, 1200).unref?.();
       }
     } catch {
-      // ignore (no lsof, no permission, etc.)
+      void 0;
     }
   };
 
   app.get('/health', async (_req, res) => {
     const serverId = await resolveServerId();
+    const identity: ServerIdentity = {};
+    if (serverId) identity.serverId = serverId;
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
       openchamberVersion,
       runtime: runtimeName,
       compatibility,
-      ...(serverId ? { serverId } : {}),
+      ...identity,
       ...getHealthSnapshot(),
     });
   });
 
-  const requireLocalDiagnostics = (req, res, next) => {
-    if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket?.remoteAddress)
+  const requireLocalDiagnostics: RequestHandler = (req, res, next) => {
+    if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket?.remoteAddress ?? '')
       || req.headers['x-openchamber-relay-connection']
       || (tunnelAuthController?.classifyRequestScope && tunnelAuthController.classifyRequestScope(req) !== 'local')) {
       res.status(403).json({ error: 'Local diagnostics require a loopback connection' });
@@ -245,7 +356,8 @@ export const registerServerStatusRoutes = (app, dependencies) => {
 
   app.get('/api/diagnostics/local-files', requireLocalDiagnostics, async (_req, res) => {
     try {
-      res.json(await collectLocalFileDiagnostics({ webPort: getServerPort() }));
+      const webPort = getServerPort();
+      res.json(await collectLocalFileDiagnostics(webPort === null ? {} : { webPort }));
     } catch {
       res.status(500).json({ error: 'Diagnostics unavailable' });
     }
@@ -265,26 +377,28 @@ export const registerServerStatusRoutes = (app, dependencies) => {
 
   app.get('/api/version', async (_req, res) => {
     const serverId = await resolveServerId();
+    const identity: ServerIdentity = {};
+    if (serverId) identity.serverId = serverId;
     res.json({
       status: 'ok',
       openchamberVersion,
       runtime: runtimeName,
       startedAt: serverStartedAt,
       compatibility,
-      ...(serverId ? { serverId } : {}),
+      ...identity,
     });
   });
 
-  const requireShutdownAuth = async (req, res, next) => {
-    if (!uiAuthController || typeof uiAuthController.requireAuth !== 'function') {
+  const requireShutdownAuth: RequestHandler = async (req, res, next) => {
+    if (!uiAuthController) {
       return next();
     }
-    const requestScope = typeof tunnelAuthController?.classifyRequestScope === 'function'
+    const requestScope = tunnelAuthController?.classifyRequestScope
       ? tunnelAuthController.classifyRequestScope(req)
       : 'local';
     if (
       (requestScope === 'tunnel' || requestScope === 'unknown-public')
-      && typeof tunnelAuthController?.requireTunnelSession === 'function'
+      && tunnelAuthController?.requireTunnelSession
     ) {
       return tunnelAuthController.requireTunnelSession(req, res, next);
     }
@@ -315,25 +429,27 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     res.json({ ok: true });
 
     try {
-      const rawPreviewUrls = Array.isArray(req.body?.previewUrls) ? req.body.previewUrls : [];
+      const previewUrls = readBody(req)?.previewUrls;
+      const rawPreviewUrls = Array.isArray(previewUrls) ? previewUrls : [];
       const previewPorts = Array.from(new Set(
         rawPreviewUrls
-          .map((value) => parseLoopbackPort(value))
-          .filter((port) => typeof port === 'number')
+          .map((value: RouteInput['previewUrls']) => parseLoopbackPort(value))
+          .filter(isNumber)
       ));
       await Promise.all(previewPorts.map((port) => killListenPort(port)));
 
       const pgid = await resolveProcessGroupId(process.pid);
-      const ppid = typeof process.ppid === 'number' ? process.ppid : null;
+      const ppid = process.ppid;
       const parentPgid = ppid ? await resolveProcessGroupId(ppid) : null;
 
       void gracefulShutdown({ exitProcess: false });
 
-      const pgidsToKill = Array.from(new Set([pgid, parentPgid].filter(Boolean)));
+      const pgidsToKill = Array.from(new Set([pgid, parentPgid].filter((id): id is number => Boolean(id))));
       for (const id of pgidsToKill) {
         try {
           process.kill(-id, 'SIGTERM');
         } catch {
+          void 0;
         }
       }
 
@@ -342,6 +458,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
           try {
             process.kill(-id, 'SIGKILL');
           } catch {
+            void 0;
           }
         }
       }, 1500).unref?.();
@@ -350,19 +467,21 @@ export const registerServerStatusRoutes = (app, dependencies) => {
         try {
           process.exit(0);
         } catch {
+          void 0;
         }
       }, 2500).unref?.();
     } catch (error) {
-      console.error('Dev shutdown request failed:', error?.message || error);
+      console.error('Dev shutdown request failed:', (hasErrorDetails(error) && error.message) || error);
       try {
         process.exit(0);
       } catch {
+        void 0;
       }
     }
   });
 
   app.get('/api/system/info', async (req, res) => {
-    const info = {
+    const info: ServerInfo = {
       openchamberVersion,
       runtime: runtimeName,
       pid: process.pid,
@@ -383,13 +502,13 @@ export const registerServerStatusRoutes = (app, dependencies) => {
       }
       return res.json({ port });
     } catch (error) {
-      return res.status(500).json({ error: (error && error.message) || 'Failed to allocate port' });
+      return res.status(500).json({ error: (hasErrorDetails(error) && error.message) || 'Failed to allocate port' });
     }
   });
 
 };
 
-export const registerAuthAndAccessRoutes = (app, dependencies) => {
+export const registerAuthAndAccessRoutes = (app: Application, dependencies: AuthAndAccessDependencies) => {
   const {
     express,
     tunnelAuthController,
@@ -408,11 +527,11 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   } = dependencies;
   const PAIRING_REDEEM_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
   const PAIRING_REDEEM_RATE_LIMIT_MAX_ATTEMPTS = 10;
-  const pairingRedeemAttempts = new Map();
+  const pairingRedeemAttempts = new Map<string, { count: number; firstAttemptAt: number }>();
 
-  const runWithUiAuth = async (req, res, next, handler, options = {}) => {
+  const runWithUiAuth = async (req: Request, res: Response, next: NextFunction, handler: () => Promise<void | Response>, options: { sessionOnly?: boolean } = {}) => {
     try {
-      const requireAuth = options.sessionOnly === true && typeof uiAuthController.requireSessionAuth === 'function'
+      const requireAuth = options.sessionOnly === true && uiAuthController.requireSessionAuth
         ? uiAuthController.requireSessionAuth
         : uiAuthController.requireAuth;
       await requireAuth(req, res, async () => {
@@ -423,9 +542,9 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     }
   };
 
-  const runWithClientManagementAuth = async (req, res, next, handler) => {
+  const runWithClientManagementAuth = async (req: Request, res: Response, next: NextFunction, handler: (context: ManagementAuthContext) => Promise<void | Response>) => {
     try {
-      if (typeof uiAuthController.resolveAuthContext === 'function') {
+      if (uiAuthController.resolveAuthContext) {
         const context = await uiAuthController.resolveAuthContext(req, res, {
           allowClientAuth: true,
           allowUrlToken: false,
@@ -444,9 +563,9 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     }
   };
 
-  const runWithClientCreateAuth = async (req, res, next, handler) => {
+  const runWithClientCreateAuth = async (req: Request, res: Response, next: NextFunction, handler: (context: ManagementAuthContext) => Promise<void | Response>) => {
     try {
-      if (typeof uiAuthController.resolveAuthContext === 'function') {
+      if (uiAuthController.resolveAuthContext) {
         const context = await uiAuthController.resolveAuthContext(req, res, {
           allowClientAuth: true,
           allowUrlToken: false,
@@ -473,13 +592,13 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     }
   };
 
-  const clientIdFromAuthContext = (context) => {
+  const clientIdFromAuthContext = (context: ManagementAuthContext) => {
     const raw = context?.client?.id || context?.clientId;
-    return typeof raw === 'string' && raw.length > 0 ? raw : null;
+    return raw && raw.length > 0 ? raw : null;
   };
 
-  const clientRecordFromAuthContext = async (context) => {
-    if (context?.client && typeof context.client === 'object') {
+  const clientRecordFromAuthContext = async (context: ManagementAuthContext) => {
+    if (context?.client) {
       return context.client;
     }
     const clientId = clientIdFromAuthContext(context);
@@ -488,26 +607,30 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     return clients.find((client) => client.id === clientId) || null;
   };
 
-  const requestOrigin = (req) => {
-    const forwardedProto = typeof req.headers?.['x-forwarded-proto'] === 'string'
-      ? req.headers['x-forwarded-proto'].split(',')[0].trim()
+  const requestOrigin = (req: Request) => {
+    const forwardedProto = isString(req.headers?.['x-forwarded-proto'])
+      ? req.headers['x-forwarded-proto'].split(',')[0]?.trim()
       : '';
-    const protocol = forwardedProto || (req.socket?.encrypted ? 'https' : 'http');
-    const host = typeof req.headers?.host === 'string' ? req.headers.host.trim() : '';
+    const protocol = forwardedProto || (req.socket && 'encrypted' in req.socket && req.socket.encrypted ? 'https' : 'http');
+    const host = isString(req.headers?.host) ? req.headers.host.trim() : '';
     if (!host) return null;
     return `${protocol}://${host}`;
   };
 
-  const requestIp = (req) => {
+  const requestIp = (req: Request) => {
     return req.socket?.remoteAddress || req.connection?.remoteAddress || 'unknown';
   };
 
-  const pairingIdFromRequest = (req) => {
-    const raw = typeof req.body?.pairingId === 'string' ? req.body.pairingId.trim() : '';
+  const pairingIdFromRequest = (req: Request) => {
+    const pairingId = readBody(req)?.pairingId;
+    const raw = isString(pairingId) ? pairingId.trim() : '';
     return raw || 'missing';
   };
 
-  const checkPairingRedeemRateLimit = (req) => {
+  const checkPairingRedeemRateLimit = (req: Request): {
+    remaining: number;
+    reset: number;
+  } & ({ allowed: true } | { allowed: false; retryAfter: number }) => {
     const now = Date.now();
     const key = `${requestIp(req)}:${pairingIdFromRequest(req)}`;
     for (const [entryKey, entry] of pairingRedeemAttempts.entries()) {
@@ -533,12 +656,16 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     return { allowed: true, remaining: PAIRING_REDEEM_RATE_LIMIT_MAX_ATTEMPTS - entry.count, reset };
   };
 
-  const clearPairingRedeemRateLimit = (req) => {
+  const clearPairingRedeemRateLimit = (req: Request) => {
     pairingRedeemAttempts.delete(`${requestIp(req)}:${pairingIdFromRequest(req)}`);
   };
 
-  const pairingServerCandidates = async (req, { preferredServerUrl, includeRelay, includeDirect = true } = {}) => {
-    const candidates = [];
+  const pairingServerCandidates = async (req: Request, { preferredServerUrl, includeRelay, includeDirect = true }: {
+    preferredServerUrl?: RouteInput['serverUrl'];
+    includeRelay?: boolean | undefined;
+    includeDirect?: boolean;
+  } = {}) => {
+    const candidates: (DirectPairingCandidate | RelayPairingCandidate)[] = [];
     if (includeDirect) {
       const preferred = normalizeCandidateUrl(preferredServerUrl);
       const origin = normalizeCandidateUrl(requestOrigin(req));
@@ -555,41 +682,41 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         const relayCandidate = await getRelayPairingCandidate({ ensureEnabled: includeRelay === true });
         if (relayCandidate) candidates.push(relayCandidate);
       } catch {
-        // A relay enable/status failure must not break direct pairing.
+        void 0;
       }
     }
     return candidates;
   };
 
-  const sendPairingRedeemError = (res, error) => {
-    const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : 400;
+  const sendPairingRedeemError = (res: Response, error: { statusCode?: unknown }) => {
+    const statusCode = isNumber(error?.statusCode) ? error.statusCode : 400;
     res.status(statusCode).json({ error: 'Invalid or expired pairing session' });
   };
 
   const selfAuthenticatedApiPaths = new Set(['/api/git/repository-credential']);
 
-  const isGuestOauthCallback = (req) => (
+  const isGuestOauthCallback = (req: Request) => (
     req.method === 'GET'
     && /^\/(?:guests\/[a-z][a-z0-9-]*|tracker\/ext-[a-z][a-z0-9-]*)\/oauth\/callback$/.test(req.path || '')
   );
 
-  const isMcpOauthCallback = (req) => (
+  const isMcpOauthCallback = (req: Request) => (
     req.method === 'GET'
     && /^\/mcp\/oauth\/[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?\/callback$/.test(req.path || '')
   );
 
-  const isFilePreviewRead = (req) => (
+  const isFilePreviewRead = (req: Request) => (
     req.method === 'GET'
     && /^\/fs\/preview\/[^/]+\/./.test(req.path || '')
   );
 
-  const isGuestFrameFileRead = (req) => (
+  const isGuestFrameFileRead = (req: Request) => (
     req.method === 'GET'
     && /^\/guest-files\/[^/]+\/./.test(req.path || '')
   );
 
-  const requireApiAuth = async (req, res, next) => {
-    const pathname = (req.originalUrl || '').split('?')[0];
+  const requireApiAuth: RequestHandler = async (req, res, next) => {
+    const pathname = (req.originalUrl || '').split('?', 1).join('');
     if (selfAuthenticatedApiPaths.has(pathname)) return next();
     if (isGuestOauthCallback(req) || isMcpOauthCallback(req) || isFilePreviewRead(req) || isGuestFrameFileRead(req)) {
       return next();
@@ -722,6 +849,9 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     }
     try {
       await uiAuthController.requireSessionAuth(req, res, async () => {
+        if (!uiAuthController.handlePasskeyRename) {
+          throw new TypeError('uiAuthController.handlePasskeyRename is not a function');
+        }
         await uiAuthController.handlePasskeyRename(req, res);
       });
     } catch (error) {
@@ -759,16 +889,16 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   app.post('/api/client-auth/clients', express.json({ limit: '64kb' }), async (req, res, next) => {
     await runWithClientCreateAuth(req, res, next, async () => {
       const result = await remoteClientAuthRuntime.createClient({
-        label: req.body?.label,
-        clientKind: req.body?.clientKind,
-        dedupeKey: req.body?.dedupeKey,
+        label: readBody(req)?.label,
+        clientKind: readBody(req)?.clientKind,
+        dedupeKey: readBody(req)?.dedupeKey,
       });
       res.setHeader('Cache-Control', 'no-store');
       res.status(201).json(result);
     });
   });
 
-  app.delete('/api/client-auth/clients/:id', async (req, res, next) => {
+  app.delete<unknown, { id: string }>('/api/client-auth/clients/:id', async (req, res, next) => {
     await runWithClientManagementAuth(req, res, next, async (authContext) => {
       if (authContext.type === 'client') {
         const actingClient = await clientRecordFromAuthContext(authContext);
@@ -809,15 +939,16 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
 
   app.post('/api/client-auth/pairing/sessions', express.json({ limit: '64kb' }), async (req, res, next) => {
     await runWithClientCreateAuth(req, res, next, async (authContext) => {
+      const includeRelay = readBody(req)?.includeRelay;
       const candidates = await pairingServerCandidates(req, {
-        preferredServerUrl: req.body?.serverUrl,
-        includeRelay: typeof req.body?.includeRelay === 'boolean' ? req.body.includeRelay : undefined,
-        includeDirect: req.body?.includeDirect !== false,
+        preferredServerUrl: readBody(req)?.serverUrl,
+        includeRelay: isBoolean(includeRelay) ? includeRelay : undefined,
+        includeDirect: readBody(req)?.includeDirect !== false,
       });
       const usesRelay = candidates.some((candidate) => candidate.type === 'relay');
       const result = await clientPairingRuntime.createPairingSession({
-        label: req.body?.label,
-        allowedClientKinds: req.body?.allowedClientKinds,
+        label: readBody(req)?.label,
+        allowedClientKinds: readBody(req)?.allowedClientKinds,
         createdByClientId: clientIdFromAuthContext(authContext),
         usesRelay,
         localOnly: isLocalOnlyCandidateSet(candidates),
@@ -833,7 +964,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
 
   app.get('/api/client-auth/connection/candidates', async (req, res, next) => {
     await runWithClientManagementAuth(req, res, next, async (authContext) => {
-      const candidates = [];
+      const candidates: (DirectPairingCandidate | RelayPairingCandidate)[] = [];
       const directUrls = (() => {
         try {
           const urls = getDirectCandidateUrls(req);
@@ -854,18 +985,20 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
           const relayCandidate = await getRelayPairingCandidate({ ensureEnabled: false });
           if (relayCandidate) candidates.push(relayCandidate);
         } catch {
-          // Relay status failure must not break the direct-candidate refresh.
+          void 0;
         }
       }
       let serverId = null;
       try {
         const value = await getServerId();
-        serverId = typeof value === 'string' && value.trim() ? value.trim() : null;
+        serverId = value && value.trim() ? value.trim() : null;
       } catch {
         serverId = null;
       }
       res.setHeader('Cache-Control', 'no-store');
-      res.json({ label: getServerLabel(), ...(serverId ? { serverId } : {}), candidates });
+      const identity: ServerIdentity = {};
+      if (serverId) identity.serverId = serverId;
+      res.json({ label: getServerLabel(), ...identity, candidates });
     });
   });
 
@@ -906,15 +1039,15 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         return res.status(429).json({ error: 'Invalid or expired pairing session' });
       }
       const result = await clientPairingRuntime.redeemPairingSession({
-        pairingId: req.body?.pairingId,
-        secret: req.body?.secret,
-        clientLabel: req.body?.clientLabel,
-        clientKind: req.body?.clientKind,
-        deviceName: req.body?.deviceName,
-        devicePlatform: req.body?.devicePlatform,
-        deviceModel: req.body?.deviceModel,
-        appVersion: req.body?.appVersion,
-        dedupeKey: req.body?.dedupeKey,
+        pairingId: readBody(req)?.pairingId,
+        secret: readBody(req)?.secret,
+        clientLabel: readBody(req)?.clientLabel,
+        clientKind: readBody(req)?.clientKind,
+        deviceName: readBody(req)?.deviceName,
+        devicePlatform: readBody(req)?.devicePlatform,
+        deviceModel: readBody(req)?.deviceModel,
+        appVersion: readBody(req)?.appVersion,
+        dedupeKey: readBody(req)?.dedupeKey,
       });
       clearPairingRedeemRateLimit(req);
       if (result.replacedClientIds?.length) {
@@ -935,7 +1068,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         clientToken: result.token,
       });
     } catch (error) {
-      if (error?.message === 'Invalid or expired pairing session') {
+      if (hasErrorDetails(error) && error.message === 'Invalid or expired pairing session') {
         sendPairingRedeemError(res, error);
         return;
       }
@@ -945,7 +1078,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
 
   app.get('/connect', async (req, res) => {
     try {
-      const token = typeof req.query?.t === 'string' ? req.query.t : '';
+      const token = isString(req.query?.t) ? req.query.t : '';
       const settings = await readSettingsFromDiskMigrated();
       const tunnelSessionTtlMs = normalizeTunnelSessionTtlMs(settings?.tunnelSessionTtlMs);
 
@@ -975,7 +1108,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   app.post('/api/system/probe-url', express.json({ limit: '16kb' }), async (req, res, next) => {
     try {
       await requireApiAuth(req, res, async () => {
-        const url = parseLoopbackUrl(req.body?.url);
+        const url = parseLoopbackUrl(readBody(req)?.url);
         if (!url) {
           return res.status(400).json({ ok: false, error: 'Invalid loopback URL' });
         }
@@ -988,7 +1121,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
           });
           return res.json({ ok: response.status >= 200 && response.status < 600, status: response.status });
         } catch (error) {
-          return res.json({ ok: false, error: error?.message || 'Probe failed' });
+          return res.json({ ok: false, error: (hasErrorDetails(error) && error.message) || 'Probe failed' });
         }
       });
     } catch (error) {
@@ -1005,7 +1138,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   });
 };
 
-export const registerSettingsUtilityRoutes = (app, dependencies) => {
+export const registerSettingsUtilityRoutes = (app: Application, dependencies: SettingsUtilityDependencies) => {
   const {
     readCustomThemesFromDisk,
     saveImportedTheme,
@@ -1026,7 +1159,7 @@ export const registerSettingsUtilityRoutes = (app, dependencies) => {
 
   app.post('/api/config/themes', async (req, res) => {
     try {
-      const theme = await saveImportedTheme(req.body?.theme);
+      const theme = await saveImportedTheme(readBody(req)?.theme);
       res.status(201).json({ theme });
     } catch (error) {
       if (error instanceof ThemeImportStorageError) {
@@ -1068,7 +1201,11 @@ export const registerSettingsUtilityRoutes = (app, dependencies) => {
       });
     } catch (error) {
       console.error('[Server] Failed to reload configuration:', error);
-      res.status(500).json({
+      const response = res.status(500);
+      if (!hasErrorDetails(error)) {
+        throw new TypeError(`Cannot read properties of ${error} (reading 'message')`);
+      }
+      response.json({
         error: error.message || 'Failed to reload configuration',
         success: false,
       });
@@ -1076,7 +1213,7 @@ export const registerSettingsUtilityRoutes = (app, dependencies) => {
   });
 };
 
-export const registerCommonRequestMiddleware = (app, dependencies) => {
+export const registerCommonRequestMiddleware = (app: Application, dependencies: CommonRequestDependencies) => {
   const { express, verboseRequestLogs = false, skipBodyParsing = () => false } = dependencies;
 
   app.use((req, res, next) => {

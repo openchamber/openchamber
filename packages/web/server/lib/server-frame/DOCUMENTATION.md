@@ -22,6 +22,26 @@ Vite asset filenames identify their content, so immutable caching avoids revalid
 
 A server embedded in Desktop or launched manually may have no supervisor to restart it after a stray socket exception. It logs isolated exceptions and keeps serving; a sustained exception storm triggers shutdown because continued operation is no longer reliable.
 
+### Why route inputs remain unchecked fields
+
+The core routes forward client and pairing inputs to their owning validators.
+The body accessor checks only presence and keeps each field unknown, including
+properties inherited from non-null values. URL, header, query, boolean and
+error-status checks still establish the specific values used here.
+
+### Why absent passkey handlers still fail
+
+The password-free auth controller has no passkey rename handler. Calling that
+route still forwards a TypeError through the existing error path. A null or
+undefined configuration-refresh rejection likewise retains its property-access
+TypeError after setting status 500.
+
+### Why a missing diagnostic port is omitted
+
+The server port getter returns null before a port is known. The local-file
+collector accepts an optional number and selects a web log only for a positive
+integer, so omitting the null port preserves its source selection.
+
 ## Modules
 
 - `packages/web/server/lib/server-frame/cli-options.js`: CLI/environment option parsing for server startup arguments.

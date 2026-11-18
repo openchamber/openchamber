@@ -11,7 +11,7 @@ interface JournalEntry {
 const MAX_EVENTS = 4_000;
 const MAX_AGE_MS = 24 * 60 * 60 * 1_000;
 const HTTP_BURST_MS = 10 * 60_000;
-const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
+const HTTP_METHODS = new Set<string | undefined>(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
 const ACTIONS = new Set([
   'managed launch', 'managed ready', 'managed startup failed', 'managed process exited',
   'managed restart started', 'managed restart ready', 'managed restart failed',
