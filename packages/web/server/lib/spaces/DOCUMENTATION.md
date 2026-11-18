@@ -147,6 +147,16 @@ for a value the manager did not validate. Error-property access preserves
 inherited fields and the existing optional access on nullish failures.
 Required error-property reads still fail on nullish values.
 
+The command runner shares `CommandOptions` and `CommandResult` with host Git.
+Its output events carry buffers because these private child pipes never set an
+encoding. The tail window contains a first chunk while trimming and tracks the
+byte count for each of its two buffers. Required-entry accessors preserve those
+invariants under indexed-access checking. Node's general spawn declaration makes
+stdin nullable when stderr is a file descriptor; the runner always requests a
+stdin pipe and requires it before writing. Error fields remain unchecked, and
+required reads still fail for nullish errors. Both process-tree kill paths keep
+the integer-greater-than-one pid check.
+
 Dispatcher directory headers retain Node's string-or-array input type. URI
 decoding and percent-escape matching coerce arrays as before; an undecoded array
 still fails with the original `trim` TypeError. Empty header arrays are ignored.
@@ -1300,6 +1310,11 @@ The manager verifies again after `create` and removes a space that reports viola
 ## Process rules
 
 `run-command.js` spawns the executable directly with an argv array, `shell: false`, and `windowsHide: true`. No `cmd.exe`, no shell strings. Every call has a timeout that kills the child, and an output cap. The Docker place receives the runner as a dependency, so tests pass a fake and never mock a module.
+
+libuv's [Windows process implementation](https://github.com/libuv/libuv/blob/v1.x/src/win/process.c)
+uses silent breakaway, leaving subprocesses outside Node's job object.
+[Node's detached option](https://nodejs.org/api/child_process.html#optionsdetached)
+gives a Windows child its own console, so tree-kill children detach only on POSIX.
 
 A timeout kills the `docker` CLI only. A command started with `exec` keeps running inside the space or the gatekeeper.
 

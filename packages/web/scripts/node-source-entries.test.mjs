@@ -27,7 +27,7 @@ const preloadedEntries = [
   'packages/web/server/lib/opencode/providers.js',
   'packages/web/server/lib/dictation/local/model-downloader.ts',
   'packages/web/server/lib/guests/service-registry.ts',
-  'packages/web/server/lib/spaces/run-command.js',
+  'packages/web/server/lib/spaces/run-command.ts',
 ];
 const fixtures = [
   'packages/web/server/lib/git/storage-process.fixture.js',
