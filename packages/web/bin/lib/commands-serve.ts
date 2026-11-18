@@ -21,6 +21,51 @@ import {
   printJson,
   logStatus,
 } from '../cli-output.js';
+import type { CliOptions } from './cli-args.js';
+import type { CliNotice } from './cli-process.js';
+import { isString } from '../../server/lib/shared/object-guards.js';
+
+export interface ServeOptions extends Partial<Omit<CliOptions, 'port' | 'host' | 'uiPassword'>> {
+  port?: unknown;
+  host?: unknown;
+  uiPassword?: unknown;
+  suppressUnsafePortWarning?: boolean;
+  suppressUiPasswordWarning?: boolean;
+  suppressStartupSummary?: boolean;
+  suppressQuietOutput?: boolean;
+}
+
+interface GeneratedPasswordResult {
+  password?: string | undefined;
+}
+
+export interface ServeDependencies {
+  serverPath: string;
+  checkOpenCodeCLI: (onNotice: (notice: CliNotice) => void) => Promise<string>;
+  getServerRuntimeBinary: () => string;
+  setForegroundServerActive: (active: boolean) => void;
+  setForegroundShutdown: (handler: ((signal?: string) => Promise<void>) | null) => void;
+}
+
+function hasReadyMessageFields(value: unknown): value is { type?: unknown; port?: unknown } {
+  return Boolean(value);
+}
+
+function isReadyMessage(value: unknown): value is { type: 'openchamber:ready'; port: number } {
+  return hasReadyMessageFields(value) && value.type === 'openchamber:ready' && typeof value.port === 'number';
+}
+
+function isNoticeObject(value: unknown): value is { message?: unknown } {
+  return Boolean(value) && typeof value === 'object';
+}
+
+function isCliNotice(value: unknown): value is { message: string } {
+  return isNoticeObject(value) && typeof value.message === 'string';
+}
+
+function isServePort(value: unknown): value is number {
+  return Number.isFinite(value);
+}
 
 const DAEMON_READY_TIMEOUT_MS = 30000;
 
@@ -30,12 +75,12 @@ function createServeCommand({
   getServerRuntimeBinary,
   setForegroundServerActive,
   setForegroundShutdown,
-}) {
-async function serveCommand(options) {
+}: ServeDependencies) {
+async function serveCommand(options: ServeOptions) {
     const showOutput = shouldRenderHumanOutput(options);
-    const jsonMessages = [];
-    const emitNotice = (notice) => {
-      if (!notice || typeof notice !== 'object' || typeof notice.message !== 'string') return;
+    const jsonMessages: { level: string; code: string | undefined; message: string }[] = [];
+    const emitNotice = (notice: CliNotice) => {
+      if (!isCliNotice(notice)) return;
       const level = notice.level === 'error' ? 'error' : (notice.level === 'warning' ? 'warning' : 'info');
 
       if (isJsonMode(options)) {
@@ -63,8 +108,8 @@ async function serveCommand(options) {
       }
     };
     const explicitPort = options.explicitPort === true;
-    const effectiveHost = resolveServeHost(options.host);
-    const targetPort = await resolveAvailablePort(options.port, explicitPort, emitNotice);
+    const effectiveHost = resolveServeHost(isString(options.host) ? options.host : undefined);
+    const targetPort = await resolveAvailablePort(isServePort(options.port) ? options.port : undefined, explicitPort, emitNotice);
 
     if (targetPort !== 0 && !options.suppressUnsafePortWarning) {
       assertSafeBrowserPort(targetPort, { context: 'OpenChamber serve' });
@@ -158,16 +203,17 @@ async function serveCommand(options) {
       const realStdoutWrite = process.stdout.write.bind(process.stdout);
       if (suppressServerOutput) {
         const logStream = fs.createWriteStream(null, { fd: logFd });
-        process.stdout.write = (chunk, encoding, callback) => {
+        process.stdout.write = (chunk, encoding?: BufferEncoding | ((error?: Error | null) => void), callback?: (error?: Error | null) => void) => {
           return logStream.write(chunk, encoding, callback);
         };
-        process.stderr.write = (chunk, encoding, callback) => {
+        process.stderr.write = (chunk, encoding?: BufferEncoding | ((error?: Error | null) => void), callback?: (error?: Error | null) => void) => {
           return logStream.write(chunk, encoding, callback);
         };
       } else {
         try {
           fs.closeSync(logFd);
         } catch {
+          void 0;
         }
       }
 
@@ -225,6 +271,7 @@ async function serveCommand(options) {
         try {
           await controller.stop({ exitProcess: false });
         } catch {
+          void 0;
         }
         cleanupFiles();
         setForegroundServerActive(false);
@@ -270,7 +317,7 @@ async function serveCommand(options) {
 
     let resolvedPort;
     try {
-      resolvedPort = await new Promise((resolve, reject) => {
+      resolvedPort = await new Promise<number>((resolve, reject) => {
         let settled = false;
         const timeout = setTimeout(() => {
           if (settled) return;
@@ -280,7 +327,7 @@ async function serveCommand(options) {
 
         child.on('message', (msg) => {
           if (settled) return;
-          if (msg && msg.type === 'openchamber:ready' && typeof msg.port === 'number') {
+          if (isReadyMessage(msg)) {
             settled = true;
             clearTimeout(timeout);
             resolve(msg.port);
@@ -307,15 +354,17 @@ async function serveCommand(options) {
     }
 
     try {
-      if (typeof child.disconnect === 'function' && child.connected) {
+      if (child.connected) {
         child.disconnect();
       }
     } catch {
+      void 0;
     }
 
     try {
       fs.closeSync(logFd);
     } catch {
+      void 0;
     }
 
     const resolvedLogPath = getLogFilePath(resolvedPort);
@@ -323,6 +372,7 @@ async function serveCommand(options) {
       try {
         fs.renameSync(initialLogPath, resolvedLogPath);
       } catch {
+        void 0;
       }
     }
 
@@ -351,11 +401,13 @@ async function serveCommand(options) {
     };
 
     if (isJsonMode(options)) {
-      printJson({
+      const output = {
         ...serveResult,
         messages: jsonMessages,
-        ...(autoGeneratedUiPassword ? { password: effectiveUiPassword } : {}),
-      });
+      };
+      const passwordResult: GeneratedPasswordResult = {};
+      if (autoGeneratedUiPassword) passwordResult.password = effectiveUiPassword;
+      printJson({ ...output, ...passwordResult });
       return resolvedPort;
     }
 

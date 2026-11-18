@@ -9,7 +9,6 @@ import {
 } from '../../server/lib/security/bind-host.js';
 import { injectedEnvKeys } from '../../server/lib/injected-env.js';
 
-// external: https://fetch.spec.whatwg.org/#port-blocking Fetch and Chromium refuse these ports for the UI.
 const UNSAFE_BROWSER_PORTS = new Set([
   0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69,
   77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119,
@@ -20,27 +19,35 @@ const UNSAFE_BROWSER_PORTS = new Set([
 ]);
 
 
-function isUnsafeBrowserPort(port) {
-  return Number.isFinite(port) && UNSAFE_BROWSER_PORTS.has(Math.trunc(port));
+function isNetworkNumber(value: unknown): value is number {
+  return Number.isFinite(value);
 }
 
-function resolveConfiguredBindHost(hostOverride) {
+function isNetworkText(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function isUnsafeBrowserPort(port: number | undefined) {
+  return isNetworkNumber(port) && UNSAFE_BROWSER_PORTS.has(Math.trunc(port));
+}
+
+function resolveConfiguredBindHost(hostOverride?: string) {
   const configuredHost = injectedEnvKeys(process.env).has('OPENCHAMBER_HOST')
     ? undefined
     : process.env.OPENCHAMBER_HOST;
-  const configured = typeof hostOverride === 'string' && hostOverride.trim()
+  const configured = isNetworkText(hostOverride) && hostOverride.trim()
     ? hostOverride.trim()
-    : typeof configuredHost === 'string'
+    : isNetworkText(configuredHost)
       ? configuredHost.trim()
       : '';
   return configured || '127.0.0.1';
 }
 
-function resolveServeHost(hostOverride) {
+function resolveServeHost(hostOverride?: string) {
   return resolveConfiguredBindHost(hostOverride);
 }
 
-function resolveApiHost(hostOverride) {
+function resolveApiHost(hostOverride?: string) {
   const configured = resolveConfiguredBindHost(hostOverride);
 
   if (!configured) {
@@ -61,31 +68,31 @@ function resolveApiHost(hostOverride) {
   return configured;
 }
 
-function formatHostForUrl(host) {
-  if (typeof host !== 'string') return '127.0.0.1';
+function formatHostForUrl(host: string | undefined) {
+  if (!isNetworkText(host)) return '127.0.0.1';
   return host.includes(':') ? `[${host}]` : host;
 }
 
-function buildLocalUrl(port, endpoint = '', hostOverride) {
+function buildLocalUrl(port: number | undefined, endpoint = '', hostOverride?: string) {
   const host = formatHostForUrl(resolveApiHost(hostOverride));
   const pathPart = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   return `http://${host}:${port}${pathPart}`;
 }
 
 async function detectLanIPv4Address() {
-  const ip = await new Promise((resolve) => {
+  const ip = await new Promise<string | null>((resolve) => {
     const socket = dgram.createSocket('udp4');
-    const finish = (value) => {
-      try { socket.close(); } catch {}
+    const finish = (value: string | null) => {
+      try { socket.close(); } catch { void 0; }
       resolve(value);
     };
     socket.once('error', () => finish(null));
     try {
-      socket.connect(80, '8.8.8.8', (error) => {
+      socket.connect(80, '8.8.8.8', (error?: Error) => {
         if (error) return finish(null);
         try {
           const addr = socket.address();
-          finish(addr && typeof addr.address === 'string' ? addr.address : null);
+          finish(addr && isNetworkText(addr.address) ? addr.address : null);
         } catch {
           finish(null);
         }
@@ -108,11 +115,11 @@ async function detectLanIPv4Address() {
 }
 
 
-function formatUnsafePortWarning(port) {
+function formatUnsafePortWarning(port: number | undefined) {
   return `Port ${port} is browser-unsafe (ERR_UNSAFE_PORT) and is not supported for OpenChamber UI at ${buildLocalUrl(port, '/')}.`;
 }
 
-function assertSafeBrowserPort(port, { context = 'This action' } = {}) {
+function assertSafeBrowserPort(port: number | undefined, { context = 'This action' } = {}) {
   if (!isUnsafeBrowserPort(port)) {
     return;
   }
@@ -123,7 +130,7 @@ function assertSafeBrowserPort(port, { context = 'This action' } = {}) {
 }
 
 
-function hasUiPasswordConfigured(password) {
+function hasUiPasswordConfigured(password: unknown): password is string {
   return typeof password === 'string' && password.trim().length > 0;
 }
 
@@ -137,7 +144,7 @@ function generateUiPassword(length = 16) {
   return password;
 }
 
-function resolveServeUiPassword({ uiPassword, explicitUiPassword }) {
+function resolveServeUiPassword({ uiPassword, explicitUiPassword }: { uiPassword?: unknown; explicitUiPassword?: boolean }) {
   if (hasUiPasswordConfigured(uiPassword)) {
     return { password: uiPassword, generated: false };
   }
@@ -147,7 +154,7 @@ function resolveServeUiPassword({ uiPassword, explicitUiPassword }) {
   return { password: undefined, generated: false };
 }
 
-function assertAuthenticatedNetworkExposure({ host, uiPassword }) {
+function assertAuthenticatedNetworkExposure({ host, uiPassword }: { host?: string; uiPassword?: unknown }) {
   const bindHost = resolveConfiguredBindHost(host);
   if (hasUiPasswordConfigured(uiPassword)) {
     return;

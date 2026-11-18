@@ -9,8 +9,9 @@ import {
   printJson,
   logStatus,
 } from '../cli-output.js';
+import type { CliOptions } from './cli-args.js';
 
-async function logsCommand(options) {
+async function logsCommand(options: Partial<CliOptions>) {
   const showFrames = shouldRenderHumanOutput(options);
   const shouldPrefixLines = options.all || !showFrames;
   let targets = [];
@@ -93,7 +94,7 @@ async function logsCommand(options) {
     });
   });
 
-  await new Promise((resolve) => {
+  await new Promise<void>((resolve) => {
     const onSignal = () => {
       for (const unsub of unsubs) {
         unsub();

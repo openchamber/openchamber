@@ -1,37 +1,35 @@
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { requestJson } from './cli-http.js';
 import { shellQuote } from './cli-shell.js';
-
-const asNonEmptyString = (value) => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
+import { asNonEmptyString } from '../../server/lib/shared/object-guards.js';
+import type { ControlInput } from '../../server/lib/openchamber-control/contracts.js';
+import type { JsonRequestOptions } from './cli-http.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
 const WAIT_HTTP_TIMEOUT_BUFFER_MS = 30_000;
 
 const WORKTREE_PROVISION_TIMEOUT_MS = 6 * 60_000;
 
-export const resolveControlTimeoutMs = (input, options, action) => {
-  if (Number.isFinite(options?.timeoutMs) && options.timeoutMs > 0) return options.timeoutMs;
+export const resolveControlTimeoutMs = (input: ControlInput | null | undefined, options: JsonRequestOptions | undefined, action?: string) => {
+  if (options?.timeoutMs !== undefined && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0) return options.timeoutMs;
   const needsCheckoutPreparation = action === 'session.create' || asNonEmptyString(input?.worktree) !== null;
   if (input?.wait !== true) {
     return needsCheckoutPreparation ? WORKTREE_PROVISION_TIMEOUT_MS : undefined;
   }
-  const waitSeconds = Number(input?.timeout) > 0 ? Number(input.timeout) : DEFAULT_WAIT_TIMEOUT_SECONDS;
+  const waitSeconds = Number(input?.timeout) > 0 ? Number(input?.timeout) : DEFAULT_WAIT_TIMEOUT_SECONDS;
   const waitTimeoutMs = (waitSeconds * 1000) + WAIT_HTTP_TIMEOUT_BUFFER_MS;
   return needsCheckoutPreparation ? waitTimeoutMs + WORKTREE_PROVISION_TIMEOUT_MS : waitTimeoutMs;
 };
 
-export const requestControlAction = async (port, action, input, options = {}) => {
+export const requestControlAction = async (port: number, action: string, input: ControlInput, options: JsonRequestOptions = {}) => {
   const timeoutMs = resolveControlTimeoutMs(input, options, action);
-  const { response, body } = await requestJson(port, '/api/openchamber/control', {
+  const requestOptions: JsonRequestOptions = {
     ...options,
-    ...(timeoutMs ? { timeoutMs } : {}),
     method: 'POST',
     body: JSON.stringify({ action, input }),
-  });
+  };
+  if (timeoutMs) requestOptions.timeoutMs = timeoutMs;
+  const { response, body } = await requestJson(port, '/api/openchamber/control', requestOptions);
   if (response?.ok) return body;
   const isPartial = body?.partial === true;
   const partialSessionId = isPartial ? asNonEmptyString(body?.sessionId) : null;
@@ -42,10 +40,12 @@ export const requestControlAction = async (port, action, input, options = {}) =>
     : '';
   if (isPartial && body?.partialAction === 'worktree-created' && partialDirectory) {
     const retry = ['openchamber session create', '--directory', shellQuote(partialDirectory), '--port', String(port)];
-    for (const key of ['prompt', 'title', 'model', 'agent', 'variant', 'timeout']) {
-      if (input?.[key] != null) retry.push(`--${key}`, shellQuote(input[key]));
+    const valueKeys: (keyof ControlInput)[] = ['prompt', 'title', 'model', 'agent', 'variant', 'timeout'];
+    for (const key of valueKeys) {
+      if (input?.[key] != null) retry.push(`--${key}`, shellQuote(String(input[key])));
     }
-    for (const [key, flag] of [['goal', '--goal'], ['wait', '--wait'], ['lastAssistant', '--last-assistant']]) {
+    const booleanFlags: [keyof ControlInput, string][] = [['goal', '--goal'], ['wait', '--wait'], ['lastAssistant', '--last-assistant']];
+    for (const [key, flag] of booleanFlags) {
       if (input?.[key] === true) retry.push(flag);
     }
     if (input?.goalTokenBudget != null) retry.push('--goal-token-budget', String(input.goalTokenBudget));

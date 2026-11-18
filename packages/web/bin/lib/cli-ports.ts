@@ -1,13 +1,14 @@
 import net from 'net';
 import { DEFAULT_PORT } from './cli-args.js';
 import { fetchSystemInfoFromPort } from './cli-http.js';
+import type { CliNotice } from './cli-process.js';
 
-async function isPortAvailable(port, host) {
-  if (!Number.isFinite(port) || port <= 0) {
+async function isPortAvailable(port: number | undefined, host?: string) {
+  if (port === undefined || !Number.isFinite(port) || port <= 0) {
     return false;
   }
 
-  return await new Promise((resolve) => {
+  return await new Promise<boolean>((resolve) => {
     const server = net.createServer();
     server.unref();
     server.on('error', () => resolve(false));
@@ -17,8 +18,8 @@ async function isPortAvailable(port, host) {
   });
 }
 
-async function resolveAvailablePort(desiredPort, explicitPort = false, onNotice) {
-  const startPort = Number.isFinite(desiredPort) ? Math.trunc(desiredPort) : DEFAULT_PORT;
+async function resolveAvailablePort(desiredPort: number | undefined, explicitPort = false, onNotice?: (notice: CliNotice) => void) {
+  const startPort = desiredPort !== undefined && Number.isFinite(desiredPort) ? Math.trunc(desiredPort) : DEFAULT_PORT;
   if (explicitPort) {
     return startPort;
   }
@@ -35,7 +36,7 @@ async function resolveAvailablePort(desiredPort, explicitPort = false, onNotice)
   } else {
     message = `Port ${startPort} in use; using a free port`;
   }
-  if (typeof onNotice === 'function' && message) {
+  if (onNotice !== undefined && message) {
     onNotice({
       level: 'warning',
       code: 'PORT_REASSIGNED',

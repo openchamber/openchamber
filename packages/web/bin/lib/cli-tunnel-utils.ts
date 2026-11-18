@@ -1,6 +1,36 @@
 import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
 import { shellQuote } from './cli-shell.js';
 import { canPrompt, select as clackSelect, text as clackText, cancel as clackCancel, isCancel as clackIsCancel } from '../cli-output.js';
+import type { CliOptions } from './cli-args.js';
+
+function isTtlCancelled(value: string | symbol): value is symbol {
+  return clackIsCancel(value);
+}
+
+export interface TunnelReplayOptions {
+  port: number;
+  provider: string;
+  mode: string;
+  profileName?: string | undefined;
+  configPath?: string | null | undefined;
+  hostname?: string | undefined;
+  httpsPort?: number | undefined;
+  connectTtlMs?: number | undefined;
+  sessionTtlMs?: number | undefined;
+  qr?: boolean;
+  noQr?: boolean;
+  includeTokenPlaceholder?: boolean;
+  tokenViaStdin?: boolean;
+  tokenFileProvided?: boolean;
+}
+
+function isDurationText(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function isDurationNumber(value: unknown): value is number {
+  return typeof value === 'number';
+}
 
 const TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS = 30 * 60 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_MIN_MS = 60 * 1000;
@@ -26,11 +56,11 @@ const SESSION_TTL_PICKER_OPTIONS = [
   { value: '__custom__', label: 'Custom' },
 ];
 
-function parseHumanDurationToMs(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) {
+function parseHumanDurationToMs(value: string | number | undefined) {
+  if (isDurationNumber(value) && Number.isFinite(value)) {
     return Math.round(value);
   }
-  if (typeof value !== 'string') {
+  if (!isDurationText(value)) {
     return null;
   }
 
@@ -53,7 +83,7 @@ function parseHumanDurationToMs(value) {
       return null;
     }
     cursor = pattern.lastIndex;
-    const amount = Number.parseInt(match[1], 10);
+    const amount = Number.parseInt(match[1] ?? '', 10);
     const unit = match[2];
     const unitMs = unit === 'ms'
       ? 1
@@ -74,19 +104,19 @@ function parseHumanDurationToMs(value) {
   return total;
 }
 
-function parseTtlMsOrThrow(rawValue, {
+function parseTtlMsOrThrow(rawValue: string | number | undefined, {
   flagName,
   minMs,
   maxMs,
-} = {}) {
+}: { flagName?: string; minMs?: number; maxMs?: number } = {}) {
   const parsed = parseHumanDurationToMs(rawValue);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
+  if (parsed === null || !Number.isFinite(parsed) || parsed <= 0) {
     throw new TunnelCliError(
       `Invalid value for ${flagName}. Use a positive duration like 30m, 24h, 1d, or milliseconds.`,
       EXIT_CODE.USAGE_ERROR,
     );
   }
-  if (parsed < minMs || parsed > maxMs) {
+  if ((minMs !== undefined && parsed < minMs) || (maxMs !== undefined && parsed > maxMs)) {
     throw new TunnelCliError(
       `${flagName} must be between ${minMs}ms and ${maxMs}ms.`,
       EXIT_CODE.USAGE_ERROR,
@@ -95,8 +125,8 @@ function parseTtlMsOrThrow(rawValue, {
   return parsed;
 }
 
-function formatDurationForCli(ms) {
-  if (!Number.isFinite(ms) || ms <= 0) {
+function formatDurationForCli(ms: number | undefined) {
+  if (ms === undefined || !Number.isFinite(ms) || ms <= 0) {
     return null;
   }
   const value = Math.round(ms);
@@ -122,7 +152,7 @@ function buildTunnelStartReplayCommand({
   includeTokenPlaceholder,
   tokenViaStdin,
   tokenFileProvided,
-}) {
+}: TunnelReplayOptions) {
   const parts = ['openchamber', 'tunnel', 'start'];
   if (Number.isFinite(port) && port > 0) {
     parts.push('--port', String(port));
@@ -136,10 +166,10 @@ function buildTunnelStartReplayCommand({
   if (mode) {
     parts.push('--mode', shellQuote(mode));
   }
-  if (typeof configPath === 'string' && configPath.trim().length > 0) {
+  if (configPath !== null && configPath !== undefined && configPath.trim().length > 0) {
     parts.push('--config', shellQuote(configPath));
   }
-  if (typeof hostname === 'string' && hostname.trim().length > 0) {
+  if (hostname !== undefined && hostname.trim().length > 0) {
     parts.push('--hostname', shellQuote(hostname));
   }
   if (Number.isInteger(httpsPort)) {
@@ -169,7 +199,7 @@ function buildTunnelStartReplayCommand({
   return parts.join(' ');
 }
 
-function buildTunnelProfileAddCommand({ provider, hostname }) {
+function buildTunnelProfileAddCommand({ provider, hostname }: { provider: string; hostname: string }) {
   const parts = [
     'openchamber',
     'tunnel',
@@ -189,9 +219,9 @@ function buildTunnelProfileAddCommand({ provider, hostname }) {
   return parts.join(' ');
 }
 
-async function resolveTunnelTtlOverrides(options) {
-  let connectTtlRaw = typeof options.connectTtl === 'string' ? options.connectTtl : undefined;
-  let sessionTtlRaw = typeof options.sessionTtl === 'string' ? options.sessionTtl : undefined;
+async function resolveTunnelTtlOverrides(options: Partial<CliOptions>) {
+  let connectTtlRaw = options.connectTtl;
+  let sessionTtlRaw = options.sessionTtl;
 
   const shouldPrompt = !connectTtlRaw
     && !sessionTtlRaw
@@ -202,7 +232,7 @@ async function resolveTunnelTtlOverrides(options) {
       message: 'Select connect-link TTL',
       options: CONNECT_TTL_PICKER_OPTIONS,
     });
-    if (clackIsCancel(connectChoice)) {
+    if (isTtlCancelled(connectChoice)) {
       clackCancel('Tunnel start cancelled.');
       return null;
     }
@@ -223,7 +253,7 @@ async function resolveTunnelTtlOverrides(options) {
           }
         },
       });
-      if (clackIsCancel(enteredConnect)) {
+      if (isTtlCancelled(enteredConnect)) {
         clackCancel('Tunnel start cancelled.');
         return null;
       }
@@ -236,7 +266,7 @@ async function resolveTunnelTtlOverrides(options) {
       message: 'Select session TTL',
       options: SESSION_TTL_PICKER_OPTIONS,
     });
-    if (clackIsCancel(sessionChoice)) {
+    if (isTtlCancelled(sessionChoice)) {
       clackCancel('Tunnel start cancelled.');
       return null;
     }
@@ -257,7 +287,7 @@ async function resolveTunnelTtlOverrides(options) {
           }
         },
       });
-      if (clackIsCancel(enteredSession)) {
+      if (isTtlCancelled(enteredSession)) {
         clackCancel('Tunnel start cancelled.');
         return null;
       }

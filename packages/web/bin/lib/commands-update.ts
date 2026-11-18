@@ -6,7 +6,9 @@ import {
   removePidFile,
   stopInstanceProcess,
   SERVER_SHUTDOWN_GRACE_MS,
+  hasInstanceFields,
 } from './cli-process.js';
+import type { InstanceFileFields } from './cli-process.js';
 import { findStartupServiceInstance, restartStartupService } from './cli-startup.js';
 import {
   intro as clackIntro,
@@ -18,8 +20,25 @@ import {
   printJson,
   logStatus,
 } from '../cli-output.js';
+import type { CliOptions } from './cli-args.js';
+import type { ServeOptions } from './commands-serve.js';
+import type { JsonValue } from '../../server/lib/shared/json-values.js';
 
-async function waitForServerVersion({ port, host }, version, timeoutMs = 30000) {
+export type RunningInstance = Awaited<ReturnType<typeof discoverRunningInstances>>[number];
+
+export interface UpdateDependencies {
+  importFromFilePath: (filePath: string) => Promise<Pick<typeof import('../../server/lib/package-manager.js'), 'checkForUpdates' | 'executeUpdate' | 'detectPackageManager' | 'getCurrentVersion'>>;
+  packageManagerPath: string;
+  serveCommand: (options: ServeOptions) => Promise<number>;
+  discoverInstances?: () => Promise<RunningInstance[]>;
+  startupService?: {
+    findInstance: (instances: RunningInstance[]) => RunningInstance | null | undefined;
+    restart: typeof restartStartupService;
+  };
+  waitForVersion?: typeof waitForServerVersion;
+}
+
+async function waitForServerVersion({ port, host }: Pick<RunningInstance, 'port' | 'host'>, version: JsonValue | undefined, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -29,6 +48,7 @@ async function waitForServerVersion({ port, host }, version, timeoutMs = 30000) 
         return true;
       }
     } catch {
+      void 0;
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
@@ -45,8 +65,8 @@ function createUpdateCommand({
     restart: restartStartupService,
   },
   waitForVersion = waitForServerVersion,
-}) {
-  return async function updateCommand(options = {}) {
+}: UpdateDependencies) {
+  return async function updateCommand(options: Partial<CliOptions> = {}) {
     const showOutput = shouldRenderHumanOutput(options);
     const updateSpin = createSpinner(options);
 
@@ -128,6 +148,7 @@ function createUpdateCommand({
           });
           removePidFile(instance.pidFilePath);
         } catch {
+          void 0;
         }
       }
     }
@@ -149,7 +170,8 @@ function createUpdateCommand({
       updateSpin?.message(`Restarting ${runningInstances.length} instance(s)...`);
     }
     for (const instance of cliInstances) {
-      const storedOptions = readInstanceOptions(instance.instanceFilePath) || { port: instance.port };
+      const storedInput = readInstanceOptions(instance.instanceFilePath) || { port: instance.port };
+      const storedOptions: InstanceFileFields = hasInstanceFields(storedInput) ? storedInput : { port: instance.port };
       await serveCommand({
         port: storedOptions.port || instance.port,
         host: storedOptions.host,

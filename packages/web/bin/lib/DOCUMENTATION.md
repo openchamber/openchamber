@@ -28,7 +28,7 @@ build entering the development loop.
 
 Command modules implement user-facing commands and preserve output contracts across interactive, non-TTY, `--quiet`, and `--json` modes. They should use `../cli-output.js` for presentation helpers and keep safety validation in command logic, not prompts.
 
-- `commands-serve.js`
+- `commands-serve.ts`
   - Implements `openchamber serve`.
   - Owns OpenCode CLI checks, port resolution, log rotation, PID/instance registry writes, foreground/background server launch, startup summaries, and foreground shutdown behavior.
   - The effective UI password is resolved before either launch path, so a password generated for `--ui-password` with no value is in the server environment before it spawns and in the instance state file that restart and status read.
@@ -40,7 +40,7 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Owns lifecycle stop/restart semantics, desktop-managed port rejection, unmanaged instance shutdown attempts, PID/instance cleanup, and restart reuse of stored instance options.
   - `restart` of a foreground instance stops it and records success. A process manager (systemd, Docker) starts it again; calling `serve()` here would race the manager with a second copy.
 
-- `commands-status.js`
+- `commands-status.ts`
   - Implements `openchamber status`.
   - Formats discovered instances and tunnel readiness/status for human, quiet, and JSON output.
   - `bindHost` is the address the server was asked to bind, not the host a probe answered on: a server bound to `0.0.0.0` also answers on loopback.
@@ -58,17 +58,17 @@ Command modules implement user-facing commands and preserve output contracts acr
   - `update` sends only the flags given; `--goal` and `--disabled` go out only when present, as `true`. `--target-session` names an existing session on `create` and `update` only; on any other schedule action, or with a missing or empty inline value, it is a parse error. On `update`, a value flag given without a value (`--prompt`, `--name`, schedule selectors, `--model`, `--agent`, `--variant`, `--timezone`, `--goal-token-budget`) is a parse error rather than a dropped change.
   - `enable` and `disable` report the state the server saved, never the requested one.
 
-- `commands-models.js`
+- `commands-models.ts`
   - Prints OpenChamber default, favorite, and recent model settings.
 
-- `commands-projects.js`
+- `commands-projects.ts`
   - Prints configured project labels, ids, and directories for later control-plane calls.
 
-- `commands-logs.js`
+- `commands-logs.ts`
   - Implements `openchamber logs`.
   - Resolves log files, tails recent lines, and follows log output.
 
-- `commands-startup.js`
+- `commands-startup.ts`
   - Implements `openchamber startup`.
   - Handles startup subcommand dispatch and presentation around the lower-level startup service helpers.
 
@@ -81,7 +81,7 @@ Command modules implement user-facing commands and preserve output contracts acr
   - A localhost server URL does not establish how the server is bound, and localhost can be intentional (including Windows-to-WSL forwarding), so the command warns about a localhost link instead of treating it as a misconfiguration.
   - The relay endpoint follows the administrator's pin (`pinnedRelayUrl`: policy file, then `OPENCHAMBER_RELAY_URL`) / the stored setting / the default, matching the running host; the host must be running with the relay enabled to serve the redeem over the tunnel.
 
-- `commands-update.js`
+- `commands-update.ts`
   - Implements `openchamber update`.
   - Loads the package-manager helper, performs update flow, and coordinates restart behavior after updates.
   - Installs the exact version returned by the update check and verifies the globally installed version after the package manager exits; a zero exit status without the target version is a loud failure, not a success report (#3083).
@@ -113,7 +113,7 @@ These modules hold reusable, non-presentational logic for commands.
 - `cli-paths.ts`
   - Data, run, log, settings, tunnel profile, and managed-local config paths.
 
-- `cli-settings-accessors.js`
+- `cli-settings-accessors.ts`
   - Minimal settings.json read/write for CLI contexts that must not load the
     full web settings runtime (`connect-url` relay identity resolution).
   - Mirrors the settings runtime's guarantees so a CLI read-modify-write can
@@ -130,7 +130,7 @@ These modules hold reusable, non-presentational logic for commands.
     signing or encryption keypair, which would change `serverId` and orphan
     every paired device and push binding.
 
-- `cli-process.js`
+- `cli-process.ts`
   - PID files, instance registry files, process identity checks, runtime metadata checks, and process termination helpers.
   - An accepted HTTP shutdown gets `SERVER_SHUTDOWN_GRACE_MS` (30 seconds) before PID termination. Stop and plain CLI update still fall back to PID termination immediately when the shutdown endpoint is unreachable. Windows task restart retains its 5-second wait after `/End` when HTTP shutdown fails.
   - `isProcessRunning` answers liveness only: "some process with this pid is alive". It is for a pid known to be ours (a child just spawned, a process being stopped), never for a pid read from a pid file. After an ungraceful shutdown the file is stale and the kernel may have recycled the pid; a liveness-only check then reports "already running" and aborts startup, which loops forever under systemd `Restart=always` (#1721). Pid-file validation uses `isOpenchamberProcessRunning` / `getOpenchamberProcessState`.
@@ -146,28 +146,28 @@ These modules hold reusable, non-presentational logic for commands.
   - Owns local desktop bearer auth and managed CLI-instance UI password retry for control-plane requests.
   - `requestJson` passes only `method`, `headers` and `body` to `fetch`. Control commands hand it their parsed CLI options, and Bun, which runs the CLI in the Docker image, reads `session` as its own fetch option and rejects `--session`.
 
-- `cli-control.js`
+- `cli-control.ts`
   - Sends one typed action request to the authenticated OpenChamber control endpoint and maps HTTP failures to CLI exit behavior.
   - Must not reproduce session, scheduled-task, project-resolution, or wait orchestration.
   - Every session create reserves the 6-minute provisioning HTTP window, including a retry in an existing checkout, because it can still await checkout setup before selection. The server keeps provisioning after the client gives up, so a shorter client timeout reported a failure for a worktree that was in fact created; the server allows a minute for git and three more for the project's setup commands. With `--wait`, the wait window is added to that provisioning window rather than overlapping it, because the server provisions before it starts waiting for idle. An explicit HTTP timeout remains authoritative.
 
-- `cli-shell.js`
+- `cli-shell.ts`
   - Quotes replay arguments for PowerShell on Windows and POSIX shells elsewhere. Session recovery and tunnel replay commands share this formatter.
 
 - `cli-api-target.js`
   - Resolves the target OpenChamber runtime for control-plane commands, preferring desktop unless a port is explicit.
 
-- `cli-goal.js`
+- `cli-goal.ts`
   - Owns shared Goal Mode token-budget validation for session and schedule commands.
 
-- `cli-network.js`
+- `cli-network.ts`
   - Host resolution, URL building, LAN detection, unsafe browser port validation, and UI password/network exposure checks.
   - Generated UI passwords use an alphabet without ambiguous characters so the printed password is easy to type from a phone or another machine.
 
-- `cli-ports.js`
+- `cli-ports.ts`
   - Port availability checks and available-port resolution.
 
-- `cli-log-files.js`
+- `cli-log-files.ts`
   - Log rotation, tail reads, and file-follow streaming.
 
 - `cli-executables.ts`
@@ -189,10 +189,10 @@ These modules hold reusable, non-presentational logic for commands.
 - `cli-tunnel-profiles.ts`
   - Tunnel profile normalization, token resolution/redaction, profile storage, migration, file-permission warnings, and managed-remote pair persistence.
 
-- `cli-tunnel-utils.js`
+- `cli-tunnel-utils.ts`
   - Tunnel-specific command string builders, TTL parsing/formatting, and replay command helpers.
 
-- `cli-tunnel-capabilities.js`
+- `cli-tunnel-capabilities.ts`
   - Built-in tunnel provider capability fallbacks used when a live server cannot provide tunnel metadata.
 
 ## Placement Rules
@@ -318,6 +318,51 @@ Most value flags keep their old value when the value is missing. For `--target-s
 ### Why foreground serve stays in-process
 
 Foreground mode imports and runs the server in the CLI process. Process managers such as systemd `Type=simple` track that direct child; a detached grandchild would escape them. Converting it to child-process orchestration also caused shell job-control suspension. Signal handlers are added without `removeAllListeners`, which would drop handlers other code registered in the same process.
+
+### Why instance files retain their decoded JSON type
+
+`readInstanceOptions` preserves every decoded JSON value, including scalar and
+array roots. A successful read establishes JSON syntax only. `hasInstanceFields`
+provides an optional-field view at each consumer without rejecting non-null
+scalars or claiming that a port, host or password has been validated. Primitive
+field access keeps JavaScript's boxing behavior. Password text and finite
+timestamps retain their checks where they are used.
+
+Thrown values retain unchecked `message` fields. A null or undefined value keeps
+the property-access `TypeError` wording of the running Node or Bun runtime.
+
+The instance writer accepts unchecked fields because it validates the host,
+password, launch mode and timestamp itself. Serve also receives stored fields
+from restart and update. Invalid hosts and ports retain their existing
+environment/default fallback, and invalid passwords retain the existing
+password-generation decision.
+
+### Why native streams have local declarations
+
+With an existing file descriptor, Node ignores the path passed to
+`createWriteStream`; foreground quiet mode retains its null path. Writable
+streams also accept a callback in the second argument or an explicit undefined
+encoding. `node-streams.d.ts` describes these native calls without changing the
+stream redirection wrappers.
+
+### Why the API target helper remains JavaScript
+
+The web Knip project currently includes `bin/**/*.js` but omits TypeScript
+implementations. `cli-api-target.js` keeps a visible importer of
+`discoverDesktopInstance` after the other consumers move to TypeScript.
+Converting that helper requires the coordinator's shared Knip configuration
+change; otherwise the unchanged gate reports the live discovery export as unused.
+
+### Why browser port and environment checks remain
+
+The blocked-port set follows the
+[Fetch port-blocking list](https://fetch.spec.whatwg.org/#port-blocking).
+Environment hosts, stored passwords, process text, IPC readiness messages,
+filesystem errors and optional profile/model fields retain their representation
+checks. Internal optional callbacks and already parsed replay options use their
+declared contracts. Injected environment names come from comma-separated strings;
+the environment helper's explicit `Set<string>` return keeps the empty-set branch
+usable as environment keys without changing its contents.
 
 ## Verification
 

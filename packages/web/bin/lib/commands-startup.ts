@@ -8,12 +8,28 @@ import {
   printJson,
   logStatus,
 } from '../cli-output.js';
+import type { CliOptions } from './cli-args.js';
 
-async function startupCommand(options, action = 'status', dependencies = {}) {
+export interface StartupDependencies {
+  getStartupStatus?: typeof getStartupStatus;
+  enableStartupService?: typeof enableStartupService;
+  disableStartupService?: typeof disableStartupService;
+}
+
+type StartupResult = ReturnType<typeof getStartupStatus> & {
+  action: string;
+  messages?: { level: string; code: string; message: string }[];
+};
+
+function isStartupAction(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+async function startupCommand(options: Partial<CliOptions>, action = 'status', dependencies: StartupDependencies = {}) {
   const getStatus = dependencies.getStartupStatus || getStartupStatus;
   const enableService = dependencies.enableStartupService || enableStartupService;
   const disableService = dependencies.disableStartupService || disableStartupService;
-  const normalized = typeof action === 'string' ? action.trim().toLowerCase() : 'status';
+  const normalized = isStartupAction(action) ? action.trim().toLowerCase() : 'status';
   if (!['status', 'enable', 'disable'].includes(normalized)) {
     throw new TunnelCliError(
       `Unknown startup subcommand '${action}'. Use 'openchamber startup --help'.`,
@@ -30,7 +46,7 @@ async function startupCommand(options, action = 'status', dependencies = {}) {
     status = getStatus();
   }
 
-  let result = { action: normalized, ...status };
+  let result: StartupResult = { action: normalized, ...status };
   if (!result.supported) {
     throw new TunnelCliError(
       `Startup integration is not supported on ${result.platform}.`,
@@ -72,7 +88,7 @@ async function startupCommand(options, action = 'status', dependencies = {}) {
 
   clackIntro('OpenChamber Startup');
   logStatus(result.enabled ? 'success' : 'info', `startup ${result.enabled ? 'enabled' : 'disabled'}`, result.servicePath || undefined);
-  if (typeof result.activeState === 'string') {
+  if (result.activeState !== undefined) {
     logStatus(result.active ? 'success' : result.activeState === 'failed' ? 'error' : 'warning', `service ${result.activeState}`);
   }
   if (normalized === 'enable') {

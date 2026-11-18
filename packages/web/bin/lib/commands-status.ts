@@ -1,4 +1,5 @@
-import { readInstanceOptions } from './cli-process.js';
+import { readInstanceOptions, hasInstanceFields } from './cli-process.js';
+import type { InstanceFileFields } from './cli-process.js';
 import { discoverLifecycleInstances, discoverDesktopInstance } from './cli-lifecycle.js';
 import {
   intro as clackIntro,
@@ -8,8 +9,10 @@ import {
   printJson,
   logStatus,
 } from '../cli-output.js';
+import type { CliOptions } from './cli-args.js';
+import { isString } from '../../server/lib/shared/object-guards.js';
 
-async function statusCommand(options = {}) {
+async function statusCommand(options: Partial<CliOptions> = {}) {
   const [runningInstances, desktopInstance] = options.explicitPort
     ? [await discoverLifecycleInstances(options), null]
     : await Promise.all([
@@ -17,7 +20,7 @@ async function statusCommand(options = {}) {
         discoverDesktopInstance(),
       ]);
 
-  const toPasswordProtectionLabel = (value) => {
+  const toPasswordProtectionLabel = (value: boolean | null) => {
     if (value === true) return 'yes';
     if (value === false) return 'no';
     return 'unknown';
@@ -37,9 +40,10 @@ async function statusCommand(options = {}) {
   const cliInstances = runningInstances
     .filter((instance) => instance.runtime !== 'desktop')
     .map((instance) => {
-      const storedOptions = instance.instanceFilePath ? (readInstanceOptions(instance.instanceFilePath) || {}) : {};
+      const storedInput = instance.instanceFilePath ? (readInstanceOptions(instance.instanceFilePath) || {}) : {};
+      const storedOptions: InstanceFileFields = hasInstanceFields(storedInput) ? storedInput : {};
       const passwordProtected = storedOptions.hasUiPassword === true
-        || (typeof storedOptions.uiPassword === 'string' && storedOptions.uiPassword.trim().length > 0);
+        || (isString(storedOptions.uiPassword) && storedOptions.uiPassword.trim().length > 0);
 
       return {
         runtime: instance.source === 'probe' ? 'unmanaged' : 'cli',

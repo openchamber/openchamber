@@ -1,6 +1,6 @@
 import { buildLocalUrl } from './cli-network.js';
 import { readDesktopLocalClientTokenFromSettings, readDesktopLocalPortFromSettings } from './cli-paths.js';
-import { getInstanceFilePath, readInstanceOptions } from './cli-process.js';
+import { getInstanceFilePath, readInstanceOptions, hasInstanceFields } from './cli-process.js';
 import type { CliOptions } from './cli-args.js';
 
 export interface JsonRequestOptions extends Pick<Partial<CliOptions>, 'explicitUiPassword' | 'uiPassword'> {
@@ -77,7 +77,7 @@ async function resolveUiPasswordForPort(port: number, options: JsonRequestOption
     return options.uiPassword;
   }
   const instanceOptions = readInstanceOptions(await getInstanceFilePath(port));
-  if (isHttpText(instanceOptions?.uiPassword) && instanceOptions.uiPassword.trim().length > 0) {
+  if (hasInstanceFields(instanceOptions) && isHttpText(instanceOptions.uiPassword) && instanceOptions.uiPassword.trim().length > 0) {
     return instanceOptions.uiPassword;
   }
   return options.uiPassword !== undefined && options.uiPassword.trim().length > 0
