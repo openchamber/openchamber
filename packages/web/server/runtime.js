@@ -116,7 +116,7 @@ import { resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.j
 import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
 import { createChatDirectoryCleanupRuntime } from './lib/chat-directories/runtime.js';
 import { createUnregisteredScheduledWorktreeBridge } from './lib/scheduled-tasks/worktree-bridge.js';
-import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
+import { createServerStartupRuntime } from './lib/server-frame/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/tunnels/tunnel-wiring-runtime.js';
 import { createStartupPipelineRuntime } from './lib/opencode/startup-pipeline-runtime.js';
 import { createHiddenSessionRegistry } from './lib/opencode/hidden-sessions.js';
