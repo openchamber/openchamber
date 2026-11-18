@@ -1416,7 +1416,8 @@ const clearSessionNotifications = (sessionId) => {
   const ids = deliveredNotificationIdsBySession.get(sessionId);
   if (!ids) return;
   deliveredNotificationIdsBySession.delete(sessionId);
-  Notification.remove(ids);
+  // Notification.remove is Electron 44+; see setZoomMode in createBrowserWindow.
+  if (typeof Notification.remove === 'function') Notification.remove(ids);
 };
 
 const getNativeNotificationClaimKey = (payload) => {
@@ -2866,7 +2867,15 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
 
   // The app scales itself (View > Zoom changes the interface scale), so
   // Chromium's page zoom from pinch or Ctrl+wheel stays off.
-  browserWindow.webContents.setZoomMode('disabled');
+  // setZoomMode is Electron 44+. On an older runtime (a packager that
+  // supplies its own Electron) the call threw before the window was shown,
+  // leaving a black app, so fall back to resetting the zoom factor.
+  if (typeof browserWindow.webContents.setZoomMode === 'function') {
+    browserWindow.webContents.setZoomMode('disabled');
+  } else {
+    browserWindow.webContents.setZoomFactor(1);
+    browserWindow.webContents.on('zoom-changed', () => browserWindow.webContents.setZoomFactor(1));
+  }
   attachRendererRecovery(browserWindow, { log, label: 'window' });
   attachDevWindowTape(app, browserWindow);
 
