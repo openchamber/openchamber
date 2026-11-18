@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
+import { directoryEnvironment } from './test-support/directoryEnvironment';
+
+const environment = directoryEnvironment({ home: '/workspace', fakeTimers: false });
 
 const activeProjectPath = '/workspace/project-with-agents-skills';
 
@@ -8,7 +11,6 @@ let runtimeFetchImpl: (url: string, init?: RequestInit) => Promise<Response> = a
     headers: { 'Content-Type': 'application/json' },
   })
 );
-let getDirectoryImpl: () => string | undefined = () => undefined;
 type Policy = { resource: string; effect: 'allow' | 'deny'; path: string | null };
 let policiesImpl: () => Promise<Policy[]> = async () => [];
 
@@ -17,56 +19,24 @@ const runtimeFetchMock = async (url: string, init?: RequestInit) => {
   return runtimeFetchImpl(url, init);
 };
 
-mock.module('@/lib/opencode/client', () => ({
-  opencodeClient: {
-    getDirectory: () => getDirectoryImpl(),
-    checkHealth: async () => true,
-    getIntegrationPolicies: () => policiesImpl(),
-  },
-}));
-
-mock.module('@/stores/useProjectsStore', () => ({
-  useProjectsStore: {
-    getState: () => ({
-      getActiveProject: () => ({ path: activeProjectPath }),
-    }),
-  },
-}));
-
-mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: runtimeFetchMock,
-}));
-
-mock.module('@/lib/background-network', () => ({
-  runBackgroundNetworkTask: async <T,>(task: () => Promise<T>) => task(),
-}));
-
-mock.module('@/lib/configUpdate', () => ({
-  startConfigUpdate: mock(() => undefined),
-  finishConfigUpdate: mock(() => undefined),
-  updateConfigUpdateMessage: mock(() => undefined),
-}));
-
-mock.module('@/lib/configSync', () => ({
-  emitConfigChange: mock(() => undefined),
-  scopeMatches: mock(() => false),
-  subscribeToConfigChanges: mock(() => () => undefined),
-}));
-
-mock.module('./utils/safeStorage', () => ({
-  createDeferredSafeJSONStorage: () => ({
-    getItem: async () => null,
-    setItem: async () => undefined,
-    removeItem: async () => undefined,
-  }),
-}));
+environment.respond(async (url, init) => {
+  if (url.pathname.startsWith('/api/config/skills') || url.pathname === '/api/config/skill-switch') return runtimeFetchMock(`${url.pathname}${url.search}`, init);
+  if (url.pathname === '/api/config') {
+    const policies = await policiesImpl();
+    return Response.json([...policies].reverse().map((policy) => ({ type: 'document', path: policy.path, info: { policies: [{ action: 'integration.use', resource: policy.resource, effect: policy.effect }] } })));
+  }
+  if (url.pathname === '/api/fs/home') return Response.json({ home: '/workspace', chatsRoot: '/workspace/chats' });
+  throw new Error(`Unexpected request: ${url}`);
+});
+const { useProjectsStore } = await import('./useProjectsStore');
+useProjectsStore.setState({ projects: [{ id: 'project', path: activeProjectPath }], activeProjectId: 'project' });
 
 const { invalidateSkillsLoadCache, selectAvailableSkillsForDirectory, selectSkillsLoadedForDirectory, useSkillsStore } = await import('./useSkillsStore');
 
 describe('useSkillsStore directory resolution', () => {
   beforeEach(() => {
+    useProjectsStore.setState({ projects: [{ id: 'project', path: activeProjectPath }], activeProjectId: 'project' });
     runtimeFetchCalls = [];
-    getDirectoryImpl = () => undefined;
     policiesImpl = async () => [];
     runtimeFetchImpl = async () => new Response(JSON.stringify({
       skills: [{
@@ -347,7 +317,10 @@ describe('useSkillsStore directory resolution', () => {
     expect(await useSkillsStore.getState().setSkillEnabled(skill, false, directory)).toBe(true);
     const switchCall = runtimeFetchCalls.at(-1);
     expect(switchCall?.url).toContain(`/api/config/skill-switch?directory=${encodeURIComponent(directory)}`);
-    expect(switchCall?.headers).toEqual({ 'Content-Type': 'application/json', 'x-opencode-directory': directory });
+    const headers = new Headers(switchCall?.headers);
+    expect(headers.get('Content-Type')).toBe('application/json');
+    expect(headers.get('x-opencode-directory-encoding')).toBe('uri');
+    expect(decodeURIComponent(headers.get('x-opencode-directory') ?? '')).toBe(directory);
   });
 
   test('statements never read are unknown, not empty, and the next load asks again', async () => {

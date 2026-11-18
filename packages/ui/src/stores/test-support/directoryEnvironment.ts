@@ -2,7 +2,7 @@ import { afterAll, jest, spyOn } from 'bun:test';
 import { Window } from 'happy-dom';
 import type { DesktopSettings } from '@/lib/desktop';
 
-export function directoryEnvironment(options: { home?: string; lastDirectory?: string; vscode?: boolean } = {}) {
+export function directoryEnvironment(options: { home?: string; lastDirectory?: string; vscode?: boolean; fakeTimers?: boolean } = {}) {
   const browser = new Window({ url: 'https://local.test/' });
   const globals = ['window', 'document', 'navigator', 'location', 'localStorage', 'CustomEvent'] as const;
   const previous = new Map(globals.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
@@ -12,16 +12,19 @@ export function directoryEnvironment(options: { home?: string; lastDirectory?: s
   if (options.home) Object.assign(browser, { __OPENCHAMBER_HOME__: options.home });
   if (options.vscode) Object.assign(browser, { __VSCODE_CONFIG__: { workspaceFolder: '', workspaceFolders: [] } });
   if (options.lastDirectory) browser.localStorage.setItem('lastDirectory', options.lastDirectory);
-  jest.useFakeTimers();
+  if (options.fakeTimers !== false) jest.useFakeTimers();
 
   const settingsWrites: Array<{ runtimeKey: string; changes: DesktopSettings }> = [];
   let settings: DesktopSettings = {};
+  const cleanups: Array<() => void> = [];
+  let settingsResponse: ((url: URL, init?: RequestInit) => Promise<Response>) | null = null;
   let respond: (url: URL, init?: RequestInit) => Promise<Response> = async (url) => {
     throw new Error(`Unexpected request: ${url}`);
   };
   const fetch = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), browser.location.href);
     if (url.pathname === '/api/config/settings') {
+      if (settingsResponse) return settingsResponse(url, init);
       if (init?.method === 'PUT' || init?.method === 'PATCH') {
         const changes = JSON.parse(String(init.body));
         settingsWrites.push({ runtimeKey: url.hostname, changes });
@@ -35,8 +38,9 @@ export function directoryEnvironment(options: { home?: string; lastDirectory?: s
   });
 
   afterAll(() => {
+    for (const cleanup of cleanups) cleanup();
     fetch.mockRestore();
-    jest.useRealTimers();
+    if (options.fakeTimers !== false) jest.useRealTimers();
     for (const key of globals) {
       const descriptor = previous.get(key);
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
@@ -48,10 +52,12 @@ export function directoryEnvironment(options: { home?: string; lastDirectory?: s
   return {
     storage: browser.localStorage,
     settingsWrites,
+    cleanup(handler: () => void) { cleanups.push(handler); },
+    respondSettings(handler: NonNullable<typeof settingsResponse>) { settingsResponse = handler; },
     respond(handler: typeof respond) { respond = handler; },
     async settle() {
       for (let step = 0; step < 40; step += 1) await Promise.resolve();
-      jest.advanceTimersByTime(300);
+      if (options.fakeTimers !== false) jest.advanceTimersByTime(300);
       for (let step = 0; step < 40; step += 1) await Promise.resolve();
     },
   };
