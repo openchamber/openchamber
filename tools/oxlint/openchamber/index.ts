@@ -1,4 +1,5 @@
 import { eslintCompatPlugin } from "@oxlint/plugins";
+import { gatekeeperStandardLibraryRule } from "./rules/gatekeeper-standard-library.ts";
 
 import { noAppImportsInOpencodeRule } from "./rules/no-app-imports-in-opencode.ts";
 import { noCommentsRule } from "./rules/no-comments.ts";
@@ -23,6 +24,7 @@ import { serverJsSpecifiersRule } from "./rules/server-js-specifiers.ts";
 const openchamberPlugin = eslintCompatPlugin({
   meta: { name: "openchamber" },
   rules: {
+    "gatekeeper-standard-library": gatekeeperStandardLibraryRule,
     "no-app-imports-in-opencode": noAppImportsInOpencodeRule,
     "no-comments": noCommentsRule,
     "no-cross-runtime-imports": noCrossRuntimeImportsRule,
