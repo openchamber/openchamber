@@ -259,6 +259,13 @@ The SDK contract still prevents a behavior-preserving TypeScript conversion:
   `extension-channels.ts` forwards the notification. Both contracts belong to
   the SDK, outside the server-only type corrections allowed for this conversion.
 
+`GuestNotificationKind` is a type alias derived from the runtime kind list, so
+module augmentation cannot add `share-answer`. Exporting a server type or
+converting a helper cannot change `NotificationsProviderInputs.notify` either.
+Dropping or relabeling the notification would change delivery behavior. The
+remaining implementation therefore stays JavaScript until the SDK contract
+admits the kind already sent by this runtime.
+
 ### Why channel results follow their schemas
 
 Provider responses use the SDK schemas' inferred result types. Verification
