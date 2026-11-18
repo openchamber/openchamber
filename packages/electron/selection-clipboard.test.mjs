@@ -1,61 +1,18 @@
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
-import { registerHooks } from 'node:module';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { installNativeElectron } from './test-support/native-electron.mjs';
 
-const handlers = new Map();
-const clipboard = {};
-const app = Object.assign(new EventEmitter(), {
-  isPackaged: false,
-  isDefaultProtocolClient: () => true,
-  getAppPath: () => '',
-  getPath: () => '/tmp/opencode/selection-clipboard-test',
-  getVersion: () => '2.7.2',
-  whenReady: () => new Promise(() => {}),
-});
-const electron = {
-  app,
-  BrowserWindow: Object.assign(class {}, { fromWebContents: () => null, getAllWindows: () => [] }),
-  clipboard,
-  ipcMain: Object.assign(new EventEmitter(), {
-    handle: (channel, handler) => handlers.set(channel, handler),
-  }),
-  ClipboardItem: class {}, dialog: {}, globalShortcut: {}, Menu: {}, MessageChannelMain: class {},
-  nativeTheme: {}, net: {}, Notification: class {}, powerMonitor: {}, powerSaveBlocker: {},
-  protocol: {}, screen: {}, session: {}, shell: {}, webContents: {}, Tray: class {}, nativeImage: {},
-};
-const log = {
-  initialize() {},
-  transports: { file: { getFile: () => { throw new Error('no log file'); } }, console: {} },
-  functions: {}, info() {}, warn() {}, debug() {}, error() {},
-};
-globalThis.selectionClipboardTestEdges = { electron, log };
-const hooks = registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier === 'electron' || specifier === 'electron-log/main.js') {
-      return { url: `selection-clipboard-test:${specifier}`, shortCircuit: true };
-    }
-    return nextResolve(specifier, { ...context, conditions: [...context.conditions, 'openchamber-source'] });
-  },
-  load(url, context, nextLoad) {
-    if (url === 'selection-clipboard-test:electron') {
-      return { format: 'module', shortCircuit: true, source: `
-        const electron = globalThis.selectionClipboardTestEdges.electron;
-        export default electron;
-        ${Object.keys(electron).map((key) => `export const ${key} = electron.${key};`).join('\n')}
-      ` };
-    }
-    if (url === 'selection-clipboard-test:electron-log/main.js') {
-      return { format: 'module', shortCircuit: true,
-        source: 'export default globalThis.selectionClipboardTestEdges.log;' };
-    }
-    return nextLoad(url, context);
-  },
-});
+const directory = mkdtempSync(path.join(os.tmpdir(), 'oc-selection-'));
+const dataDirectory = process.env.OPENCHAMBER_DATA_DIR;
+process.env.OPENCHAMBER_DATA_DIR = directory;
+const { handlers, electron: { clipboard }, hooks } = installNativeElectron({ directory });
 await import('../web/scripts/register-server-sources.mjs');
 const cwd = process.cwd();
 const resourcesPath = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
-Object.defineProperty(process, 'resourcesPath', { value: '/tmp/opencode', configurable: true });
+Object.defineProperty(process, 'resourcesPath', { value: directory, configurable: true });
 try {
   await import('./main.mjs');
 } finally {
@@ -63,7 +20,10 @@ try {
   if (resourcesPath) Object.defineProperty(process, 'resourcesPath', resourcesPath);
   else delete process.resourcesPath;
   hooks.deregister();
-  delete globalThis.selectionClipboardTestEdges;
+  delete globalThis.nativeElectronTestEdges;
+  rmSync(directory, { recursive: true, force: true });
+  if (dataDirectory === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+  else process.env.OPENCHAMBER_DATA_DIR = dataDirectory;
 }
 const invokeHandler = handlers.get('openchamber:invoke');
 const createInvoke = (selection, platform = 'linux') => async (_window, command, args) => {
@@ -106,5 +66,6 @@ test('invalid text and unsupported platforms never write PRIMARY', async () => {
   const selection = { writeText: () => assert.fail('unexpected write') };
   assert.equal(await createInvoke(selection)(null, 'desktop_clipboard_write_selection', { text: 42 }), false);
   assert.equal(await createInvoke(selection, 'darwin')(null, 'desktop_clipboard_write_selection', { text: 'text' }), false);
+  assert.equal(await createInvoke(selection, 'win32')(null, 'desktop_clipboard_write_selection', { text: 'text' }), false);
   assert.equal(await createInvoke(undefined)(null, 'desktop_clipboard_write_selection', { text: 'text' }), false);
 });
