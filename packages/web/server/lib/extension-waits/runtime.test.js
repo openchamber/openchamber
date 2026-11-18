@@ -300,6 +300,43 @@ describe('createExtensionWaitsRuntime', () => {
       .rejects.toMatchObject({ status: 400, message: 'args must be an object' });
   });
 
+  it('keeps explicit undefined optional arguments in memory and omits them on the wire and disk', async () => {
+    const dataDir = await makeDataDir();
+    const catalog = [guest({
+      waits: [{ id: 'timer', title: 'Timer', description: 'An optional note', params: { note: { type: 'string' } }, interval: 10_000 }],
+    })];
+    const first = await createRuntime({ dataDir, catalog });
+    const started = await first.runtime.startWait({
+      sessionID: SESSION, directory: DIRECTORY, source: 'wait-kit/timer', args: { note: undefined },
+    });
+    expect(Object.hasOwn(started.waiting.args, 'note')).toBe(true);
+    expect(Object.hasOwn(first.runtime.snapshot().waits[0].args, 'note')).toBe(true);
+    expect(first.service.calls[0].body.wait.args).toEqual({});
+    const stored = JSON.parse(await fs.readFile(path.join(dataDir, 'extension-waits.json'), 'utf8'));
+    expect(stored.waits[0].args).toEqual({});
+    first.runtime.stop();
+    await first.runtime.flush();
+
+    const second = await createRuntime({ dataDir, catalog });
+    const restored = (await second.runtime.listWaits(SESSION)).waiting[0];
+    expect(restored.waitId).toBe(started.waiting.waitId);
+    expect(Object.hasOwn(restored.args, 'note')).toBe(false);
+  });
+
+  it('ignores check entries without a string id and still handles the matching outcome', async () => {
+    const service = createService({
+      check: (body) => ({
+        results: [null, false, 1, 'entry', [], {}, { id: 1 }, { id: null },
+          ...body.waits.map((wait) => ({ id: wait.id, fired: true, summary: 'Done' }))],
+      }),
+    });
+    const { runtime, openCode, advance } = await createRuntime({ service });
+    await runtime.startWait({ sessionID: SESSION, directory: DIRECTORY, source: 'wait-kit/timer', args: { seconds: 5 } });
+    await advance();
+    expect(await until(() => openCode.state.admitted.length === 1)).toBe(true);
+    expect(openCode.state.admitted[0]).toMatchObject({ metadata: { outcome: 'fired', summary: 'Done' } });
+  });
+
   it('refuses a wait past the cap instead of dropping one an agent still counts on', async () => {
     const { runtime } = await createRuntime();
     for (let session = 0; session < 10; session += 1) {

@@ -154,28 +154,26 @@ through the server they are connected to.
 
 ## Decisions
 
-### Why the runtime remains JavaScript
+### Why in-memory arguments follow the schema output
 
-`@openchamber/sdk/schemas` returns `string | number | boolean | undefined`
-values from `waitArgsSchema`, while the SDK's `GuestWaitArgs` and this
-runtime's persisted `argsSchema` allow only `string | number | boolean`.
-`parseArgs` passes the parsed object straight into the wait record. Converting
-that path requires resolving the SDK boundary first: rejecting or removing
-explicit undefined arguments changes behavior, and widening the stored
-contract hides the mismatch. The message helper uses the existing
-`GuestWaitArgs` contract.
+`WaitArgs` is the inferred output of the SDK's `waitArgsSchema`. An optional
+argument explicitly supplied as `undefined` stays an own property in memory.
+JSON serialization omits it from service requests and the stored file, whose
+unchanged `argsSchema` accepts only strings, numbers and booleans. The message
+helper uses the in-memory contract too. Claiming `GuestWaitArgs` at the parser
+would promise more than the schema checks.
 
-The remaining implementation is `runtime.js`. The outside symbols are
-`WaitArgSchema` and `waitArgsSchema` in `packages/sdk/src/waits-schemas.ts`,
-and `GuestWaitArgs` in `packages/sdk/src/waits.ts`. For example,
-`waitArgsSchema({ note: { type: 'string' } }).parse({ note: undefined })`
-returns an object with an own `note` property whose value is `undefined`.
-This is accepted data, not just an imprecise return annotation.
-The SDK must reconcile that output with `GuestWaitArgs` before this runtime
-can use the persisted argument contract unchanged: either the schema must
-produce only `string | number | boolean` values, or `GuestWaitArgs` must
-include `undefined` and the persistence contract must account for it.
-Neither change belongs to this folder's conversion.
+Arguments may arrive as JSON text from the agent. Parsing that text before
+the argument schema preserves the same validation for object and text inputs.
+
+### Why provider admission does not promise a service contribution
+
+`isWaitProvider` checks enablement, wait declarations and approval. It does not
+check `service`, so its narrowed type keeps that field optional, matching
+`GuestRecord`. The injected proxy request describes exactly what the runtime
+passes, including a potentially absent service; the service implementation owns
+that request's failure. The SDK wire argument types and the guest proxy's
+required service parameter remain unchanged.
 
 ### Why the host checks and the service answers
 

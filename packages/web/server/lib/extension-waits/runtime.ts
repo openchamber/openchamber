@@ -20,6 +20,13 @@ import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { createMessageId } from '../dispatch-results/runtime.js';
 import { EXTENSION_WAIT_SOURCE, buildWakeMessage, subjectOf } from './wake-message.js';
+import type { GuestWaitParam, WaitContribution } from '@openchamber/sdk';
+import type { GuestRecord } from '../guests/contracts.js';
+import type { proxyGuestServiceRequest } from '../guests/service.js';
+import type { Application, Response } from '../shared/http-contracts.js';
+import type { SessionActivityOptions } from '../opencode/session-activity.js';
+import type { PrWatchEventHub } from '../pr-watch/runtime.js';
+import type { WaitArgs, WakingWait } from './wake-message.js';
 
 export { EXTENSION_WAIT_SOURCE };
 
@@ -45,7 +52,7 @@ const TIMER = {
   title: 'Timer',
   description: 'Wakes the session once the given number of minutes has passed',
   params: { minutes: { type: 'number', description: `Whole minutes, 1 to ${TIMER_MINUTES_MAX}`, required: true } },
-};
+} satisfies PublicWaitSource;
 
 const ENDED_REASONS = {
   unavailable: 'the extension was paused or removed, or its approval to wake sessions was withdrawn',
@@ -87,26 +94,121 @@ const deletedEventSchema = z.object({
   properties: z.object({ sessionID: z.string().min(1) }),
 });
 
-const parse = (schema, value) => {
+type Wait = Omit<z.output<typeof waitSchema>, 'args'> & { args: WaitArgs };
+type WaitProvider = GuestRecord & { waits: WaitContribution[] };
+type WaitTimer = ReturnType<typeof setTimeout>;
+type Release = () => void;
+type ProxyRequest = Omit<Parameters<typeof proxyGuestServiceRequest>[0], 'service'> & { service: GuestRecord['service'] };
+type WaitServiceBody = { v: number; requestId: string } & (
+  { wait: { id: string; type: string; args: WaitArgs; session: { id: string; directory: string | null } } }
+  | { waits: Pick<Wait, 'id' | 'type' | 'args' | 'state'>[] }
+);
+type OpenCodeRequestHeaders = { Accept: string; 'Content-Type'?: string };
+
+export interface PublicWait {
+  waitId: string;
+  sessionID: string;
+  directory: string | null;
+  source: string;
+  extension: string;
+  title: string;
+  label: string | null;
+  args: WaitArgs;
+  startedAt: number;
+  status: 'waking' | 'waiting';
+}
+
+export interface PublicWaitSource {
+  source: string;
+  extension: string;
+  title: string;
+  description: string;
+  params: Record<string, GuestWaitParam>;
+}
+
+export interface ExtensionWaitsSnapshot {
+  revision: number;
+  waits: PublicWait[];
+}
+
+export interface StartWaitInput {
+  sessionID: unknown;
+  directory: string | null | undefined;
+  source: unknown;
+  args: unknown;
+}
+
+export interface StopWaitInput {
+  sessionID: unknown;
+  waitId?: unknown;
+}
+
+export interface ExtensionWaitsOptions extends Pick<SessionActivityOptions, 'buildOpenCodeUrl' | 'getOpenCodeAuthHeaders'> {
+  listGuests: () => Promise<GuestRecord[]>;
+  proxyServiceRequest: (request: ProxyRequest) => ReturnType<typeof proxyGuestServiceRequest>;
+  persistPath: string;
+  dataDir: string;
+  broadcastUiEvent?: ((event: {
+    type: 'openchamber:extension-waits.updated';
+    properties: ExtensionWaitsSnapshot & { sessionID: string };
+  }) => void) | null;
+  isSessionArchived?: (sessionID: string) => boolean | Promise<boolean>;
+  insideSpace?: boolean;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+  createId?: () => string;
+  timers?: { setTimeout: (callback: () => void, delay: number) => WaitTimer; clearTimeout: (timer: WaitTimer) => void };
+  quietMs?: number;
+  retryDelayMs?: (failures: number) => number;
+  warn?: (...args: unknown[]) => void;
+}
+
+type Admission = {
+  sessionID: string;
+  directory: StartWaitInput['directory'];
+  guest: WaitProvider;
+  type: WaitContribution;
+  typeId: string;
+  args: WaitArgs;
+  release: Release;
+};
+
+const isFailureObject = (value: unknown): value is object => value !== null
+  && (typeof value === 'object' || typeof value === 'function');
+const hasFailureMessage = (value: unknown): value is { message: unknown } => isFailureObject(value) && 'message' in value;
+const hasFailureCode = (value: unknown): value is { code: string } => isFailureObject(value)
+  && 'code' in value && typeof value.code === 'string';
+const hasFailureStatus = (value: unknown): value is { status: unknown } => isFailureObject(value) && 'status' in value;
+const failureMessage = (cause: unknown) => hasFailureMessage(cause) ? cause.message : undefined;
+const failureCode = (cause: unknown) => hasFailureCode(cause) ? cause.code : undefined;
+const failureStatus = (cause: unknown) => hasFailureStatus(cause) ? cause.status : undefined;
+const isInteger = (value: unknown): value is number => Number.isInteger(value);
+const isTextInput = (value: unknown): value is string => typeof value === 'string';
+const isWakingWait = (wait: Wait): wait is Wait & WakingWait => Boolean(wait.wake);
+const hasCheckId = (value: unknown): value is { id: string } => value !== null
+  && typeof value === 'object' && 'id' in value && typeof value.id === 'string';
+
+const parse = <S extends z.ZodType>(schema: S, value: Parameters<S['safeParse']>[0]): z.output<S> | null => {
   const parsed = schema.safeParse(value);
   return parsed.success ? parsed.data : null;
 };
 
-const parseJson = (text) => {
+const parseJson = (text: string) => {
   try {
-    return JSON.parse(text);
+    const value: unknown = JSON.parse(text);
+    return value;
   } catch {
     return undefined;
   }
 };
 
-const httpError = (message, status) => Object.assign(new Error(message), { status });
+const httpError = (message: string, status: number) => Object.assign(new Error(message), { status });
 
-const retryDelay = (failures) => Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(failures - 1, 0), RETRY_MAX_DELAY_MS);
+const retryDelay = (failures: number) => Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(failures - 1, 0), RETRY_MAX_DELAY_MS);
 
-export const isWaitProvider = (guest) => {
+export const isWaitProvider = (guest: GuestRecord | null | undefined): guest is WaitProvider => {
   const granted = Array.isArray(guest?.capabilityGrants) ? guest.capabilityGrants : [];
-  return Boolean(guest)
+  return !!guest
     && guest.enabled !== false
     && Array.isArray(guest.waits)
     && guest.waits.length > 0
@@ -115,13 +217,13 @@ export const isWaitProvider = (guest) => {
     && isGuestApproved({ requested: requestedGuestCapabilities(guest), granted });
 };
 
-const isTimer = (wait) => wait.guestId === null;
+const isTimer = (wait: Wait) => wait.guestId === null;
 
-const sourceOf = (wait) => (isTimer(wait) ? TIMER_SOURCE : `${wait.guestId}/${wait.type}`);
+const sourceOf = (wait: Wait) => (isTimer(wait) ? TIMER_SOURCE : `${wait.guestId}/${wait.type}`);
 
-const minutesText = (minutes) => (minutes === 1 ? '1 minute' : `${minutes} minutes`);
+const minutesText = (minutes: WaitArgs[string]) => (minutes === 1 ? '1 minute' : `${minutes} minutes`);
 
-const toPublicWait = (wait) => ({
+const toPublicWait = (wait: Wait): PublicWait => ({
   waitId: wait.id,
   sessionID: wait.sessionID,
   directory: wait.directory,
@@ -134,7 +236,7 @@ const toPublicWait = (wait) => ({
   status: wait.wake ? 'waking' : 'waiting',
 });
 
-const toPublicSource = (guest, wait) => ({
+const toPublicSource = (guest: WaitProvider, wait: WaitContribution): PublicWaitSource => ({
   source: `${guest.id}/${wait.id}`,
   extension: guest.name || guest.id,
   title: wait.title,
@@ -161,27 +263,27 @@ export function createExtensionWaitsRuntime({
   quietMs = QUIET_MS,
   retryDelayMs = retryDelay,
   warn = (...args) => console.warn(...args),
-}) {
+}: ExtensionWaitsOptions) {
   const filePath = path.join(dataDir, FILE_NAME);
-  const waits = new Map();
+  const waits = new Map<string, Wait>();
   let revision = 0;
-  let loadPromise = null;
+  let loadPromise: Promise<void> | null = null;
   let writePromise = Promise.resolve();
   let stopped = false;
   const controller = new AbortController();
-  let checkTimer = null;
-  const checking = new Set();
-  const checkFailures = new Map();
-  const wakeTimers = new Map();
-  const delivering = new Set();
-  const deferred = new Set();
-  const deliveryFailures = new Map();
-  const reservations = new Map();
+  let checkTimer: WaitTimer | null = null;
+  const checking = new Set<string>();
+  const checkFailures = new Map<string, number>();
+  const wakeTimers = new Map<string, WaitTimer>();
+  const delivering = new Set<string>();
+  const deferred = new Set<string>();
+  const deliveryFailures = new Map<string, number>();
+  const reservations = new Map<string, number>();
   let reservedTotal = 0;
 
-  const waitsOf = (sessionID) => Array.from(waits.values()).filter((wait) => wait.sessionID === sessionID);
-  const hasWake = (sessionID) => waitsOf(sessionID).some((wait) => wait.wake);
-  const isCurrent = (wait) => !stopped && waits.get(wait.id) === wait;
+  const waitsOf = (sessionID: string) => Array.from(waits.values()).filter((wait) => wait.sessionID === sessionID);
+  const hasWake = (sessionID: string) => waitsOf(sessionID).some((wait) => wait.wake);
+  const isCurrent = (wait: Wait) => !stopped && waits.get(wait.id) === wait;
 
 
   const readFile = async () => {
@@ -199,7 +301,7 @@ export function createExtensionWaitsRuntime({
       warn(`[extension-waits] file was unreadable and moved to ${backup}`);
       return { waits: [], revision: 0 };
     }
-    const restored = stored.waits.map((value) => parse(waitSchema, value)).filter(Boolean);
+    const restored = stored.waits.map((value) => parse(waitSchema, value)).filter((wait) => wait !== null);
     return { waits: restored, revision: stored.revision ?? 0 };
   };
 
@@ -226,17 +328,17 @@ export function createExtensionWaitsRuntime({
     await fs.promises.rename(tmpPath, filePath);
   };
 
-  const enqueue = (step) => {
+  const enqueue = <T>(step: () => Promise<T>) => {
     const run = writePromise.then(step);
     writePromise = run.then(() => undefined, (error) => {
-      warn('[extension-waits] failed to persist waits:', error?.message ?? error);
+      warn('[extension-waits] failed to persist waits:', failureMessage(error) ?? error);
     });
     return run;
   };
 
   const persist = () => enqueue(writeWaits);
 
-  const broadcast = (sessionIDs) => {
+  const broadcast = (sessionIDs: string[]) => {
     for (const sessionID of new Set(sessionIDs)) {
       broadcastUiEvent?.({
         type: 'openchamber:extension-waits.updated',
@@ -245,7 +347,7 @@ export function createExtensionWaitsRuntime({
     }
   };
 
-  const commit = async (...sessionIDs) => {
+  const commit = async (...sessionIDs: string[]) => {
     revision += 1;
     try {
       await persist();
@@ -254,7 +356,7 @@ export function createExtensionWaitsRuntime({
     }
   };
 
-  const mutate = (apply, sessionIDs = []) => enqueue(async () => {
+  const mutate = (apply: () => Release | null, sessionIDs: string[] = []) => enqueue(async () => {
     const undo = apply();
     if (!undo) return false;
     revision += 1;
@@ -270,7 +372,7 @@ export function createExtensionWaitsRuntime({
     return true;
   });
 
-  const snapshot = () => ({ revision, waits: Array.from(waits.values(), toPublicWait) });
+  const snapshot = (): ExtensionWaitsSnapshot => ({ revision, waits: Array.from(waits.values(), toPublicWait) });
 
 
   const listProviders = async () => {
@@ -278,7 +380,7 @@ export function createExtensionWaitsRuntime({
     return new Map((Array.isArray(guests) ? guests : []).filter(isWaitProvider).map((guest) => [guest.id, guest]));
   };
 
-  const ask = async (guest, requestPath, body) => {
+  const ask = async (guest: WaitProvider, requestPath: string, body: WaitServiceBody) => {
     let answer;
     try {
       answer = await proxyServiceRequest({
@@ -297,8 +399,8 @@ export function createExtensionWaitsRuntime({
         responseMax: RESPONSE_MAX,
       });
     } catch (error) {
-      const unavailable = UNAVAILABLE_CODES.has(error?.code);
-      throw Object.assign(httpError(`The extension's service could not be reached: ${error?.message ?? error}`, unavailable ? 503 : 502), { unavailable });
+      const unavailable = UNAVAILABLE_CODES.has(failureCode(error) ?? '');
+      throw Object.assign(httpError(`The extension's service could not be reached: ${failureMessage(error) ?? error}`, unavailable ? 503 : 502), { unavailable });
     }
     if (answer.status !== 200) throw httpError(`The extension's service answered HTTP ${answer.status}`, 502);
     return parseJson(answer.body);
@@ -316,19 +418,19 @@ export function createExtensionWaitsRuntime({
     if (next === Infinity) return;
     checkTimer = timers.setTimeout(() => {
       checkTimer = null;
-      runChecks().catch((error) => warn('[extension-waits] checks failed:', error?.message ?? error));
+      runChecks().catch((error) => warn('[extension-waits] checks failed:', failureMessage(error) ?? error));
     }, Math.max(0, next - now()));
     checkTimer.unref?.();
   };
 
-  const endWaits = (ending, reason) => {
+  const endWaits = (ending: Wait[], reason: string) => {
     for (const wait of ending) {
       if (!isCurrent(wait) || wait.wake) continue;
       wait.wake = { outcome: 'ended', summary: reason, messageID: null };
     }
   };
 
-  const checkType = async (guest, type, due) => {
+  const checkType = async (guest: WaitProvider, type: WaitContribution, due: Wait[]) => {
     const key = `${guest.id}/${type.id}`;
     const interval = resolveWaitInterval(type);
     for (let start = 0; start < due.length; start += WAITS_CHECK_BATCH_MAX) {
@@ -346,7 +448,7 @@ export function createExtensionWaitsRuntime({
       } catch (error) {
         const failures = (checkFailures.get(key) ?? 0) + 1;
         checkFailures.set(key, failures);
-        if (failures === 1) warn(`[extension-waits] ${key}: a check failed (${error?.message ?? error}); trying again later`);
+        if (failures === 1) warn(`[extension-waits] ${key}: a check failed (${failureMessage(error) ?? error}); trying again later`);
         const delay = Math.min(interval * 2 ** failures, CHECK_BACKOFF_MAX_MS);
         for (const wait of batch) {
           if (!isCurrent(wait)) continue;
@@ -360,7 +462,7 @@ export function createExtensionWaitsRuntime({
       for (const wait of batch) wait.failingSince = null;
       const byId = new Map(batch.map((wait) => [wait.id, wait]));
       for (const entry of parsed.data.results) {
-        const wait = byId.get(entry !== null && typeof entry === 'object' ? entry.id : undefined);
+        const wait = hasCheckId(entry) ? byId.get(entry.id) : undefined;
         if (!wait || !isCurrent(wait) || wait.wake) continue;
         const outcome = waitCheckOutcomeSchema.safeParse(entry);
         if (!outcome.success) {
@@ -394,7 +496,7 @@ export function createExtensionWaitsRuntime({
     scheduleChecks();
   }
 
-  const checkDue = async (dueWaits) => {
+  const checkDue = async (dueWaits: Wait[]) => {
     for (const wait of dueWaits) {
       if (isTimer(wait)) wait.wake = { outcome: 'fired', summary: `${minutesText(wait.args.minutes)} passed.`, messageID: null };
     }
@@ -404,22 +506,26 @@ export function createExtensionWaitsRuntime({
     try {
       providers = await listProviders();
     } catch (error) {
-      warn('[extension-waits] the extension catalog could not be read:', error?.message ?? error);
+      warn('[extension-waits] the extension catalog could not be read:', failureMessage(error) ?? error);
       for (const wait of due) wait.nextCheckAt = now() + 60_000;
       return;
     }
-    const groups = new Map();
-    const unavailable = [];
-    const dropped = [];
+    const groups = new Map<string, { guest: WaitProvider; type: WaitContribution; waits: Wait[] }>();
+    const unavailable: Wait[] = [];
+    const dropped: Wait[] = [];
     for (const wait of due) {
-      const guest = providers.get(wait.guestId);
+      const guest = wait.guestId === null ? undefined : providers.get(wait.guestId);
       const type = guest?.waits.find((entry) => entry.id === wait.type);
       if (!guest) unavailable.push(wait);
       else if (!type) dropped.push(wait);
       else {
         const key = sourceOf(wait);
-        if (!groups.has(key)) groups.set(key, { guest, type, waits: [] });
-        groups.get(key).waits.push(wait);
+        let group = groups.get(key);
+        if (!group) {
+          group = { guest, type, waits: [] };
+          groups.set(key, group);
+        }
+        group.waits.push(wait);
       }
     }
     endWaits(unavailable, ENDED_REASONS.unavailable);
@@ -428,9 +534,12 @@ export function createExtensionWaitsRuntime({
   };
 
 
-  const openCodeRequest = async (fetchPath, { method = 'GET', body } = {}) => {
-    const headers = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
-    const init = { method, headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) };
+  const openCodeRequest = async (fetchPath: string, { method = 'GET', body }: {
+    method?: string;
+    body?: ReturnType<typeof buildWakeMessage> & { id: string; delivery: 'steer'; resume: true };
+  } = {}) => {
+    const headers: OpenCodeRequestHeaders = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
+    const init: RequestInit = { method, headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) };
     if (body) {
       headers['Content-Type'] = 'application/json';
       init.body = JSON.stringify(body);
@@ -446,26 +555,27 @@ export function createExtensionWaitsRuntime({
 
   const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: FETCH_TIMEOUT_MS, fetchImpl });
 
-  const clearWakeTimer = (sessionID) => {
+  const clearWakeTimer = (sessionID: string) => {
     const timer = wakeTimers.get(sessionID);
     if (timer) timers.clearTimeout(timer);
     wakeTimers.delete(sessionID);
   };
 
-  const arm = (sessionID, delayMs = quietMs) => {
+  const arm = (sessionID: string, delayMs = quietMs) => {
     if (stopped || !hasWake(sessionID)) return;
     clearWakeTimer(sessionID);
     const timer = timers.setTimeout(() => {
       wakeTimers.delete(sessionID);
-      deliver(sessionID).catch((error) => warn('[extension-waits] wake failed:', error?.message ?? error));
+      deliver(sessionID).catch((error) => warn('[extension-waits] wake failed:', failureMessage(error) ?? error));
     }, Math.max(0, delayMs));
     timer.unref?.();
     wakeTimers.set(sessionID, timer);
   };
 
-  const drop = async (...ending) => {
-    if (ending.length === 0) return;
-    const { sessionID } = ending[0];
+  const drop = async (...ending: Wait[]) => {
+    const [first] = ending;
+    if (!first) return;
+    const { sessionID } = first;
     let removed;
     try {
       removed = await mutate(() => {
@@ -490,26 +600,26 @@ export function createExtensionWaitsRuntime({
     scheduleChecks();
   };
 
-  const retry = (wait, reason) => {
+  const retry = (wait: Wait, cause: unknown): Promise<void> | undefined => {
     if (!isCurrent(wait)) return undefined;
     const count = (deliveryFailures.get(wait.id) ?? 0) + 1;
     deliveryFailures.set(wait.id, count);
     if (count >= MAX_DELIVERY_FAILURES) {
-      warn(`[extension-waits] giving up waking ${wait.sessionID}: ${reason}`);
+      warn(`[extension-waits] giving up waking ${wait.sessionID}: ${cause}`);
       return drop(wait);
     }
     arm(wait.sessionID, retryDelayMs(count));
     return undefined;
   };
 
-  const settle = (wait, ...ending) => drop(...ending).catch((error) => retry(wait, `the wait could not be removed: ${error?.message ?? error}`));
+  const settle = (wait: Wait, ...ending: Wait[]) => drop(...ending).catch((error) => retry(wait, `the wait could not be removed: ${failureMessage(error) ?? error}`));
 
-  async function deliver(sessionID) {
+  async function deliver(sessionID: string) {
     if (delivering.has(sessionID)) {
       deferred.add(sessionID);
       return;
     }
-    const wait = waitsOf(sessionID).find((entry) => entry.wake);
+    const wait = waitsOf(sessionID).find(isWakingWait);
     if (stopped || !wait) return;
     delivering.add(sessionID);
     try {
@@ -520,7 +630,7 @@ export function createExtensionWaitsRuntime({
     }
   }
 
-  async function attemptWake(wait) {
+  async function attemptWake(wait: Wait & WakingWait) {
     const { sessionID } = wait;
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!isCurrent(wait)) return undefined;
@@ -541,7 +651,7 @@ export function createExtensionWaitsRuntime({
           };
         });
       } catch (error) {
-        return retry(wait, `the wake could not be saved: ${error?.message ?? error}`);
+        return retry(wait, `the wake could not be saved: ${failureMessage(error) ?? error}`);
       }
       if (!isCurrent(wait) || !wait.wake.messageID) return undefined;
     }
@@ -551,46 +661,47 @@ export function createExtensionWaitsRuntime({
         body: { id: wait.wake.messageID, ...buildWakeMessage(wait, sourceOf(wait), isTimer(wait)), delivery: 'steer', resume: true },
       });
     } catch (error) {
-      if (error?.status !== 409 && error?.status !== 404) return retry(wait, error?.message ?? String(error));
+      if (failureStatus(error) !== 409 && failureStatus(error) !== 404) return retry(wait, failureMessage(error) ?? String(error));
     }
     return settle(wait, wait);
   }
 
 
-  const requireSession = (rawSessionID, action) => {
+  const requireSession = (rawSessionID: StartWaitInput['sessionID'], action: string) => {
     const sessionID = parse(sessionIdSchema, rawSessionID);
     if (!sessionID) throw httpError(`${action} must be called from a session`, 400);
     return sessionID;
   };
 
-  const listWaits = async (rawSessionID) => {
+  const listWaits = async (rawSessionID: StartWaitInput['sessionID']) => {
     const sessionID = requireSession(rawSessionID, 'wait.list');
     await load();
     let providers;
     try {
       providers = await listProviders();
     } catch (error) {
-      throw httpError(`The extension catalog could not be read: ${error?.message ?? error}`, 503);
+      throw httpError(`The extension catalog could not be read: ${failureMessage(error) ?? error}`, 503);
     }
-    const sources = insideSpace ? [] : [{ ...TIMER, params: { ...TIMER.params } }];
+    const sources: PublicWaitSource[] = insideSpace ? [] : [{ ...TIMER, params: { ...TIMER.params } }];
     for (const guest of providers.values()) for (const wait of guest.waits) sources.push(toPublicSource(guest, wait));
     return { waiting: waitsOf(sessionID).map(toPublicWait), sources };
   };
 
-  const startWait = async ({ sessionID: rawSessionID, directory, source, args: rawArgs }) => {
+  const startWait = async ({ sessionID: rawSessionID, directory, source, args: rawArgs }: StartWaitInput) => {
     if (insideSpace) throw httpError('Waits are not available inside an isolated space', 400);
     const sessionID = requireSession(rawSessionID, 'wait.start');
-    const name = typeof source === 'string' ? source.trim() : '';
+    const name = isTextInput(source) ? source.trim() : '';
     if (name === TIMER_SOURCE) return startTimer({ sessionID, directory, rawArgs });
     const match = /^([a-z][a-z0-9-]*)\/([a-z][a-z0-9-]*)$/.exec(name);
     if (!match) throw httpError('source must be "timer", or "<extension>/<wait>" as wait.list names it', 400);
-    const [, guestId, typeId] = match;
+    const guestId = match[1] ?? '';
+    const typeId = match[2] ?? '';
     await load();
     let providers;
     try {
       providers = await listProviders();
     } catch (error) {
-      throw httpError(`The extension catalog could not be read: ${error?.message ?? error}`, 503);
+      throw httpError(`The extension catalog could not be read: ${failureMessage(error) ?? error}`, 503);
     }
     const guest = providers.get(guestId);
     const type = guest?.waits.find((entry) => entry.id === typeId);
@@ -604,25 +715,24 @@ export function createExtensionWaitsRuntime({
     }
   };
 
-  const parseArgs = (params, rawArgs) => {
-    // external: #4591 some models send a nested object as JSON text.
-    const given = typeof rawArgs === 'string' ? parseJson(rawArgs) ?? rawArgs : rawArgs;
+  const parseArgs = (params: Record<string, GuestWaitParam> | undefined, rawArgs: StartWaitInput['args']) => {
+    const given = isTextInput(rawArgs) ? parseJson(rawArgs) ?? rawArgs : rawArgs;
     const args = waitArgsSchema(params).safeParse(given ?? {});
     if (!args.success) throw httpError(args.error.issues[0]?.message ?? 'args do not match the wait\'s params', 400);
     return args.data;
   };
 
-  const startTimer = async ({ sessionID, directory, rawArgs }) => {
+  const startTimer = async ({ sessionID, directory, rawArgs }: { sessionID: string; directory: StartWaitInput['directory']; rawArgs: unknown }) => {
     const args = parseArgs(TIMER.params, rawArgs);
     const { minutes } = args;
-    if (!Number.isInteger(minutes) || minutes < 1 || minutes > TIMER_MINUTES_MAX) {
+    if (!isInteger(minutes) || minutes < 1 || minutes > TIMER_MINUTES_MAX) {
       throw httpError(`minutes must be a whole number from 1 to ${TIMER_MINUTES_MAX}`, 400);
     }
     await load();
     const release = reserve(sessionID);
     try {
       const startedAt = now();
-      const record = {
+      const record: Wait = {
         id: `wait_${createId()}`,
         sessionID,
         directory: directory || null,
@@ -644,7 +754,7 @@ export function createExtensionWaitsRuntime({
     }
   };
 
-  const reserve = (sessionID) => {
+  const reserve = (sessionID: string) => {
     const held = reservations.get(sessionID) ?? 0;
     if (waitsOf(sessionID).length + held >= MAX_WAITS_PER_SESSION) {
       throw httpError(`This session already waits on ${MAX_WAITS_PER_SESSION} things; stop one with wait.stop first`, 409);
@@ -663,7 +773,7 @@ export function createExtensionWaitsRuntime({
     };
   };
 
-  const admitWait = async ({ sessionID, directory, guest, type, typeId, args, release }) => {
+  const admitWait = async ({ sessionID, directory, guest, type, typeId, args, release }: Admission) => {
     const id = `wait_${createId()}`;
     const body = await ask(guest, WAITS_START_PATH, {
       v: WAITS_WIRE_VERSION,
@@ -678,7 +788,7 @@ export function createExtensionWaitsRuntime({
     }
     if (!answer.data.ok) throw httpError(`The extension refused the wait: ${answer.data.error}`, 400);
 
-    const record = {
+    const record: Wait = {
       id,
       sessionID,
       directory: directory || null,
@@ -697,7 +807,7 @@ export function createExtensionWaitsRuntime({
     return keepWait(record, release, `A message arrives in this session when ${subjectOf(record)} fires: ${type.description}. One wake ends the wait. End your turn now if you have nothing else to do; never wait with a sleep loop.`);
   };
 
-  const keepWait = async (record, release, next) => {
+  const keepWait = async (record: Wait, release: Release, next: string) => {
     try {
       await mutate(() => {
         release();
@@ -707,13 +817,13 @@ export function createExtensionWaitsRuntime({
         };
       }, [record.sessionID]);
     } catch (error) {
-      throw httpError(`OpenChamber could not save the wait, so it is not waiting: ${error?.message ?? error}`, 500);
+      throw httpError(`OpenChamber could not save the wait, so it is not waiting: ${failureMessage(error) ?? error}`, 500);
     }
     scheduleChecks();
     return { waiting: toPublicWait(record), next };
   };
 
-  const stopWaits = async (rawSessionID, waitId) => {
+  const stopWaits = async (rawSessionID: StopWaitInput['sessionID'], waitId?: StopWaitInput['waitId']) => {
     const sessionID = requireSession(rawSessionID, 'wait.stop');
     await load();
     const every = waitId === undefined || waitId === null || waitId === '';
@@ -722,7 +832,7 @@ export function createExtensionWaitsRuntime({
     try {
       await drop(...ending);
     } catch (error) {
-      throw httpError(`OpenChamber could not save the stop, so the wait goes on: ${error?.message ?? error}`, 500);
+      throw httpError(`OpenChamber could not save the stop, so the wait goes on: ${failureMessage(error) ?? error}`, 500);
     }
     return { waiting: waitsOf(sessionID).map(toPublicWait), stopped: ending.length };
   };
@@ -737,8 +847,11 @@ export function createExtensionWaitsRuntime({
       return;
     }
     const pending = Array.from(waits.values()).filter((wait) => !wait.wake && !isTimer(wait));
-    const unavailable = pending.filter((wait) => !providers.has(wait.guestId));
-    const dropped = pending.filter((wait) => providers.get(wait.guestId) && !providers.get(wait.guestId).waits.some((entry) => entry.id === wait.type));
+    const unavailable = pending.filter((wait) => wait.guestId === null || !providers.has(wait.guestId));
+    const dropped = pending.filter((wait) => {
+      const guest = wait.guestId === null ? undefined : providers.get(wait.guestId);
+      return guest && !guest.waits.some((entry) => entry.id === wait.type);
+    });
     if (unavailable.length === 0 && dropped.length === 0) return;
     endWaits(unavailable, ENDED_REASONS.unavailable);
     endWaits(dropped, ENDED_REASONS.dropped);
@@ -748,7 +861,7 @@ export function createExtensionWaitsRuntime({
     scheduleChecks();
   };
 
-  const processPayload = (payload) => {
+  const processPayload = (payload: Parameters<typeof statusEventSchema.safeParse>[0]) => {
     if (stopped) return;
     const deleted = parse(deletedEventSchema, payload);
     if (deleted) {
@@ -760,7 +873,7 @@ export function createExtensionWaitsRuntime({
     if (hasWake(status.properties.sessionID)) arm(status.properties.sessionID);
   };
 
-  const start = (globalEventHub) => {
+  const start = (globalEventHub?: PrWatchEventHub | null) => {
     const unsubscribeEvent = globalEventHub?.subscribeEvent((event) => {
       for (const payload of event?.translated?.() ?? []) processPayload(payload);
     });
@@ -773,7 +886,7 @@ export function createExtensionWaitsRuntime({
         scheduleChecks();
         for (const wait of waits.values()) if (wait.wake) arm(wait.sessionID);
       })
-      .catch((error) => warn('[extension-waits] failed to load waits:', error?.message ?? error));
+      .catch((error) => warn('[extension-waits] failed to load waits:', failureMessage(error) ?? error));
     return () => {
       unsubscribeEvent?.();
       unsubscribeStatus?.();
@@ -804,9 +917,10 @@ export function createExtensionWaitsRuntime({
   };
 }
 
-export function registerExtensionWaitsRoutes(app, runtime) {
-  const respondError = (res, error, fallback) => {
-    res.status(Number.isInteger(error?.status) ? error.status : 500).json({ error: error?.message ?? fallback });
+export function registerExtensionWaitsRoutes(app: Application, runtime: ReturnType<typeof createExtensionWaitsRuntime>) {
+  const respondError = (res: Response, cause: unknown, fallback: string) => {
+    const status = failureStatus(cause);
+    res.status(isInteger(status) ? status : 500).json({ error: failureMessage(cause) ?? fallback });
   };
 
   app.get('/api/extension-waits', async (_req, res) => {
@@ -820,7 +934,7 @@ export function registerExtensionWaitsRoutes(app, runtime) {
 
   app.delete('/api/extension-waits/sessions/:sessionID', async (req, res) => {
     try {
-      const waitId = typeof req.query.waitId === 'string' ? req.query.waitId : undefined;
+      const waitId = isTextInput(req.query.waitId) ? req.query.waitId : undefined;
       res.json(await runtime.stopWaits(req.params.sessionID, waitId));
     } catch (error) {
       respondError(res, error, 'Failed to stop waiting');
