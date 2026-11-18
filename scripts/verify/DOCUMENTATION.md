@@ -250,7 +250,7 @@ A leftover Git lock or damaged metadata can prevent ordinary cleanup. Rebuilding
 
 ### Why Git scenarios wait for completed actions
 
-Staging can leave Commit disabled while the index refreshes. A branch header can update before branch creation finishes and closes its form. Apply restores a stashed file before its refresh finishes and re-enables Pop. The scenarios wait for enabled actions and for the creation form to disappear before the next action, so faster steps in a warmed-up run cannot click a disabled button or close a picker that is still completing creation.
+Staging can leave Commit disabled while the index refreshes. A branch header can update before branch creation finishes and closes its form. Creating a stash shows its row before Apply is re-enabled, and Apply restores a stashed file before its refresh finishes and re-enables Pop. The scenarios wait for enabled actions and for the creation form to disappear before the next action, so faster steps in a warmed-up run cannot click a disabled button or close a picker that is still completing creation.
 
 ### Why prompt history waits for its caret
 
