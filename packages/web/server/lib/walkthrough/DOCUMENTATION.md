@@ -30,7 +30,7 @@ has to ask for it.
 - `model-settings.ts` — the feature's own model override.
 - `languages.ts` — the languages the prose may be written in.
 - `index.js` — orchestration.
-- `routes.js` — `/api/walkthrough*`.
+- `routes.ts` — `/api/walkthrough*`.
 
 ## What a walkthrough says
 
@@ -628,13 +628,23 @@ The remaining JavaScript has unresolved contracts:
   JSON without establishing the `{ patch: string, meta }` result consumed here.
   That result must be established by the source-control reader. The file reader
   only passes its result through and can retain its JSON type.
-- `source-control/provider-descriptors.js` exposes an untyped
-  `sourceControlProviderDescriptors.get` result. The registry must establish
-  `ProviderDescriptor | null` before consumers can rely on its capability,
-  terminology and reference-prefix fields.
-- `routes.js` requires Express declarations, which this checkout does not have.
-  Adding a dependency or a local replacement declaration is outside the folder's
-  conversion scope.
+
+Routes use the shared HTTP contracts and the source-control module's
+`ProviderReadContext`. The lazy service contract retains the implementation's
+inferred results. It does not strengthen unchecked service responses, source
+descriptors or error fields. Optional revision and previous-path fields accept
+explicit `undefined` because the routes supply those keys even when absent.
+
+### Why route guards leave fields unchecked
+
+Body, source and error guards establish only the object being accessed and, for
+PR prevalidation, the `kind` discriminator. Arrays and functions retain their
+property reads. Field checks remain where the original routes made them:
+directory, model and language strings, provider/model schemas, repository owner,
+revision and finite error budgets. Other source validation still belongs to
+`parseSource`, after bound-context validation. Non-PR sources pass through
+unchanged, and error logging retains the original thrown value, including
+primitives.
 
 ### Why previous walkthroughs keep their JSON type
 
