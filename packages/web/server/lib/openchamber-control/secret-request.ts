@@ -13,7 +13,7 @@ interface SecretInput {
   placeholder?: unknown;
 }
 
-interface SecretAnswerInput {
+export interface SecretAnswerInput {
   sessionId?: unknown;
   callId?: unknown;
   declined?: unknown;

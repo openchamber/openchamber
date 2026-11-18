@@ -12,7 +12,7 @@ type CheckContext = z.infer<typeof checkContextSchema>;
 type PrNode = z.infer<typeof prNodeSchema>;
 type SummaryEntry = { kind: 'pull' | 'issue' | 'discussion'; ref: SummaryRef };
 type PrSummary = NonNullable<ReturnType<typeof toSummary>>;
-interface PullSummary {
+export interface PullSummary {
   owner: string; repo: string; number: number; state: string; draft: boolean; title: string; headSha: string; base: string;
   mergeable: boolean | null; mergeableState: string | null; isInMergeQueue: boolean;
   mergeQueueEntry: PrNode['mergeQueueEntry']; autoMergeRequest: PrNode['autoMergeRequest'];

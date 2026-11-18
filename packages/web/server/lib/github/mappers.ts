@@ -23,22 +23,22 @@ interface ProjectInput {
   owner: string; repo: string; url?: unknown; cloneUrl?: unknown; sshUrl?: unknown; defaultBranch?: unknown;
   defaultBranchSha?: unknown; remoteName?: unknown;
 }
-interface Project extends Identity {
+export interface Project extends Identity {
   id: string; owner: string; name: string; url: string;
   cloneUrl?: string; sshUrl?: string; defaultBranch?: string; defaultBranchSha?: string | null; remoteName?: string | null;
 }
 interface Label { name: string; color?: string }
-interface ChangeRequest extends Identity {
+export interface ChangeRequest extends Identity {
   id: string; number: number; project: Project; title: string; url: string; state: string; draft: boolean;
   base: string | undefined; head: string | undefined; body: string; headSha?: string; author?: User;
   createdAt?: string; updatedAt?: string; headLabel?: string; headProject?: Project | null;
   mergeable?: boolean | null; mergeableState?: string | null; labels?: Label[];
 }
-interface IssueDTO extends Identity {
+export interface IssueDTO extends Identity {
   id: string; number: number; project: Project; title: string; url: string; state: string; body: string; author: User | null;
   labels: Label[]; assignees?: User[]; createdAt?: string; updatedAt?: string;
 }
-interface CommentDTO extends Identity {
+export interface CommentDTO extends Identity {
   id: string; url: string; body: string; author: User | null; createdAt?: string; updatedAt?: string;
 }
 interface FileDTO { path: string; status: string; additions: number; deletions: number; changes: number; patch?: string }
@@ -55,7 +55,7 @@ interface CheckRunDTO extends Identity {
   output?: { title: string | undefined; summary: string | undefined; text: string | undefined };
   job?: WorkflowJob; annotations?: ReturnType<typeof mapAnnotations>;
 }
-interface CI {
+export interface CI {
   summary: Pick<ChecksSummary, 'state' | 'total' | 'success' | 'failure' | 'pending'> & Partial<Pick<ChecksSummary, 'inProgress' | 'queued' | 'startedAt'>>;
   runs?: CheckRunDTO[];
 }
