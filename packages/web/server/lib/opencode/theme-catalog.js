@@ -2,7 +2,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { parse } from 'jsonc-parser';
 import { z } from 'zod';
-import { openThemeArchive } from './theme-archive.js';
+import { openThemeArchive } from '../appearance/theme-archive.js';
 
 const identifier = z.string().min(1).max(160).regex(/^[\w-]+$/);
 const version = z.string().min(1).max(80).regex(/^[\w.+-]+$/);
