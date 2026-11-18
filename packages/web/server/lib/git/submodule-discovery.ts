@@ -134,6 +134,7 @@ export function parseSubmoduleManifest({ gitmodulesConfig, gitlinks, recursionDe
   const seenPaths = new Set<string>();
   const modules = [];
   for (const entry of entries.values()) {
+    if (entry.path === undefined) continue;
     const commit = gitlinksByPath.get(entry.path);
     if (!commit) continue;
     if (entry.url === undefined) throw manifestError(`Submodule ${entry.name} is incomplete`);
