@@ -5,12 +5,36 @@ import { getOctokitForAccountId, getOctokitForHost } from './octokit.js';
 import { resolveGitHubRepoFromDirectory } from './repo/index.js';
 import { resolveRepoNetwork } from './repo/fork-detection.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
+import type { SourceControlIdentity } from './octokit.js';
+import type { GitHubEnvelope } from './contracts.js';
 
+interface Repository { owner: string; repo: string }
+export interface ChangeRequestPatchInput {
+  session?: { accountId: string };
+  directory: string;
+  remote: string;
+  number: number;
+  sourceRepo?: Repository | null;
+  linked?: boolean;
+}
+export interface ChangeRequestFileInput extends ChangeRequestPatchInput {
+  path: string;
+  previousPath?: string;
+  status?: string;
+  binary?: boolean;
+}
+export interface ChangeRequestPatchDependencies {
+  resolveGitHubRepoFromDirectory?: typeof resolveGitHubRepoFromDirectory;
+  resolveRepoNetwork?: typeof resolveRepoNetwork;
+  getOctokitForHost?: typeof getOctokitForHost;
+  getOctokitForAccountId?: typeof getOctokitForAccountId;
+  onAccountUnavailable?: (identity: SourceControlIdentity) => void | Promise<void>;
+}
 
-const sameRepository = (left, right) => left.owner.toLowerCase() === right.owner.toLowerCase()
+const sameRepository = (left: Repository, right: Repository) => left.owner.toLowerCase() === right.owner.toLowerCase()
   && left.repo.toLowerCase() === right.repo.toLowerCase();
 
-async function resolvePullRequestRepo({ session, directory, remote, number, sourceRepo = null, linked = false }, dependencies) {
+async function resolvePullRequestRepo({ session, directory, remote, number, sourceRepo = null, linked = false }: ChangeRequestPatchInput, dependencies: ChangeRequestPatchDependencies) {
   const resolveRepository = dependencies.resolveGitHubRepoFromDirectory ?? resolveGitHubRepoFromDirectory;
   const { repo } = await resolveRepository(directory, remote);
   if (!repo?.owner || !repo?.repo) {
@@ -43,7 +67,7 @@ async function resolvePullRequestRepo({ session, directory, remote, number, sour
 
   if (linked && sourceRepo) return { octokit: account.octokit, repo: { owner: sourceRepo.owner, repo: sourceRepo.repo } };
 
-  let target = repo;
+  let target: Repository = repo;
   if (sourceRepo && !sameRepository(sourceRepo, repo)) {
     const resolveNetwork = dependencies.resolveRepoNetwork ?? resolveRepoNetwork;
     const network = await resolveNetwork(account.octokit, directory, remote, { strictErrors: true });
@@ -59,9 +83,9 @@ async function resolvePullRequestRepo({ session, directory, remote, number, sour
   return { octokit: account.octokit, repo: { owner: target.owner, repo: target.repo } };
 }
 
-export async function readGitHubChangeRequestPatch(input, dependencies = {}) {
+export async function readGitHubChangeRequestPatch(input: ChangeRequestPatchInput, dependencies: ChangeRequestPatchDependencies = {}) {
   const { octokit, repo: target } = await resolvePullRequestRepo(input, dependencies);
-  const response = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
+  const response: { data: unknown } = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
     owner: target.owner,
     repo: target.repo,
     pull_number: input.number,
@@ -73,38 +97,41 @@ export async function readGitHubChangeRequestPatch(input, dependencies = {}) {
 
 const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
 
-export async function readGitHubChangeRequestFile(input, dependencies = {}) {
+function assertFileText(content: unknown): asserts content is string {
+  assert.equal(typeof content, 'string', 'GitHub returned invalid file contents');
+}
+
+export async function readGitHubChangeRequestFile(input: ChangeRequestFileInput, dependencies: ChangeRequestPatchDependencies = {}) {
   const { path, previousPath, status, binary } = input;
   const { octokit, repo } = await resolvePullRequestRepo(input, dependencies);
   const pull = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
     owner: repo.owner, repo: repo.repo, pull_number: input.number,
   });
-  const headSha = pull.data?.head?.sha;
-  const baseSha = pull.data?.base?.sha;
+  const headSha: unknown = pull.data?.head?.sha;
+  const baseSha: unknown = pull.data?.base?.sha;
   assert.match(String(headSha), /^[0-9a-f]{40}$/, 'GitHub returned an invalid pull request head');
   assert.match(String(baseSha), /^[0-9a-f]{40}$/, 'GitHub returned an invalid pull request base');
   const compare = await octokit.request('GET /repos/{owner}/{repo}/compare/{basehead}', {
     owner: repo.owner, repo: repo.repo, basehead: `${baseSha}...${headSha}`,
   });
-  const mergeBaseSha = compare.data?.merge_base_commit?.sha;
+  const mergeBaseSha: unknown = compare.data?.merge_base_commit?.sha;
   assert.match(String(mergeBaseSha), /^[0-9a-f]{40}$/, 'GitHub returned an invalid merge base');
 
-  // external: https://docs.github.com/en/rest/repos/contents#get-repository-content The contents API omits content above 1 MB; blobs supply base64 bytes.
-  const readDocument = async (filePath, ref) => {
+  const readDocument = async (filePath: string, ref: GitHubEnvelope['data']) => {
     const entry = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', { owner: repo.owner, repo: repo.repo, path: filePath, ref });
     const blob = await octokit.request('GET /repos/{owner}/{repo}/git/blobs/{file_sha}', { owner: repo.owner, repo: repo.repo, file_sha: entry.data?.sha });
     assert.ok(blob.data?.encoding === 'base64', 'GitHub returned invalid file contents');
     return documentDataUrl(Buffer.from(blob.data.content, 'base64'));
   };
 
-  const readFile = async (filePath, ref) => {
+  const readFile = async (filePath: string, ref: GitHubEnvelope['data']) => {
     if (binary) return readDocument(filePath, ref);
-    const response = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
+    const response: { data: unknown } = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
       owner: repo.owner, repo: repo.repo, path: filePath, ref,
       headers: { accept: 'application/vnd.github.raw+json' },
     });
     const content = response.data;
-    assert.equal(typeof content, 'string', 'GitHub returned invalid file contents');
+    assertFileText(content);
     if (Buffer.byteLength(content) > MAX_FULL_FILE_BYTES) {
       throw Object.assign(new Error('This file is too large to show in full'), { statusCode: 413, code: 'file-too-large' });
     }

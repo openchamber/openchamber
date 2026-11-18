@@ -341,18 +341,27 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
   optional independently of `kind` and `state`. Its owner must expose the
   successful merge-receipt variant before the follow hook can rely on those
   fields without new checks.
-- `change-request-patch.js` checks raw diff text with Node's `assert.match`.
-  `@types/node:assert.match` accepts an already-typed string and returns `void`;
-  it cannot validate and narrow an unknown raw response with the same call.
-  That declaration would need to accept unknown and assert string. Declaring
-  Octokit's unchecked media-dependent response to be a string would conceal the
-  boundary.
-  The contents endpoint also returns either a collection or an entry. Its
-  unchecked `entry.data?.sha` goes straight to the blob endpoint's required
-  `file_sha`; replacing that access with `in` changes the null-response failure.
 
 The nested repository-network helper now supplies its host and its
 `origin`/`upstream` source union.
+
+### Why patch text is unknown until the existing assertions pass
+
+Octokit's response depends on the requested media type. Diff and raw file
+responses enter as unknown values. The local Node declaration lets
+`assert.match` express its existing runtime string validation. File text uses
+the original `assert.equal(typeof content, 'string', message)` in an assertion
+function, preserving its error code, actual value and expected value.
+The contents lookup still forwards `entry.data?.sha` directly to the blob
+endpoint. A missing SHA and a null contents response retain their existing
+failure behavior. The contents API omits content above 1 MB, so binary reads
+use the blob's base64 bytes.
+Commit references keep the unchecked provider-envelope type: the SHA assertions
+validate `String(ref)`, while the contents endpoint still receives the original
+value. A string declaration would promise more than those assertions check.
+The exact-account lookup retains an absent session's undefined account id.
+`RegExp.exec` coerces that value to text at runtime; its local overload admits
+the existing call without replacing it or changing the optional session input.
 
 ### Why rate-limit fields remain unchecked
 
