@@ -18,7 +18,7 @@ Small Model is worth waking.
   it. Every patch is decided against the record at write time.
 - `membership.ts` — which sessions can be in work and which ones the block
   shows.
-- `runtime.js` — `createSessionWorkRuntime`: `processPayload` (a sent message,
+- `runtime.ts` — `createSessionWorkRuntime`: `processPayload` (a sent message,
   a turn start), `evaluateTurnEnd` (called by session assist), `stop`.
 
 ## State
@@ -72,26 +72,25 @@ Question wording and thresholds remain unchanged.
 The runtime keeps comparing `sessionWorkEnabled` to `false` and
 `sessionReviewOfferEnabled` to `true` without treating file values as booleans.
 
-`../session-assist/context.js` infers turn `changedFiles` and `assistant` as
-`null` even though collection fills them. `loadAssistContext` needs to describe
-`changedFiles` as a nullable set of snapshot file paths and `assistant` as a
-nullable parsed message. Its successful result also needs to express that
-`turns` has a final turn with a non-null assistant, as its existing completion
-checks establish. Earlier turns may still have no assistant. The current
-inference makes the runtime's `changedFiles.size` branch `never` and its final
-`assistant.text` access nullable. Typing this runtime requires those owners to
-describe their existing results; local casts or new rejection paths would hide
-the mismatch or change behavior.
+`runtime.ts` owns its injected settings, metadata callbacks, event directory
+envelope and turn-end input contracts. Event discriminators, session ids, user
+roles and timestamps remain parsed by Zod. The directory comes from the internal
+event hub or its directory hint; the SDK session read also retains the legacy
+optional `directory` fallback. SDK reads, Jev answers, metadata writes, archive
+state and background activity remain separate failure boundaries.
 
-`../session-assist/contracts.ts` already declares `AssistTurn` with the nullable
-set and assistant fields, but `loadAssistContext` does not use that contract.
-Its owner must type collection with `AssistTurn` and expose a successful
-`turns` result whose `at(-1)` returns an existing turn with a non-null assistant.
-A plain `AssistTurn[]` return, or a non-empty tuple alone, still leaves `at(-1)`
-possibly undefined and its assistant nullable. Until that boundary is typed, `runtime.js` remains
-JavaScript; its final-turn accesses cannot compile without additional runtime
-branches or assertions. A focused compile-time probe reproduces TS2339 on
-`changedFiles.size`, TS18048 on the final turn and TS18047 on its assistant.
+`loadAssistContext` returns `AssistContext` from
+`../session-assist/contracts.ts`. Its existing completion and assistant-id
+checks establish that `turns.at(-1)` exists and has an assistant. Earlier turns
+retain nullable assistants and snapshot file sets. The final-turn overload
+describes only the checked last entry; other indices remain optional.
+
+The bounded maps check iterator completion before eviction, so their values
+need no assertions. A missing timer is passed to `clearTimeout` as `undefined`;
+both it and the stored `null` mean no timer. Background jobs retain the array
+check because unavailable jobs must remain distinct from a successful empty
+list. Open retries still inspect the tagged rejection separately from Errors
+used for warning text.
 
 ## Invariants
 

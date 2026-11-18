@@ -10,6 +10,71 @@ import { buildTurnEndRequest, decideAssist, decideReviewReady, decideWrapUp } fr
 import { clearSuggestionPatch, offerReviewPatch, openPatch, readWork, suggestDonePatch } from './state.js';
 import { createWorkMembership } from './membership.js';
 import { sessionParentId } from '../session-lineage.js';
+import type { SessionMetadata } from '@opencode/client';
+import type { createSessionLineage } from '../session-lineage.js';
+import type { SessionActivityProbe, RunningSessionJob } from '../opencode/session-activity.js';
+import type { ClassifierEndpoint } from '../routing/classifier.js';
+import type { createJevClient } from '../routing/jev.js';
+import type { AssistTargets } from '../session-assist/contracts.js';
+import type { WorkMetadataPatch } from './state.js';
+
+type Client = ReturnType<typeof OpenCode.make>;
+type Session = Awaited<ReturnType<Client['session']['get']>> & { directory?: string };
+
+export interface SessionWorkOptions {
+  buildOpenCodeUrl: (route: string, query: string) => string;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+  getSettings?: () => { enabled: boolean; reviewOffer: boolean };
+  classifierEndpoint: () => Promise<ClassifierEndpoint | null>;
+  jev: Pick<ReturnType<typeof createJevClient>, 'ask'>;
+  readMetadata: (sessionId: string, directory: string) => Promise<SessionMetadata | null | undefined>;
+  updateMetadata: (
+    sessionId: string,
+    decide: (metadata: SessionMetadata | null | undefined) => WorkMetadataPatch | null,
+    options: { directory: string | undefined },
+  ) => Promise<{ changed: boolean }>;
+  isSessionArchived?: (sessionId: string) => Promise<boolean>;
+  isWorktreePinned?: (directory: string) => Promise<boolean>;
+  chatRoots?: string[];
+  lineage?: Pick<ReturnType<typeof createSessionLineage>, 'remember' | 'isChild'> | null;
+  activityProbe?: SessionActivityProbe | null;
+  now?: () => number;
+  openRetryDelaysMs?: number[];
+  doneHintDelayMs?: number;
+}
+
+interface OpenRequest {
+  sessionId: string;
+  directory: string;
+  createdAt: number;
+}
+
+interface PendingOpen extends OpenRequest {
+  failures: number;
+  timer: ReturnType<typeof setTimeout> | null;
+  inFlight: boolean;
+  restored: boolean;
+}
+
+interface HintRequest {
+  sessionId: string;
+  directory: string;
+  generation: number;
+}
+
+export interface WorkEvent {
+  properties?: { directory?: string };
+}
+
+export interface TurnEndInput {
+  sessionId: string;
+  directory: string;
+  assist: AssistTargets;
+}
+
+const isSessionNotFound = (error: unknown): error is { _tag: 'SessionNotFoundError' } =>
+  error != null && (typeof error === 'object' || typeof error === 'function')
+  && '_tag' in error && error._tag === 'SessionNotFoundError';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -33,8 +98,6 @@ const SEEN_MESSAGES_LIMIT = 500;
 const OPEN_RETRY_DELAYS_MS = [2_000, 10_000, 60_000];
 const DONE_HINT_DELAY_MS = 10 * 60_000;
 const BACKGROUND_SHELL_WAIT_MS = 30 * 60_000;
-
-const errorMessage = (error) => (error instanceof Error ? error.message : String(error));
 
 const userMessageSchema = z.object({
   type: z.literal('message.updated'),
@@ -81,64 +144,73 @@ export function createSessionWorkRuntime({
   now = Date.now,
   openRetryDelaysMs = OPEN_RETRY_DELAYS_MS,
   doneHintDelayMs = DONE_HINT_DELAY_MS,
-}) {
+}: SessionWorkOptions) {
   const { canBeInWork } = createWorkMembership({ chatRoots });
   let stopped = false;
-  const seenMessages = new Set();
-  const pendingOpens = new Map();
-  const suggested = new Map();
-  const turnGenerations = new Map();
+  const seenMessages = new Set<string>();
+  const pendingOpens = new Map<string, PendingOpen>();
+  const suggested = new Map<string, string>();
+  const turnGenerations = new Map<string, number>();
   let lastTurnGeneration = 0;
-  const pendingDoneHints = new Map();
-  const cancelDoneHint = (sessionId) => {
+  const pendingDoneHints = new Map<string, ReturnType<typeof setTimeout>>();
+  const cancelDoneHint = (sessionId: string) => {
     clearTimeout(pendingDoneHints.get(sessionId));
     pendingDoneHints.delete(sessionId);
   };
-  const turnGeneration = (sessionId) => turnGenerations.get(sessionId) ?? 0;
-  const advanceTurn = (sessionId) => {
+  const turnGeneration = (sessionId: string) => turnGenerations.get(sessionId) ?? 0;
+  const advanceTurn = (sessionId: string) => {
     cancelDoneHint(sessionId);
     lastTurnGeneration += 1;
     turnGenerations.delete(sessionId);
     turnGenerations.set(sessionId, lastTurnGeneration);
-    while (turnGenerations.size > SEEN_MESSAGES_LIMIT) turnGenerations.delete(turnGenerations.keys().next().value);
+    while (turnGenerations.size > SEEN_MESSAGES_LIMIT) {
+      const oldest = turnGenerations.keys().next();
+      if (!oldest.done) turnGenerations.delete(oldest.value);
+    }
   };
 
-  const openCodeClient = (directory) => {
+  const openCodeClient = (directory: string) => {
     const headers = { ...getOpenCodeAuthHeaders() };
     if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
     return OpenCode.make({ baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''), headers });
   };
 
-  const readPages = (client, sessionId, signal) => ({ limit, cursor }) => client.message.list(
+  const readPages = (client: Client, sessionId: string, signal: AbortSignal) => ({ limit, cursor }: { limit: number; cursor: string | undefined }) => client.message.list(
     { sessionID: sessionId, limit, ...(cursor ? { cursor } : { order: 'desc' }) },
     { signal },
   );
 
-  const workSession = async (client, sessionId, signal) => {
-    const session = await client.session.get({ sessionID: sessionId }, { signal });
+  const workSession = async (client: Client, sessionId: string, signal: AbortSignal) => {
+    const session: Session = await client.session.get({ sessionID: sessionId }, { signal });
     if (session?.id === sessionId) lineage?.remember(sessionId, sessionParentId(session));
     return session?.id === sessionId && canBeInWork(session) ? session : null;
   };
 
-  const eligibleSession = async (client, sessionId, signal) => {
+  const eligibleSession = async (client: Client, sessionId: string, signal: AbortSignal) => {
     const session = await workSession(client, sessionId, signal);
     return session && !(await isSessionArchived(sessionId)) ? session : null;
   };
 
-  const markSuggested = (sessionId, directory) => {
+  const markSuggested = (sessionId: string, directory: string) => {
     suggested.delete(sessionId);
     suggested.set(sessionId, directory);
-    while (suggested.size > SEEN_MESSAGES_LIMIT) suggested.delete(suggested.keys().next().value);
+    while (suggested.size > SEEN_MESSAGES_LIMIT) {
+      const oldest = suggested.keys().next();
+      if (!oldest.done) suggested.delete(oldest.value);
+    }
   };
 
-  const takeMessage = (messageId) => {
+  const takeMessage = (messageId: string) => {
     if (seenMessages.has(messageId)) return false;
     seenMessages.add(messageId);
-    while (seenMessages.size > SEEN_MESSAGES_LIMIT) seenMessages.delete(seenMessages.values().next().value);
+    while (seenMessages.size > SEEN_MESSAGES_LIMIT) {
+      const oldest = seenMessages.values().next();
+      if (!oldest.done) seenMessages.delete(oldest.value);
+    }
     return true;
   };
 
-  const tryOpen = async ({ sessionId, directory, createdAt }) => {
+  const tryOpen = async ({ sessionId, directory, createdAt }: OpenRequest) => {
     if (stopped || !getSettings().enabled) return 'settled';
     if (readWork(await readMetadata(sessionId, directory))?.state === 'open') return 'settled';
     const session = await workSession(openCodeClient(directory), sessionId, AbortSignal.timeout(READ_TIMEOUT_MS));
@@ -150,16 +222,16 @@ export function createSessionWorkRuntime({
     return 'settled';
   };
 
-  const dropPending = (pending) => {
-    clearTimeout(pending.timer);
+  const dropPending = (pending: PendingOpen) => {
+    clearTimeout(pending.timer ?? undefined);
     if (pendingOpens.get(pending.sessionId) === pending) pendingOpens.delete(pending.sessionId);
   };
 
-  const attemptOpen = async (pending) => {
+  const attemptOpen = async (pending: PendingOpen) => {
     pending.timer = null;
     pending.restored = false;
     pending.inFlight = true;
-    let outcome;
+    let outcome: unknown;
     try {
       outcome = await tryOpen(pending);
     } catch (error) {
@@ -175,10 +247,10 @@ export function createSessionWorkRuntime({
       if (pending.restored) void attemptOpen(pending);
       return;
     }
-    const gone = outcome?._tag === 'SessionNotFoundError';
+    const gone = isSessionNotFound(outcome);
     if (gone || pending.failures >= openRetryDelaysMs.length) {
       dropPending(pending);
-      console.warn('[session-work] gave up opening a session for a sent message:', errorMessage(outcome));
+      console.warn('[session-work] gave up opening a session for a sent message:', outcome instanceof Error ? outcome.message : String(outcome));
       return;
     }
     const delay = openRetryDelaysMs[pending.failures];
@@ -187,32 +259,35 @@ export function createSessionWorkRuntime({
     pending.timer.unref?.();
   };
 
-  const onUserMessage = ({ sessionId, directory, createdAt }) => {
+  const onUserMessage = ({ sessionId, directory, createdAt }: OpenRequest) => {
     if (!getSettings().enabled) return;
     const previous = pendingOpens.get(sessionId);
     if (previous) dropPending(previous);
-    const pending = { sessionId, directory, createdAt, failures: 0, timer: null, inFlight: false, restored: false };
+    const pending: PendingOpen = { sessionId, directory, createdAt, failures: 0, timer: null, inFlight: false, restored: false };
     pendingOpens.set(sessionId, pending);
-    while (pendingOpens.size > SEEN_MESSAGES_LIMIT) dropPending(pendingOpens.values().next().value);
+    while (pendingOpens.size > SEEN_MESSAGES_LIMIT) {
+      const oldest = pendingOpens.values().next();
+      if (!oldest.done) dropPending(oldest.value);
+    }
     void attemptOpen(pending);
   };
 
-  const onSessionRestored = (sessionId) => {
+  const onSessionRestored = (sessionId: string) => {
     const pending = pendingOpens.get(sessionId);
     if (!pending || pending.timer) return;
     if (pending.inFlight) pending.restored = true;
     else void attemptOpen(pending);
   };
 
-  const retireSuggestion = (sessionId) => {
+  const retireSuggestion = (sessionId: string) => {
     if (!suggested.has(sessionId)) return;
     const directory = suggested.get(sessionId);
     suggested.delete(sessionId);
     Promise.resolve(updateMetadata(sessionId, clearSuggestionPatch, { directory }))
-      .catch((error) => console.warn('[session-work] could not retire a hint:', errorMessage(error)));
+      .catch((error) => console.warn('[session-work] could not retire a hint:', error instanceof Error ? error.message : String(error)));
   };
 
-  const processPayload = (payload, directoryHint = '') => {
+  const processPayload = (payload: WorkEvent, directoryHint = '') => {
     if (stopped) return;
     const busy = busySchema.safeParse(payload);
     if (busy.success) {
@@ -248,7 +323,7 @@ export function createSessionWorkRuntime({
     });
   };
 
-  const writeHint = async ({ sessionId, directory, generation, patch }) => {
+  const writeHint = async ({ sessionId, directory, generation, patch }: HintRequest & { patch: typeof suggestDonePatch }) => {
     const { changed } = await updateMetadata(
       sessionId,
       (metadata) => (turnGeneration(sessionId) === generation ? patch(metadata, { now: now() }) : null),
@@ -257,23 +332,23 @@ export function createSessionWorkRuntime({
     if (changed) markSuggested(sessionId, directory);
   };
 
-  const scheduleDoneHint = ({ sessionId, directory, generation }) => {
+  const scheduleDoneHint = ({ sessionId, directory, generation }: HintRequest) => {
     if (turnGeneration(sessionId) !== generation) return;
     cancelDoneHint(sessionId);
     const timer = setTimeout(() => {
       pendingDoneHints.delete(sessionId);
       if (stopped) return;
       writeHint({ sessionId, directory, generation, patch: suggestDonePatch })
-        .catch((error) => console.warn('[session-work] could not write a done hint:', errorMessage(error)));
+        .catch((error) => console.warn('[session-work] could not write a done hint:', error instanceof Error ? error.message : String(error)));
     }, doneHintDelayMs);
     timer.unref?.();
     pendingDoneHints.set(sessionId, timer);
   };
 
-  const waitsOnBackground = async (sessionId, turnStartedAt) => {
+  const waitsOnBackground = async (sessionId: string, turnStartedAt: number) => {
     if (!activityProbe) return null;
     const jobs = await activityProbe.fetchRunningBackgroundJobs(sessionId);
-    const waitedOn = (job) => job.kind !== 'shell'
+    const waitedOn = (job: RunningSessionJob) => job.kind !== 'shell'
       || (job.startedAt >= turnStartedAt && now() - job.startedAt < BACKGROUND_SHELL_WAIT_MS);
     if (jobs?.some(waitedOn)) return true;
     const statuses = await activityProbe.fetchActiveSessionStatuses();
@@ -282,7 +357,7 @@ export function createSessionWorkRuntime({
     return Array.isArray(jobs) && children === false ? false : null;
   };
 
-  const evaluateTurnEnd = async ({ sessionId, directory, assist }) => {
+  const evaluateTurnEnd = async ({ sessionId, directory, assist }: TurnEndInput) => {
     if (stopped || lineage?.isChild(sessionId) === true) return null;
     const settings = getSettings();
     if (!settings.enabled && !settings.reviewOffer && !assist.recap && !assist.suggestion) return null;
@@ -325,7 +400,7 @@ export function createSessionWorkRuntime({
       const gate = decideAssist(answers);
       return background === true ? { ...gate, suggestion: false } : gate;
     } catch (error) {
-      console.warn('[session-work] turn-end check failed:', errorMessage(error));
+      console.warn('[session-work] turn-end check failed:', error instanceof Error ? error.message : String(error));
       return background === true && assist.suggestion ? { recap: true, suggestion: false } : null;
     }
   };
@@ -333,7 +408,7 @@ export function createSessionWorkRuntime({
   const stop = () => {
     stopped = true;
     seenMessages.clear();
-    for (const pending of pendingOpens.values()) clearTimeout(pending.timer);
+    for (const pending of pendingOpens.values()) clearTimeout(pending.timer ?? undefined);
     pendingOpens.clear();
     for (const timer of pendingDoneHints.values()) clearTimeout(timer);
     pendingDoneHints.clear();
