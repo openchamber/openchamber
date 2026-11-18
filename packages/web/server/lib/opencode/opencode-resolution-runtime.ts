@@ -1,4 +1,15 @@
-export const createOpenCodeResolutionRuntime = (dependencies) => {
+import { isString } from '../shared/object-guards.js';
+import type { OpenCodeEnvState, createOpenCodeEnvRuntime } from './env-runtime.js';
+import type path from 'node:path';
+
+export type OpenCodeResolutionDependencies = Pick<ReturnType<typeof createOpenCodeEnvRuntime>,
+  'resolveOpencodeCliPath' | 'applyOpencodeBinaryFromSettings' | 'ensureOpencodeCliEnv' | 'resolveManagedOpenCodeLaunchSpec'> & {
+  path: Pick<typeof path, 'dirname'>;
+  getResolvedState: () => OpenCodeEnvState;
+  setResolvedOpencodeBinarySource: (source: OpenCodeEnvState['resolvedOpencodeBinarySource']) => void;
+};
+
+export const createOpenCodeResolutionRuntime = (dependencies: OpenCodeResolutionDependencies) => {
   const {
     path,
     resolveOpencodeCliPath,
@@ -9,8 +20,8 @@ export const createOpenCodeResolutionRuntime = (dependencies) => {
     setResolvedOpencodeBinarySource,
   } = dependencies;
 
-  const getOpenCodeResolutionSnapshot = async (settings) => {
-    const configured = typeof settings?.opencodeBinary === 'string' ? settings.opencodeBinary : null;
+  const getOpenCodeResolutionSnapshot = async (settings: { opencodeBinary?: unknown } | null) => {
+    const configured = isString(settings?.opencodeBinary) ? settings.opencodeBinary : null;
 
     const { resolvedOpencodeBinarySource: previousSource } = getResolvedState();
     const detectedNow = resolveOpencodeCliPath();
