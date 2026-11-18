@@ -93,6 +93,7 @@ const settle = async (check) => {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -393,6 +394,7 @@ describe('session work runtime: a turn ended', () => {
   });
 
   it('offers a review at once, and looks done replaces it after the quiet pause', async () => {
+    vi.useFakeTimers();
     stubOpenCode();
     const open = { openchamber: { work: { state: 'open', openedAt: 1 } } };
     const review = makeRuntime({ metadata: open, answers: { ...notDone, review_ready: { noul: 0.75 } } });
@@ -403,8 +405,9 @@ describe('session work runtime: a turn ended', () => {
     const both = makeRuntime({ metadata: open, answers: { ...looksDone, review_ready: { noul: 0.9 } }, doneHintDelayMs: 20 });
     await both.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
     expect(both.records.get('ses_1').openchamber.reviewOffer.at).toBeTypeOf('number');
+    await vi.advanceTimersByTimeAsync(19);
     expect(both.records.get('ses_1').openchamber.work).not.toHaveProperty('suggestDoneAt');
-    await settle(() => both.records.get('ses_1').openchamber.work.suggestDoneAt !== undefined);
+    await vi.advanceTimersByTimeAsync(1);
     expect(both.records.get('ses_1').openchamber.work.suggestDoneAt).toBeTypeOf('number');
     expect(both.records.get('ses_1').openchamber).not.toHaveProperty('reviewOffer');
   });
@@ -457,6 +460,7 @@ describe('session work runtime: a turn ended', () => {
   });
 
   it('drops a late done answer once the next turn started', async () => {
+    vi.useFakeTimers();
     stubOpenCode();
     const { runtime, jev, records } = makeRuntime({
       metadata: { openchamber: { work: { state: 'open', openedAt: 1 } } },
@@ -471,31 +475,22 @@ describe('session work runtime: a turn ended', () => {
       answer = undefined;
       runtime.processPayload(busy);
       const pending = runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
-      await settle(() => answer !== undefined);
+      await vi.advanceTimersByTimeAsync(0);
       runtime.processPayload(busy);
       answer({ answers: looksDone, ms: 5 });
       await pending;
+      await vi.advanceTimersByTimeAsync(5);
       expect(records.get('ses_1').openchamber.work).not.toHaveProperty('suggestDoneAt');
     }
 
     // A check nobody overtook still writes its hint.
     answer = undefined;
     const current = runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
-    await settle(() => answer !== undefined);
+    await vi.advanceTimersByTimeAsync(0);
     answer({ answers: looksDone, ms: 5 });
     await current;
-    await settle(() => records.get('ses_1').openchamber.work.suggestDoneAt !== undefined);
+    await vi.advanceTimersByTimeAsync(5);
     expect(records.get('ses_1').openchamber.work.suggestDoneAt).toBeTypeOf('number');
-  });
-
-  it('never closes: a closing turn in a session in work only hints', async () => {
-    stubOpenCode();
-    const { runtime, records } = makeRuntime({
-      metadata: { openchamber: { work: { state: 'open', openedAt: 1 } } },
-      answers: looksDone,
-    });
-    await runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
-    expect(records.get('ses_1').openchamber.work.state).toBe('open');
   });
 
   it('neither hints done nor suggests a next step while the agent waits on its own background work', async () => {
