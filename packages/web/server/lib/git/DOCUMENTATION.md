@@ -111,6 +111,15 @@ This module provides Git repository operations for the web server runtime, inclu
 
 ### Network execution and recovery
 
+- The durable network store exports its validated record and snapshot shapes
+  from `network-storage-contracts.ts`. Snapshot scrubbing and JSON cloning stay
+  unchecked until the existing record parser validates them. Unknown operation
+  names retain their opaque JSON targets instead of acquiring a known-operation
+  target type. Error-message replacement still requires an own dictionary key;
+  state-specific error-code lookup keeps its existing optional method call.
+- Stored nullable timestamps keep JavaScript's numeric-null behavior in
+  expiration and eviction arithmetic. Persisted input still passes the original
+  boolean, integer, endpoint, exact-key and vocabulary checks.
 - Server-generated digests are opaque values, never CLI arguments. Base64url digests may begin with `-`, so option-shaped argument validation does not apply to them.
 - Expiring an unstarted operation cancels its durable record before dropping it from memory. Otherwise its persisted `planned` state holds a capacity slot indefinitely.
 - Durable recovery identifies the process that claims an operation. Multiple servers can share the data directory, and another live server's operation is still running.
