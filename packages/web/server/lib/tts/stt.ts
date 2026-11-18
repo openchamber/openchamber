@@ -1,23 +1,22 @@
 import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 import { createEndpointPathFetch, normalizeEndpointPath } from './endpoint-path.js';
+import type { ClientOptions } from 'openai';
+import type { TranscriptionCreateParamsNonStreaming } from 'openai/resources/audio/transcriptions';
 
 const DEFAULT_TRANSCRIPTION_PATH = '/audio/transcriptions';
 
-/**
- * Transcribe an audio buffer via an OpenAI-compatible /v1/audio/transcriptions endpoint.
- *
- * @param {object} opts
- * @param {Buffer} opts.audioBuffer  - Raw audio bytes
- * @param {string} opts.mimeType     - MIME type of the audio (e.g. 'audio/webm')
- * @param {string} opts.model        - Model name accepted by the remote server
- * @param {string} [opts.baseURL]    - Base URL of the compatible server (including /v1)
- * @param {string} [opts.apiKey]     - Optional API key for the compatible server
- * @param {string} [opts.language]   - Optional BCP-47 language hint (e.g. 'en')
- * @param {string} [opts.endpointPath] - Optional resource path override for the endpoint
- * @returns {Promise<string>} Transcribed text
- */
-export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language, endpointPath }) {
+export interface TranscribeAudioOptions {
+  audioBuffer: Buffer;
+  mimeType: string;
+  model: string;
+  baseURL?: string | undefined;
+  apiKey?: string | undefined;
+  language?: string | undefined;
+  endpointPath?: string | undefined;
+}
+
+export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language, endpointPath }: TranscribeAudioOptions) {
   const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
   if (normalizedBaseURLResult.error) {
     throw new Error(normalizedBaseURLResult.error);
@@ -34,7 +33,7 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
   }
   const normalizedEndpointPath = endpointPathResult.value;
 
-  const clientOpts = {
+  const clientOpts: ClientOptions = {
     apiKey: apiKey || 'not-required',
   };
   clientOpts.baseURL = normalizedBaseURL;
@@ -53,23 +52,20 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
 
   const file = await OpenAI.toFile(audioBuffer, filename, { type: mimeType });
 
-  const result = await client.audio.transcriptions.create({
+  const params: TranscriptionCreateParamsNonStreaming<'json'> = {
     file,
     model,
     response_format: 'json',
-    ...(language ? { language } : {}),
-  });
+  };
+  if (language) params.language = language;
+  const result = await client.audio.transcriptions.create(params);
 
   return result.text ?? '';
 }
 
-/**
- * Map a MIME type to a file extension understood by Whisper servers.
- * @param {string} mimeType
- * @returns {string}
- */
-function mimeTypeToExt(mimeType) {
-  const type = (mimeType || '').split(';')[0].trim().toLowerCase();
+function mimeTypeToExt(mimeType: string) {
+  const [mediaType = ''] = (mimeType || '').split(';');
+  const type = mediaType.trim().toLowerCase();
   const map = {
     'audio/webm': 'webm',
     'audio/ogg': 'ogg',
@@ -80,5 +76,6 @@ function mimeTypeToExt(mimeType) {
     'audio/mp3': 'mp3',
     'audio/flac': 'flac',
   };
-  return map[type] ?? 'webm';
+  const hasExtension = (key: string): key is keyof typeof map => key in map;
+  return hasExtension(type) ? map[type] ?? 'webm' : 'webm';
 }

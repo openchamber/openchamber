@@ -119,6 +119,19 @@ describe('tts routes', () => {
     });
   });
 
+  it('keeps coercing unchecked summary limits from HTTP JSON', async () => {
+    const response = await request(createApp())
+      .post('/api/text/summarize')
+      .send({ text: 'A short sentence.', threshold: '100', maxLength: null });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      summary: 'A short sentence.',
+      summarized: false,
+      reason: 'Text under threshold',
+    });
+  });
+
   it('rejects a custom speech endpoint path that is a URL', async () => {
     const response = await request(createApp())
       .post('/api/tts/speak')
