@@ -27,11 +27,28 @@ Serve shares that list so switching modes preserves the saved port.
 ### Why Cloudflare and ngrok remain JavaScript
 
 Their helper contracts need changes in the owning sibling modules before strict
-conversion can preserve the existing calls. `startCloudflareManagedRemoteTunnel`
-infers `tokenFilePath` as required although it handles absence;
-`startCloudflareQuickTunnel` accepts only `originUrl` although the provider also
-passes `port`. `checkNgrokAuthtokenConfigured` infers its defaulted path parameter
-as `null | undefined` although availability supplies a string path.
+conversion can preserve the existing calls:
+
+- In `../../cloudflare-tunnel.ts`, `LocalCloudflareOptions.configPath` and
+  `.hostname` must accept explicit `undefined`. Doctor requests and normalized
+  start requests forward it to `inspectManagedLocalCloudflareConfig` and
+  `startCloudflareManagedLocalTunnel`; optional properties currently accept only
+  `string | null` when present.
+- `startCloudflareManagedRemoteTunnel` accepts omitted token and hostname fields,
+  but its optional fields exclude explicit `undefined`. Direct provider starts
+  can forward that value; those fields must also accept explicit `undefined`.
+- `startCloudflareQuickTunnel` accepts only `originUrl`, although the provider
+  also passes `port`. Its options contract must include
+  `port?: number | null | undefined` to describe the existing call.
+- In `../../ngrok-tunnel.ts`, `startNgrokQuickTunnel` requires `port: number`.
+  The service context supplies `number | null`, and a direct provider start can
+  omit context altogether. The helper's port input must accept
+  `number | null | undefined`; it already rejects missing and nonfinite ports
+  after dependency and authentication checks.
+
+The earlier `tokenFilePath` and `checkNgrokAuthtokenConfigured` blockers are
+resolved in the typed helpers. No provider calls, validation order or helper
+contracts change here.
 
 ### Why optional port fields include undefined
 
