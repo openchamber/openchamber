@@ -92,7 +92,7 @@ export function summarizeCombinedStatuses(statuses: readonly { state: string }[]
     else if (s.state === 'pending') counts.pending += 1;
   });
   const total = counts.success + counts.failure + counts.pending;
-  const state = counts.failure > 0
+  const state: ChecksSummary['state'] = counts.failure > 0
     ? 'failure'
     : (counts.pending > 0 ? 'pending' : (total > 0 ? 'success' : 'unknown'));
   return { state, total, ...counts, inProgress: counts.pending, queued: 0 };

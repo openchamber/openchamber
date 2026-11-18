@@ -39,6 +39,97 @@ import {
   searchGitHubReferencesAcross,
 } from './reference-search.js';
 import { fetchReviewState } from './review-draft.js';
+import type { Octokit, RestEndpointMethodTypes } from '@octokit/rest';
+import type { ProviderImplementation, ProviderSession } from '../source-control/provider-contract.js';
+import type { ContributorProvenanceRead } from '../git/contributor-provenance-storage.js';
+import type { AcrossContext, AcrossGroup, DiscoveryRepository, GitHubEnvelope } from './contracts.js';
+import type { CI } from './mappers.js';
+import { retainedEntry } from './contracts.js';
+
+type ResourceMethods = ProviderImplementation['resources'];
+type ResourceInput<Key extends keyof ResourceMethods> = Parameters<NonNullable<ResourceMethods[Key]>>[0];
+type Rest = RestEndpointMethodTypes;
+type Pull = Rest['pulls']['get']['response']['data'];
+type ListedPull = Rest['pulls']['list']['response']['data'][number];
+type Issue = Rest['issues']['get']['response']['data'];
+type CheckRun = Rest['checks']['listForRef']['response']['data']['check_runs'][number];
+type Job = Rest['actions']['listJobsForWorkflowRun']['response']['data']['jobs'][number];
+type Annotation = Rest['checks']['listAnnotations']['response']['data'][number];
+type Identity = Pick<ReturnType<typeof mapProject>, 'provider' | 'instance'>;
+export interface GitHubResourceModules {
+  octokit: typeof import('./octokit.js');
+  summaries: typeof import('./pr-summaries.js');
+  rateLimit: typeof import('./rate-limit.js');
+  patch: typeof import('./change-request-patch.js');
+  prStatus: typeof import('./pr-status.js');
+  checks: typeof import('./checks-summary.js');
+  repo: typeof import('./repo/index.js');
+  forks: typeof import('./repo/fork-detection.js');
+  git: typeof import('../git/index.js');
+}
+export interface GitHubResourceOptions {
+  load: () => Promise<GitHubResourceModules>;
+  accountOf: (session: ProviderSession) => { octokit: Octokit; user: { login?: string } | null };
+  resolveRepo: typeof import('./repo/index.js').resolveGitHubRepoFromDirectory;
+  resolveNetwork: typeof import('./repo/fork-detection.js').resolveRepoNetwork;
+  resolvePrStatus: typeof import('./pr-status.js').resolveGitHubPrStatus;
+  readContributorProvenance?: ((directory: string) => Promise<ContributorProvenanceRead>) | undefined;
+  invalidateAccount: (identity: GitHubEnvelope['data'], persisted: boolean) => Promise<boolean>;
+}
+interface ContextScope {
+  accountId: string;
+  credentialRevision: number | null;
+  repositoryId: string | undefined;
+  bindingRevision: number | undefined;
+  primaryRemote: string;
+  number: number | undefined;
+}
+export interface PullContext {
+  identity: Identity;
+  fetchedAt: number;
+  project: ReturnType<typeof mapProject>;
+  changeRequest: ReturnType<typeof mapChangeRequest>;
+  issueComments: ReturnType<typeof mapComment>[];
+  reviewComments: ReturnType<typeof mapReviewComment>[];
+  files: ReturnType<typeof mapFile>[];
+  ci: CI | null;
+  diff?: string;
+  stack?: Awaited<ReturnType<typeof fetchPullStack>>;
+}
+export interface PageResult<Item> {
+  items: Item[];
+  page: number;
+  hasMore: boolean;
+  incompleteProjectIds?: string[];
+}
+interface RepositoryFailure { repoRef: DiscoveryRepository; error: unknown }
+type FolderStatus = 'invalid-context' | 'no-repo' | 'disconnected' | 'error';
+interface IncludedFolder {
+  directory: string;
+  status: 'included' | FolderStatus;
+  repo: DiscoveryRepository;
+  repos: import('./repo/fork-detection.js').NetworkRepository[];
+  octokit: Octokit;
+  trusted: AcrossContext;
+}
+type SearchFolder = IncludedFolder | { directory: string; status: FolderStatus };
+interface AccountGroup extends Omit<AcrossGroup, 'repos'> {
+  folders: IncludedFolder[];
+  repositories: Map<string, AcrossGroup['repos'][number]>;
+}
+
+const hasErrorField = <Key extends string>(value: unknown, key: Key): value is Record<Key, unknown> =>
+  value != null && key in Object(value);
+const errorField = (value: GitHubEnvelope['data'], key: string) =>
+  hasErrorField(value, key) ? value[key] : undefined;
+const errorStatus = (error: GitHubEnvelope['data']) => errorField(error, 'status') ?? errorField(errorField(error, 'response'), 'status');
+const isErrorCodeMethod = (value: unknown): value is (prefix: string) => GitHubEnvelope['code'] => typeof value === 'function';
+const errorCodeStartsWith = (code: GitHubEnvelope['code'], prefix: string) => {
+  if (code == null) return undefined;
+  const method = errorField(code, 'startsWith');
+  if (!isErrorCodeMethod(method)) throw new TypeError('code.startsWith is not a function');
+  return Boolean(method.call(code, prefix));
+};
 
 
 const PR_CONTEXT_CACHE_TTL_MS = 30_000;
@@ -46,46 +137,51 @@ const PR_CONTEXT_CACHE_MAX_ENTRIES = 50;
 const GITHUB_COM = 'github.com';
 const PULL_LIST_STATES = new Set(['open', 'closed', 'merged', 'all']);
 const PULL_LIST_PEOPLE = new Set(['any', 'assigned', 'created', 'reviewRequested']);
+const isPullListState = (value: string): value is 'open' | 'closed' | 'merged' | 'all' => PULL_LIST_STATES.has(value);
+const isPullListPeople = (value: string): value is 'any' | 'assigned' | 'created' | 'reviewRequested' => PULL_LIST_PEOPLE.has(value);
 const CAN_MERGE_REFUSAL_TTL_MS = 5 * 60_000;
 const CAN_MERGE_REFUSAL_MAX_ENTRIES = 1000;
 
-export const responseError = (status, body) => Object.assign(new Error(body.error), { sourceControlResponse: { status, body } });
+export const responseError = <Body extends { error: unknown }>(status: number, body: Body) => Object.assign(new Error(body.error), { sourceControlResponse: { status, body } });
 
-const sourceControlError = (message, code, status) => Object.assign(new Error(message), { code, status });
+const sourceControlError = (message: string, code: string, status: number) => Object.assign(new Error(message), { code, status });
 
 const notInProject = () => responseError(400, { error: 'Repository is not part of this project' });
 
 const rateLimited = () => Object.assign(new Error('GitHub rate limited'), { status: 503 });
 
-const sameRepository = (left, right) => left.owner.toLowerCase() === right.owner.toLowerCase()
+const sameRepository = (left: Pick<DiscoveryRepository, 'owner' | 'repo'>, right: Pick<DiscoveryRepository, 'owner' | 'repo'>) => left.owner.toLowerCase() === right.owner.toLowerCase()
   && left.repo.toLowerCase() === right.repo.toLowerCase();
 
-export const gitHubRefusalMessage = (error) => {
-  const message = error?.response?.data?.message;
-  return isProviderString(message) && message.trim() ? message : error?.message;
+export const gitHubRefusalMessage = (error: GitHubEnvelope['data']) => {
+  const message = errorField(errorField(errorField(error, 'response'), 'data'), 'message');
+  return isProviderString(message) && message.trim() ? message : errorField(error, 'message');
 };
 
 function createContextCache() {
-  const entries = new Map();
+  const entries = new Map<string, { data: PullContext; includeCheckDetails: boolean; fetchedAt: number; scope: ContextScope }>();
   let epoch = 0;
   return Object.freeze({
     begin: () => epoch,
-    read: (key, includeCheckDetails) => {
+    read: (key: string, includeCheckDetails: boolean) => {
       const entry = entries.get(key);
       return entry && Date.now() - entry.fetchedAt < PR_CONTEXT_CACHE_TTL_MS && (entry.includeCheckDetails || !includeCheckDetails)
         ? entry.data
         : null;
     },
-    store: (key, scope, data, includeCheckDetails, started) => {
+    store: (key: string, scope: ContextScope, data: PullContext, includeCheckDetails: boolean, started: number) => {
       if (started !== epoch) return;
       entries.delete(key);
       entries.set(key, { data, includeCheckDetails, fetchedAt: data.fetchedAt, scope });
-      if (entries.size > PR_CONTEXT_CACHE_MAX_ENTRIES) entries.delete(entries.keys().next().value);
+      if (entries.size > PR_CONTEXT_CACHE_MAX_ENTRIES) {
+        const oldest = entries.keys().next().value;
+        if (oldest !== undefined) entries.delete(oldest);
+      }
     },
-    invalidate: (scope) => {
+    invalidate: (scope: Partial<ContextScope>) => {
       epoch += 1;
       for (const [key, entry] of entries) {
-        if (Object.entries(scope).every(([field, value]) => entry.scope[field] === value)) entries.delete(key);
+        if (Object.entries(scope).every(([field, value]) => errorField(entry.scope, field) === value)) entries.delete(key);
       }
     },
   });
@@ -99,14 +195,16 @@ export function createGitHubResources({
   resolvePrStatus,
   readContributorProvenance,
   invalidateAccount,
-}) {
+}: GitHubResourceOptions) {
   const contextCache = createContextCache();
-  const authLoginByCredential = new Map();
-  const canMergeRefusals = new Map();
+  const authLoginByCredential = new Map<string, Promise<string | null>>();
+  const canMergeRefusals = new Map<string, number>();
 
-  const identityOf = (session) => ({ provider: 'github', instance: session.instance });
+  const identityOf = (session: ProviderSession) => ({ provider: 'github', instance: session.instance });
 
-  const resolveRepoForRequest = async (octokit, directory, requestedRepo, remoteName, { linked = false } = {}) => {
+  async function resolveRepoForRequest(octokit: Octokit, directory: string, requestedRepo: null, remoteName: string): Promise<DiscoveryRepository>;
+  async function resolveRepoForRequest(octokit: Octokit, directory: string, requestedRepo: DiscoveryRepository | null, remoteName: string, options?: { linked?: boolean | undefined }): Promise<DiscoveryRepository | null>;
+  async function resolveRepoForRequest(octokit: Octokit, directory: string, requestedRepo: DiscoveryRepository | null, remoteName: string, { linked = false }: { linked?: boolean | undefined } = {}) {
     const { repo } = await resolveRepo(directory, remoteName);
     if (!repo) throw new Error(`Unable to resolve GitHub repo from git remote "${remoteName}"`);
     if (linked && requestedRepo) return requestedRepo;
@@ -116,19 +214,19 @@ export function createGitHubResources({
     return Array.isArray(network) && network.some((item) => item?.owner === requestedRepo.owner && item?.repo === requestedRepo.repo)
       ? requestedRepo
       : null;
-  };
+  }
 
-  const resolveRepoNetwork = async (octokit, directory, remoteName, { requirePrimary = true } = {}) => {
+  const resolveRepoNetwork = async (octokit: Octokit, directory: string, remoteName: string, { requirePrimary = true } = {}) => {
     const { repo } = await resolveRepo(directory, remoteName);
     if (!repo) throw new Error(`Unable to resolve GitHub repo from git remote "${remoteName}"`);
     const network = requireGitHubRepoNetwork(
       await resolveNetwork(octokit, directory, remoteName, { strictErrors: true }),
       requirePrimary ? repo : undefined,
     );
-    return { repo, repos: network ?? [{ ...repo, source: 'origin' }] };
+    return { repo, repos: network ?? [{ ...repo, source: 'origin' as const }] };
   };
 
-  const readContributorSourceRemote = async (directory, branch) => {
+  const readContributorSourceRemote = async (directory: string, branch: string) => {
     if (!(readContributorProvenance instanceof Function)) return null;
     try {
       const { provenance } = await readContributorProvenance(directory);
@@ -139,10 +237,10 @@ export function createGitHubResources({
     }
   };
 
-  const readChecks = async (octokit, repo, sha, { runs: keepRuns = false } = {}) => {
+  const readChecks = async (octokit: Octokit, repo: DiscoveryRepository, sha: string, { runs: keepRuns = false } = {}) => {
     const { checks: { dedupeCheckRuns, summarizeCheckRuns, summarizeCombinedStatuses } } = await load();
-    let summary = null;
-    let checkRuns = [];
+    let summary: ReturnType<GitHubResourceModules['checks']['summarizeCheckRuns']> | ReturnType<GitHubResourceModules['checks']['summarizeCombinedStatuses']> | null = null;
+    let checkRuns: CheckRun[] = [];
     try {
       const response = await octokit.rest.checks.listForRef({ owner: repo.owner, repo: repo.repo, ref: sha, per_page: 100 });
       checkRuns = dedupeCheckRuns(requireGitHubCheckRuns(response?.data?.check_runs));
@@ -161,15 +259,15 @@ export function createGitHubResources({
     return { summary, checkRuns: keepRuns && summary && checkRuns.length > 0 ? checkRuns : [] };
   };
 
-  const readCheckDetails = async (octokit, repo, checkRuns) => {
-    const jobsByRun = new Map();
-    const annotationsByRun = new Map();
-    const runIdOf = (run) => {
+  const readCheckDetails = async (octokit: Octokit, repo: DiscoveryRepository, checkRuns: CheckRun[]) => {
+    const jobsByRun = new Map<number, Job[]>();
+    const annotationsByRun = new Map<number, ReturnType<typeof mapAnnotations>>();
+    const runIdOf = (run: CheckRun) => {
       const match = (isProviderString(run.details_url) ? run.details_url : '').match(/\/actions\/runs\/(\d+)(?:\/job\/(\d+))?/);
       const runId = match ? Number(match[1]) : null;
-      return runId && Number.isFinite(runId) && runId > 0 ? { runId, jobId: match[2] ? Number(match[2]) : null } : null;
+      return runId && Number.isFinite(runId) && runId > 0 ? { runId, jobId: match?.[2] ? Number(match[2]) : null } : null;
     };
-    for (const runId of new Set(checkRuns.map(runIdOf).filter(Boolean).map((entry) => entry.runId))) {
+    for (const runId of new Set(checkRuns.map(runIdOf).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)).map((entry) => entry.runId))) {
       try {
         const response = await octokit.rest.actions.listJobsForWorkflowRun({ owner: repo.owner, repo: repo.repo, run_id: runId, per_page: 100 });
         jobsByRun.set(runId, requireGitHubWorkflowJobs(response?.data?.jobs));
@@ -180,7 +278,7 @@ export function createGitHubResources({
     for (const run of checkRuns) {
       const conclusion = isProviderString(run?.conclusion) ? run.conclusion.toLowerCase() : '';
       if (!run?.id || !conclusion || ['success', 'neutral', 'skipped'].includes(conclusion)) continue;
-      const annotations = [];
+      const annotations: Annotation[] = [];
       for (let page = 1; page <= 3; page += 1) {
         try {
           const response = await octokit.rest.checks.listAnnotations({
@@ -195,7 +293,7 @@ export function createGitHubResources({
       }
       if (annotations.length > 0) annotationsByRun.set(run.id, mapAnnotations(annotations));
     }
-    return (run) => {
+    return (run: CheckRun) => {
       const ids = runIdOf(run);
       let job;
       if (ids) {
@@ -208,7 +306,7 @@ export function createGitHubResources({
     };
   };
 
-  const readCanMerge = async (octokit, session, user, repo, host) => {
+  const readCanMerge = async (octokit: Octokit, session: ProviderSession, user: { login?: string } | null, repo: DiscoveryRepository, host: string | null | undefined) => {
     try {
       const loginHost = String(host ?? '').trim().toLowerCase() || GITHUB_COM;
       const loginKey = JSON.stringify([loginHost, session.accountId, session.credentialRevision]);
@@ -217,12 +315,12 @@ export function createGitHubResources({
         let loginPromise = authLoginByCredential.get(loginKey);
         if (!loginPromise) {
           loginPromise = octokit.rest.users.getAuthenticated()
-            .then((response) => response?.data?.login || null)
+            .then((response: Rest['users']['getAuthenticated']['response']) => response?.data?.login || null)
             .catch(() => {
               authLoginByCredential.delete(loginKey);
               return null;
             });
-          authLoginByCredential.set(loginKey, loginPromise);
+          if (loginPromise) authLoginByCredential.set(loginKey, loginPromise);
         }
         username = await loginPromise;
       }
@@ -237,14 +335,15 @@ export function createGitHubResources({
         return ['admin', 'maintain', 'write'].includes(permission?.data?.permission);
       } catch (error) {
         const { rateLimit } = await load();
-        if ((error?.status ?? error?.response?.status) === 403 && !rateLimit.isGitHubRateLimitError(error)) {
+        if (errorStatus(error) === 403 && !rateLimit.isGitHubRateLimitError(error)) {
           const now = Date.now();
           for (const [key, expiresAt] of canMergeRefusals) {
             if (expiresAt <= now) canMergeRefusals.delete(key);
           }
           canMergeRefusals.set(refusalKey, now + CAN_MERGE_REFUSAL_TTL_MS);
           if (canMergeRefusals.size > CAN_MERGE_REFUSAL_MAX_ENTRIES) {
-            canMergeRefusals.delete(canMergeRefusals.keys().next().value);
+            const oldest = canMergeRefusals.keys().next().value;
+            if (oldest !== undefined) canMergeRefusals.delete(oldest);
           }
         }
         throw error;
@@ -254,22 +353,22 @@ export function createGitHubResources({
     }
   };
 
-  const statusFailure = async (error, host) => {
+  const statusFailure = async (error: GitHubEnvelope['data'], host: string) => {
     const { rateLimit } = await load();
     if (rateLimit.noteIfGitHubRateLimit(error, host)) return rateLimited();
-    if ((error?.status ?? error?.response?.status) === 403) {
+    if (errorStatus(error) === 403) {
       return Object.assign(new Error(gitHubRefusalMessage(error)), { status: 403 });
     }
     return error;
   };
 
-  const pickerRead = async (operation) => {
+  const pickerRead = async <Result>(operation: () => Promise<Result>) => {
     try {
       return await operation();
     } catch (error) {
-      if (error?.sourceControlResponse || error?.sourceControlAccountUnavailable) throw error;
-      if ((error?.status ?? error?.response?.status) === 401) {
-        if (error?.sourceControlIdentity?.accountId) throw error;
+      if (errorField(error, 'sourceControlResponse') || errorField(error, 'sourceControlAccountUnavailable')) throw error;
+      if (errorStatus(error) === 401) {
+        if (errorField(errorField(error, 'sourceControlIdentity'), 'accountId')) throw error;
         return { connected: false };
       }
       const { summaries, rateLimit } = await load();
@@ -281,12 +380,12 @@ export function createGitHubResources({
     }
   };
 
-  const emptyContext = (identity) => ({ identity, project: null, changeRequest: null, issueComments: [], reviewComments: [], files: [] });
+  const emptyContext = (identity: Identity) => ({ identity, project: null, changeRequest: null, issueComments: [], reviewComments: [], files: [] });
 
   return Object.freeze({
-    invalidateContexts: (scope) => contextCache.invalidate(scope),
+    invalidateContexts: (scope: Partial<ContextScope>) => contextCache.invalidate(scope),
 
-    changeRequestStatus: async ({ session, directory, branch, remote, force = false }) => {
+    changeRequestStatus: async ({ session, directory, branch, remote, force = false }: ResourceInput<'changeRequestStatus'>) => {
       const { octokit, user } = accountOf(session);
       const identity = identityOf(session);
       const { rateLimit } = await load();
@@ -318,29 +417,29 @@ export function createGitHubResources({
           canMerge: await readCanMerge(octokit, session, user, resolved.repo, hostRepo?.host),
         };
       } catch (error) {
-        if ((error?.status ?? error?.response?.status) === 404) return noProject;
+        if (errorStatus(error) === 404) return noProject;
         throw await statusFailure(error, host);
       }
     },
 
-    listChangeRequests: async ({ session, directory, page, query, labels, state, people, remote }) => {
+    listChangeRequests: async ({ session, directory, page, query, labels, state, people, remote }: ResourceInput<'listChangeRequests'>) => {
       const { octokit } = accountOf(session);
       const identity = identityOf(session);
       const { repo, repos } = await resolveRepoNetwork(octokit, directory, remote);
-      const projectOf = (repoRef) => mapProject(repoRef, identity);
-      const toChangeRequest = (pr, repoRef) => mapChangeRequest(requireGitHubPullRequest(pr, 'GitHub returned an invalid pull request'), projectOf(repoRef), identity);
-      const isPrimary = (repoRef) => repoRef.owner === repo.owner && repoRef.repo === repo.repo;
-      const ofState = PULL_LIST_STATES.has(state) ? state : 'open';
-      const ofPeople = PULL_LIST_PEOPLE.has(people) ? people : 'any';
+      const projectOf = (repoRef: DiscoveryRepository) => mapProject(repoRef, identity);
+      const toChangeRequest = (pr: Pull | ListedPull, repoRef: DiscoveryRepository) => mapChangeRequest(requireGitHubPullRequest(pr, 'GitHub returned an invalid pull request'), projectOf(repoRef), identity);
+      const isPrimary = (repoRef: DiscoveryRepository) => repoRef.owner === repo.owner && repoRef.repo === repo.repo;
+      const ofState = isPullListState(state) ? state : 'open';
+      const ofPeople = isPullListPeople(people) ? people : 'any';
 
-      if (ofState === 'merged' || ofPeople !== 'any' || query || labels?.length > 0) {
+      if (ofState === 'merged' || ofPeople !== 'any' || query || (labels?.length ?? 0) > 0) {
         const q = buildReferenceSearchQuery({ repos, kind: 'pull', state: ofState, people: ofPeople, text: query ?? '', labels });
         const search = await octokit.rest.search.issuesAndPullRequests({ q, per_page: 50, page });
         const data = search?.data;
         if (!isPlainObject(data) || !Number.isSafeInteger(data.total_count) || data.total_count < 0) {
           throw invalidProviderPayload('GitHub returned an invalid pull request search result');
         }
-        const items = requireProviderArray(data.items, 'GitHub returned an invalid pull request search list');
+        const items = requireProviderArray<Rest['search']['issuesAndPullRequests']['response']['data']['items'][number]>(data.items, 'GitHub returned an invalid pull request search list');
         const refs = items.map((item) => {
           if (!isPlainObject(item) || !Number.isSafeInteger(item.number) || item.number <= 0) {
             throw invalidProviderPayload('GitHub returned an invalid pull request search item');
@@ -351,21 +450,21 @@ export function createGitHubResources({
           if (!repoRef) throw invalidProviderPayload('GitHub returned pull request outside the bound repository network');
           return { number: item.number, repoRef };
         });
-        const failed = [];
+        const failed: RepositoryFailure[] = [];
         const results = await Promise.all(refs.map(async ({ number, repoRef }) => {
           try {
             const pr = await octokit.rest.pulls.get({ owner: repoRef.owner, repo: repoRef.repo, pull_number: number });
             return toChangeRequest(pr?.data, repoRef);
           } catch (error) {
-            if (error?.status === 401) throw error;
+            if (errorField(error, 'status') === 401) throw error;
             failed.push({ repoRef, error });
             return null;
           }
         }));
-        if (refs.length > 0 && failed.length === refs.length) throw failed[0].error;
+        if (refs.length > 0 && failed.length === refs.length) throw retainedEntry(failed, 0).error;
         const primaryFailure = failed.find(({ repoRef }) => isPrimary(repoRef));
         if (primaryFailure) throw primaryFailure.error;
-        const result = { items: results.filter(Boolean), page, hasMore: (page - 1) * 50 + items.length < data.total_count };
+        const result: PageResult<ReturnType<typeof mapChangeRequest>> = { items: results.filter((item): item is NonNullable<typeof item> => Boolean(item)), page, hasMore: (page - 1) * 50 + items.length < data.total_count };
         if (failed.length > 0) result.incompleteProjectIds = [...new Set(failed.map(({ repoRef }) => `${repoRef.owner}/${repoRef.repo}`))];
         return result;
       }
@@ -374,24 +473,24 @@ export function createGitHubResources({
         try {
           const list = await octokit.rest.pulls.list({ owner: repoRef.owner, repo: repoRef.repo, state: ofState, per_page: 50, page });
           const link = isProviderString(list?.headers?.link) ? list.headers.link : '';
-          const prs = requireProviderArray(list?.data, 'GitHub returned an invalid pull request list');
+          const prs = requireProviderArray<ListedPull>(list?.data, 'GitHub returned an invalid pull request list');
           return { items: prs.map((pr) => toChangeRequest(pr, repoRef)), hasMore: /rel="next"/.test(link) };
         } catch (error) {
-          if (error?.status === 401) throw error;
+          if (errorField(error, 'status') === 401) throw error;
           return { error, repoRef };
         }
       }));
-      const failed = results.filter((entry) => entry.error);
+      const failed = results.filter((entry): entry is Extract<typeof entry, { error: unknown }> => Boolean(entry.error));
       const primaryFailure = failed.find((entry) => isPrimary(entry.repoRef));
       if (primaryFailure) throw primaryFailure.error;
       const succeeded = results.filter((entry) => !entry.error);
-      if (succeeded.length === 0 && failed.length > 0) throw failed[0].error;
-      const result = { items: succeeded.flatMap((entry) => entry.items), page, hasMore: succeeded.some((entry) => entry.hasMore) };
+      if (succeeded.length === 0 && failed.length > 0) throw retainedEntry(failed, 0).error;
+      const result: PageResult<ReturnType<typeof mapChangeRequest> | undefined> = { items: succeeded.flatMap((entry) => entry.items), page, hasMore: succeeded.some((entry) => entry.hasMore) };
       if (failed.length > 0) result.incompleteProjectIds = failed.map(({ repoRef }) => `${repoRef.owner}/${repoRef.repo}`);
       return result;
     },
 
-    changeRequestContext: async ({ session, context, directory, number, project, remote, includeDiff, includeCIDetails }) => {
+    changeRequestContext: async ({ session, context, directory, number, project, remote, includeDiff, includeCIDetails }: ResourceInput<'changeRequestContext'>) => {
       const { octokit } = accountOf(session);
       const identity = identityOf(session);
       const requestedRepo = project ? { owner: project.owner, repo: project.name } : null;
@@ -413,7 +512,7 @@ export function createGitHubResources({
       const route = { owner: repo.owner, repo: repo.repo };
       const projectDTO = mapProject(repo, identity);
       const prData = requireGitHubPullRequest((await octokit.rest.pulls.get({ ...route, pull_number: number }))?.data, 'GitHub returned an invalid pull request');
-      const issueComments = requireProviderArray(
+      const issueComments = requireProviderArray<Rest['issues']['listComments']['response']['data'][number]>(
         (await octokit.rest.issues.listComments({ ...route, issue_number: number, per_page: 100 }))?.data,
         'GitHub returned an invalid issue comment list',
       ).map((comment) => mapComment(requireGitHubComment(comment, 'GitHub returned an invalid issue comment'), identity));
@@ -421,12 +520,12 @@ export function createGitHubResources({
         (await octokit.rest.pulls.listReviewComments({ ...route, pull_number: number, per_page: 100 }))?.data,
         'GitHub returned an invalid review comment list',
       ).map((comment) => mapReviewComment(requireGitHubReviewComment(comment), identity));
-      const files = requireProviderArray(
+      const files = requireProviderArray<Rest['pulls']['listFiles']['response']['data'][number]>(
         (await octokit.rest.pulls.listFiles({ ...route, pull_number: number, per_page: 100 }))?.data,
         'GitHub returned an invalid pull request file list',
       ).map((file) => mapFile(requireGitHubPullFile(file)));
 
-      let ci = null;
+      let ci: CI | null = null;
       const sha = prData.head?.sha;
       if (sha) {
         const { summary, checkRuns } = await readChecks(octokit, repo, sha, { runs: true });
@@ -447,7 +546,7 @@ export function createGitHubResources({
         diff = response.data;
       }
 
-      const result = {
+      const result: PullContext = {
         identity,
         fetchedAt: Date.now(),
         project: projectDTO,
@@ -466,11 +565,11 @@ export function createGitHubResources({
       return result;
     },
 
-    listIssues: async ({ session, directory, page, query, labels, remote }) => {
+    listIssues: async ({ session, directory, page, query, labels, remote }: ResourceInput<'listIssues'>) => {
       const { octokit } = accountOf(session);
       const identity = identityOf(session);
       const { repos } = await resolveRepoNetwork(octokit, directory, remote, { requirePrimary: false });
-      const toIssue = (issue, repoRef) => mapIssue(requireGitHubIssue(issue, 'GitHub returned an invalid issue'), mapProject(repoRef, identity), identity);
+      const toIssue = (issue: Issue, repoRef: DiscoveryRepository) => mapIssue(requireGitHubIssue(issue, 'GitHub returned an invalid issue'), mapProject(repoRef, identity), identity);
 
       if (query) {
         const q = [...repos.map((entry) => `repo:${entry.owner}/${entry.repo}`), query, 'type:issue state:open',
@@ -480,9 +579,9 @@ export function createGitHubResources({
         if (!isPlainObject(data) || !Number.isSafeInteger(data.total_count) || data.total_count < 0) {
           throw invalidProviderPayload('GitHub returned an invalid issue search result');
         }
-        const items = requireProviderArray(data.items, 'GitHub returned an invalid issue search result');
+        const items = requireProviderArray<Rest['search']['issuesAndPullRequests']['response']['data']['items'][number]>(data.items, 'GitHub returned an invalid issue search result');
         const issueItems = items.filter((item) => !item?.pull_request);
-        const failed = [];
+        const failed: RepositoryFailure[] = [];
         const results = await Promise.all(issueItems.map(async (item) => {
           if (!isPlainObject(item) || !Number.isSafeInteger(item.number) || item.number <= 0) {
             throw invalidProviderPayload('GitHub returned an invalid issue search item');
@@ -494,40 +593,40 @@ export function createGitHubResources({
             const issue = await octokit.rest.issues.get({ owner: repoRef.owner, repo: repoRef.repo, issue_number: item.number });
             return toIssue(issue?.data, repoRef);
           } catch (error) {
-            if (error?.status === 401 || error?.code === 'MALFORMED_PROVIDER_RESPONSE') throw error;
+            if (errorField(error, 'status') === 401 || errorField(error, 'code') === 'MALFORMED_PROVIDER_RESPONSE') throw error;
             failed.push({ repoRef, error });
             return null;
           }
         }));
-        if (issueItems.length > 0 && failed.length === issueItems.length) throw failed[0].error;
-        const result = { items: results.filter(Boolean), page, hasMore: (page - 1) * 50 + items.length < data.total_count };
+        if (issueItems.length > 0 && failed.length === issueItems.length) throw retainedEntry(failed, 0).error;
+        const result: PageResult<ReturnType<typeof mapIssue>> = { items: results.filter((item): item is NonNullable<typeof item> => Boolean(item)), page, hasMore: (page - 1) * 50 + items.length < data.total_count };
         if (failed.length > 0) result.incompleteProjectIds = [...new Set(failed.map(({ repoRef }) => `${repoRef.owner}/${repoRef.repo}`))];
         return result;
       }
 
-      const labelParam = labels?.length > 0 ? { labels: labels.join(',') } : {};
+      const labelParam = labels && labels.length > 0 ? { labels: labels.join(',') } : {};
       const results = await Promise.all(repos.map(async (repoRef) => {
         try {
           const list = await octokit.rest.issues.listForRepo({ owner: repoRef.owner, repo: repoRef.repo, state: 'open', per_page: 50, page, ...labelParam });
           const link = isProviderString(list?.headers?.link) ? list.headers.link : '';
-          const issues = requireProviderArray(list?.data, 'GitHub returned an invalid issue list')
+          const issues = requireProviderArray<Rest['issues']['listForRepo']['response']['data'][number]>(list?.data, 'GitHub returned an invalid issue list')
             .filter((item) => !item?.pull_request)
             .map((item) => toIssue(item, repoRef));
           return { items: issues, hasMore: /rel="next"/.test(link) };
         } catch (error) {
-          if (error?.status === 401 || error?.code === 'MALFORMED_PROVIDER_RESPONSE') throw error;
+          if (errorField(error, 'status') === 401 || errorField(error, 'code') === 'MALFORMED_PROVIDER_RESPONSE') throw error;
           return { error, repoRef };
         }
       }));
       const succeeded = results.filter((entry) => !entry.error);
-      const failed = results.filter((entry) => entry.error);
-      if (succeeded.length === 0 && failed.length > 0) throw failed[0].error;
-      const result = { items: succeeded.flatMap((entry) => entry.items), page, hasMore: succeeded.some((entry) => entry.hasMore) };
+      const failed = results.filter((entry): entry is Extract<typeof entry, { error: unknown }> => Boolean(entry.error));
+      if (succeeded.length === 0 && failed.length > 0) throw retainedEntry(failed, 0).error;
+      const result: PageResult<ReturnType<typeof mapIssue> | undefined> = { items: succeeded.flatMap((entry) => entry.items), page, hasMore: succeeded.some((entry) => entry.hasMore) };
       if (failed.length > 0) result.incompleteProjectIds = failed.map(({ repoRef }) => `${repoRef.owner}/${repoRef.repo}`);
       return result;
     },
 
-    getIssue: async ({ session, context, directory, number, project, remote }) => {
+    getIssue: async ({ session, context, directory, number, project, remote }: ResourceInput<'getIssue'>) => {
       const { octokit } = accountOf(session);
       const identity = identityOf(session);
       const repo = await resolveRepoForRequest(octokit, directory, project ? { owner: project.owner, repo: project.name } : null, remote, { linked: context?.linked });
@@ -537,17 +636,17 @@ export function createGitHubResources({
       return mapIssue(issue, mapProject(repo, identity), identity);
     },
 
-    issueComments: async ({ session, context, directory, number, project, remote }) => {
+    issueComments: async ({ session, context, directory, number, project, remote }: ResourceInput<'issueComments'>) => {
       const { octokit } = accountOf(session);
       const identity = identityOf(session);
       const repo = await resolveRepoForRequest(octokit, directory, project ? { owner: project.owner, repo: project.name } : null, remote, { linked: context?.linked });
       if (!repo) return [];
       const response = await octokit.rest.issues.listComments({ owner: repo.owner, repo: repo.repo, issue_number: number, per_page: 100 });
-      return requireProviderArray(response?.data, 'GitHub returned an invalid issue comment list')
+      return requireProviderArray<Rest['issues']['listComments']['response']['data'][number]>(response?.data, 'GitHub returned an invalid issue comment list')
         .map((comment) => mapComment(requireGitHubComment(comment, 'GitHub returned an invalid issue comment'), identity));
     },
 
-    projectUpstream: async ({ session, directory, remote }) => {
+    projectUpstream: async ({ session, directory, remote }: ResourceInput<'projectUpstream'>) => {
       const { octokit } = accountOf(session);
       const identity = identityOf(session);
       const { repos } = await resolveRepoNetwork(octokit, directory, remote, { requirePrimary: false });
@@ -580,14 +679,14 @@ export function createGitHubResources({
       };
     },
 
-    projectBranches: async ({ session, directory, project, remote }) => {
+    projectBranches: async ({ session, directory, project, remote }: ResourceInput<'projectBranches'>) => {
       const { octokit } = accountOf(session);
       const repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote);
       if (!repo) return [];
       const branches = [];
       for (let page = 1; ; page += 1) {
         const response = await octokit.rest.repos.listBranches({ owner: repo.owner, repo: repo.repo, per_page: 100, page });
-        const payload = requireProviderArray(response?.data, 'GitHub returned an invalid branch list');
+        const payload = requireProviderArray<Rest['repos']['listBranches']['response']['data'][number]>(response?.data, 'GitHub returned an invalid branch list');
         for (const branch of payload) {
           if (!isPlainObject(branch) || !isProviderString(branch.name) || !branch.name.trim()) {
             throw invalidProviderPayload('GitHub returned an invalid branch');
@@ -599,23 +698,23 @@ export function createGitHubResources({
       return branches;
     },
 
-    listLabels: async ({ session, directory, project, remote }) => {
+    listLabels: async ({ session, directory, project, remote }: ResourceInput<'listLabels'>) => {
       const { octokit } = accountOf(session);
       const repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote);
       if (!repo) throw notInProject();
       const response = await octokit.rest.issues.listLabelsForRepo({ owner: repo.owner, repo: repo.repo, per_page: 100 });
-      return requireProviderArray(response?.data, 'GitHub returned an invalid label list').flatMap((label) => {
+      return requireProviderArray<Rest['issues']['listLabelsForRepo']['response']['data'][number]>(response?.data, 'GitHub returned an invalid label list').flatMap((label) => {
         if (!isProviderString(label?.name) || !label.name) return [];
         return [isProviderString(label.color) && label.color ? { name: label.name, color: label.color } : { name: label.name }];
       });
     },
 
-    listReviewerCandidates: async ({ session, directory, project, remote }) => {
+    listReviewerCandidates: async ({ session, directory, project, remote }: ResourceInput<'listReviewerCandidates'>) => {
       const { octokit } = accountOf(session);
       const repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote);
       if (!repo) throw notInProject();
       const response = await octokit.rest.issues.listAssignees({ owner: repo.owner, repo: repo.repo, per_page: 100 });
-      return requireProviderArray(response?.data, 'GitHub returned an invalid user list').flatMap((user) => {
+      return requireProviderArray<Rest['issues']['listAssignees']['response']['data'][number]>(response?.data, 'GitHub returned an invalid user list').flatMap((user) => {
         if (!isProviderString(user?.login) || !user.login) return [];
         return [isProviderString(user.avatar_url) && user.avatar_url
           ? { id: user.login, login: user.login, avatarUrl: user.avatar_url }
@@ -623,7 +722,7 @@ export function createGitHubResources({
       });
     },
 
-    references: ({ session, context, directory, remote, kind, state, people, query, labels = [], cursor }) => pickerRead(async () => {
+    references: ({ session, context, directory, remote, kind, state, people, query, labels = [], cursor }: ResourceInput<'references'> & { labels?: string[] }) => pickerRead(async () => {
       const { octokit } = accountOf(session);
       const { rateLimit } = await load();
       const { repo } = await resolveRepo(directory, remote);
@@ -634,7 +733,7 @@ export function createGitHubResources({
         if (!link) return { connected: true, repo, items: [], cursor: null, hasMore: false, total: 0 };
         return { connected: true, repo, ...(await searchGitHubReferences({
           octokit,
-          repos: [{ owner: link.owner, repo: link.repo, source: 'origin' }],
+          repos: [{ owner: retainedEntry([link.owner], 0), repo: retainedEntry([link.repo], 0), source: 'origin' }],
           kind,
           state: readReferenceState(state),
           people: readReferencePeople(people),
@@ -656,33 +755,38 @@ export function createGitHubResources({
       return { connected: true, repo, ...page };
     }),
 
-    referencesAcross: async ({ body, validateReadContext, resolveSession }) => {
+    referencesAcross: async ({ body, validateReadContext, resolveSession }: {
+      body: Parameters<typeof readReferencesAcrossRequest>[0];
+      validateReadContext: (context: AcrossContext) => Promise<AcrossContext | null>;
+      resolveSession: (context: AcrossContext) => Promise<ProviderSession>;
+    }) => {
       const { rateLimit, summaries } = await load();
       const input = readReferencesAcrossRequest(body);
       if (!input) throw responseError(400, { error: 'Invalid references request; at most 100 unique contexts are allowed' });
       if (rateLimit.isGitHubRateLimited()) throw responseError(503, { error: 'GitHub rate limited' });
-      const isRateLimit = (error) => summaries.isGraphqlRateLimitError(error) || rateLimit.isGitHubRateLimitError(error);
-      const folderFailure = async (error) => {
+      const isRateLimit = (error: GitHubEnvelope['data']) => summaries.isGraphqlRateLimitError(error) || rateLimit.isGitHubRateLimitError(error);
+      const folderFailure = async (error: GitHubEnvelope['data']): Promise<FolderStatus> => {
         if (isRateLimit(error)) {
           rateLimit.noteGitHubRateLimit(error);
           throw error;
         }
-        if ((error?.status ?? error?.response?.status) === 401 && !error?.sourceControlAccountUnavailable) {
-          if (error?.sourceControlIdentity?.accountId) {
-            await invalidateAccount(error.sourceControlIdentity, Boolean(error.sourceControlPersistedAccount));
+        if (errorStatus(error) === 401 && !errorField(error, 'sourceControlAccountUnavailable')) {
+          if (errorField(errorField(error, 'sourceControlIdentity'), 'accountId')) {
+            await invalidateAccount(errorField(error, 'sourceControlIdentity'), Boolean(errorField(error, 'sourceControlPersistedAccount')));
           }
           return 'disconnected';
         }
-        if (error?.sourceControlAccountUnavailable) return 'disconnected';
-        if (error?.code?.startsWith('SOURCE_CONTROL_BINDING_') || error?.code?.startsWith('SOURCE_CONTROL_LOCK_')
-          || error?.code === 'INVALID_SOURCE_CONTROL_READ_CONTEXT' || error?.code === 'INVALID_SOURCE_CONTROL_BINDING') {
+        if (errorField(error, 'sourceControlAccountUnavailable')) return 'disconnected';
+        const code = errorField(error, 'code');
+        if (errorCodeStartsWith(code, 'SOURCE_CONTROL_BINDING_') || errorCodeStartsWith(code, 'SOURCE_CONTROL_LOCK_')
+          || code === 'INVALID_SOURCE_CONTROL_READ_CONTEXT' || code === 'INVALID_SOURCE_CONTROL_BINDING') {
           return 'invalid-context';
         }
-        console.error('Failed to search GitHub references across repositories:', { status: error?.status, code: error?.code, name: error?.name });
+        console.error('Failed to search GitHub references across repositories:', { status: errorField(error, 'status'), code: errorField(error, 'code'), name: errorField(error, 'name') });
         return 'error';
       };
       try {
-        const folders = await mapReferencesAcross(input.contexts, async (context) => {
+        const folders = await mapReferencesAcross(input.contexts, async (context): Promise<SearchFolder> => {
           const { directory } = context;
           try {
             const trusted = await validateReadContext(context);
@@ -696,13 +800,14 @@ export function createGitHubResources({
             return { directory, status: await folderFailure(error) };
           }
         });
-        const accounts = new Map();
+        const accounts = new Map<string, AccountGroup>();
         for (const folder of folders) {
           if (folder.status !== 'included') continue;
           const { accountId, instance } = folder.trusted;
           const groupKey = JSON.stringify([instance ?? '', accountId]);
           if (!accounts.has(groupKey)) accounts.set(groupKey, { accountId, octokit: folder.octokit, folders: [], authority: [], repositories: new Map() });
           const group = accounts.get(groupKey);
+          if (!group) throw new Error('Missing reference account group');
           group.folders.push(folder);
           group.authority.push(folder.trusted);
           for (const repo of folder.repos) {
@@ -728,14 +833,14 @@ export function createGitHubResources({
           : { directory: folder.directory, status: folder.status }]));
         return { ...page, repositories: input.directories.map((directory) => repositories.get(directory)) };
       } catch (error) {
-        if (error?.code === 'INVALID_REFERENCES_CURSOR') throw responseError(400, { error: error.message });
+        if (errorField(error, 'code') === 'INVALID_REFERENCES_CURSOR') throw responseError(400, { error: errorField(error, 'message') });
         if (isRateLimit(error)) throw responseError(503, { error: 'GitHub rate limited' });
-        console.error('Failed to search GitHub references across repositories:', { status: error?.status, code: error?.code, name: error?.name });
+        console.error('Failed to search GitHub references across repositories:', { status: errorField(error, 'status'), code: errorField(error, 'code'), name: errorField(error, 'name') });
         throw responseError(500, { error: 'Failed to search GitHub issues and pull requests' });
       }
     },
 
-    referenceDetail: ({ session, context, directory, remote, project, number, host, kind }) => pickerRead(async () => {
+    referenceDetail: ({ session, context, directory, remote, project, number, host, kind }: ResourceInput<'referenceDetail'>) => pickerRead(async () => {
       const { octokit: github, rateLimit } = await load();
       const requestedHost = String(host ?? '').trim().toLowerCase();
       const octokit = requestedHost ? await github.getOctokitOrNull(requestedHost) : accountOf(session).octokit;
@@ -759,22 +864,22 @@ export function createGitHubResources({
       return { connected: true, detail: await read({ octokit, owner: repo.owner, repo: repo.repo, number }) };
     }),
 
-    reviewState: ({ session, directory, remote, project, number }) => pickerRead(async () => {
+    reviewState: ({ session, directory, remote, project, number }: ResourceInput<'reviewState'>) => pickerRead(async () => {
       const { octokit } = accountOf(session);
       const repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote);
       if (!repo) throw notInProject();
       return fetchReviewState({ octokit, owner: repo.owner, repo: repo.repo, number });
     }),
 
-    referenceStatuses: ({ context, directory, remote, pulls }) => pickerRead(async () => {
+    referenceStatuses: ({ context, directory, remote, pulls }: ResourceInput<'referenceStatuses'>) => pickerRead(async () => {
       const { octokit: github, rateLimit, summaries: summaryReads } = await load();
       const refs = readPullStatusRefs(pulls);
       if (!refs) throw responseError(400, { error: 'directory and pulls (owner/repo#number, comma separated) are required' });
-      const refsByHost = new Map();
+      const refsByHost = new Map<string, NonNullable<ReturnType<typeof readPullStatusRefs>>>();
       for (const ref of refs) {
         const refHost = ref.host ? String(ref.host).toLowerCase() : GITHUB_COM;
         if (!refsByHost.has(refHost)) refsByHost.set(refHost, []);
-        refsByHost.get(refHost).push(ref);
+        refsByHost.get(refHost)?.push(ref);
       }
       const { repo } = await resolveRepo(directory, remote);
       if (rateLimit.isGitHubRateLimited(repo?.host)) throw responseError(503, { error: 'GitHub rate limited' });
@@ -805,14 +910,14 @@ export function createGitHubResources({
       return { connected: true, statuses };
     }),
 
-    readChangeRequestHead: async ({ session, directory, remote, number }) => {
+    readChangeRequestHead: async ({ session, directory, remote, number }: ResourceInput<'readChangeRequestHead'>) => {
       const { octokit } = accountOf(session);
       const repo = await resolveRepoForRequest(octokit, directory, null, remote);
       let response;
       try {
         response = await octokit.rest.pulls.get({ owner: repo.owner, repo: repo.repo, pull_number: number });
       } catch (error) {
-        if (error?.status === 404) {
+        if (errorField(error, 'status') === 404) {
           throw sourceControlError(`Pull request #${number} was not found in ${repo.owner}/${repo.repo}`, 'SOURCE_CONTROL_CHANGE_REQUEST_NOT_FOUND', 404);
         }
         throw error;
@@ -831,7 +936,7 @@ export function createGitHubResources({
       };
     },
 
-    resolveChangeRequestSource: async ({ session, context, project, number, expectedHeadSha, requestedRemoteName }) => {
+    resolveChangeRequestSource: async ({ session, context, project, number, expectedHeadSha, requestedRemoteName }: ResourceInput<'resolveChangeRequestSource'>) => {
       const { octokit } = accountOf(session);
       const target = await resolveRepoForRequest(octokit, context.directory, { owner: project.owner, repo: project.name }, context.primaryRemote);
       if (!target || `${target.owner}/${target.repo}` !== project.id) {
