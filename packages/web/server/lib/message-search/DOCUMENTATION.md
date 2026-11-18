@@ -146,6 +146,11 @@ at `text.toLowerCase()`. These reads do not validate or coerce the stored values
 Narrowing the SQLite declaration would conceal accepted database contents;
 adding validation or coercion would change the existing failure behavior.
 
+`store.test.js` pins this boundary against an in-memory database: blob cursors
+and text timestamps survive store reads, and a blob message body reaches the
+snippet builder and throws `TypeError`. The test prevents a type conversion
+from silently adding row validation or coercion.
+
 The runtime cannot convert independently while those store methods remain
 JavaScript: their inferred search parameters narrow `directories` and `exclude`
 to `never[]`, and `sessionId`, `role` and `before` to null. The indexer's inferred
