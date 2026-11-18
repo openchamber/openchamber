@@ -74,9 +74,14 @@ that fixture before the copied helper can contain TypeScript. The fixture's
 `copyFile` source and destination both require JavaScript; changing an import
 specifier does not repair that boundary.
 
-`realtime-proxy.js` imports `ws`, whose declaration package is absent from this
-workspace. Both `WebSocket` and `WebSocketServer` need the dependency's real
-declarations. A local shim would replace the dependency's actual contract.
+`realtime-proxy.js` uses the constructors now declared by `shared/ws.d.ts`.
+Its remaining boundary is `WebSocket.send` in
+`shared/websocket-contracts.ts`: `RawData` includes `Buffer[]`, while `SendData`
+does not. Both message handlers and the pending queue forward the received data
+unchanged. The owner contract must admit `Buffer[]` as send data before those
+calls can be typed. A compiler probe reports TS2769 for forwarding `RawData`
+to `send`. Narrowing the received type or converting frame data locally would
+hide the mismatch or change the forwarding implementation.
 
 `tailscale-tunnel.js` can now pass approval details to the typed
 `TunnelServiceError` constructor. Its remaining boundary is
@@ -107,3 +112,10 @@ values before conversion; declaring the producers' results as strings would
 promise validation they do not perform. The local `compareVersions` contract
 also accepts only strings. Adding validation or coercion at these call sites
 would change acceptance or failure behavior.
+
+The external `fetchUpdateNotes` contract would need to accept the unchecked
+JSON versions that this folder forwards, including truthy numbers, arrays and
+objects. A compiler probe using `shared/json-values.ts` reports TS2345 at that
+call. The same probe reports TS2345 when forwarding an unchecked manifest entry
+to Node's `path.resolve`. Node's string-only path contract must stay intact;
+claiming that the manifest entry is a string would invent validation.
