@@ -32,12 +32,48 @@ import {
   formatModelSelection,
   isRecord,
 } from './config-v2.js';
+import type { AgentEntity } from './config-v2.js';
+import type { JsonValue } from '../shared/json-values.js';
 
+export type AgentScope = 'user' | 'project';
+export interface AgentLookupCache {
+  userAgentIndexByName: Map<string, string>;
+  userAgentLookupByName: Map<string, string | null>;
+  userAgentIndexReady: boolean;
+}
+interface AgentMutation {
+  [key: string]: AgentEntity[keyof AgentEntity] | JsonValue;
+}
+export type AgentConfig = {
+  source: 'md';
+  scope: AgentScope;
+  path: string;
+  legacy: boolean;
+  config: AgentEntity;
+} | {
+  source: 'json';
+  scope: AgentScope;
+  path: string | null;
+  legacy: boolean;
+  config: AgentEntity;
+} | {
+  source: 'none';
+  scope: null;
+  path: null;
+  legacy: false;
+  config: AgentEntity;
+};
+export interface DisabledAgent {
+  name: string;
+  scope: AgentScope | null;
+  path: string | null;
+  description?: string;
+}
 
 const USER_AGENT_DIRS = ['agents', 'agent', 'modes', 'mode'].map((name) => path.join(OPENCODE_CONFIG_DIR, name));
 const PROJECT_AGENT_DIR_NAMES = ['agents', 'agent', 'modes', 'mode'];
 
-function ensureProjectAgentDir(workingDirectory) {
+function ensureProjectAgentDir(workingDirectory: string) {
   const projectAgentDir = path.join(workingDirectory, '.opencode', 'agents');
   if (!fs.existsSync(projectAgentDir)) {
     fs.mkdirSync(projectAgentDir, { recursive: true });
@@ -45,7 +81,7 @@ function ensureProjectAgentDir(workingDirectory) {
   return projectAgentDir;
 }
 
-function getProjectAgentPath(workingDirectory, agentName) {
+function getProjectAgentPath(workingDirectory: string, agentName: string) {
   const preferred = path.join(workingDirectory, '.opencode', 'agents', `${agentName}.md`);
   const worktreeRoot = findWorktreeRoot(workingDirectory) || path.resolve(workingDirectory);
   for (const base of getAncestors(workingDirectory, worktreeRoot)) {
@@ -57,7 +93,7 @@ function getProjectAgentPath(workingDirectory, agentName) {
   return preferred;
 }
 
-function createAgentLookupCache() {
+function createAgentLookupCache(): AgentLookupCache {
   return {
     userAgentIndexByName: new Map(),
     userAgentLookupByName: new Map(),
@@ -65,13 +101,14 @@ function createAgentLookupCache() {
   };
 }
 
-function buildUserAgentIndex(cache) {
+function buildUserAgentIndex(cache: AgentLookupCache) {
   if (cache.userAgentIndexReady) return;
   cache.userAgentIndexReady = true;
 
   const dirsToVisit = USER_AGENT_DIRS.filter((dir) => fs.existsSync(dir));
   while (dirsToVisit.length > 0) {
     const dir = dirsToVisit.pop();
+    if (dir === undefined) break;
     let entries;
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -91,14 +128,14 @@ function buildUserAgentIndex(cache) {
 
     for (let i = entries.length - 1; i >= 0; i -= 1) {
       const entry = entries[i];
-      if (entry.isDirectory()) {
+      if (entry?.isDirectory()) {
         dirsToVisit.push(path.join(dir, entry.name));
       }
     }
   }
 }
 
-function getIndexedUserAgentPath(agentName, cache) {
+function getIndexedUserAgentPath(agentName: string, cache: AgentLookupCache) {
   if (cache.userAgentLookupByName.has(agentName)) {
     return cache.userAgentLookupByName.get(agentName);
   }
@@ -109,7 +146,7 @@ function getIndexedUserAgentPath(agentName, cache) {
   return found;
 }
 
-function getUserAgentPath(agentName, lookupCache = null) {
+function getUserAgentPath(agentName: string, lookupCache: AgentLookupCache | null = null) {
   const preferred = path.join(AGENT_DIR, `${agentName}.md`);
   for (const dir of USER_AGENT_DIRS) {
     const candidate = path.join(dir, `${agentName}.md`);
@@ -123,7 +160,7 @@ function getUserAgentPath(agentName, lookupCache = null) {
   return preferred;
 }
 
-function getAgentScope(agentName, workingDirectory, lookupCache = null) {
+function getAgentScope(agentName: string, workingDirectory: string | null, lookupCache: AgentLookupCache | null = null) {
   if (workingDirectory) {
     const projectPath = getProjectAgentPath(workingDirectory, agentName);
     if (fs.existsSync(projectPath)) {
@@ -139,7 +176,7 @@ function getAgentScope(agentName, workingDirectory, lookupCache = null) {
   return { scope: null, path: null };
 }
 
-function getAgentWritePath(agentName, workingDirectory, requestedScope, lookupCache = null) {
+function getAgentWritePath(agentName: string, workingDirectory: string | null, requestedScope: AgentScope, lookupCache: AgentLookupCache | null = null) {
   const existing = getAgentScope(agentName, workingDirectory, lookupCache);
   if (existing.path) {
     return existing;
@@ -160,7 +197,7 @@ function getAgentWritePath(agentName, workingDirectory, requestedScope, lookupCa
 }
 
 
-function readMdAgent(mdPath) {
+function readMdAgent(mdPath: string) {
   const { frontmatter, body } = parseMdFile(mdPath);
   return {
     entity: toAgentEntity(frontmatter, body),
@@ -170,9 +207,9 @@ function readMdAgent(mdPath) {
   };
 }
 
-function getAgentSources(agentName, workingDirectory, lookupCache = createAgentLookupCache()) {
+function getAgentSources(agentName: string, workingDirectory: string | null, lookupCache = createAgentLookupCache()) {
   const projectPath = workingDirectory ? getProjectAgentPath(workingDirectory, agentName) : null;
-  const projectExists = Boolean(projectPath) && fs.existsSync(projectPath);
+  const projectExists = projectPath !== null && fs.existsSync(projectPath);
 
   const userPath = getUserAgentPath(agentName, lookupCache);
   const userExists = fs.existsSync(userPath);
@@ -192,7 +229,7 @@ function getAgentSources(agentName, workingDirectory, lookupCache = createAgentL
       path: mdPath,
       scope: mdScope,
       legacy: false,
-      fields: [],
+      fields: new Array<string>(),
     },
     json: {
       exists: jsonSource.exists,
@@ -200,7 +237,7 @@ function getAgentSources(agentName, workingDirectory, lookupCache = createAgentL
       scope: jsonSource.exists ? jsonScope : null,
       sectionKey: jsonSource.sectionKey,
       legacy: Boolean(jsonSource.legacy),
-      fields: [],
+      fields: new Array<string>(),
     },
     projectMd: {
       exists: projectExists,
@@ -212,7 +249,7 @@ function getAgentSources(agentName, workingDirectory, lookupCache = createAgentL
     },
   };
 
-  if (mdExists) {
+  if (mdPath !== null) {
     const md = readMdAgent(mdPath);
     sources.md.legacy = md.legacy;
     sources.md.fields = Object.keys(md.entity);
@@ -225,9 +262,9 @@ function getAgentSources(agentName, workingDirectory, lookupCache = createAgentL
   return sources;
 }
 
-function getAgentConfig(agentName, workingDirectory, lookupCache = createAgentLookupCache()) {
+function getAgentConfig(agentName: string, workingDirectory: string | null, lookupCache = createAgentLookupCache()): AgentConfig {
   const projectPath = workingDirectory ? getProjectAgentPath(workingDirectory, agentName) : null;
-  const projectExists = Boolean(projectPath) && fs.existsSync(projectPath);
+  const projectExists = projectPath !== null && fs.existsSync(projectPath);
 
   const userPath = getUserAgentPath(agentName, lookupCache);
   const userExists = fs.existsSync(userPath);
@@ -267,7 +304,7 @@ function getAgentConfig(agentName, workingDirectory, lookupCache = createAgentLo
   };
 }
 
-function getAgentPermissions(agentName, workingDirectory, lookupCache = createAgentLookupCache()) {
+function getAgentPermissions(agentName: string, workingDirectory: string | null, lookupCache = createAgentLookupCache()) {
   const layers = readConfigLayers(workingDirectory);
   const global = [
     ...readGlobalPermissionRules(layers.userConfig),
@@ -285,13 +322,13 @@ function getAgentPermissions(agentName, workingDirectory, lookupCache = createAg
 }
 
 
-function writeAgentMd(targetPath, entity) {
+function writeAgentMd(targetPath: string, entity: AgentEntity | JsonValue) {
   const { fields, system } = fromAgentEntity(entity);
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   writeMdFile(targetPath, fields, system);
 }
 
-function createAgent(agentName, config, workingDirectory, scope) {
+function createAgent(agentName: string, config: JsonValue, workingDirectory: string | null, scope?: AgentScope) {
   ensureDirs();
   const lookupCache = createAgentLookupCache();
 
@@ -314,7 +351,7 @@ function createAgent(agentName, config, workingDirectory, scope) {
   let targetPath;
   let targetScope;
 
-  if (scope === AGENT_SCOPE.PROJECT && workingDirectory) {
+  if (scope === AGENT_SCOPE.PROJECT && workingDirectory && projectPath) {
     ensureProjectAgentDir(workingDirectory);
     targetPath = projectPath;
     targetScope = AGENT_SCOPE.PROJECT;
@@ -331,21 +368,21 @@ function createAgent(agentName, config, workingDirectory, scope) {
 
 const AGENT_REQUEST_BODY_FIELDS = ['temperature', 'top_p'];
 
-function deleteRequestBodyField(entity, key) {
+function deleteRequestBodyField(entity: AgentMutation, key: string) {
   if (!isRecord(entity.request) || !isRecord(entity.request.body)) return;
   delete entity.request.body[key];
   if (Object.keys(entity.request.body).length === 0) delete entity.request.body;
   if (Object.keys(entity.request).length === 0) delete entity.request;
 }
 
-function stripModelVariant(entity) {
+function stripModelVariant(entity: AgentMutation) {
   const parsed = parseModelSelection(entity.model);
   if (!parsed) return;
   const stripped = formatModelSelection({ providerID: parsed.providerID, modelID: parsed.modelID });
   if (stripped) entity.model = stripped;
 }
 
-function deleteAgentField(entity, field) {
+function deleteAgentField(entity: AgentMutation, field: string) {
   if (field === 'permission' || field === 'permissions') {
     delete entity.permissions;
     return;
@@ -361,10 +398,10 @@ function deleteAgentField(entity, field) {
   delete entity[field === 'prompt' ? 'system' : field];
 }
 
-function applyAgentUpdates(entity, updates) {
-  const next = { ...entity };
+function applyAgentUpdates(entity: AgentEntity, updates: JsonValue) {
+  const next: AgentMutation = { ...entity };
   if (isRecord(next.request)) {
-    const request = { ...next.request };
+    const request: AgentMutation = { ...next.request };
     if (isRecord(request.body)) request.body = { ...request.body };
     if (isRecord(request.headers)) request.headers = { ...request.headers };
     next.request = request;
@@ -386,7 +423,9 @@ function applyAgentUpdates(entity, updates) {
   return toAgentEntity(next);
 }
 
-function updateAgent(agentName, updates, workingDirectory) {
+const hasPromptFields = (value: unknown): value is { system?: unknown; prompt?: unknown } => value != null;
+
+function updateAgent(agentName: string, updates: JsonValue, workingDirectory: string | null) {
   ensureDirs();
   const lookupCache = createAgentLookupCache();
 
@@ -403,7 +442,8 @@ function updateAgent(agentName, updates, workingDirectory) {
     const layers = readConfigLayers(workingDirectory);
     const jsonSource = getJsonEntrySource(layers, 'agents', agentName);
     const config = jsonSource.config || {};
-    const rawSystem = jsonSource.section?.system ?? jsonSource.section?.prompt;
+    const section = hasPromptFields(jsonSource.section) ? jsonSource.section : undefined;
+    const rawSystem = section?.system ?? section?.prompt;
     if (isPromptFileReference(rawSystem)) {
       const promptFilePath = resolvePromptFilePath(rawSystem);
       if (!promptFilePath) {
@@ -427,7 +467,7 @@ function updateAgent(agentName, updates, workingDirectory) {
   return { source: 'md', scope, path: targetPath };
 }
 
-function deleteAgent(agentName, workingDirectory, scope) {
+function deleteAgent(agentName: string, workingDirectory: string | null, scope?: AgentScope) {
   const lookupCache = createAgentLookupCache();
   const requestedScope = scope === AGENT_SCOPE.PROJECT || scope === AGENT_SCOPE.USER ? scope : null;
 
@@ -483,7 +523,7 @@ function deleteAgent(agentName, workingDirectory, scope) {
 }
 
 
-function collectAgentIds(dir, prefix, ids) {
+function collectAgentIds(dir: string, prefix: string, ids: Set<string>) {
   let entries;
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -499,9 +539,9 @@ function collectAgentIds(dir, prefix, ids) {
   }
 }
 
-function listDisabledAgents(workingDirectory) {
+function listDisabledAgents(workingDirectory: string | null) {
   const lookupCache = createAgentLookupCache();
-  const names = new Set();
+  const names = new Set<string>();
 
   buildUserAgentIndex(lookupCache);
   for (const name of lookupCache.userAgentIndexByName.keys()) names.add(name);
@@ -525,12 +565,13 @@ function listDisabledAgents(workingDirectory) {
   for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
     const entry = getAgentConfig(name, workingDirectory, lookupCache);
     if (entry.config.disabled !== true) continue;
-    disabled.push({
+    const item: DisabledAgent = {
       name,
       scope: entry.scope,
       path: entry.path,
-      ...(typeof entry.config.description === 'string' ? { description: entry.config.description } : {}),
-    });
+    };
+    if (entry.config.description !== undefined) item.description = entry.config.description;
+    disabled.push(item);
   }
   return disabled;
 }

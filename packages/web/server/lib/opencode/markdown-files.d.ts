@@ -5,6 +5,9 @@ export interface MarkdownDocument {
 
 export function parseMdFile(filePath: string): MarkdownDocument;
 export function parseMdFileAsync(filePath: string): Promise<MarkdownDocument>;
+export function isPromptFileReference(value: unknown): value is string;
+export function resolvePromptFilePath<Reference>(reference: Reference): string | null;
+export function writePromptFile(filePath: string, content: string | null): void;
 export function writeMdFile<Frontmatter extends object>(
   filePath: string,
   frontmatter: Frontmatter,

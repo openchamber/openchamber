@@ -2,6 +2,7 @@ import path from 'path';
 import { buildAppliedResponse } from './config-mutation-response.js';
 import { isString } from '../shared/object-guards.js';
 import type { Application, Request, Response } from '../shared/http-contracts.js';
+import type { JsonObject, JsonValue } from '../shared/json-values.js';
 import type { createProjectDirectoryRuntime } from '../projects/project-directory-runtime.js';
 import type * as agents from './agents.js';
 import type * as commands from './commands.js';
@@ -23,6 +24,8 @@ export interface ConfigEntityRouteDependencies<Snippet> extends Pick<ReturnType<
 
 const hasBodyFields = (value: unknown): value is Record<string, unknown> => value != null;
 const bodyFields = <Value>(value: Value) => hasBodyFields(value) ? value : undefined;
+const agentScope = <Value>(value: Value): agents.AgentScope | undefined =>
+  value === 'project' ? 'project' : value === 'user' ? 'user' : undefined;
 const requiredBodyFields = <Value>(value: Value) => {
   if (hasBodyFields(value)) return value;
   throw new TypeError(`Cannot destructure property 'scope' of 'req.body' as it is ${value}.`);
@@ -113,7 +116,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
     }
   });
 
-  app.get('/api/config/agents/:name', async (req, res) => {
+  app.get<unknown, { name: string }>('/api/config/agents/:name', async (req, res) => {
     try {
       const agentName = req.params.name;
       const { directory, error } = await resolveProjectDirectory(req);
@@ -138,7 +141,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
     }
   });
 
-  app.get('/api/config/agents/:name/config', async (req, res) => {
+  app.get<unknown, { name: string }>('/api/config/agents/:name/config', async (req, res) => {
     try {
       const agentName = req.params.name;
       const { directory, error } = await resolveProjectDirectory(req);
@@ -154,7 +157,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
     }
   });
 
-  app.get('/api/config/agents/:name/permissions', async (req, res) => {
+  app.get<unknown, { name: string }>('/api/config/agents/:name/permissions', async (req, res) => {
     try {
       const agentName = req.params.name;
       const { directory, error } = await resolveProjectDirectory(req);
@@ -168,7 +171,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
     }
   });
 
-  app.post('/api/config/agents/:name', async (req, res) => {
+  app.post<JsonObject | undefined, { name: string }>('/api/config/agents/:name', async (req, res) => {
     try {
       const agentName = req.params.name;
       const { scope, ...config } = requiredBodyFields(req.body);
@@ -181,7 +184,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
       console.log('[Server] Config received:', JSON.stringify(config, null, 2));
       console.log('[Server] Scope:', scope, 'Working directory:', directory);
 
-      const created = createAgent(agentName, config, directory, scope);
+      const created = createAgent(agentName, config, directory, agentScope(scope));
       res.json(buildAppliedResponse(
         `Agent ${agentName} created successfully.`,
         created,
@@ -192,7 +195,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
     }
   });
 
-  app.patch('/api/config/agents/:name', async (req, res) => {
+  app.patch<JsonValue | undefined, { name: string }>('/api/config/agents/:name', async (req, res) => {
     try {
       const agentName = req.params.name;
       const updates = req.body;
@@ -205,7 +208,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
       console.log('[Server] Updates:', JSON.stringify(updates, null, 2));
       console.log('[Server] Working directory:', directory);
 
-      const updated = updateAgent(agentName, updates, directory);
+      const updated = updateAgent(agentName, updates ?? null, directory);
 
       console.log(`[Server] Agent ${agentName} updated successfully`);
 
@@ -220,7 +223,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
     }
   });
 
-  app.delete('/api/config/agents/:name', async (req, res) => {
+  app.delete<unknown, { name: string }>('/api/config/agents/:name', async (req, res) => {
     try {
       const agentName = req.params.name;
       const { directory, error } = await resolveProjectDirectory(req);
@@ -229,7 +232,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
       }
 
       const scope = bodyFields(req.body)?.scope;
-      deleteAgent(agentName, directory, scope);
+      deleteAgent(agentName, directory, agentScope(scope));
       res.json(buildAppliedResponse(
         `Agent ${agentName} deleted successfully.`,
       ));
