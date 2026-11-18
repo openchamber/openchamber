@@ -108,13 +108,26 @@ Numeric process exit codes and transport failure codes remain separate checks.
 
 GitBeaker's `ProjectSchema.forked_from_project`,
 `MergeRequestSchema.head_pipeline`, `MergeRequestSchema.pipeline` and
-`MergeRequestSchema.user` are unchecked extension fields. Legacy resource paths
-read their properties and can pass a truthy, unchecked fork ID into
-`Projects.show`. Its declared project-ID parameter accepts only strings and
-numbers. Converting this boundary requires retaining the unchecked values and
-GitBeaker's runtime coercion, rather than declaring validated project metadata.
-The requester also exposes GraphQL bodies as a broad response union. The
-resource and provider implementations retain their JavaScript boundary.
+`MergeRequestSchema.user` are unchecked extension fields. The local GitBeaker
+declaration reflects the requester factory's concrete response body and leaves
+resource replies unchecked. `Projects.show` stringifies unchecked fork IDs before
+encoding them; `RepositoryFiles.showRaw` passes its ref to the query formatter.
+GraphQL responses need their own field checks since the requester also returns
+text, blobs and streams. Resource orchestration still reads and forwards some
+unchecked fields, including the draft note position. Provider dispatch still
+uses a route string to look up a normalizer and its matching mutation arguments.
+
+### Why payload checks remain in the mappers
+
+No transport schema validates resource payloads before the mappers see them.
+The mappers retain checks for primitive strings, integers, plain objects and
+arrays. A diff accepts either path as a nonempty string, then selects the first
+truthy path, which may be a non-string value from a malformed response.
+
+Request failures may carry arbitrary `code` and `name` fields. Classification
+still checks the type of `code` before using its string prefix. Fetch failures
+can supply a non-string error message; the request error keeps Error's message
+coercion and leaves the message absent for `undefined`.
 
 ### Why mapper paths retain unchecked values
 
