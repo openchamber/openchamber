@@ -66,18 +66,40 @@ record.
 
 `path-realpath-cache.js` is copied verbatim by `fs/routes.test.js` into a bare
 Node fixture without a source resolver or transpilation. Its owner must change
-that fixture before the copied helper can contain TypeScript.
+that fixture before the copied helper can contain TypeScript. The fixture's
+`copyFile` source and destination both require JavaScript; changing an import
+specifier does not repair that boundary.
 
 `realtime-proxy.js` imports `ws`, whose declaration package is absent from this
-workspace. A local shim would replace the dependency's actual contract.
+workspace. Both `WebSocket` and `WebSocketServer` need the dependency's real
+declarations. A local shim would replace the dependency's actual contract.
 
-`tailscale-tunnel.js` passes approval details to `tunnels/types.js`.
-That JavaScript constructor's inferred third parameter accepts only null;
-its owner must declare the existing details contract.
+`tailscale-tunnel.js` can now pass approval details to the typed
+`TunnelServiceError` constructor. Its remaining boundary is
+`tunnels/providers/tailscale.ts`, in `createTailscaleTunnelProvider().diagnose`.
+That caller passes `target` to `checkTailscaleRunning` after checking
+`dependency.available`. The availability result does not narrow the separate
+`target` binding, whose type remains `{ command: string; env: NodeJS.ProcessEnv }
+| null`. The caller must establish a non-null target before calling the helper,
+which dereferences `target.command`. A strict conversion reports TS2322 at that
+call. Accepting null in the helper would promise support its implementation
+does not provide.
 
 `web-package-paths.js` passes unchecked manifest `main` and `bin.openchamber`
-values directly to Node's path validation. `package-manager.js` also passes
-through unchecked manifest versions, saved update-channel values and registry
-tags. Declaring those values as strings would promise validation they do not
-perform. Adding schema validation would change their malformed-input behavior.
-Their consumers need a settled parsing contract before conversion.
+values directly to Node's `path.resolve`, whose segments must be strings.
+Only `manifest.name` is checked. Its owner must settle the manifest parsing
+contract without replacing Node's existing malformed-input failures. The
+`web-package-paths.test.js` installed-layout fixture also copies the source
+verbatim as JavaScript.
+
+`package-manager.js` passes through unchecked manifest versions, saved
+update-channel values and registry tags. In particular, `getCurrentVersion`
+returns `pkg.version || 'unknown'`, and `getLatestVersion` returns the unchecked
+`dist-tags.latest` value. These can be non-string truthy JSON values.
+`changelog/update-notes.ts` exports `fetchUpdateNotes` with string-only
+`fromVersion` and `toVersion` parameters, while `fetchChangelogNotes` forwards
+those unchecked values. That contract must account for the actual forwarded
+values before conversion; declaring the producers' results as strings would
+promise validation they do not perform. The local `compareVersions` contract
+also accepts only strings. Adding validation or coercion at these call sites
+would change acceptance or failure behavior.
