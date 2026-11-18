@@ -84,7 +84,7 @@ implementation skills unless a specialized subsystem has to be interpreted.
 
 - Use `package.json` scripts as the command source of truth. Which checks a change needs is in `openchamber-change-discipline`.
 - Before every commit of source changes, `bun run check:changed` passes (`scripts/check-changed.mjs` says what it runs). Fix the new findings; the pre-existing backlog stays out of scope unless the task is that cleanup. Never silence a rule, weaken severity, or launder types to make a check pass.
-- A correction becomes a check. When the maintainer or a reviewer corrects how code is written, the fix includes a lint rule (`tools/oxlint/openchamber`) or a test that catches the same thing next time, with the reason in the rule's message. A line in a skill is for what no check can decide.
+- A correction becomes a check. When the maintainer or a reviewer corrects how code is written, the fix includes a lint rule (`tools/oxlint/openchamber`) that catches the same thing next time, with the reason in the rule's message; when the correction is about what the code does, the check is a test of that behavior (`openchamber-change-discipline`, *Test Design*), never a test that reads source as text. A line in a skill is for what no check can decide.
 
 ## Pull Request Handoff
 
