@@ -53,3 +53,10 @@ export const bundledOpenCodeServerLaunch = (
   env: process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {},
   wrapperType: 'bundled-server',
 });
+
+export const isRetiredBundledCliSetting = (configured: string): boolean => {
+  const candidate = configured.trim();
+  if (!/[\\/]resources[\\/]opencode-cli(?:[\\/]opencode(?:\.exe)?)?$/i.test(candidate) || fs.existsSync(candidate)) return false;
+  console.warn(`settings.opencodeBinary points at the CLI older desktop builds shipped, which no longer exists; using the default OpenCode instead: ${candidate}`);
+  return true;
+};

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { readEnterprisePolicy } from '../enterprise-mode.js';
 import { clearAppImageArgv0FromProcessEnv } from '../inherited-env.js';
 import { mergePathValues } from './path-utils.js';
-import { bundledOpenCodeServerLaunch, isBundledOpenCodeServer, resolveBundledOpenCodeServer } from './bundled-opencode-server.js';
+import { bundledOpenCodeServerLaunch, isBundledOpenCodeServer, isRetiredBundledCliSetting, resolveBundledOpenCodeServer } from './bundled-opencode-server.js';
 import type { SpawnSyncOptionsWithStringEncoding } from 'node:child_process';
 import type { ManagedOpenCodeLaunchSpec } from './lifecycle.js';
 
@@ -1100,7 +1100,7 @@ export const createOpenCodeEnvRuntime = (deps: OpenCodeEnvDependencies) => {
 
       const normalized = isString(settings.opencodeBinary) ? normalizeOpencodeBinarySetting(settings.opencodeBinary) : null;
 
-      if (normalized === '') {
+      if (normalized === '' || (isString(settings.opencodeBinary) && isRetiredBundledCliSetting(settings.opencodeBinary))) {
         if (state.resolvedOpencodeBinarySource === 'settings') {
           delete process.env.OPENCODE_BINARY;
         }
