@@ -1,8 +1,12 @@
 
-// external: #5839 MiniMax returns cookie-required error 1004 for valid Subscription Keys.
+export type MiniMaxBaseResp = {
+  status_code?: unknown;
+  status_msg?: unknown;
+};
+
 const NO_USAGE_FOR_KEY = 1004;
 
-export const miniMaxStatusError = (baseResp) => {
+export const miniMaxStatusError = (baseResp: MiniMaxBaseResp | null | undefined) => {
   if (!baseResp) return null;
   const statusCode = Number(baseResp.status_code);
   if (statusCode === 0) return null;
