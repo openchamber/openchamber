@@ -96,14 +96,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const [mountedStackedFiles, setMountedStackedFiles] = React.useState<Set<string>>(() => new Set());
     const [scrollRequestNonce, setScrollRequestNonce] = React.useState(0);
     const [fileDiffRefreshNonce, setFileDiffRefreshNonce] = React.useState<Map<string, number>>(() => new Map());
-    // A tool completion says "something in this directory changed" without
-    // naming paths; every live diff on screen may be stale even when the
-    // status row it hangs off did not move.
     const [workingTreeRevision, setWorkingTreeRevision] = React.useState(0);
     const [reviewDialogOpen, setReviewDialogOpen] = React.useState(false);
-    // With no view picked, Changes opens on Branch and waits there for the
-    // base; it falls back to Changed only once the branch has none, so the
-    // view never switches under the person a moment after it opened.
     const [activeDiffScope, setActiveDiffScope] = React.useState<DiffScope>(
         diffScope === null && !isVSCodeRuntime() ? 'branch' : diffScope ?? 'working'
     );
@@ -126,7 +120,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const diffFileListMode = useUIStore((state) => state.diffFileListMode);
     const setDiffFileListMode = useUIStore((state) => state.setDiffFileListMode);
     const openContextFileAtLine = useUIStore((state) => state.openContextFileAtLine);
-    // Another project's PR has nothing to do with the session on screen.
     const panelSessionId = useSessionUIStore((state) => state.currentSessionId);
     const currentSessionId = foreign ? null : panelSessionId;
     const diffWrapLines = diffWrapLinesStore;
@@ -251,8 +244,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
             const isExpanded = isSingleFile || expandedFiles.has(file.path);
             return (
                 <MultiFileDiffEntry
-                    // Only an expanded entry loads while shown; a collapsed one
-                    // stays out of the re-render when the view is shown or hidden.
                     visible={visible && isExpanded}
                     key={`${getRuntimeKey()}:${effectiveDirectory}:${file.path}`}
                     directory={effectiveDirectory}
@@ -291,7 +282,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
             <div ref={fileTreeLayoutRef} className={cn('flex min-w-0 flex-1 min-h-0 h-full', flushContent ? 'gap-0' : 'gap-3 px-3 pb-3 pt-2')}>
                 {isTreeMode && (
                     <>
-                        {/* Clamped by CSS too: a width stored in a wide panel must not swallow a narrow one. */}
                         <section className="flex max-w-[50%] flex-shrink-0 flex-col" style={{ width: `${fileTreeWidth}px` }}>
                             <FileTree changedFiles={changedFiles} selectedFile={treeSelectedFile?.path ?? null} onSelectFile={handleSelectFileAndScroll} />
                         </section>
@@ -344,7 +334,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         preventOverscroll
                         data-diff-virtual-root
                     >
-                        {/* The end space is the content's: padding on the scroller would hold a diff's sticky scrollbar that far above the panel's bottom. */}
                         <div className="flex flex-col [overflow-anchor:none] pb-16" data-diff-virtual-content>
                             {isTreeMode
                                 ? treeSelectedFile && renderEntry(treeSelectedFile, true)
@@ -408,8 +397,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
             }
         }
         if (activeDiffScope === 'branch') {
-            // A base not found while the status or the binding (whose pull
-            // request names it) still load is still being resolved, not missing.
             const baseInputsLoading = status === null || binding.status === 'idle' || binding.status === 'loading';
             if (!isBranchBaseResolved || (!qualifiedBranchBase && baseInputsLoading)) {
                 return <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -461,9 +448,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
     };
     const showWalkthroughButton = changedFiles.length > 0 && showWalkthroughAction && (activeDiffScope !== 'pr' || Boolean(pullRequestContext));
     const openWalkthrough = () => {
-        // Carry the scope across: opening the walkthrough
-        // while looking at staged changes should review
-        // staged changes, not whatever the panel showed last.
         const directory = effectiveDirectory ?? '';
         const localSource: WalkthroughTarget = {
             source: activeDiffScope === 'commit' && selectedCommitHash ? {
@@ -615,8 +599,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <span className="inline-flex flex-shrink-0">
-                                    {/* A raised button like its neighbours: a filled one read
-                                        as a state. The accent stays on its icon. */}
                                     <Button
                                         variant="outline"
                                         size="sm"

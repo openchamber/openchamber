@@ -35,7 +35,7 @@ import { getToolIcon } from './parts/toolPresentation';
 import { useGuestToolPresentation } from '@/lib/guests/tool-presentation';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { fetchBypassingRuntimeBridge, runtimeFetch } from '@/lib/runtime-fetch';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { toast } from '@/components/ui';
 import { saveFile } from './parts/saveFile';
@@ -263,7 +263,7 @@ const imageLoader = (image: GalleryItem | undefined): (() => Promise<Blob>) | nu
     if (!image || isVSCodeRuntime()) return null;
     if (image.load) return image.load;
     const { url } = image;
-    if (/^(?:data|blob):/i.test(url)) return () => fetch(url).then((response) => response.blob());
+    if (/^(?:data|blob):/i.test(url)) return () => fetchBypassingRuntimeBridge(url).then((response) => response.blob());
     return null;
 };
 
@@ -744,7 +744,7 @@ const MermaidPreviewDialog: React.FC<{
             if (!resolvedUrl || (resolvedUrl.protocol !== 'http:' && resolvedUrl.protocol !== 'https:')) {
                 sourcePromise = Promise.reject(mermaidLoadFailure('chat.toolOutputDialog.mermaid.unsupportedUrlProtocol'));
             } else {
-                sourcePromise = fetch(resolvedUrl.toString())
+                sourcePromise = runtimeFetch(resolvedUrl)
                     .then((response) => {
                         if (!response.ok) {
                             return Promise.reject(mermaidLoadFailure('chat.toolOutputDialog.mermaid.loadFailedWithStatus', { status: response.status }));

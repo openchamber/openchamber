@@ -64,24 +64,16 @@ export function useComposerPaste({
     const handlePaste = React.useCallback(async (event: ClipboardEvent) => {
         const clipboardData = event.clipboardData;
         if (!clipboardData) return;
-        // Narrowed alias so the rest of the handler reads as it did when this
-        // was a React synthetic event, whose clipboardData is never null.
         const e = { ...event, clipboardData, preventDefault: () => event.preventDefault() };
 
-        // A pasted link to another session or one of its messages pastes as
-        // usual and draws as a chip once resolved.
         if (!isVSCodeRuntime() && inputMode === 'normal') {
             const links = findSessionLinks(e.clipboardData.getData('text'), sessionLinkOrigins);
             if (links.length > 0) void resolveSessionLinks(links.map((range) => range.target), true);
         }
-        // Issue and PR links are read only when the text lands in the composer,
-        // not when a large paste goes as a file.
         const readLinksOfPaste = (text: string) => {
             if (!isVSCodeRuntime() && inputMode === 'normal' && !isBtwActive) void readPastedReferenceLinks(text);
         };
 
-        // Pasting a URL over a selection wraps it as a markdown link:
-        // [selected text](pasted url).
         if (inputMode === 'normal' && (currentSessionId || newSessionDraftOpen)) {
             const ta = composerRef.current;
             const selStart = ta?.getSelection().start ?? -1;
@@ -91,7 +83,6 @@ export function useComposerPaste({
                 const url = clipboardText.trim();
                 const message = composerText.get();
                 const selected = message.slice(selStart, selEnd);
-                // A share link replaces the selection and becomes its chip; wrapped, its key would stay in the text.
                 if (shouldWrapSelectionAsLink(url, selected) && !findShareLink(url, receivedPageBases)) {
                     e.preventDefault();
                     const next = `${message.slice(0, selStart)}[${selected}](${url})${message.slice(selEnd)}`;
@@ -105,8 +96,6 @@ export function useComposerPaste({
             }
         }
 
-        // Images get a citation and a generated name; every other clipboard
-        // file (Finder/Explorer copy, a saved document) attaches as picked.
         const imageMap = new Map<string, File>();
         const otherFileMap = new Map<string, File>();
         const collectClipboardFile = (file: File) => {
@@ -138,7 +127,6 @@ export function useComposerPaste({
         }
 
         if (imageFiles.length === 0 && otherFiles.length > 0) {
-            // A copied file also carries its name as text; keep it out of the draft.
             e.preventDefault();
             if (!sessionReady) return;
             await attachFilesWithCitation(otherFiles);
@@ -163,7 +151,6 @@ export function useComposerPaste({
                 return;
             }
 
-            // Must run synchronously — ComposerEditor does not consume paste.
             e.preventDefault();
 
             const pasteInline = () => {
@@ -178,8 +165,6 @@ export function useComposerPaste({
             };
 
             const attachAsFile = async (candidate: LargeTextPasteCandidate | null = null) => {
-                // Read live attachment + composer state at action time — the ask
-                // toast can outlive the paste while the user types or attaches more.
                 const liveAttachedFiles = useInputStore.getState().attachedFiles;
                 const filename = nextPastedContextFilename([
                     ...liveAttachedFiles.map((file) => file.filename),
@@ -197,7 +182,6 @@ export function useComposerPaste({
                 );
 
                 const file = createPastedContextFile(pastedText, filename);
-                // Pending before the citation lands, so it shows as a chip at once.
                 pendingPastedAttachmentFilenamesRef.current.add(filename);
                 try {
                     if (!candidate) {
@@ -244,7 +228,6 @@ export function useComposerPaste({
                 return;
             }
 
-            // A newer large paste replaces an unanswered choice.
             const offerId = beginLargeTextPasteOffer(largeTextPasteOfferIdRef.current);
             largeTextPasteOfferIdRef.current = offerId;
 
@@ -267,15 +250,10 @@ export function useComposerPaste({
                 if (typedText) {
                     insertTextAtSelection(typedText);
                 }
-                // Keep this in the tap's gesture: iOS won't raise the
-                // keyboard when focus is restored after the attachment awaits.
                 if (resolution.restoreFocus) {
                     if (composerRef.current) {
                         composerRef.current.focus({ preventScroll: isCapacitorApp() });
                     } else {
-                        // The editor may have collapsed since the paste. The
-                        // insertion above appends to its draft; expand mounts
-                        // and focuses the editor with the platform's keyboard timing.
                         mobileShell.expand();
                     }
                 }
@@ -296,17 +274,13 @@ export function useComposerPaste({
         await attachFilesWithCitation([...imageFiles, ...otherFiles], pastedText);
     }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, largeTextPasteBehavior, largeTextPasteGesture, readLargeTextPasteSnapshot, markFileMentionPasteSuppression, composerText, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState, resolveSessionLinks, sessionLinkOrigins, pastedSessionIds, isBtwActive, readPastedReferenceLinks, receivedPageBases, pendingPastedAttachmentFilenamesRef, largeTextPasteOfferIdRef, setLargeTextPasteOffer, composerRef]);
 
-    // Android commits an image through the IME instead of the page (see nativeImagePaste).
     React.useEffect(() => {
         setNativeImagePasteEnabled(mobileShell.focused);
     }, [mobileShell.focused]);
 
-    // A composer unmounted while focused must not leave image commits enabled
-    // for whatever field gets the keyboard next.
     React.useEffect(() => () => setNativeImagePasteEnabled(false), []);
 
     React.useEffect(() => subscribeToNativeImagePastes((paste) => {
-        // Backstop for the window around the shell re-reading the declaration.
         if (!mobileShell.focused) return;
         if (!paste.ok) {
             toast.error(t('chat.chatInput.toast.clipboardAttachFailed'));

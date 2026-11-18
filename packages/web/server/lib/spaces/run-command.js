@@ -275,7 +275,7 @@ export async function killProcessTree(child, {
 
 const STREAM_STDERR_BYTES = 4 * 1024;
 
-class CommandStream extends Duplex {
+export class CommandStream extends Duplex {
   #child;
   #file;
   #args;

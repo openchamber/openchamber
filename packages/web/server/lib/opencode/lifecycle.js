@@ -356,16 +356,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       throw new Error('Launching OpenCode through WSL is no longer supported. Install OpenCode natively on Windows and configure opencode.cmd or opencode.exe.');
     }
 
-    if (process.platform === 'win32' && !state.useWslForOpencode) {
-      const launchSpec = resolveManagedOpenCodeLaunchSpec(binary);
-      if (launchSpec?.binary) {
-        if (launchSpec.wrapperType) {
-          console.log(`Launching OpenCode via ${launchSpec.wrapperType}: ${launchSpec.binary}`);
-        }
-        launchWrapperType = launchSpec.wrapperType || null;
-        binary = launchSpec.binary;
-        args = [...(Array.isArray(launchSpec.args) ? launchSpec.args : []), ...args];
+    const launchSpec = resolveManagedOpenCodeLaunchSpec(binary);
+    if (launchSpec?.binary) {
+      if (launchSpec.wrapperType) {
+        console.log(`Launching OpenCode via ${launchSpec.wrapperType}: ${launchSpec.binary}`);
       }
+      launchWrapperType = launchSpec.wrapperType || null;
+      binary = launchSpec.binary;
+      args = [...(Array.isArray(launchSpec.args) ? launchSpec.args : []), ...args];
     }
 
     const pathValue = typeof processEnv?.PATH === 'string' ? processEnv.PATH : '';
@@ -387,7 +385,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     const child = spawn(binary, args, {
       cwd,
-      env: processEnv,
+      env: launchSpec?.env ? { ...processEnv, ...launchSpec.env } : processEnv,
       detached: process.platform !== 'win32',
       windowsHide: true,
       stdio: [stdinLease ? 'pipe' : 'ignore', 'pipe', 'pipe'],

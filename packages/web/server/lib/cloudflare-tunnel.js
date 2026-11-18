@@ -2,15 +2,11 @@ import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import yaml from 'yaml';
 import {
   createExecutableSearchEnv,
   resolveExecutableLaunchTarget,
 } from './tunnels/executable-search.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const TRY_CF_URL_REGEX = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
 

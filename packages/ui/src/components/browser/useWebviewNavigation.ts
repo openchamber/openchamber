@@ -1,4 +1,5 @@
 import React from 'react';
+import { z } from 'zod';
 
 import { IDLE_NAV_STATUS, type BrowserNavStatus } from '@/lib/browser/contract';
 import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
@@ -11,6 +12,8 @@ import {
 
 // external: https://source.chromium.org/chromium/chromium/src/+/main:net/base/net_error_list.h ERR_ABORTED (-3) marks a cancelled navigation.
 const ERR_ABORTED = -3;
+
+const documentAnswerSchema = z.object({ httpResponseCode: z.number().int().positive() });
 
 const isRealPageUrl = (url: unknown): url is string => (
   typeof url === 'string' && url.length > 0 && url !== 'about:blank'
@@ -58,6 +61,8 @@ export const useWebviewNavigation = (
   React.useEffect(() => {
     if (!webview) return;
 
+    let documentStatus: number | undefined;
+
     const readCurrentUrl = (): string => {
       try {
         const value = webview.getURL();
@@ -101,7 +106,7 @@ export const useWebviewNavigation = (
       setStatus((previous) => (
         previous.kind === 'failed'
           ? previous
-          : { kind: 'ready', url: current, title: pageTitle }
+          : { kind: 'ready', url: current, title: pageTitle, httpStatus: documentStatus }
       ));
     };
 
@@ -111,6 +116,13 @@ export const useWebviewNavigation = (
         commitUrl(detail.url);
         syncHistory();
       }
+    };
+
+    const onDocumentNavigate = (event: Event) => {
+      // external: https://www.electronjs.org/docs/latest/api/webview-tag#event-did-navigate httpResponseCode is -1 for non-HTTP navigations.
+      const answer = documentAnswerSchema.safeParse(readEventPayload(event));
+      documentStatus = answer.success ? answer.data.httpResponseCode : undefined;
+      onNavigate(event);
     };
 
     const onFaviconUpdated = (event: Event) => {
@@ -165,7 +177,7 @@ export const useWebviewNavigation = (
 
     webview.addEventListener('did-start-loading', onStartLoading);
     webview.addEventListener('did-stop-loading', onStopLoading);
-    webview.addEventListener('did-navigate', onNavigate);
+    webview.addEventListener('did-navigate', onDocumentNavigate);
     webview.addEventListener('did-navigate-in-page', onNavigate);
     webview.addEventListener('page-title-updated', onTitleUpdated);
     webview.addEventListener('page-favicon-updated', onFaviconUpdated);
@@ -186,7 +198,7 @@ export const useWebviewNavigation = (
       webview.removeEventListener('crashed', onCrashed);
       webview.removeEventListener('did-start-loading', onStartLoading);
       webview.removeEventListener('did-stop-loading', onStopLoading);
-      webview.removeEventListener('did-navigate', onNavigate);
+      webview.removeEventListener('did-navigate', onDocumentNavigate);
       webview.removeEventListener('did-navigate-in-page', onNavigate);
       webview.removeEventListener('page-title-updated', onTitleUpdated);
       webview.removeEventListener('page-favicon-updated', onFaviconUpdated);

@@ -8,6 +8,7 @@ import { startBrowser } from "./browser.mjs"
 import { createSelector, diffMap, keepingChangedFiles, listChangedFiles, readMapAt, workingTreeFiles } from "./changed.mjs"
 import { DEFAULT_MODEL, attachKeptStand, startStand } from "./stand.mjs"
 import { ACTION_NAMES, StepFailure, runStep } from "./steps.mjs"
+import { prioritizeWindowsProcess } from "./windows-priority.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, "../..")
@@ -203,6 +204,7 @@ const runScenario = async ({ scenario, stand, browser, vocabulary, outDir, round
 }
 
 const main = async () => {
+  prioritizeWindowsProcess()
   const options = parseArgs(process.argv.slice(2))
   const { vocabulary, zones, scenarios } = loadMap()
   const chosen = options.changed ? selectChanged({ zones, vocabulary }, scenarios, options.base) : select(scenarios, options.selection)
@@ -222,17 +224,32 @@ const main = async () => {
   let browser = null
   let browserStarting = null
   let stopStand = async () => undefined
-  const stopAll = async () => {
-    const running = browser ?? await browserStarting?.catch(() => null)
-    browser = null
-    browserStarting = null
-    await running?.stop()
-    await stopStand()
+  let stopping = null
+  const stopAll = () => {
+    stopping ??= (async () => {
+      try {
+        const running = browser ?? await browserStarting?.catch(() => null)
+        browser = null
+        browserStarting = null
+        await running?.stop()
+      } finally {
+        await stopStand()
+      }
+    })().finally(() => { stopping = null })
+    return stopping
   }
   let starting = null
+  let exiting = false
   for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]]) {
-    process.once(signal, () => {
-      void stopAll().then(() => starting?.catch(() => undefined)).then(() => process.exit(code))
+    process.on(signal, () => {
+      if (exiting) return
+      exiting = true
+      void (async () => {
+        try { await stopAll() } finally {
+          await starting?.catch(() => undefined)
+          await stopAll()
+        }
+      })().then(() => process.exit(code), (error) => { console.error(`[verify] cleanup failed: ${error.message}`); process.exit(2) })
     })
   }
   const results = []
@@ -244,7 +261,7 @@ const main = async () => {
     const standFile = join(outDir, "stand.json")
     if (!options.attach) writeFileSync(standFile, JSON.stringify(stand.describe(), null, 2))
     log(`stand ready after ${Math.round((Date.now() - startedAt) / 1000)}s; ${chosen.length} scenarios × ${options.repeat}; warming up`)
-    browserStarting = startBrowser({ chrome: options.chrome, headed: options.headed })
+    browserStarting = startBrowser({ chrome: options.chrome, headed: options.headed, onSpawn: stand.trackProcess })
     browser = await browserStarting
     await stand.reset()
     await warmUp({ stand, browser, vocabulary })

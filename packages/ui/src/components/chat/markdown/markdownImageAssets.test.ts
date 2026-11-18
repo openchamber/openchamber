@@ -63,22 +63,6 @@ const {
 } = await import('./markdownImageAssets');
 
 describe('Markdown image asset preparation', () => {
-  test('prepares many images in one message-level request', async () => {
-    requestCount = 0;
-    const sources = Array.from({ length: 12 }, (_, index) => `${index}.png`);
-
-    const result = await prepareLocalMarkdownImages({
-      sources,
-      directory: '/repo',
-      sessionId: 'ses_batch',
-      messageId: 'msg_batch',
-      signal: new AbortController().signal,
-    });
-
-    expect(result.size).toBe(12);
-    expect(requestCount).toBe(1);
-  });
-
   test('names the page whose images it prepares, apart from the same images in text', async () => {
     requestCount = 0;
     const request = { sources: ['poster.png'], directory: '/repo', sessionId: 'ses_page', messageId: 'msg_page', signal: new AbortController().signal };

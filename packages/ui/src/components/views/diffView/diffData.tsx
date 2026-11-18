@@ -62,24 +62,16 @@ export const createTextDiffDataFromPatch = (filePath: string, patch: string, con
     };
 };
 
-/**
- * Searchable metadata for a file from either a patch-backed diff (its
- * `fileDiff` is already parsed) or a turn payload's full contents (parsed here).
- * Binary and submodule entries have no lines to search and resolve to null.
- */
 export const diffDataToFileDiff = (
     filePath: string,
     data: { original: string; modified: string; isBinary?: boolean; submodule?: GitSubmoduleState | null; fileDiff?: FileDiffMetadata },
 ): FileDiffMetadata | null => {
-    // A submodule entry renders as a summary, not as lines, whatever it parsed to.
     if (data.isBinary || data.submodule) return null;
     if (data.fileDiff) return data.fileDiff;
     if (!data.original && !data.modified) return null;
     return parseDiffFromFile({ name: filePath, contents: data.original }, { name: filePath, contents: data.modified });
 };
 
-// Identity of a diff payload for find revisions: a new read hands back a new
-// object, so its id moves while an unchanged payload keeps its own.
 const findPayloadIds = new WeakMap<ComparisonDiffResult | DiffData, number>();
 let nextFindPayloadId = 0;
 export const findPayloadRevision = (payload: ComparisonDiffResult | DiffData | undefined): string => {
@@ -93,7 +85,6 @@ export const findPayloadRevision = (payload: ComparisonDiffResult | DiffData | u
     return String(id);
 };
 
-/** Whether the entry for `rowPath` holds the find source `key`. */
 export const isFindRevealFor = (rowPath: string, key: string): boolean =>
     key === rowPath || (rowPath.endsWith('/') && key.startsWith(rowPath));
 

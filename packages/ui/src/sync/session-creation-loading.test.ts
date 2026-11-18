@@ -87,6 +87,10 @@ describe("confirmed session creation", () => {
     expect(requests).toBe(0)
     expect(store.getState().session).toEqual([newerSession])
     expect(store.getState().message[session.id]).toEqual([record])
+    const target = { directory: session.directory, sessionID: session.id }
+    expect(loader.coversHistory(target)).toBe(true)
+    await loader.ensure(target, { reason: "reactive" })
+    expect(requests).toBe(0)
   })
 
   test("a rejected create does not seed an empty successful transcript", async () => {

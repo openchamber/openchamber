@@ -1,5 +1,5 @@
 
-import type { FormField, FormValue, FormWhen } from '@opencode/client';
+import type { FormField, FormValue, FormWhen } from '@/lib/opencode/model';
 import type { I18nKey, I18nParams } from '@/lib/i18n';
 
 export type OAuthCompletionMode = 'auto' | 'code';

@@ -1630,7 +1630,7 @@ export const dict = {
   'contextPanel.browser.frameTitle': 'Browser',
   'contextPanel.browser.loadFailed': 'Deze pagina kon niet worden geladen',
   'contextPanel.browser.waitingForServer': 'Wachten op de dev server',
-  'contextPanel.browser.waitingForServerHint': 'De server accepteert nog geen verbindingen. Deze pagina laadt zodra dat wel zo is.',
+  'contextPanel.browser.waitingForServerHint': 'De server is nog niet klaar. Deze pagina laadt zodra dat wel zo is.',
   'contextPanel.browser.tunnelFailed': 'Deze dev server was niet bereikbaar',
   'contextPanel.browser.remoteLoopback.title': '{url} draait op de OpenChamber-machine',
   'contextPanel.browser.remoteLoopback.hint': 'Een browsertabblad kan pagina\'s die daar draaien niet openen. Open deze in de OpenChamber-desktop- of mobiele app.',

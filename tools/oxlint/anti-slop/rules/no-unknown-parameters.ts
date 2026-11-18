@@ -51,9 +51,18 @@ export const noUnknownParametersRule = defineRule({
       unknownParameter:
         "Parameter `{{parameter}}` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
     },
+    schema: [{
+      type: "object",
+      properties: { allowInTypeGuards: { type: "boolean" } },
+      additionalProperties: false,
+    }],
+    defaultOptions: [{ allowInTypeGuards: false }],
   },
   createOnce(context) {
     const checkParameters = (node: ParameterOwner) => {
+      const option = context.options?.[0];
+      if (typeof option === "object" && option !== null && "allowInTypeGuards" in option
+        && option.allowInTypeGuards === true && node.returnType?.typeAnnotation.type === "TSTypePredicate") return;
       for (const parameter of node.params) {
         const annotation = parameterAnnotation(parameter);
         if (annotation?.typeAnnotation.type !== "TSUnknownKeyword") continue;

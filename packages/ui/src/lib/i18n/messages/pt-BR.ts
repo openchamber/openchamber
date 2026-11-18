@@ -1626,7 +1626,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.frameTitle": "Navegador",
   "contextPanel.browser.loadFailed": "Não foi possível carregar esta página",
   "contextPanel.browser.waitingForServer": "Aguardando o servidor de desenvolvimento",
-  "contextPanel.browser.waitingForServerHint": "Ele ainda não aceita conexões. A página carregará assim que aceitar.",
+  "contextPanel.browser.waitingForServerHint": "Ele ainda não está pronto. A página carregará assim que estiver.",
   "contextPanel.browser.tunnelFailed": "Não foi possível alcançar este servidor de desenvolvimento",
   "contextPanel.browser.remoteLoopback.title": "{url} está na máquina do OpenChamber",
   "contextPanel.browser.remoteLoopback.hint": "Uma aba do navegador não consegue abrir páginas que rodam lá. Abra no app do OpenChamber para desktop ou celular.",

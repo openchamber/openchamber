@@ -1,7 +1,9 @@
 import { rmSync, writeFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
 import process from "node:process"
 
 import { CdpClient, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "../perf/cdp.mjs"
+import { prioritizeWindowsProcess } from "./windows-priority.mjs"
 
 const VIEWPORT = { width: 1440, height: 900, deviceScaleFactor: 1 }
 // A phone the size of an iPhone 15; the app serves its phone layout at /mobile.html.
@@ -275,6 +277,25 @@ export class Page {
     await this.mouse("mouseMoved", { x: 2, y: 2 })
   }
 
+  // Canvas output has no DOM text. Read it through the user's selection and Copy.
+  async copyVisibleTerminal(target, timeoutMs) {
+    const point = await this.hover(target, timeoutMs)
+    if (!point?.hits) return false
+    const rect = await this.evaluate(`(() => {
+      const element = ${this.query(target)}[${target.index}]
+      if (!element) return null
+      const { left, top, right, bottom } = element.getBoundingClientRect()
+      return { left, top, right, bottom }
+    })()`)
+    if (!rect) return false
+    await this.drag(
+      { x: rect.left + 2, y: rect.top + 2 },
+      { x: rect.right - 2, y: rect.bottom - 2 },
+    )
+    await this.press("c", ["mod"])
+    return true
+  }
+
   async press(key, modifiers = []) {
     const mask = modifierMask(modifiers)
     const known = KEYS[key]
@@ -316,14 +337,24 @@ const connectBrowser = async (port) => {
   return root
 }
 
-export const startBrowser = async ({ chrome, headed = false }) => {
+export const startBrowser = async ({ chrome, headed = false, onSpawn }) => {
   const executable = resolveChrome(chrome)
   const port = await reservePort()
   const profile = resolveProfileDir(null, "verify")
-  const child = launchChrome({ chrome: executable, profileDir: profile.dir, port, headless: !headed, extraArgs: ["--lang=en-US", `--window-size=${VIEWPORT.width},${VIEWPORT.height}`] })
+  // A Windows SSH session may have no input devices. Desktop scenarios still
+  // use a mouse, including controls behind CSS (hover: hover).
+  const pointerArgs = process.platform === "win32"
+    ? ["--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2"]
+    : []
+  const child = launchChrome({ chrome: executable, profileDir: profile.dir, port, headless: !headed, extraArgs: ["--lang=en-US", `--window-size=${VIEWPORT.width},${VIEWPORT.height}`, ...pointerArgs] })
   profile.removeAfter(child)
   const spawnFailed = new Promise((_, reject) => child.once("error", (error) => reject(new Error(`Chrome did not start: ${error.message}`))))
-  const root = await Promise.race([connectBrowser(port), spawnFailed]).catch((error) => {
+  const connecting = Promise.resolve().then(() => {
+    onSpawn?.(child, profile.dir)
+    if (child.pid) prioritizeWindowsProcess(child.pid)
+    return connectBrowser(port)
+  })
+  const root = await Promise.race([connecting, spawnFailed]).catch((error) => {
     child.kill("SIGKILL")
     rmSync(profile.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     throw error
@@ -340,6 +371,24 @@ export const startBrowser = async ({ chrome, headed = false }) => {
     return page
   }
   const stop = async () => {
+    if (process.platform === "win32" && child.exitCode === null && child.signalCode === null) {
+      // SIGTERM terminates only Windows Chrome's main process. Its helpers
+      // retain profile locks, so first let Chrome shut down its own children.
+      const exited = new Promise((resolveExit) => child.once("exit", resolveExit))
+      await root.send("Browser.close", {}, { timeoutMs: 3000 }).catch(() => undefined)
+      await Promise.race([exited, wait(3000)])
+      if (child.exitCode === null && child.signalCode === null) {
+        try {
+          execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" })
+        } catch (error) {
+          try { process.kill(child.pid, 0) } catch (probe) { if (probe.code === "ESRCH") { root.close(); return } }
+          throw error
+        }
+        await exited
+      }
+      root.close()
+      return
+    }
     root.close()
     if (child.exitCode !== null) return
     const exited = new Promise((resolveExit) => child.once("exit", resolveExit))

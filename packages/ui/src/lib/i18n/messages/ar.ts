@@ -1554,7 +1554,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': 'المتصفح',
   'contextPanel.browser.loadFailed': 'تعذّر تحميل هذه الصفحة',
   'contextPanel.browser.waitingForServer': 'في انتظار خادم التطوير',
-  'contextPanel.browser.waitingForServerHint': 'لا يقبل الاتصالات بعد. ستُحمَّل هذه الصفحة فور أن يبدأ بقبولها.',
+  'contextPanel.browser.waitingForServerHint': 'لم يجهز بعد. ستُحمَّل هذه الصفحة فور أن يجهز.',
   'contextPanel.browser.tunnelFailed': 'تعذّر الوصول إلى خادم التطوير هذا',
   'contextPanel.browser.remoteLoopback.title': '{url} موجود على جهاز OpenChamber',
   'contextPanel.browser.remoteLoopback.hint': 'لا يمكن لعلامة تبويب في المتصفح فتح الصفحات التي تعمل هناك. افتحها في تطبيق OpenChamber لسطح المكتب أو للهاتف.',

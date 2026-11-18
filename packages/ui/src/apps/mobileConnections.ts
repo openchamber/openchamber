@@ -9,7 +9,7 @@ import type { PairingConnectionPayload, PairingEndpointCandidate } from '@/lib/c
 import { isCapacitorApp } from '@/lib/platform';
 import { adoptRelayTunnel, getActiveRelayDescriptor, getActiveRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient, isRelayLimitReached } from '@/lib/relay/tunnel-client';
-import { addRuntimeProxyHeaders, runtimeFetch } from '@/lib/runtime-fetch';
+import { addRuntimeProxyHeaders, fetchBypassingRuntimeBridge, runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
@@ -315,7 +315,7 @@ const nativeHttpRequest = async (url: string, init?: RequestInit): Promise<Mobil
 };
 
 const browserFetchRequest = async (url: string, init?: RequestInit): Promise<MobileFetchResponse | null> => {
-  const response = await fetch(url, init).catch((error) => {
+  const response = await fetchBypassingRuntimeBridge(url, init).catch((error) => {
     logConnect('browser-fetch:failed', { url, error: error instanceof Error ? error.message : String(error) });
     return null;
   });

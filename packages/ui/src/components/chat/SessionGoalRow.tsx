@@ -16,18 +16,12 @@ interface SessionGoalRowProps {
   directory?: string;
 }
 
-// The goal as a top row of the composer: informational only (status icon,
-// objective or the latest audit note, token usage) plus an inline
-// pause/resume action. The manage dialog opens from the composer target
-// button, not from here.
 export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessionId, directory }) => {
   const { t } = useI18n();
   const { goal, enabled } = useSessionGoal(sessionId ?? '', directory);
   const objectiveContent = useGoalObjectiveContent(sessionId ?? '', goal);
   const sessionStatus = useSessionStatus(sessionId ?? '', directory);
   const [busy, setBusy] = React.useState(false);
-  // The agent stopped but the goal is still active: the server is sitting out
-  // the quiet window and running the audit.
   const evaluating = Boolean(sessionId && enabled && goal?.status === 'active' && (!sessionStatus || sessionStatus.type === 'idle'));
 
   const handleToggleStatus = React.useCallback(async (nextStatus: 'active' | 'paused') => {
@@ -47,8 +41,6 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
     return null;
   }
 
-  // Accounting only lands on idle ticks — hide the counter until there is a
-  // real number (or a budget worth tracking against) instead of showing "0".
   const usage = goal.tokenBudget
     ? t('chat.goal.usage.tokensWithBudget', {
         used: formatGoalTokens(goal.tokensUsed),
@@ -73,7 +65,6 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
         {objectiveContent || t('chat.goal.dialog.titleManage')}
       </span>
       {evaluating ? (
-        // Show the audit instead of a static "Active" that looks stuck.
         <span className="flex flex-shrink-0 items-center gap-1 typography-meta text-muted-foreground">
           <Spinner className="h-3 w-3" aria-hidden="true" />
           {t('chat.goal.status.evaluating')}

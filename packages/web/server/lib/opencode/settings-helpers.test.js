@@ -182,7 +182,7 @@ describe('settings helpers', () => {
       linkModules(join(packagesWebDir, '..', '..', 'node_modules'), join(extractDir, 'node_modules'));
 
       const extractedModule = await import(
-        pathToFileURL(join(extractDir, 'package', 'server', 'lib', 'opencode', 'settings-helpers.js')).href
+        pathToFileURL(join(extractDir, 'package', 'build', 'server', 'lib', 'opencode', 'settings-helpers.js')).href
       );
 
       const helpers = extractedModule.createSettingsHelpers({

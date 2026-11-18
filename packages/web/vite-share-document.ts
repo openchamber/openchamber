@@ -3,26 +3,12 @@ import { build, type InlineConfig, type Plugin, type PluginOption } from 'vite';
 
 import { SHARE_DOCUMENT_ENTRY, SHARE_DOCUMENT_SHIMS } from '../ui/src/share-document/shims';
 
-/**
- * Builds the renderer a shared `ui` page carries (packages/ui/src/share-document)
- * as one self-contained IIFE, `share-document.js`, next to the app's assets. The
- * chat fetches it as text and inlines it into the page it hands the server, so
- * the page runs in the relay's viewer with no network. The bundle is its own
- * build: it replaces the app modules listed in SHARE_DOCUMENT_SHIMS and inlines
- * every chunk and the stylesheet, which the app's chunked build cannot do.
- *
- * In development the dev server builds it on the first request and again after
- * a source change.
- */
 
 export const SHARE_DOCUMENT_FILE = 'share-document.js';
 
 type Options = {
-  /** packages/ui/src */
   uiSource: string;
-  /** The app's aliases, so the bundle resolves imports the way the app does. */
   aliases: { find: string | RegExp; replacement: string }[];
-  /** The app's React plugin, so the bundle is compiled the same way. */
   react: () => PluginOption;
 };
 
@@ -45,9 +31,6 @@ function shimPlugin(uiSource: string): Plugin {
 }
 
 async function buildShareDocument({ uiSource, aliases, react }: Options): Promise<string> {
-  // The React plugin compiles JSX for the mode Vite runs in (development under
-  // the dev server), so React's own build has to match it: production React
-  // has no jsxDEV for development JSX.
   const mode = process.env.NODE_ENV === 'production' ? 'production' : 'development';
   const config: InlineConfig = {
     configFile: false,

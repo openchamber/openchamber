@@ -21,6 +21,21 @@ This module owns the two stores behind trusted-device access to an OpenChamber s
 
 ## Decisions
 
+### Why raw inputs and stored records have separate types
+
+HTTP routes pass unparsed body fields to creation and redemption, and both stores
+read JSON written by older versions. Input fields remain unknown until the local
+guards parse them. Non-string metadata, malformed records, missing values and
+invalid timestamps retain their existing fallback behavior. Stored and public
+records use normalized types; a stored pairing label can be null while its public
+label is always the display placeholder or a supplied name. A newly minted client
+has no `lastTransport` until normalization or authentication supplies it.
+
+The injected filesystem requires read, write and directory creation. `chmod`
+remains an optional capability checked at runtime, preserving adapters that omit
+it. The mutation queue initializes its release callback before constructing the
+promise; the synchronous executor always replaces it before the first await.
+
 ### Why the pending-device placeholder is display-only
 
 `publicSession` shows `Pair new device` when the stored label is null, but `createPairingSession` keeps the label null. Storing the placeholder would make it indistinguishable from a typed name, and redeem would then pass it to `createClient` as an explicit label, replacing the device's own reported name with the placeholder. Null also lets redemption fall back to the device's reported name.

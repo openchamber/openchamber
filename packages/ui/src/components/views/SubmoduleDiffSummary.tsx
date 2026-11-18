@@ -4,12 +4,6 @@ import { useI18n } from '@/lib/i18n';
 
 const shortCommit = (commit: string): string => commit.slice(0, 7);
 
-/**
- * A submodule has no file contents to diff, only the commit its parent records
- * and the state of its own checkout. Staged changes compare HEAD with the
- * index; unstaged changes compare the index with the checkout, which is also
- * where uncommitted and untracked work inside the submodule lives.
- */
 export const SubmoduleDiffSummary: React.FC<{ state: GitSubmoduleState; staged: boolean }> = ({ state, staged }) => {
     const { t } = useI18n();
     const from = staged ? state.headCommit : state.indexCommit;

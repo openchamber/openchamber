@@ -19,6 +19,11 @@ Traffic is modeled as three stacked layers. The relay understands only Layer 1; 
 ## Entrypoints and structure
 
 Host side (`packages/web/server/lib/relay/`):
+
+Paths below use the runtime `.js` import specifiers. The scheduler, E2EE,
+host lock, identity, key store, signing key and tunnel codec implementations
+are TypeScript. The service, host client and tunnel dispatcher remain JavaScript.
+
 - `service.js` — thin entrypoint: relay config (enabled flag + relay URL), the management routes (`GET/POST /api/openchamber/relay/{status,enable,disable,reset-identity}`), a `getPairingCandidate()` accessor (the relay transport candidate folded into pairing-v2 links when enabled, consumed by the pairing-session route in `core-routes.js`), and lifecycle wiring. Started from `packages/web/server/index.js` only when the user has explicitly enabled the relay. The relay endpoint defaults to the OpenChamber-hosted relay but can be pinned to a self-hosted relay (`pinnedRelayUrl`: `relayUrl` in the machine policy file, else the `OPENCHAMBER_RELAY_URL` env var; see `../enterprise-mode.js`; must be `ws://`/`wss://`, an invalid value pins nothing); when set it overrides the stored setting for the host connection, the pairing candidate, and status, so paired clients inherit the endpoint automatically. In enterprise mode (`../enterprise-mode.js`) the relay runs only with that pin (`relayBlockedByEnterprise`): `start()` refuses otherwise (every path in passes through it), `enable` answers 403, `getPairingCandidate()` is null, `ensureEnabledForPairing()` throws (the pairing route drops the candidate and direct pairing still works), status carries `blockedByEnterprise`, and `resolvePairingTransports` in `index.js` reports `relayAvailable: false`.
 - `identity.js` — the host's stable identity: the long-lived signing keypair (shared with the push relay, defines the routing id) plus a long-lived encryption keypair (the E2EE trust anchor). Reused across restarts; never rotated implicitly. The only rotation is the user's: Settings shows a notice while the host reports `identityConflict` (two `4001` evictions within 10 minutes, so another copy of the data dir, usually on another machine, keeps taking the slot), and its button calls `reset-identity`. That drops both keypairs through `key-store.js`, restarts the host if it was running, and leaves the other copy with the old identity: devices paired through the relay keep reaching it until they are paired here again, and devices paired for the home network only are unaffected. Callers that cache derived keys (this runtime and the push relay's) compare the store's `generation()`, so the reset reaches both without a restart.
 - `signing-key.js` — the signing keypair and the routing id derivation, shared with the notifications runtime.
@@ -27,7 +32,7 @@ Host side (`packages/web/server/lib/relay/`):
 - `host-lock.js` — the host claim shared through the data dir. Every instance using the data dir shares the relay identity (same serverId), so concurrent relay hosts evict each other at the relay worker (`4001: Control replaced`) and paired devices land on whichever process won last. The claim file (`<data-dir>/relay-host.lock`, `{ pid, instance, host, refreshedAt }`) makes this deterministic: `service.js` only starts the host when no LIVE process holds the claim, goes to `standby` otherwise, and a 30s watcher both takes over when the claimant dies and stands down when another process claims; while hosting, the same check refreshes the claim. The holder is named by a random per-process instance id, never by pid alone, because a data dir is not always private to one process table: containers mounting one volume all run as pid 1, and a synced or network folder is shared with processes on other machines. A claimant is live only while its `refreshedAt` is under 90 s old; one on this host must also still answer on its pid, so a holder that exits is replaced without waiting for the claim to age. The pid alone proves nothing: Windows reuses a dead host's pid for unrelated processes (`svchost.exe` in #4953), and a claim judged by pid alone held the relay in `standby` until the user re-enabled it. A claim from an older build has no `refreshedAt` and reads as stale; an older build still hosting sees the newer claim by its pid and stands down. A standby watcher waits a 2-minute grace after the claim frees before taking over, so a cleanly restarting host (app update/relaunch) — which reclaims at boot with no wait — always wins the restart window over a bystander instance. Explicit user intent — creating a pairing link or hitting `/relay/enable` — force-claims; the previous holder's watcher sees the takeover and backs off instead of fighting. Instances created with `allowPassiveHost: false` (dev servers via `OPENCHAMBER_RELAY_HOST=off`, the Electron dev shell via `OPENCHAMBER_ELECTRON_DEV`; `OPENCHAMBER_RELAY_HOST=on` overrides) never start the host passively at all — boot, demand reconcile, and watcher takeover leave them in `standby`; only explicit enable/pairing hosts there. The claim is cooperative (the relay worker still enforces the single host slot); it only decides which process keeps retrying.
 - `tunnel-host.js` — the per-connection dispatcher: decrypts tunnel frames and forwards HTTP/SSE/WS to the local server over loopback, then streams responses back. Enforces a path allowlist and never injects credentials.
 - `downstream-scheduler.js` owns end-client delivery credit and round-robin transmission across response streams. It selects plaintext frames before encryption.
-- `e2ee.js`, `tunnel-codec.js` — host-side (JS) mirrors of the shared crypto and framing (see "Two implementations" below).
+- `e2ee.js`, `tunnel-codec.js` are host-side mirrors of the shared crypto and framing. See "Two implementations".
 
 Client side (`packages/ui/src/lib/relay/`):
 - `protocol.ts` — the shared contract: constants, frame types, message shapes. The normative source both implementations follow.
@@ -176,7 +181,7 @@ belong to a different machine.
 
 ## Two implementations, kept in sync
 
-The E2EE and framing logic exists twice: TypeScript in `packages/ui/src/lib/relay/` (shared by the client and the normative reference) and a JavaScript mirror in this module (the host, which is plain JS ESM). They **must stay byte-compatible** — a client encrypted by one must decrypt on the other. A cross-compatibility test (`cross-compat.test.js`) imports the TS modules directly and exercises a full TS-client ↔ JS-host exchange. Any change to the wire format, frame codec, handshake, or batching must update both sides and keep that test green.
+The E2EE and framing logic exists twice, in `packages/ui/src/lib/relay/` and in this module. Both implementations are TypeScript; the client implementation is the normative reference. They must stay byte-compatible. A client encrypted by one must decrypt on the other. `cross-compat.test.js` imports both implementations directly and exercises a full client-to-host exchange. A wire-format, frame-codec, handshake or batching change must update both sides and keep that test green.
 
 ## Runtime integration (client)
 
@@ -262,6 +267,39 @@ A URL the browser loads itself (`<img src>`, `<video src>`, an iframe) never ent
 - A request body sink exists before body frames arrive and stops accepting bytes after completion or abort. `StreamEnd` half-closes the request body while the response continues. Synthetic HTTP responses include an explicit reason and `source: 'relay-tunnel-host'` so callers can distinguish a host-generated error from an upstream response.
 
 ## Decisions
+
+### Why some host implementations remain JavaScript
+
+The server package has no declarations for `ws` or `express`. Converting
+`host-client.js`, `service.js` or `tunnel-host.js` requires their owning package
+to supply those contracts. The dispatcher also accepts arbitrary entries in a
+wire `protocols` array and lets `ws` validate them. A `string[]` type would claim
+validation the dispatcher does not perform; tightening its validator changes
+the wire acceptance rules.
+
+### Why key and handshake types preserve partial input
+
+The identity-file schema requires only each JWK's nonempty `kty`; WebCrypto and
+Node crypto validate key material when importing it. Public-point extraction
+explicitly supplies `kty`, `crv`, `x` and `y`, including undefined when a field
+is absent. The public-point contract preserves those explicit values. Legacy
+settings and identity rewrites preserve fields owned by other modules or newer
+versions. Schema-derived settings types retain those fields without interpreting
+them here.
+
+Handshake guards preserve the existing object and string checks, including
+ignored unknown messages, absent capability flags and malformed keys rejected
+during import. File and process errors retain their original `code` and
+`message` handling. An `EPERM` pid probe keeps a claimant live, and a failed
+claim release remains best effort.
+
+### Why occupied entries have checked accessors
+
+Frame-length checks, loop bounds, queued-frame insertion and key creation
+establish occupied byte, queue, acknowledgement and key slots. Checked reads
+express those invariants under `noUncheckedIndexedAccess` without assertions
+or fallback data. The batcher's unchecked empty-frame type byte retains its
+existing bitwise-zero behavior.
 
 ### Why separate control and data liveness checks and not socket state alone
 

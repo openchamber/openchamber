@@ -51,9 +51,7 @@ export const getToolDisplayName = (toolName: string): string => {
   return toolName;
 };
 
-/** Icon and short name of the capability a request asks for, for headers. */
 export const getPermissionToolPresentation = (permission: PermissionRequest) => {
-  // v2 names the requested capability `action` (`shell`, `edit`, `webfetch`, ...).
   const toolName = permission.action || 'unknown';
   return { icon: getToolIcon(toolName), name: getToolDisplayName(toolName) };
 };

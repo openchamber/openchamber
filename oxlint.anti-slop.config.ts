@@ -58,4 +58,11 @@ export default defineConfig({
     "openchamber/no-timers": "error",
     "openchamber/no-wire-client-imports": "error",
   },
+  overrides: [{
+    files: ["packages/web/server/**/*.ts", "packages/web/bin/**/*.ts"],
+    rules: {
+      "anti-slop/no-runtime-typeof": ["error", { allowInTypeGuards: true }],
+      "anti-slop/no-unknown-parameters": ["error", { allowInTypeGuards: true }],
+    },
+  }],
 });

@@ -10,6 +10,7 @@ import { searchPathFor } from './cli-executables.js';
 import { requestServerShutdown } from './cli-http.js';
 import { isProcessRunning, stopInstanceProcess } from './cli-process.js';
 import { injectedEnvKeys } from '../../server/lib/injected-env.js';
+import { fileURLToPath } from 'node:url';
 
 const STARTUP_SERVICE_ID = 'dev.openchamber.web';
 
@@ -199,7 +200,7 @@ function isPnpmGlobalLinkEntrypoint(invoked) {
 function resolveCliEntrypoint() {
   const entry = typeof process.argv[1] === 'string' && process.argv[1].trim().length > 0
     ? process.argv[1]
-    : path.join(__dirname, 'cli.js');
+    : fileURLToPath(new URL('../cli.js', import.meta.url));
   const invoked = path.resolve(entry);
   if (isPnpmGlobalLinkEntrypoint(invoked)) {
     return invoked;

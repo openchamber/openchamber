@@ -114,6 +114,29 @@ const scratchFiles = (files, ctx) => files.map(({ name, content }) => {
 })
 
 const ACTIONS = {
+  async "clipboard.permission"(step, ctx) {
+    if (!["granted", "denied", "prompt"].includes(step.state)) fail("clipboard.permission needs state granted, denied or prompt")
+    await ctx.page.client.send("Browser.setPermission", {
+      permission: { name: "clipboard-read" },
+      setting: step.state,
+      origin: ctx.stand.uiUrl,
+      browserContextId: ctx.page.browserContextId,
+    })
+  },
+  async "terminal.expect"(step, ctx) {
+    const target = resolveTarget(step, ctx)
+    const deadline = Date.now() + timeoutOf(step)
+    let actual = ""
+    do {
+      await ctx.page.evaluate("navigator.clipboard.writeText('verify: no terminal selection')")
+      if (await ctx.page.copyVisibleTerminal(target, Math.max(1, deadline - Date.now()))) {
+        actual = await ctx.page.evaluate("navigator.clipboard.readText()")
+        if (actual !== "verify: no terminal selection" && !expectText(actual, step, "the visible terminal")) return
+      }
+      await wait(150)
+    } while (Date.now() < deadline)
+    fail(expectText(actual, step, "the visible terminal") ?? "the terminal had no selectable output")
+  },
   async "session.create"(step, ctx) {
     const created = ctx.stand.cli(["create", "--title", step.title ?? `verify ${step.as}`])
     ctx.vars[step.as] = created.sessionId
@@ -141,6 +164,20 @@ const ACTIONS = {
       await wait(150)
     }
     fail(`session ${step.session} never became busy`)
+  },
+  async "fixture.request"(step, ctx) {
+    if (!step.prompt) fail("fixture.request needs a prompt")
+    const query = new URLSearchParams({ session: sessionId(step, ctx), prompt: step.prompt })
+    const deadline = Date.now() + timeoutOf(step)
+    while (Date.now() < deadline) {
+      const response = await fetch(`http://127.0.0.1:${ctx.stand.fixturePort}/__verify/active?${query}`, { signal: AbortSignal.timeout(2000) })
+      if (!response.ok) fail(`the fixture request control answered ${response.status}; start a new verification stand`)
+      const body = await response.json()
+      if (body.active === true) return
+      if (body.active !== false) fail("the fixture returned invalid request activity")
+      await wait(100)
+    }
+    fail(`the fixture has no active request for session ${step.session} and prompt ${JSON.stringify(step.prompt)}`)
   },
   async "file.write"(step, ctx) {
     const content = Array.isArray(step.content) ? step.content.join("\n") : step.content
@@ -383,6 +420,22 @@ const ACTIONS = {
     const name = `inspect-${++ctx.shots}.json`
     writeFileSync(join(ctx.dir, name), JSON.stringify({ selector: step.selector, found }, null, 2))
     ctx.artifacts.push(name)
+  },
+  async style(step, ctx) {
+    if (!step.property || step.equals === undefined) fail("style needs a CSS property and an equals value")
+    const target = resolveTarget(step, ctx)
+    const deadline = Date.now() + timeoutOf(step)
+    let actual = null
+    do {
+      actual = await ctx.page.evaluate(`(() => {
+        const element = ${ctx.page.query(target)}[${target.index}]
+        return element ? getComputedStyle(element).getPropertyValue(${JSON.stringify(step.property)}).trim() : null
+      })()`)
+      if (actual === step.equals) return
+      if (Date.now() >= deadline) break
+      await wait(150)
+    } while (Date.now() < deadline)
+    fail(`${describe(step)} ${step.property} is ${JSON.stringify(actual)}, expected ${JSON.stringify(step.equals)}`)
   },
   async pause(step) {
     await wait(step.ms)

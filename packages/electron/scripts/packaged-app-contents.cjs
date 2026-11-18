@@ -3,7 +3,7 @@ const path = require('node:path');
 
 const WEB_PACKAGE = 'node_modules/@openchamber/web';
 
-const FORBIDDEN_DIRECTORIES = [`${WEB_PACKAGE}/dist`];
+const FORBIDDEN_DIRECTORIES = [`${WEB_PACKAGE}/dist`, `${WEB_PACKAGE}/server`, `${WEB_PACKAGE}/bin`];
 
 const APP_FILES = [
   'dist-bundle/entry.mjs',
@@ -17,16 +17,23 @@ const APP_FILES = [
 const REQUIRED_FILES = [
   ...APP_FILES,
   `${WEB_PACKAGE}/package.json`,
-  `${WEB_PACKAGE}/server/index.js`,
+  `${WEB_PACKAGE}/build/server/index.js`,
+  `${WEB_PACKAGE}/build/server/index.js.map`,
+  `${WEB_PACKAGE}/build/bin/cli.js`,
+  `${WEB_PACKAGE}/build/server/built-in-extensions/registry.json`,
 ];
 
 const RIPGREP_PLATFORM_PACKAGE = /(?:^|\/)node_modules\/@vscode\/ripgrep-[^/]+\//;
 const RIPGREP_BINARY = process.platform === 'win32' ? 'rg.exe' : 'rg';
 
 const REQUIRED_UNPACKED_FILES = [
-  `${WEB_PACKAGE}/server/lib/git/credential-helper.js`,
-  `${WEB_PACKAGE}/server/lib/git/ssh-wrapper.js`,
-  `${WEB_PACKAGE}/server/lib/git/repository-credential-helper.js`,
+  `${WEB_PACKAGE}/build/server/lib/git/credential-helper.js`,
+  `${WEB_PACKAGE}/build/server/lib/git/credential-helper-runtime.js`,
+  `${WEB_PACKAGE}/build/server/lib/git/ssh-wrapper.js`,
+  `${WEB_PACKAGE}/build/server/lib/git/ssh-wrapper-runtime.js`,
+  `${WEB_PACKAGE}/build/server/lib/git/repository-credential-helper.js`,
+  `${WEB_PACKAGE}/build/server/lib/git/repository-credential-helper-runtime.js`,
+  `${WEB_PACKAGE}/build/server/built-in-extensions/registry.json`,
 ];
 
 const requiredUnpackedFiles = ({ platform = process.platform, arch = process.arch } = {}) => (

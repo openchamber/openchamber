@@ -1,17 +1,3 @@
-// A disk cache for the React Compiler pass of `@vitejs/plugin-react` in the dev server.
-//
-// The compiler runs through Babel on every UI module the browser asks for, and
-// Vite keeps the result in memory only: each `bun run dev` paid it again, about
-// 16 of the 21 seconds the first page load took (measured on ~1,700 modules).
-// Babel's output depends only on its input and its setup, so it is keyed by the
-// module's id, its code, the dev server's settings plugin-react reads and the
-// versions of everything that shapes the output, and a restart reads it back.
-// A changed file misses and is compiled again.
-//
-// One cache serves every checkout of the repository (the main one and each
-// worktree): paths are keyed relative to the repository root, and the root is
-// stored as a placeholder in the output, so a new worktree starts from what
-// the others already compiled.
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
@@ -20,9 +6,7 @@ import type { Plugin, PluginOption, SourceMapInput } from 'vite';
 import { z } from 'zod';
 
 const require = createRequire(import.meta.url);
-// Stands for the checkout's root in stored output; never part of real code.
 const ROOT_PLACEHOLDER = '@@openchamber-checkout-root@@';
-// Entries unused this long are removed when a dev server starts.
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 const manifestSchema = z.object({ name: z.string().optional(), version: z.string().optional() });
@@ -30,11 +14,6 @@ const compiledSchema = z.object({ code: z.string(), map: z.unknown() });
 const entrySchema = z.union([z.object({ skipped: z.literal(true) }), compiledSchema]);
 type Entry = z.infer<typeof entrySchema>;
 
-/**
- * A package's version, found from its entry point (`package.json` is not
- * always exported) as `from` resolves it; null when it cannot be read, and
- * then nothing is cached, since an update could not miss.
- */
 const versionOf = (from: NodeRequire, name: string): { version: string; resolve: NodeRequire } | null => {
   try {
     let directory = path.dirname(from.resolve(name));
@@ -54,7 +33,6 @@ const versionOf = (from: NodeRequire, name: string): { version: string; resolve:
   return null;
 };
 
-/** The versions Babel's output depends on: plugin-react, and the Babel it runs. */
 const toolVersions = (): string | null => {
   const pluginReact = versionOf(require, '@vitejs/plugin-react');
   if (!pluginReact) return null;
@@ -88,7 +66,6 @@ const readEntry = (file: string) => {
     const entry = entrySchema.safeParse(JSON.parse(fs.readFileSync(file, 'utf8')));
     return entry.success ? entry.data : null;
   } catch {
-    // A miss, or an entry another server is still writing.
     return null;
   }
 };
@@ -104,14 +81,7 @@ const writeEntry = (directory: string, file: string, value: Entry) => {
   }
 };
 
-/**
- * Wraps the `vite:react-babel` transform of the plugins `react()` returned,
- * in the dev server only; a build runs it as before. `setup` names the Babel
- * options passed to `react()`, so changing them misses every entry; `root` is
- * the checkout's root, the part of every path that differs between checkouts.
- */
 export function cacheReactBabel(plugins: PluginOption[], { directory, root, setup }: { directory: string; root: string; setup: unknown }): PluginOption[] {
-  // With the separator, so a sibling such as `<root>-other` stays as it is.
   const rootPrefix = `${root}${path.sep}`;
   const placeholderPrefix = `${ROOT_PLACEHOLDER}${path.sep}`;
   const toStored = (text: string) => text.split(rootPrefix).join(placeholderPrefix);
@@ -120,12 +90,9 @@ export function cacheReactBabel(plugins: PluginOption[], { directory, root, setu
   const transform = babelPlugin && 'name' in babelPlugin ? babelPlugin.transform : undefined;
   if (!transform || !('handler' in transform)) return plugins;
   const original = transform.handler;
-  // Set once the dev server's config is known: null keeps the cache off.
   let salt: string | null = null;
 
   const cached: typeof original = async function cachedTransform(code, id, options) {
-    // Code that names the checkout itself would have that path rewritten too:
-    // only the paths Babel generates may be swapped, so such a module is not kept.
     if (salt === null || code.includes(root) || code.includes(ROOT_PLACEHOLDER)) return original.call(this, code, id, options);
     const key = createHash('sha256').update(salt).update('\0').update(toStored(id)).update('\0').update(String(options?.ssr === true)).update('\0').update(code).digest('hex');
     const file = path.join(directory, `${key}.json`);
@@ -142,7 +109,6 @@ export function cacheReactBabel(plugins: PluginOption[], { directory, root, setu
     if (result === undefined || result === null) {
       writeEntry(directory, file, { skipped: true });
     } else {
-      // plugin-react answers `{ code, map }`; any other shape is not kept.
       const compiled = compiledSchema.safeParse(result);
       if (compiled.success) {
         const map = compiled.data.map ?? null;
@@ -159,7 +125,6 @@ export function cacheReactBabel(plugins: PluginOption[], { directory, root, setu
     configResolved(config) {
       const versions = toolVersions();
       if (!versions) return;
-      // What plugin-react reads from the config to decide on Fast Refresh.
       salt = JSON.stringify({ setup, versions, root: toStored(`${config.root}${path.sep}`), production: config.isProduction, hmr: config.server.hmr !== false });
       pruneOld(directory);
     },

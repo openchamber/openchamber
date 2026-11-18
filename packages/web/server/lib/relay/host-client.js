@@ -1,6 +1,7 @@
 
 import { WebSocket } from 'ws';
 import { createRequire } from 'node:module';
+import { webPackagePaths } from '../web-package-paths.js';
 
 import { RELAY_PROTOCOL_VERSION, RelayCloseCode, createHostHandshake } from './e2ee.js';
 import { createOutboundFrameBatcher, decodeFrameBatch, decodeTunnelFrame, decodeDeliveryAck, encodeFrameBatch, TunnelFrameType } from './tunnel-codec.js';
@@ -59,7 +60,7 @@ export const describeRelayError = (error) => redactSensitiveText(error?.message 
  * }} options
  */
 export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, onStatus, onShareState, logger = console, createSocket = (url) => new WebSocket(url), batchWindowMs, batch, flowControl }) => {
-  const { version } = createRequire(import.meta.url)('../../../package.json');
+  const { version } = createRequire(import.meta.url)(webPackagePaths.packageJson);
   const platform = process.env.OPENCHAMBER_RUNTIME || 'web';
   const resolveLocalPort = typeof getLocalPort === 'function' ? getLocalPort : () => localPort;
   const localBatch = batch !== false;

@@ -36,7 +36,6 @@ export function useComposerDraftTarget({
 
     const showDraftTargetSelectors = newSessionDraftOpen && !isVSCode;
 
-    // Which project and directory a new session will target.
     const {
         projects: draftProjects,
         selectedDraftProject,
@@ -64,9 +63,6 @@ export function useComposerDraftTarget({
         setMobileDraftPicker(picker);
     }, [refreshDraftTarget, setMobileDraftPicker]);
 
-    // The one entry to an isolated space: while the feature's switch is on, for a project the
-    // branch selector serves, never in VS Code (decision 16). The dialog keeps the project it
-    // was opened for, whatever the draft picks after.
     const isolatedSpacesEnabled = useUIStore((state) => state.isolatedSpacesEnabled);
 
     const [newSpaceProject, setNewSpaceProject] = React.useState<{ id: string; path: string } | null>(null);
@@ -84,8 +80,6 @@ export function useComposerDraftTarget({
         return () => setNewSpaceProject(project);
     }, [isVSCode, isolatedSpacesEnabled, selectedDraftProject]);
 
-    // The full New Worktree dialog for the draft's project, so a named worktree, an existing
-    // branch or a PR branch can be made where the sidebar has no project headers (Timeline).
     const [newWorktreeProject, setNewWorktreeProject] = React.useState<{ id: string; path: string } | null>(null);
 
     const handleCreateCustomWorktree = React.useMemo(() => {
@@ -97,8 +91,6 @@ export function useComposerDraftTarget({
     const handleCustomWorktreeCreated = React.useCallback((worktreePath: string) => {
         const project = newWorktreeProject;
         if (!project) return;
-        // Pin the draft to the new directory: until the worktree list refreshes,
-        // the draft's validity check would otherwise reset it to the project root.
         const sessionStore = useSessionUIStore.getState();
         if (sessionStore.newSessionDraft.open) {
             sessionStore.overrideNewSessionDraftTarget({

@@ -57,6 +57,10 @@ turn projection and scroll-follow policy.
 
 ## Decisions
 
+### Why HTTP Mermaid sources use runtime URL classification
+
+A Mermaid source URL can name the UI origin, the active remote server or an external host. `runtimeFetch` owns that distinction so active-server reads retain authentication even when the UI has another origin; external URLs keep their destination without runtime credentials. Inline data/blob image reads use `fetchBypassingRuntimeBridge`.
+
 ### Why selection overlays use text rectangles and not whole Range boxes
 
 Comment focus removes the native selection, so the captured quote uses overlay

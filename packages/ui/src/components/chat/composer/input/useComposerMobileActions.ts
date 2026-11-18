@@ -55,16 +55,9 @@ export function useComposerMobileActions({
     };
 
     const handleDictationSendStart = React.useCallback(() => {
-        // Only the mobile shell collapses on dictation end, and only its
-        // dictation reports when it ends, which is what releases a hold
-        // that never reaches a submit.
         if (isMobile) mobileShell.holdDictationSend(true);
     }, [isMobile, mobileShell]);
 
-    // A record-and-send that never reaches a submit (failed or empty
-    // transcript, cancel, a transcript kept for another draft) still releases
-    // the hold once dictation ends. The transcript callback runs in the same
-    // tick the status turns idle, so a real send is already in flight here.
     const { onDictationActiveChange } = mobileShell;
 
     const handleDictationActiveChange = React.useCallback((active: boolean) => {
@@ -72,8 +65,6 @@ export function useComposerMobileActions({
         if (!active && !dictationSendInFlightRef.current) dictationSendEndRef.current?.();
     }, [onDictationActiveChange, dictationSendEndRef, dictationSendInFlightRef]);
 
-    // Mobile comment mode: subscription, scope ownership and the attach/cancel
-    // transitions live in the hook; ChatInput only renders from it.
     const mobileComment = useMobileCommentComposerMode({
         isMobile,
         runtimeKey: activeRuntimeKey,

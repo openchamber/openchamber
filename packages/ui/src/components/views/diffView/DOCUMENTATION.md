@@ -12,6 +12,28 @@ remain in their existing neighbouring modules.
 
 ## Invariants
 
+- Hunk mutations require live working-tree or index data. Turn snapshots and
+  comparison ranges never authorize stage or discard actions.
+- A live diff's refresh revision includes changes that preserve its status row's
+  line counts. Refresh keeps the previous diff visible until replacement, but
+  switching between staged and unstaged clears that side's old content even
+  while the entry is hidden or collapsed.
+- Tree mode expands its selected file for fetching as well as rendering.
+  Otherwise its default first file can wait forever for an unrequested patch.
+- Find uses the viewer's exact index-to-working or HEAD-to-index side. The
+  combined HEAD-to-working fallback cache cannot supply those search results,
+  and renames read their source separately from destination-only batch reads.
+- Find source identity stays stable across unrelated scope data and file
+  selection changes. Layout rematches existing content; side, whitespace,
+  context and data revisions invalidate only the reads they affect.
+- File-action widths come from ResizeObserver's completed layout. Synchronous
+  width reads during entry mounting would force one layout per file.
+- File wrappers use `overflow: clip` so they do not create a scroll box that
+  captures the sticky horizontal scrollbar. Action masks clear the measured
+  control area without reserving width; touch actions stay in normal flow.
+- Stacked expansion limits bound simultaneous Pierre instances and their DOM.
+  Visibility callbacks retain identity so opening the panel cannot rerender
+  every collapsed entry in a long change.
 - View hooks run in the order shown by `DiffView`. Their effects retain the
   original ordering, including expansion initialization before pending navigation.
 - State and refs belong to the retained view instance. Passing them between

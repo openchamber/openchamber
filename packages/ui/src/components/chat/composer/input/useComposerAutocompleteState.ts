@@ -10,7 +10,6 @@ import { MentionCompletionState } from '../../composer/state/mentionCompletion';
 
 
 export function useComposerAutocompleteState() {
-    // At most one picker is open at a time; the prompt language decides which.
     const [openAutocomplete, setOpenAutocomplete] = React.useState<AutocompleteKind | null>(null);
 
     const [autocompleteQuery, setAutocompleteQuery] = React.useState('');

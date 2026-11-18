@@ -1,6 +1,7 @@
 import { publicEnterprisePolicy } from '../enterprise-mode.js';
 import { withUserEnv } from '../injected-env.js';
 import { isOpenCodeOlderThan } from './compatibility.js';
+import { webPackagePaths } from '../web-package-paths.js';
 
 const SYSTEMD_SERVICE_UNIT_PATTERN = /^[A-Za-z0-9:_.@-]+\.service$/;
 
@@ -52,7 +53,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     path,
     process,
     server,
-    __dirname,
+    cliEntry = webPackagePaths.cliEntry,
     openchamberDataDir,
     modelsDevApiUrl,
     modelsMetadataCacheTtl,
@@ -363,7 +364,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         const quotedPlistPath = quotePosixShell(launchdPlistPath);
         restartCmd = `launchctl kickstart -k gui/$(id -u)/${LAUNCHD_SERVICE_ID} || launchctl bootstrap gui/$(id -u) ${quotedPlistPath}`;
       } else {
-        const cliPath = path.resolve(__dirname, '..', 'bin', 'cli.js');
+        const cliPath = cliEntry;
         const restartParts = [
           isWindows ? quoteCmd(process.execPath) : quotePosix(process.execPath),
           isWindows ? quoteCmd(cliPath) : quotePosix(cliPath),

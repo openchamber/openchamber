@@ -1,7 +1,12 @@
 export type BrowserNavStatus =
   | { readonly kind: 'idle' }
   | { readonly kind: 'loading'; readonly url: string }
-  | { readonly kind: 'ready'; readonly url: string; readonly title: string }
+  | {
+    readonly kind: 'ready';
+    readonly url: string;
+    readonly title: string;
+    readonly httpStatus?: number;
+  }
   | {
     readonly kind: 'failed';
     readonly url: string;
