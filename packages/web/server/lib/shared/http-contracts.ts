@@ -5,6 +5,7 @@ export type QueryValue = string | QueryValue[] | { [key: string]: QueryValue | u
 export type Query = Record<string, QueryValue | undefined>;
 
 export interface Request<Body = unknown, Params = Record<string, string>, Search = Query> extends IncomingMessage {
+  url: string;
   body: Body;
   params: Params;
   query: Search;
@@ -17,6 +18,7 @@ export interface Request<Body = unknown, Params = Record<string, string>, Search
   ips: string[];
   secure: boolean;
   get(name: 'set-cookie'): string[] | undefined;
+  get(name: 'x-opencode-directory' | 'x-opencode-directory-encoding'): string | undefined;
   get(name: string): string | string[] | undefined;
   header(name: 'set-cookie'): string[] | undefined;
   header(name: string): string | string[] | undefined;
@@ -66,7 +68,7 @@ export type ErrorRequestHandler = (
 export interface Router {
   (request: IncomingMessage, response: ServerResponse, next?: NextFunction): void;
   get<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp, ...handlers: RequestHandler<Body, Params, Search>[]): this;
-  post<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp, ...handlers: RequestHandler<Body, Params, Search>[]): this;
+  post<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp | string[], ...handlers: RequestHandler<Body, Params, Search>[]): this;
   put<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp, ...handlers: RequestHandler<Body, Params, Search>[]): this;
   patch<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp, ...handlers: RequestHandler<Body, Params, Search>[]): this;
   delete<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp, ...handlers: RequestHandler<Body, Params, Search>[]): this;

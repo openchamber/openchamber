@@ -15,13 +15,13 @@ import { loadRoutingHistory } from './history.js';
 import { PROMPT_CACHE_TTL_MS, cacheHoldCategory, warmWindowMs } from './cache.js';
 import { readOpenCodeCredentials } from '../opencode/auth.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
+import { isRecord } from '../shared/object-guards.js';
 import type { LegacyAuthFile } from '../opencode/auth.js';
-import type { ClassifierSource } from './classifier.js';
 import type { CustomEndpoint, RoutingCategory, RoutingConfig, RoutingModel } from './store.js';
 import type { HistoryEntry } from './history.js';
 import type { RoutingPermission } from './jev.js';
 import type { JsonValue } from '../shared/json-values.js';
-import type { AutoSelectionInput, CacheHoldInput, PermissionVerdict, PublicCustomEndpoint, RoutingAttempt, RoutingBody, RoutingBroadcastProperties, RoutingModelRef, RoutingRuntimeOptions, Selection, SessionScope } from './contracts.js';
+import type { AutoSelectionInput, CacheHoldInput, CustomEndpointInput, PermissionVerdict, PublicCustomEndpoint, RoutingAttempt, RoutingBody, RoutingBroadcastProperties, RoutingModelRef, RoutingRuntimeOptions, Selection, SessionScope } from './contracts.js';
 
 const HISTORY_TIMEOUT_MS = 2500;
 const PERMISSION_DECISION_TTL_MS = 15 * 60 * 1000;
@@ -37,7 +37,7 @@ const commandBodySchema = z.object({ name: z.string().trim().min(1), text: z.str
 const promptBodySchema = z.object({ text: z.string().nullish() });
 const formReplyBodySchema = z.object({ answer: z.record(z.string(), z.unknown()) });
 
-export const requestTextOf = (body: RoutingBody | null | undefined) => {
+export const requestTextOf = (body: RoutingBody) => {
   const formReply = formReplyBodySchema.safeParse(body);
   if (formReply.success) return Object.values(formReply.data.answer).flat().join('\n').trim();
   const command = commandBodySchema.safeParse(body);
@@ -61,8 +61,8 @@ const isImageFile = (file: z.infer<typeof attachmentFileSchema>) => {
   return dot > 0 && IMAGE_EXTENSIONS.has(name.slice(dot + 1));
 };
 
-export const attachmentHint = (body: RoutingBody | null | undefined) => {
-  const files = attachmentListSchema.safeParse(body?.files).data ?? [];
+export const attachmentHint = (body: RoutingBody) => {
+  const files = attachmentListSchema.safeParse(isRecord(body) ? body.files : undefined).data ?? [];
   const images = files.filter((file) => isImageFile(file));
   if (images.length === 0) return '';
   const names = images.map((file) => file.name).filter(Boolean).slice(0, 3);
@@ -70,7 +70,7 @@ export const attachmentHint = (body: RoutingBody | null | undefined) => {
   return `\n\n[The user attached ${count}${names.length > 0 ? `: ${names.join(', ')}` : ''}]`;
 };
 
-export const routingRequestTextOf = (body: RoutingBody | null | undefined) => `${requestTextOf(body)}${attachmentHint(body)}`.trim();
+export const routingRequestTextOf = (body: RoutingBody) => `${requestTextOf(body)}${attachmentHint(body)}`.trim();
 
 const agentBodySchema = z.object({ agent: z.string().trim().min(1) });
 
@@ -380,7 +380,7 @@ export function createRoutingRuntime({
     return { model: selection.model, agent: sendAgent, decision: completeDecision };
   };
 
-  const noteModelSelection = (sessionId: string, model: AutoSelectionInput['model'], directory?: string | null) => {
+  const noteModelSelection = (sessionId: string, model: JsonValue | undefined, directory?: string | null) => {
     if (!sessionId) return false;
     if (!isAutoModel(model)) {
       autoSessions.delete(sessionId);
@@ -404,7 +404,7 @@ export function createRoutingRuntime({
     if (selection.agent) await client.session.switchAgent({ sessionID: sessionId, agent: selection.agent });
   };
 
-  const routeSend = async ({ sessionId, directory, body }: SessionScope & { body: RoutingBody | null | undefined }) => {
+  const routeSend = async ({ sessionId, directory, body }: SessionScope & { body: RoutingBody }) => {
     const resolved = await resolveAutoSelection({
       sessionId,
       directory,
@@ -464,7 +464,7 @@ export function createRoutingRuntime({
     return publishUpdated();
   };
 
-  const setToken = async (token: string) => {
+  const setToken = async (token: JsonValue | undefined) => {
     const parsed = z.string().trim().min(1).max(4000).safeParse(token);
     if (!parsed.success) throw Object.assign(new Error('A Jev API key is required'), { status: 400 });
     if (enterpriseMode()) throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
@@ -478,7 +478,7 @@ export function createRoutingRuntime({
     return publishUpdated();
   };
 
-  const setGeminiKey = async (key: string) => {
+  const setGeminiKey = async (key: JsonValue | undefined) => {
     const parsed = geminiKeySchema.safeParse(key);
     if (!parsed.success) throw Object.assign(new Error('A Gemini API key is required, without spaces or control characters'), { status: 400 });
     if (enterpriseMode()) throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
@@ -492,7 +492,7 @@ export function createRoutingRuntime({
     return publishUpdated();
   };
 
-  const setClassifierSource = async (source: ClassifierSource) => {
+  const setClassifierSource = async (source: JsonValue | undefined) => {
     const parsed = z.enum(CLASSIFIER_SOURCES).safeParse(source);
     if (!parsed.success) throw Object.assign(new Error(`Unknown classification provider: ${String(source)}`), { status: 400 });
     const allowedInEnterprise = parsed.data === 'off' || (parsed.data === 'custom' && readPinnedEndpoint() !== null);
@@ -501,7 +501,7 @@ export function createRoutingRuntime({
     return publishUpdated();
   };
 
-  const setCustomEndpoint = async (input: z.input<typeof customEndpointInputSchema>) => {
+  const setCustomEndpoint = async (input: CustomEndpointInput) => {
     if (readPinnedEndpoint()) throw pinnedEndpointError();
     if (enterpriseMode()) throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
     const parsed = customEndpointInputSchema.safeParse(input);
@@ -523,7 +523,7 @@ export function createRoutingRuntime({
     return publishUpdated();
   };
 
-  const testClassifier = async (draft?: z.input<typeof customEndpointInputSchema>) => {
+  const testClassifier = async (draft?: CustomEndpointInput) => {
     let source;
     let endpoint;
     if (draft !== undefined) {
