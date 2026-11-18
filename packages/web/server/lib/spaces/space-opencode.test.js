@@ -160,6 +160,10 @@ describe('the login row inside a space', () => {
     expect(buildLoginRow('openai', { ...LOGIN, metadata: {} }).value).not.toHaveProperty('metadata');
   });
 
+  it('keeps the method property failure for a missing login', () => {
+    expect(() => buildLoginRow('openai', null)).toThrow("Cannot read properties of null (reading 'methodID')");
+  });
+
   const answering = (statuses) => {
     const asked = [];
     const requestInside = async (spaceId, request) => {
