@@ -1,32 +1,79 @@
-
 import { fork } from 'child_process';
+import type { ChildProcess, ForkOptions } from 'child_process';
 import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
 import { fileURLToPath } from 'url';
 
 import { applySherpaLoaderEnv } from './sherpa-loader.js';
+import {
+  committedPayloadSchema,
+  createSessionResultSchema,
+  responseHeadSchema,
+  synthesizeResultSchema,
+  transcriptPayloadSchema,
+  workerMessageSchema,
+} from './worker-protocol.js';
+import type { WorkerMessage } from './worker-protocol.js';
+
+type WorkerResponseResult = Extract<WorkerMessage, { type: 'response' }>['result'];
+
+interface PendingRequest {
+  resolve: (result: WorkerResponseResult) => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout> | undefined;
+}
+
+type WorkerInput =
+  | { type: 'tts.synthesize'; modelsDir: string; modelId: string; text: string; speakerId?: number | undefined; speed?: number | undefined }
+  | { type: 'session.create'; sessionId: string; modelsDir: string; modelId: string; language?: unknown }
+  | { type: 'session.append'; sessionId: string; audio: Buffer }
+  | { type: 'session.commit' | 'session.clear' | 'session.close'; sessionId: string };
+
+export interface LocalModelConfig {
+  modelsDir: string;
+  modelId: string;
+  language?: unknown;
+}
+
+const malformedResult = (type: string) => new Error(`Dictation worker answered ${type} with a malformed result`);
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 const DEFAULT_IDLE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_LOCAL_SAMPLE_RATE = 16000;
 const STDERR_TAIL_MAX_CHARS = 2000;
 
+function quietly(action: () => void) {
+  try {
+    action();
+  } catch {
+    return;
+  }
+}
+
 function forkDictationWorker() {
   const env = { ...process.env };
   applySherpaLoaderEnv(env);
-  return fork(fileURLToPath(new URL('./worker-process.js', import.meta.url)), [], {
+  const options: ForkOptions & { windowsHide: boolean } = {
     env,
     serialization: 'advanced',
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     windowsHide: true,
-  });
+  };
+  return fork(fileURLToPath(new URL('./worker-process.js', import.meta.url)), [], options);
 }
 
 export class DictationWorkerClient {
-  /**
-   * @param {{ requestTimeoutMs?: number, idleTtlMs?: number }} [options]
-   */
-  constructor(options = {}) {
+  requestTimeoutMs: number;
+  idleTtlMs: number;
+  pendingRequests: Map<string, PendingRequest>;
+  sessionEmitters: Map<string, EventEmitter>;
+  worker: ChildProcess | null;
+  stderrTail: string;
+  inFlightRequests: number;
+  idleTimer: ReturnType<typeof setTimeout> | null;
+  intentionalCloses: WeakSet<ChildProcess>;
+
+  constructor(options: { requestTimeoutMs?: number; idleTtlMs?: number } = {}) {
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.idleTtlMs = options.idleTtlMs ?? DEFAULT_IDLE_TTL_MS;
     this.pendingRequests = new Map();
@@ -38,29 +85,22 @@ export class DictationWorkerClient {
     this.intentionalCloses = new WeakSet();
   }
 
-  /**
-   * Synthesize speech in the worker. Returns WAV bytes.
-   * @param {{ modelsDir: string, modelId: string, text: string, speakerId?: number | undefined, speed?: number | undefined }} params
-   * @returns {Promise<{ audio: Buffer, format: string }>}
-   */
-  async synthesizeSpeech(params) {
-    const result = await this.sendRequest(
+  async synthesizeSpeech(params: { modelsDir: string; modelId: string; text: string; speakerId?: number | undefined; speed?: number | undefined }) {
+    const parsed = synthesizeResultSchema.safeParse(await this.sendRequest(
       { type: 'tts.synthesize', ...params },
       { timeoutMs: 120000 },
-    );
+    ));
+    if (!parsed.success) {
+      throw malformedResult('tts.synthesize');
+    }
+    const { audio, format } = parsed.data;
     return {
-      audio: Buffer.isBuffer(result.audio) ? result.audio : Buffer.from(result.audio),
-      format: result.format || 'audio/wav',
+      audio: Buffer.isBuffer(audio) ? audio : Buffer.from(audio),
+      format: format || 'audio/wav',
     };
   }
 
-  /**
-   * Create a streaming STT session in the worker.
-   * @param {{ modelsDir: string, modelId: string, language?: unknown }} params
-   * @param {EventEmitter} emitter receives 'committed' | 'transcript' | 'error'
-   * @returns {Promise<{ sessionId: string, requiredSampleRate: number }>}
-   */
-  async createSession({ modelsDir, modelId, language }, emitter) {
+  async createSession({ modelsDir, modelId, language }: LocalModelConfig, emitter: EventEmitter) {
     const sessionId = randomUUID();
     this.sessionEmitters.set(sessionId, emitter);
     try {
@@ -71,7 +111,7 @@ export class DictationWorkerClient {
         modelId,
         language,
       });
-      return { sessionId, requiredSampleRate: result?.requiredSampleRate ?? DEFAULT_LOCAL_SAMPLE_RATE };
+      return { sessionId, requiredSampleRate: createSessionResultSchema.parse(result)?.requiredSampleRate ?? DEFAULT_LOCAL_SAMPLE_RATE };
     } catch (err) {
       this.sessionEmitters.delete(sessionId);
       this.scheduleIdleShutdownIfReady();
@@ -79,29 +119,27 @@ export class DictationWorkerClient {
     }
   }
 
-  appendSessionAudio(sessionId, audio) {
+  appendSessionAudio(sessionId: string, audio: Buffer) {
     void this.sendRequest({ type: 'session.append', sessionId, audio }, { timeoutMs: 0 }).catch((err) => {
       this.emitSessionError(sessionId, err);
     });
   }
 
-  commitSession(sessionId) {
+  commitSession(sessionId: string) {
     void this.sendRequest({ type: 'session.commit', sessionId }, { timeoutMs: 0 }).catch((err) => {
       this.emitSessionError(sessionId, err);
     });
   }
 
-  clearSession(sessionId) {
+  clearSession(sessionId: string) {
     void this.sendRequest({ type: 'session.clear', sessionId }, { timeoutMs: 0 }).catch((err) => {
       this.emitSessionError(sessionId, err);
     });
   }
 
-  closeSession(sessionId) {
+  closeSession(sessionId: string) {
     this.sessionEmitters.delete(sessionId);
-    void this.sendRequest({ type: 'session.close', sessionId }, { timeoutMs: 0 }).catch(() => {
-      // Closing is best-effort; the parent already dropped the session.
-    });
+    void this.sendRequest({ type: 'session.close', sessionId }, { timeoutMs: 0 }).catch(() => undefined);
     this.scheduleIdleShutdownIfReady();
   }
 
@@ -113,20 +151,12 @@ export class DictationWorkerClient {
     this.worker = null;
     if (worker && !worker.killed) {
       this.intentionalCloses.add(worker);
-      try {
-        worker.disconnect();
-      } catch {
-        // ignore
-      }
-      try {
-        worker.kill();
-      } catch {
-        // ignore
-      }
+      quietly(() => worker.disconnect());
+      quietly(() => worker.kill());
     }
   }
 
-  sendRequest(input, options = {}) {
+  sendRequest(input: WorkerInput, options: { timeoutMs?: number } = {}) {
     const worker = this.ensureWorker();
     const requestId = randomUUID();
     const message = { ...input, requestId };
@@ -135,7 +165,7 @@ export class DictationWorkerClient {
 
     const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
 
-    return new Promise((resolve, reject) => {
+    return new Promise<WorkerResponseResult>((resolve, reject) => {
       const timeout =
         timeoutMs > 0
           ? setTimeout(() => {
@@ -144,7 +174,7 @@ export class DictationWorkerClient {
               this.scheduleIdleShutdownIfReady();
               reject(new Error(`Dictation worker request timed out: ${input.type}`));
             }, timeoutMs)
-          : null;
+          : undefined;
 
       this.pendingRequests.set(requestId, { resolve, reject, timeout });
 
@@ -172,7 +202,7 @@ export class DictationWorkerClient {
     const worker = forkDictationWorker();
     this.worker = worker;
     this.stderrTail = '';
-    worker.stderr?.on('data', (chunk) => {
+    worker.stderr?.on('data', (chunk: Buffer | string) => {
       const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
       this.stderrTail = (this.stderrTail + text).slice(-STDERR_TAIL_MAX_CHARS);
     });
@@ -181,8 +211,20 @@ export class DictationWorkerClient {
     return worker;
   }
 
-  handleWorkerMessage(message) {
-    if (message?.type === 'response') {
+  handleWorkerMessage<Raw>(raw: Raw) {
+    const parsed = workerMessageSchema.safeParse(raw);
+    if (parsed.success) {
+      this.dispatchWorkerMessage(parsed.data);
+      return;
+    }
+    const { requestId } = responseHeadSchema.parse(raw);
+    if (requestId !== undefined && this.pendingRequests.has(requestId)) {
+      this.dispatchWorkerMessage({ type: 'response', requestId, ok: false, error: 'Dictation worker sent a malformed response' });
+    }
+  }
+
+  dispatchWorkerMessage(message: WorkerMessage) {
+    if (message.type === 'response') {
       const pending = this.pendingRequests.get(message.requestId);
       if (!pending) {
         return;
@@ -199,25 +241,29 @@ export class DictationWorkerClient {
       return;
     }
 
-    const emitter = this.sessionEmitters.get(message?.sessionId);
+    const emitter = this.sessionEmitters.get(message.sessionId);
     if (!emitter) {
       return;
     }
     switch (message.type) {
-      case 'session.committed':
-        emitter.emit('committed', message.payload);
+      case 'session.committed': {
+        const payload = committedPayloadSchema.safeParse(message.payload);
+        if (payload.success) emitter.emit('committed', payload.data);
+        else emitter.emit('error', new Error('Dictation worker sent a malformed committed segment'));
         return;
-      case 'session.transcript':
-        emitter.emit('transcript', message.payload);
+      }
+      case 'session.transcript': {
+        const payload = transcriptPayloadSchema.safeParse(message.payload);
+        if (payload.success) emitter.emit('transcript', payload.data);
+        else emitter.emit('error', new Error('Dictation worker sent a malformed transcript'));
         return;
+      }
       case 'session.error':
         emitter.emit('error', new Error(message.error));
-        return;
-      default:
     }
   }
 
-  handleWorkerExit(worker, code, signal) {
+  handleWorkerExit(worker: ChildProcess, code: number | null, signal: NodeJS.Signals | null) {
     const wasCurrentWorker = this.worker === worker;
     const wasIntentional = this.intentionalCloses.has(worker);
     this.intentionalCloses.delete(worker);
@@ -246,7 +292,7 @@ export class DictationWorkerClient {
     this.inFlightRequests = 0;
   }
 
-  rejectAllPending(error) {
+  rejectAllPending(error: Error) {
     for (const [requestId, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);
       pending.reject(error);
@@ -254,7 +300,7 @@ export class DictationWorkerClient {
     }
   }
 
-  emitSessionError(sessionId, error) {
+  emitSessionError<Cause>(sessionId: string, error: Cause) {
     const emitter = this.sessionEmitters.get(sessionId);
     if (emitter && emitter.listenerCount('error') > 0) {
       emitter.emit('error', error instanceof Error ? error : new Error(String(error)));
@@ -282,11 +328,13 @@ export class DictationWorkerClient {
 }
 
 export class WorkerBackedTranscriptionSession extends EventEmitter {
-  /**
-   * @param {DictationWorkerClient} client
-   * @param {{ modelsDir: string, modelId: string, language?: unknown }} modelConfig
-   */
-  constructor(client, modelConfig) {
+  client: DictationWorkerClient;
+  modelConfig: LocalModelConfig;
+  requiredSampleRate: number;
+  connectedSessionId: string | null;
+  connecting: Promise<void> | null;
+
+  constructor(client: DictationWorkerClient, modelConfig: LocalModelConfig) {
     super();
     this.client = client;
     this.modelConfig = modelConfig;
@@ -313,7 +361,7 @@ export class WorkerBackedTranscriptionSession extends EventEmitter {
     await this.connecting;
   }
 
-  appendPcm16(pcm16le) {
+  appendPcm16(pcm16le: Buffer) {
     if (!this.connectedSessionId) {
       this.emit('error', new Error('Local STT session not connected'));
       return;

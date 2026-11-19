@@ -30,12 +30,25 @@ returns either module as-is and leaves the constructor fields unchecked.
 The raw addon exports `createOfflineRecognizer` and `createOfflineTts`; it
 does not expose the wrapper's `OfflineRecognizer` and `OfflineTts` classes.
 
-The recognizer constructs `OfflineRecognizer` without a guard and lets the
-runtime report a non-constructor. TTS retains the function check which
-distinguishes the pinned wrapper's class from the raw addon's missing export.
-Kokoro requires a speaker bank and can name additional catalog file roles for
-lexicons. VITS, including Piper, accepts an optional espeak-ng data directory.
-Missing file roles from untyped callers still reach `path.join`.
+Both engines check that the wrapper's class is a function before
+constructing it. The recognizer then throws the same `TypeError` the runtime
+would for a non-constructor; TTS throws its own message that tells the pinned
+wrapper's class from the raw addon's missing export. The native recognizer,
+its streams and results are declared by the fields the engine reads and stay
+unchecked, as the TTS engine's are. Kokoro requires a speaker bank and can name
+additional catalog file roles for lexicons. VITS, including Piper, accepts an
+optional espeak-ng data directory. The catalog types file roles as a plain
+dictionary, so the worker builds the TTS configuration through `ttsConfigOf`,
+which refuses a model type other than VITS or Kokoro and a missing model,
+tokens, espeak or voices file by name; the recognizer refuses a missing role
+the same way instead of passing `undefined` to `path.join`.
+
+The recognizer decodes a whole segment at a time and raises the gain of a
+quiet segment, up to 50 times, toward a 0.6 peak. `takePendingSegment` hands
+the segment back without decoding it, so the worker acknowledges a commit
+before the decode, which is quadratic in the segment's length and would
+otherwise hold the IPC past the parent's request timeout;
+`sherpa-recognizer.test.js` guards that order.
 
 ### Why TTS copies the generated samples
 
@@ -46,34 +59,29 @@ before encoding PCM16LE. Playback uses a positive numeric rate from the audio
 or engine, then falls back to 24 kHz. The speaker and speed checks still
 validate worker inputs at use time.
 
-### Why the worker runtime and client remain JavaScript
+### Why the worker IPC is parsed on both ends
 
-Node's `Process.on('message')` listener receives `unknown`.
-`ChildProcess.on('message')` receives `Serializable`, which also includes scalar
-values and arbitrary objects. Neither outside contract establishes the request
-or response fields this folder reads. The worker accesses request fields without
-validation, and the client forwards response results and event payloads without
-validating their shapes.
+Node hands a forked process's messages to listeners as `unknown` or
+`Serializable`, and neither side checked the fields it read: the worker took
+any request fields to the engines, and the client forwarded results and session
+events unchanged. `worker-protocol.ts` holds Zod schemas for both directions,
+and each side parses where a message arrives. A request with the wrong fields
+is answered `Malformed dictation worker request: <type>` on the same error path
+as an unknown type, which keeps its old message. A non-text language counts as
+no hint. Append audio is checked before the session lookup, so a bad payload is
+refused even for a session that is already gone. On the client, synthesized audio that is not bytes rejects the request,
+a sample rate that is not a positive number falls back to 16 kHz, a malformed
+committed or transcript payload becomes a session error, a malformed reply to
+a pending request rejects that request, because append, commit, clear and close
+have no timeout and would otherwise hold the worker open, and any other message
+outside the protocol is ignored, as unknown message types were.
+`worker-ipc.test.js` pins each case against a stand-in worker and the real
+forked one. Advanced serialization and the serialized-buffer fallback for audio
+are unchanged.
 
-These listeners would need an owner-provided checked request/response transport
-before their values could honestly have a dictation protocol type. Annotating a
-listener with that type would assert an unchecked shape. Adding rejection rules
-would change existing error and forwarding behavior. The runtime and client keep
-their existing IPC boundary, including advanced serialization and the audio
-buffer fallback.
-
-In `DictationWorkerClient`, the first unresolved input is
-`handleWorkerMessage(message)`. Its response discriminator does not check
-`requestId`, `ok`, `result` or `error`. `synthesizeSpeech` then reads the
-unchecked result's audio and format; `createSession` forwards its unchecked
-sample rate. In `worker-runtime.js`, `handleRequest(message)` reads the
-unchecked process message's discriminator and fields before the audio
-conversion guard can run. `sendToParent` forwards segment events unchanged.
-Node's broad listener declarations accurately describe these inputs.
-Narrowing those declarations through augmentation would assert a protocol
-that Node does not check; widening them or converting a helper cannot
-establish the missing fields. New validation would change the existing
-acceptance and failure paths.
+`worker-process.js` stays JavaScript because it is the fork target run by path:
+it installs source resolution before importing `worker-runtime.ts`, and
+`scripts/node-source-entries.test.mjs` lists it as an entry.
 
 ### Why the downloader declares Node's fetch locally
 
