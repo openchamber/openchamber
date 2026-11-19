@@ -739,5 +739,10 @@ function trimSessions(draft: State) {
 
 function cleanupSessionCaches(draft: State, sessionID: string) {
   if (!sessionID) return
+  draft.message = { ...draft.message }
+  draft.part = { ...draft.part }
+  draft.session_status = { ...draft.session_status }
+  draft.permission = { ...draft.permission }
+  draft.form = { ...draft.form }
   dropSessionCaches(draft, [sessionID])
 }

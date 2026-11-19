@@ -1746,7 +1746,7 @@ Keep this in sync with `handleDirectoryEvent` in `sync-context.tsx`:
 
 | Event type | Fields to clone |
 |---|---|
-| `session.created/patched/deleted` | `session`, `permission`, `form`, `part`, `sessionEventRevision`, `sessionDeletedRevision` (an archive patch also clears caches) |
+| `session.created/patched/deleted` | `session`, `sessionEventRevision`, `sessionDeletedRevision`; an archive patch or a delete clears the session's caches, and the reducer copies the `message`, `part`, `session_status`, `permission` and `form` maps it deletes from. A usage patch arrives after every agent step, so cloning those maps up front handed their subscribers new maps that held nothing new |
 | `session.status/idle/error` | `session_status` |
 | `message.updated` | `message` |
 | `message.patched` | `message` |
