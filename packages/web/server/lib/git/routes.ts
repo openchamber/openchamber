@@ -90,9 +90,8 @@ const isJsonValue = (value: unknown): value is JsonValue => {
   while (pending.length) {
     const current = pending.pop();
     if (isJsonScalar(current)) continue;
-    if (Array.isArray(current)) pending.push(...current);
-    else if (isJsonContainer(current)) pending.push(...Object.values(current));
-    else return false;
+    if (!isJsonContainer(current)) return false;
+    for (const item of Array.isArray(current) ? current : Object.values(current)) pending.push(item);
   }
   return true;
 };
