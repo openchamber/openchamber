@@ -1,5 +1,6 @@
 import { asNonEmptyString } from '../shared/guards.js';
 import express from 'express';
+import fs from 'node:fs';
 import { z } from 'zod';
 import path from 'node:path';
 import {
@@ -1565,7 +1566,14 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     }),
     hydrateCheckout: hydrateWorktreeCheckout,
     resolveWorktreeSetup: worktreeSetupForDirectory,
-    moveSession: (sessionID, directory) => clientFor(undefined).session.move({ sessionID, directory }),
+    // OpenCode stores the spelling it is handed, and a home folder reached
+    // through a symlink would then sit outside the project that owns the worktree.
+    moveSession: async (sessionID, directory) => {
+      const canonical = path.isAbsolute(directory)
+        ? await fs.promises.realpath(directory).catch(() => directory)
+        : directory;
+      return clientFor(undefined).session.move({ sessionID, directory: canonical });
+    },
   });
 
   const moveToWorktree = async (sessionID: string, payload: SessionPayload = {}) => {

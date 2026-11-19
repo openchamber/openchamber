@@ -1,5 +1,6 @@
 import http from 'node:http';
 import https from 'node:https';
+import path from 'node:path';
 
 import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
@@ -33,6 +34,8 @@ import type { Socket } from 'node:net';
 
 export interface OpenCodeProxyDependencies {
   fs?: { promises: { realpath: (directory: string) => Promise<string> } };
+  /** Directories under this root keep the spelling the client addressed them by. */
+  chatsRoot?: string | null;
   OPEN_CODE_READY_GRACE_MS: number;
   LONG_REQUEST_TIMEOUT_MS: number;
   getRuntime: () => Pick<OpenCodeLifecycleState, 'openCodePort' | 'openCodeBaseUrl' | 'isOpenCodeReady' | 'openCodeNotReadySince' | 'isRestartingOpenCode'>;
@@ -229,6 +232,74 @@ export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions }:
   };
 };
 
+type CanonicalizeDirectory = (directory: string) => Promise<string>;
+
+/**
+ * Rewrites an absolute `directory` in a session.move body before OpenCode stores it.
+ * Relative values and `~` keep the meaning OpenCode gives them.
+ */
+export const canonicalizeMoveBodyDirectory = async <Body>(
+  body: Body,
+  canonicalize: CanonicalizeDirectory,
+): Promise<Body> => {
+  if (!isObject(body) || !isString(body.directory)) {
+    return body;
+  }
+
+  const directory = body.directory.trim();
+  if (!path.isAbsolute(directory)) {
+    return body;
+  }
+
+  const canonical = await canonicalize(directory).catch(() => null);
+  if (!canonical || canonical === body.directory) {
+    return body;
+  }
+
+  return { ...body, directory: canonical };
+};
+
+const isInsideDirectory = (directory: string, root: string | null | undefined) => {
+  if (!isString(root) || root.length === 0) {
+    return false;
+  }
+
+  const relative = path.relative(path.resolve(root), path.resolve(directory));
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+};
+
+/**
+ * Rewrites the absolute `location.directory` of a session.create body. A directory
+ * inside the chats tree keeps its spelling, because the chats identity is derived
+ * from the configured root.
+ */
+export const canonicalizeCreateBodyDirectory = async <Body>(
+  body: Body,
+  canonicalize: CanonicalizeDirectory,
+  chatsRoot: string | null | undefined,
+): Promise<Body> => {
+  if (!isObject(body)) {
+    return body;
+  }
+
+  const location = body.location;
+  if (!isObject(location) || !isString(location.directory)) {
+    return body;
+  }
+
+  const directory = location.directory.trim();
+  if (!path.isAbsolute(directory) || isInsideDirectory(directory, chatsRoot)) {
+    return body;
+  }
+
+  const canonical = await canonicalize(directory).catch(() => null);
+  if (!canonical || canonical === location.directory) {
+    return body;
+  }
+
+  return { ...body, location: { ...location, directory: canonical } };
+};
+
 const PERCENT_ESCAPE = /%[0-9a-fA-F]{2}/;
 
 const directoriesAsOpenCodeReadsThem = (req: Request, url: URL) => {
@@ -415,6 +486,7 @@ const sessionListRecords = <Payload>(payload: Payload): unknown[] | null => {
 export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDependencies) => {
   const {
     fs,
+    chatsRoot = null,
     OPEN_CODE_READY_GRACE_MS,
     LONG_REQUEST_TIMEOUT_MS,
     getRuntime,
@@ -541,8 +613,9 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
     return isProxyTimeoutError(error) ? 504 : 503;
   };
   const FALLBACK_PROXY_TARGET = 'http://127.0.0.1:3902';
+  const resolveDirectoryRealpath = fs?.promises?.realpath?.bind(fs.promises);
   const canonicalizeDirectoryQuery = createDirectoryQueryCanonicalizer({
-    realpath: fs?.promises?.realpath?.bind(fs.promises),
+    realpath: resolveDirectoryRealpath,
   });
 
   const hasParsedBodyValue = <Body>(body: Body) => {
@@ -1051,7 +1124,17 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
 
   const checkoutGateFolders = async (req: Request, res: Response, url: URL): Promise<{ folders: string[]; refusal?: never } | { refusal: OpenCodeTrustAnswer; folders?: never }> => {
     const folders = directoriesAsOpenCodeReadsThem(req, url).filter(Boolean);
-    const movedSessionID = sessionMoveOf(req.method || '', new URL(req.originalUrl || req.url, 'http://localhost').pathname);
+    const requestPathname = new URL(req.originalUrl || req.url, 'http://localhost').pathname;
+    // A session created at a symlinked spelling keeps it, and then matches no
+    // project. The chats tree is addressed by its configured spelling, so it is
+    // left alone.
+    if (req.method === 'POST' && requestPathname === '/api/session' && resolveDirectoryRealpath) {
+      const body = await readBody(req, res).catch(() => undefined);
+      if (body !== undefined) {
+        req.body = await canonicalizeCreateBodyDirectory(body, resolveDirectoryRealpath, chatsRoot);
+      }
+    }
+    const movedSessionID = sessionMoveOf(req.method || '', requestPathname);
     if (!movedSessionID) return { folders };
     let source;
     try {
@@ -1062,6 +1145,13 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
     const { refusal, destination } = await readMoveDestination(() => readBody(req, res), source);
     if (refusal) return { refusal };
     if (destination) folders.push(destination);
+    // OpenCode stores the directory it is handed, so a symlinked home spelling
+    // would become the session's location and no longer match its project. The
+    // move is rare and the target may have just been created, so ask the
+    // filesystem rather than a cached answer.
+    if (destination && req.body !== undefined && resolveDirectoryRealpath) {
+      req.body = await canonicalizeMoveBodyDirectory(req.body, resolveDirectoryRealpath);
+    }
     if (source) folders.push(source);
     return { folders };
   };

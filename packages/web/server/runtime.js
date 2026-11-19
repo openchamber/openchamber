@@ -1552,6 +1552,7 @@ const serverUtilsRuntime = createServerUtilsRuntime({
   openCodeTrust,
   mcpOAuthSignIn,
   readWorktreeBootstrapStatus: (directory) => getWorktreeBootstrapGateStatus(directory, { bootstrapStore: worktreeBootstrapStore }),
+  chatsRoot: OPENCHAMBER_CHATS_DIR,
   fs,
   os,
   path,

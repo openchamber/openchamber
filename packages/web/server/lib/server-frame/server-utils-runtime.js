@@ -31,6 +31,7 @@ export const createServerUtilsRuntime = (dependencies) => {
     openCodeTrust = null,
     mcpOAuthSignIn = null,
     readWorktreeBootstrapStatus,
+    chatsRoot = null,
   } = dependencies;
 
   const setOpenCodePort = (port) => {
@@ -208,6 +209,7 @@ export const createServerUtilsRuntime = (dependencies) => {
       openCodeTrust,
       mcpOAuthSignIn,
       readWorktreeBootstrapStatus,
+      chatsRoot,
     });
   };
 
