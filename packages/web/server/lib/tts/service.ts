@@ -10,7 +10,7 @@ import type { SpeechCreateParams } from 'openai/resources/audio/speech';
 type SpeechCredential = string | {
   type?: string;
   key?: string;
-  access?: string;
+  access?: string | undefined;
   token?: string;
 };
 

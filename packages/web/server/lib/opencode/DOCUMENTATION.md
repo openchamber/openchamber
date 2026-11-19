@@ -65,15 +65,15 @@ record. Learned IDs retain their original values, and filtered pages expose
 the values their Zod schemas actually checked. Filtering must not validate,
 rewrite or discard unrelated payload fields.
 
-### Why credential projection needs a separate validation change
+### Why credential reads and writes have different token contracts
 
-`projectCredentialValue` treats every non-key credential as OAuth, although
-the client union also includes external credentials. `renewStoredLogin`
-projects the value returned by `credential.create` without checking its type.
-The spaces login keeper expects guaranteed token fields and hashes `access`
-directly. Honest declarations for the unchecked projections can include
-missing token fields; adopting those declarations needs runtime validation
-or consumers that accept those missing fields.
+`projectCredentialValue` treats every non-key credential as OAuth for the
+legacy view. OpenCode also lists external credentials, so token fields in
+that projection can be `undefined`. Stored login reads select OAuth rows
+before projection. The create route inserts the value from its request and
+returns the inserted row by ID, so creating an OAuth row returns OAuth
+tokens. The SDK's general create return type does not express that
+relationship with the input.
 
 ### Why process records are per child and not one shared file
 
