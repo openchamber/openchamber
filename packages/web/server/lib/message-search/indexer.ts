@@ -1,13 +1,23 @@
 import { z } from 'zod';
 import { sessionParentId } from '../session-lineage.js';
+import type { MessageListInput, OpenCodeClient, SessionMessageGetInput } from '@opencode/client';
+import type { SQLOutputValue } from 'node:sqlite';
+import type { GlobalStreamEvent } from '../event-stream/global-hub.js';
+import type { applyOwnedArchiveState } from '../opencode/proxy.js';
+import type { IndexedMessage, openMessageSearchStore } from './store.js';
 
 const PAGE_SIZE = 100;
 const SESSION_PAGE_SIZE = 200;
 const LIVE_DEBOUNCE_MS = 1_500;
 const BACKFILL_PAUSE_MS = 25;
-const ROLES = ['user', 'assistant'];
+const ROLES: readonly ('user' | 'assistant')[] = ['user', 'assistant'];
 
-const isTag = (error, tag) => error?._tag === tag;
+const hasTag = (error: unknown): error is { _tag: unknown } =>
+  error != null && '_tag' in Object(error);
+const hasMessage = (error: unknown): error is { message: unknown } =>
+  error != null && 'message' in Object(error);
+const isFiniteNumber = (value: unknown): value is number => Number.isFinite(value);
+const isBigInt = (value: SQLOutputValue | undefined): value is bigint => typeof value === 'bigint';
 
 const sessionSchema = z.object({
   id: z.string().min(1),
@@ -49,13 +59,48 @@ const eventSchema = z.object({
 });
 const archivedEventSchema = z.object({
   type: z.literal('session.archived'),
-  created: z.number().finite().catch(null),
+  created: z.number().finite().nullable().catch(null),
   data: z.object({ sessionID: z.string().min(1) }),
 });
 
-const stripTerminalContext = (text) => text.replace(/\n*<terminal_context>\n[\s\S]*?\n<\/terminal_context>\s*$/, '');
+type StoredIdentifier = NonNullable<SQLOutputValue>;
+type Session = z.output<typeof sessionSchema>;
+type Message = z.output<typeof messageSchema>;
+type AssistantMessage = Extract<Message, { type: 'assistant' }>;
+type ArchiveTimes = Record<string, number | null> | null;
 
-const joinParts = (message, schema) => {
+export interface IndexerClient {
+  session: {
+    get: OpenCodeClient['session']['get'];
+    list: OpenCodeClient['session']['list'];
+    message: { get(input: Omit<SessionMessageGetInput, 'messageID'> & { messageID: StoredIdentifier }): ReturnType<OpenCodeClient['session']['message']['get']> };
+  };
+  message: { list(input: Omit<MessageListInput, 'cursor'> & { cursor?: StoredIdentifier }): ReturnType<OpenCodeClient['message']['list']> };
+}
+
+export interface IndexerOptions {
+  store: ReturnType<typeof openMessageSearchStore>;
+  createClient: (directory: string) => IndexerClient;
+  pageSize?: number;
+  liveDebounceMs?: number;
+  backfillPauseMs?: number;
+  includeReasoning?: () => boolean;
+  getArchivedSessions?: () => Promise<ArchiveTimes>;
+  applyOwnedArchiveState?: typeof applyOwnedArchiveState<Session>;
+  logger?: Pick<Console, 'warn'>;
+}
+
+const hasArchiveTime = (value: unknown): value is { time: { archived: number } } => {
+  if (value == null) return false;
+  const session: object = Object(value);
+  if (!('time' in session) || session.time == null) return false;
+  const time: object = Object(session.time);
+  return 'archived' in time && isFiniteNumber(time.archived);
+};
+
+const stripTerminalContext = (text: string) => text.replace(/\n*<terminal_context>\n[\s\S]*?\n<\/terminal_context>\s*$/, '');
+
+const joinParts = (message: AssistantMessage, schema: typeof textPartSchema | typeof reasoningPartSchema) => {
   const blocks = [];
   for (const part of message.content ?? []) {
     const parsed = schema.safeParse(part);
@@ -64,23 +109,23 @@ const joinParts = (message, schema) => {
   return blocks.length > 0 ? blocks.join('\n\n') : null;
 };
 
-const readSearchableText = (message) => {
+const readSearchableText = (message: Message) => {
   if (message.type === 'user') return stripTerminalContext(message.text ?? '').trim() || null;
   return joinParts(message, textPartSchema);
 };
 
-const messageExists = async (client, sessionId, messageId) => {
+const messageExists = async (client: IndexerClient, sessionId: string, messageId: SQLOutputValue | undefined) => {
   if (!messageId) return false;
   try {
     await client.session.message.get({ sessionID: sessionId, messageID: messageId });
     return true;
   } catch (error) {
-    if (isTag(error, 'MessageNotFoundError')) return false;
+    if (hasTag(error) && error._tag === 'MessageNotFoundError') return false;
     throw error;
   }
 };
 
-const isSettled = (message) => message.type !== 'assistant' || Number.isFinite(message.time.completed);
+const isSettled = (message: Message) => message.type !== 'assistant' || Number.isFinite(message.time.completed);
 
 export const createMessageSearchIndexer = ({
   store,
@@ -92,19 +137,19 @@ export const createMessageSearchIndexer = ({
   getArchivedSessions = async () => null,
   applyOwnedArchiveState = (session) => session,
   logger = console,
-}) => {
-  const liveTimers = new Map();
-  const liveQueue = new Map();
-  const backfillQueue = new Map();
-  let draining = null;
+}: IndexerOptions) => {
+  const liveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const liveQueue = new Map<string, string>();
+  const backfillQueue = new Map<string, string>();
+  let draining: Promise<void> | null = null;
   let backfill = { state: 'idle', total: 0, done: 0 };
   let backfillRun = 0;
   let stopped = false;
   let lifecycleRevision = 0;
-  const lifecycleMutations = new Map();
-  const pendingLifecycleWork = new Set();
-  const activeLifecycleReaders = new Map();
-  const deletedLifecycleSessions = new Map();
+  const lifecycleMutations = new Map<SQLOutputValue, { revision: number; archivedAt: SQLOutputValue | undefined; lifecycleKnown: boolean }>();
+  const pendingLifecycleWork = new Set<Promise<void>>();
+  const activeLifecycleReaders = new Map<number, number>();
+  const deletedLifecycleSessions = new Map<SQLOutputValue, number>();
 
   const cleanupDeletedLifecycleMutations = () => {
     for (const [sessionId, deletedAtRevision] of deletedLifecycleSessions) {
@@ -115,12 +160,12 @@ export const createMessageSearchIndexer = ({
     }
   };
 
-  const recordSessionDeletion = (sessionId) => {
+  const recordSessionDeletion = (sessionId: SQLOutputValue) => {
     deletedLifecycleSessions.set(sessionId, ++lifecycleRevision);
     cleanupDeletedLifecycleMutations();
   };
 
-  const withLifecycleReader = async (read) => {
+  const withLifecycleReader = async <T>(read: (revision: number) => Promise<T>) => {
     const startedAtRevision = lifecycleRevision;
     activeLifecycleReaders.set(startedAtRevision, (activeLifecycleReaders.get(startedAtRevision) ?? 0) + 1);
     try {
@@ -133,14 +178,14 @@ export const createMessageSearchIndexer = ({
     }
   };
 
-  const withArchiveTime = (session, archivedAt) => {
+  const withArchiveTime = (session: Session, archivedAt: SQLOutputValue | undefined) => {
     const time = { ...(session.time ?? {}) };
-    if (Number.isFinite(archivedAt)) time.archived = archivedAt;
+    if (isFiniteNumber(archivedAt)) time.archived = archivedAt;
     else delete time.archived;
     return { ...session, time };
   };
 
-  const applySnapshotLifecycle = (session, archivedById, startedAtRevision) => {
+  const applySnapshotLifecycle = (session: Session, archivedById: ArchiveTimes, startedAtRevision: number) => {
     const overlaid = sessionSchema.parse(applyOwnedArchiveState(session, archivedById));
     const mutation = lifecycleMutations.get(overlaid.id);
     if (!mutation) return overlaid;
@@ -150,14 +195,14 @@ export const createMessageSearchIndexer = ({
     if (mutation.revision <= startedAtRevision) {
       lifecycleMutations.set(overlaid.id, {
         revision: mutation.revision,
-        archivedAt: Number.isFinite(overlaid.time?.archived) ? overlaid.time.archived : null,
+        archivedAt: isFiniteNumber(overlaid.time?.archived) ? overlaid.time.archived : null,
         lifecycleKnown: true,
       });
     }
     return overlaid;
   };
 
-  const processLifecycleEvent = async (sessionId, archivedAt) => {
+  const processLifecycleEvent = async (sessionId: string, archivedAt: number | null) => {
     const revision = ++lifecycleRevision;
     const current = store.readSession(sessionId);
     const hasEffectiveState = current?.lifecycle_known === 1;
@@ -170,27 +215,27 @@ export const createMessageSearchIndexer = ({
     try {
       archivedById = await getArchivedSessions();
     } catch (error) {
-      logger.warn?.('[message-search] could not read archive overlay:', error?.message ?? error);
+      logger.warn?.('[message-search] could not read archive overlay:', (hasMessage(error) ? error.message : undefined) ?? error);
       return;
     }
     const upstream = withArchiveTime({ id: sessionId }, archivedAt);
     const overlaid = applyOwnedArchiveState(upstream, archivedById);
-    const effectiveArchiveTime = Number.isFinite(overlaid?.time?.archived) ? overlaid.time.archived : null;
+    const effectiveArchiveTime = hasArchiveTime(overlaid) ? overlaid.time.archived : null;
     if (lifecycleMutations.get(sessionId)?.revision !== revision) return;
     lifecycleMutations.set(sessionId, { revision, archivedAt: effectiveArchiveTime, lifecycleKnown: true });
     store.setArchiveState(sessionId, effectiveArchiveTime);
   };
 
-  const trackLifecycleEvent = (sessionId, archivedAt) => {
+  const trackLifecycleEvent = (sessionId: string, archivedAt: number | null) => {
     const work = processLifecycleEvent(sessionId, archivedAt).catch((error) => {
-      logger.warn?.('[message-search] could not apply lifecycle event:', error?.message ?? error);
+      logger.warn?.('[message-search] could not apply lifecycle event:', (hasMessage(error) ? error.message : undefined) ?? error);
     });
     pendingLifecycleWork.add(work);
     void work.finally(() => pendingLifecycleWork.delete(work));
     return work;
   };
 
-  const runSyncSession = async (sessionId, directoryHint, { retried = false } = {}, startedAtRevision) => {
+  const runSyncSession = async (sessionId: string, directoryHint: string, { retried = false }: { retried?: boolean } = {}, startedAtRevision: number): Promise<void> => {
     const client = createClient(directoryHint);
     let session;
     try {
@@ -198,7 +243,7 @@ export const createMessageSearchIndexer = ({
       const upstream = sessionSchema.parse(await client.session.get({ sessionID: sessionId }));
       session = applySnapshotLifecycle(upstream, archived, startedAtRevision);
     } catch (error) {
-      if (isTag(error, 'SessionNotFoundError')) {
+      if (hasTag(error) && error._tag === 'SessionNotFoundError') {
         store.deleteSession(sessionId);
         return;
       }
@@ -223,7 +268,7 @@ export const createMessageSearchIndexer = ({
       cutoff = reverted.success ? reverted.data.time.created : Number.NEGATIVE_INFINITY;
     }
 
-    const startOver = () => {
+    const startOver = (): Promise<void> => {
       store.resetSession(sessionId, revertId);
       return syncSession(sessionId, directory, { retried: true });
     };
@@ -242,12 +287,12 @@ export const createMessageSearchIndexer = ({
             ...(cursor ? { cursor } : { order: 'asc' }),
           }));
         } catch (error) {
-          if (cursor && !retried && (isTag(error, 'InvalidCursorError') || isTag(error, 'InvalidRequestError'))) return startOver();
+          if (cursor && !retried && hasTag(error) && (error._tag === 'InvalidCursorError' || error._tag === 'InvalidRequestError')) return startOver();
           throw error;
         }
         const records = page.data;
         if (records.length === 0 && cursor && !retried && !(await messageExists(client, sessionId, anchor))) return startOver();
-        const rows = [];
+        const rows: IndexedMessage[] = [];
         let complete = true;
         for (const record of records) {
           const parsed = messageSchema.safeParse(record);
@@ -279,7 +324,7 @@ export const createMessageSearchIndexer = ({
     store.markSynced(sessionId, session.time?.updated ?? null);
   };
 
-  const syncSession = (sessionId, directoryHint, options) => withLifecycleReader(
+  const syncSession = (sessionId: string, directoryHint: string, options?: { retried?: boolean }): Promise<void> => withLifecycleReader(
     (startedAtRevision) => runSyncSession(sessionId, directoryHint, options, startedAtRevision),
   );
 
@@ -303,7 +348,7 @@ export const createMessageSearchIndexer = ({
         try {
           await syncSession(job.sessionId, job.directory);
         } catch (error) {
-          logger.warn?.('[message-search] could not index a session:', error?.message ?? error);
+          logger.warn?.('[message-search] could not index a session:', (hasMessage(error) ? error.message : undefined) ?? error);
         }
         if (job.fromBackfill) {
           backfill = { ...backfill, done: backfill.done + 1 };
@@ -318,7 +363,7 @@ export const createMessageSearchIndexer = ({
     return draining;
   };
 
-  const queueLive = (sessionId, directory) => {
+  const queueLive = (sessionId: string, directory: string) => {
     if (!sessionId || stopped) return;
     clearTimeout(liveTimers.get(sessionId));
     liveTimers.set(sessionId, setTimeout(() => {
@@ -328,14 +373,14 @@ export const createMessageSearchIndexer = ({
     }, liveDebounceMs));
   };
 
-  const runBackfill = async (startedAtRevision) => {
+  const runBackfill = async (startedAtRevision: number) => {
     const run = ++backfillRun;
     const client = createClient('');
-    const listed = new Map();
-    let cursor = null;
+    const listed = new Map<SQLOutputValue | undefined, Session>();
+    let cursor: string | null = null;
     try {
       for (;;) {
-        const page = sessionPageSchema.parse(await client.session.list({ parentID: null, limit: SESSION_PAGE_SIZE, ...(cursor ? { cursor } : { order: 'desc' }) }));
+        const page: z.output<typeof sessionPageSchema> = sessionPageSchema.parse(await client.session.list({ parentID: null, limit: SESSION_PAGE_SIZE, ...(cursor ? { cursor } : { order: 'desc' }) }));
         for (const record of page.data) {
           const session = sessionSchema.safeParse(record);
           if (session.success && !sessionParentId(session.data)) listed.set(session.data.id, session.data);
@@ -345,7 +390,7 @@ export const createMessageSearchIndexer = ({
         cursor = next;
       }
     } catch (error) {
-      logger.warn?.('[message-search] could not list sessions:', error?.message ?? error);
+      logger.warn?.('[message-search] could not list sessions:', (hasMessage(error) ? error.message : undefined) ?? error);
       return;
     }
     if (run !== backfillRun || stopped) return;
@@ -353,12 +398,13 @@ export const createMessageSearchIndexer = ({
     try {
       archived = await getArchivedSessions();
     } catch (error) {
-      logger.warn?.('[message-search] could not read archive overlay:', error?.message ?? error);
+      logger.warn?.('[message-search] could not read archive overlay:', (hasMessage(error) ? error.message : undefined) ?? error);
       return;
     }
     if (run !== backfillRun || stopped) return;
     for (const id of store.sessionIds()) {
       if (listed.has(id)) continue;
+      if (id === undefined) throw new TypeError('Missing id column in search index');
       store.deleteSession(id);
       recordSessionDeletion(id);
     }
@@ -369,7 +415,8 @@ export const createMessageSearchIndexer = ({
       store.upsertSession({ id: session.id, directory: session.location?.directory ?? '', title: session.title ?? '', createdAt: session.time?.created, archivedAt: session.time?.archived, lifecycleKnown: true });
       const known = store.readSession(session.id);
       const updatedAt = session.time?.updated ?? null;
-      if (known && known.synced_updated_at !== null && updatedAt !== null && known.synced_updated_at >= updatedAt) continue;
+      const synced = known?.synced_updated_at;
+      if (known && synced !== null && updatedAt !== null && (isBigInt(synced) ? synced >= updatedAt : Number(synced) >= updatedAt)) continue;
       backfillQueue.set(session.id, session.location?.directory ?? '');
       queued += 1;
     }
@@ -381,7 +428,7 @@ export const createMessageSearchIndexer = ({
   const startBackfill = () => withLifecycleReader(runBackfill);
 
   return {
-    processPayload(payload, directory = '') {
+    processPayload(payload: ReturnType<GlobalStreamEvent['translated']>[number], directory = '') {
       if (stopped) return;
       const event = eventSchema.safeParse(payload);
       if (!event.success) return;
@@ -417,7 +464,7 @@ export const createMessageSearchIndexer = ({
       void startBackfill();
     },
 
-    processArchiveEvent(payload) {
+    processArchiveEvent(payload: GlobalStreamEvent['payload']) {
       if (stopped) return;
       const event = archivedEventSchema.safeParse(payload);
       if (!event.success) return;

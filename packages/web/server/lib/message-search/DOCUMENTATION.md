@@ -101,7 +101,7 @@ overlays before the file closes under them.
   when its text changed.
   It also builds snippets: FTS5's `snippet()` counts trigrams and cuts a hit to
   a few characters, so the window is taken in JS on the returned hits.
-- `indexer.js` keeps the index in step with OpenCode.
+- `indexer.ts` keeps the index in step with OpenCode.
 - `runtime.js` follows the setting, wires the indexer to the global event hub
   while on, answers queries, reports status (state, file size, progress) and
   deletes the file (while on, a fresh index starts at once: "rebuild").
@@ -129,6 +129,9 @@ The OpenCode client declares `message.list` cursors and `session.message.get`
 message ids as strings. Its query encoder sends byte-array cursors as indexed
 parameters, and its path encoder sends byte-array anchors as comma-separated
 segments. Filtering them would change what the indexer sends.
+The indexer declares the transport inputs locally and parses the SDK responses
+with its own schemas before using them. The archive event timestamp falls back
+to `null` for missing or invalid values, including non-finite numbers.
 
 The server check includes Node types only. The Bun constructor contract here
 describes the database and statement methods this adapter uses, including
