@@ -176,13 +176,21 @@ nullable fallback does not establish SQLite column types. The native
 describe what an unchecked database can return, so a type-only correction
 cannot narrow them to the expected schema.
 
-`store.js` uses `createdAt` in ordered comparisons and `sessionId` in string
-comparisons, and uses `directory` as a dictionary key. `indexer.js` compares
-`readSession().synced_updated_at` with a number and passes stored cursors and
-anchors to OpenCode. `runtime.js` passes returned `text` to `buildSnippet`,
-which calls string methods. A strict compiler probe against `SqliteConnection`
-rejects those uses because a column can be missing, null, a number, a bigint
-or a byte array as well as a string.
+`store.js` compares `createdAt` and `sessionId` to the paging cursor and uses
+`directory` as a dictionary key. `indexer.js` compares
+`readSession().synced_updated_at` with a number. `runtime.js` passes returned
+`text` to `buildSnippet`, which calls `text.toLowerCase()`. The compiler
+rejects these uses against the native row type. In particular, a string
+timestamp in the database still participates in JavaScript's ordered
+comparison, and a blob body still throws during snippet construction.
+
+The indexer also passes stored cursors and anchors to
+`@opencode/client`'s `message.list` and `session.message.get`, whose `cursor`
+and `messageID` inputs are declared as strings. The 2.3.0 client encodes a
+byte-array cursor as indexed query parameters and a byte-array anchor as a
+comma-separated path segment. Filtering those values before the call would
+change the request. Describing that serialization with a wider client
+declaration would still leave the indexer's timestamp comparison unresolved.
 
 Converting these files requires either runtime row validation or assertions
 about the unchecked file. Validation would change acceptance and failure
