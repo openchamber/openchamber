@@ -31,7 +31,7 @@ const preloadedEntries = [
 ];
 const fixtures = [
   'packages/web/server/lib/git/storage-process.fixture.ts',
-  'packages/web/server/lib/source-control/storage-process.fixture.js',
+  'packages/web/server/lib/source-control/storage-process.fixture.ts',
 ];
 let root;
 let env;

@@ -81,6 +81,10 @@ The CLI owns its credentials. These handles have no token and an empty outbound 
 
 ## Cross-process locks and recovery
 
+The storage process fixture delays snapshot reads so tests can exercise
+competing writers without adding a barrier inside a transaction. Its parent
+forks the TypeScript source with the Node source hook preloaded for its imports.
+
 `file-lock.js` owns the dependency-free exclusion contract for source-control and Git stores that import it. Every snapshot read and complete read/check/write transaction acquires `<json-file>.lock` using exclusive `wx` creation with mode `0600`. Local queues preserve call ordering; each filesystem acquisition waits at most two seconds by default before `SOURCE_CONTROL_LOCK_BUSY` with HTTP `503`. Other lock I/O or ownership failures return `SOURCE_CONTROL_LOCK_FAILED` with HTTP `500`. Neither failure is an empty store, a missing binding, or a disconnected provider. Errors name the lock basename and explain stopped-writer recovery without exposing the data-root path.
 
 Provider execution uses `<mutation-json-file>.execution-<sha256-key>.lock`. Snapshot locks are brief and never span provider network calls. Different execution keys and different stores can progress while another provider request runs. These locks support multiple daemons sharing the same data root; there is no global backend lock. All writers must use this contract and the same file location on a filesystem that supports exclusive creation and atomic same-directory rename. Older unlocked writers, external file edits, and removal or replacement of the data directory while writers run are unsupported.

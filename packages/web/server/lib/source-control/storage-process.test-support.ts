@@ -5,7 +5,7 @@ import type { Serializable } from 'node:child_process';
 const isStorageReply = (value: Serializable): value is Serializable & { id?: unknown } => Object.hasOwn(value, 'ok');
 
 export async function storageProcess(kind: string, filePath: string) {
-  const child = fork(new URL('./storage-process.fixture.js', import.meta.url), [kind, filePath], {
+  const child = fork(new URL('./storage-process.fixture.ts', import.meta.url), [kind, filePath], {
     execArgv: ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href], stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
   });
   const events: Serializable[] = [];
