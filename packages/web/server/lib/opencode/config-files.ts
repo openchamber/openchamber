@@ -82,7 +82,7 @@ const COMMAND_SCOPE = {
 const SKILL_SCOPE = {
   USER: 'user',
   PROJECT: 'project'
-};
+} satisfies { USER: 'user'; PROJECT: 'project' };
 
 
 function ensureDirs() {

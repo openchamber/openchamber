@@ -18,6 +18,7 @@ export interface SkillSupportingFile {
   fullPath: string;
 }
 const hasSkillFields = (value: unknown): value is { name?: unknown; description?: unknown } => value != null;
+const isWritableView = (value: unknown): value is NodeJS.ArrayBufferView => ArrayBuffer.isView(value);
 
 async function pathExists(target: string) {
   try {
@@ -182,8 +183,11 @@ async function listSkillSupportingFiles(skillDir: string) {
   return files;
 }
 
-function assertPathWithinSkillDir(skillDir: string, relativePath: string) {
+function assertPathWithinSkillDir<Path>(skillDir: string, relativePath: Path) {
   const root = fs.realpathSync(skillDir);
+  if (!isString(relativePath)) {
+    throw Object.assign(new TypeError('The skill file path must be a string'), { code: 'ERR_INVALID_ARG_TYPE' });
+  }
   const target = path.resolve(root, relativePath);
   const relative = path.relative(root, target);
   const isWithin = relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
@@ -205,14 +209,17 @@ function readSkillSupportingFile(skillDir: string, relativePath: string) {
   return fs.readFileSync(fullPath, 'utf8');
 }
 
-function writeSkillSupportingFile(skillDir: string, relativePath: string, content: string) {
+function writeSkillSupportingFile<Path, Content>(skillDir: string, relativePath: Path, content: Content) {
   const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
   const dir = path.dirname(fullPath);
   fs.mkdirSync(dir, { recursive: true });
+  if (!isString(content) && !isWritableView(content)) {
+    throw Object.assign(new TypeError('The skill file content must be a string or an ArrayBuffer view'), { code: 'ERR_INVALID_ARG_TYPE' });
+  }
   fs.writeFileSync(fullPath, content, 'utf8');
 }
 
-function deleteSkillSupportingFile(skillDir: string, relativePath: string) {
+function deleteSkillSupportingFile<Path>(skillDir: string, relativePath: Path) {
   const root = fs.realpathSync(skillDir);
   const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
   if (fs.existsSync(fullPath)) {

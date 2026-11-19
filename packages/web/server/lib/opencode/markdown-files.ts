@@ -63,7 +63,7 @@ function parseMdContent(rawContent: string, filePath: string): MarkdownDocument 
   return { frontmatter, body };
 }
 
-function writeMdFile<Frontmatter extends object>(filePath: string, frontmatter: Frontmatter, body: string, { flag = 'w' }: { flag?: string } = {}) {
+function writeMdFile<Frontmatter extends object, Body>(filePath: string, frontmatter: Frontmatter, body: Body, { flag = 'w' }: { flag?: string } = {}) {
   try {
     const cleanedFrontmatter = Object.fromEntries(
       Object.entries(frontmatter).filter(([, value]) => value != null)

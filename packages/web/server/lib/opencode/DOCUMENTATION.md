@@ -1280,7 +1280,7 @@ headers }` or v1 `{ npm, options }`. The stored entry is always a
 - Returned API:
   - `getOpenCodeResolutionSnapshot(settings)`: returns configured/resolved OpenCode binary details plus effective managed-launch fields (`launchBinary`, `launchArgs`, `launchWrapperType`) when applicable.
 
-## Public exports (skills.js)
+## Public exports (skills.ts)
 - `getSkillSources(skillName, workingDirectory, discoveredSkill?, options?)`: returns the skill's Markdown metadata and instructions, source paths and scopes, and supporting files. Supporting files are included by default. `GET /api/config/skills` calls it once per skill with `{ includeSupportingFiles: false }`, which omits `md.supportingFiles` and skips walking supporting files.
 
 ## Public exports (skill-routes.js)
@@ -1306,6 +1306,11 @@ headers }` or v1 `{ npm, options }`. The stored entry is always a
 ### Why parsed markdown is shared within a request
 
 Discovery already reads each skill's frontmatter and body. Source lookup uses that same read so listing does not open and parse the file again. The map holds a request's snapshot, so an edit during a list appears on the next request. Keeping entries across requests would need invalidation for external file edits.
+
+Skill detail keeps YAML `name` and `description` as read. Discovery still
+requires a string name. Writes preserve YAML values and let the Markdown
+writer interpolate the instruction body. Supporting file paths require
+strings; file data can also be a Node array-buffer view.
 
 ## Public exports (proxy.js)
 - `registerOpenCodeProxy(app, dependencies)`: registers OpenCode proxy routes and middleware.
