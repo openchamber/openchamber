@@ -1,4 +1,5 @@
 import { isPlainObject, isString } from '../shared/guards.js';
+import type { JsonValue } from '../shared/json-values.js';
 
 export interface GiteaFailure {
   kind?: unknown;
@@ -8,7 +9,7 @@ export interface GiteaFailure {
 }
 
 export type GiteaFetch = (input: string, init: Omit<RequestInit, 'body'> & { body?: string | undefined }) => Promise<Response>;
-export type GiteaQuery = Record<string, string | number | boolean | null | undefined>;
+export type GiteaQuery = Record<string, JsonValue | undefined>;
 export type GiteaBody = null | boolean | number | string | GiteaBody[] | { [key: string]: GiteaBody | undefined };
 
 export interface GiteaClientOptions {
@@ -125,7 +126,11 @@ export function createGiteaClient({
     return url;
   };
 
-  const send = async (method: string, path: string, { query, body, responseType = 'json' }: SendOptions = {}) => {
+  type ResponseBody<T> = { status: number; headers: Headers; body: T | null };
+  function send(method: string, path: string, options: SendOptions & { responseType: 'text' }): Promise<ResponseBody<string>>;
+  function send(method: string, path: string, options: SendOptions & { responseType: 'bytes' }): Promise<ResponseBody<Buffer>>;
+  function send(method: string, path: string, options: Omit<SendOptions, 'responseType'>): Promise<ResponseBody<JsonValue>>;
+  async function send(method: string, path: string, { query, body, responseType = 'json' }: SendOptions): Promise<ResponseBody<JsonValue | Buffer>> {
     const url = urlOf(path, query);
     const headers: GiteaHeaders = { accept: responseType === 'json' ? 'application/json' : '*/*' };
     if (token) headers.authorization = `token ${token}`;
@@ -152,7 +157,7 @@ export function createGiteaClient({
           if (responseType === 'text') return { ...result, body: await response.text() };
           if (responseType === 'bytes') return { ...result, body: Buffer.from(await response.arrayBuffer()) };
           const text = await response.text();
-          const body: unknown = text ? JSON.parse(text) : null;
+          const body: JsonValue = text ? JSON.parse(text) : null;
           return { ...result, body };
         }
         if (attempt >= attempts || !RETRY_STATUSES.has(response.status)) throw await errorFromResponse(response, label);
@@ -165,7 +170,7 @@ export function createGiteaClient({
       }
       await delay(2 ** attempt * 250);
     }
-  };
+  }
 
   const page = async (path: string, query?: GiteaQuery, { page: number = 1, limit = 50 }: PageOptions = {}) => {
     const response = await send('GET', path, { query: { ...query, page: number, limit } });
@@ -175,7 +180,7 @@ export function createGiteaClient({
     const hasMore = link !== null
       ? hasNextLink(link)
       : Number.isInteger(total) ? number * limit < total : response.body.length >= limit;
-    const items: unknown[] = response.body;
+    const items: JsonValue[] = response.body;
     return { items, hasMore, total: Number.isInteger(total) ? total : null };
   };
 
@@ -189,7 +194,7 @@ export function createGiteaClient({
     delete: async (path: string, body?: GiteaBody) => (await send('DELETE', path, { body })).body,
     page,
     collection: async (path: string, query?: GiteaQuery, { limit = 50, maxItems = 2000, message = `${label} list is longer than OpenChamber reads` }: CollectionOptions = {}) => {
-      const items: unknown[] = [];
+      const items: JsonValue[] = [];
       for (let number = 1; ; number += 1) {
         const result = await page(path, query, { page: number, limit });
         items.push(...result.items);

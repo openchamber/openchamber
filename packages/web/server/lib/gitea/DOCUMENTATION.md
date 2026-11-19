@@ -95,37 +95,14 @@ gt puts its configuration under `GITEA_CLI_CONFIG_DIR`, else the platform's conf
 
 The injected process runner can return text or bytes; only string output supplies a token or a configuration path. Thrown values need not be `Error` instances. The failure guard establishes only non-nullness, leaving `code`, `killed` and `stderr` unchecked until their existing comparisons or string checks run. The YAML schemas remain nullable and passthrough: an active account's `auth_method` is checked by the schema, while unrelated file fields remain unknown. An invalid instance origin is skipped without preventing other hosts from being listed.
 
-### Why some implementations remain JavaScript
-
-`shared/guards.js` re-exports the primitive-string predicate from
-`shared/object-guards.ts`. The remaining unchecked boundaries are:
-
-- `resources.js`: `showRepo` retains the unchecked response alongside the
-  mapped project. `withParents` reads `source.raw.parent`, while
-  `headProjectOf` reads `raw.head`. The client checks JSON syntax and list
-  containers only; its `get` result is `unknown` and its list entries are
-  `unknown`. A repository or pull-request interface on those results would
-  promise fields the client never checks.
-- `provider.js`: `serviceFor` assigns `sourceControlIdentity` and
-  `sourceControlPersistedAccount` to an arbitrary caught value. A resource
-  rejection with `null` or a number becomes a `TypeError` at that assignment.
-  Guarding and rethrowing the original value would change the rejection.
-- `mappers.js`: `text` and `integer` receive unchecked API fields. Annotating
-  those parameters as `unknown` fails `anti-slop/no-unknown-parameters`;
-  declaring them strings or numbers excludes values their checks handle.
-  `mapGiteaPull` also reads `value.head.ref` and `value.base.ref` without
-  establishing the nested containers. The root plain-object check does not
-  establish either branch's shape.
-
-These boundaries are inside this folder. Correcting a neighbouring declared
-type, exporting a type, converting an outside helper or augmenting a dependency
-cannot validate the unchecked payloads or make arbitrary rejections mutable.
-
 ### Why the client leaves JSON unchecked
 
 JSON syntax and pagination-container checks do not establish a Gitea payload
-schema. Reads and writes return `unknown`, and pages and collections contain
-`unknown` entries. Verification narrows version and user payloads with the
+schema. JSON reads and writes return `JsonValue`, and pages and collections
+contain unchecked JSON entries. Text and byte reads also admit `null` for a
+204. Resource checks still validate the fields they consume: a mapped
+repository establishes a numeric id, but its parent and pull request branches
+remain unchecked. Verification narrows version and user payloads with the
 existing checks before publishing their fields. User ids still accept every
 nonnegative integer, including values outside the safe-integer range.
 
