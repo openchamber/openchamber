@@ -51,10 +51,8 @@ Both providers accept any origin, so a server connected on both cards would be c
 
 Codeberg is the public Forgejo instance, the way gitlab.com is GitLab's: recognising its remotes without an account lets the app offer to connect, and listing it on the card means a token is all a Codeberg user enters.
 
-### Why the provider wrapper remains JavaScript
+### Why provider options come from Gitea
 
-`createGiteaFamilyProvider` in `../gitea/provider.js` still infers `authStore`, `events` and `resolveRepos` as required inputs. The existing Forgejo call in `../source-control/mutation-digest-freeze.test.js` supplies only `store` and `events`. Making those inputs optional in a TypeScript wrapper fails the server check with `TS2345` when forwarding them to the family provider.
-
-The family provider's owner must declare `authStore` optional when `store` is supplied, and `resolveRepos` optional with the resolver's actual function type because the resource service supplies its default. Its `events` contract must distinguish mutation-only construction with `{}` from authentication operations that require `connected`, `invalidated` and `removed` callbacks. Requiring omitted inputs in Forgejo, casting the forwarded services or supplying new defaults would hide the mismatch or change the wrapper's contract. The wrapper stays JavaScript until the family provider owns those types.
-
-The family provider remains a 276-line JavaScript implementation without a paired declaration. Making the wrapper's omitted services optional still fails `type-check:server` with `TS2345` at the forwarding call. The second-pass exceptions cannot correct that boundary without a product-code comment: annotating the JavaScript parameter requires JSDoc, converting this dependency exceeds the 200-line helper limit, and a replacement implementation declaration is forbidden. Its `descriptor` parameter also has no declared domain type; deriving the wrapper's options from the inferred family signature does not supply that contract.
+Forgejo selects the edition and defaults the descriptor. The Gitea family
+owns every other option, including the choice between supplying an auth store
+or a provider-specific store.
