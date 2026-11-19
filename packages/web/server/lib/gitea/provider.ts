@@ -12,6 +12,7 @@ import type { ProviderDescriptor, ProviderMutationContext, ProviderReadContext, 
 import type { MutationRecord } from '../source-control/mutation-storage.js';
 import type { StandardMutationInput } from '../source-control/standard-mutations.js';
 import type { SourceControlMutationTarget } from '@openchamber/sdk';
+import type { BindingMutationTarget } from '../source-control/binding-service-contracts.js';
 import type { GiteaFetch } from './client.js';
 import type { GiteaResourceOptions } from './resources.js';
 import type { GtCliOptions } from './gt-cli.js';
@@ -43,14 +44,14 @@ type Existing = Awaited<ReturnType<Service['resolveChangeRequestMutation']>>;
 type Create = Awaited<ReturnType<Service['resolveCreateMutation']>>;
 type NumberedTarget = SourceControlMutationTarget & { number: number };
 type ResolveInput = { session: ProviderSession; input: StandardMutationInput } & (
-  { context: ProviderMutationContext; kind: 'change-request-create'; replayOf?: never }
-  | { context: ProviderMutationContext & { target: NumberedTarget }; kind: string; replayOf?: Omit<MutationRecord, 'target'> & { target: NumberedTarget } }
+  { context: ProviderMutationContext; kind: 'change-request-create'; replayOf?: MutationRecord }
+  | { context: ProviderMutationContext & { target: BindingMutationTarget & { number: number } }; kind: string; replayOf?: Omit<MutationRecord, 'target'> & { target: NumberedTarget } }
 );
-const numberedContext = (input: ResolveInput): input is Extract<ResolveInput, { context: { target: NumberedTarget } }> => input.kind !== 'change-request-create';
+const numberedContext = (input: ResolveInput): input is Extract<ResolveInput, { context: { target: { number: number } } }> => input.kind !== 'change-request-create';
 type ReadInput = { session: ProviderSession; directory: string; remote?: Parameters<Service['changeRequestStatus']>[2] };
 type NumberedRead = ReadInput & { number: number; project?: Parameters<Service['reviewState']>[2] };
 type LinkedRead = { context?: Pick<ProviderReadContext, 'linked'> };
-type PatchRead = ReadInput & { number: number; sourceRepo?: { owner: string; repo: string }; linked?: boolean };
+type PatchRead = ReadInput & { number: number; sourceRepo?: { owner: string; repo: string } | null | undefined; linked?: boolean };
 type ExistingStep<Fields extends StandardMutationInput = StandardMutationInput> = { input: Fields; resolved: Existing };
 type Body = StandardMutationInput & { body: string };
 type Title = StandardMutationInput & { title: string };
@@ -82,7 +83,7 @@ type Steps = {
   '/pr/reviewers': ExistingStep<Names>;
 };
 type Route = keyof Steps;
-type MutationCall<K extends Route> = { session: ProviderSession; route: K } & Steps[K];
+type MutationCall<K extends Route> = { session: ProviderSession; route: K; kind: string } & Steps[K];
 type Operation<Step extends Steps[Route]> = {
   perform(service: Service, input: Step['input'], resolved: Step['resolved']): Promise<object>;
   reconcile(service: Service, resolved: Step['resolved'], input: Step['input']): { state: string; result?: object } | Promise<{ state: string; result?: object }>;
@@ -322,7 +323,7 @@ export function createGiteaFamilyProvider(build: GiteaFamilyProviderOptions) {
         };
       },
       resolveChangeRequestSource: async ({ session, context, project, number, expectedHeadSha, requestedRemoteName }: NumberedRead & {
-        context: Pick<ProviderReadContext, 'directory' | 'primaryRemote' | 'instance'>;
+        context: ProviderReadContext;
         project: SourceControlMutationTarget['project'];
         expectedHeadSha: string;
         requestedRemoteName: string;
@@ -336,7 +337,7 @@ export function createGiteaFamilyProvider(build: GiteaFamilyProviderOptions) {
         const endpoint = headProject.cloneUrl;
         let parsed = null;
         try { parsed = new URL(String(endpoint)); } catch { parsed = null; }
-        if (!parsed || parsed.origin !== new URL(context.instance).origin
+        if (!parsed || endpoint === undefined || parsed.origin !== new URL(context.instance).origin
           || decodeURIComponent(parsed.pathname).replace(/^\//, '').replace(/\.git$/, '') !== `${headProject.owner}/${headProject.name}`) {
           throw Object.assign(new Error(`${label} returned an invalid head repository endpoint`), { code: 'MALFORMED_PROVIDER_RESPONSE' });
         }

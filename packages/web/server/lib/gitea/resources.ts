@@ -1,5 +1,5 @@
 import { documentDataUrl } from '../source-control/document-versions.js';
-import { isPlainObject, isString } from '../shared/guards.js';
+import { isPlainObject, isPresent, isString } from '../shared/guards.js';
 import { mapLimited } from '../shared/map-limited.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 import {
@@ -9,7 +9,7 @@ import {
 } from './mappers.js';
 import { resolveGiteaReposFromDirectory } from './repo.js';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
-import type { ProviderReadContext } from '../source-control/provider-contract.js';
+import type { ProviderMutationContext, ProviderReadContext } from '../source-control/provider-contract.js';
 import type { reviewCommentPosition } from '../source-control/review-position.js';
 import type { SourceControlMutationTarget } from '@openchamber/sdk';
 import type { GiteaBody, GiteaQuery, createGiteaClient } from './client.js';
@@ -622,7 +622,7 @@ export function createGiteaResourceService({
         })),
         mapLimited(issueRefs, LIVE_SUMMARY_CONCURRENCY, (ref) => read(ref, async (repo) => ref ? liveIssueSummary(ref, await client.get(`${repo}/issues/${ref.number}`)) : null)),
       ]);
-      return { summaries: summaries.filter(Boolean), issueSummaries: issueSummaries.filter(Boolean) };
+      return { summaries: summaries.filter(isPresent), issueSummaries: issueSummaries.filter(isPresent) };
     },
 
     async findChangeRequest(directory: string, number: number, selector?: Selector, remote?: Remote) {
@@ -630,7 +630,7 @@ export function createGiteaResourceService({
       return { target, request, headProject: await headProjectOf(raw, target, net.targets) };
     },
 
-    async resolveCreateMutation(context: Context, expected: SourceControlMutationTarget, options: { remote?: Remote; headRemote?: Remote } = {}) {
+    async resolveCreateMutation(context: Context, expected: ProviderMutationContext['target'], options: { remote?: Remote; headRemote?: Remote } = {}) {
       if (options.remote !== undefined && options.remote !== context.primaryRemote) {
         throw Object.assign(new Error(`${providerLabel} mutation remote does not match the bound primary remote`), { code: 'SOURCE_CONTROL_MUTATION_REMOTE_MISMATCH', status: 409 });
       }
@@ -652,7 +652,7 @@ export function createGiteaResourceService({
       };
     },
 
-    async resolveChangeRequestMutation(context: Context, expected: SourceControlMutationTarget & { number: number }) {
+    async resolveChangeRequestMutation(context: Context, expected: ProviderMutationContext['target'] & { number: number }) {
       const { target, request } = await findPull(context.directory, expected.number, expected.project, { remote: context.primaryRemote });
       requireExpected(expected, request);
       return {
@@ -661,7 +661,7 @@ export function createGiteaResourceService({
       };
     },
 
-    async resolveIssueMutation(context: Context, expected: SourceControlMutationTarget & { number: number }) {
+    async resolveIssueMutation(context: Context, expected: ProviderMutationContext['target'] & { number: number }) {
       if (expected.head !== undefined || expected.base !== undefined || expected.headSha !== undefined) {
         throw Object.assign(new Error(`${providerLabel} issue target is invalid`), { code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status: 400 });
       }

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { providerTargetKind } from './audit-storage.js';
 import { isSourceControlInteger } from './input-guards.js';
 import type { AuditPlan, AuditRuntime, createSourceControlAuditStore } from './audit-storage.js';
-import type { MutationClaim, MutationCompletion, MutationCompletionInput, MutationRecord, MutationResult, createMutationStore } from './mutation-storage.js';
+import type { MutationClaim, MutationCompletionInput, MutationRecord, createMutationStore } from './mutation-storage.js';
 
 const valueTag = <Value>(value: Value) => Object.prototype.toString.call(value);
 const isPlainObject = (value: unknown): value is object => value === Object(value)
@@ -122,10 +122,11 @@ interface ExecutorOptions {
 export interface MutationExecution {
   record: MutationClaim;
   providerAccountId?: string;
-  perform(record: MutationRecord): Promise<MutationResult | undefined>;
-  reconcile?(record: MutationRecord): Promise<{ state: string; result?: MutationResult | undefined }>;
+  perform(record: MutationRecord): Promise<MutationCompletionInput['result']>;
+  reconcile?(record: MutationRecord): MutationReconciliation | Promise<MutationReconciliation>;
   classifyError?(cause: unknown): string | Promise<string>;
 }
+type MutationReconciliation = { state: string; result?: MutationCompletionInput['result'] };
 interface ExecutionResult { record: MutationRecord; replayed: boolean }
 type AuditStep = 'provider-request' | 'provider-reconciliation';
 const AUDIT_TARGET_KEYS = ['number', 'head', 'base', 'headSha'] as const;
@@ -227,7 +228,7 @@ export function createMutationExecutor({ store, auditStore, runtimeIdentity }: E
       || (reconciliation.state !== 'succeeded' && reconciliation.state !== 'failed' && reconciliation.state !== 'outcome-unknown')) {
       return markOutcomeUnknown(record, 'provider-reconciliation');
     }
-    const completion: MutationCompletion = { state: reconciliation.state };
+    const completion: MutationCompletionInput = { state: reconciliation.state };
     if (reconciliation.result !== undefined) completion.result = reconciliation.result;
     const completed = await complete(record, completion, 'provider-reconciliation');
     if (completed.state === 'succeeded') return { record: completed, replayed: true };

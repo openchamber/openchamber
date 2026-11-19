@@ -9,15 +9,13 @@ import type { Application } from '../shared/http-contracts.js';
 import type { GitHubProviderOptions } from '../github/provider.js';
 import type { AccountEvents } from './provider-contract.js';
 import type { AccountEventPayloads } from './provider-registry.js';
-import type { createBindingService } from './binding-service.js';
-import type { createMutationExecutor } from './mutation-executor.js';
-import type { createOAuthFlowRegistry } from './oauth-flow-registry.js';
+import type { ProviderRouteOptions } from './provider-routes.js';
 
 export interface GitHubRoutesOptions extends GitHubProviderOptions {
-  validateReadContext?: ReturnType<typeof createBindingService>['validateReadContext'];
-  validateMutationContext?: ReturnType<typeof createBindingService>['validateMutationContext'];
-  mutationExecutor?: ReturnType<typeof createMutationExecutor>;
-  oauthFlowRegistry?: ReturnType<typeof createOAuthFlowRegistry>;
+  validateReadContext?: ProviderRouteOptions['validateReadContext'];
+  validateMutationContext?: ProviderRouteOptions['validateMutationContext'];
+  mutationExecutor?: ProviderRouteOptions['mutationExecutor'];
+  oauthFlowRegistry?: ProviderRouteOptions['oauthFlowRegistry'];
   onAccountConnected?: AccountEvents['connected'];
   onAccountInvalidated?: (identity: AccountEventPayloads['invalidated']) => Promise<void>;
   onAccountRemoved?: AccountEvents['removed'];

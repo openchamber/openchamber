@@ -63,7 +63,7 @@ export interface GitHubMutationTarget {
 }
 export interface MutationStep {
   session: ProviderSession;
-  kind: string;
+  route: string; kind: string;
   input: GitHubMutationInput;
   resolved: { providerTarget: GitHubMutationTarget; target: MutationTarget };
 }

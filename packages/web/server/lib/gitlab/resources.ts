@@ -4,7 +4,7 @@ import { pairedDiffLine } from '../source-control/review-position.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 import { mapGitLabCI, mapGitLabCommit, mapGitLabDiff, mapGitLabIssue, mapGitLabMergeRequest, mapGitLabNote, mapGitLabProject, mapGitLabUser, mapGitLabVerdictNote } from './mappers.js';
 import { resolveGitLabProjectsFromDirectory } from './repo.js';
-import { isPlainObject as isPlain, isString } from './validation.js';
+import { isPlainObject as isPlain, isPresent, isString } from './validation.js';
 import type { SourceControlMutationTarget, SourceControlProjectRef } from '@openchamber/sdk';
 import type { ProviderReadContext } from '../source-control/provider-contract.js';
 import type { reviewCommentPosition } from '../source-control/review-position.js';
@@ -1509,7 +1509,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         mapLimited(refs, LIVE_SUMMARY_CONCURRENCY, (ref) => read(ref, loadMergeRequest, mapMergeRequest)),
         mapLimited(issueRefs, LIVE_SUMMARY_CONCURRENCY, (ref) => read(ref, (path, number) => client.Issues.show(number, { projectId: path }), liveIssueSummary)),
       ]);
-      return { summaries: summaries.filter(Boolean), issueSummaries: issueSummaries.filter(Boolean) };
+      return { summaries: summaries.filter(isPresent), issueSummaries: issueSummaries.filter(isPresent) };
     },
 
     async issueComments(directory: string, number: number, selector?: Selector, remote?: Remote, { linked }: ReadOptions = {}) {

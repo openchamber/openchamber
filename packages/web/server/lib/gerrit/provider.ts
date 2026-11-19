@@ -11,6 +11,7 @@ import type { ProviderDescriptor, ProviderMutationContext, ProviderReadContext, 
 import type { MutationRecord } from '../source-control/mutation-storage.js';
 import type { StandardMutationInput } from '../source-control/standard-mutations.js';
 import type { SourceControlMutationTarget } from '@openchamber/sdk';
+import type { BindingMutationTarget } from '../source-control/binding-service-contracts.js';
 
 type Service = ReturnType<typeof createGerritResourceService>;
 type ResourceOptions = Parameters<typeof createGerritResourceService>[0];
@@ -32,13 +33,15 @@ type Resolved = { providerTarget: ProviderTarget; target: SourceControlMutationT
 type NumberedTarget = SourceControlMutationTarget & { number: number };
 type ResolveInput = {
   session: ProviderSession;
-  context: ProviderMutationContext & { target: NumberedTarget };
+  kind: string;
+  input: StandardMutationInput;
+  context: ProviderMutationContext & { target: BindingMutationTarget & { number: number } };
   replayOf?: Omit<MutationRecord, 'target'> & { target: NumberedTarget };
 };
 type ReadInput = { session: ProviderSession; directory: string; remote?: string | undefined };
 type Project = { owner: string; name: string };
 type NumberedRead = ReadInput & { project?: Project | undefined; number: number };
-type FileRead = ReadInput & { number: number; sourceRepo?: { owner: string; repo: string }; revision?: string; linked?: boolean };
+type FileRead = ReadInput & { number: number; sourceRepo?: { owner: string; repo: string } | null | undefined; revision?: string; linked?: boolean };
 
 type ReviewInputs = {
   '/pr/merge': StandardMutationInput;
@@ -54,7 +57,7 @@ type ReviewInputs = {
   '/pr/reviewers': StandardMutationInput & { names: string[] };
 };
 type Route = keyof ReviewInputs;
-type MutationCall<K extends Route> = { session: ProviderSession; route: K; input: ReviewInputs[K]; resolved: Resolved };
+type MutationCall<K extends Route> = { session: ProviderSession; route: K; kind: string; input: ReviewInputs[K]; resolved: Resolved };
 type Operations = {
   [K in Route]: {
     perform(service: Service, input: ReviewInputs[K], resolved: Resolved): Promise<object>;
@@ -201,7 +204,7 @@ export function createProvider(options: GerritProviderOptions) {
       listReviewerCandidates: ({ session, directory, project, remote }: ReadInput & { project?: Project }) => serviceFor(session).listReviewerCandidates(directory, project, remote),
       readChangeRequestPatch: ({ session, directory, number, sourceRepo, remote, revision, linked }: FileRead) => serviceFor(session)
         .changeRequestPatch(directory, number, { project: projectSelector(sourceRepo), remote, revision, linked }),
-      readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, revision, binary, linked }: FileRead & { path: string; previousPath?: string; status?: string; binary?: boolean }) => serviceFor(session)
+      readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, revision, binary, linked }: FileRead & { path: string; previousPath?: string | undefined; status?: string; binary?: boolean | undefined }) => serviceFor(session)
         .changeRequestFileContents(directory, number, { project: projectSelector(sourceRepo), remote, path, previousPath, status, revision, binary, linked }),
       liveSummaries: ({ session, refs, issueRefs }: { session: ProviderSession; refs?: Parameters<Service['liveSummaries']>[0]['refs']; issueRefs?: Array<{ owner: string; repo: string; number: number }> }) => {
         const options = { refs, issueRefs };
@@ -221,7 +224,7 @@ export function createProvider(options: GerritProviderOptions) {
         };
       },
       resolveChangeRequestSource: async ({ session, context, project, number, expectedHeadSha, requestedRemoteName }: NumberedRead & {
-        context: Pick<ProviderReadContext, 'directory' | 'primaryRemote'>;
+        context: ProviderReadContext;
         project: Project & { id: string };
         expectedHeadSha: string;
         requestedRemoteName: string;

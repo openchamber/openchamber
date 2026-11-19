@@ -1,6 +1,6 @@
 import { sourceControlProviderDescriptors } from './provider-descriptors.js';
 import type { createSettingsRuntime } from '../settings/settings-runtime.js';
-import type { AccountEvents, ProviderDescriptor, ProviderId, ProviderImplementation } from './provider-contract.js';
+import type { AccountEvents, ProviderDescriptor, ProviderId, ProviderImplementation, ProviderMutations } from './provider-contract.js';
 import type { BindingTransportAccount } from './binding-service-contracts.js';
 import type { createSourceControlAuthStore } from './auth-storage.js';
 import type { createExtensionProvider, ExtensionProviderOptions } from './extension-provider.js';
@@ -20,6 +20,8 @@ type ReadSettings = ReturnType<typeof createSettingsRuntime>['readSettingsFromDi
 type AuthStore = ReturnType<typeof createSourceControlAuthStore>;
 type ExtensionServices = Pick<ExtensionProviderOptions, 'handles' | 'persistPath' | 'currentGuest' | 'reconcile'>;
 
+export type RegisteredMutationInput = object;
+type RegisteredProviderTarget = object;
 export interface TransportCredentialRequest {
   instance: string;
   credentialId: string;
@@ -27,10 +29,13 @@ export interface TransportCredentialRequest {
 }
 
 export interface RegisteredProvider {
-  auth: Pick<ProviderImplementation['auth'], 'readCurrentAccountId' | 'refreshOAuthToken'>;
+  auth: ProviderImplementation['auth'];
   transport: {
     readCredential(input: TransportCredentialRequest): Promise<BindingTransportAccount | null>;
   };
+  resources: ProviderImplementation['resources'];
+  mutations?: ProviderMutations<RegisteredMutationInput, RegisteredProviderTarget>;
+  classifyFailure(cause: unknown): ReturnType<ReturnType<typeof createExtensionProvider>['classifyFailure']>;
 }
 
 export interface ProviderServices {
@@ -48,7 +53,7 @@ type SharedServices = Pick<ProviderServices, 'readSettings' | 'configRoot' | 'fe
 type HostOptions<Options> = Options extends unknown
   ? Omit<Options, RegistrySupplied | keyof SharedServices> & Partial<SharedServices>
   : never;
-interface BuiltInHostServices {
+export interface BuiltInHostServices {
   readonly github?: HostOptions<GitHubProviderOptions>;
   readonly gitlab?: HostOptions<GitLabProviderOptions>;
   readonly gitea?: HostOptions<GiteaProviderOptions>;

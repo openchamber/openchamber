@@ -375,14 +375,16 @@ integer-status check because an error's evidence is unchecked. It does not
 assume that an array check validated each member. User IDs retain the separate
 primitive-string and safe-integer checks before forwarding an account.
 
-### Why unchecked implementation boundaries remain JavaScript
+### Why the binding routes remain JavaScript
 
-`provider-routes.js` passes caught `error.sourceControlResponse.status` and
-`error.status` directly to the numeric Express response setter. Its error-code
-checks establish neither field's type. `routes.js` has the same caught-status
-boundary in `sendBindingError`. Its `resolveDirectoryQuery` also uses a String
-tag check before passing the original value to the binding service's string
-directory parameter. A boxed or String-tagged value remains unchanged.
+`routes.js` passes caught `error.status` directly to the response setter in
+`sendBindingError`, and its `resolveDirectoryQuery` uses a String tag check
+before passing the original value to the binding service's string directory
+parameter. A boxed or String-tagged value remains unchanged. The binding
+service declares its route inputs as validated intents, so these routes stay
+JavaScript until those inputs are typed as what arrives.
+
+### Why the executor keeps a thrown code unchecked
 
 `mutation-executor.ts` checks a thrown code's String tag before reading its
 unchecked `length` and copying the original code into a completion input. The
@@ -391,10 +393,36 @@ can pass the tag check. The mutation store checks for a primitive string before
 writing or returning the result. Receipt and audit identity checks still
 require the original value to equal its trimmed form.
 
-Type-only corrections and dependency overloads do not validate these unchecked
-values or establish missing methods. The implementations retain these boundaries
-until their existing failure behavior can be represented without casts or new
-runtime validation.
+### Why the route shell asserts the mutation body is an object
+
+The JSON parser admits arrays, while every provider's `mutations.prepare`
+reads fields from a JSON object. `assertMutationContextObject`
+(`binding-input.ts`) is the binding validator's first check, the one that
+refuses anything but a plain object, written as an assertion; the shell calls
+it before `validateMutationContext`, so `prepare` receives a JSON object by
+proof and a non-object body is refused with the same
+`INVALID_SOURCE_CONTROL_MUTATION_CONTEXT` error as before.
+
+### Why the registry's provider contract is the shell's view of every provider
+
+`RegisteredProvider` is `ProviderImplementation` as the route shell uses it, and
+every built-in factory and the extension provider must satisfy it. Reads the
+shell only serializes return `object`; `getIssue` may answer `null`; live
+summaries take tracked-item thread references and answer the summary lists the
+tracked-item readers consume. The mutation context's target is the
+`BindingMutationTarget` the binding validator returns, and a resolved target
+may carry explicitly undefined optional fields, as an extension's parsed answer
+does; the mutation store's checks already accept both. The registry resolves
+providers by a runtime id, so it cannot correlate a provider's mutation input
+and provider target with the same provider's later steps: the contract types
+them as `object`, and its method signatures let each provider declare its own.
+Provider declarations narrower than what the shell passes were corrected at
+the provider (an omitted list query, a null source repository, Gerrit's list
+`state` and `people` looked up by own key, the `route` and `kind` every
+mutation step receives, the binding target a resolve step reads and the
+running create record it may be handed for reconciliation). A refused
+account's identity comes from the provider's own error, so `invalidateAccount`
+takes its instance and account id unchecked, as the shell forwards them.
 
 ### Why the registry requires an auth store
 

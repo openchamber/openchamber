@@ -1,1 +1,1 @@
-export { isPlainObject, isBoolean, isRecord, isString, asNonEmptyString } from './object-guards.js';
+export { isPlainObject, isBoolean, isRecord, isString, asNonEmptyString, isPresent } from './object-guards.js';

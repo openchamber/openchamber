@@ -1,4 +1,5 @@
 import { isPlainObject } from '../shared/guards.js';
+import { mutationContextError, readContextError } from './binding-input.js';
 import { isSourceControlString as isString, isSourceControlInteger as isSafeInteger } from './input-guards.js';
 import { normalizeSourceControlProviderInstance } from './provider-instance.js';
 import { isExtensionProviderId, isProviderId, isProviderUsername } from './provider-id.js';
@@ -330,17 +331,6 @@ export const hostOf = (value: string | null | undefined) => {
     return scp?.[1]?.toLowerCase() ?? null;
   }
 };
-
-const readContextError = (code: string, message: string, status: number) => {
-  const error = Object.assign(new Error(message), { code, status });
-  return error;
-};
-
-const mutationContextError = (message: string) => readContextError(
-  'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT',
-  message,
-  400,
-);
 
 const staleBindingError = (message: string, current: BindingRead) => {
   const error = readContextError('SOURCE_CONTROL_BINDING_STALE', message, 409);

@@ -7,7 +7,7 @@ import { allowsTopLevelProjects } from './project-path.js';
 import { sourceControlProviderDescriptors } from './provider-descriptors.js';
 import { hasSourceControlErrorCode } from './input-guards.js';
 import type { SourceControlMutationTarget, SourceControlProjectRef } from '@openchamber/sdk';
-import type { AccountIdentity } from './provider-contract.js';
+import type { AccountIdentity, ResolvedMutationTarget } from './provider-contract.js';
 
 export interface MutationResult {
   project?: SourceControlProjectRef;
@@ -39,7 +39,8 @@ export interface MutationRecord {
   result?: MutationResult;
 }
 
-export type MutationClaim = Omit<MutationRecord, 'state' | 'startedAt' | 'updatedAt' | 'expiresAt' | 'result'> & {
+export type MutationClaim = Omit<MutationRecord, 'state' | 'startedAt' | 'updatedAt' | 'expiresAt' | 'result' | 'target'> & {
+  target: ResolvedMutationTarget;
   state?: 'running';
   startedAt?: number;
   updatedAt?: number;
@@ -50,7 +51,7 @@ export interface MutationCompletion {
   state: Exclude<MutationRecord['state'], 'running'>;
   result?: MutationResult | undefined;
 }
-type MutationResultInput = Omit<MutationResult, 'failureCode'> & { failureCode?: unknown };
+type MutationResultInput = { [Field in Exclude<keyof MutationResult, 'failureCode'>]?: MutationResult[Field] | undefined } & { failureCode?: unknown };
 export interface MutationCompletionInput {
   state: MutationCompletion['state'];
   result?: MutationResultInput | undefined;
@@ -159,7 +160,7 @@ const isProject = (value: SourceControlProjectRef, provider: string) => isPlainO
     || (value.owner === '' && allowsTopLevelProjects(sourceControlProviderDescriptors.get(provider))))
   && isNonEmptyString(value.name);
 
-const isTarget = (value: SourceControlMutationTarget, provider: string) => isPlainObject(value)
+const isTarget = (value: ResolvedMutationTarget, provider: string) => isPlainObject(value)
   && hasExactKeys(
     value,
     ['repositoryId', 'bindingRevision', 'primaryRemote', 'project'],
@@ -191,7 +192,7 @@ const isTerminalResult = (value: MutationResultInput, provider: string): value i
   && (value.failureStatus === undefined || isFailureStatus(value.failureStatus))
   && (value.failureCode === undefined || isNonEmptyString(value.failureCode));
 
-const isRecord = (value: MutationRecord, key: string) => {
+const isRecord = (value: Omit<MutationRecord, 'target'> & { target: ResolvedMutationTarget }, key: string) => {
   if (!isPlainObject(value)
     || !hasExactKeys(
       value,
@@ -226,7 +227,7 @@ const parseState = (value: MutationSnapshot) => {
 };
 
 const copyProject = (project: SourceControlProjectRef) => ({ id: project.id, owner: project.owner, name: project.name });
-const copyTarget = (target: SourceControlMutationTarget) => {
+const copyTarget = (target: ResolvedMutationTarget) => {
   const copy: SourceControlMutationTarget = {
     repositoryId: target.repositoryId,
     bindingRevision: target.bindingRevision,
@@ -317,7 +318,7 @@ export function createMutationStore({
       || !hasExactKeys(record, ['key', 'inputDigest', 'kind', 'actor', 'target'], ['state', 'startedAt', 'updatedAt', 'expiresAt'])
       || (record.state !== undefined && record.state !== 'running')) throw invalidState();
     const startedAt = record.startedAt ?? timestamp;
-    const candidate: MutationRecord = {
+    const candidate: Omit<MutationRecord, 'target'> & { target: ResolvedMutationTarget } = {
       key: record.key,
       inputDigest: record.inputDigest,
       kind: record.kind,

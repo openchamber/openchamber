@@ -86,12 +86,12 @@ type Mutations = { [K in Route]: MutationEntry<Inputs[K], Resolutions[K]> };
 type DraftRoute = keyof ReturnType<typeof reviewDraftEntries>;
 type ExtraRoute = DraftRoute | '/pr/state' | '/issues/state' | '/pr/labels' | '/issues/labels' | '/pr/reviewers';
 type NumberedTarget = SourceControlMutationTarget & { number: number };
-type NumberedContext = Omit<ProviderMutationContext, 'target'> & { target: NumberedTarget };
+type NumberedContext = Omit<ProviderMutationContext, 'target'> & { target: ProviderMutationContext['target'] & { number: number } };
 type ResolveInput = { session: ProviderSession } & (
-  { context: ProviderMutationContext; kind: 'change-request-create'; input: CreateInput; replayOf?: never }
+  { context: ProviderMutationContext; kind: 'change-request-create'; input: CreateInput; replayOf?: MutationRecord }
   | { context: NumberedContext; kind: string; input: Inputs[Route]; replayOf?: Omit<MutationRecord, 'target'> & { target: NumberedTarget } }
 );
-type MutationStep<K extends Route> = { route: K; session: ProviderSession; input: Inputs[K]; resolved: Resolutions[K] };
+type MutationStep<K extends Route> = { route: K; kind: string; session: ProviderSession; input: Inputs[K]; resolved: Resolutions[K] };
 type PrepareInput<K extends Route> = { route: K; input: SourceControlJsonObject; context: MutationContextInput; actor: AccountIdentity;
   credential: { accountId: string; credentialRevision: number } };
 type Instance = { instance: string };
@@ -100,7 +100,7 @@ type ReadInput = { session: ProviderSession; directory: string; remote?: string 
 type LinkedRead = { context?: Pick<ProviderReadContext, 'linked'> };
 type ProjectRead = ReadInput & { project?: Parameters<Service['reviewState']>[2] };
 type NumberedRead = ProjectRead & { number: number };
-type PatchRead = ReadInput & { number: number; sourceRepo?: { owner: string; repo: string }; linked?: boolean };
+type PatchRead = ReadInput & { number: number; sourceRepo?: { owner: string; repo: string } | null | undefined; linked?: boolean };
 type Failure = { status?: number; kind?: string; message?: unknown };
 
 const hasFailureFields = (value: unknown): value is Failure => value != null;
@@ -911,7 +911,7 @@ export function createProvider(options: GitLabProviderOptions) {
         };
       },
       resolveChangeRequestSource: async ({ session, context, project, number, expectedHeadSha, requestedRemoteName }: NumberedRead & {
-        context: Pick<ProviderReadContext, 'directory' | 'primaryRemote' | 'instance'>;
+        context: ProviderReadContext;
         project: SourceControlMutationTarget['project'];
         expectedHeadSha: string;
         requestedRemoteName: string;
@@ -930,7 +930,7 @@ export function createProvider(options: GitLabProviderOptions) {
         const endpoint = headProject.cloneUrl;
         const origin = new URL(context.instance);
         const parsed = new URL(String(endpoint));
-        if (parsed.origin !== origin.origin
+        if (endpoint === undefined || parsed.origin !== origin.origin
           || decodeURIComponent(parsed.pathname).replace(/^\//, '').replace(/\.git$/, '') !== `${headProject.owner}/${headProject.name}`) {
           throw Object.assign(new Error('GitLab returned an invalid head project endpoint'), { code: 'MALFORMED_PROVIDER_RESPONSE' });
         }

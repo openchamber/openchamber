@@ -4,7 +4,7 @@ const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
 const isLoopbackHost = (hostname: string) => LOOPBACK_HOSTS.has(String(hostname).toLowerCase());
 
-export function normalizeOriginInstance(value: string, { label }: { label: string }) {
+export function normalizeOriginInstance(value: string | undefined, { label }: { label: string }) {
   const raw = isString(value) ? value.trim() : '';
   if (!raw) throw new Error(`${label} instance is required`);
 

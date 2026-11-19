@@ -1,3 +1,4 @@
+import type { ResolvedChangeRequestSource } from '../source-control/provider-contract.js';
 import type { spawn, ChildProcess } from 'node:child_process';
 import type fs from 'node:fs/promises';
 import type path from 'node:path';
@@ -220,7 +221,7 @@ export type NetworkOperationsOptions = Omit<PlannerOptions, 'resolveRef' | 'reso
   bindClonedRepository?: ReturnType<typeof createBindingService>['bindClonedRepository'];
   inspectMergeState?: (directory: string) => Promise<boolean>;
   enumerateManagedConfigKeys?: (plan: TransportPlan, controls: ExecutionControls, deadline: number, env: NodeJS.ProcessEnv) => Promise<string[]>;
-  resolveChangeRequestSource?: (input: SourceRequest) => Promise<import('../shared/json-values.js').JsonValue>;
+  resolveChangeRequestSource?: (input: SourceRequest) => Promise<ResolvedChangeRequestSource>;
   validateGitAuxiliaryContext?: ReturnType<typeof createBindingService>['validateGitAuxiliaryContext'];
   auditStore?: ReturnType<typeof createSourceControlAuditStore>;
   operationStore?: ReturnType<typeof createGitNetworkOperationStore> | undefined;
