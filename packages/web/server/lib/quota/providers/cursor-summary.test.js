@@ -11,6 +11,18 @@ const summary = (overall) => ({
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Cursor dashboard individual allowance', () => {
+  it('keeps a usable allowance when the reset date is absent', async () => {
+    vi.stubGlobal('fetch', async () => Response.json({
+      individualUsage: { overall: { enabled: true, used: 100, limit: 1000 } },
+    }));
+
+    const window = await fetchCursorSummaryWindow(token);
+
+    expect(window.usedPercent).toBe(10);
+    expect(window.resetAt).toBeNull();
+    expect(window.windowSeconds).toBeNull();
+  });
+
   it('uses the dashboard cookie and converts the personal cents meter to dollars', async () => {
     const fetchMock = vi.fn(async () => Response.json(summary({ enabled: true, used: 1234, limit: 15000 })));
     vi.stubGlobal('fetch', fetchMock);

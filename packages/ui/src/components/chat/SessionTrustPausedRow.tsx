@@ -6,11 +6,6 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { formatDirectoryName } from '@/lib/utils';
 
-/**
- * A top row of the composer while the user has declined to trust the folder's
- * OpenCode configuration: no agent or model loads there, so a message cannot
- * go out. The row reopens the trust prompt, the only way back in.
- */
 export const SessionTrustPausedRow: React.FC<{ directory: string }> = React.memo(({ directory }) => {
     const { t } = useI18n();
     const resumeFolder = useResumeOpenCodeFolder();

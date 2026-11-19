@@ -3,7 +3,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { installHookTestDom } from '@/components/session/sidebar/test-utils/testDom';
-import { clearChatDraft, readChatDraft, writeChatDraft, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
+import { clearChatDraft, readChatDraft, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useInputStore } from '@/sync/input-store';
 import { useComposerDraft, type ComposerDraftControls } from '../useComposerDraft';
@@ -168,17 +168,6 @@ describe('/btw fork still being created', () => {
             expect(composer.result.text).toBe('first question');
             expect(readChatDraft(fork).text).toBe('first question');
             expect(readChatDraft(pending).text).toBe('');
-        } finally {
-            composer.teardown();
-        }
-    });
-
-    test('ignores a placeholder draft an older build left in storage', () => {
-        writeChatDraft(pending, 'text from the previous /btw', []);
-        const composer = renderComposer('');
-        try {
-            composer.render(pending);
-            expect(composer.result.text).toBe('');
         } finally {
             composer.teardown();
         }

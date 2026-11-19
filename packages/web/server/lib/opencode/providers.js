@@ -5,7 +5,7 @@ import {
   isPlainObject,
   getConfigForPath,
   writeConfig,
-} from './shared.js';
+} from './config-files.js';
 import {
   readSectionEntry,
   writeSectionEntry,

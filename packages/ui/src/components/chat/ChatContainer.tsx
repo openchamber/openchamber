@@ -44,12 +44,6 @@ type ChatContainerProps = {
     active?: boolean;
     autoOpenDraft?: boolean;
     readOnly?: boolean;
-    /**
-     * Shows this session instead of the app's selection: a chat opened in the
-     * side panel. The column navigates inside itself (open a subtask, return
-     * to the parent) and never changes the main chat's selection, draft, or
-     * panels.
-     */
     pinnedSession?: { sessionId: string; directory: string | null };
 };
 
@@ -86,14 +80,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     } = useChatColumnScope({ pinned, currentSessionId, currentSessionDirectory });
     const mobileCommentComposer = useMobileCommentComposerOwner();
 
-    // UI store
     const isExpandedInput = useUIStore((state) => (pinned ? false : state.isExpandedInput));
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     const questionsInChat = useUIStore((state) => state.questionsInChat);
     const chatFontSize = useUIStore((state) => state.chatFontSize);
-    // The chat's own text size, on top of the interface size: the semantic
-    // text variables are redefined for this column only (as FilesView does
-    // for its preview), so the sidebar keeps the interface size.
     // SAFETY: CSS custom properties are valid inline styles; React's type lists only standard ones.
     const chatTypographyStyle = React.useMemo(() => getScaledTypographyStyle(
         chatFontSize,
@@ -133,11 +123,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const { isMobile } = useDeviceInfo();
     const isVSCode = isVSCodeRuntime();
     const chatSurfaceMode = useChatSurfaceMode();
-    // The new-session draft is the main chat's; a pinned column never shows it.
     const draftOpen = !pinned && Boolean(newSessionDraft?.open);
     const initError = useGlobalSyncStore((s) => s.error);
-    // Despite the historical name, this now covers mobile too: the mobile
-    // composer enters the same fullscreen-input mode via its drag handle.
     const isDesktopExpandedInput = isExpandedInput;
     const useCompactDraftLayout = isMobile || isVSCode || chatSurfaceMode === 'mini-chat';
     const {
@@ -163,10 +150,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     });
     const messageListRef = React.useRef<MessageListHandle | null>(null);
 
-    // A pinned column hides "Return to parent" on the session it was opened
-    // on: going up from there would show the session the main chat already
-    // has. Drilling into a deeper subtask brings the button back, to return to
-    // the pinned session.
     const hideReturnToParent = pinned && currentSessionId === pinnedOrigin?.sessionId;
     const { spaceArchive, promptReadOnly, messageSelectionActive } = useColumnPromptReadOnly({
         currentSessionId,
@@ -282,19 +265,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         useCompactDraftLayout,
         clearMaterializedDraftSession,
     });
-    // The list owns the scroll element, so the shadows and the load-older
-    // trigger bind to its node rather than to a wrapper we render.
     const scrollNodeRef = React.useMemo(() => ({ current: scrollNode }), [scrollNode]);
     useScrollShadow(scrollNodeRef, {
         observeMutations: false,
         hideTopShadow: isMobile && stickyUserHeader,
-        // The glass composer is the visible end of the transcript.
         hideBottomShadow: floatingComposer,
     });
 
     if (!currentSessionId && !draftOpen) {
-        // The auto-open effect runs on the next tick. Use a neutral background
-        // until then instead of flashing the standard empty state.
         if (autoOpenDraft && !initError) {
             return <div className="flex h-full flex-col bg-background" />;
         }
@@ -371,8 +349,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     return (
         <div
             ref={attachColumnRoot}
-            // App-wide handlers (double Escape to stop) find the pinned
-            // column's session and whether it runs here.
             data-chat-column={pinned ? 'pinned' : 'main'}
             data-chat-session-id={pinned ? currentSessionId ?? undefined : undefined}
             data-chat-working={pinned && sessionIsWorking ? 'true' : undefined}
@@ -397,10 +373,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 <div
                     ref={chatRootRef}
                     data-composer-bound
-                    // A live reply can outrun the follow glide; while it streams and the
-                    // view follows it (no scroll-to-bottom pill, no reader gesture), the
-                    // transcript fades out above the composer (index.css). Once the
-                    // reader leaves the end, the rows slide under its glass again.
                     data-live-tail={sessionStatusForCurrent.type === 'busy' && isFollowingProgrammatically ? 'true' : undefined}
                     className="relative flex min-w-0 flex-1 flex-col h-full bg-background"
                 >
@@ -414,10 +386,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                     {chatSearch.open && currentSessionId && messageSearchEnabled ? (
                         <div className="pointer-events-none absolute inset-e-3 top-2 z-20">
                             <ChatSearchBar
-                                // Keyed by session so the old hits never meet a new
-                                // session id in one commit: the same instance would
-                                // re-issue message focus for the new session with the
-                                // old hit's id, ending in a "not found" toast.
                                 key={currentSessionId}
                                 sessionId={currentSessionId}
                                 scrollNode={scrollNode}
@@ -455,9 +423,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                     />
                     </FormDockModeContext.Provider>
 
-                    {/* Inside the chat column, not beside it: as a row sibling it took
-                        part in the flex layout and pushed the transcript, which is the
-                        one thing an overlay must not do. */}
                     {workStatusOverlayMountable ? (
                         <WorkStatusPanel
                             overlay
@@ -480,10 +445,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                     />
                 </div>
             </ChatColumnProviders>
-            {/* Kept mounted while it could ever show, so it can fade out and back
-                in; `visible` drives that, `reserved` keeps its column in the right
-                slot while the context panel covers it, and `besidePanel` keeps it
-                beside the open panel. */}
             {workStatusPanelMountable && workStatusHost ? createPortal(
                 <WorkStatusPanel
                     visible={showWorkStatusPanel}

@@ -8,15 +8,17 @@ import {
   OPENCODE_CONFIG_DIR,
   AGENT_SCOPE,
   ensureDirs,
-  parseMdFile,
-  writeMdFile,
   readConfigLayers,
   writeConfig,
   getJsonEntrySource,
+} from './config-files.js';
+import {
+  parseMdFile,
+  writeMdFile,
   isPromptFileReference,
   resolvePromptFilePath,
   writePromptFile,
-} from './shared.js';
+} from './markdown-files.js';
 import {
   toAgentEntity,
   fromAgentEntity,

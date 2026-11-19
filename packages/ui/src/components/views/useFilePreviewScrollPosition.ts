@@ -6,18 +6,12 @@ type PreviewScrollPosition = {
   top: number;
   left: number;
   line?: { number: number; offset: number };
-  // A Markdown preview's top-level block at the viewport's top. Its blocks
-  // far from the view are empty boxes at an estimated height until first
-  // drawn (`markdownWindow`), so a pixel offset saved in one mount meant
-  // another place in the next.
   block?: { index: number; offset: number };
 };
 
 const markdownBlocks = (scroller: HTMLElement): HTMLCollection | null =>
   scroller.querySelector('[data-oc-streamdown]')?.children ?? null;
 
-// The first block still showing at the viewport's top, found by bisection:
-// blocks stand in document order and a long changelog has a thousand.
 const topBlock = (scroller: HTMLElement, scrollerTop: number): PreviewScrollPosition['block'] => {
   const blocks = markdownBlocks(scroller);
   if (!blocks?.length) return undefined;
@@ -31,8 +25,6 @@ const topBlock = (scroller: HTMLElement, scrollerTop: number): PreviewScrollPosi
   return { index: low, offset: blocks[low].getBoundingClientRect().top - scrollerTop };
 };
 
-// Runtime, directory, file, preview mode and surface are supplied by FilesView.
-// Retain coordinates across view unmounts, without retaining DOM or file data.
 const positions = new Map<string, PreviewScrollPosition>();
 const MAX_POSITIONS = 100;
 
@@ -52,9 +44,7 @@ export function useFilePreviewScrollPosition(positionKey: string | null) {
       restorePosition?.();
       rememberPosition?.();
     };
-    // Pierre calls onPostRender before reconciling measured heights and applying
-    // its own scroll correction. Finish after that synchronous render pass,
-    // before paint, rather than saving estimates or having our restore undone.
+    // external: https://github.com/pierrecomputer/pierre onPostRender precedes height reconciliation and scroll correction; restore runs after that synchronous pass.
     if (instance) queueMicrotask(finishRender);
     else finishRender();
   }, [positionKey]);
@@ -71,10 +61,6 @@ export function useFilePreviewScrollPosition(positionKey: string | null) {
 
     let blockFrame: number | null = null;
     let blockSteadyFrames = 0;
-    // The anchor block stays mounted while it is restored (a windowed
-    // preview, `markdownWindow`): one never drawn in this mount stands at an
-    // estimated height, shorter than the offset into it, and the jump would
-    // land past it, where it never mounts.
     let heldBlock: Element | null = null;
     let releaseBlock: (() => void) | null = null;
     const holdBlock = (block: Element | null) => {
@@ -95,8 +81,6 @@ export function useFilePreviewScrollPosition(positionKey: string | null) {
       const file = getVirtualFile();
       const linePosition = target.line && file?.getLinePosition(target.line.number);
       const lineElement = target.line && getLineElement(target.line.number);
-      // Estimated heights locate the virtual window; the mounted row supplies
-      // the final visual offset, including wrapping and Pierre's padding.
       let targetTop = target.top;
       if (target.line && linePosition) {
         targetTop = (file?.top ?? 0) + linePosition.top - target.line.offset;
@@ -113,10 +97,6 @@ export function useFilePreviewScrollPosition(positionKey: string | null) {
       scroller.scrollTop = targetTop;
       scroller.scrollLeft = target.left;
       if ((!target.line || lineElement) && (!target.block || blockElement) && Math.abs(scroller.scrollTop - targetTop) < 1 && Math.abs(scroller.scrollLeft - target.left) < 1) {
-        // The blocks around it draw for the first time in the frames after
-        // the jump and grow from their estimate, moving it again; which ones
-        // draw is decided only as a frame renders. It is held until two
-        // frames in a row find it in place.
         if (inFrame) blockSteadyFrames = moved ? 0 : blockSteadyFrames + 1;
         if (blockElement && blockSteadyFrames < 2) {
           blockFrame ??= requestAnimationFrame(() => {
@@ -129,8 +109,6 @@ export function useFilePreviewScrollPosition(positionKey: string | null) {
         stopObserving();
       }
     };
-    // Markdown can mount through Suspense; code may render asynchronously in
-    // Pierre's worker. Retry only on content/layout changes, until reachable.
     const resizeObserver = new ResizeObserver(() => restorePosition());
     const mutationObserver = new MutationObserver(() => {
       if (!pending) return;
@@ -186,7 +164,6 @@ export function useFilePreviewScrollPosition(positionKey: string | null) {
       scroller.removeEventListener('touchstart', cancelRestoration);
       scroller.removeEventListener('pointerdown', cancelRestoration);
       scroller.removeEventListener('keydown', cancelRestoration);
-      // Keep the last scroll event, not offsets collapsed by DOM teardown.
     };
   }, [positionKey, scroller]);
 

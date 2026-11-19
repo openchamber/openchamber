@@ -169,7 +169,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
     });
   }, [files, t]);
 
-  const { treeRows, treeVirtualizer, treeListOffset, setTreeScrollElement, attachTreeList, handleTreeFocus, handleTreeBlur } = useVirtualFileTree({
+  const { treeRows, virtualRows, totalSize, measureRow, treeListOffset, setTreeScrollElement, attachTreeList, handleTreeFocus, handleTreeBlur } = useVirtualFileTree({
     root,
     childrenByDir,
     expandedPathSet,
@@ -287,18 +287,18 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
           <ul
             ref={attachTreeList}
             className="relative min-w-[max(100%,var(--oc-file-tree-width,0px))]"
-            style={{ height: treeVirtualizer.getTotalSize() }}
+            style={{ height: totalSize }}
             onFocus={handleTreeFocus}
             onBlur={handleTreeBlur}
           >
-            {treeVirtualizer.getVirtualItems().map((item) => {
+            {virtualRows.map((item) => {
               const row = treeRows[item.index];
               if (!row) return null;
               const path = row.kind === 'node' ? row.node.path : undefined;
               return (
                 <li
                   key={item.key}
-                  ref={treeVirtualizer.measureElement}
+                  ref={measureRow}
                   data-index={item.index}
                   data-tree-row-path={path}
                   data-tree-disclosure-path={row.kind === 'node' ? path : `${row.directory}/`}

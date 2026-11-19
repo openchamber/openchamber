@@ -8,6 +8,7 @@ import { getStreamingThrottleText } from '../../hooks/useStreamingTextThrottle';
 describe('getToolOutput', () => {
     test('prefers state.output for completed tools', () => {
         expect(getToolOutput('shell', 'final output', 'partial output', 'completed')).toBe('final output');
+        expect(getToolOutput('shell', '', 'partial output', 'completed')).toBe('');
     });
 
     test('normalizes completed shell state output while preserving final-output precedence', () => {

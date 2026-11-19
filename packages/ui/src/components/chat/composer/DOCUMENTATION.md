@@ -831,8 +831,7 @@ attaches as before, with an error toast. A HEIC the bundled decoder cannot read
 only its link in both cases: providers refuse HEIC image parts, and the store's
 own fallback for it (`sync/DOCUMENTATION.md`) would write a second copy and add
 a chip that repeats the link. With the setting off nothing is
-saved. One setting covers both cases: a split by model kind read as a puzzle of
-exceptions in Settings, and nobody needs the files for one kind of model only.
+saved at paste, and the send step below covers a text-only model.
 The browser annotation screenshot and comment-field image pastes keep
 attaching. The bytes go through the active runtime's OpenCode route (the
 OpenChamber server's proxy, the VS Code bridge, the relay for a phone), so the
@@ -840,6 +839,17 @@ file lands on the machine OpenCode runs on, which may not be the user's. Why
 OpenCode writes the file and not the OpenChamber server: only OpenCode knows
 its temp folder and its filesystem, and an external OpenCode or a space runs
 elsewhere than the server.
+
+A model whose metadata lists no `image` input never receives an image part,
+whatever the setting says: an image part to such a model fails the turn. Every
+image a send or a launch still carries (a pasted image attached with the
+setting off or under a model picked earlier, the annotation screenshot, a
+comment-field paste) goes through `sync/text-model-images.ts` and arrives as a
+text note naming the file under the same filename (`sync/DOCUMENTATION.md`).
+The composer says so once per model in a toast when such an image lands or the
+model changes to a text-only one. Converting at send, and not at attach, keeps
+the image a real attachment while the model can still change: picking a model
+that reads images sends the picture itself.
 Large pastes (about 2,000 characters or 25 lines) follow the composer setting
 `largeTextPasteBehavior` (`ask` / `attach` / `inline` / `inline-double-paste`). Attaching creates an
 in-memory `text/plain` file named `pasted-context-N.txt`, inserts a bracket
@@ -1576,7 +1586,10 @@ dashed chip says why it will not be sent and can be deleted.
 
 The screenshot belongs to its annotation: a chip in the prompt would separate
 the two, and removing it left the prompt claiming the screenshot was
-attached. It is a chip in the annotation's own row and leaves with it.
+attached. It is a chip in the annotation's own row and leaves with it. The
+chip's own remove button, shown on hover and always on a touch screen, drops
+only the screenshot: the row keeps its comment and selection, and its prompt
+says `Screenshot: not attached`.
 
 ### Why a sent message keeps its image and file previews
 

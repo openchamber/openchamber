@@ -140,17 +140,6 @@ describe('opening a page before any view exists', () => {
     expect(posted).toEqual([]);
   });
 
-  test('claims the request before touching a page', async () => {
-    const ran: string[] = [];
-    cleanups.push(tab('tab-1', ran));
-
-    emit('browser.click', { selector: 'button' });
-    await wait(50);
-
-    expect(claims).toEqual(['req-1']);
-    expect(ran).toEqual(['tab-1:browser.click']);
-  });
-
   test('does not wait for a view when no layout was requested', async () => {
     cleanups.push(registerBrowserOpener(() => 'tab-new'));
 

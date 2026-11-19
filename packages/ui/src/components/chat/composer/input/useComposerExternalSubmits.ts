@@ -37,7 +37,6 @@ export function useComposerExternalSubmits({
     const { submitPresetPrompt } = sendActions;
     const { configCatalogLoaded, currentProviderId, currentModelId, mailboxTarget } = selection;
 
-    // A command with an argument sends once the isolated composer owns its draft.
     React.useEffect(() => {
         const pending = immediateBtwSubmitRef.current;
         if (!pending || !isBtwActive || !chatDraftIdentity) return;
@@ -49,24 +48,12 @@ export function useComposerExternalSubmits({
         void handleSubmit({ presetText: pending.text });
     });
 
-    // Preset chips rendered outside this component (e.g. under the welcome
-    // message on narrow surfaces) request a submit via the input store; consume
-    // it here so it routes through the same command-aware submit path.
     React.useEffect(() => {
         if (pendingPresetSubmit == null || columnPinned) return;
         const text = useInputStore.getState().consumePendingPresetSubmit();
         if (text) submitPresetPrompt(text.text, text.type);
     }, [columnPinned, pendingPresetSubmit, submitPresetPrompt]);
 
-    // A first message a native Shortcuts request left for this draft goes out
-    // once the draft's project has its models and agents and one is selected,
-    // so it is sent with the project's defaults, the way a typed first message
-    // would be. A request for another draft is dropped, never sent from here.
-    // The text goes into the composer before the send, so a send that stops
-    // early (a stopped space, no model) leaves it there. A draft that already
-    // holds something (text, files, comments, references, context) gets the
-    // text appended and nothing is sent: the shortcut never sends or clears
-    // what the user put there.
     const draftSubmitDraftId = newSessionDraftOpen ? newSessionDraft.draftId : null;
 
     React.useEffect(() => {

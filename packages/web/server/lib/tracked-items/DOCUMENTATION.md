@@ -49,3 +49,24 @@ Batching, grouping and backoff are the service's; how an account is chosen and w
 ### Why work items keep the legacy Linear shape on the wire
 
 Older clients send `{ provider: 'linear', identifier }` and older files hold it. Parsing it into `{ provider, kind: 'work-item', identifier }` keeps the key (`linear|ENG-12`) unchanged, so the same item is followed once whichever shape asked, and nothing needs migrating.
+
+### Why cached state keeps unparsed fields
+
+The persisted cache accepts any plain state object, including a provider's newer fields and a work item's older `state.type`. `CachedTrackedState` names only the fields used for cadence, with unknown values until the cadence guards inspect them. Loading and broadcasting preserve the original object and its extra fields; validating it as a current live summary would discard previously accepted cache entries.
+
+### Why batch accessors enforce invariants
+
+Refresh groups contain one provider, instance and account, and work-item providers cannot also be source-control providers. Every sliced batch is nonempty and homogeneous. The accessors check these invariants without casting a work item to a thread or asserting that an array slot is occupied. Changed keys still belong to retained entries when broadcasting and notifying listeners.
+
+### Route conversion contracts
+
+The request, response and application contracts for `routes.ts` live in
+`../shared/http-contracts.js`. `../shared/express.d.ts` declares the existing
+Express factory and JSON middleware. The request body remains external input
+to validate; the structural contract does not establish its fields.
+
+Route body guards establish only field access on objects, including arrays,
+and leave every field unknown. Routes check the item array before passing it
+to the parser, which retains its array and length checks. Connection errors narrow only their code;
+their message remains unchecked. String-tag checks retain boxed-string
+acceptance before calling `trim`.

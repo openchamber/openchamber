@@ -91,6 +91,67 @@ gt exits 4 for every authentication failure: no login, but also a keyring it can
 
 gt puts its configuration under `GITEA_CLI_CONFIG_DIR`, else the platform's configuration directory as its XDG library sees it (`~/Library/Application Support` on macOS, the local application data folder on Windows). Rebuilding that rule here would drift with gt; `gt config path` answers it, once per process, and the file is then read without starting gt on every listing. `gt auth status --json` would answer the same hosts, at the cost of a process per listing.
 
+### Why gt keeps validation at its process and file boundaries
+
+The injected process runner can return text or bytes; only string output supplies a token or a configuration path. Thrown values need not be `Error` instances. The failure guard establishes only non-nullness, leaving `code`, `killed` and `stderr` unchecked until their existing comparisons or string checks run. The YAML schemas remain nullable and passthrough: an active account's `auth_method` is checked by the schema, while unrelated file fields remain unknown. An invalid instance origin is skipped without preventing other hosts from being listed.
+
+### Why some implementations remain JavaScript
+
+`shared/guards.js` exports `isString` as a boolean check. It accepts boxed
+strings and objects with a String `Symbol.toStringTag`, including objects
+without string methods. A predicate promising `string` or `String` would be
+false. Converting that small helper while preserving its boolean return does
+not narrow its callers.
+
+The exact blocked uses, starting with the largest implementation, are:
+
+- `resources.js`: `labelFilter` calls `name.includes` after `isString(name)`.
+  A String-tagged object without `includes` throws `TypeError` before any
+  provider call. Declaring unchecked label entries as strings hides that case.
+- `provider.js`: `serviceFor` assigns `sourceControlIdentity` and
+  `sourceControlPersistedAccount` to an arbitrary caught value. A resource
+  rejection with `null` or a number becomes a `TypeError` at that assignment.
+  Guarding and rethrowing the original value would change the rejection.
+- `mappers.js`: `mapGiteaReviewBody` calls `text(value.body).trim()`.
+  `text` can return a String-tagged object without `trim`. A boxed body is
+  returned unchanged in the mapped comment, so the result cannot promise a
+  primitive string either.
+- `client.js`: `classifyGiteaFailure` calls `code.startsWith`. A boxed TLS
+  code is classified as unreachable; a String-tagged object without that
+  method throws `TypeError`.
+- `verify.js`: `parseGiteaVersion` calls `match` and `parseGiteaUser` calls
+  `trim` after the same boolean check. `isVersion` establishes no stronger
+  string contract.
+
+The compiler reports `TS18046` at `labelFilter`, `serviceFor`,
+`classifyGiteaFailure` and `parseGiteaVersion`, and `TS2571` at the review
+body's `trim` when the unchecked inputs are annotated honestly. The folder's
+tests pin the label, review-body, failure-code and resource-rejection cases.
+Changing declarations or exporting types outside this folder cannot establish
+the missing methods or make every thrown value assignable.
+
+Type-only corrections to neighbouring modules, converting the shared boolean
+helper, and dependency declaration augmentations cannot resolve these remaining
+boundaries. The missing string methods are operations on unchecked values inside
+this folder, and the caught resource rejection has no declared type that can
+exclude null or primitives. Adding a guard, coercing the value, or replacing the
+operation would change the existing failure behavior. All five implementations
+therefore remain JavaScript until that behavior may change.
+
+`source-control/pat-account-auth.ts` now provides `PatAccountAuthOptions`,
+including the edition, SSH and CLI callbacks that this provider supplies.
+Those options no longer block conversion. The remaining client's inferred
+`namespace: null | undefined` and the native fetch declaration's refusal of
+an explicitly undefined body can be corrected with types, but neither
+correction removes the unchecked failure-code boundary. No outside file is
+changed for those corrections while the implementation remains JavaScript.
+
+### Why remote resolution can be typed separately
+
+The Git remote reader supplies names and URLs, and its status reader supplies optional tracking text. The folder-local contracts describe those inputs and the resolver's repository results. The string predicate is restricted to `string | null | undefined`, where the existing shared check establishes a string without claiming anything about unchecked JSON.
+
+`sshHostReaches` accepts the nullable user returned by `sshUserOf`, preserving rejection of a malformed encoded SSH user. Array and regular-expression capture checks expose occupancy to the compiler; successful repository splits and SCP matches always populate the checked slots. Remote ranking, accepted protocols, ports, aliases and failure propagation stay unchanged.
+
 ### Why reviewers are numeric ids and not usernames
 
 GitLab's reviewer contract is numeric ids, and the board compares the ids of current reviewers with the ids of candidates. Gitea's API takes usernames, so the provider maps ids to usernames at the moment it writes. Keeping usernames on the wire would make Gitea's reviewers the one set the board could not match.

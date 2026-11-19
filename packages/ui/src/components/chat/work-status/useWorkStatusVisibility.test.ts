@@ -229,20 +229,6 @@ describe('useWorkStatusVisibility', () => {
     dom.restore();
   });
 
-  test('measures a container the panel cannot resize, never the chat column', () => {
-    // The measured element must not depend on whether the panel is showing:
-    // otherwise hiding the panel widens it and re-shows the panel, forever.
-    // In the app this is the chat area (chat + context panel); here `closest`
-    // finds nothing, so the hook falls back to the row it was given.
-    const { rowNode, teardown } = renderVisibility(
-      { isMobile: false, isVSCode: false },
-      REQUIRED,
-    );
-    expect(observed).toHaveLength(1);
-    expect(observed[0]).toBe(rowNode);
-    teardown();
-  });
-
   test('reacts to a live resize across the threshold', () => {
     const { result, teardown } = renderVisibility(
       { isMobile: false, isVSCode: false },

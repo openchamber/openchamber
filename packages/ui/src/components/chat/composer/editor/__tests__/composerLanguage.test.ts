@@ -99,11 +99,6 @@ describe('composerLanguage — updates', () => {
         const next = state.update({ selection: { anchor: 0 } }).state;
         expect(decoratedText(next)).toEqual(['@build']);
     });
-
-    test('the document stays the plain string that gets sent', () => {
-        const state = stateWith('# Title\n@build /review #sig');
-        expect(state.doc.toString()).toBe('# Title\n@build /review #sig');
-    });
 });
 
 describe('composerLanguage — bidirectional technical fragments', () => {

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
 import { createRelayTunnelClient, isRelayLimitReached } from '@/lib/relay/tunnel-client';
 import { parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
+import { fetchBypassingRuntimeBridge } from '@/lib/runtime-fetch';
 
 type DesktopInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -136,7 +137,7 @@ export const importDesktopHostPairing = async (
     const directUrl = normalizeHostUrl(candidate.url);
     if (!directUrl) continue;
     try {
-      const token = await readToken(await fetch(`${directUrl}/api/client-auth/pairing/redeem`, { ...redeemInit, signal: AbortSignal.timeout(PAIRING_REDEEM_TIMEOUT_MS) }));
+      const token = await readToken(await fetchBypassingRuntimeBridge(`${directUrl}/api/client-auth/pairing/redeem`, { ...redeemInit, signal: AbortSignal.timeout(PAIRING_REDEEM_TIMEOUT_MS) }));
       if (token) {
         redeemed = { directUrl, token };
         break;

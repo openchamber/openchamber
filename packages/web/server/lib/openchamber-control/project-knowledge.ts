@@ -1,0 +1,263 @@
+import path from 'node:path';
+import { z } from 'zod';
+import { asNonEmptyString } from '../shared/guards.js';
+import { parsePlanMarkdown } from '../project-context/runtime.js';
+import { parsePlanProgress } from '../project-context/plan-progress.js';
+import { OpenChamberControlError } from './error.js';
+import type { createProjectContextRuntime } from '../project-context/runtime.js';
+import type { PublicPlan, ProjectTodo, NoteInput, TodoInput } from '../project-context/contracts.js';
+import type { ControlInput } from './contracts.js';
+
+type KnowledgeRuntime = ReturnType<typeof createProjectContextRuntime>;
+type KnowledgeKind = 'note' | 'todo' | 'plan';
+export type PlanEntry = Pick<PublicPlan, 'id' | 'title' | 'source' | 'createdAt' | 'progress' | 'session'> & { path: string };
+export interface KnowledgeDependencies {
+  projectContextRuntime: KnowledgeRuntime | null;
+  resolveProjectContextId: ((directory: string) => Promise<string | null>) | null;
+  isEnabled: () => Promise<boolean>;
+  resolveDirectory: (input: { projectId: string }) => Promise<string>;
+  showPlan: ((input: { projectId: string; planId: string; title: string; directory: string; sessionId: string | null }) => number) | null;
+}
+
+const stringInput = z.string();
+const booleanInput = z.boolean();
+const kindInput = z.enum(['note', 'todo', 'plan']);
+
+const NOTE_MAX_LENGTH = 3000;
+const TODO_MAX_LENGTH = 1000;
+const PLAN_MAX_LENGTH = 200_000;
+
+const requiredString = (input: ControlInput, field: keyof ControlInput, maxLength?: number, allowEmpty = false) => {
+  const parsed = stringInput.safeParse(input[field]);
+  if (!parsed.success || (!allowEmpty && !parsed.data.trim())) {
+    throw new OpenChamberControlError(`${field} must be ${allowEmpty ? 'a string' : 'a non-empty string'}`, 400);
+  }
+  const value = parsed.data;
+  if (maxLength && value.length > maxLength) {
+    throw new OpenChamberControlError(`${field} must be at most ${maxLength} characters`, 400);
+  }
+  return value;
+};
+
+const kindOf = (input: ControlInput, allowed: KnowledgeKind[]) => {
+  const parsed = kindInput.safeParse(input.kind);
+  if (!parsed.success || !allowed.includes(parsed.data)) {
+    throw new OpenChamberControlError(`kind must be ${allowed.join(', ')}`, 400);
+  }
+  return parsed.data;
+};
+
+const idOf = (input: ControlInput) => requiredString(input, 'id').trim();
+
+const found = <T>(value: T | null | undefined, kind: string, id: string): NonNullable<T> => {
+  if (!value) throw new OpenChamberControlError(`${kind} not found: ${id}`, 404);
+  return value;
+};
+
+const optionalBoolean = (input: ControlInput, field: keyof ControlInput) => {
+  if (input[field] === undefined) return undefined;
+  const parsed = booleanInput.safeParse(input[field]);
+  if (!parsed.success) throw new OpenChamberControlError(`${field} must be a boolean`, 400);
+  return parsed.data;
+};
+
+const rejectFieldsOf = (input: ControlInput, kind: KnowledgeKind, fields: (keyof ControlInput)[]) => {
+  const field = fields.find((name) => input[name] !== undefined);
+  if (field) throw new OpenChamberControlError(`${field} does not apply to a ${kind}`, 400);
+};
+
+const readyTodos = (todos: ProjectTodo[]) => {
+  const completed = new Set(todos.filter((todo) => todo.completed).map((todo) => todo.id));
+  return todos.filter((todo) => !todo.completed && (todo.dependsOn ?? []).every((id) => completed.has(id)));
+};
+
+const expectedOf = (input: ControlInput) => (input.expected === undefined ? undefined : requiredString(input, 'expected', undefined, true));
+
+const rejectExpectedOnCreate = (input: ControlInput) => {
+  if (input.expected !== undefined && input.id === undefined) {
+    throw new OpenChamberControlError('expected requires an id: pass the id of the note or plan you are replacing, or leave expected out to create', 400);
+  }
+};
+
+function assertScope(input: ControlInput): asserts input is ControlInput & { projectId?: string; directory?: string } {
+  for (const field of ['projectId', 'directory'] as const) {
+    if (input[field] !== undefined) requiredString(input, field);
+  }
+}
+
+export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, resolveProjectContextId, isEnabled, resolveDirectory, showPlan }: KnowledgeDependencies) => {
+  const ownerOf = async (input: ControlInput, contextDirectory: ControlInput['directory'], resolveOwner: NonNullable<KnowledgeDependencies['resolveProjectContextId']>) => {
+    assertScope(input);
+    if (input.projectId !== undefined && input.directory !== undefined) {
+      throw new OpenChamberControlError('Provide only one of projectId or directory', 400);
+    }
+    const directory = input.projectId !== undefined
+      ? await resolveDirectory({ projectId: input.projectId.trim() })
+      : (asNonEmptyString(input.directory) || asNonEmptyString(contextDirectory));
+    if (!directory || !path.isAbsolute(directory)) {
+      throw new OpenChamberControlError('An absolute project or calling-session directory is required', 400);
+    }
+    const projectId = asNonEmptyString(await resolveOwner(directory));
+    if (!projectId) throw new OpenChamberControlError('Project context owner not found', 404);
+    return { projectId, directory };
+  };
+
+  const planEntry = ({ id, title, source, createdAt, progress, session }: Pick<PublicPlan, 'id' | 'title' | 'source' | 'createdAt' | 'progress' | 'session'>, filePath: string) => {
+    const entry: PlanEntry = { id, title, source, createdAt, path: filePath };
+    if (progress) entry.progress = progress;
+    if (session) entry.session = session;
+    return entry;
+  };
+
+  const withStepsCheck = <T extends object>(result: T, body: string) => (parsePlanProgress(body)
+    ? result
+    : { ...result, warning: 'This plan has no "## Steps" checklist ("- [ ] step" lines under a "## Steps" heading), so its progress cannot be shown. Add one with the plan\'s coarse steps.' });
+
+  const list = async (runtime: KnowledgeRuntime, projectId: string, input: ControlInput) => {
+    const planId = input.planId === undefined ? undefined : requiredString(input, 'planId').trim();
+    const ready = optionalBoolean(input, 'ready') === true;
+    const context = await runtime.readContext(projectId);
+    const personalDir = runtime.plansDirFor(projectId);
+    const inPlan = (entry: { planId?: string }) => planId === undefined || entry.planId === planId;
+    return {
+      projectId,
+      notes: context.notes.filter(inPlan),
+      todos: (ready ? readyTodos(context.todos) : context.todos).filter(inPlan),
+      plans: context.plans
+        .filter((plan) => planId === undefined || plan.id === planId)
+        .map((plan) => {
+          const dir = plan.source === 'shared' ? context.sharedPlansDir : personalDir;
+          return dir ? planEntry(plan, path.join(dir, plan.file)) : null;
+        })
+        .filter(Boolean),
+    };
+  };
+
+  const saveNote = async (runtime: KnowledgeRuntime, projectId: string, input: ControlInput, contextSessionId: string | null | undefined) => {
+    rejectFieldsOf(input, 'note', ['dependsOn', 'sessionId']);
+    rejectExpectedOnCreate(input);
+    if (input.id === undefined) {
+      const body = requiredString(input, 'body', NOTE_MAX_LENGTH);
+      const sessionId = asNonEmptyString(contextSessionId);
+      if (!sessionId) throw new OpenChamberControlError('Creating a note requires a calling session', 400);
+      const { note } = await runtime.createNote(projectId, { body, source: 'agent', origin: { sessionId }, planId: input.planId });
+      return { projectId, note };
+    }
+    const id = idOf(input);
+    const expected = expectedOf(input);
+    const patch: NoteInput = { planId: input.planId };
+    if (input.body !== undefined) patch.body = requiredString(input, 'body', NOTE_MAX_LENGTH);
+    if (patch.body === undefined && patch.planId === undefined) {
+      throw new OpenChamberControlError('body or planId is required to change a note', 400);
+    }
+    const saved = found(await runtime.updateNote(projectId, id, patch, expected === undefined ? {} : { expectedBody: expected }), 'Note', id);
+    return { projectId, note: saved.note };
+  };
+
+  const saveTodo = async (runtime: KnowledgeRuntime, projectId: string, input: ControlInput) => {
+    if (input.expected !== undefined) {
+      throw new OpenChamberControlError('expected applies to notes and plans; a todo save changes only the fields it names', 400);
+    }
+    rejectFieldsOf(input, 'todo', ['sessionId']);
+    const completed = optionalBoolean(input, 'completed');
+    const links = { planId: input.planId, dependsOn: input.dependsOn };
+    if (input.id === undefined) {
+      const text = requiredString(input, 'body', TODO_MAX_LENGTH);
+      return { projectId, todo: (await runtime.createTodo(projectId, { text, completed: completed === true, ...links })).todo };
+    }
+    const id = idOf(input);
+    const patch: TodoInput = { ...links };
+    if (input.body !== undefined) patch.text = requiredString(input, 'body', TODO_MAX_LENGTH);
+    if (completed !== undefined) patch.completed = completed;
+    if (Object.values(patch).every((value) => value === undefined)) {
+      throw new OpenChamberControlError('body, completed, planId or dependsOn is required to change a todo', 400);
+    }
+    const { todos } = await runtime.updateTodo(projectId, id, patch);
+    return { projectId, todo: todos.find((entry) => entry.id === id) };
+  };
+
+  const savePlanSession = async (runtime: KnowledgeRuntime, projectId: string, input: ControlInput) => {
+    if (input.id === undefined) {
+      throw new OpenChamberControlError('sessionId links an existing plan: save the plan first, then pass its id', 400);
+    }
+    if (input.body !== undefined || input.expected !== undefined) {
+      throw new OpenChamberControlError('Save the plan markdown and its sessionId in separate calls', 400);
+    }
+    if (input.sessionId !== null) requiredString(input, 'sessionId');
+    const id = idOf(input);
+    const saved = found((await runtime.setPlanSession(projectId, id, { sessionId: input.sessionId }))?.plan, 'Plan', id);
+    const stored = found(await runtime.readPlan(projectId, id), 'Plan', id);
+    return { projectId, plan: planEntry(saved, stored.path) };
+  };
+
+  const savePlan = async (runtime: KnowledgeRuntime, projectId: string, input: ControlInput) => {
+    rejectFieldsOf(input, 'plan', ['planId', 'dependsOn']);
+    if (input.sessionId !== undefined) return savePlanSession(runtime, projectId, input);
+    rejectExpectedOnCreate(input);
+    const body = requiredString(input, 'body', PLAN_MAX_LENGTH);
+    if (input.id === undefined) {
+      if (!/^\s*#\s+\S/.test(body)) {
+        throw new OpenChamberControlError('A plan starts with a # title line', 400);
+      }
+      const { plan } = await runtime.createPlan(projectId, parsePlanMarkdown(body));
+      const stored = found(await runtime.readPlan(projectId, plan.id), 'Plan', plan.id);
+      return withStepsCheck({ projectId, plan: planEntry(plan, stored.path) }, body);
+    }
+    const id = idOf(input);
+    const expected = expectedOf(input);
+    const saved = found(await runtime.updatePlan(projectId, id, { raw: body }, expected === undefined ? {} : { expectedRaw: expected }), 'Plan', id);
+    const stored = found(await runtime.readPlan(projectId, id), 'Plan', id);
+    return withStepsCheck({ projectId, plan: planEntry(saved.plan, stored.path) }, body);
+  };
+
+  const remove = async (runtime: KnowledgeRuntime, projectId: string, input: ControlInput) => {
+    const kind = kindOf(input, ['note', 'todo', 'plan']);
+    const id = idOf(input);
+    if (kind === 'todo') {
+      await runtime.deleteTodo(projectId, id);
+      return { projectId, deleted: true };
+    }
+    const result = kind === 'note' ? await runtime.deleteNote(projectId, id) : await runtime.deletePlan(projectId, id);
+    found(result.deleted, kind === 'note' ? 'Note' : 'Plan', id);
+    return { projectId, deleted: true };
+  };
+
+  const show = async (runtime: KnowledgeRuntime, projectId: string, directory: string, input: ControlInput, contextSessionId: string | null | undefined) => {
+    kindOf(input, ['plan']);
+    const id = idOf(input);
+    if (!showPlan) throw new OpenChamberControlError('Showing a plan is not available on this server', 503);
+    const plan = found(await runtime.readPlan(projectId, id), 'Plan', id);
+    const delivered = showPlan({
+      projectId,
+      planId: plan.id,
+      title: plan.title,
+      directory,
+      sessionId: asNonEmptyString(contextSessionId) ?? null,
+    });
+    if (delivered === 0) throw new OpenChamberControlError('No OpenChamber window is connected to show the plan', 503);
+    return { projectId, planId: plan.id, shown: true };
+  };
+
+  const execute = async (action: string, input: ControlInput, contextDirectory?: ControlInput['directory'], contextSessionId?: string | null) => {
+    if (!runtime || !resolveProjectContextId) {
+      throw new OpenChamberControlError('Project knowledge is not available on this server', 503);
+    }
+    if (!await isEnabled()) {
+      throw new OpenChamberControlError('The project knowledge tool is turned off in OpenChamber settings', 403);
+    }
+    const { projectId, directory } = await ownerOf(input, contextDirectory, resolveProjectContextId);
+    switch (action) {
+      case 'knowledge.list': return list(runtime, projectId, input);
+      case 'knowledge.save': {
+        const kind = kindOf(input, ['note', 'todo', 'plan']);
+        if (kind === 'note') return saveNote(runtime, projectId, input, contextSessionId);
+        if (kind === 'todo') return saveTodo(runtime, projectId, input);
+        return savePlan(runtime, projectId, input);
+      }
+      case 'knowledge.delete': return remove(runtime, projectId, input);
+      case 'knowledge.show': return show(runtime, projectId, directory, input, contextSessionId);
+      default: throw new OpenChamberControlError(`Unsupported project knowledge action: ${action}`, 400);
+    }
+  };
+  return { execute };
+};

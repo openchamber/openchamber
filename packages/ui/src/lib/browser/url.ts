@@ -69,3 +69,7 @@ const isLocalhostName = (url: string): boolean => {
 export const isStartingServerFailure = (code: number, url: string): boolean => (
   RETRYABLE_LOAD_ERROR_CODES.has(code) && (isLoopbackUrl(url) || isLocalhostName(url))
 );
+
+export const isStartingServerAnswer = (httpStatus: number, url: string): boolean => (
+  (httpStatus === 404 || httpStatus >= 500) && (isLoopbackUrl(url) || isLocalhostName(url))
+);

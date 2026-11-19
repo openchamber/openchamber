@@ -5,7 +5,7 @@ import {
   readConfigFile,
   readConfigLayers,
   writeConfig,
-} from './shared.js';
+} from './config-files.js';
 import {
   findWebSearchProjectOverride,
   writeCompactionSettings,

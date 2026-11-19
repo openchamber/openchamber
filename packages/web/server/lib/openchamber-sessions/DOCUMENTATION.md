@@ -40,6 +40,7 @@ This module owns server-side session creation, dispatch, forking, archive and me
 - Move rollback removes only worktrees and branches created by that attempt. A retained retry target and pre-existing local branch survive. Removal requests cancellation of setup; carried changes return to the source, and a failed restoration leaves a stash named in the error. A failed stash-list read after stashing also reports how to locate the saved changes.
 - Task names belong to worktree branch descriptions and never rename sessions. User-owned names win. Moving a session seeds the new worktree name from its current title, preserving explicit user ownership, because the new branch has no description and agents need not name the same task twice.
 - Turn durations use OpenCode event timestamps and retain the first busy event through repeated busy steps. Only fully observed top-level turns are recorded, with subsession activity represented by the parent. Restart or event-stream reconnect discards starts because an end may have been missed; `endedAt` matches OpenCode's idle timestamp so readers can identify the turn.
+- Archive rollback reads occupied entries and archived-tree traversal reads a nonempty parent queue. Their occupancy checks expose invariant failures without asserting away missing values.
 
 ## Decisions
 
@@ -66,3 +67,77 @@ Removing a busy worktree archives many sessions before removal. Bounded batches 
 ### Why resolve fetch per call and not capture it when creating the client
 
 Client fetch resolves `globalThis.fetch` at request time so runtime replacements and injected test implementations take effect for existing clients. Calls without a directory header can use OpenCode's default instance for session-id lookups.
+
+### Why the local SDK contract accepts unchecked metadata and an absent signal
+
+OpenCode 2.3.0 forwards `requestOptions?.signal` to fetch and serializes request
+bodies with `JSON.stringify`. Its published types exclude explicit
+`signal: undefined` and non-JSON metadata values that this module already passes.
+`opencode-client-contract.d.ts` describes those inputs locally; the factory's
+overload preserves the SDK implementation and every other client operation.
+Tests exercise both inputs through the real SDK and record the fetch arguments.
+
+Metadata uses the loose object's inferred type because its object guard does
+not recursively validate values. A merge can retain a `Map`. Legacy JSON
+container validation preserves the original parsed object, including session
+ids such as `__proto__` that a parser's cloned output could omit. Recursive
+merges narrow the previous field only after checking the incoming field, so
+scalar replacements do not read inherited getters.
+
+### Why archive batching shares a value iterator
+
+The shared iterator yields each indexed value without asserting array
+occupancy. It keeps the existing sparse-array calls, result indices and
+concurrency limit. The archive predicate retains its number check for upstream
+and injected values, including the previous acceptance of non-finite numbers.
+
+### Why route inputs retain unchecked fields
+
+HTTP bodies and merged settings expose optional unknown fields until the existing
+checks narrow them. Optional-property predicates preserve primitive property
+reads and inherited fields without claiming validated values. Null send and fork
+bodies retain their property-access failure. Metadata and link schemas retain
+their loose inferred values, including non-JSON fields.
+
+Catalogue agent names and ids retain their string checks because catalogue
+responses and injected clients can omit them. Array checks remain on catalogue
+lists, variants, settings projects, hidden models and archive ids. Remembered
+effort lookup retains inherited values so the existing enum parser rejects them.
+
+`session-goal/create.js` declares its unchecked creation fields explicitly.
+Its null budget default does not establish a null-only input or a validated
+numeric return. Session routes validate the budget before calling it; the goal
+helper still forwards unchecked input to its persistence callback.
+
+### Why route occupancy checks preserve existing failures
+
+Store construction requires a data directory only when an injected store is
+absent. Reusing a session selection requires the existing session id. A null
+routing result and a null agent list retain their property-access errors rather
+than becoming successful empty selections. These checks expose impossible
+internal states without casts or non-null assertions.
+
+The SDK persists agent and model selection on sessions, so both switch calls
+precede dispatch. Forks omit `before` when copying the whole session. Worktree
+bootstrap opens OpenCode's checkout gate at `git-ready` while setup may continue.
+Goal objectives use the typed prompt because command templates are unavailable;
+their synthetic reminder follows the user prompt. A returned inbox item id is
+required to confirm prompt delivery.
+
+### Why stored unlink candidates keep their loose schema type
+
+Stored unlink candidates use the inferred `storedLinkSchema` type, whose URL,
+kind and number may be missing. The shared matcher accepts this partial identity
+as well as HTTP entries and preserves unknown snapshot fields. Matching ids
+require no URL. Number-based repository matching still throws a `TypeError`
+when the candidate has no URL; the explicit undefined guard preserves the
+previous property-access error and its message without promising a validated URL.
+
+### Why preserve property guards for external values
+
+File contents, event payloads and thrown values remain untrusted. Timestamp
+guards retain the positive safe-integer rule. Property-presence guards box
+primitives before checking inherited properties, preserving optional property
+reads without claiming an unchecked record shape. OpenCode fork metadata keeps
+its loose schema's inferred fields and checks goal objects before reading status.
+Directory headers use the client's percent encoding for non-ASCII paths.

@@ -50,7 +50,7 @@ Use it to compare a request against a narrower one the API offers before changin
 To find which OpenChamber code sends directory-scoped requests (a location booting again and again, MCP servers reconnecting), run a web server from source with a Bun preload that wraps `globalThis.fetch` and `node:http.request` and logs method, path, directory (query `directory` or `location[directory]`, or header `x-opencode-directory`) and the caller's stack. No repository change is needed:
 
 ```sh
-cd packages/web && OPENCHAMBER_UI_PASSWORD=<scratch> OPENCODE_BINARY=/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode bun --preload <trace.js> server/index.js --port 3901
+cd packages/web && OPENCHAMBER_UI_PASSWORD=<scratch> OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR=$PWD/../electron/resources/opencode-server bun --preload <trace.js> server/index.js --port 3901
 ```
 
 Start it with a clean env and a scratch data dir (`scripts/perf/DOCUMENTATION.md`, *Running An Isolated Copy*).

@@ -132,7 +132,6 @@ export function useComposerFileDrop({
 
         if (!currentSessionId && !newSessionDraftOpen) return;
 
-        // Internal drag: file tree → chat input (relative path as @mention)
         const internalPath = e.dataTransfer.getData('application/x-openchamber-file-path');
         if (internalPath && internalPath !== '.') {
             confirmMention(internalPath, confirmedMentionsRef.current);
@@ -146,10 +145,6 @@ export function useComposerFileDrop({
                 const needSpaceBefore = before.length > 0 && !/\s$/.test(before);
                 const needSpaceAfter = after.length > 0 && !/^\s/.test(after);
                 const insert = `${needSpaceBefore ? ' ' : ''}${mention}${needSpaceAfter ? ' ' : ''}`;
-                // Insert through the editor rather than setMessage: an editor
-                // dispatch places the caret right after the mention, while the
-                // external-rewrite path would send it to the end of the
-                // message and pin the scroll to the bottom.
                 textarea.replaceRange(pos, end, insert);
                 cursorPosRef.current = pos + insert.length;
                 textarea.focus();
@@ -186,7 +181,6 @@ export function useComposerFileDrop({
         if (!hasDraggedFiles(e.dataTransfer)) {
             return;
         }
-        // Prevent native textarea drop text insertion for all runtimes
         e.preventDefault();
         if (isVSCodeRuntime()) {
             suppressNextFileDropTextInsertRef.current = true;

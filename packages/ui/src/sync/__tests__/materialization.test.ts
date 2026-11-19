@@ -682,6 +682,21 @@ describe("materializeSessionSnapshots", () => {
 })
 
 describe("getSessionMaterializationStatus", () => {
+  test("complete parts do not establish known-missing history coverage", () => {
+    const state = {
+      message: { ses_1: [userMessage("msg_u"), completedAssistantMessage("msg_done")] },
+      part: { msg_done: [part("prt_1", "msg_done")] },
+    }
+
+    expect(getSessionMaterializationStatus(state, "ses_1", { historyCovered: false })).toEqual({
+      hasMessages: true,
+      renderable: false,
+      missingPartMessageIDs: [],
+    })
+    expect(getSessionMaterializationStatus(state, "ses_1", { historyCovered: true }).renderable).toBe(true)
+    expect(getSessionMaterializationStatus(state, "ses_1").renderable).toBe(true)
+  })
+
   test("requires assistant parts for renderable cached state", () => {
     const state = {
       message: { ses_1: [message("msg_1")] },

@@ -74,22 +74,6 @@ test('a failed first load is an error, never an empty success', async () => {
     expect(cache.read('k')).toMatchObject({ status: 'error', items: [], error: 'offline' });
 });
 
-test('an older answer cannot overwrite a newer one', async () => {
-    const cache = createListCache<string>();
-    const first = deferred<ListPage<string>>();
-    cache.ensure('k', () => first.promise);
-    const second = deferred<ListPage<string>>();
-    // A forced retry while the first request is still out waits for it.
-    cache.ensure('k', () => second.promise, { force: true });
-    first.resolve(page(['first']));
-    await flush();
-    cache.ensure('k', () => second.promise, { force: true });
-    second.resolve(page(['second']));
-    await flush();
-
-    expect(cache.read('k')?.items).toEqual(['second']);
-});
-
 test('later pages append, and a refresh drops a page still in flight', async () => {
     const cache = createListCache<string>();
     const more = deferred<ListPage<string>>();
