@@ -69,7 +69,7 @@ export type PlannerOptions = {
   validateGitTransportContext?: (input: TransportContext) => Promise<TransportAuthority>;
   validateManagedSshCredential?: ReturnType<typeof createManagedSshInventory>['assertAvailable'] | undefined;
   resolveSourceControlAccount?: ((input: ProviderAccount) => Promise<{
-    credentialId?: string | null | undefined;
+    credentialId?: string;
     status?: string;
     credentialRevision?: number;
     providerUserId?: string;

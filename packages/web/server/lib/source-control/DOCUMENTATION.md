@@ -413,11 +413,9 @@ and `fetch` every factory receives keep the registry's types, so a host-service
 override of one of them is checked once for all providers; each factory accepts
 an absent or explicitly undefined `fetch` and falls back to its default. Account events carry the invalidation payload GitHub reports, whose
 instance and account id come from unchecked failure data.
-`readTransportCredential` answers what the provider read: a gh login's credential
-id keeps its nullable parameter type, and a stored account's token may be absent.
-The binding validators, the credential resolver, the clone planner and the skill
-installer each compare the id with the one requested and check the secret before
-using it.
+`readTransportCredential` answers what the provider read, and a stored account's
+token may be absent. The binding validators, the credential resolver and the
+clone planner check the secret before using it.
 
 ### Why test adapters retain their boundary values
 

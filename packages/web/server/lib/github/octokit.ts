@@ -172,7 +172,7 @@ export async function getGitHubCliCredential(accountId: string | null | undefine
   const token = await getGhCliLoginToken(host, login);
   if (!token) return null;
   return {
-    credentialId: accountId,
+    credentialId: cliMatch[0],
     accountId,
     credentialRevision: 1,
     providerUserId: `${host}#${login.id}`,
