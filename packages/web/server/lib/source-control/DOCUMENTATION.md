@@ -81,6 +81,10 @@ The CLI owns its credentials. These handles have no token and an empty outbound 
 
 ## Cross-process locks and recovery
 
+The storage process fixture delays snapshot reads so tests can exercise
+competing writers without adding a barrier inside a transaction. Its parent
+forks the TypeScript source with the Node source hook preloaded for its imports.
+
 `file-lock.js` owns the dependency-free exclusion contract for source-control and Git stores that import it. Every snapshot read and complete read/check/write transaction acquires `<json-file>.lock` using exclusive `wx` creation with mode `0600`. Local queues preserve call ordering; each filesystem acquisition waits at most two seconds by default before `SOURCE_CONTROL_LOCK_BUSY` with HTTP `503`. Other lock I/O or ownership failures return `SOURCE_CONTROL_LOCK_FAILED` with HTTP `500`. Neither failure is an empty store, a missing binding, or a disconnected provider. Errors name the lock basename and explain stopped-writer recovery without exposing the data-root path.
 
 Provider execution uses `<mutation-json-file>.execution-<sha256-key>.lock`. Snapshot locks are brief and never span provider network calls. Different execution keys and different stores can progress while another provider request runs. These locks support multiple daemons sharing the same data root; there is no global backend lock. All writers must use this contract and the same file location on a filesystem that supports exclusive creation and atomic same-directory rename. Older unlocked writers, external file edits, and removal or replacement of the data directory while writers run are unsupported.
@@ -370,6 +374,98 @@ status until dispatch settles. Error classification retains its array check and
 integer-status check because an error's evidence is unchecked. It does not
 assume that an array check validated each member. User IDs retain the separate
 primitive-string and safe-integer checks before forwarding an account.
+
+### Why binding inputs are typed as unchecked requests
+
+The binding routes hand the binding service what arrives: `req.body ?? {}` and
+the first `directory` query value. The service's route-facing methods
+(`mutateProvider`, `configureTransportBinding`, `removeTransportBinding`,
+`resetRepositoryBinding`, `configureAuxiliaryBinding`, `resolveContext`, `get`)
+and the read and mutation context validators therefore take
+`BindingIntentRequest`, `ReadContextRequest` and `MutationContextRequest`:
+every field optional and unchecked. Their existing checks are spelled so the
+compiler narrows: `assertExactStrings` and `assertRequiredString`
+(`binding-input.ts`) throw the same `requiredString` and `<key> is invalid`
+errors the inline comparisons threw, and `isOneOf` replaces the
+`[...].includes(...)` membership tests. Declaring the requests as validated
+intents would claim what no route checks.
+
+### Why the executor keeps a thrown code unchecked
+
+`mutation-executor.ts` checks a thrown code's String tag before reading its
+unchecked `length` and copying the original code into a completion input. The
+input keeps that code unchecked because boxed strings and String-tagged objects
+can pass the tag check. The mutation store checks for a primitive string before
+writing or returning the result. Receipt and audit identity checks still
+require the original value to equal its trimmed form.
+
+### Why the route shell asserts the mutation body is an object
+
+The JSON parser admits arrays, while every provider's `mutations.prepare`
+reads fields from a JSON object. `assertMutationContextObject`
+(`binding-input.ts`) is the binding validator's first check, the one that
+refuses anything but a plain object, written as an assertion. The shell
+hands the parsed body to the injected `validateMutationContext` first, so a
+validator decides its own answer for any body (the binding validator refuses a
+non-object with `INVALID_SOURCE_CONTROL_MUTATION_CONTEXT`), and calls the
+assertion after it, so `prepare` receives a JSON object by proof.
+
+### Why the registry's provider contract is the shell's view of every provider
+
+`RegisteredProvider` is `ProviderImplementation` as the route shell uses it, and
+every built-in factory and the extension provider must satisfy it. Reads the
+shell only serializes return `object`; `getIssue` may answer `null`; live
+summaries take tracked-item thread references and answer the summary lists the
+tracked-item readers consume. The mutation context's target is the
+`BindingMutationTarget` the binding validator returns, and a resolved target
+may carry explicitly undefined optional fields, as an extension's parsed answer
+does; the mutation store's checks already accept both. The registry resolves
+providers by a runtime id, so it cannot correlate a provider's mutation input
+and provider target with the same provider's later steps: the contract types
+them as `object`, and its method signatures let each provider declare its own.
+Provider declarations narrower than what the shell passes were corrected at
+the provider (an omitted list query, a null source repository, Gerrit's list
+`state` and `people` looked up by own key, the `route` and `kind` every
+mutation step receives, the binding target a resolve step reads and the
+running create record it may be handed for reconciliation). A refused
+account's identity comes from the provider's own error, so `invalidateAccount`
+takes its instance and account id unchecked, as the shell forwards them.
+
+### Why the registry requires an auth store
+
+`createSourceControlProviders` takes the runtime's auth store as a required
+option and passes it to every built-in factory and extension provider. GitLab,
+Gitea, Gerrit, Forgejo and extensions read their section from it unless host
+services hand them a `store`; the registry resolves providers by a runtime id,
+so it cannot prove that a host-service `store` exists for the provider it
+loads. Requiring the store keeps each factory's options type exact instead of
+widening them to accept a construction that fails on the first account read.
+JavaScript tests that build a registry around an injected `store` still omit it.
+
+Host services are typed per built-in provider without the fields the registry
+supplies (`descriptor`, `authStore`, `events`). The settings reader, config root
+and `fetch` every factory receives keep the registry's types, so a host-service
+override of one of them is checked once for all providers; each factory accepts
+an absent or explicitly undefined `fetch` and falls back to its default. Account events carry the invalidation payload GitHub reports, whose
+instance and account id come from unchecked failure data.
+`readTransportCredential` answers what the provider read, and a stored account's
+token may be absent. The binding validators, the credential resolver and the
+clone planner check the secret before using it.
+
+### Why test adapters retain their boundary values
+
+The GitHub route test adapter forwards the provider's construction options,
+binding validators, executor, OAuth registry and account callbacks to the shared
+shell. Its auth store points at a file it never creates: the route shell reads
+no instance or account list, so the GitHub provider never opens it. Descriptor tests detach extensions after each test so the singleton
+facade cannot retain another test's provider.
+
+Storage-process test replies retain the child-process `Serializable` type.
+An own `ok` property selects a reply but does not validate its `id`, so pending
+lookups retain an unchecked key and match only an outstanding generated ID.
+The local Object constructor declaration accepts non-null primitive inputs to
+`hasOwn`, which JavaScript boxes before checking ownership. It adds no nullish
+acceptance and preserves the original process-message check.
 
 ### Why startup repair is separate from route registration
 

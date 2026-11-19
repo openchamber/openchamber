@@ -73,7 +73,7 @@ export type PlannerOptions = {
     status?: string;
     credentialRevision?: number;
     providerUserId?: string;
-    secret?: string;
+    secret?: string | undefined;
   } | null>) | undefined;
   sourceControlProviders?: typeof sourceControlProviderDescriptors | undefined;
   contributorProvenance?: { read(directory: string): Promise<ContributorAuthority> } | undefined;

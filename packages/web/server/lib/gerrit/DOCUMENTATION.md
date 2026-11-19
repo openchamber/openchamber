@@ -100,14 +100,10 @@ credential defaults. Its mutation context and target fields use the shared
 `ProviderReadContext` and SDK `SourceControlMutationTarget`; the standard
 mutation normalizers require a change number before target resolution.
 
-`provider.js` remains JavaScript. `createStandardMutations().prepare().input`
-is inferred as `any`, including in emitted declarations. Its owner,
-`source-control/standard-mutations.js`, has no declared normalized-input type
-to correct or export. That implementation has 237 lines, outside the
-small-helper conversion allowance. `createPatAccountAuth` now owns its options
-and session contracts, but the provider still needs the standard mutation
-normalizer's contract for votes, names, positions and comment bodies.
-Declaring those results in the provider would hide the untyped boundary.
+The provider uses `StandardMutationInput` from the shared normalizer. The
+mutation route selects which normalized fields are required by its operation.
+The resource wrapper attaches the acting account to rejected objects. A
+rejection that cannot take those fields still fails with `TypeError`.
 
 Review draft maps validate their container only. Draft members, timeline commit
 fields and published comment bodies retain their JSON types until their

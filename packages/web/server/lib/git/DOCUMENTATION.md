@@ -123,27 +123,72 @@ This module provides Git repository operations for the web server runtime, inclu
   Node builtin static imports. They register source resolution before loading
   their sibling `*-runtime.js` modules. Electron unpacks both halves so helpers
   launched from `app.asar.unpacked` retain their sibling implementation.
+- The repository credential helper validates an endpoint with `new URL` and
+  still passes the original JSON field to `http.request`. A single-element URL
+  array passes the first step but fails the second with `ERR_INVALID_ARG_TYPE`;
+  the two native calls keep separate boundaries so parsing does not validate
+  the original field's type. A response's username and password likewise
+  remain unchecked JSON until the existing truthiness checks and interpolation.
+- `worktreeBootstrapFailureMessage` performs a prototype-inclusive dictionary
+  lookup on an unchecked code. Its result can be an inherited Object member,
+  so its runtime contract is broader than a string-or-null return. Scrubbing's
+  own-key checks are separate and must remain.
+- The change request's read context comes from source-control authority. It
+  carries the working directory and binding revision. It does not require a
+  config revision; the service-login fetch gets that revision from a separate
+  repository binding read. Worktree hydration retains the explicit `null`
+  authority when there was no binding read.
 
 ### Identity and provenance
 
 - Identity records store account references; provider auth stores own the credentials. A disconnected account cannot resolve through a cached secret.
-- VS Code imports `isContributorForkGitDirectory` through its paired declaration.
-  Converting the implementation also exposes `../shared/guards.js` to VS Code's
-  checker, which does not allow untyped JavaScript. That shared module needs
-  typed exports before the declaration can be removed.
-- Identity-file validation establishes only `id`, `userName`, and `userEmail`;
-  legacy fields such as `sshKey` remain unchecked. `prepareGuestGitNetwork` in
-  `../guests/clone.ts` currently passes a truthy `sshKey` directly to
-  `quoteSshPath`, which requires a string. A typed identity-store result needs
-  that consumer to narrow the legacy field first.
-- `ProviderDescriptor.identity.noReplyEmail` in
-  `../source-control/provider-contract.d.ts` requires a numeric `id`.
-  Provisioning passes `user?.id`, and GitHub's implementation accepts an absent
-  id. The descriptor contract must allow that input before provisioning can
-  use it without a stricter promise or a changed call.
+- VS Code imports `isContributorForkGitDirectory` from its implementation.
+  Provenance storage imports the typed `../shared/object-guards.js` owner
+  directly, so this import does not expose the JavaScript guard entry or
+  unrelated repository-service implementations to VS Code's checker.
+- Provenance validates `sourceSha` with a coercing regular expression. It stays
+  unchecked in the stored record type: a single-element array containing a SHA
+  also passes that expression. The regular-expression overload preserves the
+  native conversion without promising that the original value is a string.
+  The checkout-trust routes narrow it before inspection and before it becomes
+  the trusted operation's `headSha`: a non-string answers the same 409
+  `STALE_CONFIG` the inspection's strict HEAD comparison already gave, and
+  `CheckoutTrustInput.headSha` stays a string.
+- Sparse listing inputs retain their undefined slots. Identity resolvers receive
+  those slots unchanged; the Git-directory probe's overload preserves the native
+  `path.join` argument failure before the filesystem catch.
+- Identity-file validation establishes only `id`, `userName`, and `userEmail`,
+  so `StoredGitIdentityProfile` types every other field, legacy `sshKey`
+  included, as `unknown`. Readers narrow a field before use:
+  `toPublicGitIdentityProfile` drops what it cannot read, and
+  `prepareGuestGitNetwork` in `../guests/clone.ts` treats a non-string `sshKey`
+  as no key, so the clone falls back to the host SSH configuration.
+- A stored state is a fresh `{ profiles }` object holding the validated
+  profile records themselves, so retained migration fields round-trip
+  unchanged.
+- Provisioning accepts partial provider account/user metadata. Legacy stored
+  account fields remain unchecked until their existing equality comparisons.
+  The provider descriptor permits the absent user id passed to `noReplyEmail`.
 - Reading a legacy identity file makes it private. Earlier releases use the host's umask, so refusing an existing permissive file would discard usable identities.
 - Account provisioning skips providers this build cannot describe and accounts without a usable signature. One incomplete account leaves the other accounts available.
 - Provenance listing tolerates an entry whose Git directory no longer resolves; action-time identity reads remain strict. Relative `gitdir:` targets preserve `..` until filesystem resolution so symlink traversal matches Git.
+
+### Route boundary
+
+- Routes parse request strings before the typed service sees them. A query or
+  body field that arrives as a non-string, such as a repeated query
+  parameter, counts as absent: a required one gets the route's existing 400,
+  and an optional one gets the service default.
+- Service inputs that the service validates from raw values keep that
+  validation and are declared unchecked: integrate plans and states, commit
+  summary SHAs, stash refs and options, revert scope, staged paths, commit
+  file lists, snapshot refs, archive ids, titles and session ids, and the
+  commit-files hash. The routes pass those fields through unchanged.
+- The network planner and contributor destination parser take JSON. A body
+  that is not JSON, including a missing one, reaches them as `null`, which
+  both reject exactly as they reject a missing body.
+- `StatusBatchDirectoryResult` distinguishes the non-repository status the
+  batch route returns from a repository's full status.
 
 ### Network execution and recovery
 
@@ -820,7 +865,9 @@ VS Code runs existing-repository network operations as plain Git commands on the
 
 ### Stash Operations
 - `listStashes(directory)`: List stash entries with ref, message, relative time, and hash.
-- `countStashFiles(directory, refs)`: Batch-count changed files for stash refs with bounded concurrency.
+- `countStashFiles(directory, refs)`: Batch-count tracked and untracked files for stash refs with bounded concurrency.
+  `stash show --include-untracked --name-only` includes the third parent's files
+  in the same Git process per ref; the VS Code runtime uses the same command.
 - `stashPush(directory, options)`: Stash changes, always including untracked files, with optional message.
 - `stashApply(directory, options)`: Apply a stash by ref without removing it.
 - `stashPop(directory, options)`: Apply a stash by ref and drop it only after a successful apply.

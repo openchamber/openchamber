@@ -487,10 +487,10 @@
     {
       "id": "stash",
       "name": "Saving and restoring a stash",
-      "sources": ["packages/ui/src/components/views/GitView.tsx", "packages/ui/src/components/views/git/GitHeader.tsx", "packages/ui/src/components/views/git/StashesDialog.tsx"],
+      "sources": ["packages/ui/src/components/views/GitView.tsx", "packages/ui/src/components/views/git/GitHeader.tsx", "packages/ui/src/components/views/git/StashesDialog.tsx", "packages/web/server/lib/git/service.ts"],
       "what": "Stash saves untracked work, search finds the named stash, Apply retains it and Pop removes it after restoring.",
       "reach": "Git header > Repository views > Stashes, or Stashes in the clean state.",
-      "proof": "Stashing removes the new file, Apply restores it while retaining the row, and Pop restores it and leaves the stash list empty.",
+      "proof": "Stashing removes the new file and counts it in the stash row, Apply restores it while retaining the row, and Pop restores it and leaves the stash list empty.",
       "scenarios": [
         {
           "id": "roundtrip", "kind": "path",
@@ -506,6 +506,7 @@
             {"do": "type", "text": "Net saved work"},
             {"do": "click", "on": "dialog.button", "text": "Stash 1 files"},
             {"do": "see", "on": "git.stashRow", "text": "Net saved work"},
+            {"do": "see", "on": "git.stashRow", "text": "1 files"},
             {"do": "file.expect", "path": "stash.txt", "exists": false},
             {"do": "click", "on": "git.stashSearch"},
             {"do": "type", "text": "zzzz-missing-stash"},

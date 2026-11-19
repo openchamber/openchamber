@@ -200,21 +200,28 @@ export function changeRequestCheckSource(provider: SourceControlProvider | undef
     return `${changeRequestNoun(provider)} ${ci === 'pipeline' ? 'pipeline job' : 'check'}`;
 }
 
+// Selections read as the user's own words to the agent: a bare "Comment on <file>" header
+// read like a review comment from someone else, and models drafted replies to it.
+const userWords = (text: string | undefined, subject: string) => (
+    text ? `\n\nThe user wrote this to you about ${subject}:\n${text}` : ''
+);
+
 export function formatContextText(payload: ContextPartPayload): string {
     switch (payload.kind) {
         case 'code-comment': {
             const originNote = payload.origin ? ` ${describeDiffCommentOrigin(payload.origin)}` : '';
             if (payload.startLine === 0 && payload.endLine === 0) {
-                return `Comment on \`${payload.fileLabel}\` (the whole file)${originNote}:\n\n${payload.text}`;
+                return `The user wrote this to you about \`${payload.fileLabel}\` (the whole file)${originNote}:\n\n${payload.text}`;
             }
             const range = `lines ${payload.startLine}-${payload.endLine}`;
             const sideNote = payload.source === 'diff' && payload.side ? ` (${payload.side})` : '';
-            const quoted = `Comment on \`${payload.fileLabel}\` ${range}${sideNote}${originNote}:\n\`\`\`${payload.language}\n${payload.code}\n\`\`\``;
-            if (payload.changedCode === undefined) return `${quoted}\n\n${payload.text}`;
-            const now = payload.changedCode
-                ? `The file changed after this comment was written, and the quoted code is no longer there. These lines now hold:\n\`\`\`${payload.language}\n${payload.changedCode}\n\`\`\``
-                : 'The file changed after this comment was written, and the quoted code is no longer there.';
-            return `${quoted}\n\n${now}\n\n${payload.text}`;
+            const quoted = `The user selected \`${payload.fileLabel}\` ${range}${sideNote}${originNote}:\n\`\`\`${payload.language}\n${payload.code}\n\`\`\``;
+            const now = payload.changedCode === undefined
+                ? ''
+                : payload.changedCode
+                    ? `\n\nThe file changed after the user selected these lines, and the quoted code is no longer there. These lines now hold:\n\`\`\`${payload.language}\n${payload.changedCode}\n\`\`\``
+                    : '\n\nThe file changed after the user selected these lines, and the quoted code is no longer there.';
+            return `${quoted}${now}${userWords(payload.text, 'these lines')}`;
         }
         case 'terminal':
             return appendTerminalContexts('', [{
@@ -233,11 +240,11 @@ export function formatContextText(payload: ContextPartPayload): string {
                 ? ` lines ${payload.startLine}-${payload.endLine}`
                 : '';
             const quoted = payload.quote.split('\n').map((line) => `> ${line}`).join('\n');
-            return `Comment on this fragment of \`${payload.fileLabel}\`${location}:\n${quoted}${payload.text ? `\n\n${payload.text}` : ''}`;
+            return `The user selected this fragment of \`${payload.fileLabel}\`${location}:\n${quoted}${userWords(payload.text, 'it')}`;
         }
         case 'chat-quote': {
             const quoted = payload.quote.split('\n').map((line) => `> ${line}`).join('\n');
-            return `Comment on this fragment of an earlier message in this conversation:\n${quoted}${payload.text ? `\n\n${payload.text}` : ''}`;
+            return `The user selected this fragment of an earlier message in this conversation:\n${quoted}${userWords(payload.text, 'it')}`;
         }
         case 'pr-check':
             return `Attached failed ${changeRequestCheckSource(payload.provider)} (${payload.label}):\n\`\`\`\n${payload.output}\n\`\`\`${payload.text ? `\n\n${payload.text}` : ''}`;

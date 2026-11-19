@@ -7,7 +7,7 @@ export const isNumber = (value: unknown): value is number => typeof value === 'n
 export const isMissingFile = (value: unknown): value is { code: 'ENOENT' } =>
   value !== null && typeof value === 'object' && 'code' in value && value.code === 'ENOENT';
 
-export const isJsonObject = (value: JsonValue | undefined): value is { [key: string]: JsonValue | undefined } =>
+export const isJsonObject = (value: unknown): value is { [key: string]: JsonValue | undefined } =>
   value !== null && typeof value === 'object';
 
 export const isSessionRecords = (value: JsonValue | undefined): value is SessionRecords => isJsonObject(value);

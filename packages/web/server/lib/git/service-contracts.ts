@@ -121,9 +121,9 @@ export interface WorktreeServerOptions extends BootstrapOptions {
   contributorSource?: ContributorSource | null;
   contributorProvenance?: {
     compareAndSwap(directory: string, revision: number, record: ContributorProvenanceInput): Promise<{ revision: number }>;
-  };
+  } | undefined;
   changeRequestLocalBranch?: ChangeRequestLocalBranch;
-  hydrateCheckout?: ((input: { directory: string; parentRemoteName: string }) => Promise<CheckoutHydration | null>) | undefined;
+  hydrateCheckout?: ((input: { directory: string; parentRemoteName: string }) => Promise<CheckoutHydration | null | undefined>) | undefined;
 }
 export interface WorktreeCandidate {
   name: string;
@@ -179,31 +179,31 @@ export interface WorktreeRemovalInput {
   directory?: string;
   deleteLocalBranch?: boolean;
   cancelSetup?: boolean;
-  teardownCommand?: string;
+  teardownCommand?: string | undefined;
   disposeInstance?: ((directory: string) => Promise<void>) | undefined;
-  isContributorCheckout?: (directory: string) => Promise<boolean>;
+  isContributorCheckout?: ((directory: string) => Promise<boolean>) | undefined;
 }
 export interface WorktreeArchiveInput extends WorktreeRemovalInput {
-  id?: string;
-  title?: string;
-  sessionIds?: string[];
+  id?: unknown;
+  title?: unknown;
+  sessionIds?: unknown;
 }
 export interface IntegratePlanInput {
-  repoRoot?: string;
-  sourceBranch?: string;
-  targetBranch?: string;
-  commits?: string[];
+  repoRoot?: unknown;
+  sourceBranch?: unknown;
+  targetBranch?: unknown;
+  commits?: unknown;
 }
 export interface IntegrateStateInput extends IntegratePlanInput {
-  tempWorktreePath?: string;
-  cleanTargetWorktrees?: string[];
-  remainingCommits?: string[];
-  currentCommit?: string;
+  tempWorktreePath?: unknown;
+  cleanTargetWorktrees?: unknown;
+  remainingCommits?: unknown;
+  currentCommit?: unknown;
 }
 export interface DiffOptions {
-  path?: string;
+  path?: string | undefined;
   staged?: boolean;
-  contextLines?: number;
+  contextLines?: number | undefined;
   previousPath?: string | undefined;
 }
 export interface RangeOptions extends DiffOptions {
@@ -277,11 +277,11 @@ export interface SnapshotOptions {
   oldValue?: string;
 }
 export interface LogOptions {
-  maxCount?: number;
+  maxCount?: number | undefined;
   all?: boolean;
-  file?: string;
-  from?: string;
-  to?: string;
+  file?: string | undefined;
+  from?: string | undefined;
+  to?: string | undefined;
 }
 
 export type HunkAction = 'stage' | 'unstage' | 'discard';

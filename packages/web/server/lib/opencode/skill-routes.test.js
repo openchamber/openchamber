@@ -625,7 +625,7 @@ describe('skill-routes directory soft fallback', () => {
 
   it('resolves account-token identities for scan and install', async () => {
     projectRoot = createTempProject();
-    const account = { provider: 'github', instance: 'github.com', accountId: 'account-one' };
+    const account = { provider: 'github', instance: 'github.com', accountId: 'account-one', credentialRevision: 2 };
     const profile = { id: 'work', transport: 'account', account };
     const credentialResolver = { resolve: async () => ({}) };
     const resolved = [];

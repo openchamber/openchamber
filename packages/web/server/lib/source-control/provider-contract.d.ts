@@ -1,7 +1,9 @@
 
 import type { ProviderId } from './provider-id.js';
-import type { SourceControlMutationTarget } from '@openchamber/sdk';
-import type { MutationRecord } from './mutation-storage.js';
+import type { SourceControlChangeRequestSource, SourceControlJson, SourceControlJsonObject, SourceControlMutationTarget } from '@openchamber/sdk';
+import type { MutationCompletionInput, MutationRecord } from './mutation-storage.js';
+import type { BindingMutationTarget } from './binding-service-contracts.js';
+import type { LiveSummariesResult, ThreadRef } from '../tracked-items/contracts.js';
 export type { ProviderId } from './provider-id.js';
 
 export type ChangeRequestTerm = 'pullRequest' | 'mergeRequest' | 'change';
@@ -47,7 +49,7 @@ export interface ProviderDescriptor {
   instance: {
     form: 'host' | 'origin';
     defaultInstances: readonly string[];
-    normalize(raw: string): string;
+    normalize(raw: string | undefined): string;
     origin(instance: string): URL;
   };
   repositoryPath: 'owner/name' | 'namespace/name' | 'path';
@@ -62,7 +64,7 @@ export interface ProviderDescriptor {
   urls: { thread: { hosts: readonly string[] | 'any'; pattern: RegExp } };
   trackedItems: { nestedOwners: boolean; defaultInstance: string | null; batchLimit: number };
   limits: { commentMaxLength: number; reviewerId: RegExp; labelsMax: number; reviewersMax: number };
-  identity: { noReplyEmail: ((user: { id?: number | undefined; login: string }) => string | null) | null };
+  identity: { noReplyEmail: ((user: { id?: number | string | undefined; login: string }) => string | null) | null };
   settings: ReadonlyArray<{ key: string; type: SettingsFieldKind; secret: boolean; scope: 'global' | 'instance' }>;
   instances: { legacyFlow: { instance: string; kind: 'github-com-device' } | null };
   presentation: {
@@ -195,11 +197,28 @@ export interface ProviderReadContext {
   linked?: boolean;
 }
 
-export interface ProviderMutationContext extends ProviderReadContext {
-  idempotencyKey: string;
-  target: SourceControlMutationTarget;
+export interface ReadContextRequest {
+  directory?: unknown;
+  repositoryId?: unknown;
+  provider?: unknown;
+  instance?: unknown;
+  accountId?: unknown;
+  bindingRevision?: unknown;
+  primaryRemote?: unknown;
+  linked?: unknown;
 }
 
+export interface ProviderMutationContext extends ProviderReadContext {
+  idempotencyKey: string;
+  target: BindingMutationTarget;
+}
+type OptionalTargetField = 'number' | 'head' | 'base' | 'headSha';
+export type ResolvedMutationTarget = Omit<SourceControlMutationTarget, OptionalTargetField> & {
+  [Field in OptionalTargetField]?: SourceControlMutationTarget[Field] | undefined;
+};
+
+type ResolvedMutation<ProviderTarget> = { providerTarget: ProviderTarget; target: ResolvedMutationTarget };
+type MutationReconciliation = { state: string; result?: MutationCompletionInput['result'] };
 type ReadInput = { session: ProviderSession; context: ProviderReadContext; directory: string; remote: string };
 type ProjectSelector = { owner: string; name: string };
 
@@ -207,21 +226,21 @@ export interface ProviderImplementation<MutationInput = Json, ProviderTarget = J
   descriptor: ProviderDescriptor;
   classifyFailure?(error: Error): string;
   auth: {
-    capabilities?(input: { instance: string }): Promise<{ authentication: boolean; authenticationMethods: Json }>;
-    status?(input: { instance: string }): Promise<Json>;
-    accounts?(input: { instance: string }): Promise<Json[]>;
+    capabilities(input: { instance: string }): Promise<{ authentication: boolean; authenticationMethods: Json }>;
+    status(input: { instance: string }): Promise<object>;
+    accounts(input: { instance: string }): Promise<readonly object[]>;
     startDeviceFlow?(input: { instance: string }): Promise<{
       flow: { deviceCode: string; clientId: string; expiresIn: number };
       result: { userCode: string; verificationUri: string; expiresIn: number; interval: number; verificationUriComplete?: string };
     }>;
-    completeDeviceFlow?(input: { instance: string; deviceCode: string; clientId: string }, control: { consume(): void }): Promise<{ pending: boolean; body: Json }>;
-    connectToken?(input: { instance: string; token: string; username?: string }): Promise<Json>;
-    activate?(input: { instance: string; accountId: string }): Promise<Json>;
+    completeDeviceFlow?(input: { instance: string; deviceCode: string; clientId: string }, control: { consume(): void }): Promise<{ pending: boolean; body: object }>;
+    connectToken(input: { instance: string; token: string; username?: string }): Promise<object>;
+    activate(input: { instance: string; accountId: string }): Promise<object>;
     setCliDisabled?(input: { instance: string; disabled: boolean }): Promise<{ available: boolean; disabled: boolean }>;
-    remove?(input: { instance: string; accountId: string }): Promise<{ removed: boolean }>;
-    resolveAccount?(input: { instance: string; accountId?: string; orCurrent?: boolean }): Promise<ProviderSession>;
+    remove(input: { instance: string; accountId: string }): Promise<{ removed: boolean }>;
+    resolveAccount(input: { instance: string; accountId?: string; orCurrent?: boolean }): Promise<ProviderSession>;
     refreshOAuthToken?(input: { instance: string; refreshToken: string }): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number }>;
-    invalidateAccount?(input: { instance: string; accountId: string; persisted?: boolean; renew?: boolean }): Promise<boolean>;
+    invalidateAccount(input: { instance: unknown; accountId: unknown; persisted?: boolean; renew?: boolean }): Promise<boolean>;
     readCurrentAccountId(input: { instance: string }): Promise<string | null>;
     listInstances(): Promise<string[]>;
     readSshUrl?(input: { instance: string }): Promise<string | null>;
@@ -240,52 +259,60 @@ export interface ProviderImplementation<MutationInput = Json, ProviderTarget = J
     readCredential(input: { instance: string; credentialId: string; credentialRevision?: number }): Promise<TransportCredential | null>;
   };
   resources: {
-    changeRequestStatus?(input: ReadInput & { branch: string; force: boolean }): Promise<Json>;
-    listChangeRequests?(input: ReadInput & { page: number; query?: string; state: string; people: string; labels?: string[] }): Promise<Json>;
-    changeRequestContext?(input: ReadInput & {
-      number: number; project?: ProjectSelector; includeDiff: boolean; includeCIDetails: boolean; includeTimeline: boolean;
+    changeRequestStatus(input: ReadInput & { branch: string; force: boolean }): Promise<object>;
+    listChangeRequests(input: ReadInput & { page: number; query?: string | undefined; state: string; people: string; labels?: string[] }): Promise<object>;
+    changeRequestContext(input: ReadInput & {
+      number: number; project?: ProjectSelector | undefined; includeDiff: boolean; includeCIDetails: boolean; includeTimeline: boolean;
       revision?: string;
+    }): Promise<object>;
+    listIssues?(input: ReadInput & { page: number; query?: string | undefined; state: string; people: string; labels?: string[] }): Promise<object>;
+    getIssue?(input: ReadInput & { number: number; project?: ProjectSelector | undefined }): Promise<object | null>;
+    issueComments?(input: ReadInput & { number: number; project?: ProjectSelector | undefined }): Promise<object>;
+    projectUpstream(input: ReadInput): Promise<object>;
+    projectBranches(input: ReadInput & { project: ProjectSelector }): Promise<object>;
+    listLabels?(input: ReadInput & { project: ProjectSelector }): Promise<object>;
+    listReviewerCandidates?(input: ReadInput & { project: ProjectSelector }): Promise<object>;
+    readUpload?(input: ReadInput & { project: ProjectSelector; secret: string; filename: string; range?: string | undefined; signal: AbortSignal }): Promise<Response>;
+    readChangeRequestPatch?(input: Omit<ReadInput, 'context'> & {
+      number: number; sourceRepo?: { owner: string; repo: string } | null | undefined; revision?: string; linked?: true;
     }): Promise<Json>;
-    listIssues?(input: ReadInput & { page: number; query?: string; state: string; people: string; labels?: string[] }): Promise<Json>;
-    getIssue?(input: ReadInput & { number: number; project?: ProjectSelector }): Promise<Json>;
-    issueComments?(input: ReadInput & { number: number; project?: ProjectSelector }): Promise<Json>;
-    projectUpstream?(input: ReadInput): Promise<Json>;
-    projectBranches?(input: ReadInput & { project: ProjectSelector }): Promise<Json>;
-    listLabels?(input: ReadInput & { project: ProjectSelector }): Promise<Json>;
-    listReviewerCandidates?(input: ReadInput & { project: ProjectSelector }): Promise<Json>;
-    readUpload?(input: ReadInput & { project: ProjectSelector; secret: string; filename: string; range?: string; signal: AbortSignal }): Promise<Response>;
-    readChangeRequestPatch?(input: ReadInput & { number: number; sourceRepo?: { owner: string; repo: string }; revision?: string }): Promise<Json>;
-    readChangeRequestFile?(input: ReadInput & {
-      number: number; sourceRepo?: { owner: string; repo: string }; path: string; previousPath?: string; status?: string; revision?: string;
-      binary?: boolean;
+    readChangeRequestFile?(input: Omit<ReadInput, 'context'> & {
+      number: number; sourceRepo?: { owner: string; repo: string } | null | undefined; path: string; previousPath?: string | undefined; status?: string;
+      revision?: string; binary?: true | undefined; linked?: true;
     }): Promise<Json>;
-    liveSummaries?(input: { session: ProviderSession; refs: Json[]; issueRefs: Json[]; discussionRefs: Json[] }): Promise<Json>;
+    liveSummaries?(input: { session: ProviderSession; refs: ThreadRef[]; issueRefs: ThreadRef[]; discussionRefs: ThreadRef[]; details: boolean }): Promise<Omit<LiveSummariesResult, 'connected'>>;
     readChangeRequestHead?(input: ReadInput & { number: number }): Promise<{
       project: { id: string; owner: string; name: string }; headSha: string; headBranch: string; headOwner: string;
     }>;
     resolveChangeRequestSource?(input: ReadInput & {
       project: { id: string; owner: string; name: string }; number: number;
       expectedHeadSha: string; requestedRemoteName: string;
-    }): Promise<Json>;
-    references?(input: ReadInput & { kind: 'issue' | 'pull' | 'discussion'; state: string; people: string; query: string; cursor: string | null }): Promise<Json>;
-    referencesAcross?(input: { body: Json; validateReadContext(context: Json): Promise<ProviderReadContext> }): Promise<Json>;
-    referenceDetail?(input: ReadInput & { project: ProjectSelector; number: number; host: string; kind: 'item' | 'discussion' }): Promise<Json>;
-    reviewState?(input: ReadInput & { project: ProjectSelector; number: number }): Promise<Json>;
-    referenceStatuses?(input: Omit<ReadInput, 'session'> & { pulls: string }): Promise<Json>;
+    }): Promise<ResolvedChangeRequestSource>;
+    references?(input: ReadInput & { kind: 'issue' | 'pull' | 'discussion'; state: string; people: string; query: string; cursor: string | null }): Promise<object>;
+    referencesAcross?(input: { body: SourceControlJson; validateReadContext(context: ReadContextRequest): Promise<ProviderReadContext | null> }): Promise<object>;
+    referenceDetail?(input: ReadInput & { project: ProjectSelector; number: number; host: string; kind: 'item' | 'discussion' }): Promise<object>;
+    reviewState?(input: ReadInput & { project: ProjectSelector; number: number }): Promise<object>;
+    referenceStatuses?(input: Omit<ReadInput, 'session'> & { pulls: string }): Promise<object>;
   };
   mutations?: {
-    routes: string[];
-    prepare(input: { route: string; input: Json; context: ProviderMutationContext; actor: AccountIdentity; credential: { accountId: string; credentialRevision: number } }): {
-      kind: string; input: MutationInput; digest(target: SourceControlMutationTarget): string;
+    routes: readonly string[];
+    prepare(input: { route: string; input: SourceControlJsonObject; context: ProviderMutationContext; actor: AccountIdentity; credential: { accountId: string; credentialRevision: number } }): {
+      kind: string; input: MutationInput; digest(target: ResolvedMutationTarget): string;
     };
-    resolveTarget(input: { session: ProviderSession; context: ProviderMutationContext; kind: string; input: MutationInput; replayOf?: MutationRecord }): Promise<{ providerTarget: ProviderTarget; target: SourceControlMutationTarget }>;
-    perform(input: { session: ProviderSession; route: string; kind: string; input: MutationInput; resolved: { providerTarget: ProviderTarget; target: SourceControlMutationTarget } }): Promise<Json>;
-    reconcile(input: { session: ProviderSession; route: string; kind: string; input: MutationInput; resolved: { providerTarget: ProviderTarget; target: SourceControlMutationTarget } }): Promise<{ state: string; result?: Json }>;
+    resolveTarget(input: { session: ProviderSession; context: ProviderMutationContext; kind: string; input: MutationInput; replayOf?: MutationRecord }): ResolvedMutation<ProviderTarget> | Promise<ResolvedMutation<ProviderTarget>>;
+    perform(input: { session: ProviderSession; route: string; kind: string; input: MutationInput; resolved: ResolvedMutation<ProviderTarget> }): Promise<MutationCompletionInput['result']>;
+    reconcile(input: { session: ProviderSession; route: string; kind: string; input: MutationInput; resolved: ResolvedMutation<ProviderTarget> }): MutationReconciliation | Promise<MutationReconciliation>;
     afterSuccess?(input: { session: ProviderSession; target: SourceControlMutationTarget }): Promise<void>;
-    classifyError?(error: Error): 'failed' | 'outcome-unknown';
-    presentError?(error: Error): { status: number; body: Json };
+    classifyError?(cause: unknown): 'failed' | 'outcome-unknown';
+    presentError?(cause: unknown): { status: number; body: object };
   };
 }
+
+export type ResolvedChangeRequestSource = SourceControlChangeRequestSource & {
+  context: ProviderReadContext;
+  requestedRemoteName: string;
+  remoteUrl?: string;
+};
 
 export type ProviderMutations<MutationInput = Json, ProviderTarget = Json> = NonNullable<ProviderImplementation<MutationInput, ProviderTarget>['mutations']>;
 

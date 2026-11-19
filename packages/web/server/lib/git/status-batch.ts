@@ -1,20 +1,13 @@
 import { z } from 'zod';
-import type { ServerResponse } from 'node:http';
+import type { Application } from '../shared/http-contracts.js';
 import type { getStatus } from './service.js';
 
-export interface StatusBatchDirectoryResult {
-  isGitRepository: boolean;
-  status: Awaited<ReturnType<typeof getStatus>>;
-}
+export type NonRepositoryStatus = { current: ''; tracking: null; ahead: 0; behind: 0; files: []; isClean: true };
+export type StatusBatchDirectoryResult =
+  | { isGitRepository: true; status: Awaited<ReturnType<typeof getStatus>> }
+  | { isGitRepository: false; status: NonRepositoryStatus };
 
-interface StatusBatchResponse extends ServerResponse {
-  status(code: number): this;
-  json(value: { error: string }): this;
-}
-
-export interface StatusBatchApp {
-  post(path: string, handler: (request: { body: unknown }, response: StatusBatchResponse) => Promise<StatusBatchResponse | undefined>): void;
-}
+export type StatusBatchApp = Pick<Application, 'post'>;
 
 const MAX_CONCURRENT_STATUS_READS = 4;
 

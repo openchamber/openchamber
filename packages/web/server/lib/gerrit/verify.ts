@@ -42,7 +42,7 @@ function parseGerritAccount(payload: GerritJson) {
   if (!stringValue(payload.username) || !payload.username.trim()) {
     throw responseError(400, { error: 'This Gerrit account has no username for Git over HTTP', code: 'GERRIT_ACCOUNT_WITHOUT_USERNAME' });
   }
-  const user: TransportCredential['user'] = { id: payload._account_id, login: payload.username.trim() };
+  const user: TransportCredential['user'] & { login: string } = { id: payload._account_id, login: payload.username.trim() };
   if (stringValue(payload.name) && payload.name) user.name = payload.name;
   if (stringValue(payload.email) && payload.email) user.email = payload.email;
   const avatar = Array.isArray(payload.avatars) ? payload.avatars.find((entry): entry is { [key: string]: GerritJson } & { url: string } => entry !== null && plainObject(entry) && stringValue(entry.url) && Boolean(entry.url)) : null;

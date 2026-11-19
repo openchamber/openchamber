@@ -189,11 +189,11 @@ export function createPermissionAutoAcceptRuntime({
     return sessions.get(sessionId) ?? null;
   };
 
-  const resolveLineageMode = async (sessionId: JsonValue, directory?: PermissionDirectory) => {
+  const resolveLineageMode = async (sessionId: JsonValue | undefined, directory?: PermissionDirectory) => {
     await load();
     await writePromise.catch(() => undefined);
     const seen = new Set<JsonValue>();
-    let current: JsonValue = sessionId;
+    let current: JsonValue | undefined = sessionId;
     let currentDirectory = directory;
     while (current && !seen.has(current)) {
       await pendingForkModes.get(current);
@@ -275,7 +275,7 @@ export function createPermissionAutoAcceptRuntime({
     return task;
   };
 
-  const isPermissionAutoAnswered = async (sessionId: JsonValue, directory?: PermissionDirectory, permissionId?: JsonValue) => {
+  const isPermissionAutoAnswered = async (sessionId: JsonValue | undefined, directory?: PermissionDirectory, permissionId?: JsonValue) => {
     const wasReplied = async () => {
       const outcome = permissionId ? outcomes.get(permissionId) : undefined;
       return outcome ? (await outcome) === 'replied' : false;

@@ -2,8 +2,8 @@
 
 ## Ownership
 
-`index.js` enables source maps before dynamically loading `runtime.js`. Node collects maps only for modules loaded after `setSourceMapsSupport` is called, which is why the runtime is a dynamic import; Bun handles maps itself and does not expose that API, hence the optional call. In a source checkout, the Node entry also registers source resolution before that import.
-`runtime.js` composes the HTTP server and feature runtimes for web, desktop and
+`index.js` enables source maps before dynamically loading `runtime.ts` (through its `.js` specifier). Node collects maps only for modules loaded after `setSourceMapsSupport` is called, which is why the runtime is a dynamic import; Bun handles maps itself and does not expose that API, hence the optional call. In a source checkout, the Node entry also registers source resolution before that import.
+`runtime.ts` composes the HTTP server and feature runtimes for web, desktop and
 mobile clients. Each feature owns its contract in `lib/<feature>/DOCUMENTATION.md`.
 This document covers composition, process-wide helpers, enterprise policy and
 server update ownership. VS Code runs its own host and shares only the helpers
@@ -365,21 +365,17 @@ belong to the coordinator. A folder assignment does not authorize a dependency
 addition, a branch change, a commit, a push, or a wider refactor. The `git mv`
 rename in step 2 is the assignment's only authorized git write.
 
-### Dependency order
+### The conversion is closed
 
-Run `bun run --cwd packages/web conversion:waves` to regenerate the order.
-Counts are direct implementation files, tests and declarations, so parent and
-child assignments do not overlap. Runtime dependencies include literal static
-imports, re-exports, dynamic imports and `require`, excluding test imports.
-The gatekeeper's `.cjs` program is a copied runtime asset and stays outside
-the `.js`-to-`.ts` assignments.
-The first waves contain folders with no dependency on another unconverted
-folder. Completed TypeScript folders already satisfy their dependents.
-
-The remaining groups are strongly connected components in dependency-first
-order. A multi-folder group is a real cycle at folder granularity and has no
-leaf-first ordering. Convert its folders as one coordinated wave using the
-mixed-JavaScript check, then validate the combined diff before advancing.
+Every implementation module under `server` and `bin` is TypeScript, and
+`type-check:server` fails on a new `.js` one. Six files stay JavaScript because
+Node, git or a child process runs each by file name, without a loader:
+`bin/cli.js`, `server/index.js`, `lib/git/credential-helper.js`,
+`lib/git/repository-credential-helper.js`, `lib/git/ssh-wrapper.js` and
+`lib/dictation/local/worker-process.js`. They hold no logic of their own; each
+imports its typed runtime. The list is `JAVASCRIPT_ENTRIES` in
+`packages/web/scripts/check-server-types.mjs`. Tests, fixtures and the
+gatekeeper's `.cjs` program are outside the rule.
 
 ## Decisions
 

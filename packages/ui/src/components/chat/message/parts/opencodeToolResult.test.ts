@@ -40,6 +40,10 @@ describe('parseOpencodeToolResult', () => {
     const read = parseOpencodeToolResult('schedule_create', JSON.stringify(gated));
     expect(read?.tool === 'schedule_create' ? read.data.until : undefined).toEqual({ type: 'shell', run: 'gh pr view 1 --json merged -q .merged' });
     expect(read?.tool === 'schedule_create' ? read.data.endsAt : undefined).toBe('2026-11-09T11:00:00.000Z');
+    const automation = { id: 'aut_1', name: 'CI', trigger: { type: 'event', server: 'github', event: 'push' }, tz: 'Europe/Kyiv', action: { type: 'code', code: 'return null' }, status: 'active', runCount: 0 };
+    const listed = parseOpencodeToolResult('automation_list', JSON.stringify({ now: '2026-11-19T10:00:00Z', automations: [automation, { id: 'aut_2' }] }));
+    expect(listed?.tool === 'automation_list' ? listed.data.automations.map((entry) => entry.trigger.type) : undefined).toEqual(['event']);
+    expect(opencodeToolVerb('opencode.automation_create')?.key).toBe('chat.toolPart.opencode.action.automationCreate');
     expect(parseOpencodeToolResult('worktree_list', JSON.stringify({ worktrees: [{ directory: '/repo', type: 'root' }] }))).not.toBeNull();
   });
 

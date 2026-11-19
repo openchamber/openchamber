@@ -3,6 +3,7 @@ import { isSpaceDirectory } from '../spaces/dispatcher.js';
 import { sessionIdSchema, warmingMinutesSchema } from './runtime.js';
 import type { createSessionWarmingRuntime } from './runtime.js';
 import type { SessionWarmingSnapshot } from './contracts.js';
+import type { Response } from '../shared/http-contracts.js';
 
 const modeSchema = z.object({ mode: z.enum(['off', 'all', 'session']) });
 const durationSchema = z.object({ scope: z.enum(['all', 'session']), minutes: warmingMinutesSchema });
@@ -17,10 +18,7 @@ interface SessionWarmingRouteOptions {
   setGlobalWarmingDuration: (minutes: number) => void;
 }
 
-interface RouteResponse {
-  status: (code: number) => RouteResponse;
-  json: (body: SessionWarmingSnapshot | { error: unknown }) => RouteResponse;
-}
+type RouteResponse = Response<SessionWarmingSnapshot | { error: unknown }>;
 
 type RouteHandler = (req: { body: unknown; params: Record<string, string | undefined> }, res: RouteResponse) => RouteResponse;
 

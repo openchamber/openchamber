@@ -4,7 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
-import { batchByCommandLength, findPairedDeclarations, findServerTypeScript } from './check-server-types.mjs';
+import { batchByCommandLength, findPairedDeclarations, findServerJavaScript, findServerTypeScript } from './check-server-types.mjs';
 
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
 
@@ -33,7 +33,7 @@ test('the conversion gate rejects declaration twins in every server and CLI fold
   }
 });
 
-test('strict checking admits JS dependencies and rejects unsafe types, overrides and source extensions', () => {
+test('strict checking rejects unsafe types, overrides and source extensions', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-server-strict-'));
   try {
     fs.mkdirSync(path.join(root, 'server'));
@@ -44,11 +44,8 @@ test('strict checking admits JS dependencies and rejects unsafe types, overrides
       extends: path.join(webRoot, 'tsconfig.server-check.json'),
       include: ['server/**/*.ts', 'bin/**/*.ts'],
     }));
-    fs.writeFileSync(path.join(root, 'server/legacy.js'), 'export const legacy = { label: "legacy" };');
     fs.writeFileSync(path.join(root, 'server/typed.ts'), 'export const value = 1;');
     fs.writeFileSync(path.join(root, 'server/valid.ts'), `
-      import { legacy } from './legacy.js';
-      export const label: string = legacy.label;
       export const answer: number = 42;
     `);
     const run = () => spawnSync(process.execPath, [
@@ -98,6 +95,25 @@ test('server lint checks a root other than this package', () => {
       process.exitCode = checkServerTypes(${JSON.stringify(root)}, true);
     `], { encoding: 'utf8' });
     expect(linted.status, linted.stdout + linted.stderr).toBe(0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a new JavaScript module under server or bin is refused; entries, tests and assets are not', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-server-js-'));
+  try {
+    for (const file of [
+      'server/index.js', 'bin/cli.js', 'server/lib/git/ssh-wrapper.js',
+      'server/lib/leaf/value.test.js', 'server/lib/leaf/store.fixture.js', 'server/lib/spaces/program.cjs',
+      'server/built-in-extensions/panel/index.js', 'server/lib/leaf/built-in-extensions/helper.js',
+      'server/lib/leaf/value.js', 'bin/lib/command.js',
+    ]) {
+      fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      fs.writeFileSync(path.join(root, file), '');
+    }
+    fs.mkdirSync(path.join(root, 'server/lib/folder.js'));
+    expect(findServerJavaScript(root).sort()).toEqual(['bin/lib/command.js', 'server/lib/leaf/built-in-extensions/helper.js', 'server/lib/leaf/value.js']);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

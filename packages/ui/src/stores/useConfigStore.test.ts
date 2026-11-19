@@ -1,8 +1,12 @@
-import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { Agent, Config } from '@/lib/opencode/model';
 import type { ModelMetadata } from '@/types';
 import type { DesktopSettings } from '@/lib/desktop';
-import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { directoryEnvironment } from './test-support/directoryEnvironment';
+import { flushDeferredStorage } from './utils/safeStorage';
+
+const environment = directoryEnvironment({ home: '/workspace', fakeTimers: false });
 
 const DIRECTORY = '/workspace/project';
 const OTHER_DIRECTORY = '/workspace/other';
@@ -20,9 +24,6 @@ let listAgentsCalls = 0;
 let liveAgents: TestAgent[] = [];
 let listAgentsImpl: ((directory?: string | null) => Promise<TestAgent[]>) | null = null;
 let getProvidersForConfigImpl: ((directory?: string | null) => Promise<TestProviderResponse>) | null = null;
-let withDirectoryCalls: Array<string | null> = [];
-let currentFetchDirectory: string | null = DIRECTORY;
-let configListener: ((event: { scopes: string[]; source?: string; timestamp: number }) => void | Promise<void>) | null = null;
 let persistedOpenChamberSettings: DesktopSettings | null = {};
 let settingsLoadCalls = 0;
 let checkHealthImpl = async () => true;
@@ -56,6 +57,14 @@ const makeStorage = (): Storage => ({
     return storage.size;
   },
 }) as Storage;
+const seedConfig = (value: string) => {
+  flushDeferredStorage();
+  storage.set(STORAGE_KEY, value);
+};
+const persistedConfig = () => {
+  flushDeferredStorage();
+  return storage.get(STORAGE_KEY) ?? '{}';
+};
 
 const model = (providerId: string, modelId: string, variantIds?: string[]) => ({
   id: `${providerId}/${modelId}`,
@@ -118,153 +127,90 @@ const deferred = <T,>() => {
   return { promise, resolve, reject };
 };
 
-mock.module('@/stores/utils/safeStorage', () => ({
-  flushDeferredStorage: () => {},
-  listStorageKeys: () => [],
-  getDeferredSafeStorage: () => makeStorage(),
-  getSafeStorage: () => makeStorage(),
-  getSafeSessionStorage: () => makeStorage(),
-  createDeferredSafeJSONStorage: () => {
-    const testStorage = makeStorage();
-    return {
-      getItem: (name: string) => {
-        const value = testStorage.getItem(name);
-        return value === null ? null : JSON.parse(value);
-      },
-      setItem: (name: string, value: unknown) => {
-        testStorage.setItem(name, JSON.stringify(value));
-      },
-      removeItem: (name: string) => {
-        testStorage.removeItem(name);
-      },
-    };
-  },
-}));
-
-mock.module('@/stores/useProjectsStore', () => ({
-  useProjectsStore: {
-    getState: () => projectsState,
-  },
-}));
-
 let directoryAvailability: 'available' | 'missing' | 'unknown' = 'available';
-let clientDirectory = DIRECTORY;
-let clientDirectoryMoves: Array<string | undefined> = [];
-
-const opencodeClientModule = await import('@/lib/opencode/client');
-mock.module('@/lib/opencode/client', () => ({
-  ...opencodeClientModule,
-  isOpencodeNotFound: () => false,
-  OpencodeApiError: Error,
-  normalizeOpencodeError: (operation: string, error: unknown) => new Error(`${operation}: ${String(error)}`),
-  opencodeClient: {
-    setDirectory: mock((directory?: string) => {
-      clientDirectoryMoves.push(directory);
-    }),
-    getDirectory: mock(() => clientDirectory),
-    getFilesystemHome: async () => '/workspace',
-    getFilesystemHomeInfo: async () => ({ home: '/workspace', chatsRoot: '/workspace/.config/openchamber/chats' }),
-    getSystemInfo: async () => ({ homeDirectory: '/workspace' }),
-    checkHealth: () => checkHealthImpl(),
-    probeHealth: (options?: { waitMs?: number }) => {
-      probeHealthOptions.push(options);
-      return probeHealthImpl ? probeHealthImpl() : checkHealthImpl().then((healthy) => (healthy ? 'healthy' : 'unhealthy'));
-    },
-    withDirectory: mock(async (directory: string | null, callback: () => Promise<unknown>) => {
-      withDirectoryCalls.push(directory);
-      const previous = currentFetchDirectory;
-      currentFetchDirectory = directory;
-      try {
-        return await callback();
-      } finally {
-        currentFetchDirectory = previous;
-      }
-    }),
-    getProviders: mock(async () => {
-      getProvidersCalls += 1;
-      const id = liveProviderIdsByDirectory.get(currentFetchDirectory ?? '') ?? liveProviderId;
-      return providerResponse(id, `${id}-model`, liveProviderVariants);
-    }),
-    getProvidersForConfig: mock(async (directory?: string | null) => {
-      getProvidersCalls += 1;
-      if (getProvidersForConfigImpl) {
-        return getProvidersForConfigImpl(directory);
-      }
-      const id = liveProviderIdsByDirectory.get(directory ?? '') ?? liveProviderId;
-      return providerResponse(id, `${id}-model`, liveProviderVariants);
-    }),
-    listAgents: mock(async (directory?: string | null) => {
-      listAgentsCalls += 1;
-      const impl = listAgentsImpl as ((directory?: string | null) => Promise<TestAgent[]>) | null;
-      return impl ? impl(directory) : liveAgents;
-    }),
-    getConfig: mock(async (directory?: string | null) => {
-      getConfigCalls += 1;
-      return configByDirectory.get(directory ?? '') ?? {};
-    }),
-    clearConfigCache: mock(() => undefined),
-    getDirectoryAvailability: mock(async () => directoryAvailability),
-    invalidateAgentList: mock(() => undefined),
-    clearAgentListRequests: mock(() => undefined),
-    clearProviderCatalogRequests: mock(() => undefined),
-  },
-}));
-
 let trustPendingDirectories = new Set<string>();
-const opencodeTrustModule = await import('@/lib/opencodeTrust');
-mock.module('@/lib/opencodeTrust', () => ({
-  ...opencodeTrustModule,
-  isOpenCodeTrustPending: async (directory: string) => trustPendingDirectories.has(directory),
-}));
-
-mock.module('@/contexts/runtimeAPIRegistry', () => ({
-  getRegisteredRuntimeAPIs: mock(() => null),
-}));
-
-const runtimeFetchModule = await import('@/lib/runtime-fetch');
-mock.module('@/lib/runtime-fetch', () => ({
-  ...runtimeFetchModule,
-  runtimeFetch: mock(async () => new Response(JSON.stringify({}), {
-    headers: { 'Content-Type': 'application/json' },
-  })),
-}));
-
-mock.module('@/lib/persistence', () => ({
-  updateDesktopSettings: mock(async () => ({ ok: true })),
-  reportSettingsSaveState: () => undefined,
-  // The store reads the shared document through this; an empty document
-  // keeps every OpenChamber default unset, like the settings route used to.
-  loadDesktopSettings: mock(async () => {
-    settingsLoadCalls += 1;
-    return loadSettingsImpl ? loadSettingsImpl() : persistedOpenChamberSettings;
-  }),
-}));
-
-mock.module('@/lib/startupTrace', () => ({
-  markStartupTrace: mock(() => undefined),
-  measureStartupTrace: mock(async (_name: string, callback: () => Promise<unknown>) => callback()),
-}));
-
-mock.module('@/lib/configSync', () => ({
-  emitConfigChange: mock(() => undefined),
-  scopeMatches: mock((event: { scopes: string[] }, scope: string) => event.scopes.includes('all') || event.scopes.includes(scope)),
-  subscribeToConfigChanges: mock((listener: typeof configListener) => {
-    configListener = listener;
-    return () => {
-      if (configListener === listener) {
-        configListener = null;
+const providerReads = new Map<string, { promise: Promise<TestProviderResponse>; remaining: number }>();
+environment.respondSettings(async (_url, init) => {
+  if (init?.method === 'PUT' || init?.method === 'PATCH') {
+    persistedOpenChamberSettings = { ...persistedOpenChamberSettings, ...JSON.parse(String(init.body)) };
+    return Response.json(persistedOpenChamberSettings);
+  }
+  settingsLoadCalls += 1;
+  const settings = loadSettingsImpl ? await loadSettingsImpl() : persistedOpenChamberSettings;
+  return settings === null ? Response.json({}, { status: 500 }) : Response.json(settings);
+});
+environment.respond(async (url, init) => {
+  const directory = decodeURIComponent(new Headers(init?.headers).get('x-opencode-directory') ?? '') || url.searchParams.get('directory') || DIRECTORY;
+  const providerKey = `${url.origin}:${directory}`;
+  if (['/api/model', '/api/model/default', '/api/provider'].includes(url.pathname)) {
+    let read = providerReads.get(providerKey);
+    if (!read) {
+      getProvidersCalls += 1;
+      const id = liveProviderIdsByDirectory.get(directory) ?? liveProviderId;
+      read = { promise: getProvidersForConfigImpl ? getProvidersForConfigImpl(directory) : Promise.resolve(providerResponse(id, `${id}-model`, liveProviderVariants)), remaining: 3 };
+      providerReads.set(providerKey, read);
+    }
+    try {
+      const catalog = await read.promise;
+      if (url.pathname === '/api/model') return Response.json({ data: catalog.models });
+      if (url.pathname === '/api/provider') return Response.json({ data: catalog.providers });
+      return Response.json({ data: catalog.default ? { providerID: catalog.default.providerID, modelID: catalog.default.id } : null });
+    } finally {
+      read.remaining -= 1;
+      if (!read.remaining && providerReads.get(providerKey) === read) providerReads.delete(providerKey);
+    }
+  }
+  if (url.pathname === '/api/agent') {
+    listAgentsCalls += 1;
+    try {
+      const agents = listAgentsImpl ? await listAgentsImpl(directory) : liveAgents;
+      return Response.json({ data: agents.map((agent) => ({ ...testAgent(agent.name, agent), ...agent, id: agent.name })) });
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
+      if (error.cause instanceof Error && 'data' in error.cause) return Response.json({ name: error.cause.name, data: error.cause.data }, { status: 400 });
+      if ('status' in error && error.status === 403) {
+        return Response.json(trustPendingDirectories.has(directory)
+          ? { error: 'Folder is not trusted', code: 'opencode_trust_required', directory }
+          : { error: error.message }, { status: 403 });
       }
-    };
-  }),
-}));
-
-// Runtime-generation guards subscribe at module load. Use real event delivery
-// so A -> B -> A exercises the lifecycle, not just unequal runtime strings.
-Object.defineProperty(globalThis, 'window', {
-  configurable: true,
-  value: Object.assign(new EventTarget(), { location: new URL('https://config-tests.example') }),
+      const tag = 'tag' in error ? String(error.tag) : 'UnknownError';
+      return Response.json({ _tag: tag, message: error.message.replace(/^agent.list failed(?: \(\d+\))?: /, '') }, { status: 400 });
+    }
+  }
+  if (url.pathname === '/api/config') {
+    getConfigCalls += 1;
+    return Response.json([{ type: 'document', path: null, info: configByDirectory.get(directory) ?? {} }]);
+  }
+  if (url.pathname === '/api/opencode/health') {
+    probeHealthOptions.push({ waitMs: Number(url.searchParams.get('wait')) || undefined });
+    const health = probeHealthImpl ? await probeHealthImpl() : await checkHealthImpl() ? 'healthy' : 'unhealthy';
+    if (health === 'unreachable') throw new Error('offline');
+    return Response.json({ healthy: health === 'healthy' });
+  }
+  if (url.pathname === '/api/fs/home') return Response.json({ home: '/workspace', chatsRoot: '/workspace/.config/openchamber/chats' });
+  if (url.pathname === '/api/fs/directory-stats') {
+    const { paths } = JSON.parse(String(init?.body));
+    return Response.json({ results: paths.map((path: string) => ({ path, isDirectory: directoryAvailability === 'available', reason: directoryAvailability === 'missing' ? 'not-found' : 'unavailable' })) });
+  }
+  if (url.pathname === '/api/opencode/trust') return Response.json({ directory, trusted: !trustPendingDirectories.has(directory), fingerprint: null, items: [] });
+  if (url.pathname === '/api/location' || url.pathname === '/api/session') return Response.json({}, { status: 401 });
+  return Response.json({});
 });
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: makeStorage() });
+Object.defineProperty(window, 'localStorage', { configurable: true, value: makeStorage() });
+const { useProjectsStore } = await import('./useProjectsStore');
+const { opencodeClient } = await import('@/lib/opencode/client');
+environment.cleanup(subscribeRuntimeEndpointChanged(() => opencodeClient.reconnectToRuntimeBaseUrl()));
+const { getOpenCodeTrustSnapshot, settleOpenCodeTrust, subscribeOpenCodeTrust } = await import('@/lib/opencodeTrust');
+const trustPrompts: string[] = [];
+environment.cleanup(subscribeOpenCodeTrust(() => {
+  const prompt = getOpenCodeTrustSnapshot();
+  if (!prompt) return;
+  trustPrompts.push(prompt.directory);
+  void settleOpenCodeTrust('skip');
+}));
+const { emitConfigChange } = await import('@/lib/configSync');
+const { invalidateSettingsCache, updateDesktopSettings } = await import('@/lib/persistence');
 
 const {
   useConfigStore,
@@ -283,6 +229,7 @@ const { useSelectionStore } = await import('@/sync/selection-store');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { useRoutingStore } = await import('@/stores/useRoutingStore');
 const { useUIStore } = await import('@/stores/useUIStore');
+let testRuntime = 0;
 
 test('configuration subscriptions stay singleton when setup is called again', async () => {
   const { subscribeConfigRuntimeChanges, subscribeConfigStoreChanges } = await import('./config/subscriptions');
@@ -316,7 +263,11 @@ test('configuration subscriptions stay singleton when setup is called again', as
 });
 
 describe('useConfigStore provider persistence', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://config-tests.example', runtimeKey: `config-test-${++testRuntime}` });
+    await environment.settle();
+    flushDeferredStorage();
+    invalidateSettingsCache();
     storage = new Map<string, string>();
     projectsState = {
       activeProjectId: 'project',
@@ -325,6 +276,11 @@ describe('useConfigStore provider persistence', () => {
         { id: 'other', path: OTHER_DIRECTORY, label: 'Other' },
       ],
     };
+    useProjectsStore.setState(projectsState);
+    providerReads.clear();
+    opencodeClient.clearAgentListRequests();
+    opencodeClient.clearProviderCatalogRequests();
+    opencodeClient.clearConfigCache();
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
       value: makeStorage(),
@@ -340,10 +296,8 @@ describe('useConfigStore provider persistence', () => {
     listAgentsImpl = null;
     getProvidersForConfigImpl = null;
     trustPendingDirectories = new Set<string>();
-    withDirectoryCalls = [];
-    currentFetchDirectory = DIRECTORY;
-    clientDirectory = DIRECTORY;
-    clientDirectoryMoves = [];
+    trustPrompts.length = 0;
+    opencodeClient.setDirectory(DIRECTORY);
     persistedOpenChamberSettings = {};
     settingsLoadCalls = 0;
     checkHealthImpl = async () => true;
@@ -670,7 +624,7 @@ describe('useConfigStore provider persistence', () => {
   });
 
   test('hydrates a legacy blob with catalogs for instant paint, refreshes to live data, then writes it slim', async () => {
-    storage.set(STORAGE_KEY, JSON.stringify({
+    seedConfig(JSON.stringify({
       state: {
         configRuntimeKey: getRuntimeKey(),
         activeDirectoryKey: DIRECTORY,
@@ -727,7 +681,7 @@ describe('useConfigStore provider persistence', () => {
     expect(reloaded.currentProviderId).toBe('fresh');
     expect(reloaded.currentModelId).toBe('fresh-model');
 
-    const rewritten = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
+    const rewritten = JSON.parse(persistedConfig());
     expect(rewritten.version).toBe(1);
     expect(rewritten.state.providers).toBeUndefined();
     expect(rewritten.state.directoryScoped[DIRECTORY].providers).toBeUndefined();
@@ -742,7 +696,7 @@ describe('useConfigStore provider persistence', () => {
       models: [{ ...model('legacy', 'legacy-model'), variants: { high: {} } }],
     };
     const validProvider = provider('valid', 'valid-model', ['low']);
-    storage.set(STORAGE_KEY, JSON.stringify({
+    seedConfig(JSON.stringify({
       state: {
         configRuntimeKey: getRuntimeKey(),
         activeDirectoryKey: DIRECTORY,
@@ -854,8 +808,8 @@ describe('useConfigStore provider persistence', () => {
       [DIRECTORY, 'active-live'],
       [OTHER_DIRECTORY, 'inactive-live'],
     ]);
-    expect(configListener).not.toBeNull();
-    await configListener?.({ scopes: ['providers'], timestamp: Date.now() });
+    emitConfigChange('providers');
+    await environment.settle();
 
     const state = useConfigStore.getState();
     expect(getProvidersCalls).toBe(2);
@@ -978,7 +932,7 @@ describe('useConfigStore provider persistence', () => {
       },
     });
 
-    const persisted = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
+    const persisted = JSON.parse(persistedConfig());
     expect(persisted.state.selectedProviderId).toBe('');
     expect(persisted.state.directoryScoped[DIRECTORY].selectedProviderId).toBe('');
   });
@@ -1898,6 +1852,7 @@ describe('useConfigStore provider persistence', () => {
 
     liveProviderId = 'second';
     persistedOpenChamberSettings = { defaultModel: 'second/second-model' };
+    await updateDesktopSettings({ defaultModel: 'second/second-model' });
     useConfigStore.getState().setSettingsDefaultModel('second/second-model');
 
     await useConfigStore.getState().loadProviders({ directory: DIRECTORY, source: 'test:defaults-cache-second' });
@@ -1932,7 +1887,7 @@ describe('useConfigStore provider persistence', () => {
 
   test('startup with an open chat loads the chat folder catalog, not the active project one (#5522)', async () => {
     const chatDirectory = '/workspace/.config/openchamber/chats/chat-1';
-    clientDirectory = chatDirectory;
+    opencodeClient.setDirectory(chatDirectory);
     const agentDirectories: Array<string | null | undefined> = [];
     listAgentsImpl = async (directory) => {
       agentDirectories.push(directory);
@@ -1944,11 +1899,11 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().isInitialized).toBe(true);
     expect(useConfigStore.getState().activeDirectoryKey).toBe(chatDirectory);
     expect(agentDirectories).toEqual([chatDirectory]);
-    expect(clientDirectoryMoves).toEqual([]);
+    expect(opencodeClient.getDirectory()).toBe(chatDirectory);
   });
 
   test('startup with a chat draft loads the Chats root catalog, not the active project one (#6283)', async () => {
-    clientDirectory = DIRECTORY;
+    opencodeClient.setDirectory(DIRECTORY);
     const agentDirectories: Array<string | null | undefined> = [];
     listAgentsImpl = async (directory) => {
       agentDirectories.push(directory);
@@ -1964,12 +1919,12 @@ describe('useConfigStore provider persistence', () => {
 
     expect(useConfigStore.getState().activeDirectoryKey).toBe('/workspace/.config/openchamber/chats');
     expect(agentDirectories).toEqual(['/workspace/.config/openchamber/chats']);
-    expect(clientDirectoryMoves).toEqual([]);
+    expect(opencodeClient.getDirectory()).toBe(DIRECTORY);
   });
 
   test('startup left a chat draft while the Chats root was loading keeps the opened session catalog (#6283)', async () => {
     const chatDirectory = '/workspace/.config/openchamber/chats/chat-1';
-    clientDirectory = chatDirectory;
+    opencodeClient.setDirectory(chatDirectory);
     const agentDirectories: Array<string | null | undefined> = [];
     listAgentsImpl = async (directory) => {
       agentDirectories.push(directory);
@@ -1990,7 +1945,7 @@ describe('useConfigStore provider persistence', () => {
   });
 
   test('startup without an open session still loads an unknown folder under the active project', async () => {
-    clientDirectory = '/workspace';
+    opencodeClient.setDirectory('/workspace');
     const agentDirectories: Array<string | null | undefined> = [];
     listAgentsImpl = async (directory) => {
       agentDirectories.push(directory);
@@ -2060,6 +2015,7 @@ describe('useConfigStore provider persistence', () => {
     await useConfigStore.getState().initializeApp();
 
     expect(useConfigStore.getState().isInitialized).toBe(true);
+    expect(trustPrompts).toEqual([DIRECTORY]);
     expect(useConfigStore.getState().lastInitFailure).toBeNull();
   }, 10_000);
 
@@ -2068,6 +2024,7 @@ describe('useConfigStore provider persistence', () => {
       throw Object.assign(new Error('agent.list failed (403): unexpected status'), { status: 403 });
     };
     await useConfigStore.getState().initializeApp();
+    expect(trustPrompts).toEqual([]);
 
     expect(useConfigStore.getState().isInitialized).toBe(false);
     expect(useConfigStore.getState().lastInitFailure?.step).toBe('loadAgents');
@@ -2102,13 +2059,14 @@ describe('useConfigStore provider persistence', () => {
     };
 
     const staleLoad = useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:stale' });
-    await Promise.resolve();
+    await environment.settle();
     expect(calls).toBe(1);
 
     invalidateConfigAgentsLoad(DIRECTORY);
     const freshLoad = useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:fresh' });
     staleAgents.resolve([{ name: 'old-agent', mode: 'primary' }]);
 
+    await environment.settle();
     expect(calls).toBe(2);
     expect(await staleLoad).toBe(true);
     expect(await freshLoad).toBe(true);
@@ -2127,7 +2085,7 @@ describe('useConfigStore provider persistence', () => {
 
     const ownerLoad = useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:owner' });
     const joinedLoad = useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:joined' });
-    await Promise.resolve();
+    await environment.settle();
     expect(calls).toBe(1);
 
     invalidateConfigAgentsLoad(DIRECTORY);
@@ -2326,7 +2284,7 @@ describe('useConfigStore provider persistence', () => {
   });
 
   test('rejects a persisted config snapshot belonging to another runtime', async () => {
-    storage.set(STORAGE_KEY, JSON.stringify({ state: {
+    seedConfig(JSON.stringify({ state: {
       configRuntimeKey: 'some-other-instance',
       settingsDefaultModel: 'foreign/model',
       providers: [provider('foreign')],
@@ -3157,6 +3115,7 @@ describe('useConfigStore provider persistence', () => {
         { id: 'other', path: OTHER_DIRECTORY, label: 'Other' },
       ],
     };
+    useProjectsStore.setState(projectsState);
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
       providers: [provider('openai', 'gpt-5.5')],
@@ -3401,6 +3360,7 @@ describe('useConfigStore provider persistence', () => {
         { id: 'other', path: OTHER_DIRECTORY, label: 'Other' },
       ],
     };
+    useProjectsStore.setState(projectsState);
     liveAgents = [testAgent('build'), testAgent('plan')];
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
@@ -3682,7 +3642,7 @@ describe('useConfigStore provider persistence', () => {
       },
     });
 
-    const persisted = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
+    const persisted = JSON.parse(persistedConfig());
     expect(persisted.state.providers).toBeUndefined();
     expect(persisted.state.agents).toBeUndefined();
     for (const directory of [DIRECTORY, OTHER_DIRECTORY]) {
@@ -3704,12 +3664,12 @@ describe('useConfigStore provider persistence', () => {
   test('persisted config is written as version 1', () => {
     useConfigStore.setState({ activeDirectoryKey: DIRECTORY, currentModelId: 'live-model' });
 
-    const persisted = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
+    const persisted = JSON.parse(persistedConfig());
     expect(persisted.version).toBe(1);
   });
 
   test('a persisted snapshot without catalogs hydrates its selections and empty catalogs', async () => {
-    storage.set(STORAGE_KEY, JSON.stringify({
+    seedConfig(JSON.stringify({
       state: {
         configRuntimeKey: getRuntimeKey(),
         activeDirectoryKey: DIRECTORY,
@@ -3765,10 +3725,13 @@ describe('useConfigStore provider persistence', () => {
     });
 
     class CountingMap extends Map<string, string> {
-      configWrites = 0;
+      private writes = 0;
+
+      get configWrites() { flushDeferredStorage(); return this.writes; }
+      set configWrites(value: number) { flushDeferredStorage(); this.writes = value; }
 
       override set(key: string, value: string) {
-        if (key === STORAGE_KEY) this.configWrites += 1;
+        if (key === STORAGE_KEY) this.writes += 1;
         return super.set(key, value);
       }
     }
@@ -3798,6 +3761,7 @@ describe('useConfigStore provider persistence', () => {
           },
         },
       });
+      flushDeferredStorage();
       const counting = new CountingMap(storage);
       storage = counting;
       return counting;
@@ -3899,10 +3863,10 @@ describe('useConfigStore provider persistence', () => {
     });
     useConfigStore.getState().setModel('live-model');
     useConfigStore.getState().setAgent('build');
-    const written = storage.get(STORAGE_KEY) ?? '';
+    const written = persistedConfig();
     // Clearing the store writes too, so the saved blob is put back before rehydrating.
     useConfigStore.setState({ directoryScoped: {}, providers: [], agents: [], currentModelId: '', currentAgentName: undefined });
-    storage.set(STORAGE_KEY, written);
+    seedConfig(written);
 
     await useConfigStore.persist.rehydrate();
 

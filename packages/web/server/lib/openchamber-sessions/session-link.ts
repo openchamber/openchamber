@@ -4,6 +4,7 @@ import { buildLinkedIssuesPatch } from './session-linked-issues.js';
 import type { TrackerRegistry, TrackerImplementation } from '../trackers/tracker-contract.js';
 import type { LinkedIssuesPatch } from './session-linked-issues.js';
 import type { JsonValue } from '@opencode/client';
+import type { SessionMetadata } from './session-metadata-store.js';
 
 export interface LinkEntry {
   id: string;
@@ -25,7 +26,7 @@ interface LinkMatchOptions {
 interface LinkerOptions {
   updateMetadata: (
     sessionId: string,
-    decide: (current: JsonValue) => LinkedIssuesPatch | null,
+    decide: (current: SessionMetadata | undefined) => LinkedIssuesPatch | null,
     options: { directory: string },
   ) => Promise<{ changed: boolean }>;
   createError: (message: string, status: number) => Error;
@@ -130,7 +131,7 @@ const linkMetadataSchema = z.looseObject({
 
 const SNAPSHOT_KEYS = ['number', 'identifier', 'title', 'url', 'kind', 'thread'] as const;
 
-export const buildLinkPatch = (metadata: JsonValue | undefined, entry: LinkEntry): LinkedIssuesPatch | null => {
+export const buildLinkPatch = (metadata: SessionMetadata | JsonValue | undefined, entry: LinkEntry): LinkedIssuesPatch | null => {
   const current = linkMetadataSchema.parse(metadata ?? {}).openchamber.linked_issues;
   const index = current.findIndex((item) => linkedEntrySchema.safeParse(item).data?.id === entry.id);
   if (index === -1) return { openchamber: { linked_issues: [...current, entry] } };
@@ -178,13 +179,13 @@ const comparableUrl = (value: string) => {
   return url.toString().replace(/\/+$/, '').toLowerCase();
 };
 
-const storedLinks = (metadata: JsonValue | undefined) => linkMetadataSchema.parse(metadata ?? {}).openchamber.linked_issues
+const storedLinks = (metadata: SessionMetadata | JsonValue | undefined) => linkMetadataSchema.parse(metadata ?? {}).openchamber.linked_issues
   .flatMap((item) => {
     const parsed = storedLinkSchema.safeParse(item);
     return parsed.success ? [parsed.data] : [];
   });
 
-const findLinkedEntries = (metadata: JsonValue, { url, identifier }: { url: string | null; identifier: string | null }, { matchTrackerUrl = () => null }: LinkMatchOptions = {}) => {
+const findLinkedEntries = (metadata: SessionMetadata | JsonValue | undefined, { url, identifier }: { url: string | null; identifier: string | null }, { matchTrackerUrl = () => null }: LinkMatchOptions = {}) => {
   const stored = storedLinks(metadata);
   if (url) {
     const id = buildLinkEntry({ url, title: 'unlink', kind: 'issue' }, 0, { matchTrackerUrl }).entry?.id;

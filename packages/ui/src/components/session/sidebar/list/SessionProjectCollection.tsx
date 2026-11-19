@@ -441,7 +441,6 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const beginActiveSourceControlContextsLoad = useGitHubPrStatusStore((state) => state.beginActiveContextsLoad);
   const commitActiveSourceControlContexts = useGitHubPrStatusStore((state) => state.commitActiveContexts);
   const releaseActiveSourceControlContexts = useGitHubPrStatusStore((state) => state.releaseActiveContexts);
-  const activeContextRegistrations = useGitHubPrStatusStore((state) => state.activeContextRegistrations);
   const sourceControlContextsOwnerId = React.useId();
   const retriedMissingChangeRequestKeysRef = React.useRef<Set<string>>(new Set());
   const registeredContextDirectoriesRef = React.useRef<RegisteredContextDirectories>(new Map());
@@ -1030,10 +1029,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     new Set(),
     (runtimeKey, directory) => releaseActiveSourceControlContexts(runtimeKey, directory, sourceControlContextsOwnerId),
   ), [releaseActiveSourceControlContexts, sourceControlContextsOwnerId]);
-  const shownPrKeys = React.useMemo(
-    () => getActiveSourceControlStatusKeys(activeContextRegistrations, shownPrTargets.values()),
-    [activeContextRegistrations, shownPrTargets],
-  );
+  const shownPrKeySignature = useGitHubPrStatusStore((state) => getActiveSourceControlStatusKeys(state.activeContextRegistrations, shownPrTargets.values()).join('\n'));
+  const shownPrKeys = React.useMemo(() => (shownPrKeySignature ? shownPrKeySignature.split('\n') : []), [shownPrKeySignature]);
   const branchPulls = useBranchTrackedPulls(shownPrKeys);
   const shownTrackedItems = React.useMemo((): TrackedItem[] => [
     ...branchPulls,

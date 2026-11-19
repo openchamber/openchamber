@@ -2,9 +2,10 @@ import fs from 'node:fs/promises';
 import type { BigIntStats } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import type { JSONType } from 'zod';
 import { canonicalDirectoryPath } from '../fs/canonical-path.js';
 import type { createOpenCodeClient } from '../openchamber-sessions/opencode-client.js';
+import type { TranslatedEvent } from '../event-stream/translate-v2.js';
+import type { JsonValue } from '../shared/json-values.js';
 
 export interface ChatDirectoryCleanupOptions<Owner> {
   roots: string[];
@@ -370,12 +371,12 @@ export const createChatDirectoryCleanupRuntime = <Owner>({ roots, createClient, 
       connected = false;
       revision += 1;
     },
-    observeWirePayload(payload: JSONType | undefined) {
+    observeWirePayload(payload: JsonValue | undefined) {
       if (!touched) return;
       const parsed = wireSessionEvent.safeParse(payload);
       if (parsed.success) touched.add(parsed.data.data.sessionID);
     },
-    processPayload(payload: JSONType | undefined) {
+    processPayload(payload: TranslatedEvent | undefined) {
       if (stopped || !hasEventType(payload) || !SESSION_EVENTS.has(payload.type) || !adoptOwner()) return;
       const parsed = sessionEvent.safeParse(payload);
       if (!parsed.success) return;

@@ -58,6 +58,7 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 - Agent tools are split by subject, with no per-action toggles.
 - OpenChamber never reads, detects or writes another plugin's private state files, such as oh-my-openagent's. An extension can.
 - No inference debug dump.
+- One tool per job: while an OpenChamber tool is on, the OpenCode built-in that does the same job is disabled in the managed config (`opencode.tool.image-generate` for `openchamber_image`, `opencode.tool.automation` for `openchamber_schedule`).
 
 ## Extensions
 

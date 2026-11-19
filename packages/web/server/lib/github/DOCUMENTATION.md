@@ -11,12 +11,12 @@ GitHub sits on the shared source-control route shell (`../source-control/provide
 
 - `descriptor.js`: GitHub's static, SDK-free source-control descriptor (host-form instances, capabilities, transport username, client presentation, the declarative `/api/github` alias list in `routeAliases`).
 - `provider.js`: the implementation the shell loads lazily through the provider registry (`createProvider(hostServices)`). It composes the parts below, resolves sessions (`auth.resolveAccount`: the exact stored credential or gh login, its Octokit kept here, never in the JSON the shell sees), answers the neutral transport credential (a stored credential, else the gh login the user switched to), the current account per instance, enterprise instances, connected accounts for identity backfill and binding repair, and the tracked-items live summaries. Octokit and the libraries that use it load on first use.
-- `accounts.js`: auth per instance in the neutral `SourceControlAuthStatus` shape: github.com's device flow and Settings gh switch, an enterprise host's PATs and own gh switch, activation, removal.
+- `accounts.ts`: auth per instance in the neutral `SourceControlAuthStatus` shape: github.com's device flow and Settings gh switch, an enterprise host's PATs and own gh switch, activation, removal.
 - `gh-cli-logins.js`: a host's gh logins, each with the GitHub account it belongs to (`<host>#cli:<id>`), and the exact login a `#cli:` account id names.
 - `resources.js`: the bound reads (status, lists, context, issues, upstream, branches, labels, reviewer candidates), the reference picker reads, and the change-request head and source behind worktrees, all answering neutral DTOs. It keeps the short PR context cache.
-- `mutations.js`: the durable mutations: `prepare` (GitHub's kinds and digests, byte-identical to the records already stored), `resolveTarget` (preflight against GitHub), `perform`, `reconcile`, `afterSuccess` (drops the target's pull context and the repository's pull lists; the shell calls it best effort after the record is durable, so a cache failure never turns a landed write into `outcome-unknown`), and how failures are classified and worded.
+- `mutations.ts`: the durable mutations: `prepare` (GitHub's kinds and digests, byte-identical to the records already stored), `resolveTarget` (preflight against GitHub), `perform`, `reconcile`, `afterSuccess` (drops the target's pull context and the repository's pull lists; the shell calls it best effort after the record is durable, so a cache failure never turns a landed write into `outcome-unknown`), and how failures are classified and worded.
 - `mappers.js`: strict checks of GitHub REST payloads and the mappers to neutral DTOs (`Project`, `ChangeRequest`, `Issue`, `IssueComment`, `CI`, users, accounts).
-- `auth.js`: auth storage, multi-account support, client id, scope config.
+- `auth.ts`: auth storage, multi-account support, client id, scope config.
 - `device-flow.js`: OAuth device flow.
 - `octokit.js`: Octokit factories for a host's current credential and for exact account IDs.
 - `repo/index.js`: remote URL parsing and directory-to-repo resolution.
@@ -304,36 +304,34 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 
 ## Decisions
 
-### Why some implementation files remain JavaScript
+### Why account and mutation inputs retain unchecked fields
 
-- `auth.js:parseVersionThree` checks that each instance is an object, then calls
-  `rawInstance.credentials.map` without validating that collection. Its
-  `activeCredentialId`, CLI flags and login also bypass `parseInstance`.
-  `createSourceControlAuthStore` now accepts an omitted `refreshOAuthToken`,
-  so that declared options boundary no longer blocks host-trust conversion.
-  Typing the unchecked file fields as a parsed instance would conceal the
-  remaining storage boundary.
-- `accounts.js` depends on the auth-store boundary above. The
-  `AccountEvents.connected` contract now permits nullable profile `name` and
-  `email`, so those fields no longer block conversion. Its device completion
-  also forwards the truthy `access_token` from `exchangeDeviceCode` to
-  `createOctokit` without a string check. That response remains unknown;
-  declaring its token a string would overstate the validation. Octokit's
-  credential digest passes the token to Node's `Hash.update`, which does not
-  accept arbitrary truthy JSON values.
-- `mutations.js` depends on
-  `ProviderImplementation.mutations.resolveTarget`. Its context is now
-  `ProviderMutationContext` and its normalized input and provider target have
-  generic contracts. Its replay record still exposes
-  `mutation-storage.ts:MutationRecord.target` as `SourceControlMutationTarget`,
-  whose `number`, `head`, `base` and `headSha` are independently optional.
-  The owner must retain the operation-specific target variant through replay
-  and perform: creation needs `head` and `base`, existing numbered operations
-  need `number`, and merge and review operations use `headSha`. A provider
-  cannot assert those fields merely because a replay record was read.
+- Device completion forwards the truthy `access_token` from `exchangeDeviceCode`
+  as received. The token is still JSON at that point. The Octokit factory
+  passes the original value to `Hash.update`, whose native argument validation
+  rejects non-string JSON. A separate email lookup may fail when the token
+  lacks the email scope; the account status still uses the profile email.
+- A replay record's `number`, `head`, `base` and `headSha` are independently
+  optional. Preflight establishes fields for new operations. Reconciliation
+  keeps the stored shape and checks a number before a numbered REST read.
+  The waiting-merge GraphQL call forwards the stored fields as read. A
+  pending review's node ID also reaches GraphQL unchanged; matching the
+  viewer does not validate the node ID.
 
 The nested repository-network helper now supplies its host and its
 `origin`/`upstream` source union.
+
+### Why version 3 retains unparsed CLI settings
+
+Version 3 validates credentials and the active credential reference. The CLI
+flags and login bypass the version 2 instance parser and retain their JSON
+values until a reader or writer interprets them. A missing or non-array
+credential collection still raises a `TypeError`.
+
+Enterprise invalidation forwards the original instance and account values from
+error metadata. The shared store uses the instance as a JavaScript property key
+and compares the account by strict equality. It does not normalize either value
+before that lookup.
 
 ### Why provider invalidation retains unchecked identity fields
 

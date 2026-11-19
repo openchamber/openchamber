@@ -5,9 +5,9 @@ This module provides server-side Text-to-Speech services using OpenAI's TTS API.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/tts/index.ts`: Public entrypoint loaded lazily by the speech routes. Relative imports keep `.js` specifiers.
-- `packages/web/server/lib/tts/routes.js`: Express route registration for `/api/voice/*`, `/api/tts/*`, and `/api/stt/*` endpoints. `/api/tts/speak` takes an optional JSON `endpointPath`; `/api/stt/transcribe` takes an optional `X-Endpoint-Path` header. Both answer 400 for an invalid path before contacting the upstream server.
+- `packages/web/server/lib/tts/routes.ts`: Express route registration for `/api/voice/*`, `/api/tts/*`, and `/api/stt/*` endpoints. `/api/tts/speak` takes an optional JSON `endpointPath`; `/api/stt/transcribe` takes an optional `X-Endpoint-Path` header. Both answer 400 for an invalid path before contacting the upstream server.
 - `packages/web/server/lib/tts/capability-runtime.ts`: runtime helper for probing local macOS `say` TTS voice capability.
-- `packages/web/server/lib/tts/service.js`: TTS service implementation with OpenAI integration.
+- `packages/web/server/lib/tts/service.ts`: TTS service implementation with OpenAI integration.
 - `packages/web/server/lib/text/summarization.js`: Shared text summarization stub and sanitization utilities. It performs no external Zen calls.
 - `packages/web/server/lib/tts/stt.ts`: STT proxy for OpenAI-compatible transcription endpoints.
 - `packages/web/server/lib/tts/voice-keys.ts`: the API keys typed in Voice settings (`openai`, `openaiCompatible`, `stt`), stored in `voice-keys.json` in the data dir, mode 0600. `GET /api/voice/keys` answers only which are set; `PUT /api/voice/keys` sets (string) or removes (null) them. `/api/tts/speak`, the STT route and dictation fill a request's key from here, so the UI never holds or sends one. A key in a request body still wins: older clients sent theirs that way. Keys earlier builds kept in the browser's localStorage are moved here by the UI on first read (`packages/ui/src/lib/voiceKeysApi.ts`).
@@ -125,11 +125,32 @@ The server-side TTS approach bypasses mobile Safari's audio context restrictions
 
 ## Decisions
 
-### Why two implementations remain JavaScript
+### Why request fields that are the wrong type count as absent
 
-`service.js` accepts a string credential or an object with `access` or `token`. The outside boundary is `readOpenCodeCredentials(): Promise<LegacyAuthFile>` in `../opencode/auth.d.ts`: `LegacyAuthEntry` declares only API credentials with `key` and OAuth credentials with `access`. The implementation projects those same two object shapes in `projectCredentialValue`; it never returns a legacy string or token-bearing object. Widening the declaration to include those forms would not describe an additional runtime path in its owner. Removing the legacy branches or reading `key` changes speech behavior, and the legacy credential tests exercise the string and token-bearing forms. Converting the service requires reconciling that compatibility contract beyond a type-only correction.
+`routes.ts` parses each request body and the transcription headers with a Zod
+schema at the route. A field of the wrong type is treated as missing and takes
+the route's default, the way the say route already treated a voice that was
+not text. Before, the speech route forwarded any JSON `voice`, `model`, `speed`
+and `instructions` to the upstream request, and the summary route passed
+`threshold` and `maxLength` on to coercions that disagreed with each other (a
+string threshold compared as a number, a string limit was ignored in
+notification mode and used by `Math.min` in note mode). Refusing such requests
+with 400 was weighed and rejected: no client in this repository sends them,
+and the lenient default keeps every request that worked before working.
+`URL` and endpoint-path values stay unknown here, because their normalizers
+own those checks.
 
-`routes.js` forwards unchecked JSON `threshold` and `maxLength` values to `../text/summarization.ts`. Its `SummarizeTextOptions.threshold` and `.maxLength` require numbers, while existing requests can supply strings or null and rely on JavaScript coercion. Widening those fields alone cannot type the implementation: `summarizeText` compares `text.length <= threshold`, and `distillNoteFallback` passes `maxLength` to `Math.min`. Both need coercion or narrowing in their owner before they can consume unknown inputs under the strict checker. Explicit coercion would change runtime code outside this folder. The error fallback also forwards unchecked text to `sanitizeForTTS` and `sanitizeForNote`; their existing string guards would permit widening those sanitizer parameters, but that correction alone does not resolve the numeric boundary. Declaring the request fields as numbers or strings would promise validation the route never performs.
+### Why the say route runs `say` without a shell
+
+`/api/tts/say/speak` runs `say` with `execFile` and an argument list. It used
+to build one shell command from the request's voice and rate inside double
+quotes and a bare word, so a voice holding a quote or a rate holding `;` ran
+another command; the text's quote escaping also left literal backslashes in
+what was spoken. A test on macOS sends both and checks that no command ran.
+
+### Why speech keeps legacy credential handling
+
+The service's local credential input type includes strings and objects with `access` or `token`, preserving its legacy compatibility checks. `readOpenCodeCredentials` currently projects only API objects with `key` and OAuth objects with `access`; both fit the local input type. Its declaration remains unchanged because it does not return the additional legacy forms. The string predicate still distinguishes a bare credential from an object, and API objects with only `key` still yield no speech credential.
 
 ### Why boundary validation stays at use time
 

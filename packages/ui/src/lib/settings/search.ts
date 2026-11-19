@@ -680,7 +680,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.compaction.background',
     descriptionKey: 'settings.openchamber.defaults.compaction.backgroundInfo',
-    keywords: ['compaction', 'compact', 'background', 'experimental', 'precompute', 'summary', 'background_compaction'],
+    keywords: ['compaction', 'compact', 'background', 'precompute', 'summary'],
   },
   {
     id: 'sessions.permission-default',

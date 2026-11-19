@@ -43,6 +43,23 @@ the schema. Its output includes undefined and keeps object fields optional;
 it does not claim an optional inner schema or an `unwrap` result the runtime
 does not provide.
 
+### Why persistence readers keep unchecked field values
+
+Instance reads accept every non-null object, including arrays. Preference reads
+reject arrays as containers, check the version and entry layout, and leave each
+stored value unchecked. Both readers therefore use the schema-derived
+`SettingsDocument` fields. A successful file read does not establish sanitized
+projects, tunnel presets, notification text or permission modes.
+
+Property guards preserve primitive boxing where legacy code reads optional
+properties. Null project entries and non-list tunnel presets still fail during
+queued persistence. Array checks and own-property checks remain at dictionary
+and file boundaries, including token string checks that reject inherited object
+members. Internal migration inputs and sanitized project paths no longer need
+object or string rechecks. Filesystem error-code guards retain the existing
+object acceptance rule. Temporary-file cleanup and an invalid legacy directory
+remain best-effort operations.
+
 ### Why orphan recovery runs once and not on every settings read
 
 Unmatched orphan files remain on disk, so repeating the scan adds filesystem work without new evidence. The process remembers the first attempt, including before its first await, to prevent concurrent and frequent settings reads from repeating it.

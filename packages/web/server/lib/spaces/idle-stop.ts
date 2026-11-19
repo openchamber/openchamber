@@ -2,6 +2,7 @@
 import { z } from 'zod';
 
 import { readSpaceSettingFile } from './space-setting-file.js';
+import type { SettingsDocument } from '../settings/settings-helpers.js';
 
 const IDLE_STOP_MIN_HOURS = 1;
 const IDLE_STOP_MAX_HOURS = 168;
@@ -14,7 +15,7 @@ export const idleStopSchema = z.object({
 
 export type IdleStopSetting = z.infer<typeof idleStopSchema>;
 
-export const readIdleStopSetting = (value: IdleStopSetting | null | undefined) => {
+export const readIdleStopSetting = (value: SettingsDocument[string]) => {
   const parsed = idleStopSchema.safeParse(value);
   return parsed.success ? parsed.data : { ...DEFAULT_IDLE_STOP };
 };
@@ -27,8 +28,8 @@ export interface IdleStopOptions {
   settingsPath: string;
   readSessionStates: () => Record<string, { status: string; lastUpdateAt: number }>;
   readPendingRequests?: () => Record<string, {
-    permissions?: readonly { id: string }[];
-    forms?: readonly { id: string }[];
+    permissions?: readonly unknown[];
+    forms?: readonly unknown[];
     pages?: readonly { id: string }[];
   }>;
   stopSpace: () => Promise<void>;

@@ -1,30 +1,32 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test"
-import { selectInputHistoryEntries, useInputHistoryStore } from "./useInputHistoryStore"
+import { beforeEach, describe, expect, test } from "bun:test"
+import { directoryEnvironment } from './test-support/directoryEnvironment'
+import { switchRuntimeEndpoint } from '@/lib/runtime-switch'
 import type { AttachedFile } from "./types/sessionTypes"
 import type { MessageQueueUpdatedEvent } from "./messageQueueStore"
 
+const environment = directoryEnvironment({ home: '/home/test' })
 type FetchCall = { path: string; method: string; body: ReturnType<typeof JSON.parse>; directory?: string }
 let calls: FetchCall[] = []
 let activeRuntimeKey = "runtime-a"
 let respond: (call: FetchCall) => Response | Promise<Response> = () => new Response("{}", { status: 200 })
 
-mock.module("@/lib/runtime-fetch", () => ({
-  runtimeFetch: async (path: string, init?: RequestInit & { directory?: string | null }) => {
+environment.respond(async (url, init) => {
+    if (!url.pathname.startsWith('/api/message-queue')) throw new Error(`Unexpected request: ${url}`)
     const call: FetchCall = {
-      path,
+      path: `${url.pathname}${url.search}`,
       method: init?.method ?? "GET",
       body: init?.body === undefined ? undefined : JSON.parse(String(init.body)),
     }
-    // The directory that picks the server: a space's own for a directory of that space.
-    if (init?.directory) call.directory = init.directory
+    const directory = new Headers(init?.headers).get('x-opencode-directory')
+    if (directory) call.directory = decodeURIComponent(directory)
     calls.push(call)
     return respond(call)
-  },
-}))
-const desktop = await import("@/lib/desktop")
-mock.module("@/lib/desktop", () => ({ ...desktop, isVSCodeRuntime: () => false }))
-mock.module("@/lib/runtime-switch", () => ({ getRuntimeKey: () => activeRuntimeKey }))
-mock.module("@/lib/persistence", () => ({ updateDesktopSettings: async () => undefined }))
+})
+const activateRuntime = (key: string) => {
+  activeRuntimeKey = key
+  switchRuntimeEndpoint({ apiBaseUrl: 'https://local.test', runtimeKey: key })
+}
+const { selectInputHistoryEntries, useInputHistoryStore } = await import("./useInputHistoryStore")
 
 const {
   applyMessageQueueUpdatedEvent,
@@ -96,7 +98,7 @@ const attachment: AttachedFile = {
 
 beforeEach(() => {
   useMessageQueueStore.getState().resetForRuntimeSwitch(activeRuntimeKey)
-  activeRuntimeKey = "runtime-a"
+  activateRuntime("runtime-a")
   useInputHistoryStore.setState({ globalBuckets: {}, sessionBuckets: {} })
   calls = []
   respond = () => json({ revision: 1, session: session([]) })
@@ -122,7 +124,6 @@ describe("server-owned message queue", () => {
     expect(calls[0]).toEqual({
       method: "POST",
       path: "/api/message-queue/sessions/session-1/items",
-      directory: "/repo",
       body: { directory: "/repo", item: { content: "from before", text: "from before", attachments: [], context: [], sendConfig: { providerID: "p", modelID: "m" } } },
     })
     expect(calls[1]?.path).toBe("/api/message-queue")
@@ -169,7 +170,7 @@ describe("server-owned message queue", () => {
   })
 
   test("resync can establish the initial snapshot before bootstrap", async () => {
-    activeRuntimeKey = "runtime-never-hydrated"
+    activateRuntime("runtime-never-hydrated")
     respond = () => json({ revision: 1, sessions: [] })
     await useMessageQueueStore.getState().resync()
     expect(calls).toHaveLength(1)
@@ -181,6 +182,7 @@ describe("server-owned message queue", () => {
     const bootstrap = useMessageQueueStore.getState().hydrate()
     const reconnect = useMessageQueueStore.getState().resync()
     const secondReconnect = useMessageQueueStore.getState().resync()
+    await environment.settle()
     expect(calls).toHaveLength(1)
     first.resolve(json({ revision: 10, sessions: [session([serverItem("q1", "delivered after snapshot")])] }))
     await Promise.all([bootstrap, reconnect, secondReconnect])
@@ -189,7 +191,7 @@ describe("server-owned message queue", () => {
   })
 
   test("concurrent bootstrap and recovery migrate a legacy message only once", async () => {
-    activeRuntimeKey = "runtime-legacy-recovery"
+    activateRuntime("runtime-legacy-recovery")
     const legacyTarget = createMessageQueueTarget("session-1", "/repo", activeRuntimeKey)
     if (!legacyTarget) throw new Error("Missing test target")
     const legacyKey = getMessageQueueKey(legacyTarget)
@@ -229,7 +231,7 @@ describe("server-owned message queue", () => {
   })
 
   test("returning to a runtime migrates its unattempted legacy messages without repeating the first upload", async () => {
-    activeRuntimeKey = "runtime-partial-migration"
+    activateRuntime("runtime-partial-migration")
     const legacyTarget = createMessageQueueTarget("session-1", "/repo", activeRuntimeKey)
     if (!legacyTarget) throw new Error("Missing test target")
     const legacyKey = getMessageQueueKey(legacyTarget)
@@ -240,10 +242,11 @@ describe("server-owned message queue", () => {
       : json({ revision: 3, sessions: [] })
     const initial = useMessageQueueStore.getState().hydrate()
     useMessageQueueStore.getState().resetForRuntimeSwitch(activeRuntimeKey)
-    activeRuntimeKey = "runtime-other"
+    await environment.settle()
+    activateRuntime("runtime-other")
     first.resolve(json({ revision: 1, session: session([]) }))
     await initial
-    activeRuntimeKey = "runtime-partial-migration"
+    activateRuntime("runtime-partial-migration")
     await useMessageQueueStore.getState().hydrate()
     expect(calls.filter((call) => call.method === "POST").map((call) => call.body.item.content)).toEqual(["first", "second"])
   })
@@ -264,7 +267,8 @@ describe("server-owned message queue", () => {
     const bootstrap = useMessageQueueStore.getState().hydrate()
     const recovery = useMessageQueueStore.getState().resync()
     useMessageQueueStore.getState().resetForRuntimeSwitch(activeRuntimeKey)
-    activeRuntimeKey = "runtime-b"
+    await environment.settle()
+    activateRuntime("runtime-b")
     respond = () => json({ revision: 1, sessions: [] })
     await useMessageQueueStore.getState().hydrate()
     old.resolve(json({ revision: 99, sessions: [session([serverItem("q1", "old runtime")])] }))
@@ -292,6 +296,7 @@ describe("server-owned message queue", () => {
       sendConfig: { providerID: "p", modelID: "m", agent: "build" },
     })
     expect(useMessageQueueStore.getState().queuedMessages[key]).toHaveLength(1)
+    await environment.settle()
     const clientRequestId = calls[0]?.body.item.clientRequestId
     expect(/^[0-9a-f]{32}$/.test(clientRequestId)).toBe(true)
     await pending
@@ -299,7 +304,6 @@ describe("server-owned message queue", () => {
     expect(calls[0]).toEqual({
       method: "POST",
       path: "/api/message-queue/sessions/session-1/items",
-      directory: "/repo",
       body: {
         directory: "/repo",
         item: {
@@ -341,7 +345,7 @@ describe("server-owned message queue", () => {
   test("queue acceptance records the captured owner after the active runtime changes", async () => {
     const historyTarget = { runtimeKey: 'runtime-a', directory: '/original', sessionId: 'history-runtime-switch' };
     respond = () => {
-      activeRuntimeKey = 'runtime-b';
+      activateRuntime('runtime-b');
       return json({ revision: 110, session: { ...session([]), sessionId: historyTarget.sessionId, directory: historyTarget.directory }, itemId: 'srv-1' });
     };
     await useMessageQueueStore.getState().addToQueue(historyTarget, {
@@ -571,9 +575,8 @@ describe("server-owned message queue", () => {
     respond = () => { removed.resolve(json({ revision: 10, session: session([serverItem("q2", "b")]) })); return removed.promise }
     useMessageQueueStore.getState().removeFromQueue(target, "q1")
     expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.id)).toEqual(["q2"])
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(calls[0]).toEqual({ method: "DELETE", path: "/api/message-queue/sessions/session-1/items/q1", body: undefined, directory: "/repo" })
+    await environment.settle()
+    expect(calls[0]).toEqual({ method: "DELETE", path: "/api/message-queue/sessions/session-1/items/q1", body: undefined })
 
     let clearCalled: () => void = () => {}
     const clearRequest = new Promise<void>((resolve) => { clearCalled = resolve })
@@ -581,7 +584,7 @@ describe("server-owned message queue", () => {
     useMessageQueueStore.getState().clearQueue(target)
     expect(useMessageQueueStore.getState().queuedMessages[key]).toBe(undefined)
     await clearRequest
-    expect(calls[1]).toEqual({ method: "DELETE", path: "/api/message-queue/sessions/session-1", body: undefined, directory: "/repo" })
+    expect(calls[1]).toEqual({ method: "DELETE", path: "/api/message-queue/sessions/session-1", body: undefined })
   })
 
   test("reorderQueue sends the complete new order", async () => {
@@ -591,7 +594,7 @@ describe("server-owned message queue", () => {
     respond = () => { reorderCalled(); return json({ revision: 12, session: session([serverItem("q2", "b"), serverItem("q1", "a")]) }) }
     useMessageQueueStore.getState().reorderQueue(target, "q2", "q1")
     await reorderRequest
-    expect(calls[0]).toEqual({ method: "PUT", path: "/api/message-queue/sessions/session-1/order", body: { itemIds: ["q2", "q1"] }, directory: "/repo" })
+    expect(calls[0]).toEqual({ method: "PUT", path: "/api/message-queue/sessions/session-1/order", body: { itemIds: ["q2", "q1"] } })
   })
 
   test("remove waits for the server id of a pending enqueue", async () => {
@@ -601,6 +604,7 @@ describe("server-owned message queue", () => {
     const id = useMessageQueueStore.getState().queuedMessages[key]?.[0]?.id
     if (!id) throw new Error("missing optimistic entry")
     useMessageQueueStore.getState().removeFromQueue(target, id)
+    await environment.settle()
     expect(calls).toHaveLength(1)
     let deleteCalled: () => void = () => {}
     const deleteRequest = new Promise<void>((resolve) => { deleteCalled = resolve })
@@ -634,6 +638,7 @@ describe("server-owned message queue", () => {
     const id = useMessageQueueStore.getState().queuedMessages[key]?.[0]?.id
     if (!id) throw new Error("missing optimistic entry")
     const taken = useMessageQueueStore.getState().takeForSend(target, id)
+    await environment.settle()
     applyMessageQueueUpdatedEvent(updated(2, session([{ ...serverItem("srv-1", "pending"), clientRequestId: calls[0]?.body.item.clientRequestId }])), "runtime-a")
     await queued
     expect((await taken).map((item) => item.content)).toEqual(["pending"])
@@ -650,10 +655,11 @@ describe("server-owned message queue", () => {
     const config = { providerID: "p", modelID: "m" }
     const a = useMessageQueueStore.getState().addToQueue(target, { content: "first", sendConfig: config })
     const b = useMessageQueueStore.getState().addToQueue(target, { content: "second", sendConfig: config })
+    await environment.settle()
     const firstId = calls[0]?.body.item.clientRequestId
     applyMessageQueueUpdatedEvent(updated(2, session([{ ...serverItem("q1", "first"), clientRequestId: firstId }])), "runtime-a")
     await a
-    await Promise.resolve()
+    await environment.settle()
     const secondId = calls.find((call) => call.body?.item?.content === "second")?.body.item.clientRequestId
     expect(Boolean(secondId)).toBe(true)
     applyMessageQueueUpdatedEvent(updated(3, session([serverItem("q1", "first"), { ...serverItem("q2", "second"), clientRequestId: secondId }])), "runtime-a")
@@ -674,7 +680,7 @@ describe("server-owned message queue", () => {
     applyMessageQueueUpdatedEvent(updated(3, moved), "runtime-a")
     first.resolve(json({ revision: 2, session: session([serverItem("q1", "first")]), itemId: "q1" }))
     await a
-    await Promise.resolve()
+    await environment.settle()
     expect(calls.find((call) => call.body?.item?.content === "second")?.body.directory).toBe("/repo/moved")
     const movedTarget = createMessageQueueTarget("session-1", "/repo/moved", "runtime-a")!
     const movedKey = getMessageQueueKey(movedTarget)
@@ -685,6 +691,8 @@ describe("server-owned message queue", () => {
   })
 
   test("a snapshot during enqueue is applied after its response", async () => {
+    respond = () => json({ revision: 1, sessions: [] })
+    await useMessageQueueStore.getState().hydrate()
     const enqueue = deferredResponse()
     respond = (call) => call.method === "GET"
       ? json({ revision: 3, sessions: [session([serverItem("srv-1", "pending"), serverItem("other", "other")])] })
@@ -705,6 +713,7 @@ describe("server-owned message queue", () => {
     const id = useMessageQueueStore.getState().queuedMessages[key]?.[0]?.id
     if (!id) throw new Error("missing optimistic entry")
     const taken = useMessageQueueStore.getState().takeForSend(target, id)
+    await environment.settle()
     expect(calls).toHaveLength(1)
     respond = () => json({ revision: 3, session: session([]), item: serverItem("srv-1", "pending") })
     enqueue.resolve(json({ revision: 2, session: session([serverItem("srv-1", "pending")]), itemId: "srv-1" }))
@@ -718,6 +727,7 @@ describe("server-owned message queue", () => {
     respond = () => enqueue.promise
     const queued = useMessageQueueStore.getState().addToQueue(target, { content: "pending", sendConfig: { providerID: "p", modelID: "m" } })
     const taken = useMessageQueueStore.getState().takeForSend(target)
+    await environment.settle()
     expect(calls).toHaveLength(1)
     respond = () => json({ revision: 3, session: session([]), items: [serverItem("srv-1", "pending")] })
     enqueue.resolve(json({ revision: 2, session: session([serverItem("srv-1", "pending")]), itemId: "srv-1" }))
@@ -802,7 +812,8 @@ describe("server-owned message queue", () => {
     const id = useMessageQueueStore.getState().queuedMessages[key]?.[0]?.id
     if (!id) throw new Error("missing optimistic entry")
     const taken = useMessageQueueStore.getState().takeForSend(target, id)
-    activeRuntimeKey = "runtime-b"
+    await environment.settle()
+    activateRuntime("runtime-b")
     enqueue.resolve(json({ revision: 2, session: session([serverItem("srv-1", "pending")]), itemId: "srv-1" }))
     await queued
     await expect(taken).rejects.toThrow("runtime changed")
@@ -819,10 +830,10 @@ describe("server-owned message queue", () => {
     const waiting = useMessageQueueStore.getState().addToQueue(target, { content: "waiting", sendConfig: { providerID: "p", modelID: "m" } })
     const waitingRejected = waiting.then(() => false, () => true)
     useMessageQueueStore.getState().resetForRuntimeSwitch("runtime-a")
-    activeRuntimeKey = "runtime-b"
+    activateRuntime("runtime-b")
     expect(await waitingRejected).toBe(true)
     useMessageQueueStore.getState().resetForRuntimeSwitch("runtime-b")
-    activeRuntimeKey = "runtime-a"
+    activateRuntime("runtime-a")
     respond = (call) => call.method === "GET"
       ? json({ revision: 3, sessions: [session([serverItem("new", "new")])] })
       : json({ revision: 4, session: session([serverItem("new", "new"), serverItem("newer", "newer")]), itemId: "newer" })
@@ -852,7 +863,7 @@ describe("a session in an isolated space", () => {
     respond = () => json({ revision: 1, session: spaceSession([serverItem("s1", "later")]), itemId: "s1" })
     await useMessageQueueStore.getState().addToQueue(spaceTarget, { content: "later", sendConfig: { providerID: "p", modelID: "m" } })
     useMessageQueueStore.getState().removeFromQueue(spaceTarget, "s1")
-    await Promise.resolve()
+    await environment.settle()
 
     expect(calls.map((call) => [call.method, call.path, call.directory])).toEqual([
       ["POST", "/api/message-queue/sessions/space-session/items", spaceDirectory],

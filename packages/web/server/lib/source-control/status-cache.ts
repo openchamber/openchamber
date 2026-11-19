@@ -17,7 +17,13 @@ export interface StatusCacheOptions {
   maxEntries?: number;
   now?: () => number;
 }
-type StatusCacheScope = Partial<Pick<StatusCacheContext, 'instance' | 'accountId' | 'repositoryId' | 'directory' | 'branch'>>;
+interface StatusCacheScope {
+  instance?: unknown;
+  accountId?: unknown;
+  repositoryId?: unknown;
+  directory?: unknown;
+  branch?: unknown;
+}
 type StampedStatus<Status> = Status & { fetchedAt: number };
 interface StatusCacheEntry<Status> {
   [field: string]: string | number | StampedStatus<Status>;

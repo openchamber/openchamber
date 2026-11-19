@@ -15,9 +15,9 @@ export interface ProjectIconSettings {
   projects?: unknown;
 }
 
-export interface ProjectIconSavedSettings {
+export type ProjectIconSavedSettings = {
   projects?: ProjectIconProject[];
-}
+};
 
 export interface ProjectIconDependencies {
   fsPromises: Pick<typeof fs, 'readFile' | 'writeFile' | 'unlink' | 'mkdir' | 'readdir'>;

@@ -43,7 +43,7 @@ response carries `X-Speech-Model` and `X-Speech-Language`.
   Chunk reordering by `seq` + ack, resampling to the provider rate, segment
   splitting inside pauses, silence suppression by PCM peak, partial-transcript
   concatenation, adaptive finalization timeout.
-- `service.js` — provider resolution and readiness. Providers:
+- `service.ts` — provider resolution and readiness. Providers:
   - `local` (default): a sherpa-onnx model from `local/model-catalog.js`
     (Parakeet TDT, Whisper, Qwen3-ASR) in a forked worker process. A saved
     model id the catalog no longer has counts as no pick (see Decisions).
@@ -157,55 +157,24 @@ rather than skipping audio. A session result without a session and a correction
 state without its callback still fail with TypeError. RMS indexing substitutes
 NaN only for missing numeric samples, preserving JavaScript's comparison result.
 
-### Why the service remains JavaScript
+### Why provider options stay unchecked until use
 
-`service.js` still supplies explicit `undefined` for language to
-`WorkerBackedTranscriptionSession` and for speaker/speed to
-`DictationWorkerClient.synthesizeSpeech`. Their parameter contracts in
-`local/worker-client.js` declare `language?: string`, `speakerId?: number` and
-`speed?: number`; preserving those calls requires the owner to admit explicit
-`undefined`.
+WebSocket start options carry unchecked fields. The service keeps the truthiness
+defaults for the compatible configuration, API key and remote language hint.
+The URL and path normalizers check their inputs. The local session forwards the
+language hint via IPC, where model-language resolution checks it. The worker
+client accepts explicitly absent speaker and speed values because it already
+forwards them in the speech request.
 
-Those optional contracts can admit explicit `undefined` without runtime changes.
-The local session also forwards an unchecked language hint, so its string-only
-declaration would need to describe that forwarding. Neither correction resolves
-the unchecked provider configuration below.
+The installed OpenAI SDK's constructor leaves a non-string, non-function API key
+unset for authentication. Its multipart encoder handles model and language fields
+with the same conversion and failure rules as other form fields. The local SDK
+declaration describes those inputs without promising that authentication or an
+upstream request will succeed.
 
-`getStatus` indexes the catalogs with entries from `LOCAL_STT_MODEL_IDS` and
-`LOCAL_TTS_MODEL_IDS`. `local/model-catalog.js` exposes string-indexed
-`LocalModelCatalog` values and `string[]` ids, so the types lose the guarantee
-that those ids have entries. A conversion must preserve a failed description
-lookup as a failure rather than inventing a missing-model fallback. An explicit
-TypeError for an absent catalog entry can preserve that failure; the catalog is
-not the boundary that prevents conversion.
-
-`DictationWorkerClient.createSession` forwards an unchecked `requiredSampleRate`
-from a worker response under its existing numeric return declaration. The stream
-manager consumes that owner contract; it does not add a stronger claim.
-
-`runtime.ts` forwards object-valued WebSocket start options without checking
-their fields. `service.js` passes their `baseUrl`, `model`, `apiKey`, `language`
-and `endpointPath` to the speech boundaries without validating their types.
-The external `normalizeCustomOpenAIBaseURL`, `normalizeEndpointPath` and
-`transcribeAudio` contracts accept strings rather than unchecked JSON values.
-Typing those options as already checked strings would overstate the existing
-checks. Widening the URL and endpoint normalizers alone does not resolve
-`transcribeAudio`: its unchecked model, key and language values reach OpenAI's
-typed constructor and transcription request. A declaration that those SDK
-boundaries accept arbitrary values would need a runtime acceptance guarantee.
-The exact blocking symbols are `TranscribeAudioOptions.model`,
-`TranscribeAudioOptions.apiKey` and `TranscribeAudioOptions.language`, consumed by
-`ClientOptions.apiKey` and `TranscriptionCreateParamsNonStreaming` in `tts/stt.ts`.
-The URL and endpoint normalizers already check their input types at runtime, so
-their declarations can accept unchecked input. The SDK-bound fields have no
-equivalent checks in the transcription helper. Widening its declared options
-would leave its assignments to the SDK invalid. A dependency augmentation would
-assert acceptance of unchecked values without an established runtime guarantee.
-The small `tts/openai-sdk.ts` loader is already typed and exposes the SDK's own
-constructor type, so converting an untyped helper cannot resolve this boundary.
-The service remains JavaScript
-because resolving this boundary requires runtime validation outside this folder
-or a stronger claim than the existing checks establish.
+Status still fails if an id from the catalog's enumerated keys has no entry.
+Download failures retain a truthy rejection message verbatim, and the corrupt
+model check coerces that message to a string only for the regex match.
 
 ### Why the runtime retains unchecked property values
 

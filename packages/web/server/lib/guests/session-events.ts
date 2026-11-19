@@ -20,7 +20,7 @@ import type { GuestSessionEventType, GuestSessionLinkedItem, GuestFormField, Gue
 import type { GuestRecord } from './contracts.js';
 import type {
   PreparedSessionEvent, SessionEventAnnouncement, SessionEventAsk,
-  SessionEventQueue, SessionEventRequest, SessionEventsOptions, SessionEventSubscriber, SessionParentCacheEntry, SessionEventPreparation,
+  SessionEventQueue, SessionEventRequest, SessionEventsOptions, SessionEventSubscriber, SessionParentCacheEntry, SessionEventPreparation, StoredMetadata,
 } from './session-events-contracts.js';
 import { hasErrorCode, hasErrorMessage } from './input-guards.js';
 import type { JsonValue, JsonObject } from '../shared/json-values.js';
@@ -43,7 +43,7 @@ const isText = (value: unknown): value is string => typeof value === 'string' &&
 const isString = (value: unknown): value is string => typeof value === 'string';
 const hasProperty = <Key extends string>(value: unknown, key: Key): value is Record<Key, JsonValue | undefined> =>
   value != null && key in Object(value);
-const propertyOf = (value: JsonValue | undefined, key: string): JsonValue | undefined => hasProperty(value, key) ? value[key] : undefined;
+const propertyOf = (value: StoredMetadata, key: string): JsonValue | undefined => hasProperty(value, key) ? value[key] : undefined;
 const isObject = (value: JsonValue | undefined): value is JsonObject | JsonValue[] => !!value && typeof value === 'object';
 const isConditionValue = (value: unknown): value is string | number | boolean =>
   ['string', 'number', 'boolean'].includes(typeof value);
@@ -80,7 +80,7 @@ const recordDirectoryOf = (record: JsonObject | JsonValue[] | null) => {
   return isText(directory) ? directory : null;
 };
 
-const linkedItemsOf = (metadata: JsonValue | undefined) => {
+const linkedItemsOf = (metadata: StoredMetadata) => {
   const entries = propertyOf(propertyOf(metadata, 'openchamber'), 'linked_issues');
   if (!Array.isArray(entries)) return [];
   const items: GuestSessionLinkedItem[] = [];
@@ -246,7 +246,8 @@ export const createExtensionSessionEvents = ({
         signal: AbortSignal.timeout(2_000),
       });
       if (!response.ok) return null;
-      const session: JsonValue = unwrapOpenCodeResponse(await response.json().catch(() => null));
+      const body: JsonValue = await response.json().catch(() => null);
+      const session = unwrapOpenCodeResponse(body);
       return isObject(session) ? session : null;
     } catch {
       return null;
