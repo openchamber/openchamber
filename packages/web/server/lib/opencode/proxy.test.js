@@ -5,6 +5,8 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { describe, expect, it } from 'vitest';
 
 import {
+  canonicalizeCreateBodyDirectory,
+  canonicalizeMoveBodyDirectory,
   createDirectoryQueryCanonicalizer,
   createOpenCodeProxyAgent,
   normalizeForwardedDirectoryHeaders,
@@ -125,6 +127,65 @@ describe('normalizeForwardedDirectoryHeaders', () => {
     expect(headers).toEqual({
       'x-opencode-directory': '/Users/example/project%20literal',
     });
+  });
+});
+
+describe('canonicalizeMoveBodyDirectory', () => {
+  const realpath = async (value) => (value === '/home/me/work' ? '/data/home/me/work' : value);
+
+  it('rewrites an absolute alias to the path OpenCode should store', async () => {
+    await expect(canonicalizeMoveBodyDirectory({ directory: '/home/me/work' }, realpath))
+      .resolves.toEqual({ directory: '/data/home/me/work' });
+  });
+
+  it('keeps relative and home-relative directories as OpenCode reads them', async () => {
+    await expect(canonicalizeMoveBodyDirectory({ directory: '~/work' }, realpath))
+      .resolves.toEqual({ directory: '~/work' });
+    await expect(canonicalizeMoveBodyDirectory({ directory: 'work' }, realpath))
+      .resolves.toEqual({ directory: 'work' });
+  });
+
+  it('leaves a body without a directory alone', async () => {
+    const body = { branch: 'main' };
+    await expect(canonicalizeMoveBodyDirectory(body, realpath)).resolves.toBe(body);
+  });
+
+  it('keeps the original value when realpath fails', async () => {
+    await expect(canonicalizeMoveBodyDirectory({ directory: '/missing/work' }, async () => {
+      throw new Error('missing');
+    })).resolves.toEqual({ directory: '/missing/work' });
+  });
+});
+
+describe('canonicalizeCreateBodyDirectory', () => {
+  const realpath = async (value) => (value === '/home/me/work' ? '/data/home/me/work' : value);
+
+  it('rewrites an absolute alias in location.directory', async () => {
+    await expect(canonicalizeCreateBodyDirectory({ location: { directory: '/home/me/work' } }, realpath, null))
+      .resolves.toEqual({ location: { directory: '/data/home/me/work' } });
+  });
+
+  it('keeps a directory inside the chats tree as it was addressed', async () => {
+    const body = { location: { directory: '/home/me/chats/2026-11-19/session-a' } };
+    await expect(canonicalizeCreateBodyDirectory(body, realpath, '/home/me/chats')).resolves.toBe(body);
+  });
+
+  it('keeps relative and home-relative directories as OpenCode reads them', async () => {
+    await expect(canonicalizeCreateBodyDirectory({ location: { directory: '~/work' } }, realpath, null))
+      .resolves.toEqual({ location: { directory: '~/work' } });
+    await expect(canonicalizeCreateBodyDirectory({ location: { directory: 'work' } }, realpath, null))
+      .resolves.toEqual({ location: { directory: 'work' } });
+  });
+
+  it('leaves a body without a location alone', async () => {
+    const body = { title: 'Untitled' };
+    await expect(canonicalizeCreateBodyDirectory(body, realpath, null)).resolves.toBe(body);
+  });
+
+  it('keeps the original value when realpath fails', async () => {
+    await expect(canonicalizeCreateBodyDirectory({ location: { directory: '/missing/work' } }, async () => {
+      throw new Error('missing');
+    }, null)).resolves.toEqual({ location: { directory: '/missing/work' } });
   });
 });
 
