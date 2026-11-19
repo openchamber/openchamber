@@ -126,7 +126,9 @@ This module provides Git repository operations for the web server runtime, inclu
 - The repository credential helper validates an endpoint with `new URL` and
   still passes the original JSON field to `http.request`. A single-element URL
   array passes the first step but fails the second with `ERR_INVALID_ARG_TYPE`;
-  declaring the original field to be a validated string would hide that path.
+  the two native calls keep separate boundaries so parsing does not validate
+  the original field's type. A response's username and password likewise
+  remain unchecked JSON until the existing truthiness checks and interpolation.
 - `worktreeBootstrapFailureMessage` performs a prototype-inclusive dictionary
   lookup on an unchecked code. Its result can be an inherited Object member,
   so its runtime contract is broader than a string-or-null return. Scrubbing's

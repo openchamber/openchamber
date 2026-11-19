@@ -2,12 +2,20 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
+import type { JsonValue } from '../shared/json-values.js';
 
 const MAX_BYTES = 64 * 1024;
 
+function parseUrl<Value extends JsonValue | undefined>(value: Value): URL;
+function parseUrl(value: string) { return new URL(value); }
 
-const delegate = (query) => {
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+function requestEndpoint<Value extends JsonValue | undefined>(value: Value, options: http.RequestOptions): http.ClientRequest;
+function requestEndpoint(value: string, options: http.RequestOptions) {
+  return http.request(value, options);
+}
+
+const delegate = (query: string) => {
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
   for (const name of Object.keys(env)) {
     if (name.startsWith('GIT_CONFIG_') || name === 'GIT_DIR' || name === 'GIT_WORK_TREE') delete env[name];
   }
@@ -21,7 +29,7 @@ const delegate = (query) => {
 };
 
 const readQuery = async () => {
-  const chunks = [];
+  const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of process.stdin) {
     size += chunk.length;
@@ -35,17 +43,23 @@ const [endpointFile, operation] = process.argv.slice(2);
 if (!endpointFile || operation !== 'get') process.exit(0);
 const query = await readQuery();
 
-let endpoint;
+interface EndpointFields {
+  url?: JsonValue;
+  version?: JsonValue;
+  secret?: JsonValue;
+}
+let endpoint: EndpointFields;
 try {
-  endpoint = JSON.parse(fs.readFileSync(endpointFile, 'utf8'));
-  const url = new URL(endpoint.url);
-  if (endpoint.version !== 1 || url.protocol !== 'http:' || !String(endpoint.secret ?? '')) throw new Error('invalid');
+  const candidate: EndpointFields = JSON.parse(fs.readFileSync(endpointFile, 'utf8'));
+  const url = parseUrl(candidate.url);
+  if (candidate.version !== 1 || url.protocol !== 'http:' || !String(candidate.secret ?? '')) throw new Error('invalid');
+  endpoint = candidate;
 } catch {
   delegate(query);
-  await new Promise(() => {});
+  endpoint = await new Promise<never>(() => {});
 }
 
-const request = http.request(endpoint.url, {
+const request = requestEndpoint(endpoint.url, {
   method: 'POST',
   headers: { 'content-type': 'application/json', authorization: `Bearer ${endpoint.secret}` },
   timeout: 10_000,
@@ -53,15 +67,15 @@ const request = http.request(endpoint.url, {
 request.on('timeout', () => request.destroy(new Error('timeout')));
 request.on('response', (response) => {
   if (response.statusCode !== 200 || response.headers.location) { delegate(query); return; }
-  const chunks = [];
+  const chunks: Buffer[] = [];
   let size = 0;
-  response.on('data', (chunk) => {
+  response.on('data', (chunk: Buffer) => {
     size += chunk.length;
     if (size > MAX_BYTES) request.destroy();
     else chunks.push(chunk);
   });
   response.on('end', () => {
-    let answer;
+    let answer: { mode?: JsonValue; username?: JsonValue; password?: JsonValue } | null;
     try { answer = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
     catch { delegate(query); return; }
     if (answer?.mode === 'managed' && answer.username && answer.password) {

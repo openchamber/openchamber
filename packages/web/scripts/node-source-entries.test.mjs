@@ -11,7 +11,7 @@ const entries = [
   ['packages/web/bin/cli.js', 'packages/web/bin/cli-runtime.js', ['--version'], 0],
   ['packages/web/server/index.js', 'packages/web/server/runtime.js'],
   ['packages/web/server/lib/git/credential-helper.js', 'packages/web/server/lib/git/credential-helper-runtime.ts', [], 0],
-  ['packages/web/server/lib/git/repository-credential-helper.js', 'packages/web/server/lib/git/repository-credential-helper-runtime.js', [], 0],
+  ['packages/web/server/lib/git/repository-credential-helper.js', 'packages/web/server/lib/git/repository-credential-helper-runtime.ts', [], 0],
   ['packages/web/server/lib/git/ssh-wrapper.js', 'packages/web/server/lib/git/ssh-wrapper-runtime.ts', [], 1],
   ['packages/web/server/lib/dictation/local/worker-process.js', 'packages/web/server/lib/dictation/local/worker-runtime.js'],
   ['scripts/build-builtin-extensions.mjs', 'packages/web/server/lib/guests/builtins.ts'],
