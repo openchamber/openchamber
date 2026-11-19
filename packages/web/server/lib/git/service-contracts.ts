@@ -121,9 +121,9 @@ export interface WorktreeServerOptions extends BootstrapOptions {
   contributorSource?: ContributorSource | null;
   contributorProvenance?: {
     compareAndSwap(directory: string, revision: number, record: ContributorProvenanceInput): Promise<{ revision: number }>;
-  };
+  } | undefined;
   changeRequestLocalBranch?: ChangeRequestLocalBranch;
-  hydrateCheckout?: ((input: { directory: string; parentRemoteName: string }) => Promise<CheckoutHydration | null>) | undefined;
+  hydrateCheckout?: ((input: { directory: string; parentRemoteName: string }) => Promise<CheckoutHydration | null | undefined>) | undefined;
 }
 export interface WorktreeCandidate {
   name: string;

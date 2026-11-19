@@ -9,6 +9,7 @@ import type { createNetworkOperationRegistry } from './network-operation-registr
 import type { createGitNetworkOperationStore } from './network-operation-storage.js';
 import type { createSourceControlAuditStore } from '../source-control/audit-storage.js';
 import type { createBindingService } from '../source-control/binding-service.js';
+import type { ProviderReadContext } from '../source-control/provider-contract.js';
 import type { inspectContributorCheckoutActions } from './service.js';
 import type { PostCheckoutHookAction } from './service-contracts.js';
 import type {
@@ -60,7 +61,7 @@ export type HydrationInput = {
   directory: string;
   parentEndpoint?: string | undefined;
   parentRemoteName?: string | undefined;
-  repositoryAuthority?: RepositoryAuthority | undefined;
+  repositoryAuthority?: RepositoryAuthority | null | undefined;
 };
 export type HydrationPlan = HydrationInput & {
   operationId: string;
@@ -85,7 +86,7 @@ export type AuxiliaryAuthority = {
   credentialId?: string | undefined;
 };
 export type SourceRequest = {
-  context: { repositoryId: string; bindingRevision: number; configRevision: string; provider: string; instance: string; accountId: string; primaryRemote: string };
+  context: ProviderReadContext;
   project: { id: string; owner: string; name: string };
   number: number;
   expectedHeadSha: string;

@@ -133,6 +133,11 @@ This module provides Git repository operations for the web server runtime, inclu
   lookup on an unchecked code. Its result can be an inherited Object member,
   so its runtime contract is broader than a string-or-null return. Scrubbing's
   own-key checks are separate and must remain.
+- The change request's read context comes from source-control authority. It
+  carries the working directory and binding revision. It does not require a
+  config revision; the service-login fetch gets that revision from a separate
+  repository binding read. Worktree hydration retains the explicit `null`
+  authority when there was no binding read.
 
 ### Identity and provenance
 
