@@ -119,26 +119,26 @@ export function labelFilterArgs({ owner, spaceId = null }: { owner: string; spac
   return filters;
 }
 
-export interface InspectLabels {
-  'openchamber.space'?: unknown;
-  'openchamber.space.id'?: unknown;
-  'openchamber.space.role'?: unknown;
-  'openchamber.space.owner'?: unknown;
-  'openchamber.space.project'?: unknown;
-  'openchamber.space.name'?: unknown;
-  'openchamber.space.created'?: unknown;
-  'openchamber.space.tools.key'?: unknown;
-  'openchamber.space.tools.description'?: unknown;
+export interface InspectLabels<Value = unknown> {
+  'openchamber.space'?: Value;
+  'openchamber.space.id'?: Value;
+  'openchamber.space.role'?: Value;
+  'openchamber.space.owner'?: Value;
+  'openchamber.space.project'?: Value;
+  'openchamber.space.name'?: Value;
+  'openchamber.space.created'?: Value;
+  'openchamber.space.tools.key'?: Value;
+  'openchamber.space.tools.description'?: Value;
 }
 
-export function parseSpaceLabels(labels: InspectLabels | null | undefined) {
+export function parseSpaceLabels<Value = unknown>(labels: InspectLabels<Value> | null | undefined) {
   if (!labels || labels[LABEL_MARKER] !== MARKER_VALUE) {
     return null;
   }
   const id = labels[LABEL_ID];
   const role = labels[LABEL_ROLE];
   const owner = labels[LABEL_OWNER];
-  if (!SPACE_ID_PATTERN.test(`${id}`) || !isSpaceRole(role) || !OWNER_PATTERN.test(`${owner ?? ''}`)) {
+  if (!SPACE_ID_PATTERN.test(`${id}`) || !isSpaceRole(role) || !OWNER_PATTERN.test(`${owner ?? ''}`) || id === undefined || owner === undefined) {
     return null;
   }
   return {
@@ -209,14 +209,14 @@ export function toolsLabelFilterArgs({ owner, role = null, key = null }: { owner
   return filters;
 }
 
-export function parseToolsLabels(labels: InspectLabels | null | undefined) {
+export function parseToolsLabels<Value = unknown>(labels: InspectLabels<Value> | null | undefined) {
   if (!labels || labels[LABEL_MARKER] !== MARKER_VALUE) {
     return null;
   }
   const role = labels[LABEL_ROLE];
   const owner = labels[LABEL_OWNER];
   const key = labels[LABEL_TOOLS_KEY];
-  if (!isToolsRole(role) || !OWNER_PATTERN.test(`${owner ?? ''}`) || !TOOLS_KEY_PATTERN.test(`${key ?? ''}`)) {
+  if (!isToolsRole(role) || !OWNER_PATTERN.test(`${owner ?? ''}`) || !TOOLS_KEY_PATTERN.test(`${key ?? ''}`) || owner === undefined || key === undefined) {
     return null;
   }
   return {
