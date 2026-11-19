@@ -10,7 +10,7 @@ import {
 const TUNNEL_PROFILES_VERSION = 1;
 const MAX_TOKEN_FILE_BYTES = 8 * 1024;
 
-export interface TunnelProfile {
+export type TunnelProfile = {
   id: string;
   name: string;
   provider: string;
@@ -19,7 +19,7 @@ export interface TunnelProfile {
   token: string;
   createdAt: number;
   updatedAt: number;
-}
+};
 
 export interface TunnelProfilesStore {
   version: number;
@@ -170,7 +170,9 @@ function resolveToken(options: Pick<Partial<CliOptions>, 'tokenStdin' | 'tokenFi
   return isProfileText(options.token) ? options.token.trim() : undefined;
 }
 
-function redactProfileForOutput<Profile extends { token?: unknown }>(profile: Profile | null | undefined, showSecrets = false) {
+type RedactedProfile<Profile extends { token?: unknown }> = Omit<Profile, 'token'> & { token: Profile['token'] | string };
+
+function redactProfileForOutput<Profile extends { token?: unknown }>(profile: Profile | null | undefined, showSecrets = false): RedactedProfile<Profile> | Profile | null | undefined {
   if (!isProfileContainer(profile)) {
     return profile;
   }

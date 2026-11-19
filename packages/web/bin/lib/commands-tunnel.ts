@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
 import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
-import { DEFAULT_PORT, findClosestMatch, generateCompletionScript, showTunnelHelp } from './cli-args.js';
+import { findClosestMatch, generateCompletionScript, showTunnelHelp } from './cli-args.js';
 import { requestJson, fetchSystemInfoFromPort, waitForServerHealth } from './cli-http.js';
 import {
   discoverRunningInstances,
@@ -61,14 +61,125 @@ import {
   formatProviderWithIcon as clackFormatProviderWithIcon,
 } from '../cli-output.js';
 
+import type { CliOptions } from './cli-args.js';
+import type { LifecycleInstance } from './cli-lifecycle.js';
+import type { JsonRequestOptions } from './cli-http.js';
+import type { TunnelProfile, TunnelProfilesStore } from './cli-tunnel-profiles.js';
+import type { ServeOptions, createServeCommand } from './commands-serve.js';
+import type { createLifecycleCommands } from './commands-lifecycle.js';
+import { isRecord, isString } from '../../server/lib/shared/object-guards.js';
+import type { JsonValue } from '../../server/lib/shared/json-values.js';
+
 const TUNNEL_PROFILES_VERSION = 1;
+
+export interface TunnelCommandOptions extends CliOptions {
+  noQr?: boolean;
+}
+
+type ServeCommand = ReturnType<typeof createServeCommand>;
+type StopCommand = ReturnType<typeof createLifecycleCommands>['stop'];
+type TargetServeCommand = (options: ServeOptions) => ReturnType<ServeCommand>;
+type TargetInstance = LifecycleInstance & { autoStarted?: true };
+
+export interface TunnelCommandDependencies {
+  serveCommand: ServeCommand;
+  stopCommand: StopCommand;
+  setCancelCleanup: (handler: (() => Promise<void>) | null) => void;
+  boldText: (text: string) => string;
+  ensureTunnelProfilesMigrated: () => TunnelProfilesStore;
+}
+
+interface TunnelQrOptions {
+  json?: boolean;
+  quiet?: boolean;
+  explicitQr?: boolean;
+  qr?: boolean;
+}
+
+type TunnelDoctorCheck = {
+  id?: JsonValue | undefined;
+  status?: JsonValue | undefined;
+  label?: JsonValue | undefined;
+  detail?: JsonValue | undefined;
+};
+
+type TunnelDoctorMode = {
+  mode: string;
+  ready?: JsonValue | undefined;
+  blockers?: JsonValue | undefined;
+  checks?: JsonValue | undefined;
+  summary?: JsonValue | undefined;
+};
+
+interface TunnelDoctorResponse {
+  ok: true;
+  provider?: JsonValue | undefined;
+  providerChecks: JsonValue[];
+  modes: TunnelDoctorMode[];
+}
+
+interface TunnelDoctorRequestBody {
+  managedRemoteTunnelTokenProvided: boolean;
+  managedRemoteTunnelHostnameProvided: boolean;
+  managedRemoteTunnelToken?: string;
+}
+
+type TunnelModeRequirements = {
+  key?: string;
+  label?: string;
+  requires?: readonly string[];
+};
+
+interface TunnelStatusLineBody {
+  active?: unknown;
+  provider?: string;
+  mode?: string;
+  url?: string;
+}
+
+interface TunnelStatusLine {
+  status: 'success' | 'neutral';
+  line: string;
+  detail: string;
+}
+
+type TunnelProviderList = Awaited<ReturnType<typeof resolveTunnelProviders>>['providers'];
+
+interface TunnelModeOption {
+  value: string;
+  label: string;
+  hint?: string;
+}
+
+interface TunnelStartPayload {
+  provider: string;
+  mode: string;
+  connectTtlMs?: number;
+  sessionTtlMs?: number;
+  configPath?: string | null;
+  token?: string;
+  hostname?: string;
+  httpsPort?: number | undefined;
+  managedRemoteTunnelPresetId?: string;
+  managedRemoteTunnelPresetName?: string;
+}
+
+interface TroubleshootingHint {
+  key: string;
+  code: string;
+  lines: string[];
+}
+
+function isPromptCancelled<Value>(value: Value | symbol): value is symbol {
+  return clackIsCancel(value);
+}
 
 function getDefaultCloudflaredConfigPath() {
   return path.join(os.homedir(), '.cloudflared', 'config.yml');
 }
 
-function isReadableRegularFile(filePath) {
-  if (typeof filePath !== 'string' || filePath.trim().length === 0) {
+function isReadableRegularFile(filePath: string) {
+  if (filePath.trim().length === 0) {
     return false;
   }
   try {
@@ -81,25 +192,29 @@ function isReadableRegularFile(filePath) {
   }
 }
 
-async function displayTunnelQrCode(url) {
+function isQrFailure(value: unknown): value is { message?: unknown } {
+  return value !== null && value !== undefined;
+}
+
+async function displayTunnelQrCode(url: string) {
   try {
     const qrcode = await import('qrcode-terminal');
     console.log('\n📱 Scan this QR code to access the tunnel:\n');
     qrcode.default.generate(url, { small: true });
     console.log('');
   } catch (error) {
-    console.warn(`Warning: Could not generate QR code: ${error.message}`);
+    console.warn(`Warning: Could not generate QR code: ${isQrFailure(error) ? error.message : undefined}`);
   }
 }
 
-function isTruthyEnv(value) {
-  if (typeof value !== 'string') return false;
+function isTruthyEnv(value: string | undefined) {
+  if (value === undefined) return false;
   const normalized = value.trim().toLowerCase();
   if (!normalized) return false;
   return normalized !== '0' && normalized !== 'false' && normalized !== 'no';
 }
 
-function shouldDisplayTunnelQr(options) {
+function shouldDisplayTunnelQr(options: TunnelQrOptions | null | undefined) {
   if (options?.json) return false;
   if (options?.quiet) return false;
   if (options?.explicitQr === true) return options.qr === true;
@@ -107,9 +222,23 @@ function shouldDisplayTunnelQr(options) {
   return !isTruthyEnv(process.env.CI);
 }
 
+function isDoctorRecord(value: unknown): value is { ok?: unknown; providerChecks?: unknown; modes?: unknown } {
+  return Boolean(value) && typeof value === 'object';
+}
 
-function isValidTunnelDoctorResponse(body) {
-  if (!body || typeof body !== 'object') {
+function isDoctorModeRecord(value: unknown): value is { mode?: unknown; ready?: unknown; blockers?: unknown; checks?: unknown; summary?: unknown } {
+  return Boolean(value) && typeof value === 'object';
+}
+
+function isDoctorModeEntry(value: unknown): value is TunnelDoctorMode {
+  if (!isDoctorModeRecord(value) || typeof value.mode !== 'string') return false;
+  if (typeof value.ready === 'boolean' && Array.isArray(value.blockers)) return true;
+  if (Array.isArray(value.checks) && isDoctorModeRecord(value.summary) && typeof value.summary.ready === 'boolean') return true;
+  return false;
+}
+
+function isValidTunnelDoctorResponse(body: unknown): body is TunnelDoctorResponse {
+  if (!isDoctorRecord(body)) {
     return false;
   }
   if (body.ok !== true) {
@@ -121,21 +250,53 @@ function isValidTunnelDoctorResponse(body) {
   if (!Array.isArray(body.modes)) {
     return false;
   }
-  return body.modes.every((entry) => {
-    if (!entry || typeof entry.mode !== 'string') return false;
-    if (typeof entry.ready === 'boolean' && Array.isArray(entry.blockers)) return true;
-    if (Array.isArray(entry.checks) && entry.summary && typeof entry.summary.ready === 'boolean') return true;
-    return false;
-  });
+  return body.modes.every((entry) => isDoctorModeEntry(entry));
 }
 
+function isDoctorCheck(value: JsonValue | undefined): value is TunnelDoctorCheck {
+  return isRecord(value);
+}
+
+function isDoctorModeReady(modeEntry: TunnelDoctorMode) {
+  return modeEntry.ready === true || (isRecord(modeEntry.summary) && modeEntry.summary.ready === true);
+}
+
+function listDoctorModeBlockers(modeEntry: TunnelDoctorMode) {
+  return Array.isArray(modeEntry.blockers)
+    ? modeEntry.blockers
+    : (Array.isArray(modeEntry.checks)
+      ? modeEntry.checks
+        .filter((c): c is TunnelDoctorCheck => isDoctorCheck(c) && c.status === 'fail' && c.id !== 'startup_readiness')
+        .map((c) => c.detail || c.label || c.id)
+      : []);
+}
+
+function assertDoctorCheckPresent(value: JsonValue | undefined) {
+  if (value === null || value === undefined) {
+    if ('Bun' in globalThis) {
+      throw new TypeError(`${value} is not an object (evaluating 'check.status')`);
+    }
+    throw new TypeError(`Cannot read properties of ${value} (reading 'status')`);
+  }
+}
+
+interface TargetInstanceRequest {
+  options: TunnelCommandOptions;
+  serveCommand: TargetServeCommand;
+  allowAutoStart: boolean;
+  requireAll?: boolean;
+  rejectDesktopRuntime?: boolean;
+}
+
+function resolveTargetInstance(request: TargetInstanceRequest & { requireAll: true }): Promise<TargetInstance | LifecycleInstance[]>;
+function resolveTargetInstance(request: TargetInstanceRequest & { requireAll?: false }): Promise<TargetInstance>;
 async function resolveTargetInstance({
   options,
   serveCommand,
   allowAutoStart,
   requireAll = false,
   rejectDesktopRuntime = false,
-}) {
+}: TargetInstanceRequest): Promise<TargetInstance | LifecycleInstance[]> {
   let running = await discoverRunningInstances();
 
   if (options.all && requireAll) {
@@ -192,7 +353,7 @@ async function resolveTargetInstance({
   }
 
   if (rejectDesktopRuntime) {
-    const attachableEntries = [];
+    const attachableEntries: LifecycleInstance[] = [];
     let sawDesktop = false;
     for (const entry of running) {
       const attachability = await inspectTunnelAttachability(entry.port, { requireHealthy: true });
@@ -204,7 +365,7 @@ async function resolveTargetInstance({
       }
     }
 
-    if (attachableEntries.length === 1) {
+    if (attachableEntries.length === 1 && attachableEntries[0]) {
       return attachableEntries[0];
     }
 
@@ -233,7 +394,7 @@ async function resolveTargetInstance({
     throw new Error('No attachable OpenChamber instance found. Start one with `openchamber serve`.');
   }
 
-  if (running.length === 1) {
+  if (running.length === 1 && running[0]) {
     return running[0];
   }
 
@@ -256,7 +417,7 @@ async function resolveTargetInstance({
   throw new Error(`Multiple OpenChamber instances found: ${ports}. Use --port <port> or --all.`);
 }
 
-async function resolveTunnelReadEntries(options) {
+async function resolveTunnelReadEntries(options: TunnelCommandOptions) {
   const running = await discoverRunningInstances();
 
   if (options.explicitPort) {
@@ -274,7 +435,7 @@ async function resolveTunnelReadEntries(options) {
   return running;
 }
 
-function formatTunnelStatusLine(statusBody, port) {
+function formatTunnelStatusLine(statusBody: TunnelStatusLineBody | null | undefined, port: number): TunnelStatusLine {
   const active = Boolean(statusBody?.active);
   const provider = statusBody?.provider || 'unknown';
   const mode = statusBody?.mode || 'unknown';
@@ -286,7 +447,7 @@ function formatTunnelStatusLine(statusBody, port) {
   };
 }
 
-function formatModeRequirements(mode) {
+function formatModeRequirements(mode: TunnelModeRequirements | null | undefined) {
   const requires = Array.isArray(mode?.requires) ? mode.requires.filter(Boolean) : [];
   if ((mode?.key || '') === 'managed-local') {
     return 'config-path (or default cloudflared config)';
@@ -297,10 +458,9 @@ function formatModeRequirements(mode) {
   return requires.join(', ');
 }
 
-function annotateTunnelProvidersForOutput(providers) {
-  if (!Array.isArray(providers)) return providers;
+function annotateTunnelProvidersForOutput(providers: TunnelProviderList) {
   return providers.map((provider) => {
-    const modes = Array.isArray(provider?.modes) ? provider.modes : [];
+    const modes: readonly TunnelModeRequirements[] = Array.isArray(provider?.modes) ? provider.modes : [];
     return {
       ...provider,
       modes: modes.map((mode) => ({
@@ -311,8 +471,12 @@ function annotateTunnelProvidersForOutput(providers) {
   });
 }
 
-async function handleTunnelProfileSubcommand(options, action, { boldText, ensureTunnelProfilesMigrated }) {
-  const sub = typeof action === 'string' ? action.trim().toLowerCase() : '';
+async function handleTunnelProfileSubcommand(
+  options: TunnelCommandOptions,
+  action: string | null | undefined,
+  { boldText, ensureTunnelProfilesMigrated }: Pick<TunnelCommandDependencies, 'boldText' | 'ensureTunnelProfilesMigrated'>,
+) {
+  const sub = isString(action) ? action.trim().toLowerCase() : '';
   const store = ensureTunnelProfilesMigrated();
 
   if (!sub) {
@@ -402,14 +566,14 @@ async function handleTunnelProfileSubcommand(options, action, { boldText, ensure
           .filter(Boolean)
           .map((providerId) => ({ value: providerId, label: clackFormatProviderWithIcon(providerId) }));
 
-        if (providerOptions.length === 1) {
+        if (providerOptions.length === 1 && providerOptions[0]) {
           provider = providerOptions[0].value;
         } else if (providerOptions.length > 1) {
           const selectedProvider = await clackSelect({
             message: 'Select tunnel provider',
             options: providerOptions,
           });
-          if (clackIsCancel(selectedProvider)) {
+          if (isPromptCancelled(selectedProvider)) {
             clackCancel('Profile add cancelled.');
             return;
           }
@@ -430,7 +594,7 @@ async function handleTunnelProfileSubcommand(options, action, { boldText, ensure
             return normalizeProfileName(value).length > 0 ? undefined : 'Profile name is required.';
           },
         });
-        if (clackIsCancel(enteredName)) {
+        if (isPromptCancelled(enteredName)) {
           clackCancel('Profile add cancelled.');
           return;
         }
@@ -450,7 +614,7 @@ async function handleTunnelProfileSubcommand(options, action, { boldText, ensure
             return normalizeProfileHostname(value).length > 0 ? undefined : 'Hostname is required.';
           },
         });
-        if (clackIsCancel(enteredHostname)) {
+        if (isPromptCancelled(enteredHostname)) {
           clackCancel('Profile add cancelled.');
           return;
         }
@@ -462,7 +626,7 @@ async function handleTunnelProfileSubcommand(options, action, { boldText, ensure
           message: `Reuse saved token for profile '${existingProfile.name}'?`,
           initialValue: true,
         });
-        if (clackIsCancel(useExistingToken)) {
+        if (isPromptCancelled(useExistingToken)) {
           clackCancel('Profile add cancelled.');
           return;
         }
@@ -481,7 +645,7 @@ async function handleTunnelProfileSubcommand(options, action, { boldText, ensure
         const entered = await clackPassword({
           message: `Enter tunnel token for profile '${name}'`,
         });
-        if (clackIsCancel(entered) || !entered || !entered.trim()) {
+        if (isPromptCancelled(entered) || !entered || !entered.trim()) {
           clackCancel('Profile add cancelled.');
           return;
         }
@@ -504,7 +668,7 @@ async function handleTunnelProfileSubcommand(options, action, { boldText, ensure
         const shouldOverwrite = await clackConfirm({
           message: `Profile '${name}' already exists for provider '${provider}'. Overwrite?`,
         });
-        if (clackIsCancel(shouldOverwrite) || !shouldOverwrite) {
+        if (isPromptCancelled(shouldOverwrite) || !shouldOverwrite) {
           clackCancel('Profile add cancelled.');
           return;
         }
@@ -532,8 +696,8 @@ async function handleTunnelProfileSubcommand(options, action, { boldText, ensure
 
     const next = [...store.profiles];
     const now = Date.now();
-    if (existingIndex >= 0) {
-      const current = next[existingIndex];
+    const current = existingIndex >= 0 ? next[existingIndex] : undefined;
+    if (current) {
       next[existingIndex] = {
         ...current,
         mode,
@@ -562,6 +726,10 @@ async function handleTunnelProfileSubcommand(options, action, { boldText, ensure
     if (isJsonMode(options)) {
       printJson({ ok: true, profile: redactProfileForOutput(added, options.showSecrets) });
       return;
+    }
+
+    if (added === undefined) {
+      throw new TypeError("Cannot read properties of undefined (reading 'name')");
     }
 
     if (isQuietMode(options)) {
@@ -619,11 +787,11 @@ async function handleTunnelProfileSubcommand(options, action, { boldText, ensure
 }
 
 
-function createTunnelCommand(deps) {
-  return (options, subcommand, action) => tunnelCommand(options, subcommand, action, deps);
+function createTunnelCommand(deps: TunnelCommandDependencies) {
+  return (options: TunnelCommandOptions, subcommand?: string | null, action?: string | null) => tunnelCommand(options, subcommand, action, deps);
 }
 
-async function tunnelCommand(options, subcommand, action, deps) {
+async function tunnelCommand(options: TunnelCommandOptions, subcommand: string | null | undefined, action: string | null | undefined, deps: TunnelCommandDependencies) {
     const { serveCommand, stopCommand, setCancelCleanup, boldText, ensureTunnelProfilesMigrated } = deps;
     switch (subcommand) {
       case 'help':
@@ -667,7 +835,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
       }
       case 'ready': {
         const entries = await resolveTunnelReadEntries(options);
-        const provider = typeof options.provider === 'string' && options.provider.trim().length > 0
+        const provider = isString(options.provider) && options.provider.trim().length > 0
           ? options.provider.trim().toLowerCase()
           : 'cloudflare';
 
@@ -780,21 +948,21 @@ async function tunnelCommand(options, subcommand, action, deps) {
         const { statuses: portStatuses, availableEntries } = await resolveDoctorPortStatuses(options);
 
         doctorSpin?.message('Checking provider...');
-        let providerOption = typeof options.provider === 'string' && options.provider.trim().length > 0
+        let providerOption = isString(options.provider) && options.provider.trim().length > 0
           ? options.provider.trim().toLowerCase()
           : '';
 
-        let doctorProfile = null;
-        let doctorHostnameOverride = typeof options.hostname === 'string' ? options.hostname.trim() : '';
+        let doctorProfile: TunnelProfile | null | undefined = null;
+        let doctorHostnameOverride = isString(options.hostname) ? options.hostname.trim() : '';
         const explicitHostnameProvided = doctorHostnameOverride.length > 0;
         const explicitTokenProvided = Boolean(options.tokenStdin)
-          || (typeof options.token === 'string' && options.token.trim().length > 0)
-          || (typeof options.tokenFile === 'string' && options.tokenFile.trim().length > 0);
+          || (isString(options.token) && options.token.trim().length > 0)
+          || (isString(options.tokenFile) && options.tokenFile.trim().length > 0);
         let doctorTokenValue = resolveToken(options);
         let hasSavedManagedRemoteProfile = false;
-        const normalizedMode = typeof options.mode === 'string' ? options.mode.trim().toLowerCase() : '';
+        const normalizedMode = isString(options.mode) ? options.mode.trim().toLowerCase() : '';
 
-        if (typeof options.profile === 'string' && options.profile.trim().length > 0) {
+        if (isString(options.profile) && options.profile.trim().length > 0) {
           const store = ensureTunnelProfilesMigrated();
           const resolved = resolveProfileByName(store.profiles, options.profile, providerOption || options.provider);
           if (!resolved.profile) {
@@ -820,42 +988,43 @@ async function tunnelCommand(options, subcommand, action, deps) {
 
         if (doctorProfile) {
           providerOption = providerOption || doctorProfile.provider;
-          if (!doctorHostnameOverride && typeof doctorProfile.hostname === 'string') {
+          if (!doctorHostnameOverride && isString(doctorProfile.hostname)) {
             doctorHostnameOverride = doctorProfile.hostname.trim();
           }
-          if ((!doctorTokenValue || doctorTokenValue.trim().length === 0) && typeof doctorProfile.token === 'string') {
+          if ((!doctorTokenValue || doctorTokenValue.trim().length === 0) && isString(doctorProfile.token)) {
             doctorTokenValue = doctorProfile.token.trim();
           }
         }
 
-        let doctorResult = null;
-        let doctorError = null;
+        let doctorResult: TunnelDoctorResponse | null = null;
+        let doctorError: string | null | undefined = null;
         const diagnosticsEntries = [...availableEntries].sort((a, b) => b.mtime - a.mtime);
         if (diagnosticsEntries.length > 0) {
           const query = new URLSearchParams();
           if (providerOption) query.set('provider', providerOption);
-          if (typeof options.mode === 'string' && options.mode.trim().length > 0) {
+          if (isString(options.mode) && options.mode.trim().length > 0) {
             query.set('mode', options.mode.trim().toLowerCase());
           }
-          if (typeof options.configPath === 'string') query.set('configPath', options.configPath);
+          if (isString(options.configPath)) query.set('configPath', options.configPath);
           if (doctorHostnameOverride.length > 0) {
             query.set('managedRemoteTunnelHostname', doctorHostnameOverride);
           }
           if (hasSavedManagedRemoteProfile) {
             query.set('hasSavedManagedRemoteProfile', '1');
           }
-          const doctorBody = {};
-          doctorBody.managedRemoteTunnelTokenProvided = explicitTokenProvided;
-          doctorBody.managedRemoteTunnelHostnameProvided = explicitHostnameProvided;
-          if (typeof doctorTokenValue === 'string' && doctorTokenValue.trim().length > 0) {
+          const doctorBody: TunnelDoctorRequestBody = {
+            managedRemoteTunnelTokenProvided: explicitTokenProvided,
+            managedRemoteTunnelHostnameProvided: explicitHostnameProvided,
+          };
+          if (isString(doctorTokenValue) && doctorTokenValue.trim().length > 0) {
             doctorBody.managedRemoteTunnelToken = doctorTokenValue;
           }
 
-          const failedPorts = [];
+          const failedPorts: string[] = [];
           for (const diagnosticsEntry of diagnosticsEntries) {
             try {
               doctorSpin?.message(`Diagnosing provider on port ${diagnosticsEntry.port}...`);
-              const doctorFetchOptions = { timeoutMs: 10000 };
+              const doctorFetchOptions: JsonRequestOptions = { timeoutMs: 10000 };
               if (Object.keys(doctorBody).length > 0) {
                 doctorFetchOptions.method = 'POST';
                 doctorFetchOptions.body = JSON.stringify(doctorBody);
@@ -871,7 +1040,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
                 break;
               }
 
-              const looksIncompatible = response.ok && (!body || typeof body !== 'object' || !body.ok);
+              const looksIncompatible = response.ok && (!isDoctorRecord(body) || !body.ok);
               const fallbackError = looksIncompatible
                 ? `port ${diagnosticsEntry.port}: doctor endpoint unavailable or incompatible (restart this CLI instance)`
                 : `port ${diagnosticsEntry.port}: ${body?.error || `doctor ${response.status}`}`;
@@ -926,19 +1095,13 @@ async function tunnelCommand(options, subcommand, action, deps) {
           process.stdout.write(`provider ${providerLabel}\n`);
           const modes = Array.isArray(doctorResult.modes) ? doctorResult.modes : [];
           for (const modeEntry of modes) {
-            const ready = modeEntry.ready === true || modeEntry.summary?.ready === true;
+            const ready = isDoctorModeReady(modeEntry);
             if (ready) {
               process.stdout.write(`mode ${modeEntry.mode} ready\n`);
               continue;
             }
 
-            const blockers = Array.isArray(modeEntry.blockers)
-              ? modeEntry.blockers
-              : (Array.isArray(modeEntry.checks)
-                ? modeEntry.checks
-                  .filter((c) => c?.status === 'fail' && c?.id !== 'startup_readiness')
-                  .map((c) => c.detail || c.label || c.id)
-                : []);
+            const blockers = listDoctorModeBlockers(modeEntry);
             process.stdout.write(`mode ${modeEntry.mode} not-ready ${blockers.length || 0}\n`);
             for (const blocker of blockers) {
               process.stdout.write(`blocker ${modeEntry.mode} ${String(blocker)}\n`);
@@ -954,9 +1117,9 @@ async function tunnelCommand(options, subcommand, action, deps) {
         for (const entry of cliPorts) {
           logStatus('success', `port ${entry.port} — CLI (available)`);
         }
-        const desktopUnavailablePorts = [];
+        const desktopUnavailablePorts: (number | null | undefined)[] = [];
         for (const entry of unavailablePorts) {
-          const isDesktop = typeof entry?.line === 'string' && entry.line.includes('desktop runtime');
+          const isDesktop = isString(entry?.line) && entry.line.includes('desktop runtime');
           if (isDesktop) {
             desktopUnavailablePorts.push(entry.port);
             logStatus('error', `port ${entry.port} — Desktop (tunneling not supported)`);
@@ -999,22 +1162,24 @@ async function tunnelCommand(options, subcommand, action, deps) {
           return;
         }
 
-        const providerLabel = clackFormatProviderWithIcon(doctorResult.provider || 'unknown');
+        const providerLabel = clackFormatProviderWithIcon(isString(doctorResult.provider) ? doctorResult.provider : 'unknown');
         clackIntro(boldText(`Provider: ${providerLabel}`));
 
         let providerPassCount = 0;
-        for (const check of (doctorResult.providerChecks || [])) {
+        for (const entry of (doctorResult.providerChecks || [])) {
+          assertDoctorCheckPresent(entry);
+          const check: TunnelDoctorCheck = isDoctorCheck(entry) ? entry : {};
           const passed = check.status === 'pass';
           if (passed) {
             providerPassCount++;
             logStatus('success', `${check.label}${check.detail ? ` — ${check.detail}` : ''}`);
           } else {
-            logStatus('error', check.label, check.detail || undefined);
+            logStatus('error', check.detail ? `${check.label}\n${check.detail}` : `${check.label}`);
           }
         }
 
         const depCheck = (doctorResult.providerChecks || []).find(
-          (c) => c.id === 'dependency' || c.id === 'provider_dependency',
+          (c): c is TunnelDoctorCheck => isDoctorCheck(c) && (c.id === 'dependency' || c.id === 'provider_dependency'),
         );
         if (depCheck && depCheck.status !== 'pass') {
           clackOutro('1 blocker — resolve before checking modes');
@@ -1031,22 +1196,16 @@ async function tunnelCommand(options, subcommand, action, deps) {
 
         clackIntro(boldText('Modes'));
         let totalBlockers = 0;
-        const troubleshootingHints = [];
+        const troubleshootingHints: TroubleshootingHint[] = [];
         for (const modeEntry of modes) {
-          const isReady = modeEntry.ready === true || modeEntry.summary?.ready === true;
+          const isReady = isDoctorModeReady(modeEntry);
           if (isReady) {
             const passDetail = Array.isArray(modeEntry.checks)
-              ? modeEntry.checks.find((c) => c?.status === 'pass' && !DOCTOR_NOISE_CHECK_IDS.has(c?.id))?.detail
+              ? modeEntry.checks.find((c): c is TunnelDoctorCheck => isDoctorCheck(c) && c.status === 'pass' && !(isString(c.id) && DOCTOR_NOISE_CHECK_IDS.has(c.id)))?.detail
               : null;
             logStatus('success', `${modeEntry.mode} — Ready${passDetail ? ` (${passDetail})` : ''}`);
           } else {
-            const blockers = Array.isArray(modeEntry.blockers)
-              ? modeEntry.blockers
-              : (Array.isArray(modeEntry.checks)
-                ? modeEntry.checks
-                  .filter((c) => c?.status === 'fail' && c?.id !== 'startup_readiness')
-                  .map((c) => c.detail || c.label || c.id)
-                : []);
+            const blockers = listDoctorModeBlockers(modeEntry);
             totalBlockers += blockers.length;
             const blockerCount = blockers.length;
             const blockerWord = blockerCount === 1 ? 'blocker' : 'blockers';
@@ -1095,8 +1254,8 @@ async function tunnelCommand(options, subcommand, action, deps) {
         }
         clackOutro(totalBlockers > 0 ? `Done (${totalBlockers} ${totalBlockers === 1 ? 'issue' : 'issues'})` : 'All modes ready');
 
-        const dedupedHints = [];
-        const seenHintKeys = new Set();
+        const dedupedHints: TroubleshootingHint[] = [];
+        const seenHintKeys = new Set<string>();
         for (const hint of troubleshootingHints) {
           if (!seenHintKeys.has(hint.key)) {
             seenHintKeys.add(hint.key);
@@ -1117,22 +1276,22 @@ async function tunnelCommand(options, subcommand, action, deps) {
         return;
       }
       case 'start': {
-        let provider = typeof options.provider === 'string' && options.provider.trim().length > 0
+        let provider = isString(options.provider) && options.provider.trim().length > 0
           ? options.provider.trim().toLowerCase()
           : '';
-        let mode = typeof options.mode === 'string' && options.mode.trim().length > 0
+        let mode = isString(options.mode) && options.mode.trim().length > 0
           ? options.mode.trim().toLowerCase()
           : '';
-        let resolvedTokenValue = resolveToken(options);
-        let token = typeof resolvedTokenValue === 'string' ? resolvedTokenValue : undefined;
-        let hostname = typeof options.hostname === 'string' ? options.hostname : undefined;
+        const resolvedTokenValue = resolveToken(options);
+        let token = isString(resolvedTokenValue) ? resolvedTokenValue : undefined;
+        let hostname = isString(options.hostname) ? options.hostname : undefined;
         let selectedProfile = null;
 
         if (options.explicitPort) {
           assertSafeBrowserPort(options.port, { context: 'Tunnel start' });
         }
 
-        if (typeof options.profile === 'string' && options.profile.trim().length > 0) {
+        if (isString(options.profile) && options.profile.trim().length > 0) {
           const store = ensureTunnelProfilesMigrated();
           const resolved = resolveProfileByName(store.profiles, options.profile, provider || options.provider);
           if (!resolved.profile) {
@@ -1141,8 +1300,8 @@ async function tunnelCommand(options, subcommand, action, deps) {
           selectedProfile = resolved.profile;
           provider = provider || selectedProfile.provider;
           mode = mode || selectedProfile.mode;
-          token = (typeof token === 'string' && token.trim().length > 0) ? token : selectedProfile.token;
-          hostname = typeof options.hostname === 'string' && options.hostname.trim().length > 0 ? options.hostname : selectedProfile.hostname;
+          token = (isString(token) && token.trim().length > 0) ? token : selectedProfile.token;
+          hostname = isString(options.hostname) && options.hostname.trim().length > 0 ? options.hostname : selectedProfile.hostname;
         }
 
         if (!selectedProfile && !mode && canPrompt(options)) {
@@ -1159,7 +1318,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
                 })),
               ],
             });
-            if (clackIsCancel(profileChoice)) {
+            if (isPromptCancelled(profileChoice)) {
               clackCancel('Tunnel start cancelled.');
               return;
             }
@@ -1168,8 +1327,8 @@ async function tunnelCommand(options, subcommand, action, deps) {
               if (selectedProfile) {
                 provider = provider || selectedProfile.provider;
                 mode = mode || selectedProfile.mode;
-                token = (typeof token === 'string' && token.trim().length > 0) ? token : selectedProfile.token;
-                hostname = typeof options.hostname === 'string' && options.hostname.trim().length > 0 ? options.hostname : selectedProfile.hostname;
+                token = (isString(token) && token.trim().length > 0) ? token : selectedProfile.token;
+                hostname = isString(options.hostname) && options.hostname.trim().length > 0 ? options.hostname : selectedProfile.hostname;
               }
             }
           }
@@ -1185,13 +1344,16 @@ async function tunnelCommand(options, subcommand, action, deps) {
           if (modes.length > 1) {
             const modeChoice = await clackSelect({
               message: `Select tunnel mode for ${clackFormatProviderWithIcon(provider)}`,
-              options: modes.map((m) => ({
-                value: m.key,
-                label: `${m.key} — ${m.label}`,
-                hint: formatModeRequirements(m) !== 'none' ? `requires: ${formatModeRequirements(m)}` : undefined,
-              })),
+              options: modes.map((m) => {
+                const option: TunnelModeOption = {
+                  value: m.key,
+                  label: `${m.key} — ${m.label}`,
+                };
+                if (formatModeRequirements(m) !== 'none') option.hint = `requires: ${formatModeRequirements(m)}`;
+                return option;
+              }),
             });
-            if (clackIsCancel(modeChoice)) {
+            if (isPromptCancelled(modeChoice)) {
               clackCancel('Tunnel start cancelled.');
               return;
             }
@@ -1201,7 +1363,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
 
         mode = mode || providerCaps?.defaults?.mode || 'quick';
         if (mode === 'managed-remote') {
-          if (!(typeof hostname === 'string' && hostname.trim().length > 0)) {
+          if (!(isString(hostname) && hostname.trim().length > 0)) {
             if (canPrompt(options)) {
               const profilesStore = ensureTunnelProfilesMigrated();
               const lastManagedRemoteProfile = [...profilesStore.profiles]
@@ -1213,13 +1375,13 @@ async function tunnelCommand(options, subcommand, action, deps) {
                 placeholder: suggestedHostname,
                 initialValue: suggestedHostname,
                 validate(value) {
-                  if (typeof value !== 'string' || value.trim().length === 0) {
+                  if (!isString(value) || value.trim().length === 0) {
                     return 'Hostname is required.';
                   }
                   return undefined;
                 },
               });
-              if (clackIsCancel(enteredHostname)) {
+              if (isPromptCancelled(enteredHostname)) {
                 clackCancel('Tunnel start cancelled.');
                 return;
               }
@@ -1229,12 +1391,12 @@ async function tunnelCommand(options, subcommand, action, deps) {
             }
           }
 
-          if (!(typeof token === 'string' && token.trim().length > 0)) {
+          if (!(isString(token) && token.trim().length > 0)) {
             if (canPrompt(options)) {
               const entered = await clackPassword({
                 message: 'Enter managed-remote tunnel token',
               });
-              if (clackIsCancel(entered) || !entered || !entered.trim()) {
+              if (isPromptCancelled(entered) || !entered || !entered.trim()) {
                 clackCancel('Tunnel start cancelled.');
                 return;
               }
@@ -1252,7 +1414,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
                 { value: 'save-run', label: 'Save profile and run', hint: 'Reuse with --profile later' },
               ],
             });
-            if (clackIsCancel(runChoice)) {
+            if (isPromptCancelled(runChoice)) {
               clackCancel('Tunnel start cancelled.');
               return;
             }
@@ -1267,7 +1429,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
                   return normalizeProfileName(value).length > 0 ? undefined : 'Profile name is required.';
                 },
               });
-              if (clackIsCancel(enteredProfileName)) {
+              if (isPromptCancelled(enteredProfileName)) {
                 clackCancel('Tunnel start cancelled.');
                 return;
               }
@@ -1283,7 +1445,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
                   message: `Profile '${desiredName}' already exists. Overwrite and run?`,
                   initialValue: true,
                 });
-                if (clackIsCancel(shouldOverwrite) || !shouldOverwrite) {
+                if (isPromptCancelled(shouldOverwrite) || !shouldOverwrite) {
                   clackCancel('Tunnel start cancelled.');
                   return;
                 }
@@ -1291,8 +1453,8 @@ async function tunnelCommand(options, subcommand, action, deps) {
 
               const now = Date.now();
               const nextProfiles = [...store.profiles];
-              if (existingIndex >= 0) {
-                const current = nextProfiles[existingIndex];
+              const current = existingIndex >= 0 ? nextProfiles[existingIndex] : undefined;
+              if (current) {
                 nextProfiles[existingIndex] = {
                   ...current,
                   mode: 'managed-remote',
@@ -1323,7 +1485,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
             }
           }
 
-          if (typeof options.token === 'string' && !options.tokenFile && !options.tokenStdin && canPrompt(options)) {
+          if (isString(options.token) && !options.tokenFile && !options.tokenStdin && canPrompt(options)) {
             clackBox(
               'Token passed via --token is visible in your shell history and process list.\n' +
               'Consider using --token-file or --token-stdin for better security.',
@@ -1333,7 +1495,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
         }
 
         if (mode === 'managed-local') {
-          const hasConfigPath = typeof options.configPath === 'string' && options.configPath.trim().length > 0;
+          const hasConfigPath = isString(options.configPath) && options.configPath.trim().length > 0;
           if (!hasConfigPath && canPrompt(options)) {
             const lastConfigPath = readLastManagedLocalConfigPath();
             const defaultConfigPath = getDefaultCloudflaredConfigPath();
@@ -1357,7 +1519,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
                   },
                 ],
               });
-              if (clackIsCancel(configChoice)) {
+              if (isPromptCancelled(configChoice)) {
                 clackCancel('Tunnel start cancelled.');
                 return;
               }
@@ -1366,26 +1528,26 @@ async function tunnelCommand(options, subcommand, action, deps) {
               }
             }
 
-            if (!(typeof options.configPath === 'string' && options.configPath.trim().length > 0)) {
+            if (!(isString(options.configPath) && options.configPath.trim().length > 0)) {
               const enteredPath = await clackText({
                 message: 'Enter managed-local config path',
                 placeholder: suggestedConfigPath,
                 initialValue: suggestedConfigPath,
                 validate(value) {
-                  if (typeof value !== 'string' || value.trim().length === 0) {
+                  if (!isString(value) || value.trim().length === 0) {
                     return 'Config path is required.';
                   }
                   return undefined;
                 },
               });
-              if (clackIsCancel(enteredPath)) {
+              if (isPromptCancelled(enteredPath)) {
                 clackCancel('Tunnel start cancelled.');
                 return;
               }
               options.configPath = enteredPath.trim();
             }
 
-            if (typeof options.configPath === 'string' && options.configPath.trim().length > 0) {
+            if (isString(options.configPath) && options.configPath.trim().length > 0) {
               writeLastManagedLocalConfigPath(options.configPath);
             }
           }
@@ -1404,7 +1566,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
             provider,
             mode,
             hostname: hostname || null,
-            hasToken: typeof token === 'string' && token.trim().length > 0,
+            hasToken: isString(token) && token.trim().length > 0,
             profile: selectedProfile ? selectedProfile.name : null,
             configPath: options.configPath || null,
             connectTtlMs: connectTtlMs ?? null,
@@ -1456,7 +1618,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
                 label: `port ${entry.port}`,
               })),
             });
-            if (clackIsCancel(selectedPort)) {
+            if (isPromptCancelled(selectedPort)) {
               clackCancel('Tunnel start cancelled.');
               return;
             }
@@ -1465,8 +1627,8 @@ async function tunnelCommand(options, subcommand, action, deps) {
           }
         }
 
-        let generatedUiPassword = null;
-        const serveProtected = (serveOptions) => {
+        let generatedUiPassword: string | null = null;
+        const serveProtected = (serveOptions: ServeOptions) => {
           if (hasUiPasswordConfigured(serveOptions.uiPassword)) return serveCommand(serveOptions);
           generatedUiPassword = generateUiPassword();
           options.uiPassword = generatedUiPassword;
@@ -1483,10 +1645,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
 
         if (instance?.autoStarted) {
           setCancelCleanup(async () => {
-            try {
-              await stopCommand({ explicitPort: true, port: instance.port });
-            } catch {
-            }
+            await stopCommand({ explicitPort: true, port: instance.port }).catch(() => undefined);
           });
         }
 
@@ -1543,21 +1702,18 @@ async function tunnelCommand(options, subcommand, action, deps) {
           }
         }
 
-        const payload = {
-          provider,
-          mode,
-          ...(typeof connectTtlMs === 'number' ? { connectTtlMs } : {}),
-          ...(typeof sessionTtlMs === 'number' ? { sessionTtlMs } : {}),
-          ...(options.configPath === null ? { configPath: null } : {}),
-          ...(typeof options.configPath === 'string' ? { configPath: options.configPath } : {}),
-          ...(typeof token === 'string' ? { token } : {}),
-          ...(typeof hostname === 'string' ? { hostname } : {}),
-          httpsPort: options.httpsPort,
-          ...(selectedProfile ? {
-            managedRemoteTunnelPresetId: selectedProfile.id,
-            managedRemoteTunnelPresetName: selectedProfile.name,
-          } : {}),
-        };
+        const payload: TunnelStartPayload = { provider, mode };
+        if (connectTtlMs !== undefined) payload.connectTtlMs = connectTtlMs;
+        if (sessionTtlMs !== undefined) payload.sessionTtlMs = sessionTtlMs;
+        if (options.configPath === null) payload.configPath = null;
+        if (isString(options.configPath)) payload.configPath = options.configPath;
+        if (isString(token)) payload.token = token;
+        if (isString(hostname)) payload.hostname = hostname;
+        payload.httpsPort = options.httpsPort;
+        if (selectedProfile) {
+          payload.managedRemoteTunnelPresetId = selectedProfile.id;
+          payload.managedRemoteTunnelPresetName = selectedProfile.name;
+        }
 
         const spin = createSpinner(options);
         spin?.start(`Starting ${clackFormatProviderWithIcon(provider)}/${mode} tunnel...`);
@@ -1613,13 +1769,15 @@ async function tunnelCommand(options, subcommand, action, deps) {
           sessionTtlMs,
           qr: options.qr === true,
           noQr: options.noQr === true,
-          includeTokenPlaceholder: !selectedProfile && mode === 'managed-remote' && typeof token === 'string' && token.trim().length > 0,
+          includeTokenPlaceholder: !selectedProfile && mode === 'managed-remote' && isString(token) && token.trim().length > 0,
           tokenViaStdin: options.tokenStdin === true,
-          tokenFileProvided: typeof options.tokenFile === 'string' && options.tokenFile.trim().length > 0,
+          tokenFileProvided: isString(options.tokenFile) && options.tokenFile.trim().length > 0,
         });
 
         if (isJsonMode(options)) {
-          printJson({ port: instance.port, replayCommand, ...body, ...(generatedUiPassword ? { password: generatedUiPassword } : {}) });
+          const startOutput = { port: instance.port, replayCommand, ...body };
+          if (generatedUiPassword) startOutput.password = generatedUiPassword;
+          printJson(startOutput);
         } else if (isQuietMode(options)) {
           const quietUrl = body.connectUrl || body.url || 'n/a';
           process.stdout.write(`port ${instance.port} ${quietUrl}${generatedUiPassword ? ` pass:${generatedUiPassword}` : ''}\n`);
@@ -1635,7 +1793,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
           if (body.replacedTunnel) {
             const revokedBootstrapCount = Number.isFinite(body.revokedBootstrapCount) ? body.revokedBootstrapCount : 0;
             const invalidatedSessionCount = Number.isFinite(body.invalidatedSessionCount) ? body.invalidatedSessionCount : 0;
-            const previousMode = typeof body?.replaced?.mode === 'string' ? body.replaced.mode : 'unknown';
+            const previousMode = isString(body?.replaced?.mode) ? body.replaced.mode : 'unknown';
             logStatus(
               'warning',
               `replaced previous ${previousMode} tunnel`,
@@ -1650,7 +1808,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
             { line: 'If needed, repeat with same settings', detail: replayCommand },
           ];
 
-          if (!selectedProfile && mode === 'managed-remote' && typeof hostname === 'string' && hostname.trim().length > 0) {
+          if (!selectedProfile && mode === 'managed-remote' && isString(hostname) && hostname.trim().length > 0) {
             const profileSaveCommand = buildTunnelProfileAddCommand({ provider, hostname });
             optionalTips.push({ line: 'Optional: save reusable profile (stores hostname + token locally)', detail: profileSaveCommand });
             optionalTips.push({ line: 'Start from saved profile', detail: 'openchamber tunnel start --profile <name>' });
@@ -1668,21 +1826,22 @@ async function tunnelCommand(options, subcommand, action, deps) {
 
         if (shouldDisplayTunnelQr(options)) {
           const url = body.connectUrl || body.url;
-          if (typeof url === 'string' && url.length > 0) {
+          if (isString(url) && url.length > 0) {
             await displayTunnelQrCode(url);
           }
         }
         return;
       }
       case 'stop': {
-        let entries;
+        let entries: LifecycleInstance[];
         if (options.all) {
-          entries = await resolveTargetInstance({ options, serveCommand, allowAutoStart: false, requireAll: true });
+          const resolvedEntries = await resolveTargetInstance({ options, serveCommand, allowAutoStart: false, requireAll: true });
+          entries = Array.isArray(resolvedEntries) ? resolvedEntries : [resolvedEntries];
           if (entries.length > 1 && !options.force && canPrompt(options)) {
             const shouldStop = await clackConfirm({
               message: `Stop tunnels on all ${entries.length} instances?`,
             });
-            if (clackIsCancel(shouldStop) || !shouldStop) {
+            if (isPromptCancelled(shouldStop) || !shouldStop) {
               clackCancel('Tunnel stop cancelled.');
               return;
             }

@@ -90,7 +90,7 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Which instance is the service comes from `findStartupServiceInstance` in `cli-startup.js`: the pid the manager reports (systemd's `MainPID`, launchd's job `PID`) settles it on Linux and macOS, and a missing pid there means the service is not running, so a foreground server on those platforms is a plain CLI copy. On Windows an instance is the service only when its pid is a child of the wrapper the running task started. A task that is missing, stopped or disabled owns nothing, so a manual foreground server stays a plain CLI copy, and a running task is found beside other foreground servers. Without this, an update on macOS or Windows stopped the service and started a detached copy beside it while launchd or the task brought the old one back (#5793's Linux fix never reached those platforms).
   - The Windows lookup can fail: PowerShell errors, or the task runs and no instance matches it, an empty discovery included, since discovery skips a server that does not answer its probe. The update then stops before it stops any instance or installs anything, and points at `openchamber startup disable`, because a wrong guess either kills the service or leaves it on the old release.
 
-- `commands-tunnel.js`
+- `commands-tunnel.ts`
   - Implements `openchamber tunnel` and its subcommands: `profile`, `providers`, `ready`, `doctor`, `status`, `start`, `stop`, and `completion`.
   - Owns tunnel-specific command flow, interactive prompt decisions, managed-local/managed-remote startup, QR display rules, tunnel start/stop API calls, and tunnel profile command handling.
   - A public tunnel refuses an instance without a UI password, so an instance this command starts gets a generated one and shows it once. `--ui-password` cannot change a server that is already running, so an existing passwordless instance is a loud error carrying the stop/retry command.
@@ -389,14 +389,17 @@ spreads that value and reads only optional legacy key fields from the strict
 reader. The CLI still checks URL text and the relay flag before use. QR
 generation uses the installed package's `small` rendering option.
 
-### Why tunnel commands retain JavaScript
+### Why doctor check labels are printed as text
 
-`isValidTunnelDoctorResponse` establishes provider-check and mode arrays, but
-does not check provider-check labels or details. A failed check can pass its
-raw label to `logStatus` without a detail. In that branch Clack splits the
-label as text or reads it as an array; for example, a number throws. Treating
-the label as a string would claim validation that never happened. Coercing
-or rejecting the value in the command would change the existing failure path.
+`isValidTunnelDoctorResponse` establishes the provider-check and mode arrays
+of a JSON-parsed response, but not the fields of each provider check. Each
+check is read as a record of optional JSON values; a missing entry still
+throws as a property read would. A failed check prints its label and detail
+through template strings, so `logStatus` receives text. Every OpenChamber
+tunnel provider declares string labels (`server/lib/tunnels/contracts.ts`),
+so the output for any response a server produces is unchanged. A malformed
+non-string label now prints its text form, where the JavaScript version
+handed the raw value to Clack, which threw for a number.
 
 ### Why browser port and environment checks remain
 
