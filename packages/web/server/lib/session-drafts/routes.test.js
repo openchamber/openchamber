@@ -71,6 +71,45 @@ describe('session drafts', () => {
     expect(saved.body.draft.attachments).toEqual([{ ...attachment, kind: 'data' }]);
   });
 
+  it('leaves no attachment bytes behind when the draft is too large', async () => {
+    const { call, dataDir } = setup();
+    const huge = `data:application/octet-stream;base64,${Buffer.alloc(26 * 1024 * 1024).toString('base64')}`;
+    const rejected = await call('PUT', '/api/session-drafts/:id', {
+      params: { id: 'd1' },
+      body: {
+        directory: '/repo',
+        text: 'x',
+        attachments: [
+          { id: 'a1', filename: 'small.txt', mimeType: 'text/plain', size: 3, dataUrl: 'data:text/plain;base64,c21h' },
+          { id: 'a2', filename: 'huge.bin', mimeType: 'application/octet-stream', size: 26 * 1024 * 1024, dataUrl: huge },
+        ],
+      },
+    }, 60_000);
+
+    expect(rejected.statusCode).toBe(413);
+    const folder = path.join(dataDir, 'session-drafts', 'd1');
+    expect(fs.existsSync(folder) ? fs.readdirSync(folder) : []).toEqual([]);
+  }, 60_000);
+
+  it('leaves no attachment bytes behind when a later attachment is invalid', async () => {
+    const { call, dataDir } = setup();
+    const rejected = await call('PUT', '/api/session-drafts/:id', {
+      params: { id: 'd1' },
+      body: {
+        directory: '/repo',
+        text: 'x',
+        attachments: [
+          { id: 'a1', filename: 'small.txt', mimeType: 'text/plain', size: 3, dataUrl: 'data:text/plain;base64,c21h' },
+          { id: 'a2', filename: 'broken.txt', mimeType: 'text/plain', size: 3, dataUrl: 'not-a-data-url' },
+        ],
+      },
+    });
+
+    expect(rejected.statusCode).toBe(400);
+    const folder = path.join(dataDir, 'session-drafts', 'd1');
+    expect(fs.existsSync(folder) ? fs.readdirSync(folder) : []).toEqual([]);
+  });
+
   it('discards a draft with its files', async () => {
     const { call, dataDir } = setup();
     await call('PUT', '/api/session-drafts/:id', { params: { id: 'd1' }, body: { directory: '/repo', text: 'x', attachments: [{ id: 'a1', filename: 'f', mimeType: 'image/png', size: 9, dataUrl: png }] } });
