@@ -1,22 +1,14 @@
 import { defineRule } from "@oxlint/plugins";
 
 import type { ESTree } from "@oxlint/plugins";
+import { isExportedInputParser, isRuntimeFunction } from "../shared/input-parsers.ts";
 
-type RuntimeFunction = ESTree.ArrowFunctionExpression | ESTree.Function;
-
-function isRuntimeFunction(node: ESTree.Node): node is RuntimeFunction {
-	return (
-		node.type === "ArrowFunctionExpression" ||
-		node.type === "FunctionDeclaration" ||
-		node.type === "FunctionExpression"
-	);
-}
-
-function isInsideTypeGuard(node: ESTree.Node): boolean {
+function isInsideBoundary(node: ESTree.Node, filename: string, allowInTypeGuards: boolean, patterns: readonly string[]): boolean {
 	let current: ESTree.Node | null = node.parent;
 	while (current !== null && current.type !== "Program") {
 		if (isRuntimeFunction(current)) {
-			return current.returnType?.typeAnnotation.type === "TSTypePredicate";
+			return (allowInTypeGuards && current.returnType?.typeAnnotation.type === "TSTypePredicate")
+				|| isExportedInputParser(current, filename, patterns);
 		}
 		current = current.parent;
 	}
@@ -40,11 +32,12 @@ export const noRuntimeTypeofRule = defineRule({
 				type: "object",
 				properties: {
 					allowInTypeGuards: { type: "boolean" },
+					allowInParsers: { type: "array", items: { type: "string" } },
 				},
 				additionalProperties: false,
 			},
 		],
-		defaultOptions: [{ allowInTypeGuards: false }],
+		defaultOptions: [{ allowInTypeGuards: false, allowInParsers: [] }],
 	},
 	createOnce(context) {
 		return {
@@ -55,9 +48,11 @@ export const noRuntimeTypeofRule = defineRule({
 					option !== null &&
 					!Array.isArray(option) &&
 					option.allowInTypeGuards === true;
+				const patterns = typeof option === "object" && option !== null && "allowInParsers" in option
+					&& Array.isArray(option.allowInParsers) ? option.allowInParsers : [];
 				if (
 					node.operator === "typeof" &&
-					(!allowInTypeGuards || !isInsideTypeGuard(node))
+					!isInsideBoundary(node, context.filename, allowInTypeGuards, patterns)
 				) {
 					context.report({ node, messageId: "runtimeTypeof" });
 				}

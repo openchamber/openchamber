@@ -11,9 +11,11 @@ Sections: *Isolate*, *Seed it*, *Drive the page*, *Stop*.
 ```
 HOME=$D/home XDG_CONFIG_HOME=$D/xdg XDG_DATA_HOME=$D/data XDG_CACHE_HOME=$D/cache XDG_STATE_HOME=$D/state
 BUN_INSTALL_CACHE_DIR=$D/cache OPENCHAMBER_DATA_DIR=$D/oc
-OPENCODE_BINARY=/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode
+OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR=<checkout>/packages/electron/resources/opencode-server
 OPENCHAMBER_HMR_UI_PORT=<ui> OPENCHAMBER_HMR_API_PORT=<api> bun run dev
 ```
+
+That folder is the OpenCode the desktop app bundles, at the version this checkout pins: stage it once with `bun run --cwd packages/electron prepare:opencode-server`. `OPENCODE_BINARY=<a CLI>` instead runs a CLI you name.
 
 The variables go because a shell opened inside the desktop app (an agent's, the integrated terminal) inherits the app's server env: the LAN UI password, `OPENCHAMBER_RUNTIME=desktop`, `OPENCHAMBER_DIST_DIR`, the managed OpenCode's `OPENCODE_*`, with their names recorded in `OPENCHAMBER_INJECTED_ENV`. `bun run dev` drops every recorded name, an inline override included, so while that record survives, `OPENCODE_CONFIG=/tmp/x.json bun run dev` silently writes the user's real `opencode.json`. Never print the password variable.
 

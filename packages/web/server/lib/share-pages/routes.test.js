@@ -7,7 +7,7 @@ import express from 'express';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { registerSharePageRoutes } from './routes.js';
+import { registerReceivedPageRoutes, registerSharePageRoutes } from './routes.js';
 import { createSharePagesRuntime, parseShareRequest } from './runtime.js';
 import { createSharePageStore } from './store.js';
 
@@ -77,5 +77,34 @@ describe('share page routes', () => {
     expect(relay.create).not.toHaveBeenCalled();
     // The card hides itself on this refusal.
     expect((await request(app).get(BASE).expect(403)).body.code).toBe('enterprise_mode');
+  });
+
+  it('keeps document fields unchecked and preserves missing-body and array errors', async () => {
+    const { app } = await createApp();
+    await request(app).post(`${BASE}/document`).expect(400, { error: 'html is required' });
+    await request(app).post(`${BASE}/document`).send([]).expect(400, { error: 'html is required' });
+    await request(app).post(`${BASE}/document`).send({ html: 42 }).expect(400, { error: 'html is required' });
+    const uploaded = await request(app).post(`${BASE}/document`).send({ html: '<p>Pick</p>', title: 42, source: [] }).expect(200);
+    expect(uploaded.body.title).toBe('Schema');
+  });
+});
+
+describe('received page request fields', () => {
+  it('passes unchecked fields and absent values to the runtime and rejects primitive JSON', async () => {
+    const register = vi.fn(async () => ({ accepted: true }));
+    const open = vi.fn(async () => ({ accepted: true }));
+    const app = express();
+    registerReceivedPageRoutes(app, { register, open });
+    const received = '/api/openchamber/received-pages';
+
+    await request(app).post(received).expect(200);
+    await request(app).post(received).send([]).expect(200);
+    await request(app).post(received).send({ url: { nested: true } }).expect(200);
+    expect(register.mock.calls).toEqual([[undefined], [undefined], [{ nested: true }]]);
+
+    await request(app).post(`${received}/rp_test/open`).send({ pin: ['123456'] }).expect(200);
+    expect(open).toHaveBeenCalledWith('rp_test', ['123456']);
+    await request(app).post(received).type('json').send('"link"').expect(400);
+    expect(register).toHaveBeenCalledTimes(3);
   });
 });

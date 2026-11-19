@@ -16,6 +16,7 @@ import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
 import { syncSessionKnowledge } from "@/lib/sessionKnowledgeApi"
 import { fetchResponseStyleInstruction } from "@/lib/responseStyle"
 import { attachmentWireName } from "@/lib/attachmentIdentity"
+import { filesForModel } from "./text-model-images"
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
 import { isDirectoryUnknown, useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
@@ -186,9 +187,6 @@ export async function routeMessage(params: {
     const text = params.skills?.names.length ? params.skills.instructionFor(params.skills.names) : null
     return text ? [{ text }] : []
   }
-  const contextFiles = (params.additionalParts ?? []).flatMap((part) => part.files ?? [])
-  const sendFiles = [...(params.files ?? []), ...contextFiles]
-
   if (params.inputMode === "shell") {
     await params.ready
     assertRuntimeCurrent()
@@ -202,6 +200,8 @@ export async function routeMessage(params: {
     })
     return 'shell'
   }
+
+  const sendFiles = await filesForModel(params, [...(params.files ?? []), ...(params.additionalParts ?? []).flatMap((part) => part.files ?? [])], requestDirectory)
 
   let skills = params.skills
   if (params.content.startsWith("/")) {

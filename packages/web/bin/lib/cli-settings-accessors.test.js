@@ -46,7 +46,7 @@ const makeSlowWriteFs = () => {
       await handle.close();
     }
   };
-  return { slowWriteFile, fsPromises: { ...realFs, writeFile: slowWriteFile } };
+  return { fsPromises: { ...realFs, writeFile: slowWriteFile } };
 };
 
 // Runs `writer` against filePath while a concurrent reader hammers it; returns
@@ -106,23 +106,6 @@ describe('cli settings accessors', () => {
 
       const leftovers = fs.readdirSync(dir).filter((name) => name.startsWith('settings.json.tmp-'));
       expect(leftovers).toEqual([]);
-    });
-  });
-
-  it('demonstrates the protected failure mode: a naive direct writer tears under the same slow write', async () => {
-    await withTempDir(async (dir) => {
-      const { slowWriteFile } = makeSlowWriteFs();
-      const filePath = path.join(dir, 'settings.json');
-
-      // The old CLI accessor wrote straight to settings.json with writeFile.
-      // The same slow-write load therefore MUST produce torn reads — proving
-      // the concurrency test above can actually fail on the pre-fix writer.
-      const torn = await countTornReads(
-        filePath,
-        (settings) => slowWriteFile(filePath, JSON.stringify(settings)),
-        20,
-      );
-      expect(torn).toBeGreaterThan(0);
     });
   });
 

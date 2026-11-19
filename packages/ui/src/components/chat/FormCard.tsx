@@ -1,5 +1,5 @@
 import React from 'react';
-import type { FormField } from '@opencode/client';
+import type { FormField } from '@/lib/opencode/model';
 import { Icon } from '@/components/icon/Icon';
 
 import { cn } from '@/lib/utils';
@@ -34,29 +34,11 @@ import {
 
 interface FormCardProps {
     form: FormRequest;
-    /** Set when this card re-asks a question whose turn died before it was answered. */
     recovered?: RecoveredQuestion;
-    /**
-     * Set when the card stands in for the composer's dock at the end of the
-     * chat ("Questions: in the chat"): it keeps the dock's draft for this
-     * directory, so a half-filled answer survives the card unmounting, and
-     * the dock's rule that Submit waits until every question has an answer.
-     */
     inChat?: boolean;
     directory?: string;
 }
 
-/**
- * The inline card for a form request, used where a dock cannot float: the
- * BTW sheet renders its child session's forms with it, and the main chat
- * renders them at its end when questions are set to show in the chat
- * (`TranscriptForms`). Otherwise the main composer shows forms in
- * `FormDock`, one field at a time.
- *
- * A form request is a single blocking question with typed fields, so the card
- * renders every visible field at once and submits one answer. Fields gated by
- * a `when` clause appear and disappear as their controlling field changes.
- */
 export const FormCard: React.FC<FormCardProps> = ({ form, recovered, inChat, directory }) => {
     const webSearchConsent = readWebSearchConsent(form);
     if (webSearchConsent) return <WebSearchConsentCard form={form} consent={webSearchConsent} />;
@@ -78,7 +60,6 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered, inChat = fa
     const fields = form.fields;
     const fieldsSignature = fields.map((field) => `${field.key}:${field.type}`).join('|');
     const recoveryDirectory = recovered?.directory;
-    // The same key the dock uses, so switching between card and dock keeps the answer.
     const draftScope = React.useMemo(
         () => (recoveryDirectory !== undefined || inChat ? formDraftScope(form, recoveryDirectory ?? directory) : null),
         [directory, form, inChat, recoveryDirectory],
@@ -87,10 +68,6 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered, inChat = fa
         const draft = draftScope ? loadFormDraft(draftScope) : null;
         return draft?.fieldsSignature === fieldsSignature ? draft : null;
     });
-    // The card shows every field at once, so an external link is on screen
-    // from the start and its acknowledgement travels with the reply. That
-    // holds for a draft the dock left too, where a link counts only once
-    // its step was opened.
     const [values, setValues] = React.useState<FormValues>(() => (
         restored ? acknowledgeLinks(fields, restored.values) : initialFormValues(fields, { acknowledgeExternal: true })
     ));
@@ -99,29 +76,18 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered, inChat = fa
     const [hasResponded, setHasResponded] = React.useState(false);
     const [showErrors, setShowErrors] = React.useState(false);
 
-    // The store hands the card a fresh form object whenever the pending list
-    // is rebuilt (an event for another form, a bootstrap reconcile), so the
-    // fields array changes identity without changing content. Resetting on
-    // identity threw away half-filled answers; only a different form, or a
-    // form whose fields actually changed, starts over.
     const mountedIdentityRef = React.useRef<string | null>(null);
     React.useEffect(() => {
         const identity = `${form.id}\u0000${fieldsSignature}`;
         if (mountedIdentityRef.current === identity) return;
         const first = mountedIdentityRef.current === null;
         mountedIdentityRef.current = identity;
-        // The first run needs no reset: the initial state already holds this
-        // scope's restored draft.
         if (!first) setValues(initialFormValues(fields, { acknowledgeExternal: true }));
         setHasResponded(false);
         setShowErrors(false);
         // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, [fieldsSignature, form.id]);
 
-    // A location-scoped form shows in every session of its directory, and a
-    // retained session keeps its card mounted while hidden. Shown again, the
-    // card takes up an answer another surface saved meanwhile, before its
-    // own save below could put back what it held.
     const savedValuesRef = React.useRef<FormValues | null>(restored?.values ?? null);
     React.useLayoutEffect(() => {
         if (!draftScope) return;
@@ -153,7 +119,6 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered, inChat = fa
             setShowErrors(true);
             return;
         }
-        // Enter follows the button: in the chat, every question first.
         if (inChat && !allAnswered) return;
         respondingRef.current = true;
         setIsResponding(true);
@@ -167,7 +132,6 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered, inChat = fa
             if (draftScope) dropFormDraft(draftScope);
             setHasResponded(true);
         } catch (error) {
-            // The store removes not-found requests, so no card remains to retry.
             if (!recovered && isFormRequestNotFoundError(error)) {
                 if (draftScope) dropFormDraft(draftScope);
                 setHasResponded(true);
@@ -244,8 +208,6 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered, inChat = fa
         />
     );
 
-    // The question travels to other tools as Markdown (to read) or JSON (to
-    // feed a script); both leave the routing ids behind.
     const handleCopy = React.useCallback(async (format: 'markdown' | 'json') => {
         const text = format === 'markdown' ? serializeFormAsMarkdown(form) : serializeFormAsJson(form);
         const result = await copyTextToClipboard(text);

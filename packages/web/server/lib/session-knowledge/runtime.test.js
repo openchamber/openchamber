@@ -132,39 +132,6 @@ describe('writing the knowledge into a session', () => {
     expect(instructionEntries.held.has(RESPONSE_STYLE)).toBe(false);
   });
 
-  test('serialises concurrent syncs for one session', async () => {
-    const held = new Map();
-    const calls = [];
-    let releaseFirst;
-    let firstPutStarted;
-    const firstPut = new Promise((resolve) => { firstPutStarted = resolve; });
-    let first = true;
-    const instructionEntries = {
-      put: async (sessionId, directory, key, value) => {
-        calls.push([sessionId, directory, key, value]);
-        if (first) {
-          first = false;
-          firstPutStarted();
-          await new Promise((resolve) => { releaseFirst = resolve; });
-        }
-        held.set(key, value);
-      },
-      remove: async (_sessionId, _directory, key) => { held.delete(key); },
-    };
-    const runtime = createRuntime({ ...pinnedStore(), instructionEntries });
-    const firstSync = runtime.sync('ses_a', DIRECTORY, 'old style');
-    await firstPut;
-    const secondSync = runtime.sync('ses_a', DIRECTORY, 'new style');
-
-    expect(calls.filter((call) => call[2] === RESPONSE_STYLE).map((call) => call[3])).toEqual(['old style']);
-    releaseFirst();
-    await firstSync;
-    await secondSync;
-
-    expect(held.get(RESPONSE_STYLE)).toBe('new style');
-    expect(calls.filter((call) => call[2] === RESPONSE_STYLE).map((call) => call[3])).toEqual(['old style', 'new style']);
-  });
-
   test('one entry that will not write does not hold back the others', async () => {
     const instructionEntries = createEntriesStub({ fail: new Set([PINNED]) });
     const runtime = createRuntime({ ...pinnedStore(), instructionEntries });

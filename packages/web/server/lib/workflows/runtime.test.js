@@ -10,6 +10,7 @@ import { createWorkflowRunStore } from './store.js';
 const directories = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   // A run saves itself once more after its report is sent, so a test that waits
   // for the report ends with that save in flight. Retrying outlasts it.
@@ -22,7 +23,12 @@ const waitFor = async (check, timeoutMs = 5_000) => {
     const value = await check();
     if (value) return value;
     if (Date.now() > deadline) throw new Error('timed out');
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    if (vi.isFakeTimers()) {
+      await vi.advanceTimersByTimeAsync(10);
+      await new Promise((resolve) => setImmediate(resolve));
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
   }
 };
 
@@ -437,17 +443,18 @@ describe('workflow durability checkpoints', () => {
   });
 
   it('keeps deletion final while an earlier terminal checkpoint is pending', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const disk = diskFault();
     const agents = fakeAgentSessions();
     const { runtime, act, store, dataDir } = await setup(agents, { storeFs: disk.fs });
     const gate = deferred();
-    const entered = deferred();
+    let checkpointEntered = false;
     disk.beforeRename = async (snapshot) => {
-      if (snapshot.state === 'completed') { entered.resolve(); await gate.promise; }
+      if (snapshot.state === 'completed') { checkpointEntered = true; await gate.promise; }
     };
     const { runId } = await act('workflow.run', { script: script("return agent('work')") });
     await runtime.approve({ runId });
-    await entered.promise;
+    await waitFor(() => checkpointEntered);
     const removal = runtime.remove({ runId });
     gate.resolve();
     await removal;
@@ -724,6 +731,7 @@ describe('workflow runtime', () => {
   });
 
   it('keeps a run deleted while its report was still on its way', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const agents = fakeAgentSessions();
     let release = () => {};
     const held = new Promise((resolve) => { release = resolve; });
@@ -736,7 +744,7 @@ describe('workflow runtime', () => {
 
     await runtime.remove({ runId });
     release();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.advanceTimersByTimeAsync(20);
     await store.flush();
     expect(await store.get(runId)).toBeNull();
   });
@@ -869,6 +877,7 @@ describe('workflow runtime', () => {
   });
 
   it('honours a stop that arrives right after the approval', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const agents = fakeAgentSessions();
     const { runtime, act, finished } = await setup(agents);
     const { runId } = await act('workflow.run', { script: script("return agent('x')") });

@@ -1,3 +1,5 @@
+import { fetchBypassingRuntimeBridge } from '@/lib/runtime-fetch';
+
 type WasmFunction = (...args: Array<number | bigint>) => number;
 
 interface TypeField {
@@ -221,7 +223,7 @@ export class GhosttyRuntime {
 }
 
 async function fetchGhosttyWasm(): Promise<ArrayBuffer> {
-  const response = await fetch(ghosttyWasmUrl);
+  const response = await fetchBypassingRuntimeBridge(ghosttyWasmUrl);
   if (!response.ok) {
     throw new Error(`Unable to load libghostty-vt (${response.status})`);
   }

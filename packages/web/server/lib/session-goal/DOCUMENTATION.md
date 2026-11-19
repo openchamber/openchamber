@@ -383,6 +383,48 @@ ordering used by create and scheduled goals.
 
 ## Decisions
 
+### Why objective content includes JSON values
+
+The HTTP route passes JSON `content` through to objective storage. Storage keeps
+the existing `String(content ?? '')` coercion, including numbers, booleans,
+arrays and objects, before trimming and clamping. Session-id validation runs
+before content coercion or filesystem access. The key guard also rejects
+non-string values received from JavaScript callers.
+
+### Why creation preserves unchecked objectives and warning causes
+
+Creation coerces its objective with `String(objective ?? '')` before fitting it.
+Warning causes retain arbitrary thrown values and the existing `message || cause`
+logging fallback. The persistence callback's return value is ignored, but its
+completion is awaited before the goal is returned. Small-model generation owns
+the string contract for distilled text and accepts the existing `sessionID` and
+omitted options.
+
+### Why the loop remains JavaScript
+
+`runtime.js:getErrorName` calls `error?.name?.trim?.()` without checking the name
+or the method's result. A callable `trim` can return an arbitrary value; declaring
+a string result would promise more than the code checks. A predicate exposing
+`trim?: () => unknown` is rejected by
+`tools/oxlint/anti-slop/rules/no-unknown-returns.ts:noUnknownReturnsRule`.
+A temporary conversion probe reproduces that diagnostic. The same probe rejects
+an unknown error-parser parameter through `noUnknownParametersRule` and its
+non-predicate `typeof` checks through `noRuntimeTypeofRule`.
+
+Changing a server owner's declared type, exporting a type, converting a small
+helper or augmenting a dependency cannot change these lint-policy boundaries.
+The loop stays whole in JavaScript to preserve the optional call, its unchecked
+return and its existing failures without casts or a replacement contract.
+
+### Why objective routes use the shared HTTP contract
+
+The route registrar needs only three registration methods, session-id parameters,
+JSON request bodies and JSON responses. These types come from
+`../shared/http-contracts.js`. JSON object bodies supply `content`; primitive and array
+bodies supply no content, matching property access on parsed JSON. Error fields
+remain unknown because caught values do not guarantee a status code or message
+type; status coercion and the original message fallback remain at the boundary.
+
 ### Why quiet windows still require live checks and not elapsed-time assumptions
 
 Quiet windows coalesce status bursts and duplicate updates; they provide no

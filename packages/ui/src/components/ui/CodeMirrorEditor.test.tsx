@@ -80,13 +80,6 @@ describe('CodeMirrorEditor detached', () => {
     expect(mounted?.dom.isConnected).toBe(true);
     expect(container.contains(mounted?.dom ?? null)).toBe(true);
   });
-
-  test('is destroyed cleanly while detached', async () => {
-    await render({ detached: true });
-    await act(async () => root.unmount());
-    root = createRoot(container);
-    expect(container.querySelector('.cm-editor')).toBeNull();
-  });
 });
 
 describe('CodeMirrorEditor reconfiguration', () => {

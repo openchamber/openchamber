@@ -3,10 +3,13 @@ name: pr checks
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  # Nothing runs these checks on a push to main, so a branch about to be merged
+  # there is checked by hand first: gh workflow run "pr checks" --ref <branch>
+  workflow_dispatch:
 
 # A new push to the same PR makes the older run pointless.
 concurrency:
-  group: pr-checks-${{ github.event.pull_request.number }}
+  group: pr-checks-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 # Five independent jobs on their own Blacksmith runners (same image as

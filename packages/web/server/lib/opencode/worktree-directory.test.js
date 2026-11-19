@@ -58,7 +58,7 @@ describe('readWorktreeDirectorySetting', () => {
     vi.stubEnv('OPENCODE_CONFIG_DIR', globalDir);
     vi.stubEnv('OPENCODE_CONFIG', '');
     vi.resetModules();
-    readSetting = (await import('./shared.js')).readWorktreeDirectorySetting;
+    readSetting = (await import('./config-files.js')).readWorktreeDirectorySetting;
   });
 
   afterEach(() => {

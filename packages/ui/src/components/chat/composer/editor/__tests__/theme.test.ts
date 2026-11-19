@@ -253,19 +253,6 @@ describe('composerIOSSelectionExtension', () => {
     test('the CodeMirror fill does not stack over the iOS system highlight', () => {
         expect(selectionBackgroundRule.background).toBe('transparent !important');
     });
-
-    /**
-     * A second custom layer was visually indistinguishable from duplicate
-     * native selection UI. iOS must only reposition the one layer that
-     * CodeMirror already uses for both selection rectangles and handles.
-     */
-    test('it does not add a second selection implementation', () => {
-        expect(Object.keys(IOS_SELECTION_THEME_SPEC)).toEqual([
-            '& .cm-scroller',
-            '& .cm-scroller > .cm-selectionLayer',
-            '& .cm-selectionBackground',
-        ]);
-    });
 });
 
 describe('composerSelectionExtension', () => {

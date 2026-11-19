@@ -38,19 +38,12 @@ interface MessageListProps {
     isLoadingOlder: boolean;
     scrollToBottom?: () => void;
     directory?: string;
-    // The list owns its scroll container; the timeline scroll hook drives it
-    // through this ref and observes it through the callbacks below.
     registerList?: (list: LegendListRef | null) => void;
-    // True while a real gesture owns the scroll; releases the list's own
-    // end pinning so the state machine, not the library heuristic, decides.
     endPinningReleased?: boolean;
     composerOverlayHeight?: number;
     onIsAtEndChange?: (isAtEnd: boolean) => void;
     onListMetricsChange?: (metrics: ListMetrics) => void;
     onTimelineDataChange?: () => void;
-    // Content that used to sit as siblings of the list inside the scroll
-    // container. The list owns that container now, so they render as its
-    // header/footer and scroll with the rows exactly as before.
     listHeader?: React.ReactNode;
     listFooter?: React.ReactNode;
     scrollContainerProps?: TimelineScrollContainerProps;
@@ -149,10 +142,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     ]);
 
     return (
-        // Virtualized rows unmount/remount during scroll; re-running the reveal
-        // fade on every remount reads as blinking. Rows are never "new" from the
-        // list's point of view, so fade-in is disabled for them — content
-        // arriving inside the streaming tail keeps its own animations.
         <FadeInDisabledProvider disabled>
             <LiveTailSource entry={trailingStreamingEntry} directory={directory}
                 showTurnChangedFiles={showTurnChangedFiles} store={liveTail} />

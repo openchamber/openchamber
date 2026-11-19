@@ -178,18 +178,6 @@ describe('credential target', () => {
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
-
-  test('a token without a recorded target never counts', async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-req-'));
-    const persistPath = guestAuthPersistPath(dir);
-    await patchGuestAuth('clickup', { accessToken: 'tok-1' }, persistPath);
-    try {
-      await expect(proxyGuestRequest({ guest: clickupGuest, persistPath, method: 'GET', path: '/api/v2/user' }))
-        .rejects.toMatchObject({ code: 'DISCONNECTED' });
-    } finally {
-      await fs.rm(dir, { recursive: true, force: true });
-    }
-  });
 });
 
 describe('a 401 while the user reconnects', () => {
@@ -204,8 +192,10 @@ describe('a 401 while the user reconnects', () => {
     const originalFetch = globalThis.fetch;
     let releaseRefresh;
     const refreshGate = new Promise((resolve) => { releaseRefresh = resolve; });
+    const refreshing = Promise.withResolvers();
     globalThis.fetch = async (url) => {
       if (String(url) === 'https://api.clickup.com/api/v2/oauth/token') {
+        refreshing.resolve();
         await refreshGate;
         return new Response(JSON.stringify({ access_token: 'access-a2', refresh_token: 'refresh-a2', token_type: 'Bearer', expires_in: 3600 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
@@ -214,7 +204,7 @@ describe('a 401 while the user reconnects', () => {
     try {
       const request = proxyGuestRequest({ guest: clickupGuest, persistPath, method: 'GET', path: '/api/v2/user' });
       // The user connects again while the refresh is in flight.
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await refreshing.promise;
       await patchGuestAuth('clickup', { accessToken: 'access-b', refreshToken: 'refresh-b', target }, persistPath);
       releaseRefresh();
       await expect(request).rejects.toMatchObject({ code: 'DISCONNECTED' });

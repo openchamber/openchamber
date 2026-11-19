@@ -66,7 +66,7 @@ const INLINE_LOGO_FILES = [
   'packages/web/index.html',
   'packages/electron/early-startup.mjs',
   'packages/vscode/src/webviewHtml.ts',
-  'packages/web/server/lib/opencode/static-routes-runtime.js',
+  'packages/web/server/lib/server-frame/static-routes-runtime.js',
 ];
 
 const replaceMarked = (source, file, markup) => {

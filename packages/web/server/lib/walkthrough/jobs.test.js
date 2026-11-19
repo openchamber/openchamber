@@ -214,6 +214,37 @@ describe('generation jobs', () => {
     expect(generateSmallModelText).not.toHaveBeenCalled();
   });
 
+  it('passes shallowly checked cache metadata through and keeps malformed anchor failures', async () => {
+    generateSmallModelText.mockResolvedValue({ text: RESPONSE });
+    await generateWalkthrough({ directory: '/repo', source: SOURCE });
+    const entries = path.join(TEMP_DATA_DIR, 'walkthroughs', 'entries');
+    const file = path.join(entries, fs.readdirSync(entries)[0]);
+    const entry = JSON.parse(fs.readFileSync(file, 'utf8'));
+    entry.model = 37;
+    entry.language = { unchecked: true };
+    entry.generatedAt = ['timestamp'];
+    fs.writeFileSync(file, JSON.stringify(entry));
+    expect(await getWalkthrough({ directory: '/repo', source: SOURCE })).toMatchObject({
+      model: 37, language: { unchecked: true }, generatedAt: ['timestamp'],
+    });
+    const uncheckedIds = [null, 7, { hunk: 'fake' }];
+    fs.writeFileSync(file, JSON.stringify({
+      ...entry, walkthrough: { chapters: [{ stops: [{ hunkIds: uncheckedIds }] }] },
+    }));
+    expect(await getWalkthrough({ directory: '/repo', source: SOURCE })).toMatchObject({
+      isStale: true, missingHunkIds: uncheckedIds, staleStopIds: [undefined],
+    });
+    for (const [chapters, message] of [
+      [[null], "Cannot read properties of null (reading 'stops')"],
+      [[{}], 'chapter.stops is not iterable'],
+      [[{ stops: [{ hunkIds: null }] }], "Cannot read properties of null (reading 'filter')"],
+      [[{ stops: [{ hunkIds: 'h1' }] }], 'stop.hunkIds.filter is not a function'],
+    ]) {
+      fs.writeFileSync(file, JSON.stringify({ ...entry, walkthrough: { chapters } }));
+      await expect(getWalkthrough({ directory: '/repo', source: SOURCE })).rejects.toThrow(message);
+    }
+  });
+
   // Asking another model about the same diff is asking for a second opinion;
   // handing it the first one under "the code has moved on" got a copy back.
   it('hands the previous narrative only to the same model and language after the code moved', async () => {

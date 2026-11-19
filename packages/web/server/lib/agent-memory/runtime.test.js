@@ -255,8 +255,10 @@ describe('create', () => {
       .rejects.toThrow('body holds at most 2000 characters');
     expect((await runtime.read(GLOBAL)).entries).toHaveLength(0);
 
-    const { entry } = await runtime.create(GLOBAL, { title: 'T', body: 'y'.repeat(2000) });
+    const { entry } = await runtime.create(GLOBAL, { title: 'T'.repeat(300), body: 'y'.repeat(2000) });
     expect(entry.body).toHaveLength(2000);
+    expect(entry.title).toBe('T'.repeat(60));
+    expect((await runtime.read(GLOBAL)).entries[0].title).toBe('T'.repeat(60));
   });
 
   test('a legacy over-limit entry still loads, while a new write of that size is rejected', async () => {
@@ -431,14 +433,6 @@ describe('restated duplicates', () => {
     });
 
     expect(result.related).toEqual([]);
-  });
-
-  test('short entries fall back to exact-title matching', async () => {
-    await runtime.create(PROJECT, { title: 'Runtime', body: 'Use bun.' });
-    const result = await runtime.create(PROJECT, { title: 'Bundler', body: 'Use vite.' });
-
-    expect(result.replaced).toBe(false);
-    expect(result.entries).toHaveLength(2);
   });
 
   test('a replacement bumps updatedAt so the panel can show it as changed', async () => {

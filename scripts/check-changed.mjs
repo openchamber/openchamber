@@ -18,11 +18,11 @@
 // uncommitted edits and commits not yet in main alike.
 //
 // Usage: bun run check:changed [-- --base <ref>] [-- --ratchet-only]
-// `--ratchet-only` skips type-check, lint and dead code, for CI jobs that run
-// those on their own.
+// `--ratchet-only` skips workspace type-check, lint and dead code. Server
+// TypeScript lint and declaration pairs still fail outright in that mode.
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { constants, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,17 +50,24 @@ const listChangedFiles = (base) => {
   return [...new Set([...tracked, ...untracked])].filter((file) => LINTABLE_FILE.test(file));
 };
 
-/** Old path of every file the change renamed, keyed by its new path. */
+/** Old path of every move, including a body moved behind a rewritten entry. */
 export const parseRenames = (nameStatus) => {
   const renames = new Map();
-  for (const line of nameStatus.split('\n')) {
-    const [status, from, to] = line.split('\t');
-    if (status?.startsWith('R') && from && to) renames.set(to, from);
+  const entries = nameStatus.split('\n').map((line) => line.split('\t'));
+  const rewritten = new Set(entries.filter(([status]) => /^M\d+$/.test(status)).map(([, file]) => file));
+  const copies = new Map();
+  for (const [status, from] of entries) {
+    if (status?.startsWith('C')) copies.set(from, (copies.get(from) ?? 0) + 1);
+  }
+  for (const [status, from, to] of entries) {
+    if (from && to && (status?.startsWith('R') || (status?.startsWith('C') && rewritten.has(from) && copies.get(from) === 1))) {
+      renames.set(to, from);
+    }
   }
   return renames;
 };
 
-const listRenames = (base) => parseRenames(git(['diff', '--name-status', '--diff-filter=R', base]));
+const listRenames = (base) => parseRenames(git(['diff', '--break-rewrites', '--find-copies', '--name-status', base]));
 
 const listDeletedFiles = (base) => git(['diff', '--name-only', '--diff-filter=D', base])
   .split('\n').filter((file) => LINTABLE_FILE.test(file));
@@ -75,19 +82,36 @@ const readAtBase = (base, file) => {
 
 const countLines = (content) => (content === '' ? 0 : content.replace(/\n$/, '').split('\n').length);
 
+const SERVER_SOURCE = /^packages\/web\/(server|bin)\/.*\.ts$/;
+const SERVER_JAVASCRIPT = /^packages\/web\/(server|bin)\/.*\.js$/;
+
+/**
+ * A server file that was already over the limit as JavaScript and is now the
+ * same file in TypeScript: the types it gained make it longer, and it stays in
+ * the backlog of files to split. The file may have moved to another server
+ * folder on the way, keeping its name.
+ */
+const isTypedConversion = ({ file, basePath, baseLines }) => (
+  SERVER_SOURCE.test(file) && SERVER_JAVASCRIPT.test(basePath)
+    && path.basename(basePath, '.js') === path.basename(file, '.ts') && baseLines > SIZE_LIMIT
+);
+
 /**
  * Source files over the size limit that the change added or made longer.
  * Message catalogs, declarations, generated files and tests have no limit.
  */
-export const findOversizedGrowth = (sizes) => sizes.filter(({ file, baseLines, currentLines }) => (
-  SIZED_FILE.test(file) && !SIZE_EXEMPT.test(file)
-  && currentLines > SIZE_LIMIT && (baseLines === null || currentLines > baseLines)
-));
+export const findOversizedGrowth = (sizes) => sizes.filter((size) => {
+  const { file, baseLines, currentLines } = size;
+  return SIZED_FILE.test(file) && !SIZE_EXEMPT.test(file) && !isTypedConversion(size)
+    && currentLines > SIZE_LIMIT && (baseLines === null || currentLines > baseLines);
+});
 
 const checkFileSizes = (base, files, renames) => findOversizedGrowth(files.map((file) => {
-  const baseContent = readAtBase(base, renames.get(file) ?? file);
+  const basePath = renames.get(file) ?? file;
+  const baseContent = readAtBase(base, basePath);
   return {
     file,
+    basePath,
     baseLines: baseContent === null ? null : countLines(baseContent),
     currentLines: countLines(readFileSync(path.join(REPO_ROOT, file), 'utf8')),
   };
@@ -162,7 +186,7 @@ const checkRatchet = (base, files, renames, deleted) => {
   const baseDir = mkdtempSync(path.join(tmpdir(), 'oc-check-changed-'));
   try {
     const baseFiles = [];
-    for (const file of [...files.map((changed) => renames.get(changed) ?? changed), ...deleted]) {
+    for (const file of new Set([...files.map((changed) => renames.get(changed) ?? changed), ...deleted])) {
       const content = readAtBase(base, file);
       if (content === null) continue; // Added since the base: every finding in it is new.
       const target = path.join(baseDir, file);
@@ -177,9 +201,48 @@ const checkRatchet = (base, files, renames, deleted) => {
   }
 };
 
-const runStep = (label, command, args) => {
+/**
+ * Knip 5.80 applies gitignore patterns to absolute package-entry paths:
+ * `*.local` then matches the .local ancestor of an OpenCode worktree.
+ * Analyze an independent source snapshot so ignores stay inside the checkout.
+ * A root symlink is insufficient: resolvers canonicalize it back to .local.
+ */
+export const withKnipSnapshot = (root, analyze) => {
+  if (!path.resolve(root).split(path.sep).some((segment) => segment.startsWith('.'))) return analyze(root);
+  const files = [...new Set(execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
+    cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+  }).split('\0').filter(Boolean))];
+  const tempRoot = process.platform === 'win32' ? tmpdir() : '/tmp';
+  const temp = mkdtempSync(path.join(tempRoot, 'oc-check-dead-code-'));
+  const snapshot = path.join(temp, 'repo');
+  try {
+    mkdirSync(snapshot);
+    for (const file of files) {
+      const source = path.join(root, file);
+      const stat = lstatSync(source, { throwIfNoEntry: false });
+      if (!stat || (!stat.isFile() && !stat.isSymbolicLink())) continue;
+      const target = path.join(snapshot, file);
+      mkdirSync(path.dirname(target), { recursive: true });
+      cpSync(source, target, { recursive: true, mode: constants.COPYFILE_FICLONE, verbatimSymlinks: true });
+    }
+    const packageDirs = new Set(['.', ...files.filter((file) => path.basename(file) === 'package.json').map((file) => path.dirname(file))]);
+    for (const dir of packageDirs) {
+      const modules = path.join(root, dir, 'node_modules');
+      if (existsSync(modules)) {
+        const target = path.join(snapshot, dir, 'node_modules');
+        mkdirSync(path.dirname(target), { recursive: true });
+        symlinkSync(modules, target, process.platform === 'win32' ? 'junction' : 'dir');
+      }
+    }
+    return analyze(snapshot);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+};
+
+const runStep = (label, command, args, cwd = REPO_ROOT) => {
   console.log(`\n▶ ${label}`);
-  const result = spawnSync(command, args, { cwd: REPO_ROOT, stdio: 'inherit' });
+  const result = spawnSync(command, args, { cwd, stdio: 'inherit' });
   return result.status === 0;
 };
 
@@ -195,7 +258,10 @@ const main = () => {
   if (!ratchetOnly) {
     if (!runStep('type-check', 'bun', ['run', 'type-check'])) failed.push('type-check');
     if (!runStep('lint', 'bun', ['run', 'lint'])) failed.push('lint');
-    if (!runStep('dead code', 'bun', ['run', 'dead-code'])) failed.push('dead code');
+    if (!withKnipSnapshot(REPO_ROOT, (cwd) => runStep('dead code', 'bun', ['run', 'dead-code'], cwd))) failed.push('dead code');
+  }
+  if (ratchetOnly && !runStep('server TypeScript lint and declaration pairs', 'bun', ['run', '--cwd', 'packages/web', 'lint:server'])) {
+    failed.push('server TypeScript lint and declaration pairs');
   }
 
   console.log('\n▶ ratchet');

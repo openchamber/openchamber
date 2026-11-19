@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ConnectionInfo } from '@opencode/client';
+import type { IntegrationConnection as ConnectionInfo } from '@/lib/opencode/model';
 import { SETTINGS_ICON_BUTTON_CLASS } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

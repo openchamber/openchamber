@@ -10,7 +10,7 @@ The SDK owns the `opencode` role and approval capability. Extension business log
 - The listener binds only `127.0.0.1` and is absent until a service needs it. It is never registered on Express, so Relay, tunnels, UI cookies and OpenChamber API routes cannot reach it. Requests with `Origin` are refused.
 - The service receives `OPENCHAMBER_OPENCODE_URL` and uses its own `OPENCHAMBER_SERVICE_TOKEN` as the bearer. The host's OpenCode connection credentials are never injected into that service. The lease lasts for the service process, allowing background reads and the event stream between panel requests.
 - Every request and every chunk of a response rechecks the current catalog, including effective grants and enterprise extension policy, so a stream stops at its next chunk once approval is gone, whether or not anything revoked its lease. An administrator's policy change works this way: it changes the catalog row and revokes nothing. A failed lookup stops the transfer. Removing approval, pausing, replacing or removing a package, process exit and shutdown revoke its lease and abort in-flight calls. A lookup finishing after revocation cannot dispatch.
-- `READS` in `index.js` is the whole grant: `GET` on the listed paths and nothing else. A path is matched on the raw request line, with session and message ids in their own shape, so an encoded separator or dot segment cannot pass as an id. Everything unlisted gets 403 and makes no upstream call, including every write, configuration change, operation start, plugin RPC and any route OpenCode adds later.
+- `READS` in `index.ts` is the whole grant: `GET` on the listed paths and nothing else. A path is matched on the raw request line, with session and message ids in their own shape, so an encoded separator or dot segment cannot pass as an id. Everything unlisted gets 403 and makes no upstream call, including every write, configuration change, operation start, plugin RPC and any route OpenCode adds later.
 - A listed read changes nothing and starts nothing on OpenCode: `/api/project`, the session list, `/api/session/active`, a session, its messages, and `/api/event`. Each is answered without a location, so none of them starts MCP servers. A new entry has to hold to this: read its OpenCode handler and its middleware before adding it.
 - Only the path, the query and `Accept` reach OpenCode, with the upstream authentication substituted. A request body, directory headers and cookies do not. Redirects are refused. There is no discovery, process launch or fallback, and each incoming call makes one upstream call.
 - Each call uses the OpenCode the host has selected when it arrives. When the host moves to another OpenCode, a transfer still open ends at its next chunk, before that chunk reaches the service. The event stream has a heartbeat every 15 seconds, so it ends within that time. Multiple calls are not an atomic snapshot across instance changes.
@@ -38,3 +38,11 @@ Routing directly to OpenCode keeps OpenChamber's management endpoints outside th
 ### Why process leases instead of request handles
 
 The user approves a local process with their user access. Its OpenCode authorization remains useful for background work and the event stream. Tying it to an enclosing panel request would cancel those reads and require request-specific plumbing in every extension.
+
+### Why native HTTP fields are narrowed at the boundary
+
+Node's `IncomingMessage` also represents requests, so its status code is optional. A response callback supplies a status code, and a listening TCP server supplies an `AddressInfo`; the checks establish those native invariants without a cast or a fallback status or port. The catalog callback supplies SDK-parsed contributions with effective grants or `null`; this module does not parse a second manifest.
+
+### Why compressed response headers are forwarded
+
+[Node's native HTTP client](https://nodejs.org/api/http.html) preserves compressed response bytes. Forwarding `content-encoding` keeps the bytes and their declared encoding consistent.

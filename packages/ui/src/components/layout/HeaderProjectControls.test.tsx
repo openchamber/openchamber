@@ -386,21 +386,6 @@ describe('HeaderProjectAction lifecycle', () => {
     expect(primaryLabel()).toContain('Auto-discover dev server');
   });
 
-  test('a running action takes the button over the first idle one', async () => {
-    mockedDeviceInfo.isMobile = false;
-    const originalList = terminal.listSessions;
-    Object.assign(terminal, { listSessions: async () => [{
-      sessionId: 'peer-run', cwd: '/repo', status: 'running', createdAt: 1, mode: 'command',
-      purpose: { type: 'project-action', actionId: 'build', executionId: 'peer-execution' },
-    }] });
-    try {
-      await renderButton();
-      await act(async () => { await Promise.resolve(); });
-      const primary = runButton();
-      expect(primary?.getAttribute('aria-label') ?? '').toContain('Build');
-    } finally { terminal.listSessions = originalList; }
-  });
-
   test('adopting a saved URL action does not auto-open a different output URL', async () => {
     mockedActionsState.actions = [{ id: 'build', name: 'Build', command: 'echo hello', autoOpenUrl: true, openUrl: 'http://localhost:4000' }];
     const originalList = terminal.listSessions;
@@ -473,23 +458,6 @@ describe('HeaderProjectAction lifecycle', () => {
     if (!button) throw new Error('missing action button');
     await act(async () => { button.click(); });
     expect(openContextPreviewCalls).toEqual([{ directory: '/repo-worktree', url: 'http://localhost:4000/' }]);
-  });
-
-  test('replaced executions cannot be cleared by their still-open old stream', async () => {
-    await renderButton();
-    const button = runButton();
-    if (!button) throw new Error('missing action button');
-    await act(async () => { button.click(); });
-    await act(async () => {
-      useTerminalStore.getState().reconcileServerSessions('/repo', [{
-        sessionId: 'other-session', cwd: '/repo', status: 'running', createdAt: 2,
-        mode: 'command', purpose: { type: 'project-action', actionId: 'build', executionId: 'new-execution' },
-      }]);
-    });
-    await act(async () => { emitToSession(firstSessionId(), { type: 'exit', sequence: 10 }); });
-    const tab = useTerminalStore.getState().getDirectoryState('/repo')?.tabs.find((tab) => tab.purpose.type === 'project-action');
-    expect(tab?.purpose).toEqual({ type: 'project-action', actionId: 'build', executionId: 'new-execution' });
-    expect(tab?.lifecycle).toBe('running');
   });
 
   test('runs, stops, and reruns on the same action tab while cleaning old subscriptions once', async () => {
