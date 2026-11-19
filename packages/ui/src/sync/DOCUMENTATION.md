@@ -40,6 +40,7 @@ Directory session arrays are replaced on change and aggregate readers leave the 
 ### Why the live aggregate moves replaced records and not re-sorts every list
 
 OpenCode reports usage after every agent step, and each report replaces one record in place in one directory's list. Re-sorting thousands of sessions for that was the largest single cost of an event flush with four agents streaming. When every changed list keeps its ids at the same positions, the ids and the order they first appear in are unchanged, so `aggregateLiveSessions` takes each replaced record out and puts its winner back by binary search, ordering ties by first appearance exactly as the stable sort did. A list that gained, lost or reordered ids, or more than 64 replaced records, rebuilds the whole aggregate.
+
 ### Why eviction waits for render pins and not the count limit alone
 
 Rows obtain their stores during render and pin them after commit. One coalesced eviction microtask and a recent-access grace let those pins settle; enforcing the count immediately can repeatedly dispose a store that is still rendering and restart its bootstrap.
@@ -2082,7 +2083,17 @@ uses `useSessionStartTimes`, which changes only when a session is added or
 removed. A list that must ignore sessions another source already holds reads
 `useLiveSessionsExcluding(ids)` instead of filtering `useAllLiveSessions()`.
 
-A published session list is never edited, so indexes over it are built once per list and shared through a `WeakMap`: the parent-to-children index in `scoped-blocking-requests.ts` backs `computeSubtreeIds` and `readChildSessions` (the running-subagent rows read a parent's children there instead of scanning the list on every flush). Scoped permissions and forms skip the subtree walk entirely while no session has a pending request. `useRecoveredQuestions` derives inside one selector and keeps its previous array while the result is equal, so the form dock and the transcript beside a streaming reply do not re-render on each `part` change.
+A published session list is never edited, so indexes over it are built once
+per list and shared through a `WeakMap`: the parent-to-children index in
+`scoped-blocking-requests.ts` backs `computeSubtreeIds` and `readChildSessions`
+(the running-subagent rows read a parent's children there instead of scanning
+the list on every flush). Scoped permissions and forms skip the subtree walk
+entirely while no session has a pending request. `useRecoveredQuestions`
+derives inside one selector and keeps its previous array while the result is
+equal, so the form dock and the transcript beside a streaming reply do not
+re-render on each `part` change. `useSessionStartTimes` compares the new list
+with the last one position by position before building a map, since a streamed
+step keeps every id where it was.
 
 ## Store splitting pattern
 
