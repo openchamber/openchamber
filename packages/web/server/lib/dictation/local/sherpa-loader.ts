@@ -5,7 +5,13 @@ import { existsSync } from 'fs';
 
 const require = createRequire(import.meta.url);
 
-let cached = null;
+export interface SherpaNodeModule {
+  version: string;
+  OfflineRecognizer?: unknown;
+  OfflineTts?: unknown;
+}
+
+let cached: SherpaNodeModule | null = null;
 
 function sherpaPlatformPackageName(platform = process.platform, arch = process.arch) {
   const normalizedPlatform = platform === 'win32' ? 'win' : platform;
@@ -25,7 +31,7 @@ function sherpaLoaderEnvKey(platform = process.platform) {
   return null;
 }
 
-function prependEnvPath(existing, value) {
+function prependEnvPath(existing: string | undefined, value: string) {
   const parts = String(existing ?? '').split(path.delimiter).filter(Boolean);
   if (parts.includes(value)) {
     return parts.join(path.delimiter);
@@ -33,8 +39,7 @@ function prependEnvPath(existing, value) {
   return [value, ...parts].join(path.delimiter);
 }
 
-// external: https://nodejs.org/api/child_process.html#child_processspawncommand-args-options Windows environment keys are case-insensitive; duplicate PATH keys break child-process lookup.
-function findEnvKey(env, key) {
+function findEnvKey(env: NodeJS.ProcessEnv, key: string) {
   const lower = key.toLowerCase();
   for (const k of Object.keys(env)) {
     if (k.toLowerCase() === lower) {
@@ -44,19 +49,19 @@ function findEnvKey(env, key) {
   return key;
 }
 
+function sherpaResolvers() {
+  try {
+    return [createRequire(require.resolve('sherpa-onnx-node')), require];
+  } catch {
+    return [require];
+  }
+}
+
 function resolveSherpaLibDir(platform = process.platform, arch = process.arch) {
   const packageName = sherpaPlatformPackageName(platform, arch);
-  const resolvers = [];
-  try {
-    resolvers.push(createRequire(require.resolve('sherpa-onnx-node')));
-  } catch {
-  }
-  resolvers.push(require);
-
-  for (const resolver of resolvers) {
+  for (const resolver of sherpaResolvers()) {
     try {
       const pkgJson = resolver.resolve(`${packageName}/package.json`);
-      // external: https://www.electronjs.org/docs/latest/tutorial/asar-archives#extra-unpacking-on-some-apis Native addons and shared libraries must load from app.asar.unpacked.
       const dir = path.dirname(pkgJson);
       const unpacked = dir.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
       return existsSync(unpacked) ? unpacked : dir;
@@ -67,12 +72,7 @@ function resolveSherpaLibDir(platform = process.platform, arch = process.arch) {
   return null;
 }
 
-/**
- * Prepend the sherpa platform package dir to the loader search path env var.
- * Mutates the provided env object.
- * @param {NodeJS.ProcessEnv} env
- */
-export function applySherpaLoaderEnv(env) {
+export function applySherpaLoaderEnv(env: NodeJS.ProcessEnv) {
   const key = sherpaLoaderEnvKey();
   const libDir = resolveSherpaLibDir();
   if (!key || !libDir) {
@@ -83,7 +83,11 @@ export function applySherpaLoaderEnv(env) {
   return { key, libDir };
 }
 
-export function loadSherpaOnnxNode() {
+function hasMessage(value: unknown): value is { message?: unknown } {
+  return value !== null && value !== undefined;
+}
+
+export function loadSherpaOnnxNode(): SherpaNodeModule {
   if (cached) {
     return cached;
   }
@@ -91,10 +95,12 @@ export function loadSherpaOnnxNode() {
   const attempts = [];
 
   try {
-    cached = require('sherpa-onnx-node');
+    const wrapper: SherpaNodeModule = require('sherpa-onnx-node');
+    cached = wrapper;
     return cached;
   } catch (error) {
-    attempts.push(`sherpa-onnx-node: ${error?.message || String(error)}`);
+    const message = hasMessage(error) ? error.message : undefined;
+    attempts.push(`sherpa-onnx-node: ${message || String(error)}`);
   }
 
   const libDir = resolveSherpaLibDir();
@@ -103,10 +109,12 @@ export function loadSherpaOnnxNode() {
     const addonPath = path.join(libDir, 'sherpa-onnx.node');
     if (existsSync(addonPath)) {
       try {
-        cached = require(addonPath);
+        const addon: SherpaNodeModule = require(addonPath);
+        cached = addon;
         return cached;
       } catch (error) {
-        attempts.push(`${addonPath}: ${error?.message || String(error)}`);
+        const message = hasMessage(error) ? error.message : undefined;
+        attempts.push(`${addonPath}: ${message || String(error)}`);
       }
     } else {
       attempts.push(`${addonPath}: file not found`);

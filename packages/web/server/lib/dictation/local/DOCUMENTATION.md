@@ -22,33 +22,20 @@ provider selection and readiness.
 
 ## Decisions
 
-### Why native loading remains JavaScript
+### Why native loading does not promise wrapper constructors
 
 `sherpa-onnx-node` 1.13.8 has JavaScript and JSDoc but no declaration entry.
-The fallback loads a raw `.node` addon, whose exports are not checked by the
-loader. A typed conversion could only return `unknown`, which the server's lint
-gate rejects for public results. Declaring constructors and their results would
-promise shapes that this boundary does not establish. The loader, recognizer and
-TTS implementations remain JavaScript at that boundary.
+The wrapper and raw addon both expose the native version string. The loader
+returns either module as-is and leaves the constructor fields unchecked.
+The raw addon exports `createOfflineRecognizer` and `createOfflineTts`; it
+does not expose the wrapper's `OfflineRecognizer` and `OfflineTts` classes.
 
-The missing outside contracts are `sherpa-onnx-node.OfflineRecognizer` and
-`sherpa-onnx-node.OfflineTts`, together with the corresponding raw
-`sherpa-onnx.node` exports. Their owner must describe constructor configuration,
-recognizer streams and results, TTS samples and sample rates, and optional
-cleanup methods. The wrapper has no declaration entry; importing it as a typed
-module produces TS7016. Typing only the wrapper would still leave the raw-addon
-fallback unchecked.
-
-The raw addon is not the wrapper's constructor API. The installed 1.13.8
-macOS ARM64 addon exports `createOfflineRecognizer` and `createOfflineTts`;
-its `OfflineRecognizer` and `OfflineTts` properties are absent. A local
-declaration that gives both loader paths the wrapper's constructors would be
-false. `loadSherpaOnnxNode` returns either module without checking these
-properties, and `SherpaOfflineRecognizerEngine` constructs the recognizer
-without a constructor guard. `SherpaTtsEngine` checks only that `OfflineTts`
-is a function, which does not establish its instance or generation-result
-contract. Correcting another server module's types or exporting its types
-cannot establish those native contracts.
+The recognizer constructs `OfflineRecognizer` without a guard and lets the
+runtime report a non-constructor. TTS checks only that `OfflineTts` is a
+function before using `new` and `generate`. A declaration for the wrapper
+alone cannot make those calls valid for both loader paths. Missing catalog file
+roles also reach `path.join` unchanged, so its invalid-argument failure is
+part of the existing behavior.
 
 ### Why the worker runtime and client remain JavaScript
 
@@ -100,7 +87,8 @@ Windows extracts with a 7-Zip binary outside `app.asar`.
 An isolated dependency layout keeps the platform package beneath
 `sherpa-onnx-node`. Resolution tries that wrapper's require first, then this
 module's require. The native-library directory is prepended to the platform's
-loader path before loading the raw addon.
+loader path before loading the raw addon. Windows can inherit a differently
+cased `PATH` key; reuse that key to avoid ambiguous child-process lookup.
 
 ### Why model-language hints are restricted
 
