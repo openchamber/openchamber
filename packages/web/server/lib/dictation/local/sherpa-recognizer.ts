@@ -1,26 +1,83 @@
-
 import { EventEmitter } from 'events';
 import { existsSync } from 'fs';
 import { randomUUID } from 'crypto';
 import path from 'path';
 
 import { loadSherpaOnnxNode } from './sherpa-loader.js';
+import type { SherpaNodeModule } from './sherpa-loader.js';
 import { resolveModelLanguage } from './model-language.js';
 import { pcm16lePeakAbs, pcm16leToFloat32 } from '../audio.js';
 
-function assertFileExists(filePath, label) {
+interface OfflineStream {
+  acceptWaveform(request: { samples: Float32Array; sampleRate: number }): void;
+  acceptWaveform(sampleRate: number, samples: Float32Array): void;
+  setOption(name: string, value: string): void;
+  free?(): void;
+}
+
+interface OfflineRecognizer {
+  config?: { featConfig?: { sampleRate?: unknown } };
+  createStream(): OfflineStream;
+  decode(stream: OfflineStream): void;
+  getResult(stream: OfflineStream): { text?: unknown } | string | null | undefined;
+  free?(): void;
+}
+
+interface RecognizerConfig {
+  featConfig: { sampleRate: number; featureDim: number };
+  modelConfig: ReturnType<typeof buildModelSpecificConfig> & { numThreads: number; provider: string; debug: number };
+  decodingMethod: string;
+  maxActivePaths: number;
+}
+
+type OfflineRecognizerConstructor = new (config: RecognizerConfig) => OfflineRecognizer;
+
+export interface SherpaRecognizerConfig {
+  modelId?: string;
+  type: string;
+  modelDir: string;
+  files: Record<string, string>;
+  language?: string | undefined;
+  numThreads?: number;
+}
+
+export interface PendingSegment {
+  segmentId: string;
+  previousSegmentId: string | null;
+  pcm16: Buffer;
+}
+
+function hasOfflineRecognizer(sherpa: SherpaNodeModule): sherpa is SherpaNodeModule & { OfflineRecognizer: OfflineRecognizerConstructor } {
+  return typeof sherpa.OfflineRecognizer === 'function';
+}
+
+function isPositiveFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function hasTextField(value: ReturnType<OfflineRecognizer['getResult']>): value is { text: unknown } {
+  return typeof value === 'object' && value !== null && 'text' in value;
+}
+
+function hasWaveformInput(stream: OfflineStream | null | undefined): stream is OfflineStream {
+  return Boolean(stream) && typeof stream?.acceptWaveform === 'function';
+}
+
+function freeQuietly(resource: { free?(): void } | null | undefined) {
+  try {
+    resource?.free?.();
+  } catch {
+    return;
+  }
+}
+
+function assertFileExists(filePath: string, label: string) {
   if (!existsSync(filePath)) {
     throw new Error(`Missing ${label}: ${filePath}`);
   }
 }
 
-/**
- * The model-specific part of sherpa's OfflineModelConfig for a catalog entry.
- * @param {string} type catalog `type`
- * @param {(role: string) => string} file absolute path of a catalog file role
- * @param {string} language the model's language hint, '' to auto-detect
- */
-function buildModelSpecificConfig(type, file, language) {
+function buildModelSpecificConfig(type: string, file: (role: string) => string, language: string) {
   switch (type) {
     case 'nemo_transducer':
       return {
@@ -59,18 +116,20 @@ function buildModelSpecificConfig(type, file, language) {
 }
 
 export class SherpaOfflineRecognizerEngine {
-  /**
-   * @param {{ modelId?: string, type: 'nemo_transducer' | 'whisper' | 'qwen3_asr',
-   *           modelDir: string, files: Record<string, string>,
-   *           language?: string, numThreads?: number }} config
-   *   `language` is the user's dictation language; models that take no hint
-   *   or do not know it detect the language themselves.
-   */
-  constructor(config) {
+  language: string;
+  type: string;
+  recognizer: OfflineRecognizer;
+  sampleRate: number;
+
+  constructor(config: SherpaRecognizerConfig) {
     this.language = resolveModelLanguage(config.modelId, config.type, config.language);
     this.type = config.type;
-    const file = (role) => {
-      const filePath = path.join(config.modelDir, config.files[role]);
+    const file = (role: string) => {
+      const name = config.files[role];
+      if (name === undefined) {
+        throw new Error(`Missing ${role}: the model names no such file`);
+      }
+      const filePath = path.join(config.modelDir, name);
       assertFileExists(filePath, role);
       return filePath;
     };
@@ -83,7 +142,7 @@ export class SherpaOfflineRecognizerEngine {
 
     const sherpa = loadSherpaOnnxNode();
 
-    const recognizerConfig = {
+    const recognizerConfig: RecognizerConfig = {
       featConfig: {
         sampleRate: 16000,
         featureDim: 80,
@@ -93,20 +152,20 @@ export class SherpaOfflineRecognizerEngine {
       maxActivePaths: 4,
     };
 
+    if (!hasOfflineRecognizer(sherpa)) {
+      throw new TypeError('sherpa.OfflineRecognizer is not a constructor');
+    }
     this.recognizer = new sherpa.OfflineRecognizer(recognizerConfig);
     const sr = this.recognizer?.config?.featConfig?.sampleRate;
-    this.sampleRate =
-      typeof sr === 'number' && Number.isFinite(sr) && sr > 0
-        ? sr
-        : recognizerConfig.featConfig.sampleRate;
+    this.sampleRate = isPositiveFiniteNumber(sr) ? sr : recognizerConfig.featConfig.sampleRate;
   }
 
   createStream() {
     return this.recognizer.createStream();
   }
 
-  acceptWaveform(stream, sampleRate, samples) {
-    if (!stream || typeof stream.acceptWaveform !== 'function') {
+  acceptWaveform(stream: OfflineStream, sampleRate: number, samples: Float32Array) {
+    if (!hasWaveformInput(stream)) {
       throw new Error('Unexpected sherpa offline stream: missing acceptWaveform()');
     }
     // external: https://github.com/k2-fsa/sherpa-onnx/blob/master/scripts/node-addon-api/lib/non-streaming-asr.js The Node binding takes acceptWaveform({ samples, sampleRate }); the WASM binding uses positional arguments.
@@ -117,13 +176,7 @@ export class SherpaOfflineRecognizerEngine {
     }
   }
 
-  /**
-   * Decode a full PCM16 segment and return its text.
-   * Applies auto-gain when the peak is low so quiet microphones still decode.
-   * @param {Buffer} pcm16
-   * @returns {string}
-   */
-  decodePcm16(pcm16) {
+  decodePcm16(pcm16: Buffer) {
     if (pcm16.length === 0) {
       return '';
     }
@@ -145,32 +198,27 @@ export class SherpaOfflineRecognizerEngine {
       this.acceptWaveform(stream, this.sampleRate, floatSamples);
       this.recognizer.decode(stream);
       const result = this.recognizer.getResult(stream);
-      const text =
-        typeof result === 'object' && result && 'text' in result ? result.text : result;
+      const text = hasTextField(result) ? result.text : result;
       return String(text ?? '').trim();
     } finally {
-      try {
-        stream.free?.();
-      } catch {
-        // ignore
-      }
+      freeQuietly(stream);
     }
   }
 
   free() {
-    try {
-      this.recognizer?.free?.();
-    } catch {
-      // ignore
-    }
+    freeQuietly(this.recognizer);
   }
 }
 
 export class SherpaSegmentTranscriptionSession extends EventEmitter {
-  /**
-   * @param {{ engine: SherpaOfflineRecognizerEngine }} params
-   */
-  constructor({ engine }) {
+  engine: Pick<SherpaOfflineRecognizerEngine, 'sampleRate' | 'decodePcm16'>;
+  requiredSampleRate: number;
+  connected: boolean;
+  currentSegmentId: string | null;
+  previousSegmentId: string | null;
+  pcm16: Buffer;
+
+  constructor({ engine }: { engine: Pick<SherpaOfflineRecognizerEngine, 'sampleRate' | 'decodePcm16'> }) {
     super();
     this.engine = engine;
     this.requiredSampleRate = engine.sampleRate;
@@ -188,7 +236,7 @@ export class SherpaSegmentTranscriptionSession extends EventEmitter {
     this.connected = true;
   }
 
-  appendPcm16(chunk) {
+  appendPcm16(chunk: Buffer) {
     if (!this.connected || !this.currentSegmentId) {
       this.emit('error', new Error('Sherpa transcription session not connected'));
       return;
@@ -196,15 +244,7 @@ export class SherpaSegmentTranscriptionSession extends EventEmitter {
     this.pcm16 = this.pcm16.length === 0 ? chunk : Buffer.concat([this.pcm16, chunk]);
   }
 
-  /**
-   * Close the current segment and hand it back for decoding, WITHOUT decoding.
-   * The caller decodes later (e.g. on the next event-loop turn) so a long
-   * segment's quadratic decode never blocks the worker's IPC — see
-   * worker-process.js session.commit. Returns null when not connected or the
-   * segment holds no audio.
-   * @returns {{ segmentId: string, previousSegmentId: string|null, pcm16: Buffer } | null}
-   */
-  takePendingSegment() {
+  takePendingSegment(): PendingSegment | null {
     if (!this.connected || !this.currentSegmentId) {
       this.emit('error', new Error('Sherpa transcription session not connected'));
       return null;
@@ -225,13 +265,8 @@ export class SherpaSegmentTranscriptionSession extends EventEmitter {
     return { segmentId, previousSegmentId, pcm16 };
   }
 
-  /**
-   * Decode a segment previously returned by takePendingSegment() and emit its
-   * final transcript.
-   * @param {{ segmentId: string, pcm16: Buffer }} pending
-   */
-  decodeSegment(pending) {
-    let transcript;
+  decodeSegment(pending: Pick<PendingSegment, 'segmentId' | 'pcm16'>) {
+    let transcript: string;
     try {
       transcript = this.engine.decodePcm16(pending.pcm16);
     } catch (err) {
