@@ -1,24 +1,34 @@
+import { z } from 'zod';
 
 import {
   SherpaOfflineRecognizerEngine,
   SherpaSegmentTranscriptionSession,
 } from './sherpa-recognizer.js';
 import { SherpaTtsEngine } from './sherpa-tts.js';
+import type { SherpaTtsConfig } from './sherpa-tts.js';
 import { getLocalSttModelDir, getLocalSttModelSpec } from './model-catalog.js';
 import { resolveModelLanguage } from './model-language.js';
 import { pcm16ToWav } from '../audio.js';
 import { resolveEngineThreads } from './engine-threads.js';
+import { WORKER_REQUEST_TYPES, requestHeadSchema, workerRequestSchema } from './worker-protocol.js';
+import type { CommittedPayload, TranscriptPayload, WorkerRequest, WorkerResult } from './worker-protocol.js';
 
 process.title = 'OpenChamber Dictation';
 
 const ENGINE_THREADS = resolveEngineThreads();
 
-const engines = new Map();
-const ttsEngines = new Map();
-const sessions = new Map();
+const engines = new Map<string, SherpaOfflineRecognizerEngine>();
+const ttsEngines = new Map<string, SherpaTtsEngine<string>>();
+const sessions = new Map<string, SherpaSegmentTranscriptionSession>();
 let ipcClosing = false;
 
-function sendToParent(message) {
+type ParentMessage =
+  | { type: 'response'; requestId: unknown; ok: boolean; result?: WorkerResult; error?: string }
+  | { type: 'session.committed'; sessionId: string; payload: CommittedPayload }
+  | { type: 'session.transcript'; sessionId: string; payload: TranscriptPayload }
+  | { type: 'session.error'; sessionId: string; error: string };
+
+function sendToParent(message: ParentMessage) {
   if (ipcClosing || !process.connected || !process.send) {
     return;
   }
@@ -33,11 +43,13 @@ function sendToParent(message) {
   }
 }
 
-function sendOk(requestId, result) {
-  sendToParent({ type: 'response', requestId, ok: true, ...(result !== undefined ? { result } : {}) });
+function sendOk(requestId: string, result?: WorkerResult) {
+  const message: ParentMessage = { type: 'response', requestId, ok: true };
+  if (result !== undefined) message.result = result;
+  sendToParent(message);
 }
 
-function getEngine(modelsDir, modelId, language) {
+function getEngine(modelsDir: string, modelId: string, language: string | undefined) {
   const spec = getLocalSttModelSpec(modelId);
   const modelKey = `${modelsDir}:${modelId}`;
   const key = `${modelKey}:${resolveModelLanguage(modelId, spec.type, language)}`;
@@ -64,48 +76,76 @@ function getEngine(modelsDir, modelId, language) {
   return created;
 }
 
-function cleanupSession(sessionId) {
+function cleanupSession(sessionId: string) {
   const session = sessions.get(sessionId);
   sessions.delete(sessionId);
   try {
     session?.close();
   } catch {
-    // ignore
+    return;
   }
 }
 
-function toBuffer(audio) {
+const serializedBufferSchema = z.object({ type: z.literal('Buffer'), data: z.array(z.number()) });
+
+function toBuffer<Audio>(audio: Audio) {
   if (Buffer.isBuffer(audio)) {
     return audio;
   }
   if (audio instanceof Uint8Array) {
     return Buffer.from(audio.buffer, audio.byteOffset, audio.byteLength);
   }
-  if (audio && typeof audio === 'object' && audio.type === 'Buffer' && Array.isArray(audio.data)) {
-    return Buffer.from(audio.data);
+  const serialized = serializedBufferSchema.safeParse(audio);
+  if (serialized.success) {
+    return Buffer.from(serialized.data.data);
   }
   throw new Error('Unsupported audio payload in dictation worker');
 }
 
-function getTtsEngine(modelsDir, modelId) {
+function parseRequest<Message>(message: Message): WorkerRequest {
+  const parsed = workerRequestSchema.safeParse(message);
+  if (parsed.success) {
+    return parsed.data;
+  }
+  const { type } = requestHeadSchema.parse(message);
+  if (!WORKER_REQUEST_TYPES.some((known) => known === type)) {
+    throw new Error(`Unknown dictation worker request: ${type}`);
+  }
+  throw new Error(`Malformed dictation worker request: ${type}`);
+}
+
+function ttsConfigOf(modelsDir: string, modelId: string): SherpaTtsConfig<string> {
+  const spec = getLocalSttModelSpec(modelId);
+  const modelDir = getLocalSttModelDir(modelsDir, modelId);
+  const { model, tokens, espeakData, voices } = spec.files;
+  if (model === undefined || tokens === undefined) {
+    throw new Error(`Local TTS model ${modelId} names no model or tokens file`);
+  }
+  if (spec.type === 'vits') {
+    return { type: 'vits', modelDir, files: { ...spec.files, model, tokens }, numThreads: ENGINE_THREADS };
+  }
+  if (spec.type === 'kokoro') {
+    if (espeakData === undefined || voices === undefined) {
+      throw new Error(`Local TTS model ${modelId} names no espeak data or voices file`);
+    }
+    return { type: 'kokoro', modelDir, files: { ...spec.files, model, tokens, espeakData, voices }, lexicon: spec.lexicon, numThreads: ENGINE_THREADS };
+  }
+  throw new Error(`Unsupported local TTS model type: ${spec.type}`);
+}
+
+function getTtsEngine(modelsDir: string, modelId: string) {
   const key = `${modelsDir}:${modelId}`;
   const existing = ttsEngines.get(key);
   if (existing) {
     return existing;
   }
-  const spec = getLocalSttModelSpec(modelId);
-  const created = new SherpaTtsEngine({
-    modelDir: getLocalSttModelDir(modelsDir, modelId),
-    type: spec.type,
-    files: spec.files,
-    lexicon: spec.lexicon,
-    numThreads: ENGINE_THREADS,
-  });
+  const created = new SherpaTtsEngine(ttsConfigOf(modelsDir, modelId));
   ttsEngines.set(key, created);
   return created;
 }
 
-async function handleRequest(message) {
+async function handleRequest<Raw>(raw: Raw) {
+  const message = parseRequest(raw);
   switch (message.type) {
     case 'tts.synthesize': {
       const engine = getTtsEngine(message.modelsDir, message.modelId);
@@ -123,13 +163,13 @@ async function handleRequest(message) {
       cleanupSession(message.sessionId);
       const engine = getEngine(message.modelsDir, message.modelId, message.language);
       const session = new SherpaSegmentTranscriptionSession({ engine });
-      session.on('committed', (payload) => {
+      session.on('committed', (payload: CommittedPayload) => {
         sendToParent({ type: 'session.committed', sessionId: message.sessionId, payload });
       });
-      session.on('transcript', (payload) => {
+      session.on('transcript', (payload: TranscriptPayload) => {
         sendToParent({ type: 'session.transcript', sessionId: message.sessionId, payload });
       });
-      session.on('error', (err) => {
+      session.on('error', (err: Error) => {
         sendToParent({
           type: 'session.error',
           sessionId: message.sessionId,
@@ -142,7 +182,8 @@ async function handleRequest(message) {
       return;
     }
     case 'session.append': {
-      sessions.get(message.sessionId)?.appendPcm16(toBuffer(message.audio));
+      const audio = toBuffer(message.audio);
+      sessions.get(message.sessionId)?.appendPcm16(audio);
       sendOk(message.requestId);
       return;
     }
@@ -179,9 +220,6 @@ async function handleRequest(message) {
       sendOk(message.requestId);
       return;
     }
-    default: {
-      throw new Error(`Unknown dictation worker request: ${message?.type}`);
-    }
   }
 }
 
@@ -189,7 +227,7 @@ process.on('message', (message) => {
   void handleRequest(message).catch((error) => {
     sendToParent({
       type: 'response',
-      requestId: message?.requestId,
+      requestId: requestHeadSchema.parse(message).requestId,
       ok: false,
       error: error instanceof Error ? error.message : 'Dictation worker request failed',
     });
