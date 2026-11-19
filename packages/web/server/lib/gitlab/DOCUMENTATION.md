@@ -117,6 +117,13 @@ GraphQL responses need their own field checks since the requester also returns
 text, blobs and streams. Draft note positions and response fields forwarded
 without validation retain their wire types.
 
+### Why mutation arguments are typed by route
+
+The route's normalizer establishes which fields the write and reconciliation
+can use. The mutation table keeps those contracts together and preserves the
+stored kind and digest fields. A draft comment always requires text; an
+ordinary review can publish drafts without supplying text.
+
 ### Why payload checks remain in the mappers
 
 No transport schema validates resource payloads before the mappers see them.

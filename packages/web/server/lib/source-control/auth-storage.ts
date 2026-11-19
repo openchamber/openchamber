@@ -87,8 +87,8 @@ export interface OriginAccountInput {
   user: AuthUserInput;
   source: 'oauth' | 'pat';
   scope?: string;
-  refreshToken?: string;
-  expiresIn?: number;
+  refreshToken?: string | undefined;
+  expiresIn?: number | undefined;
 }
 export interface GitHubAccountInput {
   accessToken: string;

@@ -8,7 +8,7 @@ interface RequestFields { [key: string]: RequestValue }
 
 export interface GitLabClientOptions {
   origin: string;
-  token: string;
+  token: string | undefined;
   tokenType?: 'token' | 'oauth';
   fetch?: (request: Request) => Promise<Response>;
 }
@@ -137,7 +137,7 @@ export interface GitLabDownloadOptions {
 }
 
 export function createGitLabDownloader({ origin, token, tokenType = 'token', fetch: fetchImpl = (request) => fetch(request) }: GitLabClientOptions) {
-  const credential: Record<string, string> = tokenType === 'oauth' ? { authorization: `Bearer ${token}` } : { 'private-token': token };
+  const credential: Record<string, string> = tokenType === 'oauth' ? { authorization: `Bearer ${token}` } : { 'private-token': token === undefined ? 'undefined' : token };
   return async (apiPath: string, { range, signal }: GitLabDownloadOptions = {}) => {
     const headers: Record<string, string> = range ? { range } : {};
     const url = new URL(`api/v4/${apiPath}`, `${origin}/`);

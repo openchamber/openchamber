@@ -9,8 +9,110 @@ import { isString } from './validation.js';
 import { gitlabDescriptor } from './descriptor.js';
 import { digestMutationInput } from '../source-control/mutation-executor.js';
 import { ownedOriginInstance } from '../source-control/origin-instance.js';
+import type { SourceControlJson, SourceControlJsonObject, SourceControlMutationTarget } from '@openchamber/sdk';
+import type { AccountEvents, AccountIdentity, ProviderDescriptor, ProviderMutationContext, ProviderReadContext, ProviderSession } from '../source-control/provider-contract.js';
+import type { AuthCredential, createSourceControlAuthStore } from '../source-control/auth-storage.js';
+import type { MutationContextInput } from '../source-control/binding-service-contracts.js';
+import type { MutationRecord } from '../source-control/mutation-storage.js';
+import type { GitLabResourceOptions } from './resources.js';
+import type { GlabLookupOptions } from './glab-credential.js';
+import type { GitLabUser } from './user.js';
 
-const accountView = (origin, account, current, accounts) => ({
+type AuthStore = ReturnType<typeof createSourceControlAuthStore>;
+type Store = ReturnType<AuthStore['section']>;
+export type GitLabProviderOptions = {
+  descriptor?: ProviderDescriptor;
+  events: Pick<AccountEvents, 'connected' | 'invalidated' | 'removed'>;
+  readSettings?: Parameters<typeof resolveGitLabClientId>[1];
+  fetch?: typeof fetch;
+  timeoutMs?: number;
+  execFile?: GlabLookupOptions['execFile'];
+  cliTimeoutMs?: GlabLookupOptions['timeoutMs'];
+  createClient?: typeof createGitLabClient;
+  createDownloader?: typeof createGitLabDownloader;
+  createResourceService?: typeof createGitLabResourceService;
+  resolveProjects?: GitLabResourceOptions['resolveProjects'];
+} & ({ authStore: AuthStore; store?: undefined } | { authStore?: AuthStore; store: Store });
+type Service = ReturnType<typeof createGitLabResourceService>;
+type Digest = Record<string, SourceControlJson | undefined>;
+type Normalized = { digest: Digest };
+type WithBody = Normalized & { body: string };
+type WithTitle = Normalized & { title: string; body?: string };
+type WithNote = Normalized & { commentId: string };
+type WithThread = Normalized & { threadId: string };
+type WithState = Normalized & { state: 'open' | 'closed' };
+type WithNames = Normalized & { names: string[] };
+type CreateInput = WithTitle & { draft: boolean; remote?: string; headRemote?: string };
+type ExistingResolution = Pick<Awaited<ReturnType<Service['resolveChangeRequestMutation']>>, 'providerTarget' | 'target'>;
+type CreateResolution = Awaited<ReturnType<Service['resolveCreateMutation']>> & { target: SourceControlMutationTarget & { head: string; base: string } };
+type Position = Parameters<Service['addReviewComment']>[0]['position'];
+type Inputs = {
+  '/pr/create': CreateInput;
+  '/pr/update': WithTitle;
+  '/pr/merge': Normalized & { method: string };
+  '/pr/ready': Normalized;
+  '/pr/draft': Normalized;
+  '/pr/comment': WithBody;
+  '/pr/thread/start': WithBody;
+  '/pr/thread/reply': WithThread & WithBody;
+  '/pr/thread/resolve': WithThread & { resolved: boolean };
+  '/issues/comment': WithBody;
+  '/issues/update': WithTitle;
+  '/pr/comment/update': WithNote & WithBody;
+  '/pr/comment/delete': WithNote;
+  '/issues/comment/update': WithNote & WithBody;
+  '/issues/comment/delete': WithNote;
+  '/pr/review': Normalized & { verdict: string; body: string | undefined };
+  '/pr/review/comment': WithBody & { position: Position };
+  '/pr/review/comment/update': WithNote & WithBody;
+  '/pr/review/comment/delete': WithNote;
+  '/pr/review/discard': Normalized;
+  '/pr/state': WithState;
+  '/issues/state': WithState;
+  '/pr/labels': WithNames;
+  '/issues/labels': WithNames;
+  '/pr/reviewers': WithNames;
+};
+type Route = keyof Inputs;
+type Resolutions = { [K in Route]: K extends '/pr/create' ? CreateResolution : ExistingResolution };
+type Outcome = { state: string; result?: object };
+type MutationEntry<I extends Normalized, R> = {
+  kind: string;
+  normalize(input: SourceControlJsonObject, context: MutationContextInput): I;
+  perform(service: Service, input: I, resolved: R): Promise<object>;
+  reconcile(service: Service, resolved: R, input: I): Outcome | Promise<Outcome>;
+};
+type Mutations = { [K in Route]: MutationEntry<Inputs[K], Resolutions[K]> };
+type DraftRoute = keyof ReturnType<typeof reviewDraftEntries>;
+type ExtraRoute = DraftRoute | '/pr/state' | '/issues/state' | '/pr/labels' | '/issues/labels' | '/pr/reviewers';
+type NumberedTarget = SourceControlMutationTarget & { number: number };
+type NumberedContext = Omit<ProviderMutationContext, 'target'> & { target: NumberedTarget };
+type ResolveInput = { session: ProviderSession } & (
+  { context: ProviderMutationContext; kind: 'change-request-create'; input: CreateInput; replayOf?: never }
+  | { context: NumberedContext; kind: string; input: Inputs[Route]; replayOf?: Omit<MutationRecord, 'target'> & { target: NumberedTarget } }
+);
+type MutationStep<K extends Route> = { route: K; session: ProviderSession; input: Inputs[K]; resolved: Resolutions[K] };
+type PrepareInput<K extends Route> = { route: K; input: SourceControlJsonObject; context: MutationContextInput; actor: AccountIdentity;
+  credential: { accountId: string; credentialRevision: number } };
+type Instance = { instance: string };
+type Account = Instance & { accountId: string };
+type ReadInput = { session: ProviderSession; directory: string; remote?: string | undefined };
+type LinkedRead = { context?: Pick<ProviderReadContext, 'linked'> };
+type ProjectRead = ReadInput & { project?: Parameters<Service['reviewState']>[2] };
+type NumberedRead = ProjectRead & { number: number };
+type PatchRead = ReadInput & { number: number; sourceRepo?: { owner: string; repo: string }; linked?: boolean };
+type Failure = { status?: number; kind?: string; message?: unknown };
+
+const hasFailureFields = (value: unknown): value is Failure => value != null;
+const isCreate = (step: ResolveInput): step is Extract<ResolveInput, { kind: 'change-request-create' }> => step.kind === 'change-request-create';
+const includes = <T extends SourceControlJson>(items: readonly T[], value: SourceControlJson | undefined): value is T => {
+  const candidates: readonly (SourceControlJson | undefined)[] = items;
+  return candidates.includes(value);
+};
+const validNames = (value: SourceControlJson | undefined, limit: number): value is string[] =>
+  !(!Array.isArray(value) || value.length > limit || value.some((entry) => !isString(entry) || !entry.trim() || entry.length > 256));
+
+const accountView = (origin: string, account: AuthCredential, current: boolean, accounts: AuthCredential[]) => ({
   id: account.id,
   credentialId: account.id,
   credentialRevision: account.credentialRevision,
@@ -25,7 +127,7 @@ const accountView = (origin, account, current, accounts) => ({
   status: account.status === 'invalid' ? 'invalid' : 'valid',
 });
 
-const cliAccountView = (origin, user, current) => ({
+const cliAccountView = (origin: string, user: GitLabUser, current: boolean) => ({
   id: `${origin}#cli:${user.id}`,
   credentialId: `${origin}#cli:${user.id}`,
   credentialRevision: 1,
@@ -37,40 +139,41 @@ const cliAccountView = (origin, user, current) => ({
   status: 'valid',
 });
 
-const responseError = (status, body) => Object.assign(new Error(body.error), { sourceControlResponse: { status, body } });
+const responseError = (status: number, body: { error: string; status?: string }) => Object.assign(new Error(body.error), { sourceControlResponse: { status, body } });
 
-const invalidMutationContext = (message) => Object.assign(new Error(message), {
+const invalidMutationContext = (message: string) => Object.assign(new Error(message), {
   code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT',
   status: 400,
 });
 
-const requestText = (value) => (isString(value) ? value.trim() : '');
+const requestText = (value: SourceControlJson | undefined) => (isString(value) ? value.trim() : '');
 
 const unknownOutcome = () => ({ state: 'outcome-unknown' });
 
-const threadIdOf = (value) => {
+const threadIdOf = (value: SourceControlJson | undefined) => {
   if (!isString(value) || !/^[A-Za-z0-9_-]{1,100}$/.test(value)) throw invalidMutationContext('threadId is invalid');
   return value;
 };
 
-const noteIdOf = (value) => {
+const noteIdOf = (value: SourceControlJson | undefined) => {
   const id = isString(value) || Number.isSafeInteger(value) ? String(value) : '';
   if (!/^[1-9]\d{0,19}$/.test(id)) throw invalidMutationContext('commentId is invalid');
   return id;
 };
 
-function mutationTable(descriptor) {
+function mutationTable(descriptor: ProviderDescriptor): Mutations {
   const noteMaxLength = descriptor.limits.commentMaxLength;
-  const noteText = (value, required) => {
+  function noteText(value: SourceControlJson | undefined, required: true): string;
+  function noteText(value: SourceControlJson | undefined, required: boolean): string | undefined;
+  function noteText(value: SourceControlJson | undefined, required: boolean) {
     if (value === undefined && !required) return undefined;
     if (!isString(value) || !value.trim() || value.length > noteMaxLength) {
       throw invalidMutationContext('body is required and must fit a GitLab note');
     }
     return value;
-  };
-  const nameList = (value, limit) => {
-    if (!Array.isArray(value) || value.length > limit
-      || value.some((entry) => !isString(entry) || !entry.trim() || entry.length > 256)) {
+  }
+  const nameList = (value: SourceControlJson | undefined, limit: number) => {
+    if (!validNames(value, limit)) {
       throw invalidMutationContext('labels or reviewers are invalid');
     }
     return [...new Set(value)].sort();
@@ -84,7 +187,7 @@ function mutationTable(descriptor) {
         if (!title || !context.target.head || !context.target.base) {
           throw invalidMutationContext('title, target head, and target base are required');
         }
-        const normalized = { title, draft: input.draft === true };
+        const normalized: Omit<CreateInput, 'digest'> & { digest?: Digest } = { title, draft: input.draft === true };
         if (isString(input.body)) normalized.body = input.body;
         const remote = requestText(input.remote);
         const headRemote = requestText(input.headRemote);
@@ -94,7 +197,7 @@ function mutationTable(descriptor) {
           title, body: normalized.body ?? null, draft: normalized.draft,
           remote: normalized.remote ?? context.primaryRemote, headRemote: normalized.headRemote ?? context.primaryRemote,
         };
-        return normalized;
+        return { ...normalized, digest: normalized.digest };
       },
       perform: (service, normalized, resolved) => service.createChangeRequest({
         ...normalized,
@@ -111,10 +214,10 @@ function mutationTable(descriptor) {
       normalize: (input, context) => {
         const title = requestText(input.title);
         if (!title || !context.target.number) throw invalidMutationContext('title and target number are required');
-        const normalized = { title };
+        const normalized: Omit<WithTitle, 'digest'> & { digest?: Digest } = { title };
         if (isString(input.body)) normalized.body = input.body;
         normalized.digest = { title, body: normalized.body ?? null };
-        return normalized;
+        return { ...normalized, digest: normalized.digest };
       },
       perform: (service, normalized, resolved) => service.updateChangeRequest({
         ...normalized,
@@ -127,7 +230,7 @@ function mutationTable(descriptor) {
     '/pr/merge': {
       kind: 'change-request-merge',
       normalize: (input, context) => {
-        if (!context.target.number || !mergeMethods.includes(input.method)) {
+        if (!context.target.number || !includes(mergeMethods, input.method)) {
           throw invalidMutationContext('target number and merge method are required');
         }
         return { method: input.method, digest: { method: input.method } };
@@ -208,7 +311,7 @@ function mutationTable(descriptor) {
     '/pr/thread/resolve': {
       kind: 'change-request-thread-resolve',
       normalize: (input, context) => {
-        if (!context.target.number || ![true, false].includes(input.resolved)) {
+        if (!context.target.number || (input.resolved !== true && input.resolved !== false)) {
           throw invalidMutationContext('target number and resolved are required');
         }
         const threadId = threadIdOf(input.threadId);
@@ -237,10 +340,10 @@ function mutationTable(descriptor) {
       normalize: (input, context) => {
         const title = requestText(input.title);
         if (!title || !context.target.number) throw invalidMutationContext('title and target number are required');
-        const normalized = { title };
+        const normalized: Omit<WithTitle, 'digest'> & { digest?: Digest } = { title };
         if (isString(input.body)) normalized.body = input.body;
         normalized.digest = { title, body: normalized.body ?? null };
-        return normalized;
+        return { ...normalized, digest: normalized.digest };
       },
       perform: (service, normalized, resolved) => service.updateIssue({
         title: normalized.title,
@@ -312,7 +415,7 @@ function mutationTable(descriptor) {
     '/pr/review': {
       kind: 'change-request-review',
       normalize: (input, context) => {
-        if (!context.target.number || !context.target.headSha || !['approve', 'request-changes', 'comment'].includes(input.verdict)) {
+        if (!context.target.number || !context.target.headSha || !includes(['approve', 'request-changes', 'comment'], input.verdict)) {
           throw invalidMutationContext('target number, head SHA and review verdict are required');
         }
         const text = noteText(input.body, false);
@@ -327,87 +430,108 @@ function mutationTable(descriptor) {
       }),
       reconcile: unknownOutcome,
     },
+  } satisfies Omit<Mutations, ExtraRoute>;
+  const reviewDrafts = reviewDraftEntries<string>({ commentText: noteText, fail: (message) => { throw invalidMutationContext(message); } });
+  const setState = (kind: string, method: 'setChangeRequestState' | 'setIssueState'): MutationEntry<WithState, ExistingResolution> => ({
+    kind,
+    normalize: (input, context) => {
+      if (!context.target.number || (input.state !== 'open' && input.state !== 'closed')) {
+        throw invalidMutationContext('target number and state are required');
+      }
+      return { state: input.state, digest: { state: input.state } };
+    },
+    perform: (service, normalized, resolved) => service[method]({
+      state: normalized.state,
+      providerTarget: resolved.providerTarget,
+      targetProject: resolved.target.project,
+      expectedTarget: resolved.target,
+    }),
+    reconcile: (service, resolved, normalized) => service.reconcileStateMutation(resolved.providerTarget, kind, normalized.state),
+  });
+  const setNames = (kind: string, field: 'labels' | 'reviewers'): MutationEntry<WithNames, ExistingResolution> => ({
+    kind,
+    normalize: (input, context) => {
+      if (!context.target.number) throw invalidMutationContext('target number is required');
+      const names = nameList(input[field], field === 'labels' ? descriptor.limits.labelsMax : descriptor.limits.reviewersMax);
+      if (field === 'reviewers' && names.some((id) => !descriptor.limits.reviewerId.test(id))) {
+        throw invalidMutationContext('reviewers are invalid');
+      }
+      return { names, digest: { [field]: names } };
+    },
+    perform: (service, normalized, resolved) => {
+      const target = { providerTarget: resolved.providerTarget, targetProject: resolved.target.project, expectedTarget: resolved.target };
+      if (field === 'reviewers') {
+        const options = { kind, reviewers: normalized.names, ...target };
+        return service.setReviewers(options);
+      }
+      const options = { kind, labels: normalized.names, ...target };
+      return service.setLabels(options);
+    },
+    reconcile: (service, resolved, normalized) => service.reconcileSetMutation(resolved.providerTarget, kind, normalized.names),
+  });
+  return {
+    ...entries,
+    '/pr/review/comment': {
+      ...reviewDrafts['/pr/review/comment'],
+      perform: (service, normalized, resolved) => service.addReviewComment({ providerTarget: resolved.providerTarget, ...normalized }),
+      reconcile: unknownOutcome,
+    },
+    '/pr/review/comment/update': {
+      ...reviewDrafts['/pr/review/comment/update'],
+      perform: (service, normalized, resolved) => service.updateReviewComment({ providerTarget: resolved.providerTarget, ...normalized }),
+      reconcile: unknownOutcome,
+    },
+    '/pr/review/comment/delete': {
+      ...reviewDrafts['/pr/review/comment/delete'],
+      perform: (service, normalized, resolved) => service.deleteReviewComment({ providerTarget: resolved.providerTarget, ...normalized }),
+      reconcile: unknownOutcome,
+    },
+    '/pr/review/discard': {
+      ...reviewDrafts['/pr/review/discard'],
+      perform: (service, _normalized, resolved) => service.discardReview({ providerTarget: resolved.providerTarget }),
+      reconcile: unknownOutcome,
+    },
+    '/pr/state': setState('change-request-state', 'setChangeRequestState'),
+    '/issues/state': setState('issue-state', 'setIssueState'),
+    '/pr/labels': setNames('change-request-labels', 'labels'),
+    '/issues/labels': setNames('issue-labels', 'labels'),
+    '/pr/reviewers': setNames('change-request-reviewers', 'reviewers'),
   };
-  const reviewDrafts = reviewDraftEntries({ commentText: noteText, fail: (message) => { throw invalidMutationContext(message); } });
-  const reviewDraftOperations = {
-    '/pr/review/comment': (service, normalized, resolved) => service.addReviewComment({ providerTarget: resolved.providerTarget, ...normalized }),
-    '/pr/review/comment/update': (service, normalized, resolved) => service.updateReviewComment({ providerTarget: resolved.providerTarget, ...normalized }),
-    '/pr/review/comment/delete': (service, normalized, resolved) => service.deleteReviewComment({ providerTarget: resolved.providerTarget, ...normalized }),
-    '/pr/review/discard': (service, _normalized, resolved) => service.discardReview({ providerTarget: resolved.providerTarget }),
-  };
-  for (const [route, perform] of Object.entries(reviewDraftOperations)) {
-    entries[route] = { ...reviewDrafts[route], perform, reconcile: unknownOutcome };
-  }
-  for (const [route, kind, method] of [
-    ['/pr/state', 'change-request-state', 'setChangeRequestState'],
-    ['/issues/state', 'issue-state', 'setIssueState'],
-  ]) {
-    entries[route] = {
-      kind,
-      normalize: (input, context) => {
-        if (!context.target.number || !['open', 'closed'].includes(input.state)) {
-          throw invalidMutationContext('target number and state are required');
-        }
-        return { state: input.state, digest: { state: input.state } };
-      },
-      perform: (service, normalized, resolved) => service[method]({
-        state: normalized.state,
-        providerTarget: resolved.providerTarget,
-        targetProject: resolved.target.project,
-        expectedTarget: resolved.target,
-      }),
-      reconcile: (service, resolved, normalized) => service.reconcileStateMutation(resolved.providerTarget, kind, normalized.state),
-    };
-  }
-  for (const [route, kind, field, method] of [
-    ['/pr/labels', 'change-request-labels', 'labels', 'setLabels'],
-    ['/issues/labels', 'issue-labels', 'labels', 'setLabels'],
-    ['/pr/reviewers', 'change-request-reviewers', 'reviewers', 'setReviewers'],
-  ]) {
-    entries[route] = {
-      kind,
-      normalize: (input, context) => {
-        if (!context.target.number) throw invalidMutationContext('target number is required');
-        const names = nameList(input[field], field === 'labels' ? descriptor.limits.labelsMax : descriptor.limits.reviewersMax);
-        if (field === 'reviewers' && names.some((id) => !descriptor.limits.reviewerId.test(id))) {
-          throw invalidMutationContext('reviewers are invalid');
-        }
-        return { names, digest: { [field]: names } };
-      },
-      perform: (service, normalized, resolved) => service[method]({
-        kind,
-        [field]: normalized.names,
-        providerTarget: resolved.providerTarget,
-        targetProject: resolved.target.project,
-        expectedTarget: resolved.target,
-      }),
-      reconcile: (service, resolved, normalized) => service.reconcileSetMutation(resolved.providerTarget, kind, normalized.names),
-    };
-  }
-  return entries;
 }
 
-export function createProvider({
-  descriptor = gitlabDescriptor,
-  authStore,
-  store = authStore?.section instanceof Function ? authStore.section('gitlab') : authStore,
-  events,
-  readSettings = async () => ({}),
-  fetch: fetchImpl = fetch,
-  timeoutMs = 10_000,
-  execFile,
-  cliTimeoutMs,
-  createClient = createGitLabClient,
-  createDownloader = createGitLabDownloader,
-  createResourceService = createGitLabResourceService,
-  resolveProjects,
-}) {
-  const getClientId = (origin) => resolveGitLabClientId(origin, readSettings);
-  const glabToken = (origin) => getGlabToken(origin, { execFile, timeoutMs: cliTimeoutMs });
-  const verify = (origin, token) => verifyGitLabToken({ origin, token, fetch: fetchImpl, timeoutMs });
-  const identityFor = (origin, accountId) => ({ provider: descriptor.id, instance: origin, accountId });
+type PresentedUser = GitLabUser & { provider: string; instance: string };
+type StatusCli = { available: boolean; disabled: boolean; active: boolean; user?: PresentedUser };
+type StatusAccount = ReturnType<typeof accountView> | ReturnType<typeof cliAccountView>;
+type AccountStatus = {
+  provider: string; instance: string; status: string; connected: boolean;
+  accounts: StatusAccount[]; cli?: StatusCli; user?: PresentedUser; scope?: string; reason?: string; message?: unknown;
+};
+type CliState = { status: 'disabled' | 'gone' | 'unknown' } | { status: 'usable'; token: string; user: GitLabUser };
 
-  const announceConnectedAccount = async (origin, credential, user) => {
+export function createProvider(options: GitLabProviderOptions) {
+  const {
+    descriptor = gitlabDescriptor,
+    authStore,
+    events,
+    readSettings = async () => ({}),
+    fetch: fetchImpl = fetch,
+    timeoutMs = 10_000,
+    execFile,
+    cliTimeoutMs,
+    createClient = createGitLabClient,
+    createDownloader = createGitLabDownloader,
+    createResourceService = createGitLabResourceService,
+    resolveProjects,
+  } = options;
+  const store = options.store === undefined
+    ? authStore?.section instanceof Function ? authStore.section('gitlab') : options.authStore
+    : options.store;
+  const getClientId = (origin: string) => resolveGitLabClientId(origin, readSettings);
+  const glabToken = (origin: string) => getGlabToken(origin, { execFile, timeoutMs: cliTimeoutMs });
+  const verify = (origin: string, token: string | undefined) => verifyGitLabToken({ origin, token, fetch: fetchImpl, timeoutMs });
+  const identityFor = (origin: string, accountId: string) => ({ provider: descriptor.id, instance: origin, accountId });
+
+  const announceConnectedAccount = async (origin: string, credential: Pick<AuthCredential, 'credentialId' | 'credentialRevision' | 'providerUserId'> | null | undefined, user: GitLabUser) => {
     if (!credential?.credentialId) return;
     const account = identityFor(origin, credential.credentialId);
     const instance = await store.readInstance(origin).catch(() => null);
@@ -421,7 +545,7 @@ export function createProvider({
     });
   };
 
-  const invalidateAccount = async ({ instance: origin, accountId, persisted = true, renew = true }) => {
+  const invalidateAccount = async ({ instance: origin, accountId, persisted = true, renew = true }: Account & { persisted?: boolean; renew?: boolean }) => {
     if (!persisted) {
       await events.invalidated(identityFor(origin, accountId));
       return false;
@@ -432,7 +556,7 @@ export function createProvider({
     return false;
   };
 
-  const getGlabCliState = async (origin) => {
+  const getGlabCliState = async (origin: string): Promise<CliState> => {
     const instance = await store.readInstance(origin);
     if (instance.cliDisabled) return { status: 'disabled' };
     const lookup = await getGlabTokenResult(origin, { execFile, timeoutMs: cliTimeoutMs });
@@ -441,16 +565,16 @@ export function createProvider({
     try {
       return { status: 'usable', token: lookup.token, user: await verify(origin, lookup.token) };
     } catch (error) {
-      return error?.status === 401 ? { status: 'gone' } : { status: 'unknown' };
+      return hasFailureFields(error) && error.status === 401 ? { status: 'gone' } : { status: 'unknown' };
     }
   };
 
-  const getUsableGlab = async (origin) => {
+  const getUsableGlab = async (origin: string) => {
     const state = await getGlabCliState(origin);
     return state.status === 'usable' ? { token: state.token, user: state.user } : null;
   };
 
-  const buildStatus = async (origin, renewed = false) => {
+  const buildStatus = async (origin: string, renewed = false): Promise<AccountStatus> => {
     const instance = await store.readInstance(origin);
     const activeRecord = instance.cliActive ? null : instance.accounts.find((account) => account.id === instance.activeAccountId) ?? null;
     const active = activeRecord?.status === 'invalid' ? null : activeRecord;
@@ -461,7 +585,7 @@ export function createProvider({
     }
     const cli = cliState.status === 'usable' ? { token: cliState.token, user: cliState.user } : null;
     const cliCurrent = Boolean(cli && instance.cliActive);
-    const accounts = instance.accounts.map((account) => accountView(
+    const accounts: StatusAccount[] = instance.accounts.map((account) => accountView(
       origin, account, Boolean(active && account.id === active.id && !cliCurrent), instance.accounts,
     ));
     if (cli) accounts.push(cliAccountView(origin, cli.user, cliCurrent));
@@ -497,31 +621,32 @@ export function createProvider({
 
     try {
       const user = await verify(origin, active.token);
+      const cliStatus: StatusCli = { available: Boolean(cli), disabled: instance.cliDisabled, active: false };
       const status = {
         provider: 'gitlab', instance: origin, status: 'connected', connected: true,
         user: { ...user, provider: 'gitlab', instance: origin }, scope: active.scope, accounts,
-        cli: { available: Boolean(cli), disabled: instance.cliDisabled, active: false },
+        cli: cliStatus,
       };
       if (cli) status.cli.user = { ...cli.user, provider: 'gitlab', instance: origin };
       return status;
     } catch (error) {
       const kind = classifyGitLabFailure(error);
-      if (error?.kind === 'invalid-token') {
+      if (hasFailureFields(error) && error.kind === 'invalid-token') {
         const renewedNow = await invalidateAccount({ instance: origin, accountId: active.id, renew: !renewed });
         return buildStatus(origin, renewedNow);
       }
-      return { provider: 'gitlab', instance: origin, status: kind, connected: false, message: error?.message, accounts };
+      return { provider: 'gitlab', instance: origin, status: kind, connected: false, message: hasFailureFields(error) ? error.message : undefined, accounts };
     }
   };
 
-  const tokens = new WeakMap();
-  const sessionWith = (fields, token) => {
+  const tokens = new WeakMap<ProviderSession, string>();
+  const sessionWith = (fields: ProviderSession, token: string) => {
     const session = Object.freeze(fields);
     tokens.set(session, token);
     return session;
   };
 
-  const resolveAccount = async ({ instance: origin, accountId: requestedAccountId = '' }) => {
+  const resolveAccount = async ({ instance: origin, accountId: requestedAccountId = '' }: Instance & { accountId?: string }) => {
     const instance = await store.readInstance(origin);
     let active = null;
     let token = null;
@@ -529,7 +654,7 @@ export function createProvider({
     let persisted = false;
     let credentialRevision = null;
     let providerUserId = '';
-    let secretKind = 'oauth';
+    let secretKind: ProviderSession['secretKind'] = 'oauth';
     if (requestedAccountId.startsWith(`${origin}#cli:`)) {
       if (!instance.cliDisabled) token = await glabToken(origin);
       if (token) {
@@ -544,7 +669,7 @@ export function createProvider({
             secretKind = 'cli';
           }
         } catch (error) {
-          if (error?.kind === 'invalid-token') await events.invalidated(identityFor(origin, requestedAccountId));
+          if (hasFailureFields(error) && error.kind === 'invalid-token') await events.invalidated(identityFor(origin, requestedAccountId));
           throw error;
         }
       }
@@ -564,9 +689,8 @@ export function createProvider({
       if (!active) secretKind = 'cli';
     }
     if (!token) {
-      const error = new Error('GitLab is not connected');
-      error.status = 401;
-      error.sourceControlAccountUnavailable = true;
+      type Unavailable = Error & { status: number; sourceControlAccountUnavailable: boolean; sourceControlIdentity?: AccountIdentity };
+      const error: Unavailable = Object.assign(new Error('GitLab is not connected'), { status: 401, sourceControlAccountUnavailable: true });
       if (requestedAccountId) error.sourceControlIdentity = identityFor(origin, requestedAccountId);
       throw error;
     }
@@ -574,13 +698,13 @@ export function createProvider({
     return sessionWith({ instance: origin, accountId, credentialRevision, providerUserId, secretKind, persisted }, token);
   };
 
-  const services = new WeakMap();
-  const serviceFor = (session, { canonicalReads = true } = {}) => {
+  const services = new WeakMap<ProviderSession, Service>();
+  const serviceFor = (session: ProviderSession, { canonicalReads = true } = {}) => {
     const cached = services.get(session);
     if (cached) return cached;
     const tokenType = session.secretKind === 'pat' ? 'token' : 'oauth';
     const token = tokens.get(session);
-    const resourceOptions = {
+    const resourceOptions: GitLabResourceOptions = {
       origin: session.instance,
       client: createClient({ origin: session.instance, token, tokenType }),
       download: createDownloader({ origin: session.instance, token, tokenType }),
@@ -590,15 +714,18 @@ export function createProvider({
     if (resolveProjects) resourceOptions.resolveProjects = resolveProjects;
     const service = createResourceService(resourceOptions);
     const identity = identityFor(session.instance, session.accountId);
-    for (const method of Object.keys(service)) {
-      const operation = service[method];
+    const methods: Record<string, (...args: never[]) => Promise<object | void>> = service;
+    for (const method of Object.keys(methods)) {
+      const operation = methods[method];
       if (!(operation instanceof Function)) continue;
-      service[method] = async (...args) => {
+      methods[method] = async (...args: never[]) => {
         try {
           return await operation(...args);
         } catch (error) {
-          error.sourceControlIdentity = identity;
-          error.sourceControlPersistedAccount = session.persisted;
+          const target: { sourceControlIdentity?: AccountIdentity; sourceControlPersistedAccount?: boolean } = Object(error);
+          if (target !== error) throw new TypeError('Cannot attach source control account to resource failure');
+          target.sourceControlIdentity = identity;
+          target.sourceControlPersistedAccount = session.persisted;
           throw error;
         }
       };
@@ -608,18 +735,18 @@ export function createProvider({
   };
 
   const mutations = mutationTable(descriptor);
-  const mutationFor = (route) => {
+  const mutationFor = <K extends Route>(route: K) => {
     const entry = mutations[route];
     if (!entry) throw invalidMutationContext('Source control mutation is unsupported');
     return entry;
   };
-  const projectSelector = (sourceRepo) => (sourceRepo ? { owner: sourceRepo.owner, name: sourceRepo.repo } : undefined);
+  const projectSelector = (sourceRepo: PatchRead['sourceRepo']) => (sourceRepo ? { owner: sourceRepo.owner, name: sourceRepo.repo } : undefined);
 
   return Object.freeze({
     descriptor,
     classifyFailure: classifyGitLabFailure,
     auth: Object.freeze({
-      capabilities: async ({ instance: origin }) => {
+      capabilities: async ({ instance: origin }: Instance) => {
         const clientId = await getClientId(origin);
         const probe = await probeGitLabAuth({ origin, clientId, fetch: fetchImpl, timeoutMs, glabAvailable: false });
         const cliAvailable = probe.confirmed && Boolean(await getUsableGlab(origin));
@@ -629,18 +756,19 @@ export function createProvider({
           authenticationMethods: { device: probe.device, pat: probe.pat, cli },
         };
       },
-      status: ({ instance }) => buildStatus(instance),
-      accounts: async ({ instance: origin }) => {
+      status: ({ instance }: Instance) => buildStatus(instance),
+      accounts: async ({ instance: origin }: Instance) => {
         const instance = await store.readInstance(origin);
         return instance.accounts.map((account) => accountView(
           origin, account, account.id === instance.activeAccountId && !instance.cliActive, instance.accounts,
         ));
       },
-      startDeviceFlow: async ({ instance: origin }) => {
+      startDeviceFlow: async ({ instance: origin }: Instance) => {
         const clientId = await getClientId(origin);
         if (!clientId) throw responseError(400, { error: 'GitLab OAuth client is not configured', status: 'invalid-client' });
         const payload = await startGitLabDeviceFlow({ origin, clientId, fetch: fetchImpl, timeoutMs });
-        const result = {
+        type PublicFlow = { userCode: string; verificationUri: string; expiresIn: number; interval: number; verificationUriComplete?: string };
+        const result: PublicFlow = {
           userCode: payload.user_code,
           verificationUri: payload.verification_uri,
           expiresIn: payload.expires_in,
@@ -649,7 +777,7 @@ export function createProvider({
         if (isString(payload.verification_uri_complete)) result.verificationUriComplete = payload.verification_uri_complete;
         return { flow: { deviceCode: payload.device_code, clientId, expiresIn: payload.expires_in }, result };
       },
-      completeDeviceFlow: async ({ instance: origin, deviceCode, clientId }, { consume }) => {
+      completeDeviceFlow: async ({ instance: origin, deviceCode, clientId }: Instance & { deviceCode: string; clientId: string }, { consume }: { consume(): void }) => {
         const result = await exchangeGitLabDeviceCode({ origin, clientId, deviceCode, fetch: fetchImpl, timeoutMs });
         if (result.status === 'authorization_pending' || result.status === 'slow_down') {
           return { pending: true, body: { connected: false, status: result.status } };
@@ -664,13 +792,13 @@ export function createProvider({
         await announceConnectedAccount(origin, credential, user);
         return { pending: false, body: { connected: true, user, scope: result.scope } };
       },
-      connectToken: async ({ instance: origin, token }) => {
+      connectToken: async ({ instance: origin, token }: Instance & { token: string }) => {
         const user = await verify(origin, token);
         const credential = await store.setAccount(origin, { token, user, source: 'pat' });
         await announceConnectedAccount(origin, credential, user);
         return { connected: true, user };
       },
-      activate: async ({ instance: origin, accountId }) => {
+      activate: async ({ instance: origin, accountId }: Account) => {
         if (accountId.startsWith(`${origin}#cli:`)) {
           const usable = await getUsableGlab(origin);
           if (!usable || accountId !== `${origin}#cli:${usable.user.id}`) throw responseError(404, { error: 'GitLab CLI account not found' });
@@ -680,12 +808,12 @@ export function createProvider({
         if (!accountId || !(await store.activate(origin, accountId))) throw responseError(404, { error: 'GitLab account not found' });
         return buildStatus(origin);
       },
-      setCliDisabled: async ({ instance: origin, disabled }) => {
+      setCliDisabled: async ({ instance: origin, disabled }: Instance & { disabled: boolean }) => {
         const nextDisabled = await store.setCliDisabled(origin, disabled);
         const usable = await getUsableGlab(origin);
         return { available: Boolean(usable), disabled: nextDisabled };
       },
-      remove: async ({ instance: origin, accountId }) => {
+      remove: async ({ instance: origin, accountId }: Account) => {
         const instance = await store.readInstance(origin);
         if (accountId.startsWith(`${origin}#cli:`)) {
           const cli = await getUsableGlab(origin);
@@ -700,10 +828,10 @@ export function createProvider({
       },
       resolveAccount,
       invalidateAccount,
-      refreshOAuthToken: async ({ instance: origin, refreshToken }) => refreshGitLabAccessToken({
+      refreshOAuthToken: async ({ instance: origin, refreshToken }: Instance & { refreshToken: string }) => refreshGitLabAccessToken({
         origin, refreshToken, clientId: await getClientId(origin), fetch: fetchImpl, timeoutMs,
       }),
-      readCurrentAccountId: async ({ instance: origin }) => {
+      readCurrentAccountId: async ({ instance: origin }: Instance) => {
         const instance = await store.readInstance(origin);
         const cli = instance.cliActive ? await getUsableGlab(origin) : null;
         if (cli) return `${origin}#cli:${cli.user.id}`;
@@ -727,7 +855,7 @@ export function createProvider({
       ownsHost: ownedOriginInstance,
     }),
     transport: Object.freeze({
-      readCredential: async ({ instance, credentialId, credentialRevision }) => {
+      readCredential: async ({ instance, credentialId, credentialRevision }: Instance & { credentialId: string; credentialRevision?: number }) => {
         const account = await store.readAccount(instance, credentialId, credentialRevision);
         if (!account) return null;
         return {
@@ -742,31 +870,31 @@ export function createProvider({
       },
     }),
     resources: Object.freeze({
-      changeRequestStatus: ({ session, directory, branch, remote }) => serviceFor(session)
+      changeRequestStatus: ({ session, directory, branch, remote }: ReadInput & { branch: string }) => serviceFor(session)
         .changeRequestStatus(directory, branch, remote),
-      listChangeRequests: ({ session, directory, page, query, state, people, labels, remote }) => serviceFor(session)
+      listChangeRequests: ({ session, directory, page, query, state, people, labels, remote }: ReadInput & NonNullable<Parameters<Service['listChangeRequests']>[1]>) => serviceFor(session)
         .listChangeRequests(directory, { page, query, state, people, labels, remote }),
-      reviewState: ({ session, directory, project, number, remote }) => serviceFor(session).reviewState(directory, number, project, remote),
-      changeRequestContext: ({ session, context, directory, number, project, remote, includeDiff, includeCIDetails, includeTimeline }) => serviceFor(session)
+      reviewState: ({ session, directory, project, number, remote }: NumberedRead) => serviceFor(session).reviewState(directory, number, project, remote),
+      changeRequestContext: ({ session, context, directory, number, project, remote, includeDiff, includeCIDetails, includeTimeline }: NumberedRead & LinkedRead & NonNullable<Parameters<Service['changeRequestContext']>[2]>) => serviceFor(session)
         .changeRequestContext(directory, number, {
           includeDiff, includeCIDetails, includeTimeline, project, remote, constrainToPrimary: true, linked: context?.linked,
         }),
-      listIssues: ({ session, directory, page, query, state, people, labels, remote }) => serviceFor(session)
+      listIssues: ({ session, directory, page, query, state, people, labels, remote }: ReadInput & NonNullable<Parameters<Service['listIssues']>[1]>) => serviceFor(session)
         .listIssues(directory, { page, query, state, people, labels, remote }),
-      getIssue: ({ session, context, directory, number, project, remote }) => serviceFor(session).getIssue(directory, number, project, remote, { linked: context?.linked }),
-      issueComments: ({ session, context, directory, number, project, remote }) => serviceFor(session).issueComments(directory, number, project, remote, { linked: context?.linked }),
-      projectUpstream: ({ session, directory, remote }) => serviceFor(session).projectUpstream(directory, remote),
-      projectBranches: ({ session, directory, project, remote }) => serviceFor(session).projectBranches(directory, project, remote),
-      listLabels: ({ session, directory, project, remote }) => serviceFor(session).listLabels(directory, project, remote),
-      listReviewerCandidates: ({ session, directory, project, remote }) => serviceFor(session).listReviewerCandidates(directory, project, remote),
-      readUpload: ({ session, context, directory, project, remote, secret, filename, range, signal }) => serviceFor(session)
+      getIssue: ({ session, context, directory, number, project, remote }: NumberedRead & LinkedRead) => serviceFor(session).getIssue(directory, number, project, remote, { linked: context?.linked }),
+      issueComments: ({ session, context, directory, number, project, remote }: NumberedRead & LinkedRead) => serviceFor(session).issueComments(directory, number, project, remote, { linked: context?.linked }),
+      projectUpstream: ({ session, directory, remote }: ReadInput) => serviceFor(session).projectUpstream(directory, remote),
+      projectBranches: ({ session, directory, project, remote }: ProjectRead) => serviceFor(session).projectBranches(directory, project, remote),
+      listLabels: ({ session, directory, project, remote }: ProjectRead) => serviceFor(session).listLabels(directory, project, remote),
+      listReviewerCandidates: ({ session, directory, project, remote }: ProjectRead) => serviceFor(session).listReviewerCandidates(directory, project, remote),
+      readUpload: ({ session, context, directory, project, remote, secret, filename, range, signal }: ProjectRead & LinkedRead & Parameters<Service['readUpload']>[3]) => serviceFor(session)
         .readUpload(directory, project, remote, { secret, filename, range, signal, linked: context?.linked }),
-      readChangeRequestPatch: ({ session, directory, number, sourceRepo, remote, linked }) => serviceFor(session)
+      readChangeRequestPatch: ({ session, directory, number, sourceRepo, remote, linked }: PatchRead) => serviceFor(session)
         .changeRequestPatch(directory, number, { project: projectSelector(sourceRepo), remote, linked }),
-      readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, binary, linked }) => serviceFor(session)
+      readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, binary, linked }: PatchRead & Pick<Parameters<Service['changeRequestFileContents']>[2], 'path' | 'previousPath' | 'status' | 'binary'>) => serviceFor(session)
         .changeRequestFileContents(directory, number, { project: projectSelector(sourceRepo), remote, path, previousPath, status, binary, linked }),
-      liveSummaries: ({ session, refs, issueRefs, details }) => serviceFor(session, { canonicalReads: false }).liveSummaries({ refs, issueRefs, details }),
-      readChangeRequestHead: async ({ session, directory, remote, number }) => {
+      liveSummaries: ({ session, refs, issueRefs, details }: { session: ProviderSession } & Parameters<Service['liveSummaries']>[0]) => serviceFor(session, { canonicalReads: false }).liveSummaries({ refs, issueRefs, details }),
+      readChangeRequestHead: async ({ session, directory, remote, number }: NumberedRead) => {
         const { changeRequest: request } = await serviceFor(session).changeRequestContext(directory, number, {
           remote,
           constrainToPrimary: true,
@@ -782,7 +910,12 @@ export function createProvider({
           headOwner: (request.headProject ?? request.project).owner,
         };
       },
-      resolveChangeRequestSource: async ({ session, context, project, number, expectedHeadSha, requestedRemoteName }) => {
+      resolveChangeRequestSource: async ({ session, context, project, number, expectedHeadSha, requestedRemoteName }: NumberedRead & {
+        context: Pick<ProviderReadContext, 'directory' | 'primaryRemote' | 'instance'>;
+        project: SourceControlMutationTarget['project'];
+        expectedHeadSha: string;
+        requestedRemoteName: string;
+      }) => {
         const resolved = await serviceFor(session).changeRequestContext(context.directory, number, {
           project: { owner: project.owner, name: project.name },
           remote: context.primaryRemote,
@@ -796,7 +929,7 @@ export function createProvider({
         const headProject = request.headProject ?? request.project;
         const endpoint = headProject.cloneUrl;
         const origin = new URL(context.instance);
-        const parsed = new URL(endpoint);
+        const parsed = new URL(String(endpoint));
         if (parsed.origin !== origin.origin
           || decodeURIComponent(parsed.pathname).replace(/^\//, '').replace(/\.git$/, '') !== `${headProject.owner}/${headProject.name}`) {
           throw Object.assign(new Error('GitLab returned an invalid head project endpoint'), { code: 'MALFORMED_PROVIDER_RESPONSE' });
@@ -815,18 +948,19 @@ export function createProvider({
     }),
     mutations: Object.freeze({
       routes: Object.freeze(Object.keys(mutations)),
-      prepare: ({ route, input, context, actor, credential }) => {
+      prepare: <K extends Route>({ route, input, context, actor, credential }: PrepareInput<K>) => {
         const entry = mutationFor(route);
         const normalized = entry.normalize(input, context);
         return {
           kind: entry.kind,
           input: normalized,
-          digest: (target) => digestMutationInput({ kind: entry.kind, actor, credential, target, ...normalized.digest }),
+          digest: (target: SourceControlMutationTarget) => digestMutationInput({ kind: entry.kind, actor, credential, target, ...normalized.digest }),
         };
       },
-      resolveTarget: ({ session, context, kind, input, replayOf }) => {
-        const service = serviceFor(session);
-        if (kind === 'change-request-create') return service.resolveCreateMutation(context, context.target, input);
+      resolveTarget: (step: ResolveInput) => {
+        const service = serviceFor(step.session);
+        if (isCreate(step)) return service.resolveCreateMutation(step.context, step.context.target, step.input);
+        const { context, kind, replayOf } = step;
         if (replayOf) {
           return {
             providerTarget: { projectId: replayOf.target.project.id, number: replayOf.target.number },
@@ -836,8 +970,8 @@ export function createProvider({
         if (kind.startsWith('issue-')) return service.resolveIssueMutation(context, context.target);
         return service.resolveChangeRequestMutation(context, context.target);
       },
-      perform: ({ session, route, input, resolved }) => mutationFor(route).perform(serviceFor(session), input, resolved),
-      reconcile: ({ session, route, input, resolved }) => mutationFor(route).reconcile(serviceFor(session), resolved, input),
+      perform: <K extends Route>({ session, route, input, resolved }: MutationStep<K>) => mutationFor(route).perform(serviceFor(session), input, resolved),
+      reconcile: <K extends Route>({ session, route, input, resolved }: MutationStep<K>) => mutationFor(route).reconcile(serviceFor(session), resolved, input),
     }),
   });
 }

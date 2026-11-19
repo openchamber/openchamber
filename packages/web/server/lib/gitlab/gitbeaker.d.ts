@@ -19,8 +19,8 @@ declare module '@gitbeaker/rest' {
   export class Gitlab {
     constructor(options: {
       host: string;
-      token?: string;
-      oauthToken?: string;
+      token?: string | undefined;
+      oauthToken?: string | undefined;
       requesterFn: (service: import('./client.js').GitLabRequesterService) => import('./client.js').GitLabRequester;
     });
 
