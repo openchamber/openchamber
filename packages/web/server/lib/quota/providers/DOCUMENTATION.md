@@ -30,6 +30,13 @@ result construction; `../credentials` owns managed credential storage.
 
 ## Decisions
 
+### Why Codex reads the CLI token fields separately
+
+The CLI's ChatGPT sign-in is usable when `auth.json` contains a nonblank
+`tokens.access_token`. A missing account ID stays null. A signed-out CLI or
+an API-key sign-in without `tokens` provides no fallback login. JWT claims
+provide an optional display email only; decoding them does not verify the token.
+
 ### Why Copilot fields remain unknown
 
 Copilot's HTTP payload and normalized credentials do not validate their fields.
@@ -71,8 +78,8 @@ and retains the own-property check, so inherited names remain unsupported.
 Configuration failures skip only the failing provider. Pending requests remain
 keyed by the original ID and are removed only when that same promise settles.
 
-`../utils/auth.js` leaves `getAuthEntry` and `normalizeAuthEntry` untyped;
-credential readers must narrow their results before promising credential fields.
+`getAuthEntry` and `normalizeAuthEntry` do not validate credential fields.
+Credential readers narrow the fields they use.
 
 ### Why shared readers retain precise window fields
 

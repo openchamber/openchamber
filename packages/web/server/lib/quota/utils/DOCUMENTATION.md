@@ -29,15 +29,14 @@ discovery. `contracts.ts` owns the converted helpers' data types.
 ### Why auth remains JavaScript
 
 `auth.js` imports `getOpenCodeDataDir` and `OPENCODE_CONFIG_DIR` from
-`../../opencode/config-files.js`. That owner's declaration exposes both paths without
-duplicating their configuration logic.
+`../../opencode/config-files.js`. The caller supplies its own field checks:
+`auth.d.ts` exposes the JSON and credential lookup results as unchecked values.
 
 `resolveConfigApiKey` currently evaluates `os.homedir()` without an `os` import
 when its caller omits `homeDir`. Adding the import would change an existing
 failure into success. The behavior-preserving conversion leaves this file
 unchanged until that defect can be fixed separately.
 
-`auth.test.js` asserts that omitting `homeDir` throws `os is not defined`.
 An ambient declaration for `os` would claim a runtime binding that this module
 does not provide. The unresolved name is local to this file; changing a
 neighbouring module's types cannot resolve it.
