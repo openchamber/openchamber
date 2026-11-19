@@ -1,5 +1,8 @@
-export const normalizeCandidateUrl = (value) => {
-  if (typeof value !== 'string' || !value.trim()) return null;
+import type { Request } from '../shared/http-contracts.js';
+import { isString } from './inputs.js';
+
+export const normalizeCandidateUrl = (value: Request['body']) => {
+  if (!isString(value) || !value.trim()) return null;
   try {
     const parsed = new URL(value.trim());
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
@@ -11,7 +14,7 @@ export const normalizeCandidateUrl = (value) => {
   }
 };
 
-export const candidateUrlType = (url) => {
+export const candidateUrlType = (url: string) => {
   try {
     return new URL(url).protocol === 'https:' ? 'tunnel' : 'lan';
   } catch {
@@ -19,7 +22,7 @@ export const candidateUrlType = (url) => {
   }
 };
 
-export const isLoopbackCandidateUrl = (url) => {
+export const isLoopbackCandidateUrl = (url: string) => {
   try {
     const hostname = new URL(url).hostname.toLowerCase();
     return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
@@ -28,6 +31,6 @@ export const isLoopbackCandidateUrl = (url) => {
   }
 };
 
-export const isLocalOnlyCandidateSet = (candidates) => (
+export const isLocalOnlyCandidateSet = (candidates: readonly { type: string }[]) => (
   candidates.length > 0 && candidates.every((candidate) => candidate.type === 'lan')
 );
