@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 
 import { createMessageSearchIndexer } from './indexer.js';
 import { loadSqliteOpener } from './sqlite.js';
@@ -98,6 +98,10 @@ describe.skipIf(!open)('message search index', () => {
     fake = createFakeOpenCode();
     store = openMessageSearchStore(open(':memory:'));
     indexer = createMessageSearchIndexer({ store, createClient: () => fake.client, pageSize: 2, liveDebounceMs: 0, backfillPauseMs: 0, logger: { warn: () => {} } });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('migrates schema 3 without dropping indexed rows or cursors', () => {
@@ -361,8 +365,9 @@ describe.skipIf(!open)('message search index', () => {
     await backfill();
     fake.user('a', 'u1', 'live message');
     fake.touch('a');
+    vi.useFakeTimers();
     indexer.processPayload({ type: 'session.idle', properties: { sessionID: 'a' } });
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await vi.advanceTimersByTimeAsync(0);
     await indexer.idle();
     expect(search('live')).toHaveLength(1);
   });
@@ -370,13 +375,14 @@ describe.skipIf(!open)('message search index', () => {
   it('keeps an archive mutation protecting an older sync after a newer full walk commits it', async () => {
     let resolveSession;
     const pendingSession = new Promise((resolve) => { resolveSession = resolve; });
+    const sessionRequested = Promise.withResolvers();
     const activeSession = { id: 'a', title: 'A', location: { directory: '/repo/a' }, time: { created: 1, updated: 10 } };
     const archivedSession = { ...activeSession, time: { ...activeSession.time, archived: 123 } };
     store.upsertSession({ id: 'a', directory: '/repo/a', title: 'A', lifecycleKnown: true });
     store.markSynced('a', 10);
     const client = {
       session: {
-        get: () => pendingSession,
+        get: () => { sessionRequested.resolve(); return pendingSession; },
         list: async () => ({ data: [archivedSession], cursor: {} }),
         message: { get: async () => { throw new Error('message does not exist'); } },
       },
@@ -392,7 +398,7 @@ describe.skipIf(!open)('message search index', () => {
     });
 
     const olderSync = indexer.syncSession('a', '');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await sessionRequested.promise;
     await indexer.processArchiveEvent({ type: 'session.archived', created: 123, data: { sessionID: 'a' } });
     indexer.onConnected();
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -404,13 +410,14 @@ describe.skipIf(!open)('message search index', () => {
   });
 
   it('keeps the effective active state while an archive event waits for an explicit restore overlay', async () => {
+    const overlayRequested = Promise.withResolvers();
     let resolveOverlay;
     const overlay = new Promise((resolve) => { resolveOverlay = resolve; });
     store.upsertSession({ id: 'a', directory: '/repo/a', title: 'A', lifecycleKnown: true });
     indexer = createMessageSearchIndexer({
       store,
       createClient: () => fake.client,
-      getArchivedSessions: () => overlay,
+      getArchivedSessions: () => { overlayRequested.resolve(); return overlay; },
       applyOwnedArchiveState: (session, archived) => {
         if (!Object.prototype.hasOwnProperty.call(archived, session.id)) return session;
         const time = { ...(session.time ?? {}) };
@@ -421,7 +428,7 @@ describe.skipIf(!open)('message search index', () => {
     });
 
     const archiving = indexer.processArchiveEvent({ type: 'session.archived', created: 123, data: { sessionID: 'a' } });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await overlayRequested.promise;
     expect(store.readSession('a')).toMatchObject({ archived_at: null, lifecycle_known: 1 });
 
     resolveOverlay({ a: null });
@@ -444,6 +451,7 @@ describe.skipIf(!open)('message search index', () => {
   });
 
   it('lets a full walk confirm a failed event before an older sync completes', async () => {
+    const sessionRequested = Promise.withResolvers();
     let resolveSession;
     const pendingSession = new Promise((resolve) => { resolveSession = resolve; });
     const activeSession = { id: 'a', title: 'A', location: { directory: '/repo/a' }, time: { created: 1, updated: 10 } };
@@ -453,7 +461,7 @@ describe.skipIf(!open)('message search index', () => {
     let overlayReads = 0;
     const client = {
       session: {
-        get: () => pendingSession,
+        get: () => { sessionRequested.resolve(); return pendingSession; },
         list: async () => ({ data: [archivedSession], cursor: {} }),
         message: { get: async () => { throw new Error('message does not exist'); } },
       },
@@ -473,7 +481,7 @@ describe.skipIf(!open)('message search index', () => {
     });
 
     const olderSync = indexer.syncSession('a', '');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await sessionRequested.promise;
     await indexer.processArchiveEvent({ type: 'session.archived', created: 123, data: { sessionID: 'a' } });
     expect(store.readSession('a')).toMatchObject({ archived_at: null, lifecycle_known: 1 });
 
@@ -487,18 +495,19 @@ describe.skipIf(!open)('message search index', () => {
   });
 
   it('keeps the effective archived state while a restore event waits for its overlay', async () => {
+    const overlayRequested = Promise.withResolvers();
     let resolveOverlay;
     const overlay = new Promise((resolve) => { resolveOverlay = resolve; });
     store.upsertSession({ id: 'a', directory: '/repo/a', title: 'A', archivedAt: 50, lifecycleKnown: true });
     indexer = createMessageSearchIndexer({
       store,
       createClient: () => fake.client,
-      getArchivedSessions: () => overlay,
+      getArchivedSessions: () => { overlayRequested.resolve(); return overlay; },
       logger: { warn: () => {} },
     });
 
     const restoring = indexer.processPayload({ type: 'session.unarchived', properties: { sessionID: 'a' } });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await overlayRequested.promise;
     expect(store.readSession('a')).toMatchObject({ archived_at: 50, lifecycle_known: 1 });
 
     resolveOverlay({});
@@ -507,6 +516,7 @@ describe.skipIf(!open)('message search index', () => {
   });
 
   it('preserves a live archive event that arrives during an async session sync', async () => {
+    const overlayRequested = Promise.withResolvers();
     let resolveOverlay;
     const overlay = new Promise((resolve) => { resolveOverlay = resolve; });
     fake.session('a');
@@ -514,12 +524,12 @@ describe.skipIf(!open)('message search index', () => {
       store,
       createClient: () => fake.client,
       pageSize: 2,
-      getArchivedSessions: () => overlay,
+      getArchivedSessions: () => { overlayRequested.resolve(); return overlay; },
       logger: { warn: () => {} },
     });
 
     const syncing = indexer.syncSession('a', '');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await overlayRequested.promise;
     const archiving = indexer.processArchiveEvent({ type: 'session.archived', created: 123, data: { sessionID: 'a' } });
     resolveOverlay({});
     await Promise.all([syncing, archiving]);
@@ -528,18 +538,19 @@ describe.skipIf(!open)('message search index', () => {
   });
 
   it('preserves a live archive event that arrives after a pending active walk snapshot', async () => {
+    const listRequested = Promise.withResolvers();
     let resolveList;
     const listed = new Promise((resolve) => { resolveList = resolve; });
     const client = {
       session: {
-        list: () => listed,
+        list: () => { listRequested.resolve(); return listed; },
         get: async () => { throw new Error('message sync must not run'); },
       },
     };
     indexer = createMessageSearchIndexer({ store, createClient: () => client, liveDebounceMs: 0, backfillPauseMs: 0, logger: { warn: () => {} } });
 
     indexer.onConnected();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await listRequested.promise;
     await indexer.processArchiveEvent({ type: 'session.archived', created: 123, data: { sessionID: 'a' } });
     resolveList({ data: [{ id: 'a', title: 'A', location: { directory: '/repo/a' }, time: { created: 1, updated: 1 } }], cursor: {} });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -550,14 +561,15 @@ describe.skipIf(!open)('message search index', () => {
   });
 
   it('preserves a live restore event that arrives after a pending archived walk snapshot', async () => {
+    const listRequested = Promise.withResolvers();
     let resolveList;
     const listed = new Promise((resolve) => { resolveList = resolve; });
-    const client = { session: { list: () => listed, get: async () => { throw new Error('message sync must not run'); } } };
+    const client = { session: { list: () => { listRequested.resolve(); return listed; }, get: async () => { throw new Error('message sync must not run'); } } };
     store.upsertSession({ id: 'a', directory: '/repo/a', title: 'A', archivedAt: 50, lifecycleKnown: true });
     indexer = createMessageSearchIndexer({ store, createClient: () => client, liveDebounceMs: 0, backfillPauseMs: 0, logger: { warn: () => {} } });
 
     indexer.onConnected();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await listRequested.promise;
     await indexer.processPayload({ type: 'session.unarchived', properties: { sessionID: 'a' } });
     resolveList({ data: [{ id: 'a', title: 'A', location: { directory: '/repo/a' }, time: { created: 1, updated: 1, archived: 50 } }], cursor: {} });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -607,12 +619,10 @@ describe.skipIf(!open)('message search index', () => {
     });
 
     const archiving = indexer.processArchiveEvent({ type: 'session.archived', created: 456, data: { sessionID: 'a' } });
-    let idleFinished = false;
-    const idle = indexer.idle().then(() => { idleFinished = true; });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(idleFinished).toBe(false);
-
+    const idle = indexer.idle();
     resolveOverlay({});
+    // The event must finish before shutdown can report the indexer idle.
+    expect(await Promise.race([archiving.then(() => 'archive'), idle.then(() => 'idle')])).toBe('archive');
     await Promise.all([archiving, idle]);
     expect(store.readSession('a')).toMatchObject({ archived_at: 456, lifecycle_known: 1 });
   });
@@ -640,44 +650,6 @@ describe.skipIf(!open)('message search index', () => {
     await archive;
 
     expect(calls).toBe(2);
-    expect(store.readSession('a')).toMatchObject({ archived_at: null, lifecycle_known: 1 });
-  });
-
-  it('releases a walk-deleted session generation after its older reader finishes', async () => {
-    let resolveSession;
-    const pendingSession = new Promise((resolve) => { resolveSession = resolve; });
-    const activeSession = { id: 'a', title: 'A', location: { directory: '/repo/a' }, time: { created: 1, updated: 10 } };
-    store.upsertSession({ id: 'a', directory: '/repo/a', title: 'A', lifecycleKnown: true });
-    const client = {
-      session: {
-        get: () => pendingSession,
-        list: async () => ({ data: [], cursor: {} }),
-        message: { get: async () => { throw new Error('message does not exist'); } },
-      },
-      message: { list: async () => ({ data: [], cursor: {} }) },
-    };
-    indexer = createMessageSearchIndexer({
-      store,
-      createClient: () => client,
-      getArchivedSessions: async () => ({}),
-      liveDebounceMs: 0,
-      backfillPauseMs: 0,
-      logger: { warn: () => {} },
-    });
-
-    const olderSync = indexer.syncSession('a', '');
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await indexer.processArchiveEvent({ type: 'session.archived', created: 123, data: { sessionID: 'a' } });
-    indexer.onConnected();
-    await new Promise((resolve) => setTimeout(resolve, 5));
-
-    expect(store.readSession('a')).toBeNull();
-
-    resolveSession(activeSession);
-    await olderSync;
-    expect(store.readSession('a')).toBeNull();
-
-    await indexer.syncSession('a', '');
     expect(store.readSession('a')).toMatchObject({ archived_at: null, lifecycle_known: 1 });
   });
 

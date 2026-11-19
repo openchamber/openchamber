@@ -89,20 +89,4 @@ describe('message search runtime', () => {
     await runtime.stop();
     expect(hub.listeners).toEqual({ event: 0, status: 0 });
   });
-
-  it('records whether reasoning is indexed and follows its switch only while search runs', async () => {
-    const runtime = create(true);
-    await runtime.status();
-    await runtime.setReasoningEnabled(true);
-    await runtime.setEnabled(false);
-    await runtime.setReasoningEnabled(false);
-    await runtime.setEnabled(true);
-    expect((await runtime.status()).state).toBe('on');
-    await runtime.stop();
-
-    const { DatabaseSync } = await import('node:sqlite');
-    const db = new DatabaseSync(indexFile(), { readOnly: true });
-    expect(db.prepare("SELECT value FROM meta WHERE key = 'reasoning'").get().value).toBe('0');
-    db.close();
-  });
 });

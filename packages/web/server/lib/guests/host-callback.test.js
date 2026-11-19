@@ -23,7 +23,7 @@ const route = (path, handler, refusal = () => null) => removals.push(setHostCall
  * answers or cuts the connection, never ending it first; resolves with how
  * many bytes went out by then and the status, if one came.
  */
-const stream = async (path, { bearer = 'handle', total, chunk = 64 * 1024 }) => {
+const stream = async (path, { bearer = 'handle', total, chunk = 64 * 1024, failIfAllSent = false }) => {
   const url = new URL(path, await hostCallbackUrl());
   return new Promise((resolve) => {
     let sent = 0;
@@ -46,8 +46,8 @@ const stream = async (path, { bearer = 'handle', total, chunk = 64 * 1024 }) => 
           return;
         }
       }
-      // Everything went out without an answer: the listener read it all.
-      if (!settled && sent >= total) setTimeout(() => finish('read-everything'), 1_000);
+      // Reaching the budget already violates the early-cutoff contract.
+      if (!settled && sent >= total && failIfAllSent) finish('read-everything');
     };
     request.flushHeaders();
     pump();
@@ -106,7 +106,7 @@ describe('the callback listener', () => {
     let served = 0;
     route('/echo', async () => { served += 1; return { status: 200, body: {} }; });
     const total = 64 * 1024 * 1024;
-    const answer = await stream('/echo', { total });
+    const answer = await stream('/echo', { total, failIfAllSent: true });
     expect(answer.status).not.toBe('read-everything');
     expect(answer.sent).toBeLessThan(total);
     expect(served).toBe(0);

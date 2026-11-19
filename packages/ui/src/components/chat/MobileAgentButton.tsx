@@ -19,7 +19,6 @@ interface MobileAgentButtonProps {
 
 const LONG_PRESS_MS = 500;
 
-// NOTE: Use pointer events instead of onClick to keep soft keyboard open on mobile
 export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAgent, onOpenAgentPanel, className }) => {
     const getAgentColor = useAgentColors();
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
@@ -35,7 +34,6 @@ export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAge
     const uiAgentName = currentSessionId ? (sessionAgentName || currentAgentName) : currentAgentName;
     const agentLabel = getAgentDisplayName(agents, uiAgentName);
     const agentColor = getAgentColor(uiAgentName);
-    // The send would stop with an error, so the button says so beforehand.
     const agentUnavailable = useAgentMissingFromCatalog(uiAgentName);
     const { t } = useI18n();
     const unavailableText = agentUnavailable && uiAgentName
@@ -46,8 +44,6 @@ export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAge
     const isLongPressRef = React.useRef(false);
 
     const handlePointerDown = (event: React.PointerEvent) => {
-        // Same pattern as PermissionAutoAcceptButton: block the focus transfer
-        // iOS performs on touch so cycling the agent keeps the keyboard open.
         if (event.pointerType === 'touch') {
             event.preventDefault();
         }
@@ -58,7 +54,6 @@ export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAge
         }, LONG_PRESS_MS);
     };
 
-    // Use onPointerUp (not onClick) to prevent focus transfer that closes mobile keyboard
     const handlePointerUp = () => {
         if (longPressTimerRef.current) {
             clearTimeout(longPressTimerRef.current);
@@ -84,20 +79,17 @@ export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAge
         };
     }, []);
 
-    // Under Auto the routing category names the agent, so the composer offers
-    // no agent to pick — same as the desktop controls.
     if (isAutoModel(currentProviderId, currentModelId)) return null;
 
     return (
         <button
             type="button"
             onPointerDown={handlePointerDown}
-            onPointerUp={handlePointerUp} // Don't use onClick - it closes mobile keyboard
+            onPointerUp={handlePointerUp}
             onPointerLeave={handlePointerLeave}
             onContextMenu={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             className={cn(
-                // 36px to tap, drawn in the row's 26px: the margin keeps the row's height.
                 'inline-flex h-9 -my-[5px] min-h-0 min-w-0 items-stretch select-none',
                 'rounded-lg',
                 'typography-micro font-medium',
@@ -105,7 +97,6 @@ export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAge
                 'touch-none',
                 className
             )}
-            // At rest in the composer: the agent's hue, quieted.
             style={unavailableText ? undefined : { color: restingAgentColor(agentColor.color) }}
             title={unavailableText ?? agentLabel}
             aria-label={unavailableText}

@@ -25,7 +25,6 @@ export function useDiffViewNavigation({
     setDisplayFileStaged, pendingDiffStaged, setPendingDiffFile, shouldPinAfterAlignRef, pendingScrollTargetRef,
     expandStackedFile, setScrollRequestNonce, targetFilePath,
 }: DiffViewNavigationOptions) {
-    // Handle pending diff file from external navigation
     React.useEffect(() => {
         if (!visible || (activeDiffScope !== 'all' && !pendingDiffScope)) {
             return;
@@ -49,8 +48,6 @@ export function useDiffViewNavigation({
             return;
         }
         const normalizedTarget = targetFilePath?.trim();
-        // Listings are relative, so a chip's absolute path names no row here.
-        // Its click resolves the row through pendingTurnDiffFile below.
         if (!normalizedTarget || isAbsoluteFilePath(normalizedTarget)) {
             return;
         }

@@ -121,7 +121,21 @@ class FakeSocket extends EventEmitter {
   }
 
   send(payload) {
-    this.sent.push(JSON.parse(payload));
+    const frame = JSON.parse(payload);
+    this.sent.push(frame);
+    this.emit('frame', frame);
+  }
+
+  waitForFrame(predicate) {
+    if (this.sent.some(predicate)) return Promise.resolve();
+    return new Promise(resolve => {
+      const onFrame = frame => {
+        if (!predicate(frame)) return;
+        this.removeListener('frame', onFrame);
+        resolve();
+      };
+      this.on('frame', onFrame);
+    });
   }
 
   ping() {
@@ -270,7 +284,7 @@ describe('message stream websocket runtime', () => {
     runtime.wsServer.emit('connection', firstSocket, { url: '/api/global/event/ws' });
     runtime.wsServer.emit('connection', secondSocket, { url: '/api/global/event/ws' });
 
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await Promise.all([firstSocket, secondSocket].map(socket => socket.waitForFrame(frame => frame.eventId === 'evt-1')));
 
     expect(fetchCalls).toBe(1);
     expect(firstSocket.sent).toContainEqual(expect.objectContaining({ type: 'ready', scope: 'global' }));
@@ -334,13 +348,13 @@ describe('message stream websocket runtime', () => {
     const firstSocket = new FakeSocket();
     runtime.wsServer.emit('connection', firstSocket, { url: '/api/global/event/ws' });
 
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await firstSocket.waitForFrame(frame => frame.eventId === 'evt-2');
     firstSocket.close();
 
     const secondSocket = new FakeSocket();
     runtime.wsServer.emit('connection', secondSocket, { url: '/api/global/event/ws?lastEventId=evt-1' });
 
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await secondSocket.waitForFrame(frame => frame.type === 'ready');
 
     // The hub read nothing between the two sockets, so the suffix it kept
     // cannot stand for what the client missed.
@@ -384,7 +398,7 @@ describe('message stream websocket runtime', () => {
     runtime.wsServer.emit('connection', firstSocket, { url: '/api/event/ws?directory=/tmp/one' });
     runtime.wsServer.emit('connection', secondSocket, { url: '/api/event/ws?directory=/tmp/two' });
 
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await Promise.all([firstSocket, secondSocket].map(socket => socket.waitForFrame(frame => frame.eventId === 'evt-1')));
 
     expect(fetchUrls).toHaveLength(2);
     expect(new URL(fetchUrls[0]).searchParams.get('directory')).toBe('/tmp/one');
@@ -425,9 +439,10 @@ describe('message stream websocket runtime', () => {
     });
 
     const socket = new FakeSocket();
+    const closed = new Promise(resolve => socket.once('close', resolve));
     runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws' });
 
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await closed;
 
     expect(socket.sent).toEqual([
       {
@@ -477,9 +492,10 @@ describe('message stream websocket runtime', () => {
     });
 
     const socket = new FakeSocket();
+    const closed = new Promise(resolve => socket.once('close', resolve));
     runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws' });
 
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await closed;
 
     expect(socket.sent).toEqual([
       {
@@ -599,7 +615,7 @@ describe('message stream websocket runtime', () => {
     const socket = new FakeSocket();
     runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws' });
 
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await socket.waitForFrame(frame => frame.payload?.type === 'openchamber:session-status');
 
     expect(socket.sent).toContainEqual({
       type: 'event',

@@ -8,13 +8,6 @@ import type { GitWorktreeArchive } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { archivedWorktreeLabel } from '@/lib/worktrees/worktreeArchive';
 
-/**
- * One archived worktree: its name, then its branch and when it was archived,
- * on one line; Restore at the end, Delete beside it on hover. The date sits
- * with the branch, so it does not form a second date column beside the
- * sessions' dates below. On a phone (`touch`) the branch and date take a
- * second line under the name, and Delete is always shown, as nothing hovers.
- */
 export function ArchivedWorktreeRow({ archive, busy, onRestore, onDelete, touch = false }: {
   archive: GitWorktreeArchive;
   busy: boolean;

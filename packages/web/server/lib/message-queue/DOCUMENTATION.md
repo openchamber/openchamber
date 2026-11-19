@@ -21,18 +21,40 @@ UI-side queue and foreground auto-send hook.
 - The queue file holds conversation content, so it is readable by its owner
   only (`0o600`).
 
+## TypeScript boundaries
+
+`runtime.ts` owns the parsed queue item and public snapshot contracts. Its input
+types come from boundary schemas, which retain the existing defaults and
+TypeError refusals. Context metadata is checked only as a non-array object and
+passed through by reference; its properties remain unchecked until read.
+Scheduled items may omit their provider and model to retain the session's
+selection. Goal creation accepts numeric budgets and omitted unused fields
+through the declaration on `../session-goal/create.js`.
+
+### Why active-map lookups retain their object check
+
+A session id can name an inherited property such as `constructor`. Only a
+non-array object from the active-map lookup blocks delivery; comparing the
+lookup with `undefined` would also block on inherited functions.
+
+### Why internal invariant checks throw
+
+A retained queue has a directory and a head item, a validated reorder resolves
+every id, and synthetic admission follows id persistence. Checks at indexed
+reads enforce these invariants without casts or non-null assertions.
+
 ## Files
 
-- `runtime.js` — `createMessageQueueRuntime(...)` (state, persistence,
+- `runtime.ts` — `createMessageQueueRuntime(...)` (state, persistence,
   dispatch loop, event handling) and `registerMessageQueueRoutes(app, runtime)`.
 - `runtime.test.js` — delivery, idleness gates, retries, held delivery, persistence,
   concurrency with in-flight sends, slash commands, and project knowledge.
 
 Wiring: created in `server/index.js` after the global event hub and the
 session-knowledge runtime; routes registered in
-`opencode/feature-routes-runtime.js` (before the generic OpenCode proxy) with
-JSON bodies enabled in `opencode/core-routes.js`; stopped by
-`opencode/shutdown-runtime.js`.
+`server-frame/feature-routes-runtime.js` (before the generic OpenCode proxy) with
+JSON bodies enabled in `server-frame/core-routes.js`; stopped by
+`server-frame/shutdown-runtime.js`.
 
 ## Auto routing
 

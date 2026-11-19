@@ -9,8 +9,6 @@ import {
 } from '@/components/code/useHighlightedLines';
 import { parseDiffToUnified } from './message/toolRenderers';
 
-// Keep the line's layout stable while a cold worker request finishes. Plain
-// text appears only if highlighting fails, avoiding a visible color flash.
 interface CodeLineContentProps {
   content: string;
   html: string | undefined;
@@ -18,7 +16,6 @@ interface CodeLineContentProps {
 }
 
 const CodeLineContent: React.FC<CodeLineContentProps> = ({ content, html, status }) => {
-  // Ready lines, and unchanged lines carried while an update tokenizes.
   if (html !== undefined) {
     return <span className="whitespace-pre-wrap break-all" dangerouslySetInnerHTML={{ __html: html }} />;
   }
@@ -43,7 +40,6 @@ export const DiffPreview: React.FC<DiffPreviewProps> = ({ diff, filePath }) => {
     const hunks = React.useMemo(() => parseDiffToUnified(diff), [diff]);
     const language = getLanguageFromExtension(filePath || hunks[0]?.file) || 'text';
 
-    // Flatten all rendered lines so the whole diff tokenizes in one worker call.
     const flatContent = React.useMemo(
         () => hunks.flatMap((hunk) => hunk.lines.map((line) => line.content)).join('\n'),
         [hunks],

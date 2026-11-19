@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, jest, spyOn, test } from 'bun:test';
 import { IMAGE_JOB_LIFETIME_MS, type RunningImageJob } from '@/lib/opencode/background-image';
 import type { SyncEvent } from '@/lib/opencode/events';
 import {
@@ -139,10 +139,23 @@ describe('background image index', () => {
     expect(ids()).toEqual(['image_1']);
   });
 
-  test('an image past OpenCode\'s image timeout leaves the index on its own', async () => {
-    replaceImageJobs([job('image_stale', 'ses_1', Date.now() - IMAGE_JOB_LIFETIME_MS + 20)], backgroundImageRevision());
-    expect(ids()).toEqual(['image_stale']);
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    expect(ids()).toEqual([]);
+  test('an image past OpenCode\'s image timeout leaves the index on its own', () => {
+    let now = Date.now();
+    const clock = spyOn(Date, 'now').mockImplementation(() => now);
+    jest.useFakeTimers();
+    try {
+      replaceImageJobs([job('image_stale')], backgroundImageRevision());
+      expect(ids()).toEqual(['image_stale']);
+      now += IMAGE_JOB_LIFETIME_MS - 1;
+      jest.advanceTimersByTime(IMAGE_JOB_LIFETIME_MS - 1);
+      expect(ids()).toEqual(['image_stale']);
+      now += 1;
+      jest.advanceTimersByTime(1);
+      expect(ids()).toEqual([]);
+    } finally {
+      resetBackgroundImages();
+      jest.useRealTimers();
+      clock.mockRestore();
+    }
   });
 });

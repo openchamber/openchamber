@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   asDraftTitle, asReadyTitle, isDraftTitle, liveChangeRequestSummary, mapGiteaCI, mapGiteaChangedFile, mapGiteaIssue,
-  mapGiteaPull, mapGiteaRepo, mapGiteaVerdict, splitUnifiedDiff,
+  mapGiteaPull, mapGiteaRepo, mapGiteaReviewBody, mapGiteaVerdict, splitUnifiedDiff,
 } from './mappers.js';
 import { fixtures, HEAD, ORIGIN } from './fixtures/fake-fetch.js';
 

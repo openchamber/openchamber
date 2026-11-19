@@ -6,23 +6,15 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { readPreviewHeadings, type PreviewHeading } from './markdownPreviewHeadings';
 
-/** Marks the toolbar control that opens and closes the outline, so its own click is not an outside click. */
 const OUTLINE_TOGGLE_ATTRIBUTE = 'data-markdown-outline-toggle';
 
 type MarkdownPreviewOutlineProps = {
-  /** The scrollable preview container whose rendered headings are listed. */
   containerRef: React.RefObject<HTMLDivElement | null>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Layout overrides for the floating panel (position, offsets). */
   className?: string;
 };
 
-/**
- * The headings of the rendered Markdown preview, filtered as you type; picking
- * one scrolls the preview to it. A sibling of the scroll container and never a
- * child, so its own text is not part of the document it lists.
- */
 export const MarkdownPreviewOutline: React.FC<MarkdownPreviewOutlineProps> = ({
   containerRef,
   open,
@@ -34,11 +26,6 @@ export const MarkdownPreviewOutline: React.FC<MarkdownPreviewOutlineProps> = ({
   const [headings, setHeadings] = React.useState<PreviewHeading[]>([]);
   const [query, setQuery] = React.useState('');
 
-  // A long document mounts only the blocks near the view. The outline lists
-  // every heading, so the blocks stay mounted while it is open (as for the
-  // find bar), and the list follows the rendered document as it changes. The
-  // renderer loads lazily and may mount after the panel opened, so the hold is
-  // taken on the first scan that finds its window.
   React.useEffect(() => {
     const container = containerRef.current;
     if (!open || !container) return;
@@ -67,7 +54,6 @@ export const MarkdownPreviewOutline: React.FC<MarkdownPreviewOutlineProps> = ({
 
   const close = React.useCallback(() => {
     onOpenChange(false);
-    // The preview keeps keyboard focus, so the find shortcut still reaches it.
     containerRef.current?.focus({ preventScroll: true });
   }, [containerRef, onOpenChange]);
 
@@ -76,8 +62,6 @@ export const MarkdownPreviewOutline: React.FC<MarkdownPreviewOutlineProps> = ({
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Element) || !panelRef.current || panelRef.current.contains(target)) return;
-      // The toolbar button closes the panel with its own click; closing here
-      // first would let that click open it again.
       if (target.closest(`[${OUTLINE_TOGGLE_ATTRIBUTE}]`)) return;
       onOpenChange(false);
     };
@@ -92,7 +76,6 @@ export const MarkdownPreviewOutline: React.FC<MarkdownPreviewOutlineProps> = ({
 
   if (!open) return null;
 
-  // A document that starts at level 2 is not indented as if a level 1 sat above it.
   const shallowest = headings.reduce((lowest, heading) => Math.min(lowest, heading.level), 6);
 
   return (
@@ -111,7 +94,6 @@ export const MarkdownPreviewOutline: React.FC<MarkdownPreviewOutlineProps> = ({
     >
       <Command
         loop
-        // Values are `text\u0000index`; only the text is matched.
         filter={(value, search) => (value.split('\u0000')[0].toLowerCase().includes(search.trim().toLowerCase()) ? 1 : 0)}
         className="[&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-1 [&_[cmdk-item]]:typography-meta"
       >

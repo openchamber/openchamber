@@ -1,9 +1,10 @@
-import { afterAll, afterEach, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, expect, jest, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { codeToTokens } from '@pierre/highlights';
 
 import { getCodeTokenTheme } from '@/lib/shiki/appThemeRegistry';
 import { themes } from '@/lib/theme/themes';
+import { loadHighlights } from '@/components/chat/markdown/highlightsEngine';
 
 const dom = new Window();
 Object.assign(globalThis, {
@@ -21,9 +22,11 @@ const { codeHighlightExtension } = await import('./codeHighlight');
 
 const theme = getCodeTokenTheme(themes[0]).zed;
 const views: InstanceType<typeof EditorView>[] = [];
+beforeEach(() => jest.useFakeTimers());
 afterEach(() => {
   for (const view of views.splice(0)) view.destroy();
   document.body.replaceChildren();
+  jest.useRealTimers();
 });
 afterAll(() => dom.happyDOM.close());
 
@@ -49,8 +52,6 @@ const expectedColors = (code: string): string[][] =>
   codeToTokens(code, { lang: 'typescript', theme }).tokens.map((line) =>
     line.flatMap((token) => Array.from({ length: token.content.length }, () => token.color ?? '')));
 
-const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
-
 test('incremental colors match a full pass after typing and multi-range edits', async () => {
   const view = new EditorView({
     doc: 'const a = 1;\nlet b = "x";\n',
@@ -58,7 +59,8 @@ test('incremental colors match a full pass after typing and multi-range edits', 
     parent: document.body,
   });
   views.push(view);
-  await settle();
+  await loadHighlights();
+  jest.advanceTimersByTime(20);
   expect(paintedColors(view)).toEqual(expectedColors(view.state.doc.toString()));
   expect(paintedColors(view)[0].some(Boolean)).toBe(true);
 

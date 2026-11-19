@@ -82,6 +82,36 @@ raw non-ASCII header values.
 
 ## Decisions
 
+### Why the route remains JavaScript
+
+`inspect-image.ts` owns the local inspection options and result union. Its
+filesystem error guard preserves missing-file and permission/symlink failures;
+other failures still propagate.
+
+`routes.js` consumes `fitRenderPageImages` from
+`../openchamber-control/render-page.js`. That helper accepts an untyped
+inspection callback and returns an untyped image array, including its own
+`too-heavy` results. Its owning module must type that contract before the
+route can consume a checked discriminated union without a cast or new runtime
+validation. The same module's `renderPageImageSources` also infers an untyped
+source array. These contracts belong to the neighbouring folder's conversion.
+
+The required contracts in `../openchamber-control/render-page.js` are:
+
+- `renderPageImageSources(html: string): string[]`.
+- `fitRenderPageImages(html: string, inspect: (source: string) =>
+  Promise<LocalImageInspection>)` returning
+  `Promise<{ images: PageImageInspection[]; totalBytes: number }>`, where
+  `PageImageInspection` is `{ source: string } & (LocalImageInspection |
+  { status: 'too-heavy'; size: number })`. `LocalImageInspection` is exported
+  by `inspect-image.ts`; the page result belongs to the render module.
+
+The emitted declarations still expose `(html: any) => any[]` and
+`(html: any, inspect: any) => Promise<{ images: any[]; totalBytes: number }>`.
+Annotating the route's map with the desired union would trust unchecked values
+from those declarations. Converting the route therefore still requires typing
+these two outside exports first.
+
 ### Why a weight budget per page and not a count
 
 A page named 19 posters and showed 12: a count says nothing about memory, and

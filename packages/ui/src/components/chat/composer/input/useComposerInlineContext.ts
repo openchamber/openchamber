@@ -25,7 +25,6 @@ export function useComposerInlineContext({
     const { columnPinned } = column;
     const { isMobile } = preferences;
 
-    // Inline comment drafts
     const inlineDraftSessionKey = isBtwActive ? btwComposerSessionId ?? '' : currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
 
     const inlineDraftDirectory = currentSessionDirectoryForSync ?? currentDirectory;
@@ -37,11 +36,6 @@ export function useComposerInlineContext({
         [inlineDraftDirectory, inlineDraftSessionKey],
     );
 
-    /**
-     * The composer's files a message with `text` takes: those it or the
-     * comments going with it cite (an image pasted into a comment), and the
-     * annotations' screenshots.
-     */
     const attachmentsToSend = React.useCallback((text: string): AttachedFile[] => {
         const drafts = inlineDraftTarget ? useInlineCommentDraftStore.getState().getDrafts(inlineDraftTarget) : [];
         const screenshots = new Set(drafts.flatMap((draft) => (draft.screenshot ? [draft.screenshot.toLowerCase()] : [])));
@@ -53,9 +47,6 @@ export function useComposerInlineContext({
         ? getInlineCommentDraftKey(activeRuntimeKey, inlineDraftTarget.directory, inlineDraftTarget.sessionKey)
         : null;
 
-    // Publish where the composer on screen files what other surfaces hand it:
-    // inline drafts (file, diff, plan, terminal, PR and browser comments) and
-    // attachments (a comment's image, an annotation's screenshot).
     const composerAddress = React.useMemo<ComposerAddress | null>(
         () => ({ inline: inlineDraftTarget, attachments: chatDraftIdentity }),
         [chatDraftIdentity, inlineDraftTarget],
@@ -78,9 +69,6 @@ export function useComposerInlineContext({
 
     const hasDrafts = draftCount > 0;
 
-    // Mobile comment mode (see composer/comment/): read imperatively here so
-    // the send/queue guards below see the live state; rendering and lifecycle
-    // live in useMobileCommentComposerMode further down.
     const mobileCommentController = useMobileCommentComposerController();
 
     const isMobileCommentOpen = React.useCallback(

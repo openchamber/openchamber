@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { formatBrowserAnnotationPrompt, readBrowserAnnotationPrompt, withoutBrowserAnnotationComment } from './annotationPrompt';
+import { formatBrowserAnnotationPrompt, readBrowserAnnotationPrompt, withoutBrowserAnnotationComment, withoutBrowserAnnotationScreenshot } from './annotationPrompt';
 import type { BrowserAnnotationPayload, BrowserElementTarget } from './contract';
 
 const element = (overrides: Partial<BrowserElementTarget> = {}): BrowserElementTarget => ({
@@ -70,6 +70,18 @@ describe('annotation prompt', () => {
       intro: 'Selected',
     });
     expect(output).toContain('Screenshot: not attached');
+  });
+
+  test('a removed screenshot turns the prompt line into not attached and keeps the rest', () => {
+    const attached = formatBrowserAnnotationPrompt({
+      payload: basePayload({ elements: [{ id: 'e1', element: element({ text: 'Screenshot: attached' }) }] }),
+      screenshotAttached: true,
+      intro: 'Selected',
+    });
+    const removed = withoutBrowserAnnotationScreenshot(attached);
+
+    expect(removed).toBe(attached.replace('\nScreenshot: attached\n', '\nScreenshot: not attached\n'));
+    expect(removed).toContain('- Text: Screenshot: attached');
   });
 
   test('numbers multiple elements, regions and drawings independently', () => {

@@ -7,7 +7,6 @@ export function useComposerAttachmentWork() {
 
     const pendingAttachWorkRef = React.useRef<Set<Promise<void>>>(new Set());
 
-    /** Settles once the files being attached now are in; then the next render's handlers see them. */
     const waitForPendingAttachments = React.useCallback(async (): Promise<boolean> => {
         if (pendingAttachWorkRef.current.size === 0) return false;
         await Promise.allSettled([...pendingAttachWorkRef.current]);

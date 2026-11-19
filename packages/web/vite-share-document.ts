@@ -3,51 +3,48 @@ import { build, type InlineConfig, type Plugin, type PluginOption } from 'vite';
 
 import { SHARE_DOCUMENT_ENTRY, SHARE_DOCUMENT_SHIMS } from '../ui/src/share-document/shims';
 
-/**
- * Builds the renderer a shared `ui` page carries (packages/ui/src/share-document)
- * as one self-contained IIFE, `share-document.js`, next to the app's assets. The
- * chat fetches it as text and inlines it into the page it hands the server, so
- * the page runs in the relay's viewer with no network. The bundle is its own
- * build: it replaces the app modules listed in SHARE_DOCUMENT_SHIMS and inlines
- * every chunk and the stylesheet, which the app's chunked build cannot do.
- *
- * In development the dev server builds it on the first request and again after
- * a source change.
- */
 
 export const SHARE_DOCUMENT_FILE = 'share-document.js';
 
 type Options = {
-  /** packages/ui/src */
   uiSource: string;
-  /** The app's aliases, so the bundle resolves imports the way the app does. */
   aliases: { find: string | RegExp; replacement: string }[];
-  /** The app's React plugin, so the bundle is compiled the same way. */
   react: () => PluginOption;
 };
 
 const stripExtension = (file: string) => file.replace(/\.(tsx?|jsx?)$/, '');
 
+// The app's stores read localStorage when their module loads, and the viewer's opaque-origin frame throws on that read, so a store in the bundle leaves every shared page blank.
+const posix = (file: string) => file.replace(/\\/g, '/');
+
+export function appStoreModules(moduleIds: string[], uiSource: string): string[] {
+  const stores = `${posix(uiSource)}/stores/`;
+  return moduleIds.filter((id) => posix(id).startsWith(stores));
+}
+
+export function shareDocumentShim(resolvedId: string, uiSource: string, windows = process.platform === 'win32'): string | null {
+  const slashes = (file: string) => (windows ? posix(file) : file);
+  const root = slashes(uiSource).replace(/\/$/, '');
+  const target = stripExtension(slashes(resolvedId).split('?')[0]);
+  for (const [from, shim] of Object.entries(SHARE_DOCUMENT_SHIMS)) {
+    if (target === `${root}/${from}`) return `${root}/${shim}`;
+  }
+  return null;
+}
+
 function shimPlugin(uiSource: string): Plugin {
-  const shims = new Map(Object.entries(SHARE_DOCUMENT_SHIMS).map(([target, shim]) => [
-    path.join(uiSource, target),
-    path.join(uiSource, shim),
-  ]));
   return {
     name: 'openchamber-share-document-shims',
     enforce: 'pre',
     async resolveId(source, importer, options) {
       const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
       if (!resolved) return null;
-      return shims.get(stripExtension(resolved.id.split('?')[0])) ?? null;
+      return shareDocumentShim(resolved.id, uiSource);
     },
   };
 }
 
 async function buildShareDocument({ uiSource, aliases, react }: Options): Promise<string> {
-  // The React plugin compiles JSX for the mode Vite runs in (development under
-  // the dev server), so React's own build has to match it: production React
-  // has no jsxDEV for development JSX.
   const mode = process.env.NODE_ENV === 'production' ? 'production' : 'development';
   const config: InlineConfig = {
     configFile: false,
@@ -80,6 +77,10 @@ async function buildShareDocument({ uiSource, aliases, react }: Options): Promis
   const outputs = (Array.isArray(result) ? result : [result]).flatMap((entry) => ('output' in entry ? entry.output : []));
   const chunk = outputs.find((output) => output.type === 'chunk' && output.isEntry);
   if (!chunk || chunk.type !== 'chunk') throw new Error('The share document build produced no script');
+  const stores = appStoreModules(Object.keys(chunk.modules), uiSource);
+  if (stores.length > 0) {
+    throw new Error(`The share document bundles app stores, which break shared pages at load: ${stores.map((id) => path.relative(uiSource, id)).join(', ')}. Replace the import that pulls them in with a shim in share-document/shims.ts.`);
+  }
   return chunk.code;
 }
 

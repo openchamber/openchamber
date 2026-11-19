@@ -5,7 +5,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'bun:test';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { WebSocket, WebSocketServer } from 'ws';
 
 import { startRelayHost } from './host-client.js';
@@ -410,8 +410,6 @@ describe('relay host-client dropped message', () => {
 // answered by the next entry of `outcomes` ('reject' -> 503, 'hang' -> no
 // answer, 'accept' -> 101),
 // accepting once the list runs out.
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 const startScriptedRelay = (outcomes) => {
   const server = http.createServer();
   const wss = new WebSocketServer({ noServer: true });
@@ -442,13 +440,12 @@ const startScriptedRelay = (outcomes) => {
       else state.dataSockets.push(ws);
     });
   });
-  const waitForDials = (count, timeoutMs) => new Promise((resolve) => {
+  const waitForDials = (count) => new Promise((resolve) => {
     const check = () => {
       if (state.dials.length >= count) resolve(true);
     };
     notifyDial = check;
     check();
-    setTimeout(() => resolve(state.dials.length >= count), timeoutMs);
   });
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => {
@@ -472,12 +469,22 @@ const startScriptedRelay = (outcomes) => {
 describe('relay host-client data socket retry', () => {
   let relay;
   let host;
+  let statuses;
+  let markers;
+  let dataDials;
+  const waitForStatus = predicate => new Promise(resolve => {
+    const listener = status => {
+      if (predicate(status)) { statuses.off('status', listener); resolve(); }
+    };
+    statuses.on('status', listener);
+  });
 
   afterEach(async () => {
     host?.stop();
     host = null;
     await relay?.stop();
     relay = null;
+    vi.useRealTimers();
   });
 
   const startHost = async (outcomes) => {
@@ -485,13 +492,24 @@ describe('relay host-client data socket retry', () => {
     const identity = await buildIdentity();
     let markConnected;
     const connected = new Promise((resolve) => { markConnected = resolve; });
+    statuses = new EventEmitter();
+    markers = new EventEmitter();
+    dataDials = [];
+    vi.useFakeTimers();
     host = startRelayHost({
       relayUrl: relay.wsUrl,
       identity,
       getLocalPort: () => 1,
+      createSocket: url => {
+        const parsed = new URL(url);
+        if (parsed.searchParams.get('role') === 'host-data') dataDials.push(parsed.searchParams.get('connectionId'));
+        return new WebSocket(url);
+      },
       onStatus: (status) => {
         if (status.state === 'connected') markConnected();
+        statuses.emit('status', status);
       },
+      onShareState: shareId => markers.emit(shareId),
       logger: { warn: () => {}, info: () => {} },
     });
     await connected;
@@ -502,9 +520,15 @@ describe('relay host-client data socket retry', () => {
     relay.send({ type: 'connected', connectionId: 'conn-retry' });
 
     // No second `connected` arrives: the host retries on its own.
-    expect(await relay.waitForDials(3, 6000)).toBe(true);
+    await waitForStatus(status => status.connectedClients === 0);
+    const refusedAgain = waitForStatus(status => status.connectedClients === 0);
+    await vi.advanceTimersByTimeAsync(1000);
+    await refusedAgain;
+    const opened = waitForStatus(status => status.connectedClients === 1);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(await relay.waitForDials(3)).toBe(true);
     expect(relay.state.dials).toEqual(['conn-retry', 'conn-retry', 'conn-retry']);
-    await sleep(100);
+    await opened;
     expect(host.getStatus().connectedClients).toBe(1);
   }, 10000);
 
@@ -512,29 +536,42 @@ describe('relay host-client data socket retry', () => {
     await startHost(['hang']);
     relay.send({ type: 'connected', connectionId: 'conn-hung' });
 
-    expect(await relay.waitForDials(2, 9000)).toBe(true);
-    await sleep(100);
+    expect(await relay.waitForDials(1)).toBe(true);
+    const opened = waitForStatus(status => status.connectedClients === 1);
+    await vi.advanceTimersByTimeAsync(5000 + 1000);
+    expect(await relay.waitForDials(2)).toBe(true);
+    await opened;
     expect(host.getStatus().connectedClients).toBe(1);
   }, 12000);
 
   it('stops retrying once the relay reports the client gone', async () => {
     await startHost(['reject', 'reject', 'reject']);
     relay.send({ type: 'connected', connectionId: 'conn-gone' });
-    expect(await relay.waitForDials(1, 2000)).toBe(true);
+    expect(await relay.waitForDials(1)).toBe(true);
+    const processed = once(markers, 'disconnected');
     relay.send({ type: 'disconnected', connectionId: 'conn-gone' });
+    relay.send({ type: 'share-state', shareId: 'disconnected' });
+    await processed;
 
-    expect(await relay.waitForDials(2, 2500)).toBe(false);
+    await vi.advanceTimersByTimeAsync(1000 + 1);
+    expect(relay.state.dials.length >= 2).toBe(false);
     expect(relay.state.dials).toEqual(['conn-gone']);
+    expect(dataDials).toEqual(['conn-gone']);
   }, 10000);
 
   it('leaves a data socket that opened and then closed to the client reconnect', async () => {
     await startHost([]);
+    const opened = waitForStatus(status => status.connectedClients === 1);
     relay.send({ type: 'connected', connectionId: 'conn-opened' });
-    expect(await relay.waitForDials(1, 2000)).toBe(true);
-    await sleep(100);
+    expect(await relay.waitForDials(1)).toBe(true);
+    await opened;
+    const closed = waitForStatus(status => status.connectedClients === 0);
     relay.state.dataSockets[0].close(1012, 'gone');
 
-    expect(await relay.waitForDials(2, 2500)).toBe(false);
+    await closed;
+    await vi.advanceTimersByTimeAsync(1000 + 1);
+    expect(relay.state.dials.length >= 2).toBe(false);
+    expect(dataDials).toEqual(['conn-opened']);
   }, 10000);
 });
 
@@ -569,8 +606,9 @@ describe('relay host-client control reconnect', () => {
   };
 
   // Opens the control socket, has the relay close it with `code`, and reports
-  // how many control dials follow within 1.5 s.
+  // how many control dials follow at BACKOFF_BASE_MS from host-client.ts.
   const redialsAfterClose = async (code) => {
+    vi.useFakeTimers();
     const sockets = [];
     const host = startRelayHost({
       relayUrl: 'wss://relay.example.test/ws',
@@ -589,10 +627,11 @@ describe('relay host-client control reconnect', () => {
       control.emit('open');
       control.readyState = WebSocket.CLOSED;
       control.emit('close', code, Buffer.from('reason'));
-      await sleep(1500);
+      await vi.advanceTimersByTimeAsync(1000);
       return sockets.length - 1;
     } finally {
       host.stop();
+      vi.useRealTimers();
     }
   };
 
@@ -607,6 +646,7 @@ describe('relay host-client control reconnect', () => {
   // The relay retires a replaced control socket with a frame; the host closes
   // it with 1000, and the frame's code decides the reconnect.
   const redialsAfterRetire = async (code) => {
+    vi.useFakeTimers();
     const sockets = [];
     const host = startRelayHost({
       relayUrl: 'wss://relay.example.test/ws',
@@ -628,10 +668,11 @@ describe('relay host-client control reconnect', () => {
       control.readyState = WebSocket.OPEN;
       control.emit('open');
       control.emit('message', Buffer.from(JSON.stringify({ type: 'relay-retire', code, reason: 'retired' })), false);
-      await sleep(1500);
+      await vi.advanceTimersByTimeAsync(1000);
       return sockets.length - 1;
     } finally {
       host.stop();
+      vi.useRealTimers();
     }
   };
 
@@ -707,6 +748,8 @@ describe('relay host-client control reconnect', () => {
 describe('relay host-client relay retire', () => {
   it('drops a data socket the relay asks it to close', async () => {
     const sockets = [];
+    let markClosed;
+    const closed = new Promise(resolve => { markClosed = resolve; });
     const host = startRelayHost({
       relayUrl: 'wss://relay.example.test/ws',
       identity: { serverId: 'fake-server-id', hostEncPrivateKey: null, signRelayAuth: () => ({ ts: 1, sig: 'sig', pk: 'pk' }) },
@@ -715,7 +758,7 @@ describe('relay host-client relay retire', () => {
       createSocket: (url) => {
         const socket = new BunLikeFailingSocket(url);
         socket.closedWith = null;
-        socket.close = (code) => { socket.closedWith = code; };
+        socket.close = (code) => { socket.closedWith = code; markClosed(); };
         sockets.push(socket);
         return socket;
       },
@@ -731,7 +774,7 @@ describe('relay host-client relay retire', () => {
       expect(host.getStatus().connectedClients).toBe(1);
 
       data.emit('message', Buffer.from(JSON.stringify({ type: 'relay-retire', code: 1001, reason: 'Client disconnected' })), false);
-      await sleep(20);
+      await closed;
 
       expect(data.closedWith).toBe(1000);
       expect(host.getStatus().connectedClients).toBe(0);

@@ -23,13 +23,9 @@ export function useComposerEditorHandlers({
     const { cursorPosRef } = editorState;
     const { mobileShell } = mobile;
 
-    // The editor is memoized: stable handlers let it skip the composer's
-    // renders while a reply streams, which change nothing it shows.
     const handleEditorChange = useStableHandler(handleComposerChange);
 
     const handleEditorKeyDown = useStableHandler((event: KeyboardEvent) => {
-        // Every interception branch calls preventDefault, so the event itself
-        // reports whether the composer consumed it.
         handleKeyDown(event);
         return event.defaultPrevented;
     });

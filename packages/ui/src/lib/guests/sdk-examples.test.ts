@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { Window } from 'happy-dom';
 import { guestMessageSchema } from '@openchamber/sdk/schemas';
+import * as sdk from '@openchamber/sdk';
 import type { GuestMessage, HostMessage, HostReadyContext, HostResultPayload, GuestWorkspaceSnapshot } from '@openchamber/sdk';
 
 import { resolveGuestIconName } from './icon.ts';
@@ -327,11 +329,45 @@ describe('checked-in SDK examples', () => {
     expect(app.window.document.querySelector('img')).toBeNull();
   });
 
-  // An icon name the host sprite lacks draws the fallback glyph, so an example must name one it has.
   test('the mark the agent desk sets names an icon the host draws', async () => {
-    const source = await readFile(new URL('agent-desk/service/main.ts', examples), 'utf8');
-    const icons = [...source.matchAll(/setMark\([^;]*?icon: '([^']+)'/g)].map((match) => match[1]);
-    expect(icons).toEqual(['robot-2']);
-    for (const icon of icons) expect(resolveGuestIconName(icon)).toBe(icon);
+    type Request = { headers: { authorization: string }; url: string; on: (event: string, listener: (body?: string) => void) => void };
+    type Response = { writeHead: () => void; end: () => void; headersSent: boolean };
+    let handle: ((request: Request, response: Response) => void) | undefined;
+    let mark: { icon: string } | undefined;
+    let finishResponse: () => void = () => {};
+    const responded = new Promise<void>((resolve) => { finishResponse = resolve; });
+    const serviceHost = {
+      sessions: { start: async () => ({ sessionId: 'desk-session' }) },
+      setMark: async (_target: sdk.ServiceMarkTarget, value: { icon: string }) => { mark = value; },
+      setInstructions: async () => {},
+    };
+    const serviceHttp = {
+      createServer(listener: typeof handle) {
+        handle = listener;
+        return { listen: (_port: number, _address: string, ready: () => void) => ready() };
+      },
+    };
+    const source = execFileSync(process.execPath, ['build', new URL('agent-desk/service/main.ts', examples).pathname,
+      '--target=node', '--format=cjs', '--external=node:http', '--external=@openchamber/sdk'], { encoding: 'utf8' });
+    runInNewContext(source, {
+      process: { env: { OPENCHAMBER_SERVICE_PORT: '12345', OPENCHAMBER_SERVICE_TOKEN: 'fixture-token' } },
+      console,
+      require(name: string) {
+        if (name === 'node:http') return serviceHttp;
+        if (name === '@openchamber/sdk') return { ...sdk, createServiceHost: () => serviceHost };
+        throw new Error(`Unexpected service dependency: ${name}`);
+      },
+      URL,
+    });
+    if (!handle) throw new Error('Service did not register its request handler');
+    const events = new Map<string, (body?: string) => void>();
+    handle({ headers: { authorization: 'Bearer fixture-token' }, url: '/start', on: (event, listener) => { events.set(event, listener); } },
+      { writeHead: () => {}, end: finishResponse, headersSent: false });
+    events.get('data')?.(JSON.stringify({ directory: '/repo' }));
+    events.get('end')?.();
+    await responded;
+    if (!mark) throw new Error('Service did not publish its mark');
+    expect(mark.icon).toBe('robot-2');
+    expect(resolveGuestIconName(mark.icon)).toBe(mark.icon);
   });
 });

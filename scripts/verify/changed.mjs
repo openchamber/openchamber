@@ -5,7 +5,7 @@
 
 import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
-import { dirname, join, normalize } from "node:path"
+import { join, posix } from "node:path"
 
 const CODE_FILE = /\.(ts|tsx|js|jsx|mjs|cjs)$/
 const TEST_FILE = /(\.(test|spec|vitest|bench)\.[cm]?[jt]sx?$|\/(__tests__|__mocks__)\/)/
@@ -69,7 +69,7 @@ export const parseImports = (source) => {
 
 /** Repo-relative candidates for a specifier, before checking which exists. */
 const candidateBases = (specifier, fromFile) => {
-  if (specifier.startsWith(".")) return [normalize(join(dirname(fromFile), specifier))]
+  if (specifier.startsWith(".")) return [posix.join(posix.dirname(fromFile), specifier)]
   for (const [prefix, targets] of ALIASES) {
     if (specifier === prefix || (prefix.endsWith("/") && specifier.startsWith(prefix))) {
       return targets.map((target) => target.endsWith("/") ? target + specifier.slice(prefix.length) : target)
@@ -242,4 +242,4 @@ export const readMapAt = (repoRoot, ref) => {
 }
 
 const gitIn = (repoRoot) => (args) => execFileSync("git", args, { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] })
-const lines = (text) => text.split("\n").filter(Boolean)
+const lines = (text) => text.split(/\r?\n/).filter(Boolean)

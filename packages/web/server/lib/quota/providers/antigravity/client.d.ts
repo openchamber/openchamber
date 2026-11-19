@@ -1,3 +1,5 @@
+import type { JsonValue } from '../../utils/contracts.js';
+
 export const ANTIGRAVITY_CLIENT_VERSION: string;
 
 export function antigravityUserAgent(platform?: string, arch?: string): string;
@@ -9,6 +11,6 @@ export function antigravityHeaders(): {
 };
 
 export function warnIfGeminiGroupMissing(
-  summaryPayload: { groups?: Array<{ displayName?: string }> } | null,
+  summaryPayload: JsonValue,
   warn?: (message: string) => void,
 ): void;

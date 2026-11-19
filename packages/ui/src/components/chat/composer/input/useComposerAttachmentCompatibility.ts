@@ -44,7 +44,21 @@ export function useComposerAttachmentCompatibility({
 
         if (!inputModalities || filesToCheck.length === 0) return;
 
-        const incompatibleFiles = getUnsupportedAttachmentInputs(filesToCheck, inputModalities);
+        const unsupported = getUnsupportedAttachmentInputs(filesToCheck, inputModalities);
+        const summarize = (filenames: string[]) => (filenames.length > 3
+            ? `${filenames.slice(0, 3).join(', ')} (+${filenames.length - 3})`
+            : filenames.join(', '));
+        const modelName = currentModelMetadata.name ?? currentModelId ?? '';
+
+        const images = unsupported.filter(({ modality }) => modality === 'image');
+        if (images.length > 0) {
+            toast.info(t('chat.chatInput.toast.imagesSentAsPathsForTextModel', {
+                model: modelName,
+                files: summarize(images.map(({ attachment }) => attachment.filename)),
+            }), { id: `image-paths:${modelKey}` });
+        }
+
+        const incompatibleFiles = unsupported.filter(({ modality }) => modality !== 'image');
         if (incompatibleFiles.length === 0) return;
 
         const unsupportedModalities = Array.from(new Set(incompatibleFiles.map(({ modality }) => modality)));
@@ -55,15 +69,10 @@ export function useComposerAttachmentCompatibility({
             audio: t('chat.modelControls.modality.audio'),
             video: t('chat.modelControls.modality.video'),
         };
-        const filenames = incompatibleFiles.map(({ attachment }) => attachment.filename);
-        const fileSummary = filenames.length > 3
-            ? `${filenames.slice(0, 3).join(', ')} (+${filenames.length - 3})`
-            : filenames.join(', ');
-
         toast.warning(t('chat.chatInput.toast.unsupportedAttachmentModalities', {
-            model: currentModelMetadata.name ?? currentModelId ?? '',
+            model: modelName,
             modalities: unsupportedModalities.map((modality) => modalityLabels[modality]).join(', '),
-            files: fileSummary,
+            files: summarize(incompatibleFiles.map(({ attachment }) => attachment.filename)),
         }), { id: `attachment-modalities:${modelKey}` });
     }, [attachedFiles, currentModelId, currentModelMetadata, currentProviderId, t]);
 }

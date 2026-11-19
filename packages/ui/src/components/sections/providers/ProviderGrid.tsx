@@ -1,5 +1,5 @@
 import React from 'react';
-import type { IntegrationInfo } from '@opencode/client';
+import type { Integration as IntegrationInfo } from '@/lib/opencode/model';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';

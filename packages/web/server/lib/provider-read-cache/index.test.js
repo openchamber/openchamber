@@ -111,6 +111,30 @@ describe('provider read cache', () => {
     expect(other.calls.status).toBe(2);
   });
 
+  it.each([null, false, 7, 'ready', [], { connected: 0 }, { connected: 'false' }])('keeps a JSON answer without a false connected field: %j', async (body) => {
+    const { app, calls } = setup({ answer: () => body });
+    await request(app).get('/api/source-control/github/pulls/list').expect(200);
+    const cached = await request(app).get('/api/source-control/github/pulls/list').expect(200);
+    expect(cached.body).toEqual(body);
+    expect(calls.list).toBe(1);
+  });
+
+  it.each([null, false, 7, 'ready', [], { item: 'ENG-12' }, { item: { identifier: 12 } }])('leaves an unrelated tracker answer cached on item refresh: %j', async (body) => {
+    const cache = createProviderReadCache({ trackerIds: ['linear'] });
+    const app = express();
+    app.use(cache.middleware);
+    let reads = 0;
+    app.get('/api/tracker/linear/items/get', (_req, res) => {
+      reads += 1;
+      res.json(body);
+    });
+    await request(app).get('/api/tracker/linear/items/get').expect(200);
+    await request(app).post('/api/tracker/linear/read-cache/refresh?scope=item&identifier=ENG-12').expect(200);
+    const cached = await request(app).get('/api/tracker/linear/items/get').expect(200);
+    expect(cached.body).toEqual(body);
+    expect(reads).toBe(1);
+  });
+
   it('forgets a provider\'s answers after a change to it, including one still in flight', async () => {
     const { app, cache, calls, hold } = setup();
     await request(app).get('/api/source-control/github/pulls/list').expect(200);

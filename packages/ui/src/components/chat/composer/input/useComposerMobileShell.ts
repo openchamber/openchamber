@@ -29,22 +29,17 @@ export function useComposerMobileShell({
     const { isDragging } = dropState;
 
 
-    // The paste-toast tap may need to reopen the collapsed mobile composer.
     const mobileShell = useMobileComposerShell({
         isMobile,
         editorRef: composerRef,
         formRef: composerFormRef,
         setExpandedInput,
-        // Without a soft keyboard, keep the full composer up. So does a tablet,
-        // except where only one side panel fits (an unfolded iPhone Duo, a
-        // 13-inch iPad in portrait), which keeps the phone's pill.
         alwaysExpanded: hasHardwareKeyboard || (isTabletLayout && !roomyForOnePanel),
         holders: {
             controlsPanelOpen: Boolean(mobileControlsPanel),
             attachMenuOpen: mobileAttachMenuOpen,
             draftPickerOpen: mobileDraftPicker !== null,
             referencePickerOpen: referencePicker !== null,
-            // Keep the editor mounted until the closing search hands focus back.
             promptHistorySearchOpen: promptHistorySearch !== null || historyFocusPending,
             isDragging,
         },

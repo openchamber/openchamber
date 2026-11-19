@@ -21,12 +21,7 @@ interface SnippetAutocompleteProps {
   onSnippetSelect: (snippet: Snippet, trigger: string) => void;
   onClose: () => void;
   style?: React.CSSProperties;
-  /**
-   * The composer's text without the `#name` being typed. With it, a new name
-   * offers to save that text as the snippet.
-   */
   draftText?: string;
-  /** Runs once the draft is saved, with the `#name` token that was typed. */
   onDraftSaved?: (typedName: string) => void;
 }
 
@@ -51,11 +46,8 @@ export const SnippetAutocomplete = React.forwardRef<SnippetAutocompleteHandle, S
 }, ref) => {
   const { t } = useI18n();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
-  // Narrowing as the user types, the box eases into its new height; its
-  // bottom edge stays on the composer (`bottom-full`), so it moves upward.
   useHeightMorph(containerRef);
   const isMobile = useUIStore((state) => state.isMobile);
-  // A caret placement brings its own max-height.
   const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, style?.maxHeight === undefined, 240);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const selectedIndexRef = React.useRef(0);
@@ -80,9 +72,6 @@ export const SnippetAutocomplete = React.forwardRef<SnippetAutocompleteHandle, S
     });
   }, [query, snippets]);
 
-  // A typed name no snippet answers to can become one, from the draft or
-  // from scratch. Every way in opens the dialog, so a stray Enter on `#42`
-  // never writes a snippet.
   const actions = React.useMemo((): PickerAction[] => {
     const create = (request: Parameters<typeof openQuickCreate>[0]) => () => {
       openQuickCreate(request);
@@ -99,7 +88,6 @@ export const SnippetAutocomplete = React.forwardRef<SnippetAutocompleteHandle, S
         id: 'save-draft',
         label: t('chat.snippetAutocomplete.action.saveDraft', { name: typedName }),
         icon: 'save-3',
-        // The typed token leaves the draft, whatever name the dialog saved under.
         run: create({ name: typedName, content: draft, onSaved: onDraftSaved ? () => onDraftSaved(typedName) : undefined }),
       });
     }
@@ -107,7 +95,6 @@ export const SnippetAutocomplete = React.forwardRef<SnippetAutocompleteHandle, S
     return typedActions;
   }, [draftText, onClose, onDraftSaved, openQuickCreate, query, snippets, t]);
 
-  // A match is what the user most likely wants; with none, the first action.
   React.useEffect(() => {
     setSelectedIndex(filteredSnippets.length ? actions.length : 0);
   }, [actions.length, filteredSnippets]);
@@ -184,7 +171,6 @@ export const SnippetAutocomplete = React.forwardRef<SnippetAutocompleteHandle, S
               onMouseMove={() => setSelectedIndex(itemIndex)}
             >
               <span className="max-w-[60%] shrink-0 truncate font-semibold">#{snippet.name}</span>
-              {/* A global snippet is the user's own, as a user skill or command is. */}
               <AutocompleteRowDetail scope={snippet.source === 'project' ? 'project' : 'user'} description={snippetPreview(snippet)} />
             </div>
           );

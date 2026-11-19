@@ -8,7 +8,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..', '..', '..', '..', '..');
 
 export const SETTINGS_REGISTRY_SNAPSHOT_PATHS = [
-  'packages/web/server/lib/opencode/settings-registry.json',
+  'packages/web/server/lib/settings/settings-registry.json',
   'packages/vscode/src/settings-registry.json',
 ] as const;
 

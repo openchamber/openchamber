@@ -47,6 +47,24 @@ const fakeOpenCode = ({ failures = {}, archived = {} } = {}) => {
 };
 
 describe('session archive', () => {
+  it('keeps batch indices and calls for sparse id arrays', async () => {
+    const ids = new Array(3);
+    ids[0] = 'ses_a';
+    ids[2] = 'ses_c';
+    const openCode = fakeOpenCode();
+    const archive = createSessionArchive({ store: makeStore(), openCode });
+    await expect(archive.archive(ids, 1700)).resolves.toEqual({
+      archived: [{ id: 'ses_a', archivedAt: 1700 }, { id: 'ses_c', archivedAt: 1700 }],
+      failedIds: [],
+    });
+    expect(openCode.setArchived.mock.calls).toEqual([['ses_a', true], [undefined, true], ['ses_c', true]]);
+  });
+
+  it.each([NaN, Infinity, 900, '900', {}, null])('keeps the number-only archive predicate for %j', async (value) => {
+    const archive = createSessionArchive({ store: makeStore(), openCode: fakeOpenCode({ archived: { ses_a: value } }) });
+    await expect(archive.isArchived('ses_a')).resolves.toBe(typeof value === 'number');
+  });
+
   it('archives on OpenCode and stays quiet when the file had nothing to say', async () => {
     const store = makeStore();
     const announce = vi.fn();

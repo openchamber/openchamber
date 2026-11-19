@@ -34,6 +34,37 @@ const mockResponse = (body = payload) => ({
 });
 
 describe('GitHub Copilot quota provider', () => {
+  it.each([null, undefined, false, 0, 'unexpected', [], {}])('keeps empty windows for an unchecked payload %j', async (body) => {
+    for (const fetchProviderQuota of [fetchQuota, fetchQuotaAddon]) {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => body,
+      }));
+
+      const result = await fetchProviderQuota();
+
+      expect(result.ok).toBe(true);
+      expect(result.usage.windows).toEqual({});
+      expect(result.planLabel).toBeUndefined();
+    }
+  });
+
+  it('reads inherited fields and array containers without requiring own properties', async () => {
+    const snapshot = Object.create({ entitlement: '100', quota_remaining: '25.5' });
+    const snapshots = Object.assign([], { premium_interactions: snapshot });
+    const body = Object.create({ quota_snapshots: snapshots, copilot_plan: 'business' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse(body)));
+
+    for (const fetchProviderQuota of [fetchQuota, fetchQuotaAddon]) {
+      const result = await fetchProviderQuota();
+
+      expect(result.ok).toBe(true);
+      expect(result.planLabel).toBe('Copilot Business');
+      expect(result.usage.windows.premium_interactions.usedPercent).toBe(74.5);
+      expect(result.usage.windows.premium_interactions.valueLabel).toBe('74.5 / 100 used');
+    }
+  });
+
   it.each([
     ['primary provider', fetchQuota],
     ['add-on provider', fetchQuotaAddon],
