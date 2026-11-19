@@ -55,10 +55,6 @@ export interface QuotaResultInput<ProviderId extends string | null = string, Pro
 }
 
 export interface TokenWindowLimit {
-  unit?: number | string;
-  number?: number;
-}
-
-export interface TokenWindowDurations {
-  readonly [unit: string]: number | undefined;
+  unit?: unknown;
+  number?: unknown;
 }

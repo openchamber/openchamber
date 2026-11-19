@@ -1,5 +1,7 @@
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import type { LegacyAuthFile } from '../../opencode/auth.js';
 import { readConfigLayers } from '../../opencode/config-files.js';
+import type { TokenWindowLimit, UsageWindow } from '../utils/contracts.js';
 import {
   resolveConfigApiKey,
   getAuthEntry,
@@ -15,21 +17,49 @@ import {
 
 export const providerId = 'zhipuai-coding-plan';
 export const providerName = 'Zhipu AI Coding Plan';
-const aliases = ['zhipuai-coding-plan', 'zhipuai', 'zhipu'];
+const aliases = ['zhipuai-coding-plan', 'zhipuai', 'zhipu'] as const;
 
-const formatCreditAmount = (value) => {
+interface EnvelopeFields {
+  code?: unknown;
+  success?: unknown;
+  msg?: unknown;
+}
+
+interface CodingPlanLimitFields extends TokenWindowLimit {
+  type?: unknown;
+  currentValue?: unknown;
+  usage?: unknown;
+  percentage?: unknown;
+  nextResetTime?: unknown;
+}
+
+const hasPayloadFields = (value: unknown): value is EnvelopeFields & { data?: unknown } => value != null;
+const hasDataFields = (value: unknown): value is { limits?: unknown; level?: unknown } => value != null;
+const hasLimitFields = (value: unknown): value is CodingPlanLimitFields => value != null;
+const isLimitArray = (value: unknown): value is unknown[] => Array.isArray(value);
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+const isCreditLimit = (value: unknown): value is CodingPlanLimitFields =>
+  hasLimitFields(value) && (value.type === 'TOKENS_LIMIT' || value.type === 'CREDIT_LIMIT');
+const isTimeLimit = (value: unknown): value is CodingPlanLimitFields =>
+  hasLimitFields(value) && value.type === 'TIME_LIMIT';
+const hasAuthFields = (value: unknown): value is { key?: unknown; token?: unknown } => value != null;
+const hasProviderAliases = (value: unknown): value is Partial<Record<typeof aliases[number], unknown>> => value != null;
+const hasProviderOptions = (value: unknown): value is { options?: unknown } => value != null;
+const hasApiKey = (value: unknown): value is { apiKey?: unknown } => value != null;
+
+const formatCreditAmount = (value: number) => {
   if (value < 1000) return value.toLocaleString('en-US');
   return `${Math.round(value / 100) / 10}k`;
 };
 
-const formatCreditValueLabel = (limit) => {
+const formatCreditValueLabel = (limit: CodingPlanLimitFields) => {
   const used = toNumber(limit?.currentValue);
   const total = toNumber(limit?.usage);
   if (used === null || total === null) return null;
   return `${formatCreditAmount(used)} / ${formatCreditAmount(total)} credits`;
 };
 
-const resolveUsedPercent = (limit) => {
+const resolveUsedPercent = (limit: CodingPlanLimitFields) => {
   const percentage = toNumber(limit?.percentage);
   if (percentage !== null) {
     return percentage;
@@ -40,7 +70,7 @@ const resolveUsedPercent = (limit) => {
   return Math.round((used / total) * 100);
 };
 
-export const envelopeError = (payload) => {
+export const envelopeError = (payload: EnvelopeFields | null | undefined) => {
   const code = payload?.code;
   if (payload?.success !== false && !(code !== undefined && code !== null && code !== 200)) {
     return null;
@@ -49,8 +79,9 @@ export const envelopeError = (payload) => {
   return msg ?? `API error: ${code ?? 'unknown'}`;
 };
 
-function getApiKey(auth) {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+function getApiKey(auth: LegacyAuthFile) {
+  const rawEntry: unknown = normalizeAuthEntry(getAuthEntry(auth, aliases));
+  const entry = hasAuthFields(rawEntry) ? rawEntry : null;
   const apiKeyFromAuth = entry?.key ?? entry?.token;
 
   if (apiKeyFromAuth) {
@@ -61,19 +92,22 @@ function getApiKey(auth) {
     const { mergedConfig } = readConfigLayers();
 
     for (const alias of aliases) {
-      const providerConfig = mergedConfig?.provider?.[alias];
-      if (providerConfig?.options?.apiKey) {
-        return resolveConfigApiKey(providerConfig.options.apiKey);
+      const provider = mergedConfig?.provider;
+      const providerConfig = hasProviderAliases(provider) ? provider[alias] : undefined;
+      const options = hasProviderOptions(providerConfig) ? providerConfig.options : undefined;
+      if (hasApiKey(options) && options.apiKey) {
+        const key: unknown = resolveConfigApiKey(options.apiKey);
+        return key;
       }
     }
   } catch {
-    // Ignore config read errors; the provider will be treated as not configured.
+    return null;
   }
 
   return null;
 }
 
-export const isConfigured = (auth) => {
+export const isConfigured = (auth: LegacyAuthFile) => {
   return Boolean(getApiKey(auth));
 };
 
@@ -109,7 +143,8 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
+    const rawPayload: unknown = await response.json();
+    const payload = hasPayloadFields(rawPayload) ? rawPayload : null;
 
     const failure = envelopeError(payload);
     if (failure) {
@@ -122,11 +157,12 @@ export const fetchQuota = async () => {
       });
     }
 
-    const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
+    const data = hasDataFields(payload?.data) ? payload.data : null;
+    const limits = isLimitArray(data?.limits) ? data.limits : [];
 
-    const windows = {};
+    const windows: Record<string, UsageWindow> = {};
 
-    for (const limit of limits.filter((entry) => entry?.type === 'TOKENS_LIMIT' || entry?.type === 'CREDIT_LIMIT')) {
+    for (const limit of limits.filter(isCreditLimit)) {
       const windowSeconds = resolveWindowSeconds(limit);
       const windowLabel = resolveWindowLabel(windowSeconds);
       const resetAt = limit?.nextResetTime ? normalizeTimestamp(limit.nextResetTime) : null;
@@ -139,11 +175,11 @@ export const fetchQuota = async () => {
       });
     }
 
-    const mcpToolsTimeLimit = limits.find((limit) => limit?.type === 'TIME_LIMIT');
+    const mcpToolsTimeLimit = limits.find(isTimeLimit);
     if (mcpToolsTimeLimit) {
       const monthSeconds = 30 * 24 * 60 * 60;
       const resetAt = mcpToolsTimeLimit?.nextResetTime ? normalizeTimestamp(mcpToolsTimeLimit.nextResetTime) : null;
-      const usedPercent = typeof mcpToolsTimeLimit?.percentage === 'number' ? mcpToolsTimeLimit.percentage : null;
+      const usedPercent = isNumber(mcpToolsTimeLimit.percentage) ? mcpToolsTimeLimit.percentage : null;
 
       windows['MCP Tools'] = toUsageWindow({
         usedPercent,
@@ -158,7 +194,7 @@ export const fetchQuota = async () => {
       ok: true,
       configured: true,
       usage: { windows },
-      planLabel: asNonEmptyString(payload?.data?.level)
+      planLabel: asNonEmptyString(data?.level)
     });
   } catch (error) {
     return buildResult({
