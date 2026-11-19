@@ -7,6 +7,7 @@ import process from "node:process"
 import { startBrowser } from "./browser.mjs"
 import { createSelector, diffMap, keepingChangedFiles, listChangedFiles, readMapAt, workingTreeFiles } from "./changed.mjs"
 import { DEFAULT_MODEL, attachKeptStand, startStand } from "./stand.mjs"
+import { acquireSlot } from "./slots.mjs"
 import { ACTION_NAMES, StepFailure, runStep } from "./steps.mjs"
 import { prioritizeWindowsProcess } from "./windows-priority.mjs"
 
@@ -262,7 +263,9 @@ const main = async () => {
     })
   }
   const results = []
+  let releaseSlot = () => undefined
   try {
+    if (!options.attach) releaseSlot = await acquireSlot({ log })
     starting = options.attach
       ? attachKeptStand(JSON.parse(readFileSync(options.attach, "utf8")))
       : startStand({ log, logsDir: join(outDir, "logs"), onStop: (stop) => { stopStand = stop } })
@@ -298,7 +301,7 @@ const main = async () => {
       await new Promise(() => undefined)
     }
   } finally {
-    await stopAll()
+    try { await stopAll() } finally { releaseSlot() }
   }
   return results.some((result) => !result.ok) ? 1 : 0
 }
