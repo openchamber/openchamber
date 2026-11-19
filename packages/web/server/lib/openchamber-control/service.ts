@@ -24,7 +24,7 @@ import type { SessionInfo, ModelInfo, SessionListInput, PermissionReplyInput, Se
 import type { ControlClient } from './opencode-client.js';
 import type { FormValues } from './form-answer.js';
 import type { PageAnswerInput } from './render-page.js';
-import type { ControlInput, PublicSessionStatus, SessionMessagesResult, SessionStatusResult } from './contracts.js';
+import type { ControlInput, PendingPermission, PublicSessionStatus, SessionMessagesResult, SessionStatusResult, StoredSessionMetadata } from './contracts.js';
 import type { ControlErrorFields } from './error.js';
 import type { createOpenChamberSessionService } from '../openchamber-sessions/routes.js';
 import type { createScheduledTaskService } from '../scheduled-tasks/service.js';
@@ -77,7 +77,7 @@ export interface ControlDependencies {
   scheduledTaskService: ReturnType<typeof createScheduledTaskService>;
   chatsScope?: { root: string } | null;
   chatRoots?: string[];
-  updateSessionMetadata?: ((sessionId: string, update: (metadata: SessionInfo['metadata']) => ReturnType<typeof userStatePatch>, options: { directory: string }) => Promise<{ changed: boolean }>) | null;
+  updateSessionMetadata?: ((sessionId: string, update: (metadata: StoredSessionMetadata | undefined) => ReturnType<typeof userStatePatch>, options: { directory: string }) => Promise<{ changed: boolean }>) | null;
   isWorktreePinned?: (directory: string) => Promise<boolean>;
   browserControl?: ReturnType<typeof createBrowserControlRouter> | null;
   browserUploads?: ReturnType<typeof createUploadStore> | null;
@@ -94,8 +94,8 @@ export interface ControlDependencies {
   getTerminalRuntime?: TerminalReadDependencies['getTerminalRuntime'];
   secretFiles?: Parameters<typeof createSecretRequests>[0]['files'];
   onPageWaitChange?: NonNullable<Parameters<typeof createPageAnswers>[0]>['onWaitChange'];
-  readPendingRequests?: () => { [sessionID: string]: { forms: object[]; pages: object[]; permissions: { directory: string; id: string }[] } };
-  isPermissionAutoAnswered?: (sessionID: string | undefined, directory: string, permissionID: string) => Promise<boolean>;
+  readPendingRequests?: () => { [sessionID: string]: { forms: object[]; pages: object[]; permissions: PendingPermission[] } };
+  isPermissionAutoAnswered?: (sessionID: string | undefined, directory: PendingPermission['directory'], permissionID: PendingPermission['id']) => Promise<boolean>;
   showPlan?: KnowledgeDependencies['showPlan'];
   dispatchResults?: ReturnType<typeof createDispatchResultsRuntime> | null;
   prWatch?: WaitActionRequest['prWatch'];

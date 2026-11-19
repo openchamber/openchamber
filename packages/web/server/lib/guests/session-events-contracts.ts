@@ -7,6 +7,9 @@ import type {
 import type { GuestRecord } from './contracts.js';
 import type { GuestServiceRequest } from './service.js';
 import type { JsonValue, JsonObject } from '../shared/json-values.js';
+import type { SessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
+
+export type StoredMetadata = SessionMetadata | JsonValue | undefined;
 
 export type SessionEventSubscriber = GuestRecord & {
   sessionEvents: NonNullable<GuestRecord['sessionEvents']>;
@@ -21,7 +24,7 @@ export interface SessionEventsOptions {
   getOpenCodeAuthHeaders: () => Record<string, string>;
   fetchImpl?: typeof fetch;
   fetchLastAssistantMessageText: (sessionId: string, messageId: string | undefined, maxLength: number) => Promise<string>;
-  readSessionMetadata?: ((sessionId: string | null) => JsonValue | undefined | Promise<JsonValue | undefined>) | null;
+  readSessionMetadata?: ((sessionId: string | null) => StoredMetadata | Promise<StoredMetadata>) | null;
   isSessionAutoAccepting?: (sessionId: string, directory: string | null, requestId: string) => Promise<boolean> | boolean;
   isInAutoReview?: (sessionId: string, turnEndedAt: number) => boolean;
   now?: () => number;

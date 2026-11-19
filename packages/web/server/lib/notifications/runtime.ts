@@ -7,7 +7,7 @@ import { isEnterpriseMode } from '../enterprise-mode.js';
 import { genericNotificationTitle, truncateNotificationText } from './message.js';
 import { pullRequestNotificationTitle } from './pull-request-locales.js';
 import { hasErrorMessage, isJsonObject, isNumber, isString } from './inputs.js';
-import type { JsonValue, NotificationPayload } from './contracts.js';
+import type { JsonValue, NotificationPayload, StoredSessionMetadata } from './contracts.js';
 import type { createNotificationTemplateRuntime, NotificationTemplateEvent, NotificationTemplateInfo } from './template-runtime.js';
 import type { createNotificationEmitterRuntime } from './emitter-runtime.js';
 import type { createApnsRuntime } from './apns-runtime.js';
@@ -133,7 +133,7 @@ export interface GoalSettleNotice extends SettleNotice {
 }
 
 export interface PullRequestNotice {
-  item: { instance: string; owner: string; repo: string; number: number };
+  item: { instance?: string | undefined; owner: string; repo: string; number: number };
   event: Parameters<typeof pullRequestNotificationTitle>[1];
 }
 
@@ -163,7 +163,7 @@ export interface NotificationTriggerDependencies extends Pick<TemplateRuntime,
   openPushTagsStore?: { read: () => Promise<JsonValue>; write: (state: PushTagsState) => Promise<void> } | null;
   isAnyInteractiveClientVisible?: () => boolean;
   isAnyUiVisible?: () => boolean;
-  readSessionMetadata?: ((sessionId: string) => Promise<JsonValue | undefined>) | null;
+  readSessionMetadata?: ((sessionId: string) => Promise<StoredSessionMetadata | undefined>) | null;
   spaceFetchFor?: (spaceId: string) => TriggerSource['fetchImpl'] | null;
   isInAutoReview?: (sessionId: string, turnEndedAt: number) => boolean;
   deliverToExtensionChannels?: ((delivery: ExtensionNotificationDelivery) => PromiseLike<void> | void) | null;
@@ -171,7 +171,7 @@ export interface NotificationTriggerDependencies extends Pick<TemplateRuntime,
   getIsWindowFocused?: WindowFocusResolver | null;
 }
 
-const jsonField = (value: JsonField, key: string): JsonField => isJsonObject(value) ? value[key] : undefined;
+const jsonField = (value: JsonField | StoredSessionMetadata, key: string): JsonField => isJsonObject(value) ? value[key] : undefined;
 const isJsonArray = (value: JsonField): value is JsonValue[] => Array.isArray(value);
 const errorMessage = (cause: unknown) => hasErrorMessage(cause) ? cause.message : undefined;
 const isTriggerEvent = (event: NotificationTriggerEvent | null | undefined): event is NotificationTriggerEvent =>

@@ -107,10 +107,11 @@ export type TrackerSessionStatusResult = Connected<{ posted?: boolean; skipped?:
 export type TrackerRuntimeEvent = {
   type: string;
   properties?: {
+    [key: string]: unknown;
     sessionID?: string;
-    info?: { sessionID?: string; type?: string };
-    status?: { type?: string };
-    error?: { name?: string };
+    info?: { [key: string]: unknown; sessionID?: string; type?: string };
+    status?: { [key: string]: unknown; type?: string };
+    error?: { [key: string]: unknown; name?: string };
   };
 };
 

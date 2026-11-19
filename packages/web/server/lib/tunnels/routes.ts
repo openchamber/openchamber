@@ -1,6 +1,6 @@
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import type { Application, RequestHandler } from '../shared/http-contracts.js';
-import type { JsonObject } from '../shared/json-values.js';
+import type { SettingsDocument } from '../settings/settings-helpers.js';
 import type { TunnelController, TunnelDoctorCheck, TunnelDoctorRequest } from './contracts.js';
 import type { createTunnelService } from './index.js';
 import type { createTunnelProviderRegistry } from './registry.js';
@@ -20,14 +20,14 @@ export interface TunnelRoutesDependencies {
   tunnelProviderRegistry: ReturnType<typeof createTunnelProviderRegistry>;
   tunnelAuthController: ReturnType<typeof createTunnelAuth>;
   hasUiPassword: boolean;
-  readSettingsFromDiskMigrated: () => Promise<JsonObject>;
+  readSettingsFromDiskMigrated: () => Promise<SettingsDocument>;
   readManagedRemoteTunnelConfigFromDisk: ManagedConfigRuntime['readManagedRemoteTunnelConfigFromDisk'];
   normalizeTunnelProvider: typeof tunnelTypes.normalizeTunnelProvider;
   normalizeTunnelMode: typeof tunnelTypes.normalizeTunnelMode;
   normalizeOptionalPath: typeof tunnelTypes.normalizeOptionalPath;
   normalizeManagedRemoteTunnelHostname: SettingsNormalizationRuntime['normalizeManagedRemoteTunnelHostname'];
-  normalizeTunnelBootstrapTtlMs: (value: JsonObject[string]) => number | null;
-  normalizeTunnelSessionTtlMs: (value: JsonObject[string]) => number;
+  normalizeTunnelBootstrapTtlMs: (value: SettingsDocument[string]) => number | null;
+  normalizeTunnelSessionTtlMs: (value: SettingsDocument[string]) => number;
   isSupportedTunnelMode: typeof tunnelTypes.isSupportedTunnelMode;
   upsertManagedRemoteTunnelToken: ManagedConfigRuntime['upsertManagedRemoteTunnelToken'];
   resolveManagedRemoteTunnelToken: ManagedConfigRuntime['resolveManagedRemoteTunnelToken'];

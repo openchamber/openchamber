@@ -325,7 +325,7 @@ const parseCookies = (cookieHeader: Request['headers']['cookie']): Record<string
   }, {});
 };
 
-export const getBearerTokenFromRequest = (req: Pick<Request, 'headers'> | null | undefined) => {
+export const getBearerTokenFromRequest = (req: Partial<Pick<Request, 'headers'>> | null | undefined) => {
   const header = req?.headers?.authorization;
   const value = Array.isArray(header) ? header[0] : header;
   if (isString(value)) {

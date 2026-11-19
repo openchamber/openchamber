@@ -17,11 +17,11 @@ export interface HmrState extends Omit<HmrRuntimeState, 'openCodeBaseUrl'> {
   userProvidedOpenCodePassword: string | null | undefined;
 }
 
-export interface HmrStateDependencies {
-  globalThisLike: Record<string, HmrState>;
+export interface HmrStateDependencies<Key extends string = string> {
+  globalThisLike: { [K in Key]?: HmrState | undefined };
   os: { homedir: () => string };
   processLike: { env: NodeJS.ProcessEnv };
-  stateKey: string;
+  stateKey: Key;
 }
 
 export interface HmrAuthState {
@@ -29,7 +29,7 @@ export interface HmrAuthState {
   userProvidedOpenCodePassword: string | null;
 }
 
-export const createHmrStateRuntime = (dependencies: HmrStateDependencies) => {
+export const createHmrStateRuntime = <Key extends string>(dependencies: HmrStateDependencies<Key>) => {
   const {
     globalThisLike,
     os,

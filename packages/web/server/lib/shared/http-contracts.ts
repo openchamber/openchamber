@@ -101,7 +101,7 @@ export interface JsonOptions {
 
 export interface ExpressFactory {
   (): Application;
-  json(options?: JsonOptions): RequestHandler;
+  json(options?: JsonOptions): (request: IncomingMessage & { body?: unknown }, response: ServerResponse, next: (error?: Error) => void) => void;
   raw(options?: JsonOptions): RequestHandler;
   text(options?: JsonOptions & { defaultCharset?: string }): RequestHandler;
   urlencoded(options?: JsonOptions & { extended?: boolean; parameterLimit?: number }): RequestHandler;

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { SessionMetadata } from '@opencode/client';
+import type { SessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
 
 const workSchema = z.object({
   state: z.enum(['open', 'done']),
@@ -19,12 +19,12 @@ export interface WorkPatch {
   suggestDoneAt?: number | null;
 }
 
-export interface WorkMetadataPatch {
+export type WorkMetadataPatch = {
   openchamber: {
     work?: WorkPatch;
     reviewOffer?: { at: number } | null;
   };
-}
+};
 
 interface PatchTime {
   now: number;

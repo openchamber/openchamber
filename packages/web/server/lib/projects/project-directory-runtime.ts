@@ -2,10 +2,11 @@ import { createRealpathCache } from '../path-realpath-cache.js';
 import type { promises as nodeFsPromises } from 'node:fs';
 import type { PlatformPath } from 'node:path';
 import type { Request } from '../shared/http-contracts.js';
-import type { JsonObject, JsonValue } from '../shared/json-values.js';
+import type { JsonValue } from '../shared/json-values.js';
+import type { SettingsDocument } from '../settings/settings-helpers.js';
 import type { DirectoryValidation, SessionProject } from './contracts.js';
 
-type ReadDirectorySettings = () => Promise<JsonObject>;
+type ReadDirectorySettings = () => Promise<SettingsDocument>;
 type DirectorySettingsSource =
   | { readSettingsFromDiskMigrated: ReadDirectorySettings; getReadSettingsFromDiskMigrated?: never }
   | { readSettingsFromDiskMigrated?: ReadDirectorySettings; getReadSettingsFromDiskMigrated: () => ReadDirectorySettings };
@@ -14,11 +15,11 @@ export type ProjectDirectoryDependencies = DirectorySettingsSource & {
   fsPromises: Pick<typeof nodeFsPromises, 'realpath' | 'stat'>;
   path: Pick<PlatformPath, 'resolve'>;
   normalizeDirectoryPath: (value: string) => string;
-  sanitizeProjects: (value: JsonValue | undefined) => SessionProject[] | null | undefined;
+  sanitizeProjects: (value: SettingsDocument[string]) => SessionProject[] | null | undefined;
   refuseDirectory?: (candidate: string) => string | null;
 };
 
-export type ProjectDirectoryRequest = Partial<Pick<Request, 'get' | 'query'>>;
+export type ProjectDirectoryRequest = { get?: (name: string) => string | string[] | null | undefined; query?: Request['query'] };
 export type ProjectDirectoryValidation =
   | (DirectoryValidation & { ok: true; requestedDirectory: string })
   | Extract<DirectoryValidation, { ok: false }>;
@@ -31,9 +32,9 @@ export interface ProjectDirectoryResolution {
 const isDirectoryString = (value: unknown): value is string => typeof value === 'string';
 const isDirectoryError = (value: unknown): value is { code?: unknown } => Boolean(value && typeof value === 'object');
 
-const safeDecodeMarkedURIComponent = (value: string, encoding: string | null | undefined) => {
+const safeDecodeMarkedURIComponent = (value: string | string[], encoding: string | string[] | null | undefined) => {
   if (encoding !== 'uri') return value;
-  try { return decodeURIComponent(value); } catch { return value; }
+  try { return decodeURIComponent(String(value)); } catch { return value; }
 };
 
 export const createProjectDirectoryRuntime = (dependencies: ProjectDirectoryDependencies) => {

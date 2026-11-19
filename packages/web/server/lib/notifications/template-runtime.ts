@@ -13,7 +13,7 @@ export interface NotificationTemplateInfo {
   agent?: unknown;
   mode?: unknown;
   modelID?: unknown;
-  model?: { modelID?: unknown };
+  model?: unknown;
   parts?: unknown;
   content?: unknown;
 }
@@ -366,7 +366,7 @@ export const createNotificationTemplateRuntime = (deps: NotificationTemplateDepe
 
     const modelName = (() => {
       const raw = isString(info.modelID) ? info.modelID.trim()
-        : (isString(info.model?.modelID) ? info.model.modelID.trim() : '');
+        : (isJsonObject(info.model) && isString(info.model.modelID) ? info.model.modelID.trim() : '');
       if (!raw) return 'Assistant';
       return raw.split(/[-_]+/).filter(Boolean)
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');

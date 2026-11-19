@@ -2,7 +2,7 @@ import type { Server } from 'node:http';
 import type { Socket } from 'node:net';
 import { isBoolean } from '../shared/object-guards.js';
 
-type Cleanup = () => void | Promise<void>;
+type Cleanup = () => void | Promise<void | object>;
 type Stop = { stop: Cleanup };
 type OptionalStop = Partial<Stop> | null;
 type Close = { close: Cleanup };

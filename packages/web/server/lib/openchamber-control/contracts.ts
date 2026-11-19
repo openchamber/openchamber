@@ -1,4 +1,12 @@
 import type { ControlOptions, SessionActionResult, TextMessage } from './service.js';
+import type { JsonValue } from '../shared/json-values.js';
+
+export type { SessionMetadata as StoredSessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
+
+export interface PendingPermission {
+  directory?: JsonValue | undefined;
+  id?: JsonValue | undefined;
+}
 
 export type PublicSessionStatus = { type: 'idle' | 'waiting' | 'busy' };
 
@@ -11,7 +19,7 @@ export interface SessionMessagesResult extends SessionStatusResult {
   messages: TextMessage[];
 }
 
-interface SessionReadResults {
+export interface SessionReadResults {
   'session.messages': SessionMessagesResult;
   'session.status': SessionStatusResult;
 }

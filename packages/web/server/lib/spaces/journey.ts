@@ -81,7 +81,7 @@ export interface SpaceJourneyOptions<HostSecret, ArchivedChats> {
   hostProviders?: ReturnType<typeof createHostProviders>;
   hostCatalog?: ReturnType<typeof createHostCatalog>;
   readIdleStop?: (() => Promise<IdleStop>) | undefined;
-  saveIdleStop?: ((setting: IdleStop) => Promise<void>) | undefined;
+  saveIdleStop?: ((setting: IdleStop) => Promise<void | object>) | undefined;
   readPermissionDefault?: (() => Promise<PermissionDefault>) | undefined;
   folderExists?: (directory: string) => Promise<boolean>;
   resolveDirectory?: typeof path.resolve;
