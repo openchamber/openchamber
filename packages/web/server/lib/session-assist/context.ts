@@ -13,7 +13,7 @@ const LINK_KINDS = new Set([
   'repository-issue', 'repository-discussion', 'change-request', 'tracker-item', 'github-issue', 'github-pr', 'linear-issue',
 ]);
 
-export function excerpt(text, limit) {
+export function excerpt(text: string, limit: number) {
   if (text.length <= limit) return text;
   const marker = '\n[Content omitted]\n';
   if (limit <= marker.length) return text.slice(0, Math.max(0, limit));
@@ -22,22 +22,56 @@ export function excerpt(text, limit) {
   return text.slice(0, head) + marker + (tail > 0 ? text.slice(-tail) : '');
 }
 
-function attachedText(message) {
-  const context = message.metadata?.openchamberContext;
-  if (QUOTE_FIELDS.has(context?.kind)) {
-    const source = (context[QUOTE_FIELDS.get(context.kind)] ?? '').trim();
-    const authored = (context.text ?? '').trim();
-    const label = excerpt((context.fileLabel ?? context.label ?? context.pageUrl ?? context.terminalLabel ?? '').trim(), 300);
+type AssistRecord = Pick<SessionMessageAssistant, 'id' | 'metadata'> & {
+  type: SessionMessagesResponse['data'][number]['type'];
+  time?: { created?: number; completed?: number };
+  outcome?: string;
+  text?: string;
+  model?: SessionMessageAssistant['model'];
+  content?: ReadonlyArray<{ type: string; text?: string }>;
+  snapshot?: SessionMessageAssistant['snapshot'];
+  finish?: SessionMessageAssistant['finish'];
+  error?: SessionMessageAssistant['error'];
+};
+
+export interface PageReader {
+  readPage: (options: { limit: number; cursor: string | undefined }) => Promise<{
+    data: readonly AssistRecord[];
+    cursor?: SessionMessagesResponse['cursor'];
+  }>;
+  signal: AbortSignal;
+}
+
+const isAttachment = (value: JsonValue | undefined): value is { [key: string]: JsonValue; kind: string } =>
+  isRecord(value) && isString(value.kind);
+
+const isComment = (value: JsonValue): value is { comment?: JsonValue; preview?: JsonValue; path?: JsonValue } =>
+  isRecord(value);
+
+function trimAttachment(value: JsonValue | undefined) {
+  if (!isString(value)) throw new TypeError('Attachment text must be a string');
+  return value.trim();
+}
+
+function attachedText(message: AssistRecord) {
+  const rawContext = message.metadata?.openchamberContext;
+  const context = isAttachment(rawContext) ? rawContext : null;
+  const field = context ? QUOTE_FIELDS.get(context.kind) : undefined;
+  if (context && field !== undefined) {
+    const source = trimAttachment(context[field] ?? '');
+    const authored = trimAttachment(context.text ?? '');
+    const label = excerpt(trimAttachment(context.fileLabel ?? context.label ?? context.pageUrl ?? context.terminalLabel ?? ''), 300);
     const location = Number.isInteger(context.startLine) ? `, lines ${context.startLine}-${context.endLine ?? context.startLine}` : '';
     const quote = excerpt(source, 4_000).split('\n').map((line) => `> ${line}`).join('\n');
     return { text: `Attached ${context.kind}${label ? ` (${label}${location})` : ''}:\n${quote}\n\nUser comment:\n${excerpt(authored, USER_CHAR_LIMIT)}`, authored };
   }
-  if (LINK_KINDS.has(context?.kind)) return { text: excerpt(message.text ?? '', USER_CHAR_LIMIT), authored: '' };
+  if (context && LINK_KINDS.has(context.kind)) return { text: excerpt(message.text ?? '', USER_CHAR_LIMIT), authored: '' };
   const comment = message.metadata?.opencodeComment;
   if (comment) {
-    const authored = comment.comment.trim();
-    const source = (comment.preview ?? '').trim();
-    const label = excerpt((comment.path ?? '').trim(), 300);
+    if (!isComment(comment)) throw new TypeError('Attachment text must be a string');
+    const authored = trimAttachment(comment.comment);
+    const source = trimAttachment(comment.preview ?? '');
+    const label = excerpt(trimAttachment(comment.path ?? ''), 300);
     return { text: `Attached file context (${label}):\n${excerpt(source, 4_000)}\n\nUser comment:\n${excerpt(authored, USER_CHAR_LIMIT)}`, authored };
   }
   return null;
@@ -45,20 +79,21 @@ function attachedText(message) {
 
 const TRANSPARENT_TYPES = new Set(['agent-switched', 'model-switched', 'location-switched']);
 
-function isTransparent(record) {
+function isTransparent(record: AssistRecord | undefined) {
   if (record?.type === 'idle') return record.outcome === 'succeeded';
-  return TRANSPARENT_TYPES.has(record?.type);
+  return record != null && TRANSPARENT_TYPES.has(record.type);
 }
 
-export function newestContentId(records) {
-  for (const record of Array.isArray(records) ? records : []) {
+export function newestContentId(records: SessionMessagesResponse['data'] | undefined) {
+  const page: SessionMessagesResponse['data'] = Array.isArray(records) ? records : [];
+  for (const record of page) {
     if (!record?.id || isTransparent(record)) continue;
     return record.id;
   }
   return null;
 }
 
-function readMessage(message) {
+function readMessage(message: AssistRecord): AssistMessage {
   const role = message.type;
   const blocks = [];
   const authored = [];
@@ -68,20 +103,21 @@ function readMessage(message) {
     if (attached) {
       blocks.push(attached.text);
       authored.push(attached.authored);
-    } else if (typeof message.text === 'string') {
+    } else if (isString(message.text)) {
       blocks.push(message.text);
       authored.push(message.text.replace(/\n*<terminal_context>\n[\s\S]*?\n<\/terminal_context>\s*$/, ''));
     }
   } else if (role === 'assistant') {
-    for (const part of Array.isArray(message.content) ? message.content : []) {
-      if (part?.type === 'text' && typeof part.text === 'string') blocks.push(part.text);
+    const content: NonNullable<AssistRecord['content']> = Array.isArray(message.content) ? message.content : [];
+    for (const part of content) {
+      if (part?.type === 'text' && isString(part.text)) blocks.push(part.text);
     }
   } else if (role === 'synthetic') {
     const attached = attachedText(message);
     if (attached) {
       blocks.push(attached.text);
       authored.push(attached.authored);
-    } else if (typeof message.text === 'string') {
+    } else if (isString(message.text)) {
       blocks.push(message.text);
     }
   }
@@ -89,8 +125,8 @@ function readMessage(message) {
   return {
     id: message.id,
     role,
-    created: Number.isFinite(message.time?.created) ? message.time.created : null,
-    completed: Number.isFinite(message.time?.completed) ? message.time.completed : null,
+    created: Number.isFinite(message.time?.created) ? message.time?.created ?? null : null,
+    completed: Number.isFinite(message.time?.completed) ? message.time?.completed ?? null : null,
     transparent: isTransparent(message),
     providerID: message.model?.providerID,
     modelID: message.model?.id,
@@ -104,10 +140,10 @@ function readMessage(message) {
   };
 }
 
-function collectTurns(messages) {
-  const turns = [];
-  let active = null;
-  let attached = [];
+function collectTurns(messages: AssistMessage[]) {
+  const turns: AssistTurn[] = [];
+  let active: AssistTurn | null = null;
+  let attached: AssistMessage[] = [];
   for (const message of messages) {
     if (message.transparent) continue;
     if (message.role === 'synthetic') {
@@ -132,26 +168,31 @@ function collectTurns(messages) {
   return turns.slice(-TURN_LIMIT);
 }
 
-/** @returns {Promise<import('./contracts.js').AssistContext | null>} */
-export async function loadAssistContext({ readPage, signal }) {
-  let messages = [];
-  let cursor;
-  const cursors = new Set();
-  const ids = new Set();
+function hasCompletedTail(turns: AssistTurn[], last: AssistMessage): turns is CompletedAssistTurns {
+  const finalTurn = turns.at(-1);
+  return finalTurn?.complete === true && finalTurn.assistant?.id === last.id;
+}
+
+export async function loadAssistContext({ readPage, signal }: PageReader): Promise<AssistContext | null> {
+  let messages: AssistMessage[] = [];
+  let cursor: string | undefined;
+  const cursors = new Set<string>();
+  const ids = new Set<string>();
   for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber++) {
     signal.throwIfAborted();
     const page = await readPage({ limit: PAGE_SIZE, cursor });
     signal.throwIfAborted();
     if (!Array.isArray(page?.data)) throw new Error('Session message page is unavailable');
-    const older = [];
-    for (const record of page.data) {
+    const older: AssistMessage[] = [];
+    const records: readonly AssistRecord[] = page.data;
+    for (const record of records) {
       if (!record?.id || ids.has(record.id)) continue;
       ids.add(record.id);
       older.push(readMessage(record));
     }
     older.reverse();
     messages = older.concat(messages);
-    const next = typeof page.cursor?.next === 'string' ? page.cursor.next : null;
+    const next = isString(page.cursor?.next) ? page.cursor.next : null;
     const last = messages.findLast((message) => !message.transparent);
     if (!last) {
       if (!next || pageNumber === MAX_PAGES - 1) return null;
@@ -159,7 +200,7 @@ export async function loadAssistContext({ readPage, signal }) {
       if (!last.complete || !last.text) return null;
       const turns = collectTurns(messages);
       if (turns.length === TURN_LIMIT || !next || pageNumber === MAX_PAGES - 1) {
-        if (!turns.at(-1)?.complete || turns.at(-1).assistant.id !== last.id) return null;
+        if (!hasCompletedTail(turns, last)) return null;
         return { turns, last };
       }
     }
@@ -169,3 +210,6 @@ export async function loadAssistContext({ readPage, signal }) {
   }
   return null;
 }
+import type { JsonValue, SessionMessageAssistant, SessionMessagesResponse } from '@opencode/client';
+import { isRecord, isString } from '../shared/guards.js';
+import type { AssistContext, AssistMessage, AssistTurn, CompletedAssistTurns } from './contracts.js';
