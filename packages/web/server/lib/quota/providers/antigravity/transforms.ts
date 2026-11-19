@@ -1,23 +1,46 @@
-
 import {
   asNonEmptyString,
   toNumber,
   toTimestamp,
   toUsageWindow
 } from '../../utils/index.js';
+import { lowerCaseLabel } from '../../utils/labels.js';
 
 export const FIVE_HOUR_WINDOW_SECONDS = 5 * 60 * 60;
 export const WEEKLY_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 const DAILY_WINDOW_SECONDS = 24 * 60 * 60;
 
-export const parseBucket = (bucket) => {
-  const remainingFraction = toNumber(bucket?.remainingFraction);
+type PayloadFields = {
+  readonly remainingFraction?: unknown; readonly resetTime?: unknown; readonly window?: unknown;
+  readonly bucketId?: unknown; readonly groups?: unknown; readonly displayName?: unknown;
+  readonly buckets?: unknown; readonly models?: unknown; readonly quotaInfo?: unknown;
+};
+const hasPayloadFields = (value: unknown): value is PayloadFields => value !== null && value !== undefined;
+const payloadFields = <Value>(value: Value) => (hasPayloadFields(value) ? value : undefined);
+const listOf = <Value>(value: Value): unknown[] => (Array.isArray(value) ? value : []);
+
+type ParsedBucket = ReturnType<typeof parseBucket>;
+type BucketWindow = ParsedBucket['window'];
+type ModelGroupWindow = {
+  groupType: '3p' | 'gemini';
+  displayName: unknown;
+  windows: Record<string, BucketWindow>;
+  bucket5h: ParsedBucket | null;
+  bucketWeekly: ParsedBucket | null;
+};
+
+export const parseBucket = <Bucket>(bucket: Bucket) => {
+  const fields = payloadFields(bucket);
+  const remainingFraction = toNumber(fields?.remainingFraction);
   const remainingPercent = remainingFraction !== null
     ? Math.round(remainingFraction * 100)
     : null;
   const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
-  const resetAt = toTimestamp(bucket?.resetTime);
-  const windowStr = (bucket?.window || bucket?.bucketId || '').toLowerCase();
+  const resetAt = toTimestamp(fields?.resetTime);
+  const windowStr = lowerCaseLabel(
+    fields?.window || fields?.bucketId || '',
+    '((intermediate value) || (intermediate value) || "")',
+  );
 
   let label = '5h';
   let seconds = FIVE_HOUR_WINDOW_SECONDS;
@@ -45,19 +68,20 @@ export const parseBucket = (bucket) => {
   };
 };
 
-export const transformSummary = (summaryPayload) => {
-  const groups = Array.isArray(summaryPayload?.groups) ? summaryPayload.groups : [];
-  const modelGroupWindows = [];
+export const transformSummary = <Payload>(summaryPayload: Payload) => {
+  const groups = listOf(payloadFields(summaryPayload)?.groups);
+  const modelGroupWindows: ModelGroupWindow[] = [];
 
   for (const group of groups) {
-    const groupName = (group?.displayName || '').toLowerCase();
+    const fields = payloadFields(group);
+    const groupName = lowerCaseLabel(fields?.displayName || '', '((intermediate value) || "")');
     const is3p = groupName.includes('claude') || groupName.includes('gpt') || groupName.includes('3p');
     const groupType = is3p ? '3p' : 'gemini';
 
-    const buckets = Array.isArray(group?.buckets) ? group.buckets : [];
-    const windows = {};
-    let bucket5h = null;
-    let bucketWeekly = null;
+    const buckets = listOf(fields?.buckets);
+    const windows: Record<string, BucketWindow> = {};
+    let bucket5h: ParsedBucket | null = null;
+    let bucketWeekly: ParsedBucket | null = null;
 
     for (const b of buckets) {
       const parsed = parseBucket(b);
@@ -71,7 +95,7 @@ export const transformSummary = (summaryPayload) => {
 
     modelGroupWindows.push({
       groupType,
-      displayName: group?.displayName,
+      displayName: fields?.displayName,
       windows,
       bucket5h,
       bucketWeekly
@@ -81,11 +105,15 @@ export const transformSummary = (summaryPayload) => {
   return { modelGroupWindows };
 };
 
-export const transformModels = (modelsPayload, modelGroupWindows = []) => {
-  const rawModels = modelsPayload?.models ?? {};
-  const transformed = {};
+const isPresent = (value: unknown): value is object | string | number | boolean | bigint | symbol =>
+  value !== null && value !== undefined;
 
-  for (const [modelName, modelData] of Object.entries(rawModels)) {
+export const transformModels = <Payload>(modelsPayload: Payload, modelGroupWindows: ModelGroupWindow[] = []) => {
+  const rawModels = payloadFields(modelsPayload)?.models;
+  const modelEntries: [string, unknown][] = isPresent(rawModels) ? Object.entries(rawModels) : [];
+  const transformed: Record<string, { windows: Record<string, BucketWindow> }> = {};
+
+  for (const [modelName, modelData] of modelEntries) {
     const name = asNonEmptyString(modelName);
     if (!name) continue;
 
@@ -98,18 +126,20 @@ export const transformModels = (modelsPayload, modelGroupWindows = []) => {
         && (matchedGroup.bucketWeekly.remainingFraction <= 0.001
           || (matchedGroup.bucket5h && matchedGroup.bucketWeekly.remainingFraction < matchedGroup.bucket5h.remainingFraction));
 
-      const reorderedWindows = {};
-      if (isWeeklyConstrained && matchedGroup.windows.weekly) {
-        reorderedWindows.weekly = matchedGroup.windows.weekly;
-        if (matchedGroup.windows['5h']) {
-          reorderedWindows['5h'] = matchedGroup.windows['5h'];
+      const reorderedWindows: Record<string, BucketWindow> = {};
+      const weekly = matchedGroup.windows.weekly;
+      const fiveHour = matchedGroup.windows['5h'];
+      if (isWeeklyConstrained && weekly) {
+        reorderedWindows.weekly = weekly;
+        if (fiveHour) {
+          reorderedWindows['5h'] = fiveHour;
         }
       } else {
-        if (matchedGroup.windows['5h']) {
-          reorderedWindows['5h'] = matchedGroup.windows['5h'];
+        if (fiveHour) {
+          reorderedWindows['5h'] = fiveHour;
         }
-        if (matchedGroup.windows.weekly) {
-          reorderedWindows.weekly = matchedGroup.windows.weekly;
+        if (weekly) {
+          reorderedWindows.weekly = weekly;
         }
       }
 
@@ -121,12 +151,13 @@ export const transformModels = (modelsPayload, modelGroupWindows = []) => {
 
       transformed[name] = { windows: reorderedWindows };
     } else {
-      const remainingFraction = toNumber(modelData?.quotaInfo?.remainingFraction);
+      const quotaInfo = payloadFields(payloadFields(modelData)?.quotaInfo);
+      const remainingFraction = toNumber(quotaInfo?.remainingFraction);
       const remainingPercent = remainingFraction !== null
         ? Math.round(remainingFraction * 100)
         : null;
       const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
-      const resetAt = toTimestamp(modelData?.quotaInfo?.resetTime);
+      const resetAt = toTimestamp(quotaInfo?.resetTime);
 
       const remainingSeconds = resetAt !== null
         ? Math.max(0, Math.round((resetAt - Date.now()) / 1000))
