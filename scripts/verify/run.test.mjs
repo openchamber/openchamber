@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
 
-import { runScenario } from "./run.mjs"
+import { runScenario, shardOf } from "./run.mjs"
 
 test("the vocabulary gives each target one definition", () => {
   const vocabulary = readFileSync(new URL("./vocabulary.json", import.meta.url), "utf8")
@@ -49,4 +49,16 @@ test("reset failures become scenario results and do not stop later scenarios", a
   } finally {
     rmSync(outDir, { recursive: true, force: true })
   }
+})
+
+test("the parts of a sharded selection cover every scenario once", () => {
+  const scenarios = Array.from({ length: 10 }, (_, index) => ({ id: `s${index}` }))
+  const parts = [1, 2, 3, 4].map((part) => shardOf(scenarios, `${part}/4`))
+  assert.deepEqual(parts.map((part) => part.length), [3, 3, 2, 2])
+  assert.deepEqual(parts.flat().map((scenario) => scenario.id).sort(), scenarios.map((scenario) => scenario.id).sort())
+  assert.deepEqual(shardOf(scenarios, "1/1"), scenarios)
+})
+
+test("a shard outside its range is refused", () => {
+  for (const shard of ["0/4", "5/4", "2", "a/b", undefined]) assert.throws(() => shardOf([], shard), /--shard takes/)
 })

@@ -31,6 +31,8 @@ Options:
                     the files changed between two commits only
   --list            Print the feature map for the selection and exit
   --repeat <n>      Run the selection n times in the same stand
+  --shard <k>/<n>   Run the k-th of n equal parts of the selection, so n
+                    machines play it between them
   --out <dir>       Artifacts directory (default: tmp/verify/<time>)
   --keep            Keep the stand running after the run; prints how to attach
   --attach <file>   Reuse a stand kept by --keep (its stand.json)
@@ -39,7 +41,7 @@ Options:
   --help            Show this help`
 
 const parseArgs = (argv) => {
-  const options = { selection: [], changed: false, base: null, list: false, repeat: 1, out: null, keep: false, attach: null, headed: false, chrome: null }
+  const options = { selection: [], changed: false, base: null, list: false, repeat: 1, shard: null, out: null, keep: false, attach: null, headed: false, chrome: null }
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index]
     if (value === "--help") { console.log(HELP); process.exit(0) }
@@ -47,6 +49,7 @@ const parseArgs = (argv) => {
     else if (value === "--base") options.base = argv[++index]
     else if (value === "--list") options.list = true
     else if (value === "--repeat") options.repeat = Math.max(1, Number(argv[++index]))
+    else if (value === "--shard") options.shard = argv[++index]
     else if (value === "--out") options.out = resolve(argv[++index])
     else if (value === "--keep") options.keep = true
     else if (value === "--attach") options.attach = resolve(argv[++index])
@@ -123,6 +126,15 @@ const selectChanged = ({ zones, vocabulary }, scenarios, base) => {
   if (notApp.length) console.log(`\n${notApp.length} changed files are not app code (tests, docs, outside packages/): ${notApp.map((entry) => entry.file).join(", ")}`)
   console.log(`\n${chosen.length} of ${scenarios.length} scenarios selected`)
   return chosen
+}
+
+/** Part `k` of `n`: every n-th scenario starting at the k-th, so each part gets its share of every zone. */
+export const shardOf = (scenarios, shard) => {
+  const match = /^(\d+)\/(\d+)$/.exec(shard ?? "")
+  const part = Number(match?.[1])
+  const parts = Number(match?.[2])
+  if (!match || part < 1 || part > parts) throw new Error(`--shard takes <k>/<n> with k from 1 to n, got: ${shard}`)
+  return scenarios.filter((_, index) => index % parts === part - 1)
 }
 
 const printMap = (zones, chosen) => {
@@ -217,7 +229,9 @@ const main = async () => {
   prioritizeWindowsProcess()
   const options = parseArgs(process.argv.slice(2))
   const { vocabulary, zones, scenarios } = loadMap()
-  const chosen = options.changed ? selectChanged({ zones, vocabulary }, scenarios, options.base) : select(scenarios, options.selection)
+  const selected = options.changed ? selectChanged({ zones, vocabulary }, scenarios, options.base) : select(scenarios, options.selection)
+  const chosen = options.shard ? shardOf(selected, options.shard) : selected
+  if (options.shard) console.log(`[verify] part ${options.shard}: ${chosen.length} of ${selected.length} scenarios`)
   if (options.list) {
     printMap(zones, chosen)
     console.log(`\n${chosen.length} scenarios`)
