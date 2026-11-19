@@ -635,7 +635,7 @@ const VoiceApiKeyField: React.FC<{ kind: VoiceApiKeyKind; onSaved?: () => void }
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={commitDraft}
                 onKeyDown={(e) => {
-                    if (e.key === 'Enter') commitDraft();
+                    if (e.key === 'Enter') e.currentTarget.blur();
                 }}
                 placeholder={saved ? t('settings.voice.page.field.apiKeySavedPlaceholder') : 'sk-...'}
                 className={VOICE_TEXT_INPUT_CLASS}
