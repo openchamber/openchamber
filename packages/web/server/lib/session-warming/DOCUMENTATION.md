@@ -64,8 +64,37 @@ which of the two a write goes to. The UI side is `packages/ui/src/stores/useSess
   OpenCode, which this server does not reach with the ping.
 - Routing's cache hold counts a warmed session as warm until `warmUntil` plus
   one cache lifetime (`isSessionWarm`).
+- A thrown value's `message` remains unchecked. Truthy messages of any type
+  are returned by the config-write routes; absent or falsy messages use the
+  existing fallback. Inherited properties remain visible.
 
 ## Decisions
+
+### Why routes declare the HTTP methods they use
+
+The server check has no Express declarations. The local route contract describes
+registration, unknown request bodies, path parameters and the response methods
+used here, following the other converted route modules without a dependency
+or a replacement declaration for Express.
+
+### Why thrown messages have an optional unknown type
+
+The original optional property reads accept inherited fields and box primitive
+values. Any non-nullish JavaScript value supports that property read; the guard
+promises neither that `message` exists nor that it is a string. Direct access
+keeps the original receiver and proxy behavior. Requiring an Error instance or
+a string message would discard values the routes already return.
+
+### Why the runtime accepts the shared translated event type
+
+`server/runtime.js` forwards translated events directly to `processPayload`,
+including events this module ignores. The event-stream module owns
+`TranslatedEvent`; warming imports that contract and retains its schemas for
+the status and deletion fields it consumes. Model inputs use their schema's
+inferred type, including unchecked passthrough fields.
+
+Thrown values retain unchecked `message` and `code` fields through a nullish
+guard, preserving inherited properties, boxed primitives and proxy reads.
 
 ### Why the ping interval follows the cache lifetime and not a fixed 4 minutes
 

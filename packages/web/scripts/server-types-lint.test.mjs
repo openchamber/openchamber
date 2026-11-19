@@ -92,3 +92,69 @@ test('external input type guards are allowed while unparsed helpers and redundan
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('only exported single-unknown nullable parsers in the shared server folder admit boundary checks', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-server-parser-lint-'));
+  try {
+    const config = path.join(root, 'oxlint.json');
+    fs.writeFileSync(config, JSON.stringify({
+      ...antiSlopConfig,
+      jsPlugins: antiSlopConfig.jsPlugins.map((plugin) => ({ ...plugin, specifier: path.resolve(repoRoot, plugin.specifier) })),
+    }));
+    const run = (relative, source) => {
+      const file = path.join(root, relative);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, source);
+      const result = spawnSync(path.join(repoRoot, 'node_modules/.bin/oxlint'), [
+        '-c', config, '-f', 'json', file,
+      ], { cwd: root, encoding: 'utf8' });
+      expect(result.stderr).toBe('');
+      return JSON.parse(result.stdout).diagnostics.map(({ code }) => code);
+    };
+    const shared = 'packages/web/server/lib/shared/parser.ts';
+    for (const declaration of [
+      'export function parse(value: unknown): string | null',
+      'export const parse = (value: unknown): string | null =>',
+      'export const parse = function(value: unknown): string | null',
+      'export default function(value: unknown): string | null',
+    ]) {
+      expect(run(shared, `${declaration} { return typeof value === 'string' ? value : null; }`)).toEqual([]);
+    }
+    for (const declaration of [
+      'function parse(value: unknown): string | null',
+      'export function parse(value: unknown): string',
+      'export function parse(value: unknown): boolean',
+      'export function parse(value: unknown)',
+      'export function parse(value: unknown, other: string): string | null',
+      'export function parse(...value: unknown[]): string | null',
+      'export function parse(value: unknown = null): string | null',
+      'export function parse(value: unknown): unknown | null',
+      'export function parse(value: unknown): any | null',
+    ]) {
+      const codes = run(shared, `${declaration} { return typeof value === 'string' ? value : null; }`);
+      expect(codes).toContain('anti-slop(no-runtime-typeof)');
+      if (!declaration.includes('unknown[]')) expect(codes).toContain('anti-slop(no-unknown-parameters)');
+    }
+    expect(run(shared, `export function parse(value: string): string | null {
+      return typeof value === 'string' ? value : null;
+    }`)).toContain('anti-slop(no-runtime-typeof)');
+    expect(run(shared, `export function parse(value: unknown): string | null {
+      const nested = () => typeof value === 'string';
+      return nested() ? '' : null;
+    }`)).toContain('anti-slop(no-runtime-typeof)');
+    for (const file of [
+      'packages/web/server/lib/other/parser.ts',
+      'packages/web/server/lib/shared-other/parser.ts',
+      'packages/web/bin/parser.ts',
+      'packages/ui/src/parser.ts',
+    ]) {
+      const codes = run(file, `export function parse(value: unknown): string | null {
+        return typeof value === 'string' ? value : null;
+      }`);
+      expect(codes).toContain('anti-slop(no-unknown-parameters)');
+      expect(codes).toContain('anti-slop(no-runtime-typeof)');
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -456,6 +456,26 @@ describe('checkForUpdates', () => {
 
     expect(result.available).toBe(false);
   });
+
+  it.each([7, true, ['2.7.2'], { version: '2.7.2' }])('preserves a truthy registry tag %j in the fallback result', async (latest) => {
+    fetchMock
+      .when('api.openchamber.dev', { ok: false })
+      .when('registry.npmjs.org', { ok: true, json: async () => ({ 'dist-tags': { latest } }) });
+    const result = await checkForUpdates({ currentVersion: '1.0.0' });
+    expect(result.version).toEqual(latest);
+  });
+
+  it.each([7, true, ['2.7.2-canary.1.2'], { version: '2.7.2' }])('retains the unchecked current version %j in the API payload', async (currentVersion) => {
+    fetchMock.when('api.openchamber.dev', {
+      ok: true,
+      json: async () => ({ latestVersion: '1.0.0', updateAvailable: false }),
+    });
+    const result = await checkForUpdates({ appType: 'desktop-electron', currentVersion });
+    expect(result.currentVersion).toEqual(currentVersion);
+    const payload = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(payload.currentVersion).toEqual(currentVersion);
+    expect(payload.channel).toBe(/-canary\./.test(currentVersion) ? 'canary' : 'stable');
+  });
 });
 
 describe('checkForUpdates on the update channels', () => {
@@ -563,6 +583,18 @@ describe('getCurrentVersion', () => {
   it('is exported for the CLI update command', () => {
     expect(typeof getCurrentVersion).toBe('function');
     expect(getCurrentVersion()).toMatch(/^\d+\.\d+\.\d+|unknown$/);
+  });
+
+  it.each([7, true, ['2.7.2'], { version: '2.7.2' }])('passes through a truthy unchecked manifest version %j', (version) => {
+    const readFile = fs.readFileSync;
+    const manifest = path.resolve(import.meta.dirname, '../../package.json');
+    const spy = vi.spyOn(fs, 'readFileSync').mockImplementation((file, ...args) =>
+      file === manifest ? JSON.stringify({ version }) : readFile(file, ...args));
+    try {
+      expect(getCurrentVersion()).toEqual(version);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

@@ -54,9 +54,12 @@ Older builds stored `git.commit.generate` and `git.pr.generate` as a single valu
 
 The request contract includes the parsed query values Express can pass, including repeated and nested values. Only one non-empty string passes the service's selector parser. VS Code supplies string arrays through the same contract.
 
-### Why the route adapter declares its consumed HTTP contract
+### Why the route adapter uses the shared HTTP contract
 
-The server has no Express type declarations. The adapter types the request fields and registration/response methods it uses, without adding a dependency or changing the HTTP transport. Request bodies stay unparsed until the text and selector guards run.
+`../shared/http-contracts.ts` owns the request, response and router types.
+The adapter specializes its query and path parameters without copying the
+transport contract. Request bodies stay unparsed until the text and selector
+guards run.
 
 ### Why storage checks remain after conversion
 

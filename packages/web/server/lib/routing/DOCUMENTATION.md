@@ -44,8 +44,8 @@ Auto. There is no env gate — the feature shipped dark behind
   `loadAssistContext` (text parts only, attached quotes included, no files or
   tool payloads), each user message cut to its head and each answer to head
   plus tail. The new request is never cut. Also the model that wrote the last
-  settled answer and when it finished (`lastAnswer`), for `cache.js`.
-- `cache.js` — "Try to preserve cache usage": which category a send stays on
+  settled answer and when it finished (`lastAnswer`), for `cache.ts`.
+- `cache.ts` — "Try to preserve cache usage": which category a send stays on
   while the current model's prompt cache is likely warm (`cacheHoldCategory`),
   and how long that is given OpenCode's `warming` config (`warmWindowMs`).
 - `runtime.ts` — `createRoutingRuntime`: `describe`, `classifierEndpoint` (the
@@ -59,7 +59,7 @@ Auto. There is no env gate — the feature shipped dark behind
   refused in enterprise mode like a save). The classifier judges the user's
   text plus one attachment fact for sends with images (`attachmentHint`,
   `routingRequestTextOf`); that fact never reaches OpenCode.
-- `routes.js` — `/api/routing` (GET, PUT), `/api/routing/token` (PUT, DELETE),
+- `routes.ts` — `/api/routing` (GET, PUT), `/api/routing/token` (PUT, DELETE),
   `/api/routing/classifier` (PUT), `/api/routing/classifier/custom` (PUT,
   DELETE), `/api/routing/classifier/gemini` (PUT, DELETE: the Gemini key),
   `/api/routing/classifier/test` (POST) and
@@ -177,18 +177,37 @@ Auto. There is no env gate — the feature shipped dark behind
 
 ## Decisions
 
-### Why two implementations remain JavaScript
+### Conversion contracts
 
-`cache.js` uses `Array.findLast`, whose declaration requires ES2023. The shared
-server checker targets ES2022. `routes.js` imports Express, which has no installed
-declarations in this checkout. Converting either file requires a shared compiler
-or dependency change, or a local replacement for an external contract. Folder
-conversion leaves both implementations unchanged.
+`cache.ts` uses `Array.findLast`, supported by the server's ES2023 library
+selection. Its fallback model comes from the non-null fallback established by
+`resolveAutoSelection`. Rank comparisons preserve JavaScript's conversion of
+null to zero. Duration-unit lookup checks own keys: inherited names such as
+`constructor` still use the default duration, as their nonnumeric values did
+in JavaScript.
 
-The SDK's `config.get()` also returns directory entries with no `info` field.
-That union is wider than the warming schema's inferred input shape. The cache
-boundary must continue parsing the whole response and treating a failed parse
-as a cold cache when its compiler boundary is resolved.
+`routes.ts` preserves the single array-path registration and header decoding.
+The shared HTTP contract accepts Express's array paths for `post`, exposes its
+required request URL and types the two directory headers as strings. Node joins
+duplicate custom request headers before Express reads them.
+
+Route bodies retain their decoded JSON types until the runtime's existing
+schemas validate them. Config, token, classifier, model and endpoint inputs do
+not promise validated fields before those checks. Sends retain the original body,
+including arrays and malformed fields. Container guards permit field reads
+without changing the runtime's validation errors. Error guards preserve integer
+status codes and non-string message values on thrown objects and functions;
+missing fields keep their existing defaults.
+
+`RoutingPermission` models the fields forwarded by the event translator.
+Only ids are established as strings. Resource elements and metadata retain
+their JSON types; `buildPermissionRequest` serializes them unchanged.
+
+The cache boundary accepts the SDK's complete `config.get()` result and
+parses it with the warming schema. Entries with no `info` field leave the
+last warming value unchanged. Any failed parse treats the response as a cold
+cache; the parameter type does not claim that the response already satisfies
+the warming schema.
 
 ### Why endpoint construction requires the selected credential
 

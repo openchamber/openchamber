@@ -34,4 +34,15 @@ describe('completeFormAnswer', () => {
   test('a non-finite numeric default is no default', () => {
     expect(completeFormAnswer([{ key: 'n', type: 'number', default: 'Infinity' }], {})).toEqual({});
   });
+
+  test('an inherited answer does not replace a field default', () => {
+    expect(completeFormAnswer([{ key: 'constructor', type: 'string', default: 'saved' }], {}))
+      .toEqual({ constructor: 'saved' });
+  });
+
+  test('a supplied answer passes through without validating its value', () => {
+    const value = { unchecked: true };
+    expect(completeFormAnswer([{ key: 'external', type: 'external' }], { external: value }))
+      .toEqual({ external: value });
+  });
 });

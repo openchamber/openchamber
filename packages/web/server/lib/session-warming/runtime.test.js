@@ -248,6 +248,20 @@ describe('session warming runtime', () => {
     expect(runtime.snapshot().sessions[0].warmUntil).toBeNull();
   });
 
+  it('ignores unrelated and malformed event payloads', async () => {
+    const { runtime, fetchImpl } = makeRuntime();
+    runtime.setEnabled(true);
+    runtime.processPayload(status('busy'));
+    runtime.setSessionWarm(SESSION, DIRECTORY, true);
+    const before = runtime.snapshot();
+    for (const payload of [null, 'idle', {}, { type: 'session.status', properties: { sessionID: SESSION, status: { type: 'unknown' } } }, { type: 'session.deleted', properties: {} }]) {
+      runtime.processPayload(payload);
+    }
+    expect(runtime.snapshot()).toEqual(before);
+    await vi.advanceTimersByTimeAsync(WARMING_DURATION_MS);
+    expect(pings(fetchImpl)).toHaveLength(0);
+  });
+
   it('broadcasts a snapshot with a rising revision on every change', () => {
     const { runtime, events } = makeRuntime();
     runtime.setEnabled(true);
@@ -331,6 +345,14 @@ describe('session warming runtime', () => {
     it('takes the model\'s configured cache ttl', async () => {
       const { fetchImpl } = await warmAfterTurn({ id: 'sonnet', providerID: 'anthropic', cost: [{}], settings: { cache: { ttl: '10m' } } });
       await vi.advanceTimersByTimeAsync(9 * MINUTE);
+      expect(pings(fetchImpl)).toHaveLength(1);
+    });
+
+    it.each([42, null, {}, 'constructor', 'invalid'])('keeps the fallback interval for an invalid cache ttl: %j', async (ttl) => {
+      const { fetchImpl } = await warmAfterTurn({ id: 'sonnet', providerID: 'anthropic', cost: [{}], settings: { cache: { ttl } } });
+      await vi.advanceTimersByTimeAsync(WARMING_INTERVAL_MS - 1);
+      expect(pings(fetchImpl)).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1);
       expect(pings(fetchImpl)).toHaveLength(1);
     });
 

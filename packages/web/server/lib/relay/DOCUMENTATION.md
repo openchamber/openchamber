@@ -20,9 +20,8 @@ Traffic is modeled as three stacked layers. The relay understands only Layer 1; 
 
 Host side (`packages/web/server/lib/relay/`):
 
-Paths below use the runtime `.js` import specifiers. The scheduler, E2EE,
-host lock, identity, key store, signing key and tunnel codec implementations
-are TypeScript. The service, host client and tunnel dispatcher remain JavaScript.
+Paths below use the runtime `.js` import specifiers. All host implementations
+directly in this folder are TypeScript.
 
 - `service.js` — thin entrypoint: relay config (enabled flag + relay URL), the management routes (`GET/POST /api/openchamber/relay/{status,enable,disable,reset-identity}`), a `getPairingCandidate()` accessor (the relay transport candidate folded into pairing-v2 links when enabled, consumed by the pairing-session route in `core-routes.js`), and lifecycle wiring. Started from `packages/web/server/index.js` only when the user has explicitly enabled the relay. The relay endpoint defaults to the OpenChamber-hosted relay but can be pinned to a self-hosted relay (`pinnedRelayUrl`: `relayUrl` in the machine policy file, else the `OPENCHAMBER_RELAY_URL` env var; see `../enterprise-mode.js`; must be `ws://`/`wss://`, an invalid value pins nothing); when set it overrides the stored setting for the host connection, the pairing candidate, and status, so paired clients inherit the endpoint automatically. In enterprise mode (`../enterprise-mode.js`) the relay runs only with that pin (`relayBlockedByEnterprise`): `start()` refuses otherwise (every path in passes through it), `enable` answers 403, `getPairingCandidate()` is null, `ensureEnabledForPairing()` throws (the pairing route drops the candidate and direct pairing still works), status carries `blockedByEnterprise`, and `resolvePairingTransports` in `index.js` reports `relayAvailable: false`.
 - `identity.js` — the host's stable identity: the long-lived signing keypair (shared with the push relay, defines the routing id) plus a long-lived encryption keypair (the E2EE trust anchor). Reused across restarts; never rotated implicitly. The only rotation is the user's: Settings shows a notice while the host reports `identityConflict` (two `4001` evictions within 10 minutes, so another copy of the data dir, usually on another machine, keeps taking the slot), and its button calls `reset-identity`. That drops both keypairs through `key-store.js`, restarts the host if it was running, and leaves the other copy with the old identity: devices paired through the relay keep reaching it until they are paired here again, and devices paired for the home network only are unaffected. Callers that cache derived keys (this runtime and the push relay's) compare the store's `generation()`, so the reset reaches both without a restart.
@@ -268,14 +267,68 @@ A URL the browser loads itself (`<img src>`, `<video src>`, an iframe) never ent
 
 ## Decisions
 
-### Why some host implementations remain JavaScript
+### Host conversion contracts
 
-The server package has no declarations for `ws` or `express`. Converting
-`host-client.js`, `service.js` or `tunnel-host.js` requires their owning package
-to supply those contracts. The dispatcher also accepts arbitrary entries in a
+`host-client.js` and `tunnel-host.js` use the constructors, lifecycle events,
+raw-data union and backpressure methods in `../shared/websocket-contracts.js`.
+`service.js` uses the application, handler, request and response contracts in
+`../shared/http-contracts.js`. The shared package declarations supply the
+existing `ws` imports and Express JSON middleware factory.
+
+The socket contract retains the full raw-data union for sockets whose mode is
+unspecified. Newly constructed sockets use `nodebuffer` mode, so their message
+contract is `Buffer`; the generic mode also constrains `binaryType`. The relay
+never changes that mode. The existing Buffer check in the loopback dispatcher
+remains unchanged.
+
+`describeRelayError` reads a thrown value's unchecked `message` field and applies
+the redactor's existing `String(value || '')` coercion before calling its
+string-typed boundary. This preserves primitive, nullish and non-string error
+messages without changing the source-control module.
+
+`platform.d.ts` connects server-native streams to the installed Node contracts
+for BYOB readers and `pipeThrough`. DOM and Node stream declarations disagree
+on BYOB readers and completed read results even though native `fetch` supplies
+the same runtime stream that `Readable.fromWeb` accepts. The overloads use the
+Node-owned reader, transform and result types without replacing constructors or
+declaring another stream implementation. Loopback fetch options retain the existing explicit undefined
+`duplex` value. The downstream scheduler preserves each submitted frame's buffer
+type through its queue, so ArrayBuffer-backed frames reach WebCrypto without
+assertions or copies.
+
+The dispatcher also accepts arbitrary entries in a
 wire `protocols` array and lets `ws` validate them. A `string[]` type would claim
 validation the dispatcher does not perform; tightening its validator changes
-the wire acceptance rules.
+the wire acceptance rules. The shared constructor accepts unchecked protocol
+arrays and retains the library's runtime validation.
+
+### Why service inputs retain optional property reads
+
+Settings and HTTP bodies remain unchecked at their read boundaries. Guards for
+optional fields exclude only null and undefined, preserving JavaScript's boxed
+property access on primitive values and leaving each field unknown until its
+own check. Relay URL checks retain their non-string fallback, whitespace
+normalization and protocol validation. Thrown values likewise keep an unchecked
+`message` field so route errors retain the existing nullish fallback.
+
+Host options include the existing share-state callback, batching controls and
+socket factory. The optional legacy local port stays undefined when neither port
+source is supplied. Package version data remains unchecked until URL string
+coercion. Loggers may omit `info` on the optional close-log paths; idle reaping
+retains its existing TypeError when that method is absent.
+
+Wire guards retain their object, string and array checks, including array-valued
+header containers and unchecked protocol-array elements. Header names from
+`Object.entries` are already strings, but header values and WebSocket close
+reasons still require their original primitive-string checks. Node/Bun timer
+handles provide `unref`; an internally supplied port accessor is already typed
+as a function.
+
+The request-body controller is installed synchronously by `ReadableStream.start`.
+A checked accessor expresses that invariant, and a failure accessor exposes
+closure writes made while awaiting body completion. Empty scheduler batches and
+dispatch before tunnel establishment remain invariant failures. Ignored cleanup
+and listener errors stay ignored.
 
 ### Why key and handshake types preserve partial input
 

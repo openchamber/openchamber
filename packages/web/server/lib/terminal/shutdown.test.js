@@ -3,18 +3,27 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { test } from 'vitest';
+import { test, vi } from 'vitest';
 import { shutdownTerminalProcesses } from './shutdown.js';
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-test('Windows shutdown leaves teardown to each PTY and continues after a kill failure', { skip: process.platform !== 'win32' }, async () => {
+test('Windows shutdown leaves teardown to each PTY and continues after a kill failure', async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const posixKill = vi.spyOn(process, 'kill').mockImplementation(() => { throw new Error('Unexpected POSIX signal'); });
   const signals = [];
-  await shutdownTerminalProcesses([
-    { process: { pid: 1, kill: signal => { signals.push(signal); throw new Error('already gone'); } }, shellExecutable: 'cmd.exe' },
-    { process: { pid: 2, kill: signal => { signals.push(signal); } }, shellExecutable: 'powershell.exe' },
-  ]);
-  assert.deepEqual(signals, [undefined, undefined]);
+  try {
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    await shutdownTerminalProcesses([
+      { process: { pid: 100_001, kill: signal => { signals.push(signal); throw new Error('already gone'); } }, shellExecutable: 'cmd.exe' },
+      { process: { pid: 100_002, kill: signal => { signals.push(signal); } }, shellExecutable: 'powershell.exe' },
+    ]);
+    assert.deepEqual(signals, [undefined, undefined]);
+    assert.equal(posixKill.mock.calls.length, 0);
+  } finally {
+    posixKill.mockRestore();
+    Object.defineProperty(process, 'platform', platform);
+  }
 });
 
 const script = `

@@ -1,19 +1,42 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
-import vm from 'node:vm';
-import { z } from 'zod';
+import { installNativeElectron } from './test-support/native-electron.mjs';
 
-// Evaluate the real dispatcher without booting Electron or the embedded server.
-const main = readFileSync(new URL('./main.mjs', import.meta.url), 'utf8');
-const start = main.indexOf('const handleInvoke = async ');
-assert.notEqual(start, -1);
-const end = main.indexOf('\n};', start);
-assert.notEqual(end, -1);
-const dispatcher = new vm.Script(`${main.slice(start, end + 3)}\nhandleInvoke;`);
-const createInvoke = (selection, platform = 'linux') => dispatcher.runInNewContext({
-  clipboard: { selection }, process: { platform }, z,
-});
+const directory = mkdtempSync(path.join(os.tmpdir(), 'oc-selection-'));
+const dataDirectory = process.env.OPENCHAMBER_DATA_DIR;
+process.env.OPENCHAMBER_DATA_DIR = directory;
+const { handlers, electron: { clipboard }, hooks } = installNativeElectron({ directory });
+await import('../web/scripts/register-server-sources.mjs');
+const cwd = process.cwd();
+const resourcesPath = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
+Object.defineProperty(process, 'resourcesPath', { value: directory, configurable: true });
+try {
+  await import('./main.mjs');
+} finally {
+  process.chdir(cwd);
+  if (resourcesPath) Object.defineProperty(process, 'resourcesPath', resourcesPath);
+  else delete process.resourcesPath;
+  hooks.deregister();
+  delete globalThis.nativeElectronTestEdges;
+  rmSync(directory, { recursive: true, force: true });
+  if (dataDirectory === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+  else process.env.OPENCHAMBER_DATA_DIR = dataDirectory;
+}
+const invokeHandler = handlers.get('openchamber:invoke');
+const createInvoke = (selection, platform = 'linux') => async (_window, command, args) => {
+  const originalPlatform = process.platform;
+  clipboard.selection = selection;
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  try {
+    return await invokeHandler({ sender: { getURL: () => 'openchamber-ui://app/' } }, command, args);
+  } finally {
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+    delete clipboard.selection;
+  }
+};
 
 test('selection write acknowledges only after the native write completes', async () => {
   const pending = Promise.withResolvers();
@@ -22,8 +45,7 @@ test('selection write acknowledges only after the native write completes', async
   let acknowledged = false;
   const response = invoke(null, 'desktop_clipboard_write_selection', { text: 'selected text' })
     .then((result) => { acknowledged = true; return result; });
-  await Promise.resolve();
-  await Promise.resolve();
+  await new Promise(setImmediate);
   assert.deepEqual(writes, ['selected text']);
   assert.equal(acknowledged, false);
   pending.resolve();
@@ -44,5 +66,6 @@ test('invalid text and unsupported platforms never write PRIMARY', async () => {
   const selection = { writeText: () => assert.fail('unexpected write') };
   assert.equal(await createInvoke(selection)(null, 'desktop_clipboard_write_selection', { text: 42 }), false);
   assert.equal(await createInvoke(selection, 'darwin')(null, 'desktop_clipboard_write_selection', { text: 'text' }), false);
+  assert.equal(await createInvoke(selection, 'win32')(null, 'desktop_clipboard_write_selection', { text: 'text' }), false);
   assert.equal(await createInvoke(undefined)(null, 'desktop_clipboard_write_selection', { text: 'text' }), false);
 });

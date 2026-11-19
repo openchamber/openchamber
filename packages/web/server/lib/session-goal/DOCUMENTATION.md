@@ -383,6 +383,48 @@ ordering used by create and scheduled goals.
 
 ## Decisions
 
+### Why objective content includes JSON values
+
+The HTTP route passes JSON `content` through to objective storage. Storage keeps
+the existing `String(content ?? '')` coercion, including numbers, booleans,
+arrays and objects, before trimming and clamping. Session-id validation runs
+before content coercion or filesystem access. The key guard also rejects
+non-string values received from JavaScript callers.
+
+### Why creation preserves unchecked objectives and warning causes
+
+Creation coerces its objective with `String(objective ?? '')` before fitting it.
+Warning causes retain arbitrary thrown values and the existing `message || cause`
+logging fallback. The persistence callback's return value is ignored, but its
+completion is awaited before the goal is returned. Small-model generation owns
+the string contract for distilled text and accepts the existing `sessionID` and
+omitted options.
+
+### Why the loop checks fields at their point of use
+
+OpenCode responses and events supply JSON; the metadata store supplies a loose
+object whose nested values still need checking. Invalid goal counters use the
+existing defaults. Message completion comparisons still coerce wire values as
+JavaScript numeric comparisons do, while token counts require finite numbers.
+OpenCode sends message pages newest first; the loop projects and reverses them
+before accounting. The event bridge translates `session.execution.interrupted` to a
+`session.idle` event with `aborted: true` before the loop sees it.
+
+An assistant's structured error starts with `name` from OpenCode's `type`;
+an explicit wire `name` can override it. A missing `trim` gives an empty name,
+a present non-callable `trim` fails the tick, and a callable `trim` runs with
+the original receiver. Its result stays unchecked until the loop compares it
+with known error names or turns it into a reason string.
+
+### Why objective routes use the shared HTTP contract
+
+The route registrar needs only three registration methods, session-id parameters,
+JSON request bodies and JSON responses. These types come from
+`../shared/http-contracts.js`. JSON object bodies supply `content`; primitive and array
+bodies supply no content, matching property access on parsed JSON. Error fields
+remain unknown because caught values do not guarantee a status code or message
+type; status coercion and the original message fallback remain at the boundary.
+
 ### Why quiet windows still require live checks and not elapsed-time assumptions
 
 Quiet windows coalesce status bursts and duplicate updates; they provide no

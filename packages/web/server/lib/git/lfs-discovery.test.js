@@ -164,6 +164,13 @@ describe.each([['checkout', discoverLfs], ['publication', resolveLfsPushConfig]]
     expect(() => read({ effectiveConfigOutput: configOutput([record, record]) })).toThrow('contains duplicate filter.lfs.required');
   });
 
+  it.each(['constructor', '__proto__'])('keeps inherited filter name %s rejected', (key) => {
+    expect(() => read({ effectiveConfigOutput: configOutput([[key, 'value']]) }))
+      .toThrow(expect.objectContaining({ code: 'UNSAFE_LFS_EXECUTABLE_CONFIG' }));
+    expect(() => read({ effectiveConfigOutput: configOutput([[key, 'value'], [key, 'value']]) }))
+      .toThrow(expect.objectContaining({ code: 'INVALID_LFS_DISCOVERY_INPUT' }));
+  });
+
   it.each([
     ['filter.lfs.clean\ngit-lfs clean -- %f', 'incomplete'],
     ['filter.lfs.clean\0', 'malformed'],

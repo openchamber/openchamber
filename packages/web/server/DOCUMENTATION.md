@@ -2,8 +2,8 @@
 
 ## Ownership
 
-`index.js` enables source maps before dynamically loading `runtime.js`. Node collects maps only for modules loaded after `setSourceMapsSupport` is called, which is why the runtime is a dynamic import; Bun handles maps itself and does not expose that API, hence the optional call. In a source checkout, the Node entry also registers source resolution before that import.
-`runtime.js` composes the HTTP server and feature runtimes for web, desktop and
+`index.js` enables source maps before dynamically loading `runtime.ts` (through its `.js` specifier). Node collects maps only for modules loaded after `setSourceMapsSupport` is called, which is why the runtime is a dynamic import; Bun handles maps itself and does not expose that API, hence the optional call. In a source checkout, the Node entry also registers source resolution before that import.
+`runtime.ts` composes the HTTP server and feature runtimes for web, desktop and
 mobile clients. Each feature owns its contract in `lib/<feature>/DOCUMENTATION.md`.
 This document covers composition, process-wide helpers, enterprise policy and
 server update ownership. VS Code runs its own host and shares only the helpers
@@ -169,6 +169,21 @@ combined checks and builds serially.
    parameters and state their actual domain types. Keep inferred return types
    when they already express the contract; name public result shapes shared
    by callers. Preserve the existing optional-versus-null contract.
+   Use `shared/http-contracts.js` for Express `Request`, `Response`,
+   `RequestHandler`, `Router` and `Application`. Its request body and query
+   fields remain unchecked until the route validates them. `shared/express.d.ts`
+   connects the installed Express factory to these structural contracts.
+   WebSocket constructors, frame data and events live in
+   `shared/websocket-contracts.js`, connected to `ws` by `shared/ws.d.ts`.
+   Import constructors from `ws` at runtime and contracts with `import type`.
+   Import these owner contracts rather than declaring another folder's copy.
+   `shared/object-guards.js` supplies record, boolean and string predicates,
+   also re-exported from the `shared/guards.js` entry. `isString` is true only
+   for primitive strings and narrows to `string`.
+   OpenCode's declaration-only boundary exposes markdown frontmatter as
+   `unknown` and optional activity-probe signals; the settings module's
+   exposes merged settings as unchecked records. The matching implementations
+   remain owned by those modules.
 4. Keep runtime validation at HTTP, file, environment and process-message
    boundaries. Parse external values before using them. Use a small type guard
    when a runtime check establishes a shape. Remove `typeof` branches that
@@ -182,6 +197,11 @@ combined checks and builds serially.
    weaken this folder's types.
 
 ### Mixed JavaScript and TypeScript
+
+Keep server and bin implementation imports inside `packages/web`, including
+`import type`; shared packages must supply built declarations rather than
+workspace sources. Both `type-check:server` and `build:server` inspect the
+compiler's file list and reject escaping implementation sources before emit.
 
 Before converting a folder, trace its importers through to process entrypoints.
 Node links static imports before executing any module body. Each owned
@@ -249,7 +269,14 @@ changed-file backlog. Both checks run through the normal package/root gate.
 TypeScript suppressions require a reason of at least 10 characters. External
 input guards with an explicit `value is DomainType` predicate may accept
 `unknown` and use `typeof`; unparsed helper parameters and internal `typeof`
-branches remain lint errors.
+   branches remain lint errors.
+   Exported input parsers in `lib/shared/*.ts` may also accept one `unknown`
+   parameter and declare a nullable union result. Both rules scope this exception
+   through `allowInParsers`; other folders and internal callbacks remain checked.
+The dictionary rule also admits an unknown-valued dictionary in a type
+predicate's result. A record predicate establishes the container only;
+each property still needs its own check. Ordinary dictionary parameters,
+returns and stored values remain subject to the rule.
 
 Bun, Vitest and the VS Code esbuild bundle resolve `.js` imports to converted
 `.ts` files. Node source consumers, including Electron development, preload
@@ -338,21 +365,17 @@ belong to the coordinator. A folder assignment does not authorize a dependency
 addition, a branch change, a commit, a push, or a wider refactor. The `git mv`
 rename in step 2 is the assignment's only authorized git write.
 
-### Dependency order
+### The conversion is closed
 
-Run `bun run --cwd packages/web conversion:waves` to regenerate the order.
-Counts are direct implementation files, tests and declarations, so parent and
-child assignments do not overlap. Runtime dependencies include literal static
-imports, re-exports, dynamic imports and `require`, excluding test imports.
-The gatekeeper's `.cjs` program is a copied runtime asset and stays outside
-the `.js`-to-`.ts` assignments.
-The first waves contain folders with no dependency on another unconverted
-folder. Completed TypeScript folders already satisfy their dependents.
-
-The remaining groups are strongly connected components in dependency-first
-order. A multi-folder group is a real cycle at folder granularity and has no
-leaf-first ordering. Convert its folders as one coordinated wave using the
-mixed-JavaScript check, then validate the combined diff before advancing.
+Every implementation module under `server` and `bin` is TypeScript, and
+`type-check:server` fails on a new `.js` one. Six files stay JavaScript because
+Node, git or a child process runs each by file name, without a loader:
+`bin/cli.js`, `server/index.js`, `lib/git/credential-helper.js`,
+`lib/git/repository-credential-helper.js`, `lib/git/ssh-wrapper.js` and
+`lib/dictation/local/worker-process.js`. They hold no logic of their own; each
+imports its typed runtime. The list is `JAVASCRIPT_ENTRIES` in
+`packages/web/scripts/check-server-types.mjs`. Tests, fixtures and the
+gatekeeper's `.cjs` program are outside the rule.
 
 ## Decisions
 
@@ -380,6 +403,9 @@ Accept, so explicit SSE paths also bypass compression to keep events streaming.
 
 UI client bearer tokens authenticate this server. Forwarding them to managed
 OpenCode replaces its own authentication and turns valid upstream calls into 401s.
+Browser fetch-metadata headers also stop at this hop. OpenCode 2.2.6 rejects
+cross-site fetch metadata, while packaged clients terminate that request at
+OpenChamber.
 
 ### Why HTTP defaults account for proxies and not only direct browser traffic
 

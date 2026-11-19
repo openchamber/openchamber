@@ -19,11 +19,17 @@ const DIRECTORY = '/repo';
 
 const temporaryDirectories = [];
 const runtimes = [];
+const observers = new Set();
+const notify = () => {
+  for (const observer of observers) observer();
+};
 
 afterEach(async () => {
   const stopping = runtimes.splice(0);
   for (const runtime of stopping) runtime.stop();
   await Promise.all(stopping.map((runtime) => runtime.flush()));
+  vi.useRealTimers();
+  observers.clear();
   await Promise.all(temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
@@ -128,6 +134,12 @@ const createOpenCode = () => {
     runTurn(sessionID);
     return json({ data: { id: body.id } });
   });
+  const handleRequest = fetchImpl.getMockImplementation();
+  fetchImpl.mockImplementation(async (...args) => {
+    const response = await handleRequest(...args);
+    notify();
+    return response;
+  });
   return { state, fetchImpl };
 };
 
@@ -143,9 +155,9 @@ const createRuntime = async ({ dataDir, openCode = createOpenCode(), retryDelayM
     },
     buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
     getOpenCodeAuthHeaders: () => ({}),
-    broadcastUiEvent: (event) => broadcasts.push(event),
-    onRunSettled: (sessionID) => settled.push(sessionID),
-    onRunEnded: (run) => ended.push(run),
+    broadcastUiEvent: (event) => { broadcasts.push(event); notify(); },
+    onRunSettled: (sessionID) => { settled.push(sessionID); notify(); },
+    onRunEnded: (run) => { ended.push(run); notify(); },
     routeSend,
     dataDir: dataDir ?? await makeDataDir(),
     fetchImpl: openCode.fetchImpl,
@@ -181,14 +193,16 @@ const startInput = (extra = {}) => ({
   ...extra,
 });
 
-const until = async (check, timeoutMs = 2_000) => {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (check()) return true;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  return check();
-};
+// Observe runtime callbacks and OpenCode responses, including ones already received.
+const until = (check) => new Promise((resolve) => {
+  const observe = () => {
+    if (!check()) return;
+    observers.delete(observe);
+    resolve(true);
+  };
+  observers.add(observe);
+  observe();
+});
 
 const runOf = (runtime) => runtime.snapshot().runs.find((run) => run.originalSessionID === ORIGINAL) ?? null;
 
@@ -270,21 +284,25 @@ describe('createAutoReviewRuntime', () => {
     runtime.start();
     await runtime.startRun(startInput({ handoff: undefined }));
 
-    expect(await until(() => runOf(runtime)?.status === 'limit', 5_000)).toBe(true);
+    expect(await until(() => runOf(runtime)?.status === 'limit')).toBe(true);
     expect(runOf(runtime).round).toBe(MAX_ROUNDS);
     expect(openCode.state.prompts.filter((prompt) => prompt.sessionID === REVIEW)).toHaveLength(MAX_ROUNDS + 1);
   });
 
   it('waits for a running session before it sends, so nothing steers into a live turn', async () => {
+    vi.useFakeTimers();
     const { runtime, openCode, emit } = await createRuntime();
     openCode.state.active = { [ORIGINAL]: { type: 'running' } };
     runtime.start();
     await runtime.startRun(startInput());
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    await vi.advanceTimersByTimeAsync(0);
+    await runtime.flush();
     expect(openCode.state.prompts).toEqual([]);
 
     openCode.state.active = {};
     emit({ type: 'session.status', properties: { sessionID: ORIGINAL, status: { type: 'idle' } } });
+    await vi.advanceTimersByTimeAsync(0);
+    await runtime.flush();
     expect(await until(() => openCode.state.prompts.length === 1)).toBe(true);
   });
 
@@ -298,7 +316,7 @@ describe('createAutoReviewRuntime', () => {
     expect(await until(() => settled.length > 0)).toBe(true);
     expect(settled).toEqual([ORIGINAL]);
     expect(openCode.state.prompts).toHaveLength(1);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await runtime.flush();
     expect(ended).toEqual([]);
   });
 
@@ -398,6 +416,7 @@ describe('createAutoReviewRuntime', () => {
       await runtime.startRun(startInput({ handoff: { text: 'Write a handoff.', instructions: '  ' } }));
 
       expect(await until(() => openCode.state.prompts.length >= 1)).toBe(true);
+      await runtime.flush();
       const reads = openCode.fetchImpl.mock.calls.filter(([url]) => new URL(url).pathname === `/api/session/${ORIGINAL}`);
       expect(reads).toEqual([]);
     });
@@ -415,21 +434,36 @@ describe('createAutoReviewRuntime', () => {
   });
 
   it('routes a session on Auto before each prompt, and a routing failure sends nothing', async () => {
+    vi.useFakeTimers();
+    const retryDelayMs = 20;
     const routed = [];
     let failRouting = true;
+    let routingFailed = false;
     const routeSend = async (send) => {
-      if (failRouting) throw new Error('no fallback model');
+      if (failRouting) {
+        routingFailed = true;
+        throw new Error('no fallback model');
+      }
       routed.push(send);
     };
-    const { runtime, openCode } = await createRuntime({ routeSend, retryDelayMs: () => 20 });
+    const { runtime, openCode } = await createRuntime({ routeSend, retryDelayMs: () => retryDelayMs });
     openCode.state.replies[ORIGINAL].push('The handoff.');
     runtime.start();
     await runtime.startRun(startInput());
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await vi.advanceTimersByTimeAsync(0);
+    await runtime.flush();
+    expect(routingFailed).toBe(true);
     expect(openCode.state.prompts).toEqual([]);
     expect(openCode.state.synthetic).toEqual([]);
 
     failRouting = false;
+    await vi.advanceTimersByTimeAsync(retryDelayMs);
+    await runtime.flush();
+    // Read the completed handoff, then deliver the review on its immediate timer.
+    await vi.advanceTimersByTimeAsync(0);
+    await runtime.flush();
+    await vi.advanceTimersByTimeAsync(0);
+    await runtime.flush();
     expect(await until(() => openCode.state.prompts.length === 2)).toBe(true);
     expect(routed).toEqual([
       { sessionId: ORIGINAL, directory: DIRECTORY, text: 'Write a handoff.' },
@@ -454,12 +488,20 @@ describe('createAutoReviewRuntime', () => {
     expect(await until(() => openCode.state.prompts.length === 1)).toBe(true);
 
     runtime.stop();
-    const flushed = runtime.flush();
-    // The prompt is answered after the flush began; the send then saves its run.
-    setTimeout(answer, 5);
-    await flushed;
+    let flushReturned = false;
+    const flushed = runtime.flush().then(() => { flushReturned = true; });
+    try {
+      // While the response is held, the saved send must remain pending and
+      // flush must not return, even after a separate disk read completes.
+      const stored = JSON.parse(await fs.readFile(path.join(dataDir, 'auto-review.json'), 'utf8'));
+      expect(stored.runs[0].send.text).toBe('Write a handoff.');
+      expect(flushReturned).toBe(false);
+    } finally {
+      answer();
+      await flushed;
+    }
     await fs.rm(dataDir, { recursive: true, force: true });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await runtime.flush();
     await expect(fs.stat(dataDir)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 

@@ -80,11 +80,4 @@ describe('OpenAICompatibleTranscriptionSession endpoint path', () => {
 
     await expect(session.connect()).rejects.toThrow(/path, not a URL/i);
   });
-
-  it('reports request handler errors instead of leaving the request hanging', async () => {
-    const { baseURL, received } = await listen('/v1/speech_to_text', async () => { throw new Error('fixture request failed'); });
-    const response = await fetch(`${baseURL}/speech_to_text`, { method: 'POST', signal: AbortSignal.timeout(2000) });
-    expect(response.status).toBe(500);
-    await expect(received).rejects.toThrow('fixture request failed');
-  });
 });

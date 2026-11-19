@@ -26,7 +26,7 @@ export const turnsToHistory = (turns: HistoryTurn[], limits = HISTORY_LIMITS) =>
   return history;
 };
 
-const answeredBy = (message: { providerID?: string; modelID?: string; completed: number | null } | null) => (message?.providerID && message.modelID && message.completed
+const answeredBy = (message: { providerID?: string | undefined; modelID?: string | undefined; completed: number | null } | null) => (message?.providerID && message.modelID && message.completed
   ? { providerID: message.providerID, modelID: message.modelID, completed: message.completed }
   : null);
 

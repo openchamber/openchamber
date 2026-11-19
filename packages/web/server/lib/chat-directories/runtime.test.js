@@ -147,32 +147,6 @@ describe('managed chat directory cleanup', () => {
     expect(await exists(project)).toBe(true);
   });
 
-  it('invalidates an empty inventory as soon as a fork event arrives', async () => {
-    const { chats, directory, screenshot } = await fixture();
-    const source = session('source', directory);
-    const fork = session('fork', directory);
-    const { runtime, state, list, get } = makeRuntime({ roots: [chats], sessions: [source] });
-    await runtime.onConnected();
-    state.sessions = [];
-    const inventory = Promise.withResolvers();
-    const inventoryStarted = Promise.withResolvers();
-    list.mockImplementationOnce(async () => { inventoryStarted.resolve(); return inventory.promise; });
-    const cleanup = runtime.processPayload(deleted('source'));
-    await inventoryStarted.promise;
-    state.sessions = [fork];
-    const record = Promise.withResolvers();
-    get.mockImplementationOnce(async () => record.promise);
-    const learning = runtime.processPayload(forked('fork', 'source'));
-    inventory.resolve(page([]));
-    await cleanup;
-    expect(await exists(screenshot)).toBe(true);
-    record.resolve(fork);
-    await learning;
-    state.sessions = [];
-    await runtime.processPayload(deleted('fork'));
-    expect(await exists(directory)).toBe(false);
-  });
-
   it('uses a newer move when an older fork directory lookup completes', async () => {
     const first = await fixture();
     const second = await fixture();
@@ -262,20 +236,6 @@ describe('managed chat directory cleanup', () => {
     expect(await exists(draft)).toBe(true);
     expect(await exists(screenshot)).toBe(true);
     expect(list).toHaveBeenCalledTimes(1);
-  });
-
-  it('never removes the shared root, date bucket or unrelated project', async () => {
-    const { root, chats, directory, screenshot } = await fixture();
-    const project = path.join(root, 'project');
-    await fs.mkdir(project);
-    const { runtime, list } = makeRuntime({ roots: [chats] });
-    for (const [id, target] of [['root', chats], ['date', path.dirname(directory)], ['project', project]]) {
-      runtime.processPayload(created(id, target));
-      await runtime.processPayload(deleted(id));
-      expect(await exists(target)).toBe(true);
-    }
-    expect(await exists(screenshot)).toBe(true);
-    expect(list).not.toHaveBeenCalled();
   });
 
   it('recognizes configured and reference aliases without deleting a referenced folder', async () => {

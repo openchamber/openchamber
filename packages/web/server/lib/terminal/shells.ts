@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import type { statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import type * as fsPromises from 'node:fs/promises';
 import type * as nodePath from 'node:path';
 
@@ -8,14 +8,14 @@ export type TerminalShellPreference = 'auto' | TerminalShellId;
 export type TerminalLaunchMode = 'interactive' | 'command';
 
 export interface TerminalShellLaunchOptions {
-  mode?: TerminalLaunchMode;
-  command?: string | null;
+  mode?: TerminalLaunchMode | undefined;
+  command?: string | null | undefined;
   loginShell?: boolean;
   platform?: NodeJS.Platform;
 }
 
 export interface TerminalShellResolverOptions {
-  fs: { promises: Pick<typeof fsPromises, 'readFile'>; statSync: typeof statSync };
+  fs: { promises: Pick<typeof fsPromises, 'readFile'>; statSync?: typeof statSync };
   path: Pick<typeof nodePath, 'join'>;
   searchPathFor: (name: string, searchPath: string) => string | null;
   isExecutable: (candidate: string) => boolean;
@@ -93,7 +93,7 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
 }), buildAugmentedPath = () => env.PATH || '', platform = process.platform, env = process.env }: TerminalShellResolverOptions) => {
   const isPowerShellAlias = async (file: string) => {
     try {
-      fs.statSync(file);
+      (fs.statSync ?? statSync)(file);
       return false;
     } catch (error) {
       if (!(error instanceof Error && 'code' in error && error.code === 'EACCES')) return false;

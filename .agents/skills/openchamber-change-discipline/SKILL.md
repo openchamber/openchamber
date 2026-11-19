@@ -125,6 +125,8 @@ The panel's browser actions run in the app the agent itself works from, so they 
 
 ## Refactoring under the behavior net
 
+The net is the gate at handoff, run once on the finished change: when the work is about to be committed, pushed or opened as a pull request, or handed to the maintainer to test. While building and trying things out, look at the result yourself in a dev instance (*Where to run it*) and run focused tests; a net run in the middle of the work spends minutes of a shared machine on code that is about to change again. A refactor is the exception in one place only: step 2 below runs the selection before the first edit.
+
 A split, move or rewrite of a large file keeps behavior identical. `bun run verify` proves it for the features its map covers: it starts its own isolated instance, plays the user scenarios and exits non-zero on a red one. For a normal change the command is `bun run verify -- --changed`: it runs only the scenarios whose sources the change's files are, or import, and prints which file led to which feature and which changed files no scenario covers. The full run (about 25 minutes) is for merging a large batch and before a release.
 
 1. See what your files select: `bun run verify -- --changed --list` once the first edit is in, or the zones by name before it (`bun run verify -- --list composer`). A file reported as covered by no scenario has no net yet.
@@ -132,9 +134,15 @@ A split, move or rewrite of a large file keeps behavior identical. `bun run veri
 3. Give each behavior your change touches and no scenario plays a scenario now, green on the old code (format in `scripts/verify/DOCUMENTATION.md`).
 4. After the change, run `bun run verify -- --changed`. Done means the selected scenarios green, and the files it lists as uncovered named in your report. A red one is a behavior change, so fix the code. Edit a scenario only when the markup it points at moved, and then the selector in `vocabulary.json`, with the step's meaning unchanged. A split or a rename of a listed source updates the feature's `sources` in the same change; the run refuses a source that does not exist.
 
-While iterating, `--keep` holds the stand and `--attach <run>/stand.json` reruns against it in seconds. A run is one heavy job (a dev server and Chrome). Runs in separate worktrees do not disturb each other; how many fit at once depends on the machine.
+While iterating, `--keep` holds the stand and `--attach <run>/stand.json` reruns against it in seconds. A run is one heavy job (a dev server and Chrome). Runs in separate worktrees do not disturb each other, and a machine runs two at once: a third waits for a free slot by itself and says so, so never work around the wait. Start every net run as a background command and carry on or end the turn; its result arrives when it finishes. A run prints nothing useful for minutes even without a queue, so a foreground call only blocks the session.
 
 ## Test Design
+
+A new test earns its place before it is written. Settle three things for yourself first (this is a decision you make, not something to report): the behavior it protects, in words a user or a caller would use; the existing test that owns that behavior, if one does; and one credible way the code could be wrong that this test would catch and the existing tests would not. When an owner exists, extend its case instead of adding a file or a sibling case. When no such failure can be named, the change needs no new test: adding one because it is cheap leaves the next agent a test to rewrite, not a protection.
+
+A useful test fails when the behavior is wrong and stays green through an equivalent rewrite of the code. A test that fails whenever the code is merely different (it replaces an internal module with a mock, asserts which helper was called, or reads source as text) mirrors the implementation; what it meant to protect belongs in a lint rule (a rule about how code is built), a type (the shape of data) or a test of the result the user sees. Substitutes stop at the edge of the system: a provider, the network, the clock, a child process. The project's own modules run for real.
+
+When a change makes an existing assertion fail, decide which of the two happened before touching the test: the behavior changed on purpose, and the commit body says which behavior and why; or the code is wrong, and the code is fixed. In a refactor the behavior does not change, so an existing assertion that needs editing there was tied to structure: rewrite it to check the result, in the same change when that is small.
 
 - Prefer observable contracts, state transitions, failure handling, rollback, and operation counts.
 - Test private helpers through public/module behavior when that captures the risk clearly.

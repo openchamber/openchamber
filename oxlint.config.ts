@@ -26,8 +26,13 @@ export default defineConfig({
   ],
   overrides: [
     {
+      files: ["packages/web/server/lib/spaces/gatekeeper-program.cjs"],
+      rules: { "openchamber/gatekeeper-standard-library": "error" },
+    },
+    {
       files: TYPESCRIPT_FILES,
       rules: {
+        "openchamber/no-valueof-type-escape": "error",
         "for-direction": "error",
         "no-async-promise-executor": "error",
         "no-case-declarations": "error",
@@ -96,6 +101,8 @@ export default defineConfig({
         "react-hooks/rules-of-hooks": "error",
         "react-hooks/exhaustive-deps": "warn",
         "react/only-export-components": ["error", { allowConstantExport: true }],
+        "openchamber/no-virtualizer-return-from-hooks": "error",
+        "openchamber/no-session-list-scan-in-selectors": "error",
       },
     },
     {

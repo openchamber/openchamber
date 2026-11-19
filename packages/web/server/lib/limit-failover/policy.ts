@@ -10,6 +10,11 @@ export interface LimitFailoverSettings {
   accountSwitchProviders?: string[];
 }
 
+export interface LimitFailoverConfigurationInput {
+  fallbackModel?: unknown;
+  accountSwitchProviders?: unknown;
+}
+
 export interface FailoverModel {
   providerID: string;
   id: string;
@@ -88,12 +93,12 @@ export const classifyLimitFailure = (report: LimitReport, now: number): LimitFai
   return { resetAt: now + (proposedDelay >= LONG_WAIT_MS ? proposedDelay : DEFAULT_EXHAUSTION_MS) };
 };
 
-export const isLimitFailoverConfigured = (settings: LimitFailoverSettings | null | undefined) => (
+export const isLimitFailoverConfigured = (settings: LimitFailoverConfigurationInput | null | undefined) => (
   parseModelSetting(settings?.fallbackModel) !== null
   || (Array.isArray(settings?.accountSwitchProviders) && settings.accountSwitchProviders.length > 0)
 );
 
-export const parseModelSetting = (value: string | null | undefined, variantValue?: string | null): FailoverModel | null => {
+export const parseModelSetting = (value: LimitFailoverConfigurationInput['fallbackModel'], variantValue?: string | null): FailoverModel | null => {
   const text = asNonEmptyString(value);
   if (!text) return null;
   const slash = text.indexOf('/');
@@ -107,7 +112,7 @@ const credentialSchema = z
   .object({ id: z.string().min(1), label: z.string().optional().catch(undefined) })
   .transform((credential) => ({ id: credential.id, label: credential.label || credential.id }));
 
-const reportSchema = z.object({
+export const reportSchema = z.object({
   sessionID: z.string().min(1),
   providerID: z.string().min(1),
   modelID: z.string().min(1),
@@ -135,8 +140,3 @@ const reportSchema = z.object({
 
 export type LimitReport = z.output<typeof reportSchema>;
 export type LimitReportInput = z.input<typeof reportSchema>;
-
-export const parseLimitReport = (body: LimitReportInput): LimitReport | null => {
-  const report = reportSchema.safeParse(body);
-  return report.success ? report.data : null;
-};

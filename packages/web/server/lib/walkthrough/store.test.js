@@ -128,6 +128,21 @@ describe('cache entries', () => {
     expect(readCachedWalkthrough('0'.repeat(64))).toBeNull();
   });
 
+  it('keeps the existing shallow acceptance of cached chapters and pointer fields', () => {
+    const key = buildCacheKey(baseKeyInput);
+    writeCachedWalkthrough(key, {
+      walkthrough: { chapters: [null, 3, { stops: 'unchecked' }] },
+      model: 17,
+    });
+    expect(readCachedWalkthrough(key)).toMatchObject({
+      walkthrough: { chapters: [null, 3, { stops: 'unchecked' }] },
+      model: 17,
+    });
+    fs.mkdirSync(__testing.POINTERS_DIR, { recursive: true });
+    writePointer('/repo', 'working-tree:all', { cacheKey: 'loose', repoRoot: 17 });
+    expect(readPointer('/repo', 'working-tree:all')).toMatchObject({ cacheKey: 'loose', repoRoot: 17 });
+  });
+
   it('treats a corrupt entry as a miss rather than throwing', () => {
     const key = buildCacheKey(baseKeyInput);
     writeCachedWalkthrough(key, entry(key));

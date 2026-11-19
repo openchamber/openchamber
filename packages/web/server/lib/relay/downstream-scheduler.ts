@@ -9,15 +9,15 @@ const MAX_QUEUED_FRAMES = 4096;
 const MAX_OUTSTANDING_FRAMES = 4096;
 const QUEUE_DELAY_TARGET_MS = 100;
 
-interface QueuedFrame { frame: Uint8Array; resolve: () => void; streamId: number }
-interface DownstreamSchedulerOptions {
-  sendBatch: (frames: Uint8Array[]) => Promise<void>;
+interface QueuedFrame<BufferType extends ArrayBufferLike> { frame: Uint8Array<BufferType>; resolve: () => void; streamId: number }
+interface DownstreamSchedulerOptions<BufferType extends ArrayBufferLike> {
+  sendBatch: (frames: Uint8Array<BufferType>[]) => Promise<void>;
   onError: (cause: unknown) => void;
   maxBatchFrames?: number;
   now?: () => number;
 }
-export const createDownstreamScheduler = ({ sendBatch, onError, maxBatchFrames = 32, now = () => performance.now() }: DownstreamSchedulerOptions) => {
-  const queues = new Map<number, QueuedFrame[]>();
+export const createDownstreamScheduler = <BufferType extends ArrayBufferLike = ArrayBufferLike>({ sendBatch, onError, maxBatchFrames = 32, now = () => performance.now() }: DownstreamSchedulerOptions<BufferType>) => {
+  const queues = new Map<number, QueuedFrame<BufferType>[]>();
   const outstanding: { end: number; at: number }[] = [];
   let queuedBytes = 0;
   let queuedFrames = 0;
@@ -29,7 +29,7 @@ export const createDownstreamScheduler = ({ sendBatch, onError, maxBatchFrames =
   let windowLimited = false;
   let draining = false;
   let closed = false;
-  let sending: QueuedFrame[] = [];
+  let sending: QueuedFrame<BufferType>[] = [];
 
   const close = () => {
     closed = true;
@@ -52,11 +52,11 @@ export const createDownstreamScheduler = ({ sendBatch, onError, maxBatchFrames =
     draining = true;
     try {
       while (!closed) {
-        const selected: QueuedFrame[] = [];
+        const selected: QueuedFrame<BufferType>[] = [];
         let batchBytes = 1;
         while (selected.length < maxBatchFrames) {
           const priority = queues.get(0);
-          const next: [number, QueuedFrame[]] | undefined = priority ? [0, priority] : queues.entries().next().value;
+          const next: [number, QueuedFrame<BufferType>[]] | undefined = priority ? [0, priority] : queues.entries().next().value;
           if (!next) break;
           const [streamId, queue] = next;
           const entry = queue[0];
@@ -96,7 +96,7 @@ export const createDownstreamScheduler = ({ sendBatch, onError, maxBatchFrames =
   };
 
   return {
-    send(frame: Uint8Array) {
+    send(frame: Uint8Array<BufferType>) {
       if (closed) return Promise.resolve();
       const { streamId } = decodeTunnelFrame(frame);
       if (queuedBytes + frame.length > MAX_QUEUED_BYTES || queuedFrames >= MAX_QUEUED_FRAMES) {

@@ -64,41 +64,41 @@ describe('createEventPipeline — system resume reconnect', () => {
       },
     };
 
-    const recovered = new Promise((resolve) => {
-      const { cleanup } = createEventPipeline({
-        sdk,
-        transport: 'sse',
-        heartbeatTimeoutMs: 60_000,
-        reconnectDelayMs: 60_000,
-        onEvent: () => {},
-        onDisconnect: (reason) => {
-          disconnectReasons.push(reason);
-        },
-        onReconnect: () => {
-          reconnectCount += 1;
-          // onReconnect fires on the initial connect too (count=1),
-          // so wait for the second reconnect (count=2) triggered by resume.
-          if (reconnectCount === 2) {
-            cleanup();
-            resolve();
-          }
-        },
-      });
-
-      // Wait for first SSE attempt to start and deliver the event, then
-      // simulate OS resume by invoking the registered handler directly.
-      setTimeout(() => {
-        const handler = winListeners['openchamber:system-resume'];
-        if (handler) handler();
-      }, 80);
+    const connected = Promise.withResolvers();
+    const recovered = Promise.withResolvers();
+    const { cleanup } = createEventPipeline({
+      sdk,
+      transport: 'sse',
+      heartbeatTimeoutMs: 60_000,
+      reconnectDelayMs: 60_000,
+      onEvent: () => {},
+      onDisconnect: (reason) => {
+        disconnectReasons.push(reason);
+      },
+      onReconnect: () => {
+        reconnectCount += 1;
+        // onReconnect fires on the initial connect too (count=1),
+        // so wait for the second reconnect (count=2) triggered by resume.
+        if (reconnectCount === 1) connected.resolve();
+        if (reconnectCount === 2) {
+          recovered.resolve();
+        }
+      },
     });
 
-    await recovered;
-    releaseFirstStream();
+    try {
+      await connected.promise;
+      const handler = winListeners['openchamber:system-resume'];
+      if (handler) handler();
+      await recovered.promise;
 
-    // Should have made two SDK calls: initial connect + reconnect after resume.
-    expect(eventCalls.length).toBe(2);
-    // Disconnect reason should include system_resume.
-    expect(disconnectReasons.some((r) => r.includes('system_resume'))).toBe(true);
+      // Should have made two SDK calls: initial connect + reconnect after resume.
+      expect(eventCalls.length).toBe(2);
+      // Disconnect reason should include system_resume.
+      expect(disconnectReasons.some((r) => r.includes('system_resume'))).toBe(true);
+    } finally {
+      cleanup();
+      releaseFirstStream();
+    }
   });
 });

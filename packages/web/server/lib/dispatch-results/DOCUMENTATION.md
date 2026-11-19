@@ -35,7 +35,7 @@ terminal has no session to deliver into.
 
 Wiring: created in `server/index.js` after the message queue, handed to the
 control service as `dispatchResults`, stopped by
-`opencode/shutdown-runtime.js`. The control service registers an entry after a
+`server-frame/shutdown-runtime.js`. The control service registers an entry after a
 dispatch whose prompt landed (`promptDispatched: true`); the calling session
 comes from the agent tool (`contextSessionId`).
 

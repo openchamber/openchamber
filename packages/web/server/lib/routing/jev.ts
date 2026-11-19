@@ -10,7 +10,7 @@ import {
 import type { ClassifierEndpoint } from './classifier.js';
 import type { HistoryEntry } from './history.js';
 import type { RoutingCategory } from './store.js';
-import type { PermissionRequest } from '@opencode/client';
+import type { JsonValue } from '../shared/json-values.js';
 
 export interface JevQuestion {
   type: 'choice' | 'noul';
@@ -21,7 +21,13 @@ export interface JevRequest {
   state: unknown;
   questions: Record<string, JevQuestion>;
 }
-export type RoutingPermission = Pick<PermissionRequest, 'id' | 'sessionID' | 'action' | 'resources' | 'metadata'>;
+export interface RoutingPermission {
+  id?: JsonValue | undefined;
+  sessionID?: JsonValue | undefined;
+  action?: JsonValue | undefined;
+  resources?: JsonValue | readonly JsonValue[] | undefined;
+  metadata?: JsonValue | undefined;
+}
 interface JevClientOptions {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;

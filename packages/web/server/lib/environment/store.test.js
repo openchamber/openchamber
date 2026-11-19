@@ -100,4 +100,13 @@ describe('environment store', () => {
     expect(fresh.userVariables()).toEqual({ A: '1', C: '3' });
     expect(fresh.projectEntry('path_p').variables).toEqual({ B: '2' });
   });
+
+  it('reads only own project entries for names inherited from Object', async () => {
+    const store = createEnvironmentStore({ filePath });
+    await store.updateProject('path_p', { variables: { A: '1' } });
+    expect(store.projectEntry('constructor')).toEqual({ variables: {}, command: null });
+    expect(store.describeProject('toString')).toEqual({ names: [], command: null });
+    await store.updateProject('constructor', { variables: { OWN: 'yes' } });
+    expect(store.projectEntry('constructor')).toEqual({ variables: { OWN: 'yes' }, command: null });
+  });
 });

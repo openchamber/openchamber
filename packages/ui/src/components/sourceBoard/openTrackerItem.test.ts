@@ -1,13 +1,92 @@
 import { describe, expect, test } from 'bun:test';
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { Window } from 'happy-dom';
+import { createWebAPIs } from '../../../../web/src/api/index';
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import { useTrackerRegistry } from '@/lib/trackers/registry';
+import { useTrackerAuthStore } from '@/stores/useTrackerAuthStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useSourceBoardStore } from '@/stores/useSourceBoardStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
 import { createRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { acmeTrackerDescriptor, linearLikeTrackerDescriptor } from '@/lib/trackers/descriptor.fixture';
 import { createTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
-import { isSameRepositoryItemLink, trackerItemLabel, trackerTargetOfUrl } from './openTrackerItem';
+import { isSameRepositoryItemLink, trackerItemLabel, trackerTargetOfUrl, useOpenTrackerItem } from './openTrackerItem';
 
 const urls = createRepositoryUrlMatcher([githubLikeDescriptor(), gitlabLikeDescriptor()], []);
 const trackers = createTrackerUrlMatcher([linearLikeTrackerDescriptor()]);
 const noTrackers = createTrackerUrlMatcher([]);
+
+test('Linear links open the board only with an available connected integration', async () => {
+  const browser = new Window({ url: 'http://localhost' });
+  const descriptors = new Map<string, PropertyDescriptor | undefined>();
+  for (const [key, value] of Object.entries({
+    window: browser, document: browser.document, navigator: browser.navigator,
+    HTMLElement: browser.HTMLElement, Element: browser.Element, IS_REACT_ACT_ENVIRONMENT: true,
+  })) {
+    descriptors.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { value, configurable: true });
+  }
+  const originals = {
+    registry: useTrackerRegistry.getState(), auth: useTrackerAuthStore.getState(),
+    directory: useDirectoryStore.getState(), board: useSourceBoardStore.getState(),
+    ui: useUIStore.getState(), session: useSessionUIStore.getState(),
+  };
+  const external: string[] = [];
+  browser.open = (url) => { external.push(String(url)); return null; };
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const url = 'https://linear.app/openchamber/issue/OPE-282/some-title';
+  function Link() {
+    const open = useOpenTrackerItem();
+    return React.createElement('button', { onClick: () => open(url, '/repo') }, 'Open issue');
+  }
+  const apis = createWebAPIs();
+  try {
+    const linear = linearLikeTrackerDescriptor();
+    useTrackerRegistry.setState({ ordered: [linear], byId: new Map([[linear.id, linear]]) });
+    useDirectoryStore.setState({ currentDirectory: '' });
+    useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...originals.session.newSessionDraft, open: false } });
+    for (const [available, connected] of [[true, true], [true, false], [false, true]] as const) {
+      external.length = 0;
+      useTrackerAuthStore.getState().setStatus('linear', connected ? {
+        connected: true, account: { id: 'account', name: 'Test', current: true },
+      } : { connected: false });
+      useSourceBoardStore.getState().clearTrackerFocus();
+      useUIStore.getState().setSourceBoardOpen(false);
+      await act(async () => root.render(React.createElement(RuntimeAPIContext.Provider, {
+        value: available ? apis : { ...apis, trackers: undefined },
+      }, React.createElement(Link))));
+      await act(async () => host.querySelector('button')?.click());
+      if (available && connected) {
+        expect(external).toEqual([]);
+        expect(useSourceBoardStore.getState().trackerFocus).toEqual({ provider: 'linear', identifier: 'OPE-282' });
+        expect(useUIStore.getState().isSourceBoardOpen).toBe(true);
+      } else {
+        expect(external).toEqual([url]);
+        expect(useSourceBoardStore.getState().trackerFocus).toBeNull();
+        expect(useUIStore.getState().isSourceBoardOpen).toBe(false);
+      }
+    }
+  } finally {
+    await act(async () => root.unmount());
+    useTrackerRegistry.setState(originals.registry, true);
+    useTrackerAuthStore.setState(originals.auth, true);
+    useDirectoryStore.setState(originals.directory, true);
+    useSourceBoardStore.setState(originals.board, true);
+    useUIStore.setState(originals.ui, true);
+    useSessionUIStore.setState(originals.session, true);
+    await browser.happyDOM.close();
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+  }
+});
 
 describe('trackerTargetOfUrl', () => {
   test('names what a link opens as', () => {

@@ -13,7 +13,7 @@ model. Two settings drive it, both off by default:
   shown when the model has levels; cleared when the model changes).
 
 The module owns the managed OpenCode plugin that reports limit failures
-(`runtime.js`, `PLUGIN_SOURCE`), the decision (`decide`), and the
+(`runtime.ts`, `PLUGIN_SOURCE`), the decision (`decide`), and the
 `openchamber:limit-failover` event the clients turn into a toast
 (`packages/ui/src/hooks/useLimitFailoverNotices.ts`). The managed config layer
 (`../opencode/managed-config-file.js`) lists the plugin; the plugin reaches the
@@ -84,12 +84,19 @@ accounts first, then moved to the fallback.
 
 ## Decisions
 
-### Why the runtime remains JavaScript
+### Runtime conversion contracts
 
-The web package has no Express declarations for the route registration and
-authorization request boundary. The policy converts independently; the runtime
-stays JavaScript until the owning package supplies those declarations, without
-adding a local substitute for Express.
+`createLimitFailoverRuntime` and `registerRoutes` use the request, application
+and handler types from `../shared/http-contracts.js`. The shared Express
+declaration connects `express.json` to those contracts. Authorization still
+checks the request at runtime. The route parses its unchecked request body with
+the policy's exported Zod schema; only its result supplies the decision's
+report type. The settings reader can return unchecked stored fields, so the
+runtime keeps the array check and narrows string selections before calling the
+model parser. Other selection values still produce no model or variant.
+Ticket announcements and decision results use the
+runtime's exported contracts. The serialized queue holds either a decision or
+the `undefined` returned by its rejection handler.
 
 ### Why the generated plugin has no imports and not shared server dependencies
 
@@ -108,7 +115,7 @@ plugin stays a reporter that executes the answer.
 With both options off every limit error would cost the plugin three OpenCode
 reads and a round trip to the server, only to hear `none`. The managed config
 lists the plugin only while `isLimitFailoverConfigured` holds, and both
-settings are in `MANAGED_PLUGIN_SETTINGS_KEYS` (`../opencode/settings-runtime.js`),
+settings are in `MANAGED_PLUGIN_SETTINGS_KEYS` (`../settings/settings-runtime.js`),
 so turning one on rewrites the watched config and OpenCode loads the plugin
 without a restart (checked live on 2.0.32). Installs where the user's own
 environment sets `OPENCODE_CONFIG` need a restart, like the agent tools.

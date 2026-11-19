@@ -312,6 +312,22 @@ describe('OpenCode env runtime', () => {
     }
   });
 
+  it.each([
+    '/missing/OpenChamber.app/Contents/Resources/opencode-cli/opencode',
+    'C:\\missing\\OpenChamber\\resources\\opencode-cli\\opencode.exe',
+    '/missing/OpenChamber/resources/opencode-cli/',
+    '"/missing/OpenChamber Canary.app/Contents/Resources/opencode-cli/opencode"',
+  ])('treats a saved path to the CLI older desktop builds shipped as no setting: %s', async (retired) => {
+    const { runtime, state } = createRuntime({ opencodeBinary: retired });
+    await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).resolves.toBeNull();
+    expect(state.resolvedOpencodeBinarySource).toBeNull();
+  });
+
+  it('still reports a missing CLI under a folder that only resembles the old desktop layout', async () => {
+    const { runtime } = createRuntime({ opencodeBinary: '/srv/tools/resources/opencode-cli/opencode' });
+    await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).rejects.toMatchObject({ code: 'OPENCODE_BINARY_INVALID' });
+  });
+
   it('throws a specific error for a missing configured OpenCode binary in strict mode', async () => {
     const { runtime } = createRuntime({ opencodeBinary: '/missing/opencode' });
 

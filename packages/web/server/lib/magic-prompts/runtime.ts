@@ -2,7 +2,7 @@ import type { promises as fsPromises } from 'node:fs';
 import type { PlatformPath } from 'node:path';
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
-type JsonObject = { [key: string]: JsonValue };
+export type JsonObject = { [key: string]: JsonValue };
 
 export type MagicPromptOverrides = Record<string, string>;
 export type MagicPromptGlobalState = { version: number; overrides: MagicPromptOverrides };

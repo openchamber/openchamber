@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useMemo } from "react"
+import React, { useRef, useCallback } from "react"
 import { useStore } from "zustand"
 import type { FormRequest, PermissionRequest, Session } from "@/lib/opencode/model"
 import { subscribeDirectoryPermission, subscribeDirectoryPermissions, subscribeDirectoryForms } from "./child-store"
@@ -192,15 +192,31 @@ export function useScopedBlockingForms(sessionID: string | null, directory?: str
   return useScopedBlockingRequests(sessionID, directory, selectFormRequestsBySession, EMPTY_FORM_REQUESTS, collectComposerForms)
 }
 
+const NO_RECOVERED_QUESTIONS: RecoveredQuestion[] = []
+
+const sameRecoveredQuestions = (left: readonly RecoveredQuestion[], right: readonly RecoveredQuestion[]): boolean => (
+  left.length === right.length
+  && left.every((question, index) => {
+    const other = right[index]
+    return question.form === other.form
+      && question.directory === other.directory
+      && question.sessionID === other.sessionID
+      && question.toolMessageID === other.toolMessageID
+      && question.evidence === other.evidence
+  })
+)
+
 export function useRecoveredQuestions(sessionID: string | null, directory?: string): RecoveredQuestion[] {
   const store = useDirectoryStore(directory)
-  const sessions = useStore(store, (state) => state.session)
-  const form = useStore(store, (state) => state.form)
-  const part = useStore(store, (state) => state.part)
   const recovery = useRecoverableQuestionsStore()
-  return useMemo(() => deriveRecoveredQuestions(
-    { form, part },
-    recovery,
-    sessionID ? computeSubtreeIds(sessions, sessionID) : new Set<string>(),
-  ), [form, part, recovery, sessionID, sessions])
+  const previousRef = useRef(NO_RECOVERED_QUESTIONS)
+  const select = useCallback((state: State) => {
+    const next = !sessionID || recovery.seen.size === 0
+      ? NO_RECOVERED_QUESTIONS
+      : deriveRecoveredQuestions(state, recovery, computeSubtreeIds(state.session, sessionID))
+    if (sameRecoveredQuestions(previousRef.current, next)) return previousRef.current
+    previousRef.current = next
+    return next
+  }, [recovery, sessionID])
+  return useStore(store, select)
 }

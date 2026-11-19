@@ -11,12 +11,12 @@ GitHub sits on the shared source-control route shell (`../source-control/provide
 
 - `descriptor.js`: GitHub's static, SDK-free source-control descriptor (host-form instances, capabilities, transport username, client presentation, the declarative `/api/github` alias list in `routeAliases`).
 - `provider.js`: the implementation the shell loads lazily through the provider registry (`createProvider(hostServices)`). It composes the parts below, resolves sessions (`auth.resolveAccount`: the exact stored credential or gh login, its Octokit kept here, never in the JSON the shell sees), answers the neutral transport credential (a stored credential, else the gh login the user switched to), the current account per instance, enterprise instances, connected accounts for identity backfill and binding repair, and the tracked-items live summaries. Octokit and the libraries that use it load on first use.
-- `accounts.js`: auth per instance in the neutral `SourceControlAuthStatus` shape: github.com's device flow and Settings gh switch, an enterprise host's PATs and own gh switch, activation, removal.
+- `accounts.ts`: auth per instance in the neutral `SourceControlAuthStatus` shape: github.com's device flow and Settings gh switch, an enterprise host's PATs and own gh switch, activation, removal.
 - `gh-cli-logins.js`: a host's gh logins, each with the GitHub account it belongs to (`<host>#cli:<id>`), and the exact login a `#cli:` account id names.
 - `resources.js`: the bound reads (status, lists, context, issues, upstream, branches, labels, reviewer candidates), the reference picker reads, and the change-request head and source behind worktrees, all answering neutral DTOs. It keeps the short PR context cache.
-- `mutations.js`: the durable mutations: `prepare` (GitHub's kinds and digests, byte-identical to the records already stored), `resolveTarget` (preflight against GitHub), `perform`, `reconcile`, `afterSuccess` (drops the target's pull context and the repository's pull lists; the shell calls it best effort after the record is durable, so a cache failure never turns a landed write into `outcome-unknown`), and how failures are classified and worded.
+- `mutations.ts`: the durable mutations: `prepare` (GitHub's kinds and digests, byte-identical to the records already stored), `resolveTarget` (preflight against GitHub), `perform`, `reconcile`, `afterSuccess` (drops the target's pull context and the repository's pull lists; the shell calls it best effort after the record is durable, so a cache failure never turns a landed write into `outcome-unknown`), and how failures are classified and worded.
 - `mappers.js`: strict checks of GitHub REST payloads and the mappers to neutral DTOs (`Project`, `ChangeRequest`, `Issue`, `IssueComment`, `CI`, users, accounts).
-- `auth.js`: auth storage, multi-account support, client id, scope config.
+- `auth.ts`: auth storage, multi-account support, client id, scope config.
 - `device-flow.js`: OAuth device flow.
 - `octokit.js`: Octokit factories for a host's current credential and for exact account IDs.
 - `repo/index.js`: remote URL parsing and directory-to-repo resolution.
@@ -276,6 +276,16 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 
 ## Invariants
 
+- Converted implementations retain `.js` import specifiers for source-hook and
+  emitted-JavaScript consumers. Tests remain JavaScript.
+- `checks-summary` retains its string check for a run's start time. The REST
+  collection validator checks the run's identity, name and status, but does not
+  validate `started_at`.
+- The raw profile retained by the gh-login cache and the pending review's id
+  and commit retain their unchecked types. Validating selected profile fields
+  or finding `viewerDidAuthor` does not validate the rest of the provider object.
+- OAuth and GraphQL envelopes expose only the fields read here, with unknown
+  values until the existing field checks or Zod schemas validate them.
 - Mutation digest input keeps the same fields and insertion order, and stored operation kinds stay byte-identical. Changing either makes retained running records conflict on replay.
 - Host configuration validates each `hosts.yml` entry independently. A malformed entry cannot revoke another host's valid login.
 - A transient failure to identify the selected gh account preserves its activation. Only a missing, disabled or refused login clears the choice, so a network failure cannot silently select another account.
@@ -293,6 +303,151 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 - Cancellation re-reads waiting state after dequeue because dequeue can also clear auto-merge. The local cancel remains marked in flight until successful follow removal is queued, so an intervening live read cannot emit a removal notification for the user's own action.
 
 ## Decisions
+
+### Why account and mutation inputs retain unchecked fields
+
+- Device completion forwards the truthy `access_token` from `exchangeDeviceCode`
+  as received. The token is still JSON at that point. The Octokit factory
+  passes the original value to `Hash.update`, whose native argument validation
+  rejects non-string JSON. A separate email lookup may fail when the token
+  lacks the email scope; the account status still uses the profile email.
+- A replay record's `number`, `head`, `base` and `headSha` are independently
+  optional. Preflight establishes fields for new operations. Reconciliation
+  keeps the stored shape and checks a number before a numbered REST read.
+  The waiting-merge GraphQL call forwards the stored fields as read. A
+  pending review's node ID also reaches GraphQL unchanged; matching the
+  viewer does not validate the node ID.
+
+The nested repository-network helper now supplies its host and its
+`origin`/`upstream` source union.
+
+### Why version 3 retains unparsed CLI settings
+
+Version 3 validates credentials and the active credential reference. The CLI
+flags and login bypass the version 2 instance parser and retain their JSON
+values until a reader or writer interprets them. A missing or non-array
+credential collection still raises a `TypeError`.
+
+Enterprise invalidation forwards the original instance and account values from
+error metadata. The shared store uses the instance as a JavaScript property key
+and compares the account by strict equality. It does not normalize either value
+before that lookup.
+
+### Why provider invalidation retains unchecked identity fields
+
+Resource errors can supply an unchecked `sourceControlIdentity`. Spreading that
+value copies its enumerable fields without validating `instance` or `accountId`.
+The provider's invalidation callback retains those fields as unknown, including
+an absent identity's undefined fields. Account events forward their payload to
+listeners without parsing it. The Octokit callback can also carry a missing
+account id. Declaring either path as a complete account identity would overstate
+the checks performed.
+
+Provider transport results retain their inferred profile type. Passing through
+a stored or gh profile does not establish the stricter `TransportCredential`
+profile contract. Patch dependencies admit the explicit undefined callback
+already supplied when the provider has no event service. Failure-field reads
+preserve inherited properties, proxy getters and primitive boxing.
+
+### Why merge follows distinguish fresh success from replay
+
+The success hook ignores replayed records before reading their result. A fresh
+GitHub merge returns a result object on every successful path, including cancel,
+classic merge, queued merge and auto-merge. The local callback contract describes
+that fresh result separately from the general replay record; it does not claim
+that mutation storage validates a result for every successful record. The target
+retains its optional `headSha`, as does the snapshot schema.
+
+The tracked-item parser's thread overload describes its existing dispatch:
+an explicit pull, issue or discussion kind returns a thread or null, never a
+work item. A file entry's unknown item first uses the same plain-record predicate
+the parser already applies. Snapshot fields retain the schema's inferred types.
+
+Attaching sets the tracked service before queuing the initial refresh. Its
+accessor checks that invariant after loading, while still reading the latest
+attached service if attachment changes during the wait. Error-field access
+retains unchecked values, inherited and synthesized properties, primitive boxing
+and the TypeError for null or undefined thrown values.
+
+### Why patch text is unknown until the existing assertions pass
+
+Octokit's response depends on the requested media type. Diff and raw file
+responses enter as unknown values. The local Node declaration lets
+`assert.match` express its existing runtime string validation. File text uses
+the original `assert.equal(typeof content, 'string', message)` in an assertion
+function, preserving its error code, actual value and expected value.
+The contents lookup still forwards `entry.data?.sha` directly to the blob
+endpoint. A missing SHA and a null contents response retain their existing
+failure behavior. The contents API omits content above 1 MB, so binary reads
+use the blob's base64 bytes.
+Commit references keep the unchecked provider-envelope type: the SHA assertions
+validate `String(ref)`, while the contents endpoint still receives the original
+value. A string declaration would promise more than those assertions check.
+The exact-account lookup retains an absent session's undefined account id.
+`RegExp.exec` coerces that value to text at runtime; its local overload admits
+the existing call without replacing it or changing the optional session input.
+
+### Why rate-limit fields remain unchecked
+
+Thrown values and header getters have no parsed scalar contract. Rate-limit
+field access preserves inherited and synthesized properties, and the callable getter guard
+establishes only the function's callability. Its result uses the existing
+unchecked GitHub envelope value type until the original equality checks or
+numeric conversion consume it. Calling the getter as a method preserves its
+receiver and the original property-read count.
+The field envelope contains optional unknown-valued properties only. Non-null
+values support JavaScript property access, including boxed access on primitives;
+the guard establishes neither field presence nor a scalar type. An `in` test
+would discard properties supplied only by a proxy's `get` trap.
+
+### Why a null gh hosts document stays unavailable
+
+The hosts schema admits null. A null document returns null before enumeration;
+the JavaScript implementation reached the same result by catching the
+`Object.entries(null)` exception. Each host entry still passes its own schema,
+so one malformed entry cannot remove another host's login.
+
+### Why resource failures retain unchecked fields
+
+Resource reads can catch arbitrary thrown values. Their field accessor retains
+inherited properties and leaves each value unchecked. Error-code prefix checks
+test callability and use the result's truthiness; a non-callable method still
+throws rather than becoming a successful per-folder error answer.
+Error messages also remain unchecked. `runtime-boundaries.d.ts` admits the
+values JavaScript's `Error` constructor already accepts, without converting the
+message retained in an HTTP error body.
+
+The provenance owner exports its validated read shape from its existing
+declaration. Resources import that shape for the injected callback, including
+the nullable provenance of an unmarked worktree. Combined check status annotates
+its internally constructed state with the existing check-state vocabulary.
+Neither boundary requires a new runtime check.
+
+### Why GraphQL alias envelopes keep unknown values
+
+The alias dictionary validates only its outer collection. Each selected issue,
+discussion or pull request still passes its own schema, including partial data
+from a failed GraphQL request. The computed activity schema retains its inferred
+field types; activity formatting narrows the author and timestamp where it uses
+them.
+
+### Why mapper scalar guards remain
+
+Mergeability and review-comment line and position values are provider inputs.
+Their boolean and number checks retain the original primitive acceptance rules.
+Discovery's string guard also covers provider and Git values. Only the four
+number checks on private rank-map results disappear, because those maps contain
+numbers inserted by discovery itself.
+Collection and record validators preserve their input's inferred fields.
+Checking a check run's identity, name and status does not turn an unchecked
+`started_at` into a string or validate the rest of an SDK record.
+
+### Why the gh token subprocess retains its stdio option
+
+Node's `ExecFileOptionsWithStringEncoding` does not declare `stdio`. The gh
+invocation already supplies the three pipe entries and tests assert them.
+`GhTokenOptions` describes that existing object without deleting an option or
+casting the subprocess call.
 
 ### Why Octokit bounds requests and rejects enterprise redirects
 

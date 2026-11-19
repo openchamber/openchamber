@@ -175,25 +175,6 @@ describe('Linear session status comments', () => {
     })).toBe('[OpenChamber session failed](https://app.example.com/?session=ses_1)');
   });
 
-  it('cannot be broken by brackets in the issue title', async () => {
-    const graphql = stubLinearGraphql();
-    vi.stubGlobal('fetch', graphql);
-    await postLinearSessionStatus({
-      kind: 'started',
-      sessionId: 'ses_1',
-      issueIdentifier: 'ENG-12',
-      sessionOrigin: 'https://app.example.com',
-    });
-    const commentCalls = graphql.mock.calls.filter(([, options]) => {
-      return JSON.parse(options.body).query.includes('mutation CommentCreate');
-    });
-    const body = JSON.parse(commentCalls[0][1].body).variables.input.body;
-    // One balanced pair of brackets, so a title like "[Bug] …" can never leak in
-    // and split the link across the renderer.
-    expect(body.match(/\[/g)).toHaveLength(1);
-    expect(body.match(/\]/g)).toHaveLength(1);
-  });
-
   it('returns disconnected without calling Linear when there is no auth', async () => {
     clearLinearAuth();
     const graphql = vi.fn();

@@ -1,11 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmod, copyFile, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { ReadableStream } from 'node:stream/web';
 import sevenZip from '7zip-bin';
 
-import { describeTarFailure } from './model-downloader.js';
+import { describeTarFailure, ensureLocalSttModel, isLocalSttModelInstalled } from './model-downloader.js';
 import { getLocalSttModelSpec } from './model-catalog.js';
 
 // Real USTAR archives compressed with Python's bz2 module. Model files contain
@@ -115,6 +116,33 @@ describe('describeTarFailure', () => {
     expect(describeTarFailure(2, 'tar: Unexpected EOF in archive\n')).toBe('tar exited with code 2: tar: Unexpected EOF in archive');
     expect(describeTarFailure(1, '')).toBe('tar exited with code 1');
   });
+});
+
+it('downloads a Node fetch body through fromWeb and reports byte progress', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'oc-model-download-'));
+  const modelId = 'parakeet-tdt-0.6b-v3-int8';
+  const spec = getLocalSttModelSpec(modelId);
+  const nativeFetch = globalThis.fetch;
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+    const response = await nativeFetch(`data:application/octet-stream;base64,${STT_ARCHIVE.toString('base64')}`);
+    expect(response.body).toBeInstanceOf(ReadableStream);
+    return response;
+  });
+  try {
+    const progress = [];
+    const modelDir = await ensureLocalSttModel({
+      modelsDir: root,
+      modelId,
+      onProgress: (downloadedBytes, totalBytes) => progress.push([downloadedBytes, totalBytes]),
+    });
+    expect(modelDir).toBe(path.join(root, spec.extractedDir));
+    expect(await isLocalSttModelInstalled(root, modelId)).toBe(true);
+    expect(progress.at(-1)).toEqual([STT_ARCHIVE.length, null]);
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(spec.archiveUrl);
+  } finally {
+    fetchMock.mockRestore();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 it.skipIf(process.platform !== 'linux')('keeps Linux system-tar installation independent of the Windows decoder', async () => {

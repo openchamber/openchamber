@@ -32,7 +32,7 @@ export interface LifecycleDetails {
 
 export interface DiagnosticJournal {
   record: (action: string, details?: LifecycleDetails) => void;
-  recordHttpResponse: (method: string, pathname: string, status: number) => void;
+  recordHttpResponse: (method: string | undefined, pathname: string, status: number) => void;
   snapshot: () => DiagnosticSnapshot;
 }
 

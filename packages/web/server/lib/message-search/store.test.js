@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { loadSqliteOpener } from './sqlite.js';
-import { openMessageSearchStore, toMatchExpression } from './store.js';
+import { buildSnippet, openMessageSearchStore, toMatchExpression } from './store.js';
 
 const open = loadSqliteOpener();
 const temporaryDirectories = [];
@@ -44,6 +44,30 @@ afterEach(() => {
 });
 
 describe.skipIf(!open)('message search store', () => {
+  it('returns unchecked SQLite column values and leaves snippet failure to the reader', () => {
+    const connection = open(':memory:');
+    const store = openMessageSearchStore(connection);
+    try {
+      seedSession(store, 'a');
+      store.putMessages([{ id: 'm', sessionId: 'a', role: 'user', createdAt: 1, text: 'common needle' }]);
+      const cursor = new Uint8Array([1, 2, 3]);
+      connection.run('UPDATE sessions SET user_cursor = ?, synced_updated_at = ? WHERE id = ?', [cursor, 'unchecked', 'a']);
+      connection.run('UPDATE messages SET created_at = ? WHERE id = ?', ['unchecked', 'm']);
+
+      const session = store.readSession('a');
+      expect(Array.from(session.user_cursor)).toEqual([1, 2, 3]);
+      expect(session.synced_updated_at).toBe('unchecked');
+      expect(store.search({ match: toMatchExpression('common'), limit: 1 })[0].createdAt).toBe('unchecked');
+
+      connection.run('UPDATE messages SET text = ? WHERE id = ?', [new TextEncoder().encode('common needle'), 'm']);
+      const hit = store.search({ match: toMatchExpression('common'), limit: 1 })[0];
+      expect(Array.from(hit.text)).toEqual(Array.from(new TextEncoder().encode('common needle')));
+      expect(() => buildSnippet(hit.text, ['common'])).toThrow(TypeError);
+    } finally {
+      store.close();
+    }
+  });
+
   it('pages globally newest session representatives without duplicates, including timestamp ties', () => {
     const store = openMessageSearchStore(open(':memory:'));
     for (const id of ['a', 'b', 'c', 'd', 'e']) seedSession(store, id);

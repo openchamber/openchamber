@@ -67,6 +67,11 @@ describe('contributor provenance storage', () => {
     expect((await fs.stat(filePath)).mode & 0o777).toBe(0o600);
     await expect(store.compareAndSwap('/checkout', 0, provenance))
       .rejects.toMatchObject({ code: 'CONTRIBUTOR_PROVENANCE_CONFLICT', status: 409 });
+    const coercedSha = { ...provenance, sourceSha: [provenance.sourceSha] };
+    await expect(store.compareAndSwap('/checkout', 1, coercedSha))
+      .resolves.toMatchObject({ revision: 2, provenance: coercedSha });
+    await expect(store.read('/checkout')).resolves.toMatchObject({ provenance: coercedSha });
+    await expect(store.readMany(new Array(1))).rejects.toMatchObject({ code: 'ERR_INVALID_ARG_TYPE' });
   });
 
   it('finds a contributor fork by its git directory alone, and fails closed on a store it cannot read', async () => {

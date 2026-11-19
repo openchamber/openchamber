@@ -37,6 +37,10 @@ Bootstrap disposal, stream reconnect and the watchdog share recovery state for t
 
 Directory session arrays are replaced on change and aggregate readers leave the shared result untouched, so all hooks can reuse the same aggregation for identical array inputs. Field comparisons first check object identity and compare metadata by reference, because metadata writes can leave `time.updated` unchanged and joined-string signatures allocate for every live session.
 
+### Why the live aggregate moves replaced records and not re-sorts every list
+
+OpenCode reports usage after every agent step, and each report replaces one record in place in one directory's list. Re-sorting thousands of sessions for that was the largest single cost of an event flush with four agents streaming. When every changed list keeps its ids at the same positions, the ids and the order they first appear in are unchanged, so `aggregateLiveSessions` takes each replaced record out and puts its winner back by binary search, ordering ties by first appearance exactly as the stable sort did. A list that gained, lost or reordered ids, or more than 64 replaced records, rebuilds the whole aggregate.
+
 ### Why eviction waits for render pins and not the count limit alone
 
 Rows obtain their stores during render and pin them after commit. One coalesced eviction microtask and a recent-access grace let those pins settle; enforcing the count immediately can repeatedly dispose a store that is still rendering and restart its bootstrap.
@@ -241,6 +245,12 @@ OpenCode reads every `file://` attachment whole, detects its type from the bytes
 So on the desktop a file past `MAX_INLINE_ATTACHMENT_BYTES`, or one `attachment-files.ts` cannot prepare, attaches as a short `text/plain` note that gives its path and size, with `agentPath` set to that path and no size limit. The agent reads what it needs with its own tools. The note is a plain data URL attachment, so the chip, queue, drafts, restore and resend need no case of their own. Outside the desktop OpenCode may not share the disk, so these files are refused or fail intake as before.
 
 A HEIC the bundled decoder cannot read (`HeicConversionError`, Apple's HDR gain-map photos) goes as the same note in every runtime, and the agent converts the file it names with its own tools. On the desktop the note names the file's own path. Everywhere else the store first writes the original bytes into OpenCode's temp folder (`opencodeClient.writeOpenCodeTempFiles`, the route the composer's `savePastedImagesAsFiles` uses), so the file lands on the machine OpenCode runs on, and the note names that copy. Only when that write fails is the file refused, with a toast that names it and asks for it to be saved as JPEG. An image inside a document that cannot be converted keeps the older behavior and refuses the whole document, because the dropped file in that case is the document, not the HEIC.
+
+An image sent to a model whose metadata lists no `image` input goes as the same kind of note (`text-model-images.ts`): an image part to such a model fails the turn. `routeMessage` converts the files of every prompt and command it sends, and the composer converts a queued item's files before handing it to the server's queue, which sends past `routeMessage`. The note keeps the attachment's filename, so the message text's `[name]` citation still points at it. A data URL image is written into a folder of its own under OpenCode's temp folder, since two attachments of one send can share a filename; a `file://` image is named by its own path, and one counts as an image by its extension too, because VS Code attaches files by path as `text/plain`. A write that fails fails the send with `ImageSaveForTextModelError`, and the composer restores the message with a toast naming the files: sending without them would leave the text citing images the agent never gets. Unknown metadata, `openchamber/auto` included, keeps sending the image.
+
+### Why images for a text-only model convert at send and not at attach
+
+The attachment stays an image until it leaves, so the composer previews it and a switch to a model that reads images sends the picture itself. One conversion in `routeMessage` covers the composer, `/btw`, multi-run and the VS Code queue's drain; converting at each intake would have missed the annotation screenshot and comment-field pastes, which is how this bug reached users.
 
 ### Why an unreadable HEIC goes as a saved file and not as an image part
 
@@ -1740,7 +1750,7 @@ Keep this in sync with `handleDirectoryEvent` in `sync-context.tsx`:
 
 | Event type | Fields to clone |
 |---|---|
-| `session.created/patched/deleted` | `session`, `permission`, `form`, `part`, `sessionEventRevision`, `sessionDeletedRevision` (an archive patch also clears caches) |
+| `session.created/patched/deleted` | `session`, `sessionEventRevision`, `sessionDeletedRevision`; an archive patch or a delete clears the session's caches, and the reducer copies the `message`, `part`, `session_status`, `permission` and `form` maps it deletes from. A usage patch arrives after every agent step, so cloning those maps up front handed their subscribers new maps that held nothing new |
 | `session.status/idle/error` | `session_status` |
 | `message.updated` | `message` |
 | `message.patched` | `message` |
@@ -2072,6 +2082,18 @@ changes on every streamed step, so a reader that needs when sessions started
 uses `useSessionStartTimes`, which changes only when a session is added or
 removed. A list that must ignore sessions another source already holds reads
 `useLiveSessionsExcluding(ids)` instead of filtering `useAllLiveSessions()`.
+
+A published session list is never edited, so indexes over it are built once
+per list and shared through a `WeakMap`: the parent-to-children index in
+`scoped-blocking-requests.ts` backs `computeSubtreeIds` and `readChildSessions`
+(the running-subagent rows read a parent's children there instead of scanning
+the list on every flush). Scoped permissions and forms skip the subtree walk
+entirely while no session has a pending request. `useRecoveredQuestions`
+derives inside one selector and keeps its previous array while the result is
+equal, so the form dock and the transcript beside a streaming reply do not
+re-render on each `part` change. `useSessionStartTimes` compares the new list
+with the last one position by position before building a map, since a streamed
+step keeps every id where it was.
 
 ## Store splitting pattern
 

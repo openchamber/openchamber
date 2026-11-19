@@ -2,6 +2,10 @@
 import { z } from "zod"
 
 import type { JsonValue, Metadata, ToolInput, ToolState } from "./model"
+import { opencodeNamespaceTool } from "./opencode-namespace-tools"
+import { normalizeToolName, type ToolName } from "./tool-name"
+
+export { normalizeToolName, opencodeNamespaceTool, type ToolName }
 
 export const OPENCODE_TOOLS = {
   edit: "edit",
@@ -25,16 +29,6 @@ export const OPENCODE_TOOLS = {
 
 type OpencodeToolName = (typeof OPENCODE_TOOLS)[keyof typeof OPENCODE_TOOLS]
 
-export type ToolName = string | undefined
-
-export function normalizeToolName(toolName: ToolName): string {
-  const trimmed = toolName?.trim().toLowerCase()
-  if (!trimmed) return ""
-  const withoutIndex = trimmed.replace(/:\d+$/, "")
-  if (!withoutIndex.includes(".")) return withoutIndex
-  const segments = withoutIndex.split(".").filter(Boolean)
-  return segments[segments.length - 1] ?? withoutIndex
-}
 
 const is = (name: OpencodeToolName) => (toolName: ToolName): boolean => normalizeToolName(toolName) === name
 
@@ -620,34 +614,6 @@ const openChamberCallSchema = z
 
 export type OpenChamberToolCall = { tool: string; action?: string; awaitsAnswer: boolean }
 
-const OPENCODE_NAMESPACE_TOOLS = new Set([
-  "session_rename",
-  "session_move",
-  "worktree_create",
-  "worktree_list",
-  "worktree_remove",
-  "models",
-  "list_mcp_resources",
-  "read_mcp_resource",
-  "schedule_create",
-  "schedule_list",
-  "schedule_pause",
-  "schedule_resume",
-  "schedule_delete",
-  "artifact_create",
-  "artifact_read",
-  "artifact_update",
-  "artifact_delete",
-])
-const OPENCODE_NAMESPACE_PREFIX = "opencode_"
-
-export function opencodeNamespaceTool(toolName: ToolName): string | undefined {
-  const trimmed = toolName?.trim().toLowerCase() ?? ""
-  const name = trimmed.startsWith(OPENCODE_NAMESPACE_PREFIX)
-    ? trimmed.slice(OPENCODE_NAMESPACE_PREFIX.length)
-    : normalizeToolName(trimmed)
-  return OPENCODE_NAMESPACE_TOOLS.has(name) ? name : undefined
-}
 
 export function mcpToolServer(toolName: ToolName, servers: readonly string[]): string | undefined {
   const trimmed = toolName?.trim() ?? ""

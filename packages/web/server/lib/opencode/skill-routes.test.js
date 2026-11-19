@@ -14,13 +14,8 @@ import {
   renameSkill,
   updateSkill,
 } from './skills.js';
-import {
-  SKILL_DIR,
-  SKILL_SCOPE,
-  deleteSkillSupportingFile,
-  readSkillSupportingFile,
-  writeSkillSupportingFile,
-} from './shared.js';
+import { SKILL_DIR, SKILL_SCOPE } from './config-files.js';
+import { deleteSkillSupportingFile, readSkillSupportingFile, writeSkillSupportingFile } from './skill-files.js';
 
 const createTempProject = () => {
   const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-skill-routes-'));
@@ -630,7 +625,7 @@ describe('skill-routes directory soft fallback', () => {
 
   it('resolves account-token identities for scan and install', async () => {
     projectRoot = createTempProject();
-    const account = { provider: 'github', instance: 'github.com', accountId: 'account-one' };
+    const account = { provider: 'github', instance: 'github.com', accountId: 'account-one', credentialRevision: 2 };
     const profile = { id: 'work', transport: 'account', account };
     const credentialResolver = { resolve: async () => ({}) };
     const resolved = [];

@@ -112,13 +112,15 @@ const resolveFrom = (path: string, target: string): string => {
 const readSheet = (archive: Unzipped, name: string, path: string, sharedStrings: string[], formats: Array<NumberFormat | undefined>) => {
   const source = xml(archive, path);
   const relationships = parseRelationships(archive, path);
-  const sheet: BookSheet = { name, cells: new Map(), locked: new Set(), protected: /<sheetProtection\b[^>]*\bsheet\s*=\s*["'](?:1|true)["']/i.test(source) };
+  const sheet: BookSheet = { name, rowCount: 0, columnCount: 0, cells: new Map(), locked: new Set(), protected: /<sheetProtection\b[^>]*\bsheet\s*=\s*["'](?:1|true)["']/i.test(source) };
   const part: SheetPart = { path, shared: new Map() };
   for (const row of elements(source, 'row')) {
     for (const element of elements(row, 'c')) {
       const parsed = readCell(element, sharedStrings, formats);
       if (!parsed) continue;
       const { formulaTag, ...cell } = parsed;
+      sheet.rowCount = Math.max(sheet.rowCount, cell.row);
+      sheet.columnCount = Math.max(sheet.columnCount, cell.column + 1);
       if (formulaTag) applyFormula(cell, formulaTag, sheet, part);
       sheet.cells.set(cellKey(cell.row, cell.column), cell);
     }

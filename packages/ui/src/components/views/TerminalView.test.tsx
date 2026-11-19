@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -11,15 +11,18 @@ import { useSpacesStore } from '@/lib/spaces/spaces-store';
 
 let effectiveDirectory = '/repo';
 const openContextPreviewCalls: Array<[string, string]> = [];
-const createSessionCalls: Array<{ cwd: string }> = [];
+type CreateSessionOptions = { cwd: string; cols: number; rows: number };
+const createSessionCalls: CreateSessionOptions[] = [];
+let viewportAutoResize = true;
+const viewportResizes = new Map<string, (cols: number, rows: number) => void>();
 const connectCalls: string[] = [];
 const closeCalls: string[] = [];
 const ensureDirectoryCalls: string[] = [];
 const openContextPreview = (directory: string, url: string) => {
   openContextPreviewCalls.push([directory, url]);
 };
-const createSession = async ({ cwd }: { cwd: string }) => {
-  createSessionCalls.push({ cwd });
+const createSession = async (options: CreateSessionOptions) => {
+  createSessionCalls.push(options);
   return { sessionId: 'unused', cols: 80, rows: 24, status: 'running' as const };
 };
 let connectBehavior: (sessionId: string, handlers: TerminalHandlers) => { close: () => void } = () => ({ close: () => undefined });
@@ -127,8 +130,10 @@ mock.module('@/components/terminal/TerminalViewport', () => ({
     // A real surface reports its fitted grid once it is visible; a visible tab
     // spawns its shell only after that report.
     React.useEffect(() => {
-      if (isVisible) onResize(100, 30);
-    }, [isVisible, onResize]);
+      viewportResizes.set(sessionKey, onResize);
+      if (isVisible && viewportAutoResize) onResize(100, 30);
+      return () => { viewportResizes.delete(sessionKey); };
+    }, [isVisible, onResize, sessionKey]);
 
     return React.createElement('div', {
       'data-terminal-viewport': 'true',
@@ -200,6 +205,8 @@ describe('TerminalView project action tab indicator', () => {
 
   beforeEach(() => {
     effectiveDirectory = '/repo';
+    viewportAutoResize = true;
+    viewportResizes.clear();
     openContextPreviewCalls.length = 0;
     createSessionCalls.length = 0;
     connectCalls.length = 0;
@@ -644,5 +651,118 @@ describe('TerminalView project action tab indicator', () => {
     expect(tabLabels).not.toContain('Worktree Terminal');
     expect(connectCalls).toEqual(['srv-parent-build']);
     expect(createSessionCalls.length).toBe(0);
+  });
+
+  const resetViewportScenario = () => {
+    viewportAutoResize = false;
+    useTerminalStore.getState().clearAll();
+    useTerminalStore.getState().ensureDirectory('/repo');
+    return useTerminalStore.getState().getDirectoryState('/repo')!.tabs[0]!.id;
+  };
+  const resizeViewport = (tabId: string, cols = 100, rows = 30) => act(async () => {
+    viewportResizes.get(`/repo::${tabId}`)!(cols, rows);
+  });
+  const pendingCreate = () => {
+    let complete!: (session: Awaited<ReturnType<typeof createSession>>) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<Awaited<ReturnType<typeof createSession>>>((resolve, refuse) => { complete = resolve; reject = refuse; });
+    return { promise, reject, resolve: () => complete({ sessionId: 'pty-1', cols: 100, rows: 30, status: 'running' }) };
+  };
+
+  test('viewport identity uses the authoritative terminal directory and excludes the PTY session id', async () => {
+    const tabId = resetViewportScenario();
+    await act(async () => root.render(<TerminalView visible />));
+    const viewport = host.querySelector('[data-terminal-viewport]');
+    expect(viewport).not.toBeNull();
+    await act(async () => useTerminalStore.getState().setTabSessionId('/repo', tabId, 'resolved-pty'));
+    expect(host.querySelector('[data-terminal-viewport]')).toBe(viewport);
+    useTerminalStore.setState((state) => ({ sessions: new Map(state.sessions).set('/other', state.sessions.get('/repo')!) }));
+    await act(async () => root.render(<TerminalView visible directory="/other" />));
+    expect(host.querySelector('[data-terminal-viewport]')).not.toBe(viewport);
+    expect(host.querySelector('[data-terminal-viewport]')?.getAttribute('data-session-key')).toBe(`/other::${tabId}`);
+  });
+
+  test('every open tab keeps its viewport mounted and only the active one is visible', async () => {
+    const first = resetViewportScenario();
+    const second = useTerminalStore.getState().createTab('/repo');
+    useTerminalStore.getState().setActiveTab('/repo', second);
+    await act(async () => root.render(<TerminalView visible />));
+    const viewports = Array.from(host.querySelectorAll('[data-terminal-viewport]'));
+    expect(viewports).toHaveLength(2);
+    expect(viewports.map((node) => node.getAttribute('data-visible'))).toEqual(['false', 'true']);
+    await act(async () => useTerminalStore.getState().setActiveTab('/repo', first));
+    expect(Array.from(host.querySelectorAll('[data-terminal-viewport]'))).toEqual(viewports);
+    expect(viewports.map((node) => node.getAttribute('data-visible'))).toEqual(['true', 'false']);
+  });
+
+  test('scrollback is read from the buffer slice, not from the tab', async () => {
+    const tabId = resetViewportScenario();
+    await act(async () => root.render(<TerminalView visible />));
+    expect(host.querySelector('[data-terminal-viewport]')?.getAttribute('data-chunk-count')).toBe('0');
+    await act(async () => useTerminalStore.getState().replaceBuffer('/repo', tabId, 'saved output', 7));
+    expect(host.querySelector('[data-terminal-viewport]')?.getAttribute('data-chunk-count')).toBe('1');
+  });
+
+  test('spawns a visible tab at the fitted grid and a hidden one at the estimate', async () => {
+    const tabId = resetViewportScenario();
+    await act(async () => root.render(<TerminalView visible />));
+    expect(createSessionCalls).toEqual([]);
+    await resizeViewport(tabId);
+    expect(createSessionCalls).toHaveLength(1);
+    expect(createSessionCalls[0]).toMatchObject({ cwd: '/repo', cols: 100, rows: 30 });
+    await act(async () => root.unmount());
+    resetViewportScenario();
+    createSessionCalls.length = 0;
+    root = createRoot(host);
+    await act(async () => root.render(<TerminalView visible />));
+    await act(async () => root.render(<TerminalView visible={false} />));
+    await act(async () => {
+      const hidden = useTerminalStore.getState().createTab('/repo');
+      useTerminalStore.getState().setActiveTab('/repo', hidden);
+    });
+    expect(createSessionCalls).toHaveLength(1);
+    expect(createSessionCalls[0]).toMatchObject({ cols: 80, rows: 24 });
+  });
+
+  test('deduplicates create attempts while the viewport layout settles', async () => {
+    const tabId = resetViewportScenario();
+    const pending = pendingCreate();
+    const create = spyOn(terminalRuntime, 'createSession').mockImplementation((options) => {
+      createSessionCalls.push(options);
+      return pending.promise;
+    });
+    try {
+      await act(async () => root.render(<TerminalView visible />));
+      await resizeViewport(tabId);
+      await resizeViewport(tabId, 101, 31);
+      expect(createSessionCalls).toHaveLength(1);
+      await act(async () => pending.resolve());
+      expect(useTerminalStore.getState().getActiveTab('/repo')!.terminalSessionId).toBe('pty-1');
+    } finally { create.mockRestore(); }
+  });
+
+  test('lets the session-ID effect own stream startup after creating a tab', async () => {
+    const tabId = resetViewportScenario();
+    await act(async () => root.render(<TerminalView visible />));
+    await resizeViewport(tabId);
+    expect(connectCalls).toEqual(['unused']);
+    expect(useTerminalStore.getState().getActiveTab('/repo')!.terminalSessionId).toBe('unused');
+  });
+
+  test('clears a current tab from connecting when a strict-mode create rejects', async () => {
+    const tabId = resetViewportScenario();
+    const pending = pendingCreate();
+    const create = spyOn(terminalRuntime, 'createSession').mockImplementation((options) => {
+      createSessionCalls.push(options);
+      return pending.promise;
+    });
+    try {
+      await act(async () => root.render(<React.StrictMode><TerminalView visible /></React.StrictMode>));
+      await resizeViewport(tabId);
+      expect(useTerminalStore.getState().getActiveTab('/repo')!.isConnecting).toBe(true);
+      await act(async () => pending.reject(new Error('create refused')));
+      expect(useTerminalStore.getState().getActiveTab('/repo')!.isConnecting).toBe(false);
+      expect(host.textContent).toContain('create refused');
+    } finally { create.mockRestore(); }
   });
 });

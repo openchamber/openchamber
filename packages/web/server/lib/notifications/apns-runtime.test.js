@@ -331,6 +331,24 @@ describe('apns runtime relay mode (default)', () => {
       ]);
     });
 
+    it('keeps an unchecked failure message and its includes receiver', async () => {
+      const runtime = createApnsRuntime(makeDeps());
+      vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true })));
+      await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const message = {
+        includes: vi.fn(function (code) {
+          expect(this).toBe(message);
+          expect(code).toBe(7);
+          return 'present';
+        }),
+      };
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue({ message, code: 7 }));
+      await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b' });
+      expect(message.includes).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledWith('[APNs relay] request failed:', message);
+    });
+
     it('sends to other devices while one send waits for its retry', async () => {
       const runtime = createApnsRuntime(makeDeps());
       vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true })));

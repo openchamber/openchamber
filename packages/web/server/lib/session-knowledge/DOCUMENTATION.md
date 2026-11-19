@@ -204,12 +204,12 @@ depends on how the user works.
 
 ### Invariants
 
-`ui-blocks-guidance.js` is generated from `packages/ui/src/components/chat/uiBlocks/guidance.ts` by `bun run --cwd packages/ui ui-blocks:generate`. Changes to the guidance originate in that source so regeneration preserves them.
+`ui-blocks-guidance.ts` is generated from `packages/ui/src/components/chat/uiBlocks/guidance.ts` by `bun run --cwd packages/ui ui-blocks:generate`. Changes to the guidance originate in that source so regeneration preserves them.
 
 A session whose agent has the managed `openchamber_render` tool (the setting is
 on and OpenChamber launched OpenCode, read through `isPageRenderingAvailable`)
 is told how to draw UI blocks inside its reply (`UI_BLOCKS_GUIDANCE`, generated
-from the UI's block catalog into `ui-blocks-guidance.js`, see
+from the UI's block catalog into `ui-blocks-guidance.ts`, see
 `packages/ui/src/components/chat/uiBlocks/DOCUMENTATION.md`) and when a page
 still beats them (`RENDER_PAGE_GUIDANCE`): how something looks, or a custom
 drawing the block components do not cover. Data is never a page, even when the
@@ -309,8 +309,9 @@ remain untrusted until their containing objects and pin strings are checked.
 Missing metadata callbacks still reject reads and prevent pin writes; optional
 tool-availability callbacks retain their existing fallback values.
 
-`routes.js` remains JavaScript because the web package has no Express type
-declarations. Converting it requires a dependency change outside this folder's
-assignment. `ui-blocks-guidance.js` remains generated JavaScript because the UI's
-`guidanceModule.ts` owns its output path. Renaming only the output would leave
-the generator writing the old filename.
+`routes.ts` uses the existing Express factory through the declaration in
+`../shared/express.d.ts` and the application contract from
+`../shared/http-contracts.js`. Body and query validation remain with the route.
+String guards reject non-string and blank request values before trimming.
+Caught pin-write failures expose their message without assuming an Error
+instance or a string message.
