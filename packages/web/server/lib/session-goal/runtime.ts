@@ -1,4 +1,3 @@
-
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -18,6 +17,106 @@ import { readMergedSettingsSync } from '../settings/settings-files.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { isOperatorChildSession, sessionParentId } from '../session-lineage.js';
+import { isRecord, isString } from '../shared/object-guards.js';
+import type { JsonObject, JsonValue } from '../shared/json-values.js';
+import type { SessionActivityOptions } from '../opencode/session-activity.js';
+import type { ClassifierEndpoint } from '../routing/classifier.js';
+import type { createJevClient } from '../routing/jev.js';
+import type { generateSmallModelText, GeneratedTextResult } from '../small-model/index.js';
+import type { SessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
+import type { AuditInput } from './audit.js';
+
+type GoalChecker = 'classifier' | 'small-model';
+type GoalStatus = typeof GOAL_STATUSES[number];
+type SettledGoalStatus = 'blocked' | 'budgetLimited' | 'complete';
+
+interface GoalSettings {
+  enabled: boolean;
+  checker: GoalChecker;
+  maxAutoTurns: number;
+}
+
+interface SessionGoal {
+  id: string;
+  objective: string;
+  objectiveFile: boolean;
+  status: GoalStatus;
+  tokenBudget: number | null;
+  tokensUsed: number;
+  tokensBaseline: number;
+  tokensCommitted: number;
+  turnsUsed: number;
+  auditFailStreak: number;
+  statusReason: string;
+  evaluationProviderID: GeneratedTextResult['providerID'];
+  evaluationModelID: GeneratedTextResult['modelID'];
+  lastAccountedMessageID: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface GoalSession {
+  sessionId: string;
+  directory: string;
+  goal: SessionGoal;
+}
+
+interface GoalSettlement extends GoalSession, Partial<Pick<SessionGoal, 'tokensUsed' | 'tokensBaseline' | 'tokensCommitted' | 'lastAccountedMessageID' | 'evaluationProviderID' | 'evaluationModelID'>> {
+  status: SettledGoalStatus;
+  statusReason: unknown;
+  isCurrent?: (() => boolean) | null;
+}
+
+interface GoalRuntimeOptions extends Pick<SessionActivityOptions, 'buildOpenCodeUrl' | 'getOpenCodeAuthHeaders'> {
+  getSmallModelService: () => Promise<{ generateSmallModelText: typeof generateSmallModelText }>;
+  classifierEndpoint?: () => Promise<ClassifierEndpoint | null>;
+  jev?: Pick<ReturnType<typeof createJevClient>, 'ask'> | null;
+  getChecker?: () => GoalChecker;
+  emitGoalNotification?: (notification: GoalSession & { status: SettledGoalStatus }) => void;
+  isEnabled?: () => boolean;
+  idleQuietMs?: number;
+  kickoffQuietMs?: number;
+  recheckMs?: number;
+  getMaxAutoTurns?: () => number;
+  persistSessionGoal?: ((sessionId: string, directory: string, goal: SessionGoal, canWrite: ((metadata: SessionMetadataInput) => boolean) | null) => Promise<SessionMetadata | boolean | void>) | null;
+  readSessionMetadata?: ((sessionId: string) => Promise<SessionMetadataInput>) | null;
+}
+
+type SessionMetadataInput = SessionMetadata | null | undefined;
+
+export interface SessionGoalRuntime {
+  processPayload: (payload: JsonValue | undefined, directoryHint?: string) => void;
+  notifyGoalChanged: (sessionId: string, directory: string, metadata: SessionMetadataInput) => Promise<void>;
+  recoverActiveGoals: () => Promise<void>;
+  stop: () => void;
+}
+
+interface GoalFetchOptions {
+  directory?: string;
+  method?: 'GET' | 'POST';
+  body?: { text: string };
+  query?: Record<string, string>;
+}
+
+interface GoalRequestHeaders {
+  Accept: string;
+  'Content-Type'?: string;
+}
+
+type TimerEntry = { timer: ReturnType<typeof setTimeout>; armedAt: number }
+  | { timer: null; directory: string; quietMs: number };
+
+const isObject = (value: unknown): value is object => value !== null && typeof value === 'object';
+const isJsonRecord = (value: JsonValue | undefined): value is JsonObject => isRecord(value);
+const jsonFields = (value: JsonValue | undefined) => isJsonRecord(value) ? value : undefined;
+const isJsonArray = (value: JsonValue | undefined): value is JsonValue[] => Array.isArray(value);
+const isInteger = (value: unknown): value is number => Number.isInteger(value);
+const isFiniteNumber = (value: unknown): value is number => Number.isFinite(value);
+const isCallable = (value: unknown): value is CallableFunction => typeof value === 'function';
+const hasTrim = (value: unknown): value is { trim?: unknown } => value != null;
+const hasErrorFields = (value: unknown): value is { message?: unknown; statusCode?: unknown } => value != null;
+const positiveNumber = (value: unknown): value is number => isFiniteNumber(value) && value > 0;
+const errorDetail = (cause: unknown) => (hasErrorFields(cause) ? cause.message : undefined) || cause;
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -26,12 +125,12 @@ const OPENCHAMBER_SETTINGS_FILE = path.join(
   'settings.json',
 );
 
-const readGoalSettings = () => {
+const readGoalSettings = (): GoalSettings => {
   const settings = readMergedSettingsSync({ fs, path, settingsFilePath: OPENCHAMBER_SETTINGS_FILE });
   return {
     enabled: settings.sessionGoalEnabled !== false,
     checker: settings.sessionGoalChecker === 'classifier' ? 'classifier' : 'small-model',
-    maxAutoTurns: normalizeMaxAutoTurns(settings.sessionGoalMaxAutoTurns),
+    maxAutoTurns: normalizeMaxAutoTurns(isFiniteNumber(settings.sessionGoalMaxAutoTurns) ? settings.sessionGoalMaxAutoTurns : undefined),
   };
 };
 
@@ -50,25 +149,24 @@ const REASON_CHAR_LIMIT = 200;
 const DEFAULT_MAX_AUTO_TURNS = 20;
 const MAX_AUTO_TURNS_LIMIT = 200;
 
-export const normalizeMaxAutoTurns = (value) => (
-  Number.isInteger(value) && value >= 1 && value <= MAX_AUTO_TURNS_LIMIT ? value : DEFAULT_MAX_AUTO_TURNS
+export const normalizeMaxAutoTurns = (value: JsonValue | undefined) => (
+  isInteger(value) && value >= 1 && value <= MAX_AUTO_TURNS_LIMIT ? value : DEFAULT_MAX_AUTO_TURNS
 );
 const AUDIT_FAIL_LIMIT = 2;
 
-const GOAL_STATUSES = ['active', 'paused', 'blocked', 'budgetLimited', 'complete'];
+const GOAL_STATUSES = ['active', 'paused', 'blocked', 'budgetLimited', 'complete'] as const;
+const isGoalStatus = (value: unknown): value is GoalStatus => GOAL_STATUSES.some((status) => status === value);
 
-const clampText = (value, limit) => String(value ?? '').trim().slice(0, limit);
-
-const escapeXmlText = (value) => String(value ?? '')
+const escapeXmlText = (value: string) => String(value ?? '')
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
   .replace(/>/g, '&gt;');
 
-const buildContinuationPrompt = (goal) => {
-  const remaining = typeof goal.tokenBudget === 'number'
+const buildContinuationPrompt = (goal: SessionGoal) => {
+  const remaining = goal.tokenBudget !== null
     ? Math.max(0, goal.tokenBudget - goal.tokensUsed)
     : null;
-  const budgetLines = typeof goal.tokenBudget === 'number'
+  const budgetLines = goal.tokenBudget !== null
     ? [
       'Budget:',
       `- Tokens used: ${goal.tokensUsed}`,
@@ -96,79 +194,101 @@ const buildContinuationPrompt = (goal) => {
   ].join('\n');
 };
 
-const extractSessionStatus = (payload) => {
+const extractSessionStatus = (payload: JsonObject | undefined) => {
   if (!payload || payload.type !== 'session.status') return null;
-  const properties = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
-  const status = properties.status && typeof properties.status === 'object' ? properties.status : {};
-  const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
-  const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID.trim() : '';
-  const type = typeof status.type === 'string'
+  const properties = jsonFields(payload.properties) ?? {};
+  const status = jsonFields(properties.status) ?? {};
+  const info = jsonFields(properties.info) ?? {};
+  const sessionId = isString(properties.sessionID) ? properties.sessionID.trim() : '';
+  const type = isString(status.type)
     ? status.type.trim()
-    : (typeof info.type === 'string' ? info.type.trim() : '');
+    : (isString(info.type) ? info.type.trim() : '');
   if (!sessionId || !type) return null;
-  const directory = typeof properties.directory === 'string' && properties.directory
+  const directory = isString(properties.directory) && properties.directory
     ? properties.directory
-    : (typeof info.directory === 'string' ? info.directory : '');
+    : (isString(info.directory) ? info.directory : '');
   return { sessionId, type, directory };
 };
 
-// external: https://github.com/anomalyco/opencode OpenCode v2 emits session.execution.interrupted, translated to session.idle with aborted: true.
-const extractAbortedAssistant = (payload) => {
+const extractAbortedAssistant = (payload: JsonObject | undefined) => {
   if (!payload || payload.type !== 'session.idle') return null;
-  const properties = payload.properties;
-  if (!properties || typeof properties !== 'object' || properties.aborted !== true) return null;
-  if (typeof properties.sessionID !== 'string' || !properties.sessionID) return null;
+  const properties = jsonFields(payload.properties);
+  if (!properties || properties.aborted !== true) return null;
+  if (!isString(properties.sessionID) || !properties.sessionID) return null;
   return { sessionId: properties.sessionID };
 };
 
-const extractSessionUpdate = (payload) => {
+const extractSessionUpdate = (payload: JsonObject | undefined) => {
   if (!payload || payload.type !== 'session.updated') return null;
-  const info = payload.properties?.info;
-  if (!info || typeof info !== 'object' || typeof info.id !== 'string' || !info.id) return null;
+  const info = jsonFields(jsonFields(payload.properties)?.info);
+  if (!info || !isString(info.id) || !info.id) return null;
   return {
     sessionId: info.id,
-    directory: typeof info.directory === 'string' ? info.directory : '',
-    parentID: typeof info.parentID === 'string' ? info.parentID : '',
+    directory: isString(info.directory) ? info.directory : '',
+    parentID: isString(info.parentID) ? info.parentID : '',
   };
 };
 
-const parseGoalMetadata = (session) => {
+const parseGoalMetadata = (session: { metadata?: unknown } | undefined) => {
   const metadata = session?.metadata;
-  if (!metadata || typeof metadata !== 'object') return null;
+  if (!isRecord(metadata)) return null;
   const namespace = metadata.openchamber;
-  if (!namespace || typeof namespace !== 'object') return null;
+  if (!isRecord(namespace)) return null;
   const goal = namespace.goal;
-  if (!goal || typeof goal !== 'object') return null;
-  const objective = typeof goal.objective === 'string' ? goal.objective.trim() : '';
+  if (!isRecord(goal)) return null;
+  const objective = isString(goal.objective) ? goal.objective.trim() : '';
   const objectiveFile = goal.objectiveFile === true;
-  const id = typeof goal.id === 'string' ? goal.id : '';
-  const status = GOAL_STATUSES.includes(goal.status) ? goal.status : '';
+  const id = isString(goal.id) ? goal.id : '';
+  const status = isGoalStatus(goal.status) ? goal.status : '';
   if (!id || !status || (!objective && !objectiveFile)) return null;
   return {
     id,
     objective: objective.slice(0, GOAL_OBJECTIVE_CHAR_LIMIT),
     objectiveFile,
     status,
-    tokenBudget: Number.isFinite(goal.tokenBudget) && goal.tokenBudget > 0 ? Math.floor(goal.tokenBudget) : null,
-    tokensUsed: Number.isFinite(goal.tokensUsed) && goal.tokensUsed > 0 ? Math.floor(goal.tokensUsed) : 0,
-    tokensBaseline: Number.isFinite(goal.tokensBaseline) && goal.tokensBaseline > 0 ? Math.floor(goal.tokensBaseline) : 0,
-    tokensCommitted: Number.isFinite(goal.tokensCommitted) && goal.tokensCommitted > 0 ? Math.floor(goal.tokensCommitted) : 0,
-    turnsUsed: Number.isFinite(goal.turnsUsed) && goal.turnsUsed > 0 ? Math.floor(goal.turnsUsed) : 0,
-    auditFailStreak: Number.isFinite(goal.auditFailStreak) && goal.auditFailStreak > 0 ? Math.floor(goal.auditFailStreak) : 0,
-    statusReason: typeof goal.statusReason === 'string' ? goal.statusReason.slice(0, REASON_CHAR_LIMIT) : '',
-    evaluationProviderID: typeof goal.evaluationProviderID === 'string' ? goal.evaluationProviderID : '',
-    evaluationModelID: typeof goal.evaluationModelID === 'string' ? goal.evaluationModelID : '',
-    lastAccountedMessageID: typeof goal.lastAccountedMessageID === 'string' ? goal.lastAccountedMessageID : '',
-    createdAt: Number.isFinite(goal.createdAt) ? goal.createdAt : 0,
-    updatedAt: Number.isFinite(goal.updatedAt) ? goal.updatedAt : 0,
+    tokenBudget: positiveNumber(goal.tokenBudget) ? Math.floor(goal.tokenBudget) : null,
+    tokensUsed: positiveNumber(goal.tokensUsed) ? Math.floor(goal.tokensUsed) : 0,
+    tokensBaseline: positiveNumber(goal.tokensBaseline) ? Math.floor(goal.tokensBaseline) : 0,
+    tokensCommitted: positiveNumber(goal.tokensCommitted) ? Math.floor(goal.tokensCommitted) : 0,
+    turnsUsed: positiveNumber(goal.turnsUsed) ? Math.floor(goal.turnsUsed) : 0,
+    auditFailStreak: positiveNumber(goal.auditFailStreak) ? Math.floor(goal.auditFailStreak) : 0,
+    statusReason: isString(goal.statusReason) ? goal.statusReason.slice(0, REASON_CHAR_LIMIT) : '',
+    evaluationProviderID: isString(goal.evaluationProviderID) ? goal.evaluationProviderID : '',
+    evaluationModelID: isString(goal.evaluationModelID) ? goal.evaluationModelID : '',
+    lastAccountedMessageID: isString(goal.lastAccountedMessageID) ? goal.lastAccountedMessageID : '',
+    createdAt: isFiniteNumber(goal.createdAt) ? goal.createdAt : 0,
+    updatedAt: isFiniteNumber(goal.updatedAt) ? goal.updatedAt : 0,
   };
 };
 
-// external: https://github.com/anomalyco/opencode OpenCode v2 uses flat message records and a separate compaction type.
-const toLoopMessage = (message) => {
+interface LoopInfo {
+  id: string;
+  sessionID: JsonValue | undefined;
+  time: JsonObject;
+}
+
+interface AssistantInfo extends LoopInfo {
+  role: 'assistant';
+  summary: boolean;
+  agent?: JsonValue | undefined;
+  providerID?: JsonValue | undefined;
+  modelID?: JsonValue | undefined;
+  variant?: JsonValue | undefined;
+  finish: JsonValue | undefined;
+  tokens: JsonValue | undefined;
+  error?: { name: JsonValue | undefined } | undefined;
+}
+
+interface LoopMessage {
+  info: AssistantInfo | (LoopInfo & { role: 'user'; synthetic: boolean });
+  parts: { type: 'text'; text: string }[];
+}
+
+const toLoopMessage = (raw: JsonValue): LoopMessage | null => {
+  const message = jsonFields(raw);
   const id = String(message?.id ?? '');
-  if (!id) return null;
-  const time = message.time && !Array.isArray(message.time) ? { ...message.time } : {};
+  if (!id || !message) return null;
+  const time: JsonObject = { ...jsonFields(message.time) };
   const base = { id, sessionID: message.sessionID, time };
   switch (message.type) {
     case 'user':
@@ -178,9 +298,8 @@ const toLoopMessage = (message) => {
         parts: message.text ? [{ type: 'text', text: String(message.text) }] : [],
       };
     case 'assistant': {
-      const model = message.model ?? {};
-      // external: https://github.com/anomalyco/opencode OpenCode v2 names structured errors with type.
-      const error = message.error ? { name: message.error.type, ...message.error } : undefined;
+      const model = jsonFields(message.model) ?? {};
+      const error = message.error ? { name: jsonFields(message.error)?.type, ...jsonFields(message.error) } : undefined;
       return {
         info: {
           ...base,
@@ -194,14 +313,14 @@ const toLoopMessage = (message) => {
           tokens: message.tokens,
           error,
         },
-        parts: (Array.isArray(message.content) ? message.content : [])
-          .filter((part) => part?.type === 'text' && part.text)
+        parts: (isJsonArray(message.content) ? message.content : [])
+          .map(jsonFields)
+          .filter((part): part is JsonObject => part?.type === 'text' && Boolean(part.text))
           .map((part) => ({ type: 'text', text: String(part.text) })),
       };
     }
     case 'compaction': {
       if (message.status !== 'completed') return null;
-      // external: https://github.com/anomalyco/opencode Completed v2 compactions have time.created only; project it to time.completed for the loop.
       return {
         info: {
           ...base,
@@ -219,58 +338,65 @@ const toLoopMessage = (message) => {
   }
 };
 
-const lastUserMessageCreatedAt = (messages, fallback) => {
+const lastUserMessageCreatedAt = (messages: LoopMessage[], fallback: number) => {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const info = messages[i]?.info;
-    if (info?.role === 'user' && !info.synthetic && Number.isFinite(info.time?.created)) return info.time.created;
+    if (info?.role === 'user' && !info.synthetic && isFiniteNumber(info.time?.created)) return info.time.created;
   }
   return fallback;
 };
 
-const messagePartsToText = (message) => {
-  const parts = Array.isArray(message?.parts) ? message.parts : [];
+const messagePartsToText = (message: LoopMessage | null) => {
+  const parts = message?.parts ?? [];
   return parts
-    .map((part) => (part?.type === 'text' && typeof part.text === 'string' ? part.text : ''))
+    .map((part) => part.text)
     .filter(Boolean)
     .join('\n');
 };
 
-// external: https://github.com/anomalyco/opencode Earlier inputs and outputs fold into later cache.read counts, so accounting uses the latest snapshot.
-const messageTokenTotal = (info) => {
-  const tokens = info?.tokens;
-  if (!tokens || typeof tokens !== 'object') return 0;
-  const input = Number.isFinite(tokens.input) ? Math.max(0, tokens.input) : 0;
-  const output = Number.isFinite(tokens.output) ? Math.max(0, tokens.output) : 0;
-  const cachedRead = Number.isFinite(tokens.cache?.read) ? Math.max(0, tokens.cache.read) : 0;
+const messageTokenTotal = (info: AssistantInfo) => {
+  const tokens = jsonFields(info.tokens);
+  if (!tokens) return 0;
+  const input = isFiniteNumber(tokens.input) ? Math.max(0, tokens.input) : 0;
+  const output = isFiniteNumber(tokens.output) ? Math.max(0, tokens.output) : 0;
+  const cache = jsonFields(tokens.cache);
+  const cachedRead = isFiniteNumber(cache?.read) ? Math.max(0, cache.read) : 0;
   return input + cachedRead + output;
 };
 
-const getErrorName = (error) => error?.name?.trim?.() ?? '';
+const getErrorName = (error: AssistantInfo['error']) => {
+  const name = error?.name;
+  const trim = hasTrim(name) ? name.trim : undefined;
+  if (trim == null) return '';
+  if (!isCallable(trim)) throw new TypeError('error?.name?.trim is not a function');
+  const trimmed: unknown = Function.prototype.call.call(trim, name);
+  return trimmed ?? '';
+};
 
-const isLengthTruncated = (info, errorName = getErrorName(info?.error)) => {
+const isLengthTruncated = (info: AssistantInfo | undefined, { errorName = getErrorName(info?.error) }: { errorName?: unknown } = {}) => {
   const error = info?.error;
   const hasError = error !== null && error !== undefined;
   return errorName === 'MessageOutputLengthError' || (!hasError && info?.finish === 'length');
 };
 
-const hasRepeatedLengthTail = (messages, latestAssistant, goalCreatedAt) => {
+const hasRepeatedLengthTail = (messages: LoopMessage[], latestAssistant: LoopMessage | null, goalCreatedAt: number) => {
   const latestInfo = latestAssistant?.info;
-  if (latestInfo?.summary === true) return false;
+  if (!latestAssistant || latestInfo?.role !== 'assistant' || latestInfo.summary === true) return false;
   const latestIndex = messages.indexOf(latestAssistant);
   const latestCreated = latestInfo?.time?.created;
   if (
     latestIndex < 0
-    || !(latestInfo?.time?.completed > 0)
-    || !(Number.isFinite(latestCreated) && latestCreated > 0)
+    || !(Number(latestInfo.time.completed) > 0)
+    || !positiveNumber(latestCreated)
     || !isLengthTruncated(latestInfo)
   ) return false;
 
   let previous = null;
   for (let i = 0; i < messages.length; i += 1) {
     const info = messages[i]?.info;
-    if (info?.role !== 'assistant' || info.summary === true || !(info.time?.completed > 0)) continue;
+    if (info?.role !== 'assistant' || info.summary === true || !(Number(info.time.completed) > 0)) continue;
     const created = info.time?.created;
-    if (!(Number.isFinite(created) && created > 0)) continue;
+    if (!positiveNumber(created)) continue;
     if (i === latestIndex) continue;
     if (created > latestCreated || (created === latestCreated && i > latestIndex)) continue;
     if (
@@ -304,34 +430,35 @@ export const createSessionGoalRuntime = ({
   getMaxAutoTurns = () => readGoalSettings().maxAutoTurns,
   persistSessionGoal = null,
   readSessionMetadata = null,
-}) => {
-  const timers = new Map();
-  const inflight = new Set();
-  const readAttempts = new Map();
+}: GoalRuntimeOptions): SessionGoalRuntime => {
+  const timers = new Map<string, TimerEntry>();
+  const inflight = new Set<string>();
+  const readAttempts = new Map<string, { failures: number; activityFailures: number }>();
   let stopped = false;
 
-  const clearTimer = (sessionId) => {
+  const clearTimer = (sessionId: string) => {
     const existing = timers.get(sessionId);
     if (existing) {
-      clearTimeout(existing.timer);
+      clearTimeout(existing.timer ?? undefined);
       timers.delete(sessionId);
     }
   };
 
-  const openCodeFetch = async (fetchPath, { directory, method = 'GET', body, query } = {}) => {
+  const openCodeFetch = async (fetchPath: string, { directory, method = 'GET', body, query }: GoalFetchOptions = {}) => {
     const base = buildOpenCodeUrl(fetchPath, '');
     const params = new URLSearchParams(query || {});
     if (directory) params.set('directory', directory);
     const search = params.toString();
     const url = search ? `${base}?${search}` : base;
+    const acceptHeaders: GoalRequestHeaders = { Accept: 'application/json' };
+    if (body) acceptHeaders['Content-Type'] = 'application/json';
+    const headers = { ...acceptHeaders, ...getOpenCodeAuthHeaders() };
+    const requestBody: Pick<RequestInit, 'body'> = {};
+    if (body) requestBody.body = JSON.stringify(body);
     const response = await fetch(url, {
       method,
-      headers: {
-        Accept: 'application/json',
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-        ...getOpenCodeAuthHeaders(),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
+      headers,
+      ...requestBody,
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (method === 'POST' && fetchPath.endsWith('/prompt')) {
@@ -339,18 +466,18 @@ export const createSessionGoalRuntime = ({
     } else if (!response.ok) {
       throw new Error(`OpenCode ${method} ${fetchPath} failed with ${response.status}`);
     }
-    return unwrapOpenCodeResponse(await response.json().catch(() => null));
+    const payload: JsonValue = await response.json().catch(() => null);
+    return unwrapOpenCodeResponse(payload);
   };
 
-  const fetchRecentMessages = async (sessionId, directory) => {
-    // external: https://github.com/anomalyco/opencode OpenCode v2 pages messages as { data, cursor }, newest first.
+  const fetchRecentMessages = async (sessionId: string, directory: string) => {
     const page = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/message`, {
       directory,
       query: { limit: String(MESSAGE_FETCH_LIMIT) },
     }).catch(() => null);
-    const messages = page && typeof page === 'object' ? page.data : null;
-    if (!Array.isArray(messages)) return null;
-    return messages.map(toLoopMessage).filter(Boolean).reverse();
+    const messages = jsonFields(page)?.data;
+    if (!isJsonArray(messages)) return null;
+    return messages.map(toLoopMessage).filter((message) => message !== null).reverse();
   };
 
   const activityProbe = createSessionActivityProbe({
@@ -359,61 +486,65 @@ export const createSessionGoalRuntime = ({
     timeoutMs: FETCH_TIMEOUT_MS,
   });
 
-  // external: https://github.com/anomalyco/opencode Before OpenCode 2.2.6, running commands are read from the session's folder.
-  const fetchOwnRunningShells = async (session, sessionId, directory) => {
-    const shellDirectory = typeof session.location?.directory === 'string' && session.location.directory
-      ? session.location.directory
+  const fetchOwnRunningShells = async (session: JsonObject | JsonValue[], sessionId: string, directory: string) => {
+    const location = jsonFields(jsonFields(session)?.location);
+    const shellDirectory = isString(location?.directory) && location.directory
+      ? location.directory
       : directory;
     const shells = shellDirectory ? await activityProbe.fetchRunningShells(shellDirectory) : null;
     return shells && shells.filter((shell) => shell.sessionID === sessionId);
   };
 
-  // external: https://github.com/anomalyco/opencode OpenCode v2 reports only that a session is running.
-  const isWorkingStatus = (status) => Boolean(status);
+  const isWorkingStatus = (status: JsonValue | undefined) => Boolean(status);
 
-  const readGoal = async (sessionId) => parseGoalMetadata({ metadata: await readSessionMetadata(sessionId) });
+  const readGoal = async (sessionId: string) => parseGoalMetadata({ metadata: await readSessionMetadata?.(sessionId) });
 
-  const writeGoal = async (sessionId, directory, expectedGoalId, mutate, isCurrent = null) => {
+  const writeGoal = async (sessionId: string, directory: string, expectedGoalId: string,
+    mutate: (current: SessionGoal) => Partial<SessionGoal> | null, isCurrent: (() => boolean) | null = null) => {
     const currentGoal = await readGoal(sessionId);
     if (!currentGoal || currentGoal.id !== expectedGoalId) return null;
     const patch = mutate(currentGoal);
     if (!patch) return null;
     const nextGoal = { ...currentGoal, ...patch, updatedAt: Date.now() };
-    const canWrite = isCurrent ? (metadata) => {
+    const canWrite = isCurrent ? (metadata: SessionMetadataInput) => {
       const latest = parseGoalMetadata({ metadata });
       return latest?.id === expectedGoalId && latest.status === 'active' && isCurrent();
     } : null;
-    const persisted = await persistSessionGoal(sessionId, directory, nextGoal, canWrite);
+    const persisted = await persistSessionGoal?.(sessionId, directory, nextGoal, canWrite);
     if (persisted === false) return null;
     return nextGoal;
   };
 
-  const settleGoal = async ({ sessionId, directory, goal, status, statusReason, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID, evaluationProviderID, evaluationModelID, isCurrent = null }) => {
+  const settleGoal = async ({ sessionId, directory, goal, status, statusReason, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID, evaluationProviderID, evaluationModelID, isCurrent = null }: GoalSettlement) => {
     const written = await writeGoal(sessionId, directory, goal.id, (current) => {
       if (current.status !== 'active' || (isCurrent && !isCurrent())) return null;
-      return {
+      const patch: Partial<SessionGoal> = {
         status,
-        statusReason: clampText(statusReason, REASON_CHAR_LIMIT),
+        statusReason: String(statusReason ?? '').trim().slice(0, REASON_CHAR_LIMIT),
         auditFailStreak: 0,
-        ...(tokensUsed !== undefined ? { tokensUsed } : {}),
-        ...(tokensBaseline !== undefined ? { tokensBaseline } : {}),
-        ...(tokensCommitted !== undefined ? { tokensCommitted } : {}),
-        ...(lastAccountedMessageID ? { lastAccountedMessageID } : {}),
-        ...(evaluationModelID !== undefined ? { evaluationProviderID: evaluationProviderID ?? '', evaluationModelID } : {}),
       };
+      if (tokensUsed !== undefined) patch.tokensUsed = tokensUsed;
+      if (tokensBaseline !== undefined) patch.tokensBaseline = tokensBaseline;
+      if (tokensCommitted !== undefined) patch.tokensCommitted = tokensCommitted;
+      if (lastAccountedMessageID) patch.lastAccountedMessageID = lastAccountedMessageID;
+      if (evaluationModelID !== undefined) {
+        patch.evaluationProviderID = evaluationProviderID ?? '';
+        patch.evaluationModelID = evaluationModelID;
+      }
+      return patch;
     }, isCurrent);
     if (!written) return;
     console.log(`[session-goal] ${sessionId} settled as ${status}${statusReason ? ` (${statusReason})` : ''}`);
-    if (typeof emitGoalNotification === 'function') {
+    if (isCallable(emitGoalNotification)) {
       try {
         emitGoalNotification({ sessionId, directory, status, goal: written });
       } catch (error) {
-        console.warn('[session-goal] notification failed:', error?.message || error);
+        console.warn('[session-goal] notification failed:', errorDetail(error));
       }
     }
   };
 
-  const checkWithJev = async ({ objective, answer, sessionId }) => {
+  const checkWithJev = async ({ objective, answer, sessionId }: AuditInput & { sessionId: JsonValue }) => {
     const endpoint = await classifierEndpoint();
     if (!endpoint || !jev) return null;
     try {
@@ -425,12 +556,12 @@ export const createSessionGoalRuntime = ({
       }
       return { scores, evaluationProviderID: '', evaluationModelID: endpoint.model };
     } catch (error) {
-      console.warn('[session-goal] progress check: Jev failed:', error?.message || error);
+      console.warn('[session-goal] progress check: Jev failed:', errorDetail(error));
       return null;
     }
   };
 
-  const checkWithSmallModel = async ({ objective, answer, directory, lastAssistantInfo }) => {
+  const checkWithSmallModel = async ({ objective, answer, directory, lastAssistantInfo }: AuditInput & { directory: string; lastAssistantInfo: AssistantInfo }) => {
     let service;
     try {
       service = await getSmallModelService();
@@ -441,9 +572,9 @@ export const createSessionGoalRuntime = ({
       const generated = await service.generateSmallModelText({
         prompt: buildSmallModelAuditPrompt({ objective, answer }),
         directory,
-        sessionID: typeof lastAssistantInfo?.sessionID === 'string' ? lastAssistantInfo.sessionID : undefined,
-        preferredProviderID: typeof lastAssistantInfo?.providerID === 'string' ? lastAssistantInfo.providerID : undefined,
-        preferredModelID: typeof lastAssistantInfo?.modelID === 'string' ? lastAssistantInfo.modelID : undefined,
+        sessionID: isString(lastAssistantInfo.sessionID) ? lastAssistantInfo.sessionID : undefined,
+        preferredProviderID: isString(lastAssistantInfo.providerID) ? lastAssistantInfo.providerID : undefined,
+        preferredModelID: isString(lastAssistantInfo.modelID) ? lastAssistantInfo.modelID : undefined,
       });
       const scores = readSmallModelAnswers(generated?.text);
       if (!scores) {
@@ -457,14 +588,14 @@ export const createSessionGoalRuntime = ({
       }
       return { scores, evaluationProviderID: generated.providerID, evaluationModelID: generated.modelID };
     } catch (error) {
-      if (Number(error?.statusCode) !== 404) {
-        console.warn('[session-goal] progress check: small model failed:', error?.message || error);
+      if (Number(hasErrorFields(error) ? error.statusCode : undefined) !== 404) {
+        console.warn('[session-goal] progress check: small model failed:', errorDetail(error));
       }
       return null;
     }
   };
 
-  const runAudit = async ({ goal, assistantText, directory, lastAssistantInfo }) => {
+  const runAudit = async ({ goal, assistantText, directory, lastAssistantInfo }: { goal: SessionGoal; assistantText: string; directory: string; lastAssistantInfo: AssistantInfo }) => {
     const input = { objective: goal.objective, answer: assistantText };
     const sessionId = lastAssistantInfo?.sessionID ?? null;
     const checked = (getChecker() === 'classifier' ? await checkWithJev({ ...input, sessionId }) : null)
@@ -480,8 +611,7 @@ export const createSessionGoalRuntime = ({
     return { verdict, evaluationProviderID: checked.evaluationProviderID, evaluationModelID: checked.evaluationModelID };
   };
 
-  // external: https://github.com/anomalyco/opencode OpenCode v2 keeps the model and agent on the session; plain prompts preserve that selection.
-  const sendContinuation = async ({ sessionId, directory, goal }) => {
+  const sendContinuation = async ({ sessionId, directory, goal }: GoalSession) => {
     await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/prompt`, {
       directory,
       method: 'POST',
@@ -489,7 +619,7 @@ export const createSessionGoalRuntime = ({
     });
   };
 
-  const tick = async (sessionId, directory) => {
+  const tick = async (sessionId: string, directory: string) => {
     if (!isEnabled()) return;
     const maxAutoTurns = getMaxAutoTurns();
 
@@ -497,12 +627,12 @@ export const createSessionGoalRuntime = ({
     readAttempts.set(sessionId, attempt);
     const isCurrent = () => !stopped && readAttempts.get(sessionId) === attempt;
     const session = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}`, { directory })
-      .catch((error) => {
-        console.warn(`[session-goal] session fetch failed: ${error?.message || error}`);
+      .catch((cause: unknown) => {
+        console.warn(`[session-goal] session fetch failed: ${errorDetail(cause)}`);
         return null;
       });
     if (!isCurrent()) return;
-    if (!session || typeof session !== 'object') {
+    if (!isObject(session)) {
       attempt.failures += 1;
       if (attempt.failures <= SESSION_READ_RETRIES) {
         armTimer(sessionId, directory, recheckMs * (2 ** (attempt.failures - 1)));
@@ -563,7 +693,6 @@ export const createSessionGoalRuntime = ({
       return;
     }
 
-    // external: https://github.com/anomalyco/opencode OpenCode 2.2.6+ jobs cover the subagent tree but exclude OpenChamber-started workflow children.
     const backgroundJobs = await activityProbe.fetchRunningBackgroundJobs(sessionId);
     if (!isCurrent()) return;
     if (backgroundJobs === null) {
@@ -586,14 +715,15 @@ export const createSessionGoalRuntime = ({
     const messages = await fetchRecentMessages(sessionId, directory);
     if (!messages) return;
 
-    let lastAssistant = null;
+    let lastAssistant: LoopMessage | null = null;
     for (let i = messages.length - 1; i >= 0; i -= 1) {
-      if (messages[i]?.info?.role === 'assistant') {
-        lastAssistant = messages[i];
+      const message = messages[i];
+      if (message?.info?.role === 'assistant') {
+        lastAssistant = message;
         break;
       }
     }
-    const lastAssistantInfo = lastAssistant?.info;
+    const lastAssistantInfo = lastAssistant?.info.role === 'assistant' ? lastAssistant.info : undefined;
     const lastMessageInfo = messages.length > 0 ? messages[messages.length - 1]?.info : null;
 
     let executionInfo = null;
@@ -606,7 +736,7 @@ export const createSessionGoalRuntime = ({
     }
 
     if (lastMessageInfo?.role === 'user') return;
-    if (lastAssistantInfo && !(lastAssistantInfo.time?.completed > 0) && !lastAssistantInfo.error) return;
+    if (lastAssistantInfo && !(Number(lastAssistantInfo.time.completed) > 0) && !lastAssistantInfo.error) return;
 
     if (!lastAssistantInfo?.id) return;
 
@@ -616,7 +746,7 @@ export const createSessionGoalRuntime = ({
       for (const message of messages) {
         const info = message?.info;
         if (info?.role !== 'assistant') continue;
-        if (!(info.time?.completed > 0) || info.time.completed > goal.createdAt) continue;
+        if (!(Number(info.time.completed) > 0) || Number(info.time.completed) > goal.createdAt) continue;
         tokensBaseline = Math.max(tokensBaseline, messageTokenTotal(info));
       }
     }
@@ -627,13 +757,12 @@ export const createSessionGoalRuntime = ({
     let sawNewMessages = false;
     for (const message of messages) {
       const info = message?.info;
-      if (info?.role !== 'assistant' || typeof info.id !== 'string') continue;
+      if (info?.role !== 'assistant') continue;
       if (lastAccountedMessageID && info.id <= lastAccountedMessageID) continue;
-      if (!(info.time?.completed > 0)) continue;
+      if (!(Number(info.time.completed) > 0)) continue;
       sawNewMessages = true;
       const total = messageTokenTotal(info);
       if (info.summary === true) {
-        // external: https://github.com/anomalyco/opencode Compaction summary tokens are zeroed; close from known usage, which excludes the summarization call.
         tokensCommitted = Math.max(
           goal.tokensUsed,
           tokensCommitted + Math.max(0, (segmentSnapshot ?? 0) - tokensBaseline),
@@ -683,7 +812,7 @@ export const createSessionGoalRuntime = ({
     const errorName = getErrorName(error);
     const hasError = error !== null && error !== undefined;
     const abortedTail = errorName === 'MessageAbortedError';
-    const lengthTail = isLengthTruncated(lastAssistantInfo, errorName);
+    const lengthTail = isLengthTruncated(lastAssistantInfo, { errorName });
     if (abortedTail && goal.statusReason !== 'resumed') {
       await writeGoal(sessionId, directory, goal.id, () => ({
         status: 'paused',
@@ -704,7 +833,7 @@ export const createSessionGoalRuntime = ({
       return;
     }
 
-    if (typeof goal.tokenBudget === 'number' && tokensUsed >= goal.tokenBudget) {
+    if (goal.tokenBudget !== null && tokensUsed >= goal.tokenBudget) {
       await settleGoal({
         sessionId, directory, goal, status: 'budgetLimited', statusReason: 'token budget reached', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
       });
@@ -760,16 +889,22 @@ export const createSessionGoalRuntime = ({
       }
     }
 
-    const written = await writeGoal(sessionId, directory, goal.id, (current) => ({
-      tokensUsed,
-      tokensBaseline,
-      tokensCommitted,
-      lastAccountedMessageID,
-      turnsUsed: current.turnsUsed + 1,
-      auditFailStreak,
-      statusReason: '',
-      ...(audit ? { evaluationProviderID: audit.evaluationProviderID ?? '', evaluationModelID: audit.evaluationModelID ?? '' } : {}),
-    }));
+    const written = await writeGoal(sessionId, directory, goal.id, (current) => {
+      const patch: Partial<SessionGoal> = {
+        tokensUsed,
+        tokensBaseline,
+        tokensCommitted,
+        lastAccountedMessageID,
+        turnsUsed: current.turnsUsed + 1,
+        auditFailStreak,
+        statusReason: '',
+      };
+      if (audit) {
+        patch.evaluationProviderID = audit.evaluationProviderID ?? '';
+        patch.evaluationModelID = audit.evaluationModelID ?? '';
+      }
+      return patch;
+    });
     if (!written) {
       console.log('[session-goal] goal changed during tick, dropping continuation');
       return;
@@ -786,14 +921,14 @@ export const createSessionGoalRuntime = ({
     await sendContinuation({ sessionId, directory, goal: { ...written, objective: effectiveObjective } });
   };
 
-  const finishInflight = (sessionId) => {
+  const finishInflight = (sessionId: string) => {
     inflight.delete(sessionId);
     const pending = timers.get(sessionId);
-    if (pending && !pending.timer) armTimer(sessionId, pending.directory, pending.quietMs);
+    if (pending?.timer === null) armTimer(sessionId, pending.directory, pending.quietMs);
     if (!pending) readAttempts.delete(sessionId);
   };
 
-  const armTimer = (sessionId, directory, quietMs) => {
+  const armTimer = (sessionId: string, directory: string, quietMs: number) => {
     clearTimer(sessionId);
     const timer = setTimeout(() => {
       if (stopped) return;
@@ -804,18 +939,18 @@ export const createSessionGoalRuntime = ({
       timers.delete(sessionId);
       inflight.add(sessionId);
       tick(sessionId, directory)
-        .catch((error) => {
-          console.warn('[session-goal] tick failed:', error?.message || error);
+        .catch((cause: unknown) => {
+          console.warn('[session-goal] tick failed:', errorDetail(cause));
         })
         .finally(() => {
           finishInflight(sessionId);
         });
     }, quietMs);
-    if (typeof timer?.unref === 'function') timer.unref();
+    if (isCallable(timer?.unref)) timer.unref();
     timers.set(sessionId, { timer, armedAt: Date.now() });
   };
 
-  const pauseAfterAbort = async (sessionId, directory) => {
+  const pauseAfterAbort = async (sessionId: string, directory: string) => {
     const goal = await readGoal(sessionId);
     if (!goal || goal.status !== 'active') return;
     await writeGoal(sessionId, directory, goal.id, () => ({
@@ -825,9 +960,9 @@ export const createSessionGoalRuntime = ({
     console.log(`[session-goal] ${sessionId} paused after user abort`);
   };
 
-  const isWired = () => typeof persistSessionGoal === 'function' && typeof readSessionMetadata === 'function';
+  const isWired = () => isCallable(persistSessionGoal) && isCallable(readSessionMetadata);
 
-  const notifyGoalChanged = async (sessionId, directory, metadata) => {
+  const notifyGoalChanged: SessionGoalRuntime['notifyGoalChanged'] = async (sessionId, directory, metadata) => {
     if (stopped || !isWired()) return;
     const goal = parseGoalMetadata({ metadata });
     if (!goal || goal.status !== 'active') {
@@ -842,7 +977,8 @@ export const createSessionGoalRuntime = ({
     let resolved = directory;
     if (!resolved) {
       const session = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}`).catch(() => null);
-      resolved = typeof session?.location?.directory === 'string' ? session.location.directory : '';
+      const location = jsonFields(jsonFields(session)?.location);
+      resolved = isString(location?.directory) ? location.directory : '';
     }
     if (stopped || timers.has(sessionId)) return;
     armTimer(sessionId, resolved, goal.statusReason === 'resumed' ? RESUME_KICKOFF_MS : kickoffQuietMs);
@@ -852,23 +988,26 @@ export const createSessionGoalRuntime = ({
     if (stopped || !isWired() || !isEnabled()) return;
     const page = await openCodeFetch('/api/session', {
       query: { parentID: 'null', archived: 'false', order: 'desc', limit: String(RECOVERY_SESSION_LIMIT) },
-    }).catch((error) => {
-      console.warn('[session-goal] recovery: session list failed:', error?.message || error);
+    }).catch((cause: unknown) => {
+      console.warn('[session-goal] recovery: session list failed:', errorDetail(cause));
       return null;
     });
-    const sessions = Array.isArray(page?.data) ? page.data : [];
-    for (const session of sessions) {
+    const data = jsonFields(page)?.data;
+    const sessions = isJsonArray(data) ? data : [];
+    for (const record of sessions) {
       if (stopped) return;
-      const sessionId = typeof session?.id === 'string' ? session.id : '';
+      const session = jsonFields(record);
+      const sessionId = isString(session?.id) ? session.id : '';
       if (!sessionId || timers.has(sessionId) || inflight.has(sessionId)) continue;
       if (parseGoalMetadata(session)?.status !== 'active') continue;
-      const directory = typeof session.location?.directory === 'string' ? session.location.directory : '';
+      const location = jsonFields(session?.location);
+      const directory = isString(location?.directory) ? location.directory : '';
       armTimer(sessionId, directory, kickoffQuietMs);
     }
   };
 
   let parkedNoticeLogged = false;
-  const processPayload = (payload, directoryHint = '') => {
+  const processPayload: SessionGoalRuntime['processPayload'] = (rawPayload, directoryHint = '') => {
     if (stopped) return;
     if (!isWired()) {
       if (!parkedNoticeLogged) {
@@ -878,6 +1017,7 @@ export const createSessionGoalRuntime = ({
       return;
     }
 
+    const payload = jsonFields(rawPayload);
     const aborted = extractAbortedAssistant(payload);
     if (aborted) {
       if (!inflight.has(aborted.sessionId)) readAttempts.delete(aborted.sessionId);
@@ -885,8 +1025,8 @@ export const createSessionGoalRuntime = ({
       if (!inflight.has(aborted.sessionId)) {
         inflight.add(aborted.sessionId);
         pauseAfterAbort(aborted.sessionId, directoryHint)
-          .catch((error) => {
-            console.warn('[session-goal] pause after abort failed:', error?.message || error);
+          .catch((cause: unknown) => {
+            console.warn('[session-goal] pause after abort failed:', errorDetail(cause));
           })
           .finally(() => {
             finishInflight(aborted.sessionId);
@@ -926,7 +1066,7 @@ export const createSessionGoalRuntime = ({
   const stop = () => {
     stopped = true;
     for (const { timer } of timers.values()) {
-      clearTimeout(timer);
+      clearTimeout(timer ?? undefined);
     }
     timers.clear();
     readAttempts.clear();
