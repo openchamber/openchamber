@@ -126,4 +126,17 @@ describe('the host\'s custom providers', () => {
     expect(isLoopbackUrl('http://192.168.1.23:11434/v1')).toBe(false);
     expect(isLoopbackUrl('ftp://localhost/')).toBe(false);
   });
+
+  it('keeps URL string coercion for unchecked provider settings', () => {
+    const hints = [];
+    const value = { [Symbol.toPrimitive]: (hint) => { hints.push(hint); return 'http://localhost:11434/v1'; } };
+    expect(windowUpstreamOf(value)).toBe('http://host.docker.internal:11434/v1');
+    expect(isLoopbackUrl(value)).toBe(true);
+    expect(hints).toEqual(['string', 'string']);
+    expect(windowUpstreamOf(Symbol('url'))).toBeNull();
+    expect(windowUpstreamOf({ toString: () => { throw new Error('unreadable'); } })).toBeNull();
+    const url = new URL('https://example.com');
+    url.toString = () => 'http://localhost:11434/v1';
+    expect(windowUpstreamOf(url)).toBe('http://host.docker.internal:11434/v1');
+  });
 });

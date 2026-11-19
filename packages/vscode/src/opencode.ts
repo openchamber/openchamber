@@ -1,4 +1,5 @@
 import { installOpenCodeV2, supportsOpenCodeV2Install } from '../../web/server/lib/opencode/v2-install.js';
+import { isRetiredBundledCliSetting } from '../../web/server/lib/opencode/bundled-opencode-server.js';
 import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpenCodeVersion, readOpenCodeInfo, isSupportedOpenCodeVersion, type OpenCodeCompatibility } from '../../web/server/lib/opencode/compatibility.js';
 import * as vscode from 'vscode';
 import * as os from 'os';
@@ -245,9 +246,7 @@ function validateConfiguredOpencodeBinaryForManagedStart(): string | null {
   try {
     const settings = readOpenChamberSettings();
     const raw = typeof settings.opencodeBinary === 'string' ? settings.opencodeBinary.trim() : '';
-    if (raw) {
-      candidates.push(raw);
-    }
+    if (raw && !isRetiredBundledCliSetting(raw)) candidates.push(raw);
   } catch {
     // ignore
   }

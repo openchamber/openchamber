@@ -1,7 +1,7 @@
 import React from 'react';
 import type { ToolPopupContent } from '../message/types';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { fetchBypassingRuntimeBridge, runtimeFetch } from '@/lib/runtime-fetch';
 import { runtimeAssetsNeedFetch } from '@/lib/runtime-asset';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
@@ -151,7 +151,7 @@ export class MarkdownMediaOwner {
     }
     const url = await this.resolve(source);
     if (!/^(?:data|blob):/i.test(url)) throw new Error('Image cannot be saved');
-    return (await fetch(url, { signal })).blob();
+    return (await fetchBypassingRuntimeBridge(url, { signal })).blob();
   }
 
   addGallery(image: GalleryImage): () => void {

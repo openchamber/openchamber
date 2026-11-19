@@ -255,7 +255,7 @@ throwaway `FontFace` family removed when the tab closes), `TableArtifact`
 (CSV/TSV through `delimitedText.ts`, capped rows stated in the meta line),
 `OfficeArtifact` (docx, xlsx, pptx, odt, ods, odp, read-only, see below),
 and `BinaryArtifact` (name, type, size, download, and the desktop's open in
-the default app; never a decode attempt). `FilesView.renderArtifactPreview`
+the default app; never a decode attempt). `view/useArtifactPreview`
 is the single switch both the docked and the fullscreen viewer use.
 
 A file that cannot be shown fills the pane with `ContentState`
@@ -389,14 +389,14 @@ fonts, JPEG 2000 images) may lose that text or image.
 ### Why table, data and office previews load on first use
 
 `TableArtifact`, `DataFileArtifact` and `OfficeArtifact` are `React.lazy` in
-`FilesView`, each under its own error boundary keyed by the file, and the
+`view/LazyFileArtifacts`, each under its own error boundary keyed by the file, and the
 export reads `delimitedText.ts` with a dynamic import. Imported statically,
 their modules sat in a chunk `FilesView` loaded with itself, so a single
 missing file (Windows Defender quarantined that chunk in 2.7.0, #6630) failed
 the whole `FilesView` import and the app-wide boundary replaced the window
 with "Something went wrong". Now such a failure shows "Preview unavailable" in
 that file's pane, and the tree, the text editor and other previews keep
-working. `FilesView` uses plain `React.lazy` here, not `lazyWithChunkRecovery`:
+working. The artifacts use plain `React.lazy` here, not `lazyWithChunkRecovery`:
 that helper reloads the window, which drops the user's place and cannot bring
 back a quarantined file. `React.lazy` keeps a failed import, so these previews
 stay unavailable until the window reloads; on the web that includes a tab left
@@ -572,6 +572,10 @@ authoritative sheet because the optimistic typed values are already visible.
 
 ### Workbook round-trip invariants
 
+- Logical row and column counts end at the last cell with data, including gaps.
+  Readers keep these counts independently of capped ODS repeat expansion and grid
+  rows. Empty ODS padding does not extend them, and successful edits adopt the
+  counts from the read-back document.
 - Undo restores stored cell values directly. Re-parsing their display text
   could turn a text value such as `00123` into a number.
 - SpreadsheetML parts normalize namespace prefixes on open, so reading and
@@ -593,6 +597,13 @@ Quoted fields can span lines, and streaming across the source avoids a second
 large array of lines. Rows beyond the cap are counted without being retained,
 so the preview can report the full size within its memory bound.
 
+### Why workbook dimensions are separate from cells
+
+ODS repeats can describe more populated rows and columns than the preview
+materializes. The readers count their full extents while retaining the existing
+caps; deriving totals from retained cells loses the omitted part. XLSX uses
+populated cell coordinates because its optional dimension hint can be stale.
+
 ### Delimited-text invariants
 
 - Parsing and byte-offset edits agree about blank records. A final newline
@@ -600,6 +611,9 @@ so the preview can report the full size within its memory bound.
   survives as a row instead of disappearing as a blank line.
 - Column edits apply from the end of the source, so changing one field leaves
   the earlier recorded byte offsets valid.
+- The logical column total includes omitted records. The materialized width
+  covers retained records only, so a wide omitted row cannot multiply padding
+  allocations across every visible editable row.
 
 ### Data files, archives, notebooks
 

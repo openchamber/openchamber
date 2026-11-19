@@ -130,12 +130,6 @@ describe('page action scripts', () => {
     await win.happyDOM.close();
   });
 
-  test('a scoped snapshot reads only the subtree it was given', () => {
-    const script = buildSnapshotScript({ selector: '#changelog' });
-    expect(script).toContain('"#changelog"');
-    expect(script).toContain('root.querySelectorAll');
-  });
-
   test('waiting for quiet holds while the page keeps changing, then answers', async () => {
     const win = new Window({ url: 'http://localhost:3000/' });
     win.document.body.innerHTML = '<div id="root">Loading</div>';

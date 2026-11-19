@@ -4,17 +4,17 @@
 This module provides server-side Text-to-Speech services using OpenAI's TTS API. The historical shared text summarization endpoint now lives in `packages/web/server/lib/text/` as an API-compatible stub because the previous Zen model provider is unavailable.
 
 ## Entrypoints and structure
-- `packages/web/server/lib/tts/index.js`: Public entrypoint imported by `packages/web/server/index.js`.
+- `packages/web/server/lib/tts/index.ts`: Public entrypoint loaded lazily by the speech routes. Relative imports keep `.js` specifiers.
 - `packages/web/server/lib/tts/routes.js`: Express route registration for `/api/voice/*`, `/api/tts/*`, and `/api/stt/*` endpoints. `/api/tts/speak` takes an optional JSON `endpointPath`; `/api/stt/transcribe` takes an optional `X-Endpoint-Path` header. Both answer 400 for an invalid path before contacting the upstream server.
-- `packages/web/server/lib/tts/capability-runtime.js`: runtime helper for probing local macOS `say` TTS voice capability.
+- `packages/web/server/lib/tts/capability-runtime.ts`: runtime helper for probing local macOS `say` TTS voice capability.
 - `packages/web/server/lib/tts/service.js`: TTS service implementation with OpenAI integration.
 - `packages/web/server/lib/text/summarization.js`: Shared text summarization stub and sanitization utilities. It performs no external Zen calls.
-- `packages/web/server/lib/tts/stt.js`: STT proxy for OpenAI-compatible transcription endpoints.
-- `packages/web/server/lib/tts/voice-keys.js`: the API keys typed in Voice settings (`openai`, `openaiCompatible`, `stt`), stored in `voice-keys.json` in the data dir, mode 0600. `GET /api/voice/keys` answers only which are set; `PUT /api/voice/keys` sets (string) or removes (null) them. `/api/tts/speak`, the STT route and dictation fill a request's key from here, so the UI never holds or sends one. A key in a request body still wins: older clients sent theirs that way. Keys earlier builds kept in the browser's localStorage are moved here by the UI on first read (`packages/ui/src/lib/voiceKeysApi.ts`).
+- `packages/web/server/lib/tts/stt.ts`: STT proxy for OpenAI-compatible transcription endpoints.
+- `packages/web/server/lib/tts/voice-keys.ts`: the API keys typed in Voice settings (`openai`, `openaiCompatible`, `stt`), stored in `voice-keys.json` in the data dir, mode 0600. `GET /api/voice/keys` answers only which are set; `PUT /api/voice/keys` sets (string) or removes (null) them. `/api/tts/speak`, the STT route and dictation fill a request's key from here, so the UI never holds or sends one. A key in a request body still wins: older clients sent theirs that way. Keys earlier builds kept in the browser's localStorage are moved here by the UI on first read (`packages/ui/src/lib/voiceKeysApi.ts`).
 - The server's own `OPENAI_API_KEY` is used only for OpenAI itself, never sent to a custom server URL (`service.js`, `stt.js`).
-- `packages/web/server/lib/tts/base-url.js`: shared base URL validation and normalization for custom OpenAI-compatible endpoints.
-- `packages/web/server/lib/tts/endpoint-path.js`: validation and request rewriting for a custom resource path. `normalizeEndpointPath` turns a user string into `/resource/path` or `{ error }`; `createEndpointPathFetch` wraps a fetch implementation and replaces only the OpenAI SDK's fixed last path segment (`/audio/speech`, `/audio/transcriptions`), keeping the origin, base URL prefix, query and every request option. A server that copies the OpenAI request body, auth and response but names the resource differently needs exactly this.
-- `packages/web/server/lib/tts/language-detect.js`: dependency-free language detection for voice selection (`detectTextLanguage`, `pickVoiceForLanguage`, `languageOfLocale`). Used by the macOS `say` route (`language: 'auto'` switches to an installed voice whose locale matches the text; the response carries `X-Speech-Voice` — percent-encoded, because macOS voice names may be localized — and `X-Speech-Language`) and by the dictation module's local TTS model choice.
+- `packages/web/server/lib/tts/base-url.ts`: shared base URL validation and normalization for custom OpenAI-compatible endpoints.
+- `packages/web/server/lib/tts/endpoint-path.ts`: validation and request rewriting for a custom resource path. `normalizeEndpointPath` turns a user string into `/resource/path` or `{ error }`; `createEndpointPathFetch` wraps a fetch implementation and replaces only the OpenAI SDK's fixed last path segment (`/audio/speech`, `/audio/transcriptions`), keeping the origin, base URL prefix, query and every request option. A server that copies the OpenAI request body, auth and response but names the resource differently needs exactly this.
+- `packages/web/server/lib/tts/language-detect.ts`: dependency-free language detection for voice selection (`detectTextLanguage`, `pickVoiceForLanguage`, `languageOfLocale`). Used by the macOS `say` route (`language: 'auto'` switches to an installed voice whose locale matches the text; the response carries percent-encoded `X-Speech-Voice` and `X-Speech-Language`) and by the dictation module's local TTS model choice.
 
 ## Public exports
 
@@ -124,6 +124,22 @@ The server-side TTS approach bypasses mobile Safari's audio context restrictions
 - STT derives the upload filename extension from the MIME type so a Whisper server can infer the codec when the stream header does not say.
 
 ## Decisions
+
+### Why two implementations remain JavaScript
+
+`service.js` accepts a string credential or an object with `access` or `token`. The outside boundary is `readOpenCodeCredentials(): Promise<LegacyAuthFile>` in `../opencode/auth.d.ts`: `LegacyAuthEntry` declares only API credentials with `key` and OAuth credentials with `access`. The implementation projects those same two object shapes in `projectCredentialValue`; it never returns a legacy string or token-bearing object. Widening the declaration to include those forms would not describe an additional runtime path in its owner. Removing the legacy branches or reading `key` changes speech behavior, and the legacy credential tests exercise the string and token-bearing forms. Converting the service requires reconciling that compatibility contract beyond a type-only correction.
+
+`routes.js` forwards unchecked JSON `threshold` and `maxLength` values to `../text/summarization.ts`. Its `SummarizeTextOptions.threshold` and `.maxLength` require numbers, while existing requests can supply strings or null and rely on JavaScript coercion. Widening those fields alone cannot type the implementation: `summarizeText` compares `text.length <= threshold`, and `distillNoteFallback` passes `maxLength` to `Math.min`. Both need coercion or narrowing in their owner before they can consume unknown inputs under the strict checker. Explicit coercion would change runtime code outside this folder. The error fallback also forwards unchecked text to `sanitizeForTTS` and `sanitizeForNote`; their existing string guards would permit widening those sanitizer parameters, but that correction alone does not resolve the numeric boundary. Declaring the request fields as numbers or strings would promise validation the route never performs.
+
+### Why boundary validation stays at use time
+
+Custom URLs and endpoint paths accept unknown HTTP/configuration values and retain their string checks. URL policy reads the current enterprise and runtime environment on every call. Environment flags themselves are strings or absent, and URL hostnames and language helper inputs are internally typed strings, so their redundant type checks are removed. Endpoint control-character detection checks code units 0 through 31 and 127, preserving both raw and decoded-path rejection without a lint suppression.
+
+Voice-key reads retain the storage schema's inferred optional-string fields. Missing, unreadable or malformed files yield an empty object, malformed individual fields become undefined, and patches still use the strict schema. Filesystem and JSON errors retain their code/message inspection. The store uses Node filesystem, OS and path helpers plus Zod; the other runtime dependencies are the enterprise policy reader, lazy OpenAI SDK, fetch/URL/Request globals, and the macOS child-process probe. Speech credentials remain owned by OpenCode auth and text sanitization remains owned by the text module.
+
+### Why source imports keep JavaScript extensions
+
+The server bootstrap registers source resolution before dynamically loading the runtime. Web, Electron desktop, hosted mobile and Capacitor clients use those server routes; VS Code supplies its own unavailable speech responses and imports none of these helpers. Dictation shares URL/path validation, transcription, voice keys and language detection through the same server entry. Installed consumers load emitted JavaScript. `SayVoice` and `SayTtsCapability` belong to the capability module; transcription options belong to the STT module. Dictation intentionally passes explicit undefined optional transcription fields.
 
 ### Why the OpenAI SDK loads on first call
 The SDK is about 200 modules and only speech and transcription use it. Loading it on the first call keeps server startup light; an eager import would pay that cost for every run.

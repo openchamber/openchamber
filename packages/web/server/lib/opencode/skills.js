@@ -6,11 +6,14 @@ import {
   OPENCODE_CONFIG_DIR,
   SKILL_SCOPE,
   ensureDirs,
-  parseMdFile,
-  parseMdFileAsync,
-  writeMdFile,
   readConfigLayers,
   readConfig,
+  getAncestors,
+  findWorktreeRoot,
+  isPlainObject,
+} from './config-files.js';
+import { parseMdFile, parseMdFileAsync, writeMdFile } from './markdown-files.js';
+import {
   walkSkillMdFiles,
   addSkillFromMdFile,
   resolveSkillSearchDirectories,
@@ -18,11 +21,8 @@ import {
   readSkillSupportingFile,
   writeSkillSupportingFile,
   deleteSkillSupportingFile,
-  getAncestors,
-  findWorktreeRoot,
-  isPlainObject,
   pathExists,
-} from './shared.js';
+} from './skill-files.js';
 
 const BUILT_IN_SKILL_LOCATION = '<built-in>';
 

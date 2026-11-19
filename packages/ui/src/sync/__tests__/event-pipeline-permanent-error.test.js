@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, jest } from 'bun:test';
 import { createEventPipeline } from '../event-pipeline';
 
 const savedDocument = globalThis.document;
@@ -47,12 +47,8 @@ describe('createEventPipeline — permanent server errors', () => {
         subscribe: () => {
           const idx = sdkCallIndex++;
           if (idx <= 1) {
-            // First two attempts: permanent 404. Under the old code these
-            // would have entered the exponential path and the second retry
-            // would fire after ~250-500ms. With the permanent-error override
-            // both go to the long (60s) cap, so the test should observe
-            // exactly one retry (after `online` interrupts) within its
-            // observation window.
+            // Both failures must wait for the permanent-error cap unless an
+            // online event interrupts them.
             const error = new Error('Not Found');
             error.status = 404;
             throw error;
@@ -65,59 +61,41 @@ describe('createEventPipeline — permanent server errors', () => {
       },
     };
 
-    const startedAt = Date.now();
-    let cleanupFn = () => {};
-
-    // Phase 1: let the first 404 fire and verify the loop is NOT spinning.
-    // If the permanent-error override is broken, the loop would retry every
-    // 250-500ms and sdkCallIndex would climb past 1.
-    await new Promise((resolve) => {
-      const { cleanup } = createEventPipeline({
-        sdk,
-        transport: 'sse',
-        heartbeatTimeoutMs: 60_000,
-        reconnectDelayMs: 60_000,
-        onEvent: () => {},
-        onDisconnect: () => {
-          // Wait 250ms after disconnect — long enough that the broken
-          // exponential path would have retried at least once. If our
-          // override works, sdkCallIndex stays at 1.
-          setTimeout(resolve, 250);
-        },
-      });
-      cleanupFn = cleanup;
+    const disconnected = Promise.withResolvers();
+    const recovered = Promise.withResolvers();
+    jest.useFakeTimers();
+    const { cleanup } = createEventPipeline({
+      sdk,
+      transport: 'sse',
+      heartbeatTimeoutMs: 60_000,
+      reconnectDelayMs: 60_000,
+      onEvent: () => {},
+      onDisconnect: () => disconnected.resolve(),
+      onReconnect: () => recovered.resolve(),
     });
 
-    expect(sdkCallIndex).toBe(1);
+    try {
+      await disconnected.promise;
+      // RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS is 60 s. Drain the timer's
+      // promise continuations before checking that no retry ran before it.
+      jest.advanceTimersByTime(59_999);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(sdkCallIndex).toBe(1);
 
-    // Phase 2: fire `online` to interrupt the long wait. Loop should fire
-    // the second attempt (still 404) immediately, then the third attempt
-    // which succeeds.
-    const recovered = new Promise((resolve) => {
-      // Trigger an `online` event; waitForRetry's interrupter resolves and
-      // the next attempt fires. That attempt is also a 404 (idx=1), then
-      // another `online` advances us to the success path (idx=2).
-      const advance = () => {
-        globalThis.window.dispatch('online');
-      };
-      advance();
-      const t = setInterval(() => {
-        if (sdkCallIndex >= 3) {
-          clearInterval(t);
-          resolve();
-        } else {
-          advance();
-        }
-      }, 50);
-    });
+      const startedAt = Date.now();
+      globalThis.window.dispatch('online');
+      // Complete the failed second attempt and its retry setup.
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(sdkCallIndex).toBe(2);
+      globalThis.window.dispatch('online');
+      await recovered.promise;
 
-    await recovered;
-    cleanupFn();
-
-    expect(sdkCallIndex).toBeGreaterThanOrEqual(3);
-    // Total elapsed should be < 2s — well under the 60s cap that proves the
-    // interrupters work for permanent-error retries too.
-    expect(Date.now() - startedAt).toBeLessThan(5_000);
+      expect(sdkCallIndex).toBeGreaterThanOrEqual(3);
+      expect(Date.now() - startedAt).toBeLessThan(5_000);
+    } finally {
+      cleanup();
+      jest.useRealTimers();
+    }
   });
 
   it('retries 408 and 429 on the normal exponential path (not the permanent cap)', async () => {

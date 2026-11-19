@@ -36,8 +36,6 @@ export function useComposerSessionScope({
     const { chatColumnSession, columnPinned } = column;
     const { inputModeParentRef, setInputMode, storedInputMode, composerText } = draftText;
 
-    // Inside the chat column the composer follows the session the timeline is
-    // showing (see chatColumnSession.ts); elsewhere it follows the live one.
     const liveSessionId = useSessionUIStore((s) => (chatColumnSession ? null : s.currentSessionId));
 
     const currentSessionId = chatColumnSession ? chatColumnSession.sessionId : liveSessionId;
@@ -61,10 +59,6 @@ export function useComposerSessionScope({
         React.useCallback((s) => currentSessionId ? s.getDirectoryForSession(currentSessionId) : null, [currentSessionId]),
     );
 
-    // btw mode: the CURRENT session's metadata links an active btw fork and
-    // the panel is expanded, so this composer's sends route to the fork
-    // instead of the main session. Collapsed keeps the fork alive (chip stays
-    // visible) while the composer talks to the main session again.
     const trustDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
 
     const trustPausedDirectory = useOpenCodeTrustPaused(trustDirectory) ? trustDirectory : null;
@@ -77,7 +71,6 @@ export function useComposerSessionScope({
 
     const hasPendingPermission = pendingPermissions.length > 0;
 
-    // A pending permission or form owns the dock; the composer is not for sending then.
     const hasPendingForm = pendingForms.length > 0 || hasPendingPermission;
 
     const btwSessionId = btwPanel.btwSessionId;
@@ -103,9 +96,6 @@ export function useComposerSessionScope({
 
     const inputMode = isBtwActive ? 'normal' : storedInputMode;
 
-    // A session promoted out of `/btw` keeps the boundary instructions in its
-    // transcript — there is no way to delete a message part — so it has to say
-    // they no longer apply.
     const isPromotedBtwSession = btwPanel.parentPromoted;
 
     const activeRuntimeKey = getRuntimeKey();
@@ -131,18 +121,13 @@ export function useComposerSessionScope({
 
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
 
-    // The new-session draft is the main chat's; a pinned composer is never on it.
     const newSessionDraftOpen = !columnPinned && Boolean(newSessionDraft?.open);
 
-    // The server's folder stat cannot see inside an isolated space's container.
     const sessionFolder = useFolderMissing(
         !newSessionDraftOpen && !isSpaceDirectory(currentSessionDirectoryForSync) ? currentSessionDirectoryForSync ?? undefined : undefined,
         probeSessionLocation,
     );
 
-    // Nothing runs in a folder that is gone; the composer's row says so and
-    // offers the move. The text stays, and this looks again in case the folder
-    // came back. Where only a refused send said so, the next send asks again.
     const sendHeldByMissingFolder = () => {
         if (!sessionFolder.missing || isBtwActive) return false;
         if (!sessionFolder.confirmed) {
@@ -179,8 +164,6 @@ export function useComposerSessionScope({
 
     const pickSessionAgent = useSelectionStore((s) => s.pickSessionAgent);
 
-    // An agent picked for this session and not sent yet. The send carries
-    // it even while the app-wide agent has drifted from it.
     const sessionAgentPick = useSelectionStore(React.useCallback(
         (s) => currentSessionId ? s.sessionPickedAgents.get(currentSessionId) ?? null : null,
         [currentSessionId],
@@ -219,7 +202,6 @@ export function useComposerSessionScope({
 
     const consumePendingSyntheticParts = useInputStore((s) => s.consumePendingSyntheticParts);
 
-    // Read when a message leaves, so a run that starts or stops does not rebuild the send handlers.
     const projectActions = useProjectActions();
 
     const projectActionsRef = React.useRef(projectActions);
@@ -237,8 +219,6 @@ export function useComposerSessionScope({
 
     const [reviewDialogOpen, setReviewDialogOpen] = React.useState(false);
 
-    // Mounted from the first open on, so it costs nothing until then and its
-    // close animation still plays afterwards.
     const [reviewDialogMounted, setReviewDialogMounted] = React.useState(false);
 
     if (reviewDialogOpen && !reviewDialogMounted) setReviewDialogMounted(true);

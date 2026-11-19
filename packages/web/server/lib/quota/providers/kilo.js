@@ -1,5 +1,5 @@
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
-import { readConfig } from '../../opencode/shared.js';
+import { readConfig } from '../../opencode/config-files.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,

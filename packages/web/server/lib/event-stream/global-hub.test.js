@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createGlobalMessageStreamHub } from './global-hub.js';
+import { DELTA_COALESCE_WINDOW_MS } from './delta-coalescer.js';
+
+afterEach(() => vi.useRealTimers());
 
 it('bounds a contiguous replay suffix by UTF-8 bytes and event count', async () => {
   // v2 carries the event id inside the payload; there are no `id:` SSE lines.
@@ -14,8 +17,8 @@ it('bounds a contiguous replay suffix by UTF-8 bytes and event count', async () 
   });
   hub.subscribeEvent(event => received.push(event.eventId));
   try {
-    hub.start();
-    await waitForAssertion(() => expect(received).toHaveLength(8));
+    await readUpstream(hub);
+    expect(received).toHaveLength(8);
     expect(hub.replayAfter('e0')).toBeNull();
     expect(hub.replayAfter('e5')).toBeNull();
     const tail = hub.replayAfter('e6');
@@ -46,21 +49,16 @@ function createSseResponse({ blocks = [] } = {}) {
   };
 }
 
-async function waitForAssertion(assertion) {
-  const deadline = Date.now() + 1000;
-  let lastError;
-
-  while (Date.now() < deadline) {
-    try {
-      assertion();
-      return;
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-  }
-
-  throw lastError;
+function readUpstream(hub) {
+  const disconnected = new Promise(resolve => {
+    const unsubscribe = hub.subscribeStatus(status => {
+      if (status.type !== 'disconnect') return;
+      unsubscribe();
+      resolve();
+    });
+  });
+  hub.start();
+  return disconnected;
 }
 
 const deltaBlock = (id, text, ordinal = 1) => `id: ${id}\ndata: ${JSON.stringify({
@@ -94,19 +92,22 @@ const applyFrames = (frames) => {
 
 describe('delta coalescing in the global hub', () => {
   it('delivers the same text in far fewer frames', async () => {
+    vi.useFakeTimers();
     const words = Array.from({ length: 120 }, (_, index) => `w${index} `);
     const hub = createDeltaHub({ blocks: words.map((word, index) => deltaBlock(`e${String(index).padStart(4, '0')}`, word)) });
     const received = [];
     hub.subscribeEvent((event) => received.push(event));
     try {
-      hub.start();
-      await waitForAssertion(() => expect(applyFrames(received).text[1]).toBe(words.join('')));
+      await readUpstream(hub);
+      await vi.advanceTimersByTimeAsync(DELTA_COALESCE_WINDOW_MS);
+      expect(applyFrames(received).text[1]).toBe(words.join(''));
       expect(received.length).toBeLessThanOrEqual(3);
       expect(received.at(-1).eventId).toBe('e0119');
     } finally { hub.stop(); }
   });
 
   it('resumes from any cursor without losing or repeating text', async () => {
+    vi.useFakeTimers();
     const blocks = [];
     let id = 0;
     const nextId = () => `e${String(id++).padStart(4, '0')}`;
@@ -119,10 +120,11 @@ describe('delta coalescing in the global hub', () => {
     const received = [];
     hub.subscribeEvent((event) => received.push(event));
     try {
-      hub.start();
+      await readUpstream(hub);
+      await vi.advanceTimersByTimeAsync(DELTA_COALESCE_WINDOW_MS);
       const expectedA = [...Array(40).keys()].filter((index) => index % 3 !== 0).map((index) => `a${index}.`).join('')
         + [...Array(40).keys()].map((index) => `b${index}.`).join('');
-      await waitForAssertion(() => expect(applyFrames(received).text[1]).toBe(expectedA));
+      expect(applyFrames(received).text[1]).toBe(expectedA);
       expect(received.length).toBeLessThan(blocks.length / 4);
 
       const complete = applyFrames(received);
@@ -143,6 +145,7 @@ describe('delta coalescing in the global hub', () => {
   // OpenCode sends no SSE ids at all. Before the hub numbered such events
   // itself the replay buffer stayed empty and every reconnect lost its gap.
   it('numbers id-less upstream events so a reconnect resumes from any cursor', async () => {
+    vi.useFakeTimers();
     const idless = (type, data) => `data: ${JSON.stringify({ type, data })}\n\n`;
     const blocks = [];
     for (let index = 0; index < 30; index += 1) {
@@ -157,9 +160,10 @@ describe('delta coalescing in the global hub', () => {
     const received = [];
     hub.subscribeEvent((event) => received.push(event));
     try {
-      hub.start();
+      await readUpstream(hub);
+      await vi.advanceTimersByTimeAsync(DELTA_COALESCE_WINDOW_MS);
       const expected = [...Array(30).keys()].map((index) => `a${index}.`).join('') + [...Array(30).keys()].map((index) => `b${index}.`).join('');
-      await waitForAssertion(() => expect(applyFrames(received).text[1]).toBe(expected));
+      expect(applyFrames(received).text[1]).toBe(expected);
 
       const ids = received.map((event) => event.eventId);
       expect(ids.every((eventId) => typeof eventId === 'string' && eventId.length > 0)).toBe(true);
@@ -191,10 +195,9 @@ describe('delta coalescing in the global hub', () => {
     });
     const received = [];
     hub.subscribeEvent((event) => received.push(event));
-    hub.start();
     // The window is a minute, so only the leading delta has been delivered.
-    await waitForAssertion(() => expect(received).toHaveLength(1));
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await readUpstream(hub);
+    expect(received).toHaveLength(1);
 
     hub.stop();
 
@@ -211,9 +214,8 @@ describe('delta coalescing in the global hub', () => {
     const received = [];
     hub.subscribeEvent((event) => received.push(event));
     try {
-      hub.start();
-      await waitForAssertion(() => expect(received).toHaveLength(1));
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await readUpstream(hub);
+      expect(received).toHaveLength(1);
 
       hub.flushPending();
 
@@ -224,6 +226,25 @@ describe('delta coalescing in the global hub', () => {
 });
 
 describe('createGlobalMessageStreamHub', () => {
+  it('ignores incidental synchronous subscriber return values', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const hub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl: path => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      deltaCoalesceWindowMs: 0,
+    });
+    const received = [];
+    hub.subscribeEvent(event => received.push(event.eventId));
+    try {
+      hub.injectEvent({ payload: { type: 'server.connected' }, directory: 'global', spaceId: null });
+      expect(received).toHaveLength(1);
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      hub.stop();
+      warnSpy.mockRestore();
+    }
+  });
+
   it('continues fanout when an event subscriber throws', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const received = [];
@@ -246,10 +267,8 @@ describe('createGlobalMessageStreamHub', () => {
     });
 
     try {
-      hub.start();
-      await waitForAssertion(() => {
-        expect(received).toEqual(['evt-1']);
-      });
+      await readUpstream(hub);
+      expect(received).toEqual(['evt-1']);
       expect(warnSpy).toHaveBeenCalled();
     } finally {
       hub.stop();
@@ -275,10 +294,8 @@ describe('createGlobalMessageStreamHub', () => {
     });
 
     try {
-      hub.start();
-      await waitForAssertion(() => {
-        expect(received).toContain('connect');
-      });
+      await readUpstream(hub);
+      expect(received).toContain('connect');
       expect(warnSpy).toHaveBeenCalled();
     } finally {
       hub.stop();
@@ -308,13 +325,9 @@ describe('createGlobalMessageStreamHub', () => {
     });
 
     try {
-      hub.start();
-      await waitForAssertion(() => {
-        expect(received).toEqual(['evt-1']);
-      });
-      await waitForAssertion(() => {
-        expect(warnSpy).toHaveBeenCalled();
-      });
+      await readUpstream(hub);
+      expect(received).toEqual(['evt-1']);
+      expect(warnSpy).toHaveBeenCalled();
     } finally {
       hub.stop();
       warnSpy.mockRestore();

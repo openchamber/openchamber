@@ -8,15 +8,17 @@ import {
   COMMAND_DIR,
   COMMAND_SCOPE,
   ensureDirs,
-  parseMdFile,
-  writeMdFile,
   readConfigLayers,
   writeConfig,
   getJsonEntrySource,
+} from './config-files.js';
+import {
+  parseMdFile,
+  writeMdFile,
   isPromptFileReference,
   resolvePromptFilePath,
   writePromptFile,
-} from './shared.js';
+} from './markdown-files.js';
 import {
   toCommandEntity,
   fromCommandEntity,

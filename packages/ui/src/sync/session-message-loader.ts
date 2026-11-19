@@ -363,12 +363,14 @@ export class SessionMessageLoader {
     if (!normalized || this.disposed) return
     const store = this.childStores.ensureChild(normalized.directory, { bootstrap: false })
     const current = store.getState()
-    if (current.message[normalized.sessionID] !== undefined) return
     const entry = this.getEntry(normalized)
+    if (entryCoversHistory(entry)) return
     this.bumpGeneration(entry)
     entry.inflight = null
     entry.verifiedEpoch = this.historyEpoch
-    store.setState({ message: { ...current.message, [normalized.sessionID]: [] } })
+    if (current.message[normalized.sessionID] === undefined) {
+      store.setState({ message: { ...current.message, [normalized.sessionID]: [] } })
+    }
     this.patchEntry(entry, {
       status: "ready",
       loadingKind: null,
@@ -393,15 +395,7 @@ export class SessionMessageLoader {
       historyCovered: entryCoversHistory(entry),
     })
     if (options?.reason !== "prefetch") this.touchSessionCache(normalized)
-    if (!options?.force && materialization.renderable && !entry.evicted) {
-      if (!entry.snapshot.resolved) {
-        this.patchEntry(entry, {
-          status: "ready",
-          error: null,
-          resolved: true,
-          limit: Math.max(entry.snapshot.limit, store.getState().message[normalized.sessionID]?.length ?? 0),
-        })
-      }
+    if (!options?.force && materialization.renderable) {
       if (options?.reason !== "prefetch" && !entry.inboxSeeded) {
         const generation = entry.snapshot.generation
         const sdkEpoch = this.sdkEpoch

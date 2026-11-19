@@ -84,7 +84,7 @@ The relay viewer has no network access to app assets, so each document includes 
 
 ### Why the renderer loads from the app and not the runtime server
 
-The renderer bundle belongs to the app's assets. A phone can run its own bundle while connected to a remote server, so plain fetch resolves it against the app's location; successful reads are cached and failed reads allow another attempt.
+The renderer bundle belongs to the app's assets. A phone can run its own bundle while connected to a remote server, so `fetchBypassingRuntimeBridge` reads it from the app's location; successful reads are cached and failed reads allow another attempt.
 
 ### Why questions load on demand and not with the chat
 

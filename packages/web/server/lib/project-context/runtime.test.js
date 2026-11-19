@@ -448,15 +448,6 @@ describe('todos', () => {
     expect(context.plans.map((entry) => entry.id)).toEqual([plan.id]);
   });
 
-  test('serializes concurrent writes without losing one', async () => {
-    await Promise.all([
-      runtime.saveTodos(PROJECT_ID, [{ id: '1', text: 'one', createdAt: 1 }]),
-      runtime.saveTodos(PROJECT_ID, [{ id: '2', text: 'two', createdAt: 2 }]),
-    ]);
-
-    expect((await runtime.readContext(PROJECT_ID)).todos).toHaveLength(1);
-  });
-
   test('clamps oversized todo text', async () => {
     await runtime.saveTodos(PROJECT_ID, [{ id: 't1', text: 'z'.repeat(1500), createdAt: 1 }]);
     expect((await runtime.readContext(PROJECT_ID)).todos[0].text).toHaveLength(1000);

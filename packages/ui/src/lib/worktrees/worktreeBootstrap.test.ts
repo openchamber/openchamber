@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, jest, mock, test } from 'bun:test';
 import type { GitWorktreeBootstrapStatus } from '@/lib/api/types';
 
 const bootstrapStatusCalls: string[] = [];
@@ -151,24 +151,30 @@ describe('worktreeBootstrap.waitForWorktreeBootstrap', () => {
   });
 
   test('does not regress a newer phase when concurrent polls resolve out of order', async () => {
-    const statusResolvers: Array<(status: GitWorktreeBootstrapStatus) => void> = [];
-    getBootstrapStatus = () => new Promise((resolve) => {
-      statusResolvers.push(resolve);
-    });
-    markWorktreeBootstrapPending('/repo-wt');
+    jest.useFakeTimers();
+    try {
+      const statusResolvers: Array<(status: GitWorktreeBootstrapStatus) => void> = [];
+      getBootstrapStatus = () => new Promise((resolve) => {
+        statusResolvers.push(resolve);
+      });
+      markWorktreeBootstrapPending('/repo-wt');
 
-    startWorktreeBootstrapWatcher('/repo-wt', { pollIntervalMs: 1000 });
-    await waitFor(() => statusResolvers.length === 1);
-    const gitReadyWaiter = waitForWorktreeGitReady('/repo-wt');
-    await waitFor(() => statusResolvers.length === 2);
+      startWorktreeBootstrapWatcher('/repo-wt', { pollIntervalMs: 1000 });
+      expect(statusResolvers).toHaveLength(1);
+      const gitReadyWaiter = waitForWorktreeGitReady('/repo-wt');
+      expect(statusResolvers).toHaveLength(2);
 
-    statusResolvers[1]({ status: 'pending', phase: 'git-ready', error: null, updatedAt: 3 });
-    await gitReadyWaiter;
-    statusResolvers[0]({ status: 'pending', phase: 'directory-created', error: null, updatedAt: 2 });
-    await Promise.resolve();
+      statusResolvers[1]({ status: 'pending', phase: 'git-ready', error: null, updatedAt: 3 });
+      await gitReadyWaiter;
+      statusResolvers[0]({ status: 'pending', phase: 'directory-created', error: null, updatedAt: 2 });
+      // Drain the status wrapper and the background poll before reading state.
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
 
-    expect(getWorktreeBootstrapState('/repo-wt')?.phase).toBe('git-ready');
-    clearWorktreeBootstrapState('/repo-wt');
+      expect(getWorktreeBootstrapState('/repo-wt')?.phase).toBe('git-ready');
+    } finally {
+      clearWorktreeBootstrapState('/repo-wt');
+      jest.useRealTimers();
+    }
   });
 
   test('full bootstrap wait continues through git-ready until setup-ready', async () => {

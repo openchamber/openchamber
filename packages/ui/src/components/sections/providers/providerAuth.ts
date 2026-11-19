@@ -1,11 +1,11 @@
 
 import type {
-  ConnectionInfo,
+  IntegrationConnection as ConnectionInfo,
   IntegrationExternalMethod,
-  IntegrationInfo,
+  Integration as IntegrationInfo,
   IntegrationKeyMethod,
   IntegrationOAuthMethod,
-} from '@opencode/client';
+} from '@/lib/opencode/model';
 import { z } from 'zod';
 import type { Provider } from '@/lib/opencode/model';
 

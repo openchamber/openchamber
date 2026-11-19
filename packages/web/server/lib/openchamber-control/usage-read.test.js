@@ -1,9 +1,7 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { createUsageReadAction } from './usage-read.js';
+import { QUOTA_PROVIDERS } from '../../../../ui/src/lib/quota/providers/index.ts';
 
 const PAGE = [
   { providerId: 'claude', providerName: 'Claude' },
@@ -173,9 +171,7 @@ describe('usage.read', () => {
 describe('the providers the Usage page reads', () => {
   it('are the built-ins the page lists, then the extensions', async () => {
     const { listUsagePageProviders } = await import('../quota/index.js');
-    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
-    const pageSource = fs.readFileSync(path.join(root, 'packages/ui/src/lib/quota/providers/index.ts'), 'utf8');
-    const pageIds = [...pageSource.matchAll(/\{ id: '([^']+)'/g)].map((match) => match[1]);
+    const pageIds = QUOTA_PROVIDERS.map(({ id }) => id);
 
     expect(pageIds.length).toBeGreaterThan(10);
     expect(listUsagePageProviders().map(({ providerId }) => providerId).sort()).toEqual([...pageIds].sort());

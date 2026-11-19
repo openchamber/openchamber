@@ -65,36 +65,30 @@ describe('createEventPipeline — online event', () => {
     };
 
     const startedAt = Date.now();
-    const elapsed = await new Promise((resolve) => {
-      let connects = 0;
-      const { cleanup } = createEventPipeline({
-        sdk,
-        transport: 'sse',
-        heartbeatTimeoutMs: 60_000,
-        reconnectDelayMs: 60_000,
-        onEvent: () => {},
-        onDisconnect: () => {
-          // We're now inside waitForRetry on the long offline cap.
-          // Flip the browser back online and fire the event; waitForRetry
-          // should resolve early and the next attempt should fire.
-          setTimeout(() => {
-            globalThis.navigator = { onLine: true };
-            globalThis.window.dispatch('online');
-          }, 30);
-        },
-        onReconnect: () => {
-          connects += 1;
-          if (connects === 1) {
-            cleanup();
-            resolve(Date.now() - startedAt);
-          }
-        },
-      });
+    const disconnected = Promise.withResolvers();
+    const recovered = Promise.withResolvers();
+    const { cleanup } = createEventPipeline({
+      sdk,
+      transport: 'sse',
+      heartbeatTimeoutMs: 60_000,
+      reconnectDelayMs: 60_000,
+      onEvent: () => {},
+      onDisconnect: () => disconnected.resolve(),
+      onReconnect: () => recovered.resolve(Date.now() - startedAt),
     });
 
-    // Two attempts: the failed one + the recovery one. If the `online`
-    // interrupt didn't fire, the test would have hung on the 60s offline cap.
-    expect(sdkCallIndex).toBe(2);
-    expect(elapsed).toBeLessThan(2_000);
+    try {
+      await disconnected.promise;
+      globalThis.navigator = { onLine: true };
+      globalThis.window.dispatch('online');
+      const elapsed = await recovered.promise;
+
+      // Two attempts: the failed one + the recovery one. If the `online`
+      // interrupt didn't fire, the test would have hung on the 60s offline cap.
+      expect(sdkCallIndex).toBe(2);
+      expect(elapsed).toBeLessThan(2_000);
+    } finally {
+      cleanup();
+    }
   });
 });

@@ -19,15 +19,10 @@ const SCOPE_LABEL_KEYS = {
 type Props = {
   scope: SearchScope;
   onChange: (scope: SearchScope) => void;
-  /** Menu items after the choice, such as saving the search. */
   actions?: React.ReactNode;
   mobile?: boolean;
 };
 
-/**
- * The search field's one menu: where to look, then the search's own actions.
- * Its trigger sits inside the field and is pressed while a narrower scope is on.
- */
 export function SearchInMenu({ scope, onChange, actions, mobile = false }: Props): React.ReactNode {
   const { t } = useI18n();
   const scopes = useSearchScopes();

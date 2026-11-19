@@ -117,10 +117,6 @@ export function renderComposerDialogs({
             submitting={reviewFlowSubmitting}
             onConfirm={handleStartReviewFlow}
         /> : null}
-        {/* A shared page reads the server whether or not its card is open: the
-            id its link got, its state, and once opened, the page the agent gets
-            (a page added from Pages may already be open). The card shows the
-            same chip; this copy stays out of sight. */}
         <div hidden>
             {linkedReferences.flatMap((reference) => (
                 reference.kind === 'shared-page' && composerReferenceKey(reference) !== openSharedPageKey
@@ -148,16 +144,8 @@ export function renderComposerDialogs({
             </React.Suspense>
         ) : null}
 
-        {/* Single always-mounted picker input. It must NOT live inside
-            ComposerAttachmentControls: that component mounts once per composer
-            variant (pill / expanded footer), so a shared ref got nulled when a
-            variant unmounted, and a variant swap while the OS file picker was
-            open detached the clicked input — its change event was silently
-            lost and the picked files never attached. */}
         <AttachmentPickerInput ref={fileInputRef} onChange={handleLocalFileSelect} />
 
-        {/* Mobile attachment sheet: replaces the dropdown (which stole focus and
-            dismissed the keyboard) and leaves room for more actions later. */}
         {isMobile ? (
             <MobileOverlayPanel
                 open={mobileAttachMenuOpen}
@@ -167,8 +155,6 @@ export function renderComposerDialogs({
                 <MobileSheetRow
                     icon="attachment-2"
                     onClick={() => {
-                        // The native file/photo picker takes over next — restoring
-                        // the keyboard in between would flash it open and shut.
                         mobileShell.cancelOverlayCloseRestore();
                         setMobileAttachMenuOpen(false);
                         requestAnimationFrame(handlePickLocalFiles);
@@ -179,8 +165,6 @@ export function renderComposerDialogs({
                 <MobileSheetRow
                     leading={<ProviderIcon descriptor={repositoryDescriptor} className="size-4 flex-shrink-0 text-muted-foreground" />}
                     onClick={() => {
-                        // Hand-off to the picker: don't sync-restore the
-                        // keyboard under the overlay that opens next frame.
                         mobileShell.skipNextOverlayCloseRestore();
                         setMobileAttachMenuOpen(false);
                         requestAnimationFrame(openGitHubPicker);
@@ -201,8 +185,6 @@ export function renderComposerDialogs({
                         {picker.label}
                     </MobileSheetRow>
                 ))}
-                {/* Extensions that opted into the phone: a dialog opens full
-                    screen, a panel as the extension's workspace tab. */}
                 {guestAttachItems.map((guest) => (
                     <MobileSheetRow
                         key={guest.id}
@@ -219,8 +201,6 @@ export function renderComposerDialogs({
             </MobileOverlayPanel>
         ) : null}
 
-        {/* Mobile draft target pickers: bottom sheets replacing the inline
-            project/branch Selects (which desktop keeps). */}
         {isMobile && showDraftTargetSelectors && selectedDraftProject ? (
             <MobileDraftTargetSheets
                 projects={draftProjects}

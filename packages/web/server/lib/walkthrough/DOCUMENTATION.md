@@ -10,17 +10,16 @@ has to ask for it.
 
 ## Files
 
-- `hunks.js` — parses a unified diff into files and hunks and assigns each hunk
+- `hunks.ts` — parses a unified diff into files and hunks and assigns each hunk
   a stable id.
-- `generated.js` — recognises tool-produced files that are kept out of the
+- `generated.ts` — recognises tool-produced files that are kept out of the
   model's input.
-- `sources.js` — turns a source descriptor into diff *sections*.
-- `digest.js` — builds the model-facing digest and the alias↔id mapping.
-- `prompt.js` — system prompt, size guidance, previous-walkthrough section, and
-  `PROMPT_VERSION`.
-- `schema.js` — response schema, response normalization, tolerant JSON parsing.
-- `store.js` — content-addressed cache entries plus mutable pointers.
-- `pull-request.js` — change request diffs and per-file contents through the
+- `sources.ts` — turns a source descriptor into diff *sections*.
+- `digest.ts` — builds the model-facing digest and the alias↔id mapping.
+- `prompt.ts` — system prompt, size guidance and previous-walkthrough section.
+- `schema.ts` — response schema, response normalization, tolerant JSON parsing.
+- `store.ts` — content-addressed cache entries plus mutable pointers.
+- `pull-request.ts` — change request diffs and per-file contents through the
   provider-neutral readers the runtime injects from the source-control module
   (`readChangeRequestPatch`/`File`), which dispatch by the context's provider
   to its `resources.readChangeRequestPatch`/`File` (GitHub's are
@@ -28,10 +27,10 @@ has to ask for it.
   `gitea/resources.js`, Gerrit's `gerrit/resources.js`). It also
   says which providers walkthroughs serve: those whose descriptor has
   `capabilities.changeRequestPatch`.
-- `model-settings.js` — the feature's own model override.
-- `languages.js` — the languages the prose may be written in.
-- `index.js` — orchestration.
-- `routes.js` — `/api/walkthrough*`.
+- `model-settings.ts` — the feature's own model override.
+- `languages.ts` — the languages the prose may be written in.
+- `index.ts` — orchestration.
+- `routes.ts` — `/api/walkthrough*`.
 
 ## What a walkthrough says
 
@@ -604,3 +603,103 @@ telling someone to upgrade would send them after the wrong thing.
 Web, desktop, and hosted mobile reach these routes normally. VS Code serves Git
 through its own bridge rather than the OpenChamber Git routes, so the feature is
 not offered there; the surface is also gated to tablet width and above.
+
+## TypeScript boundaries
+
+Relative imports retain `.js` specifiers for converted implementations. Shared
+read-context fields live in `contracts.ts`. JSON parsing establishes JSON values;
+normalization establishes the complete `Walkthrough` shape. A cache read checks
+only the version and the presence of a chapters array. Chapter contents, model
+metadata and timestamps retain their JSON types. Pointer reads establish only a
+string cache key. The compile-time contract test prevents these reads from
+claiming the stronger normalized shape.
+
+Source descriptors enter through `SourceRequest` with an unchecked source field.
+Commit parsing validates the hash's string coercion before calling its own
+`toLowerCase` method. That method's result remains unchecked in `WalkthroughSource`.
+Git's `CommitDiffOptions` accepts that result because `resolveCommitHash` validates
+`String(hash)` before constructing the Git argument. Boxed strings, custom
+normalization results and symbol coercion failures retain their existing behavior.
+The lowercase accessor is read once and invoked with the original hash receiver;
+the function's own `call` property does not participate in invocation.
+
+### Why cache consumers retain shallow validation
+
+Generation results contain normalized walkthroughs, while cache hits retain their
+JSON types. Anchor resolution narrows cached arrays where it uses them and preserves
+the existing TypeErrors for malformed chapters, stops and hunk lists. Cache keys
+serialize the small-model module's unchecked provider and model identifiers without
+claiming they are strings. Pointer timestamps likewise retain their stored JSON
+type. Optional read-context attachment mutates the original result before returning
+it, so callers that discard the helper's return value still receive the context.
+
+Read-context string and integer checks remain at the service boundary. Injected
+pull-request readers retain their function check; untracked patches come from Git's
+typed string array and no longer repeat a string check. Deferred pruning failures
+remain ignored because housekeeping must not fail a walkthrough request.
+
+### Why change request reads retain JSON results
+
+The provider contract establishes JSON, not a patch or file result schema.
+`pull-request.ts` uses that owner's exported `Json` type. File reads pass the
+result through unchanged. Diff reads retain unchecked optional patch and
+metadata fields. The `allowEmpty` path skips the patch text check, as before;
+other reads preserve the existing trim failures and empty-diff error.
+Both injected-reader `instanceof Function` checks remain at the JavaScript
+runtime boundary.
+
+Routes use the shared HTTP contracts and the source-control module's
+`ProviderReadContext`. The lazy service contract retains the implementation's
+inferred results. It does not strengthen unchecked service responses, source
+descriptors or error fields. Optional revision and previous-path fields accept
+explicit `undefined` because the routes supply those keys even when absent.
+
+### Why route guards leave fields unchecked
+
+Body, source and error guards establish only the object being accessed and, for
+PR prevalidation, the `kind` discriminator. Arrays and functions retain their
+property reads. Field checks remain where the original routes made them:
+directory, model and language strings, provider/model schemas, repository owner,
+revision and finite error budgets. Other source validation still belongs to
+`parseSource`, after bound-context validation. Non-PR sources pass through
+unchanged, and error logging retains the original thrown value, including
+primitives.
+
+### Why previous walkthroughs keep their JSON type
+
+The prompt accepts the cache's shallowly checked JSON, including primitive chapter
+and stop entries. Property reads preserve the existing primitive-to-undefined
+behavior and text coercion. Null entries and truthy non-array stops retain their
+existing TypeErrors and messages. Local checks establish only the array or object
+being used; they neither claim normalized chapters nor discard malformed entries.
+`WalkthroughSource` in `contracts.ts` describes the parsed source consumed by the
+prompt. The source parser remains responsible for validating external input.
+
+### Why external checks remain at typed boundaries
+
+Diff text, language tags, model settings and stored JSON can arrive from
+unconverted callers or files. Their existing string, object and array checks
+remain in type guards. The settings reader exposes an inferred empty object, so
+the local guard establishes only optional, unchecked model-setting fields before
+the existing string checks run. Generated-file paths come from parsed diff files
+and use their internal string type.
+
+### Why language normalization keeps the own-property check
+
+Language tags are external dictionary keys. `constructor` and `toString` must
+normalize to English, while direct `languageName` calls retain the original
+property-lookup behavior. Internally, `languageName` accepts the supported tag
+union returned by normalization. The regression test covers both lookup paths.
+
+### Why parser state is excluded by copying the completed file
+
+The temporary hunk-digest map exists throughout file parsing. Copying the
+completed file without that field preserves the returned keys and their order
+while keeping the parser state's required map type. Required regex captures use
+empty-string fallbacks only where the matching expression guarantees a capture.
+
+### Why digest omission uses separate path and flag fields
+
+The model digest omits absent paths and flags. Separate fields preserve both
+omission and the original JSON property order when the digest is serialized into
+the prompt.

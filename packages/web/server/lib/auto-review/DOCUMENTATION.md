@@ -17,8 +17,8 @@ every send. The manual review (no auto-review) and the "send to the other
 session" buttons stay in the UI and never touch this module.
 
 Wiring: created in `server/index.js` before the message queue, routes in
-`opencode/feature-routes-runtime.js` (JSON bodies in `opencode/core-routes.js`),
-stopped by `opencode/shutdown-runtime.js`.
+`server-frame/feature-routes-runtime.js` (JSON bodies in `server-frame/core-routes.js`),
+stopped by `server-frame/shutdown-runtime.js`.
 
 ## Run
 
@@ -172,7 +172,7 @@ the manual review works as before.
 
 - Every piece of raw JSON the module reads (the store file, client bodies,
   OpenCode answers, hub events) is inspected through a zod schema in
-  `runtime.js`; no other code trusts those shapes.
+  `runtime.ts`; no other code trusts those shapes.
 - A 2xx answer that is not OpenCode's JSON, such as an app shell served by a
   proxy, is a failed request even though the status says otherwise.
 - A failed read is unknown, never idle, and retries with backoff. A send that
@@ -225,3 +225,25 @@ inserted text is not filled again.
 A handoff or feedback send lands in the user's own session, so passing a
 response-style instruction would overwrite the style entry that session already
 holds. The send syncs only the project knowledge.
+
+### Why route types describe only this module's HTTP contract
+
+The web package has no Express declarations. `AutoReviewRoutes` describes the
+three handlers and the response methods they use without adding a dependency
+or a declaration shim. Start bodies, stored runs, OpenCode responses and hub
+payloads keep their existing zod validation.
+
+### Why saved sends keep independent optional identifiers
+
+The stored schema accepts a message ID without context IDs, and context arrays
+may be shorter than their text arrays. Tightening that schema would change
+which saved runs load. A nonblank context still fails with a `TypeError` when
+the ID array is missing; a missing array element still sends no ID. The
+awaiting-state check likewise preserves the existing invariant failure.
+
+### Why thrown values keep unparsed message and status fields
+
+Dependencies can throw arbitrary values. The error guard checks the property
+container and preserves the fields as received, including a non-string message
+or non-integer status. Boxing primitives preserves optional property access;
+only integer statuses reach the HTTP response, as before.

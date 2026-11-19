@@ -14,17 +14,17 @@ would do all of that the moment OpenChamber shows it. This module refuses
 such a folder until the user trusts exactly the configuration it has, and
 asks again when that configuration changes.
 
-- `assessment.js` finds what a folder's configuration would run, read and
+- `assessment.ts` finds what a folder's configuration would run, read and
   allow, mirroring OpenCode 2.x discovery (`packages/core/src/config/discovery.ts`,
   `config/plugin/source.ts`, `config/variable.ts` and
   `config/plugin/agent.ts` in the OpenCode repository), and fingerprints it.
-- `store.js` keeps the trusted fingerprints per repository in
+- `store.ts` keeps the trusted fingerprints per repository in
   `<dataDir>/opencode-trust.json`.
-- `index.js` decides per request (`refusalFor`) and serves
+- `index.ts` decides per request (`refusalFor`) and serves
   `GET`/`POST /api/opencode/trust` (`handleRoute`) for every runtime.
-- `fetch-guard.js` puts the same decision in front of every request the
+- `fetch-guard.ts` puts the same decision in front of every request the
   server process sends OpenCode itself.
-- `session-directory.js` names the folder of a session whose route runs in
+- `session-directory.ts` names the folder of a session whose route runs in
   the session's own location.
 
 The prompt lives in the shared UI (`packages/ui/src/lib/opencodeTrust.ts`,
@@ -157,6 +157,20 @@ in `vscode/src/opencodeTrust.ts`.
   OpenCode with no folder of their own keep working on a folder that may open.
 
 ## Decisions
+
+### Why permission helpers receive parsed rules
+
+JSONC and YAML values are parsed into permission rules at their read boundary.
+Request bodies remain JSON values until the move schema validates them; trust
+route inputs are validated by their route schemas. The existing Zod schemas
+keep their acceptance and fallback rules. Error property guards retain
+messages and error codes from thrown objects and
+functions, including values that are not instances of `Error`.
+Internal assessment, permission and cache values have concrete types.
+
+The filesystem dependency uses the Node promise methods the folder calls.
+Environment defaults still select the same home and global configuration
+directories. A malformed percent-encoded directory header retains its raw value.
 
 ### Why queued prompts read trust again
 

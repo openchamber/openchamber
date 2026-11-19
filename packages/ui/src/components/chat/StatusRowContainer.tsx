@@ -7,19 +7,12 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { StatusRow } from './StatusRow';
 
-/**
- * Status row wrapper.
- * Uses the dedicated assistant status hook so the row keeps accurate live activity
- * labels while still limiting subscriptions to the active assistant message.
- */
 export const StatusRowContainer: React.FC = React.memo(() => {
     const { activeModel, working } = useAssistantStatus();
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
     const providers = useConfigStore((state) => state.providers);
     const backgroundWork = useBackgroundSessionWork();
 
-    // The shortcut lives with the status that knows whether anything can go
-    // to the background; otherwise it yields the key.
     useKeybind('background_session_work', () => {
         if (!working.canBackground) return false;
         backgroundWork();

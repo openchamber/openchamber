@@ -1,5 +1,7 @@
 import { eslintCompatPlugin } from "@oxlint/plugins";
+import { gatekeeperStandardLibraryRule } from "./rules/gatekeeper-standard-library.ts";
 
+import { noAppImportsInOpencodeRule } from "./rules/no-app-imports-in-opencode.ts";
 import { noCommentsRule } from "./rules/no-comments.ts";
 import { noCrossRuntimeImportsRule } from "./rules/no-cross-runtime-imports.ts";
 import { noEffectsInComponentsRule } from "./rules/no-effects-in-components.ts";
@@ -10,7 +12,10 @@ import { noRealWaitsInTestsRule } from "./rules/no-real-waits-in-tests.ts";
 import { noSessionListScanInSelectorsRule } from "./rules/no-session-list-scan-in-selectors.ts";
 import { noSourceTextInTestsRule } from "./rules/no-source-text-in-tests.ts";
 import { noTimersRule } from "./rules/no-timers.ts";
+import { noValueofTypeEscapeRule } from "./rules/no-valueof-type-escape.ts";
+import { noVirtualizerReturnFromHooksRule } from "./rules/no-virtualizer-return-from-hooks.ts";
 import { noWireClientImportsRule } from "./rules/no-wire-client-imports.ts";
+import { serverJsSpecifiersRule } from "./rules/server-js-specifiers.ts";
 
 /**
  * OpenChamber's own lint rules. `oxlint.config.ts` runs the ones the code
@@ -20,6 +25,8 @@ import { noWireClientImportsRule } from "./rules/no-wire-client-imports.ts";
 const openchamberPlugin = eslintCompatPlugin({
   meta: { name: "openchamber" },
   rules: {
+    "gatekeeper-standard-library": gatekeeperStandardLibraryRule,
+    "no-app-imports-in-opencode": noAppImportsInOpencodeRule,
     "no-comments": noCommentsRule,
     "no-cross-runtime-imports": noCrossRuntimeImportsRule,
     "no-effects-in-components": noEffectsInComponentsRule,
@@ -30,7 +37,10 @@ const openchamberPlugin = eslintCompatPlugin({
     "no-session-list-scan-in-selectors": noSessionListScanInSelectorsRule,
     "no-source-text-in-tests": noSourceTextInTestsRule,
     "no-timers": noTimersRule,
+    "no-valueof-type-escape": noValueofTypeEscapeRule,
+    "no-virtualizer-return-from-hooks": noVirtualizerReturnFromHooksRule,
     "no-wire-client-imports": noWireClientImportsRule,
+    "server-js-specifiers": serverJsSpecifiersRule,
   },
 });
 

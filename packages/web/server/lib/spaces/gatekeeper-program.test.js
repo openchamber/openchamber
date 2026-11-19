@@ -9,7 +9,7 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
-import fs, { readFileSync } from 'node:fs';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1521,52 +1521,144 @@ describe('the gatekeeper program and its bind address', () => {
   });
 });
 
-describe('the gatekeeper program as a file', () => {
-  const source = readFileSync(PROGRAM, 'utf8');
+describe('the gatekeeper with controlled network edges', () => {
+  const run = (scenario, bind = '127.0.0.1') => {
+    const result = spawnSync(process.execPath, ['-e', `
+      const net = require('node:net');
+      const http = require('node:http');
+      const dns = require('node:dns');
+      const { once } = require('node:events');
+      const assert = require('node:assert/strict');
+      const servers = [];
+      const listen = net.Server.prototype.listen;
+      let ready;
+      const listening = new Promise(resolve => { ready = resolve; });
+      net.Server.prototype.listen = function (...args) {
+        servers.push(this);
+        this.once('listening', () => { if (servers.length === 3) ready(); });
+        return listen.apply(this, args);
+      };
+      process.argv = [process.execPath, ${JSON.stringify(PROGRAM)}, ${JSON.stringify(bind)}, '0', '0', '0'];
+      require('node:module').runMain();
+      (async () => {
+        await listening;
+        net.Server.prototype.listen = listen;
+        const [corridor, window, control] = servers.map(server => server.address().port);
+        const ask = (port, path, body) => new Promise((resolve, reject) => {
+          const request = http.request({ host: '127.0.0.1', port, path, method: body ? 'POST' : 'GET', agent: false }, answer => {
+            let text = '';
+            answer.on('data', chunk => { text += chunk; });
+            answer.on('end', () => resolve({ status: answer.statusCode, body: text }));
+          });
+          request.on('error', reject);
+          request.end(body ? JSON.stringify(body) : undefined);
+        });
+        const lookup = dns.lookup;
+        const lookups = {};
+        dns.lookup = (host, options, callback) => {
+          if (!host.endsWith('.example.test')) return lookup(host, options, callback);
+          lookups[host] = (lookups[host] || 0) + 1;
+          const address = lookups[host] > 1 ? '127.0.0.2' : host === 'window.example.test' ? '127.0.0.1' : '203.0.113.7';
+          process.nextTick(() => options.all ? callback(null, [{ address, family: 4 }]) : callback(null, address, 4));
+        };
+        await ask(control, '/network', { mode: 'open', domains: [] });
+        await (${scenario.toString()})({ net, http, once, assert, corridor, window, control, ask, lookups });
+        console.log('scenario passed');
+        process.exit(0);
+      })().catch(error => { console.error(error); process.exit(1); });
+    `], { encoding: 'utf8', timeout: 10_000 });
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr + result.stdout).toBe(0);
+    expect(result.stdout).toContain('scenario passed');
+  };
 
   it('binds the control channel to loopback and never to the space-facing interface', () => {
-    expect(source).toContain("const CONTROL_HOST = '127.0.0.1';");
-    expect(source).toContain('await listen(control, controlPort, CONTROL_HOST);');
+    const other = ownAddress();
+    expect(other).not.toBe('127.0.0.1');
+    run(async ({ net, assert, corridor, window, control }) => {
+      const other = process.argv[2];
+      const probe = (host, port) => new Promise((resolve) => {
+        const socket = net.connect({ host, port });
+        socket.on('connect', () => { socket.destroy(); resolve('connected'); });
+        socket.on('error', (error) => resolve(error.code));
+      });
+      assert.equal(await probe(other, corridor), 'connected');
+      assert.equal(await probe(other, window), 'connected');
+      assert.equal(await probe('127.0.0.1', control), 'connected');
+      assert.equal(await probe(other, control), 'ECONNREFUSED');
+    }, other);
   });
 
   it('writes no refusal into a tunnel that is already carrying bytes', () => {
-    // An upstream reset halfway through a download would otherwise put `HTTP/1.1 502` in the
-    // middle of somebody's TLS stream. It cannot be reached from here, because a tunnel needs an
-    // address this machine may not tunnel to, so what is checked is that the guard is there and
-    // that it is armed where the tunnel becomes a tunnel.
-    expect(source).toContain('if (!carrying && !clientSocket.destroyed');
-    expect(source).toContain('carrying = true;');
-    expect(source.indexOf('carrying = true;')).toBeGreaterThan(source.indexOf("upstream.on('connect'"));
+    run(async ({ net, once, assert, corridor, control, ask }) => {
+      const origin = net.createServer(socket => {
+        socket.on('error', () => {});
+        socket.once('data', () => socket.resetAndDestroy());
+      });
+      origin.listen(0, '127.0.0.1');
+      await once(origin, 'listening');
+      const connect = net.connect;
+      net.connect = options => connect({ ...options, host: '127.0.0.1', port: origin.address().port });
+      const client = connect({ host: '127.0.0.1', port: corridor });
+      client.on('error', () => {});
+      let text = '';
+      client.on('data', chunk => {
+        text += chunk;
+        if (text.includes('\r\n\r\n')) client.write('upload');
+      });
+      client.write('CONNECT tunnel.example.test:443 HTTP/1.1\r\n\r\n');
+      await once(client, 'close');
+      assert.equal(text, 'HTTP/1.1 200 Connection Established\r\n\r\n');
+      const records = JSON.parse((await ask(control, '/journal')).body).records;
+      assert(records.some(entry => entry.host === 'tunnel.example.test' && entry.decision === 'failed:ECONNRESET'));
+    });
   });
 
   it('lets a 502 leave the same way a 403 does, drained rather than reset', () => {
-    // The answer to an allowed host that could not be reached carries the one header that tells
-    // the space "allowed, and the connection out failed" apart from "refused", which is the
-    // distinction the journal and this reason header exist for. Destroying the socket in the same
-    // tick would lose it exactly as it lost the 403 before this round: a close with unread bytes
-    // in the receive queue is a reset, and the reset takes the queued answer with it.
-    //
-    // It cannot be driven from here, for the same reason as the guard above: a 502 needs a name
-    // that resolves to an address this machine is allowed to tunnel to, and the unit suite
-    // resolves nothing. The drain itself is exercised for real by the 403 test, which fills the
-    // receive queue against this same `refuse`. What is checked here is that this branch hands
-    // the socket to `refuse` and does not pull it out from under it.
-    const branch = source.slice(source.indexOf("upstream.on('error'"), source.indexOf('upstream.setTimeout(CONNECT_TIMEOUT_MS'));
-    expect(branch).toContain("refuse(clientSocket, 502, 'Bad Gateway', UNREACHABLE);");
-    expect(branch).toContain('releasePlace();');
-    expect(branch).toContain('upstream.destroy();');
-    // `abort()` destroys the client socket, and it stays for the timeout, the carrying case and a
-    // client that left. It must not be what ends a socket that has just been given an answer.
-    expect(branch.slice(0, branch.indexOf('abort();'))).toContain('return;');
+    run(async ({ net, once, assert, corridor }) => {
+      const unavailable = net.createServer();
+      unavailable.listen(0, '127.0.0.1');
+      await once(unavailable, 'listening');
+      const port = unavailable.address().port;
+      await new Promise(resolve => unavailable.close(resolve));
+      const connect = net.connect;
+      net.connect = options => connect({ ...options, host: '127.0.0.1', port });
+      const client = connect({ host: '127.0.0.1', port: corridor, allowHalfOpen: true });
+      client.on('error', () => {});
+      let text = '';
+      client.on('data', chunk => { text += chunk; });
+      client.write('CONNECT gone.example.test:443 HTTP/1.1\r\n\r\n');
+      client.write('x'.repeat(4 * 1024 * 1024));
+      await once(client, 'end');
+      assert.equal(text, 'HTTP/1.1 502 Bad Gateway\r\nx-gatekeeper-reason: unreachable\r\nConnection: close\r\n\r\n');
+      assert.equal(client.destroyed, false);
+      client.end();
+      await once(client, 'close');
+      assert.equal(client.destroyed, true);
+    });
   });
 
   it('connects to the address it checked, and never resolves the name again', () => {
-    expect(source).toContain('net.connect({ host: resolved.address, port, allowHalfOpen: true })');
-    expect(source).toContain('lookup: fixedLookup(chosen.address, chosen.family)');
-  });
-
-  it('needs nothing but the standard library', () => {
-    const required = [...source.matchAll(/require\('([^']+)'\)/g)].map((match) => match[1]);
-    expect(required.every((name) => name.startsWith('node:'))).toBe(true);
+    run(async ({ net, http, once, assert, corridor, window, control, ask, lookups }) => {
+      const origin = net.createServer(socket => socket.end('checked-address'));
+      origin.listen(0, '127.0.0.1');
+      await once(origin, 'listening');
+      const connect = net.connect;
+      net.connect = options => connect(options.host === '203.0.113.7'
+        ? { ...options, host: '127.0.0.1', port: origin.address().port } : options);
+      const client = connect({ host: '127.0.0.1', port: corridor });
+      let text = '';
+      client.on('data', chunk => { text += chunk; });
+      client.write('CONNECT pinned.example.test:443 HTTP/1.1\r\n\r\n');
+      await once(client, 'end');
+      assert.equal(text, 'HTTP/1.1 200 Connection Established\r\n\r\nchecked-address');
+      assert.equal(lookups['pinned.example.test'], 1);
+      const upstream = http.createServer((request, response) => response.end('window-address'));
+      upstream.listen(0, '127.0.0.1');
+      await once(upstream, 'listening');
+      assert.equal((await ask(control, '/grants', { id: 'pinned', upstream: 'http://window.example.test:' + upstream.address().port })).status, 200);
+      assert.deepEqual(await ask(window, '/model/pinned/path'), { status: 200, body: 'window-address' });
+      assert.equal(lookups['window.example.test'], 1);
+    });
   });
 });

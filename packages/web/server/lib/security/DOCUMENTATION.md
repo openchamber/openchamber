@@ -25,6 +25,15 @@ HTTP and WebSocket consumers. `../ui-auth` owns credentials and session cookies;
   explicit wildcard; untrusted documents supply their own response policy.
 - `OPENCHAMBER_LAN_URL` is an HTTP(S) origin override for hosts whose reachable
   LAN address is invisible inside a container. An invalid value is ignored.
+- Bind helpers receive strings already resolved by server startup or the CLI.
+  HTTP headers and the stored `publicOrigin` retain string validation at use.
+- Origin decisions return either a boolean immediately or a promise when
+  reading settings. Upgrade consumers must support both forms.
+- Forwarded-host and host arrays use their first entry. Empty arrays still fail
+  instead of becoming an absent header. Malformed cookie escapes return their
+  raw value.
+- A failed settings read preserves request-derived origins. Upgrade rejection
+  still destroys the socket after a failed write and ignores destruction errors.
 
 ## Decisions
 
@@ -33,3 +42,10 @@ HTTP and WebSocket consumers. `../ui-auth` owns credentials and session cookies;
 TLS can end at a cloud edge before a plain HTTP reverse-proxy hop. The browser's
 HTTPS origin remains valid when its external host matches, even if that hop
 does not preserve the original protocol.
+
+### Why stored origins retain runtime validation
+
+The settings reader is an unconverted JavaScript dependency. Its expected
+`publicOrigin` contract is optional text, but file contents still need validation
+before URL parsing. Invalid or unreadable settings leave request-derived
+candidates intact.

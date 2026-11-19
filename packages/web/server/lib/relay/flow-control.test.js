@@ -5,14 +5,6 @@ import { startRelayHost } from './host-client.js';
 import { generateEcdhKeyPair, exportPublicKeyJwk } from './e2ee.js';
 import { createRelayTunnelClient } from '../../../../ui/src/lib/relay/tunnel-client.ts';
 
-const waitFor = async predicate => {
-  for (let attempt = 0; attempt < 1000; attempt++) {
-    if (predicate()) return;
-    await new Promise(resolve => setTimeout(resolve, 5));
-  }
-  throw new Error('test condition timed out');
-};
-
 async function exercise({ clientFlow = true, hostFlow = true, batch = true, cancel = false, websocket = false } = {}) {
   const total = 512 * 1024;
   const content = Buffer.alloc(total, 'a');
@@ -32,10 +24,7 @@ async function exercise({ clientFlow = true, hostFlow = true, batch = true, canc
     }
     upstreamWs.handleUpgrade(req, socket, head, ws => {
       ws.send(content.subarray(0, total / 2));
-      ws.send(content.subarray(total / 2));
-      // Let Bun finish the local write turn, then close while the throttled
-      // tunnel still has most of the two messages queued.
-      setTimeout(() => ws.close(1000, 'complete'), 20);
+      ws.send(content.subarray(total / 2), () => ws.close(1000, 'complete'));
     });
   });
   await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
@@ -46,6 +35,13 @@ async function exercise({ clientFlow = true, hostFlow = true, batch = true, canc
   let hostData;
   const waiting = [];
   const down = [];
+  let credit = 0;
+  let draining = false;
+  const requestCredit = () => {
+    if (draining) return;
+    draining = true;
+    clientSocket.ping();
+  };
   // This fixture brokers an isolated room only; it does not replace production
   // relay authentication. Neither WebSocket leg fails or drops a frame.
   relay.on('connection', (socket, req) => {
@@ -55,6 +51,18 @@ async function exercise({ clientFlow = true, hostFlow = true, batch = true, canc
       socket.send(JSON.stringify({ type: 'sync', connectionIds: clientSocket ? ['fixture'] : [] }));
     } else if (role === 'client') {
       clientSocket = socket;
+      // Each completed socket round trip grants a packet's byte budget.
+      // Keep whole messages ordered while the host fills its delivery window.
+      socket.on('pong', () => {
+        draining = false;
+        credit = Math.min(128 * 1024, credit + 4096);
+        while (down.length && down[0].data.length <= credit) {
+          const frame = down.shift();
+          credit -= frame.data.length;
+          socket.send(frame.data, { binary: frame.binary });
+        }
+        if (down.length) requestCredit();
+      });
       control?.send(JSON.stringify({ type: 'connected', connectionId: 'fixture' }));
       socket.on('message', (data, binary) => {
         if (hostData) hostData.send(data, { binary });
@@ -65,20 +73,10 @@ async function exercise({ clientFlow = true, hostFlow = true, batch = true, canc
       for (const frame of waiting.splice(0)) socket.send(frame.data, { binary: frame.binary });
       socket.on('message', (data, binary) => {
         down.push({ data, binary });
+        requestCredit();
       });
     }
   });
-  // Drain at a byte budget, not a frame count: frame-size changes cannot make
-  // the test's effective bandwidth change. Preserve whole WS messages in order.
-  let credit = 0;
-  const drain = setInterval(() => {
-    credit = Math.min(128 * 1024, credit + 4096);
-    while (down.length && down[0].data.length <= credit) {
-      const frame = down.shift();
-      credit -= frame.data.length;
-      clientSocket.send(frame.data, { binary: frame.binary });
-    }
-  }, 5);
   const keys = await generateEcdhKeyPair();
   const relayUrl = `ws://127.0.0.1:${relay.address().port}/ws`;
   const host = startRelayHost({
@@ -93,10 +91,16 @@ async function exercise({ clientFlow = true, hostFlow = true, batch = true, canc
   let finished = false;
   let wsMessages = 0;
   let streamFailure;
+  let markFirstChunk;
+  const firstChunk = new Promise(resolve => { markFirstChunk = resolve; });
   const chunks = [];
   const abort = new AbortController();
   try {
-    await waitFor(() => client.getStatus().state === 'connected');
+    await new Promise(resolve => {
+      const unsubscribe = client.subscribeStatus(status => {
+        if (status.state === 'connected') { unsubscribe(); resolve(); }
+      });
+    });
     let stream;
     if (websocket) {
       const socket = client.openWebSocket('/api/terminal/ws?oc_url_token=fixture-url-token');
@@ -106,6 +110,7 @@ async function exercise({ clientFlow = true, hostFlow = true, batch = true, canc
           chunks.push(bytes);
           received += bytes.length;
           wsMessages++;
+          markFirstChunk();
         };
         socket.onclose = event => {
           finished = true;
@@ -117,14 +122,14 @@ async function exercise({ clientFlow = true, hostFlow = true, batch = true, canc
       const response = await client.fetch('/api/global/event', { headers, signal: abort.signal });
       stream = (async () => {
         try {
-          for await (const chunk of response.body) { chunks.push(chunk); received += chunk.length; }
+          for await (const chunk of response.body) { chunks.push(chunk); received += chunk.length; markFirstChunk(); }
         } catch (error) {
           if (!cancel || error.name !== 'AbortError') throw error;
         } finally { finished = true; }
       })();
     }
-    stream = stream.catch(error => { streamFailure = error; });
-    await waitFor(() => received > 0 || streamFailure);
+    stream = stream.catch(error => { streamFailure = error; markFirstChunk(); });
+    await firstChunk;
     if (streamFailure) throw streamFailure;
     if (cancel) abort.abort();
     const response = await client.fetch('/health', { headers, signal: AbortSignal.timeout(5000) });
@@ -140,7 +145,6 @@ async function exercise({ clientFlow = true, hostFlow = true, batch = true, canc
   } finally {
     client.close();
     host.stop();
-    clearInterval(drain);
     for (const ws of relay.clients) ws.terminate();
     relay.close();
     for (const ws of upstreamWs.clients) ws.terminate();
