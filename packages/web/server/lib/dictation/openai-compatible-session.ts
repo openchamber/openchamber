@@ -3,19 +3,16 @@ import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 
 import { transcribeAudio } from '../tts/stt.js';
+import type { TranscribeAudioOptions } from '../tts/stt.js';
 import { normalizeCustomOpenAIBaseURL } from '../tts/base-url.js';
 import { normalizeEndpointPath } from '../tts/endpoint-path.js';
 import { pcm16ToWav } from './audio.js';
 
 const OPENAI_COMPATIBLE_SAMPLE_RATE = 16000;
 
-export interface OpenAICompatibleSessionConfig {
-  baseURL: string;
-  model: string;
-  apiKey?: string | undefined;
-  language?: string | undefined;
+export interface OpenAICompatibleSessionConfig extends Pick<TranscribeAudioOptions, 'baseURL' | 'model' | 'apiKey' | 'language' | 'endpointPath'> {
+  baseURL: TranscribeAudioOptions['baseURL'];
   prompt?: string;
-  endpointPath?: string | undefined;
 }
 
 export interface OpenAICompatibleSessionEvents {

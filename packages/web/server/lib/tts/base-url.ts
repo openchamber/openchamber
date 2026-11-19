@@ -28,7 +28,7 @@ const isAllowedLocalHost = (hostname: string) => {
   return LOCAL_BASE_URL_HOSTS.has(normalized);
 };
 
-export const normalizeCustomOpenAIBaseURL = (value: string | null | undefined) => {
+export const normalizeCustomOpenAIBaseURL = (value: Parameters<typeof isString>[0]) => {
   if (!isString(value) || !value.trim()) {
     return { value: undefined };
   }

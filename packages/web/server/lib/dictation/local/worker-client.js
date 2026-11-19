@@ -40,7 +40,7 @@ export class DictationWorkerClient {
 
   /**
    * Synthesize speech in the worker. Returns WAV bytes.
-   * @param {{ modelsDir: string, modelId: string, text: string, speakerId?: number, speed?: number }} params
+   * @param {{ modelsDir: string, modelId: string, text: string, speakerId?: number | undefined, speed?: number | undefined }} params
    * @returns {Promise<{ audio: Buffer, format: string }>}
    */
   async synthesizeSpeech(params) {
@@ -56,7 +56,7 @@ export class DictationWorkerClient {
 
   /**
    * Create a streaming STT session in the worker.
-   * @param {{ modelsDir: string, modelId: string, language?: string }} params
+   * @param {{ modelsDir: string, modelId: string, language?: unknown }} params
    * @param {EventEmitter} emitter receives 'committed' | 'transcript' | 'error'
    * @returns {Promise<{ sessionId: string, requiredSampleRate: number }>}
    */
@@ -284,7 +284,7 @@ export class DictationWorkerClient {
 export class WorkerBackedTranscriptionSession extends EventEmitter {
   /**
    * @param {DictationWorkerClient} client
-   * @param {{ modelsDir: string, modelId: string, language?: string }} modelConfig
+   * @param {{ modelsDir: string, modelId: string, language?: unknown }} modelConfig
    */
   constructor(client, modelConfig) {
     super();
