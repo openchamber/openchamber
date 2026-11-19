@@ -45,7 +45,6 @@ import { createLifecycleCommands } from './lib/commands-lifecycle.js';
 import { createServeCommand } from './lib/commands-serve.js';
 import { createTunnelCommand, isValidTunnelDoctorResponse, shouldDisplayTunnelQr } from './lib/commands-tunnel.js';
 import {
-  resolveDoctorPortStatuses,
   discoverRunningInstances,
   discoverOpenChamberInstanceOnPort,
   discoverLifecycleInstances,
@@ -74,19 +73,28 @@ import {
 import { applyConnectAttemptTimeout } from '../server/lib/network-defaults.js';
 import { createOpenCodeEnvRuntime } from '../server/lib/opencode/env-runtime.js';
 import { bunVersionRunsBunPty } from '../server/lib/terminal/bun-pty-support.js';
+import { isRecord, isString } from '../server/lib/shared/object-guards.js';
+import type { JsonObject, JsonValue } from '../server/lib/shared/json-values.js';
+import type { CliOptions } from './lib/cli-args.js';
+import type { CliNotice } from './lib/cli-process.js';
 
 // external: #3399 provider fetches need a longer connect-attempt timeout than undici's 250ms default.
 applyConnectAttemptTimeout();
 
-const PACKAGE_JSON = JSON.parse(fs.readFileSync(webPackagePaths.packageJson, 'utf8'));
+function isPackageManifest(value: JsonValue): value is JsonObject {
+  return isRecord(value);
+}
 
-let onCancelCleanup = null;
-let activeCommandOptions = null;
+const PACKAGE_JSON: JsonValue = JSON.parse(fs.readFileSync(webPackagePaths.packageJson, 'utf8'));
+const PACKAGE_VERSION = isPackageManifest(PACKAGE_JSON) ? PACKAGE_JSON.version : undefined;
+
+let onCancelCleanup: (() => Promise<void>) | null = null;
+let activeCommandOptions: CliOptions | null = null;
 let foregroundServerActive = false;
-let foregroundShutdown = null;
+let foregroundShutdown: ((signal?: string) => Promise<void>) | null = null;
 
-function setCancelCleanup(handler) {
-  onCancelCleanup = typeof handler === 'function' ? handler : null;
+function setCancelCleanup(handler: (() => Promise<void>) | null) {
+  onCancelCleanup = handler;
 }
 
 function shouldWarnForTunnelProfileFile() {
@@ -105,30 +113,26 @@ const ANSI = {
   unbold: '\x1b[22m',
 };
 
-function boldText(text) {
+function boldText(text: string) {
   if (!STYLE_ENABLED) return text;
   return `${ANSI.bold}${text}${ANSI.unbold}`;
 }
 
-function importFromFilePath(filePath) {
+function importFromFilePath(filePath: string) {
   return import(pathToFileURL(filePath).href);
 }
 
 function getBunBinary() {
-  if (typeof process.env.BUN_BINARY === 'string' && process.env.BUN_BINARY.trim().length > 0) {
+  if (isString(process.env.BUN_BINARY) && process.env.BUN_BINARY.trim().length > 0) {
     return process.env.BUN_BINARY.trim();
   }
-  if (typeof process.env.BUN_INSTALL === 'string' && process.env.BUN_INSTALL.trim().length > 0) {
+  if (isString(process.env.BUN_INSTALL) && process.env.BUN_INSTALL.trim().length > 0) {
     return path.join(process.env.BUN_INSTALL.trim(), 'bin', process.platform === 'win32' ? 'bun.exe' : 'bun');
   }
   return 'bun';
 }
 
 const BUN_BIN = getBunBinary();
-
-function isBunRuntime() {
-  return typeof globalThis.Bun !== 'undefined';
-}
 
 function getInstalledBunVersion() {
   try {
@@ -147,11 +151,18 @@ function getInstalledBunVersion() {
 // external: #6322 Bun before the PTY fix cannot back a terminal, so the server runs on Node there.
 function getServerRuntimeBinary() {
   if (bunVersionRunsBunPty(getInstalledBunVersion())) return BUN_BIN;
-  if (!isBunRuntime() || bunVersionRunsBunPty(globalThis.Bun.version)) return process.execPath;
+  const bun = globalThis.Bun;
+  if (bun === undefined || bunVersionRunsBunPty(bun.version)) return process.execPath;
   return searchPathFor('node') ?? process.execPath;
 }
 
-async function checkOpenCodeCLI(onNotice) {
+function missingEnvDependency(name: string) {
+  return (): never => {
+    throw new TypeError(`${name} is not a function`);
+  };
+}
+
+async function checkOpenCodeCLI(onNotice?: (notice: CliNotice) => void) {
   if (process.env.OPENCODE_BINARY) {
     const override = resolveExplicitBinary(process.env.OPENCODE_BINARY);
     if (override) {
@@ -159,7 +170,7 @@ async function checkOpenCodeCLI(onNotice) {
       return override;
     }
     const message = `OPENCODE_BINARY="${process.env.OPENCODE_BINARY}" is not an executable file. Falling back to PATH lookup.`;
-    if (typeof onNotice === 'function') {
+    if (onNotice !== undefined) {
       onNotice({ level: 'warning', code: 'OPENCODE_BINARY_INVALID', message });
     } else {
       console.warn(`Warning: ${message}`);
@@ -168,7 +179,11 @@ async function checkOpenCodeCLI(onNotice) {
 
   let resolvedFromPath = searchPathFor('opencode');
   if (!resolvedFromPath) {
-    createOpenCodeEnvRuntime({ state: {} }).applyLoginShellEnvSnapshot();
+    createOpenCodeEnvRuntime({
+      state: {},
+      normalizeDirectoryPath: missingEnvDependency('normalizeDirectoryPath'),
+      readSettingsFromDiskMigrated: missingEnvDependency('readSettingsFromDiskMigrated'),
+    }).applyLoginShellEnvSnapshot();
     resolvedFromPath = searchPathFor('opencode');
   }
   if (resolvedFromPath) {
@@ -182,14 +197,42 @@ async function checkOpenCodeCLI(onNotice) {
   );
 }
 
+const serveCommand = createServeCommand({
+  serverPath: fileURLToPath(new URL('../server/index.js', import.meta.url)),
+  checkOpenCodeCLI,
+  getServerRuntimeBinary,
+  setForegroundServerActive(value) { foregroundServerActive = value; },
+  setForegroundShutdown(handler) { foregroundShutdown = handler; },
+});
+
+const lifecycleCommands = createLifecycleCommands({ serveCommand });
+
+const tunnelCommand = createTunnelCommand({
+  serveCommand,
+  stopCommand: lifecycleCommands.stop,
+  setCancelCleanup,
+  boldText,
+  ensureTunnelProfilesMigrated,
+});
+
+const connectUrlCommand = createConnectUrlCommand({
+  serveCommand,
+});
+
+const updateCommand = createUpdateCommand({
+  importFromFilePath,
+  packageManagerPath: fileURLToPath(new URL('../server/lib/package-manager.js', import.meta.url)),
+  serveCommand,
+});
+
 const commands = {
-  serve: null,
+  serve: serveCommand,
 
-  'connect-url': null,
+  'connect-url': connectUrlCommand,
 
-  stop: null,
+  stop: lifecycleCommands.stop,
 
-  restart: null,
+  restart: lifecycleCommands.restart,
 
   status: statusCommand,
 
@@ -205,40 +248,14 @@ const commands = {
 
   startup: startupCommand,
 
-  update: null,
+  update: updateCommand,
+
+  tunnel: tunnelCommand,
 };
 
-commands.serve = createServeCommand({
-  serverPath: fileURLToPath(new URL('../server/index.js', import.meta.url)),
-  checkOpenCodeCLI,
-  getServerRuntimeBinary,
-  setForegroundServerActive(value) { foregroundServerActive = value; },
-  setForegroundShutdown(handler) { foregroundShutdown = handler; },
-});
-
-{
-  const lifecycleCommands = createLifecycleCommands({ serveCommand: commands.serve.bind(commands) });
-  commands.stop = lifecycleCommands.stop;
-  commands.restart = lifecycleCommands.restart;
+function isCommandName(name: string): name is keyof typeof commands {
+  return name in commands;
 }
-
-commands.tunnel = createTunnelCommand({
-  serveCommand: commands.serve.bind(commands),
-  stopCommand: commands.stop.bind(commands),
-  setCancelCleanup,
-  boldText,
-  ensureTunnelProfilesMigrated,
-});
-
-commands['connect-url'] = createConnectUrlCommand({
-  serveCommand: commands.serve.bind(commands),
-});
-
-commands.update = createUpdateCommand({
-  importFromFilePath,
-  packageManagerPath: fileURLToPath(new URL('../server/lib/package-manager.js', import.meta.url)),
-  serveCommand: commands.serve.bind(commands),
-});
 
 async function main() {
   const parsed = parseArgs();
@@ -247,9 +264,9 @@ async function main() {
 
   if (versionRequested) {
     if (isJsonMode(options)) {
-      printJson({ version: PACKAGE_JSON.version });
+      printJson({ version: PACKAGE_VERSION });
     } else {
-      console.log(PACKAGE_JSON.version);
+      console.log(PACKAGE_VERSION);
     }
     return;
   }
@@ -332,7 +349,7 @@ async function main() {
     return;
   }
 
-  if (!commands[command]) {
+  if (!isCommandName(command) || !commands[command]) {
     const knownCommands = ['serve', 'stop', 'restart', 'status', 'schedule', 'session', 'models', 'projects', 'control', 'tunnel', 'startup', 'logs', 'update'];
     const suggestion = findClosestMatch(command, knownCommands);
     const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
@@ -363,7 +380,7 @@ if (isCliExecution) {
       return;
     }
     if (foregroundServerActive) {
-      if (typeof foregroundShutdown === 'function') {
+      if (foregroundShutdown !== null) {
         void foregroundShutdown('SIGINT');
       }
       return;
@@ -375,6 +392,7 @@ if (isCliExecution) {
         try {
           await onCancelCleanup();
         } catch {
+          void 0;
         } finally {
           setCancelCleanup(null);
         }

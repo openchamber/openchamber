@@ -2,7 +2,7 @@
 
 This directory contains the command implementation for the OpenChamber CLI.
 `bin/cli.js` registers checkout source resolution before dynamically loading
-`bin/cli-runtime.js`, which owns command wiring, dispatch and process handlers.
+`bin/cli-runtime.ts`, which owns command wiring, dispatch and process handlers.
 Domain logic belongs in these modules.
 
 ## Entrypoint Boundary
@@ -14,7 +14,7 @@ build entering the development loop.
 
 - `../cli.js`
   - Keeps the package bin, shebang and legacy exports. Its static imports are Node builtins, so the source resolver runs before the CLI graph links.
-- `../cli-runtime.js`
+- `../cli-runtime.ts`
   - Owns package/version lookup, command table wiring, signal handlers and top-level error handling. Execution detection uses the original `cli.js` URL, including symlinked `openchamber` executables.
   - Injects runtime dependencies into command factories, such as `serveCommand`, `stopCommand`, package-manager loading, cancel cleanup, and foreground server state setters.
   - Should not grow command-specific behavior. If a new branch needs more than dispatch/wiring, move it here into a command or helper module instead.

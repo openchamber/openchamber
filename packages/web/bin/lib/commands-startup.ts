@@ -25,7 +25,7 @@ function isStartupAction(value: unknown): value is string {
   return typeof value === 'string';
 }
 
-async function startupCommand(options: Partial<CliOptions>, action = 'status', dependencies: StartupDependencies = {}) {
+async function startupCommand(options: Partial<CliOptions>, action: string | null = 'status', dependencies: StartupDependencies = {}) {
   const getStatus = dependencies.getStartupStatus || getStartupStatus;
   const enableService = dependencies.enableStartupService || enableStartupService;
   const disableService = dependencies.disableStartupService || disableStartupService;

@@ -28,10 +28,19 @@ cross file, process or JavaScript boundaries. Their original checks remain.
 The JSON envelope guard establishes only the container; its `messages`, `status`
 and `data` properties remain unchecked until consumed.
 
-### Why the CLI runtime remains JavaScript
+### Why the command table is built from named factory results
 
-The shared Knip configuration includes `bin/**/*.js` in the web project and
-omits TypeScript. Converting `cli-runtime.js` makes Knip miss its imports and
-report 20 live exports from `bin/lib` as unused, including `createServeCommand`
-and `createTunnelCommand`. The coordinator must include TypeScript in the shared
-project configuration before this runtime can pass the unchanged gate.
+The command factories run in their original order, then one object literal
+lists the commands in their original key order. The factories receive the
+serve and stop functions directly instead of copies bound to the command
+table: neither function reads `this`, and `restart` still reads `stop` and
+`serve` from the table it is called on. Dispatch accepts a command name with
+`in`, so inherited property names reach the same call as before.
+
+### Why the CLI login-shell probe names two failing dependencies
+
+`checkOpenCodeCLI` only calls `applyLoginShellEnvSnapshot` on its OpenCode
+environment runtime. The runtime contract requires a directory normalizer and
+a settings reader that only binary-resolution paths use. The CLI passes
+functions that throw the same `TypeError` a missing function would, so the
+contract holds without a settings dependency the CLI never had.
