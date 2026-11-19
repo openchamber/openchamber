@@ -37,6 +37,9 @@ Bootstrap disposal, stream reconnect and the watchdog share recovery state for t
 
 Directory session arrays are replaced on change and aggregate readers leave the shared result untouched, so all hooks can reuse the same aggregation for identical array inputs. Field comparisons first check object identity and compare metadata by reference, because metadata writes can leave `time.updated` unchanged and joined-string signatures allocate for every live session.
 
+### Why the live aggregate moves replaced records and not re-sorts every list
+
+OpenCode reports usage after every agent step, and each report replaces one record in place in one directory's list. Re-sorting thousands of sessions for that was the largest single cost of an event flush with four agents streaming. When every changed list keeps its ids at the same positions, the ids and the order they first appear in are unchanged, so `aggregateLiveSessions` takes each replaced record out and puts its winner back by binary search, ordering ties by first appearance exactly as the stable sort did. A list that gained, lost or reordered ids, or more than 64 replaced records, rebuilds the whole aggregate.
 ### Why eviction waits for render pins and not the count limit alone
 
 Rows obtain their stores during render and pin them after commit. One coalesced eviction microtask and a recent-access grace let those pins settle; enforcing the count immediately can repeatedly dispose a store that is still rendering and restart its bootstrap.
