@@ -32,15 +32,6 @@ discovery. `contracts.ts` owns the converted helpers' data types.
 `../../opencode/config-files.js`. The caller supplies its own field checks:
 `auth.d.ts` exposes the JSON and credential lookup results as unchecked values.
 
-`resolveConfigApiKey` currently evaluates `os.homedir()` without an `os` import
-when its caller omits `homeDir`. Adding the import would change an existing
-failure into success. The behavior-preserving conversion leaves this file
-unchanged until that defect can be fixed separately.
-
-An ambient declaration for `os` would claim a runtime binding that this module
-does not provide. The unresolved name is local to this file; changing a
-neighbouring module's types cannot resolve it.
-
 ### Why external scalar guards remain
 
 Provider and credential JSON reaches the transformer helpers before scalar
