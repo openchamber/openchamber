@@ -2,7 +2,7 @@ import { Readable } from 'node:stream';
 import express from 'express';
 import { pipeline } from 'node:stream/promises';
 
-import { isPlainObject, isString } from '../shared/guards.js';
+import { isString } from '../shared/guards.js';
 import { createOAuthFlowRegistry } from './oauth-flow-registry.js';
 import { mutationReceipt } from './mutation-executor.js';
 import { readBranchTip } from './change-id.js';
@@ -10,7 +10,7 @@ import { createChangeRequestStatusCache } from './status-cache.js';
 import { allowsTopLevelProjects } from './project-path.js';
 import { isProviderUserId, isProviderUsername } from './provider-id.js';
 import { assertMutationContextObject } from './binding-input.js';
-import type { SourceControlJson, SourceControlJsonObject } from '@openchamber/sdk';
+import type { SourceControlJson } from '@openchamber/sdk';
 import type { Query, QueryValue, Request, RequestHandler, Response, Router } from '../shared/http-contracts.js';
 import type { AccountIdentity, ProviderDescriptor, ProviderMutationContext, ProviderReadContext, ReadContextRequest } from './provider-contract.js';
 import type { createMutationExecutor } from './mutation-executor.js';
@@ -28,7 +28,7 @@ interface MutationNotice { context: ProviderMutationContext; kind: string; input
 export interface ProviderRouteOptions {
   providers: ReturnType<typeof createSourceControlProviders>;
   validateReadContext?: ((input: ReadContextRequest) => Promise<ProviderReadContext>) | undefined;
-  validateMutationContext?: ((input: SourceControlJsonObject) => Promise<ProviderMutationContext>) | undefined;
+  validateMutationContext?: ((input: SourceControlJson) => Promise<ProviderMutationContext>) | undefined;
   mutationExecutor?: Pick<ReturnType<typeof createMutationExecutor>, 'read' | 'execute'> | undefined;
   onMutationSucceeded?: ((notice: MutationNotice & { record: MutationRecord; replayed: boolean }) => void | Promise<void>) | undefined;
   onMutationStarting?: ((notice: MutationNotice & { target: ResolvedMutation['target'] }) => (() => void) | null | undefined) | undefined;
@@ -73,7 +73,8 @@ interface SourceControlErrorBody { error: unknown; code: unknown; current?: unkn
 interface ChangeRequestStatus { fetchedAt?: unknown }
 interface FailedIdentity { provider?: unknown; instance?: unknown; accountId?: unknown }
 interface StartedMutation { settle: (() => void) | null }
-const bodyField = <Body>(body: Body, key: string) => (isPlainObject(body) ? body[key] : undefined);
+const hasBodyFields = <Body>(body: Body): body is Body & Readonly<Record<string, unknown>> => body != null;
+const bodyField = <Body>(body: Body, key: string) => (hasBodyFields(body) ? body[key] : undefined);
 
 
 const STATUS_CACHE_TTL_MS = 90_000;
@@ -756,8 +757,8 @@ export function registerProviderRoutes(app: Router, {
           code: 'SOURCE_CONTROL_MUTATIONS_UNAVAILABLE', status: 501,
         });
       }
-      assertMutationContextObject(body);
       const context = await validateMutationContext(body);
+      assertMutationContextObject(body);
       const actor = { provider: id, instance: context.instance, accountId: context.accountId };
       const session = await sessionFor(impl, context.instance, context.accountId);
       if (session.accountId !== context.accountId
@@ -1025,7 +1026,7 @@ export function registerProviderRoutes(app: Router, {
 
     boundRead('issues', '/issues/list', async ({ req, res, impl, instance, directory, trustedContext }) => {
       const session = await sessionFor(impl, instance, trustedContext.accountId);
-      return res.json(await requireResource(impl, 'listIssues')({
+      return res.json(await requireResource(impl, 'listIssues').call(impl.resources, {
         session,
         directory,
         page: requestNumber(req.query?.page) ?? 1,
@@ -1040,7 +1041,7 @@ export function registerProviderRoutes(app: Router, {
         const session = await sessionFor(impl, instance, trustedContext.accountId);
         const number = requestIssueNumber(req.query?.number);
         if (!number) return res.status(400).json({ error: 'valid number and complete project selector are required' });
-        return res.json(await requireResource(impl, method)({
+        return res.json(await requireResource(impl, method).call(impl.resources, {
           session,
           directory,
           number,

@@ -19,7 +19,7 @@ import type { AccountIdentity, ReadContextRequest } from './provider-contract.js
 import type {
   BindingServiceOptions, RepositoryIdentity, RepositoryResolver, BindingRead, BindingIntent,
   TransportContextInput, AuxiliaryContextInput, TransportAuthority, AuxiliaryAuthority,
-  CloneBindingInput, BindingMutationTarget, PresentedBinding, BindingIntentRequest, MutationContextRequest, AccountIdentityRequest,
+  CloneBindingInput, BindingMutationTarget, PresentedBinding, BindingIntentRequest, MutationContextBody, AccountIdentityRequest,
   RemoteBindingInput, AuxiliaryBindingInput,
 } from './binding-service-contracts.js';
 
@@ -490,7 +490,7 @@ export function createBindingService({
       }),
     } };
   };
-  const validateAuthority = async (input: ReadContextRequest, makeContextError: typeof bindingInputError, makeRequiredFieldError = makeContextError) => {
+  const validateAuthority = async (input: ReadContextRequest | MutationContextBody, makeContextError: typeof bindingInputError, makeRequiredFieldError = makeContextError) => {
     if (!isPlainObject(input)) throw makeContextError('Source control read context is required');
     const directory = requiredString(input.directory, 'directory', makeRequiredFieldError);
     const repositoryId = requiredString(input.repositoryId, 'repositoryId', makeRequiredFieldError);
@@ -672,7 +672,7 @@ export function createBindingService({
     get: async <Directory>(directory: Directory) => presentRead(await readCurrent(await resolve(directory))),
     present: presentRead,
     validateReadContext: (input: ReadContextRequest) => validateAuthority(input, invalidReadInput, bindingInputError),
-    validateMutationContext: async (input: MutationContextRequest) => {
+    validateMutationContext: async (input: MutationContextBody) => {
       const context = await validateAuthority(input, mutationContextError);
       const repository = await resolve(context.directory);
       const current = await readCurrent(repository);
@@ -681,8 +681,8 @@ export function createBindingService({
       }
       return {
         ...context,
-        idempotencyKey: requiredString(input.idempotencyKey, 'idempotencyKey', mutationContextError),
-        target: parseTarget(input.target, context.provider),
+        idempotencyKey: requiredString(isPlainObject(input) ? input.idempotencyKey : undefined, 'idempotencyKey', mutationContextError),
+        target: parseTarget(isPlainObject(input) ? input.target : undefined, context.provider),
       };
     },
     validateGitTransportContext,

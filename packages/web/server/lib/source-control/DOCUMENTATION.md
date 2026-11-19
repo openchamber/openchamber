@@ -404,10 +404,11 @@ require the original value to equal its trimmed form.
 The JSON parser admits arrays, while every provider's `mutations.prepare`
 reads fields from a JSON object. `assertMutationContextObject`
 (`binding-input.ts`) is the binding validator's first check, the one that
-refuses anything but a plain object, written as an assertion; the shell calls
-it before `validateMutationContext`, so `prepare` receives a JSON object by
-proof and a non-object body is refused with the same
-`INVALID_SOURCE_CONTROL_MUTATION_CONTEXT` error as before.
+refuses anything but a plain object, written as an assertion. The shell
+hands the parsed body to the injected `validateMutationContext` first, so a
+validator decides its own answer for any body (the binding validator refuses a
+non-object with `INVALID_SOURCE_CONTROL_MUTATION_CONTEXT`), and calls the
+assertion after it, so `prepare` receives a JSON object by proof.
 
 ### Why the registry's provider contract is the shell's view of every provider
 

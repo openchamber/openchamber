@@ -1,4 +1,4 @@
-import type { SourceControlMutationTarget } from '@openchamber/sdk';
+import type { SourceControlJson, SourceControlMutationTarget } from '@openchamber/sdk';
 import type { BindingDraft } from './binding-contract.js';
 import type { createBindingStore } from './binding-storage.js';
 import type { SourceControlProviderBinding, SourceControlRepositoryContext, SourceControlRepositoryEndpoint } from './binding-types.js';
@@ -188,3 +188,4 @@ export interface AccountIdentityRequest {
   instance?: unknown;
   accountId?: unknown;
 }
+export type MutationContextBody = MutationContextRequest | SourceControlJson;

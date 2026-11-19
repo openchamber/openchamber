@@ -61,7 +61,7 @@ interface BindingFailure {
 const hasErrorFields = (value: unknown): value is BindingFailure => value != null;
 const hasProviderEntry = <Options extends object>(options: Options, key: string): options is Options & Record<string, unknown> => key in options;
 const hasCallbackFields = (value: unknown): value is { onAccountInvalidated?: unknown; onAccountRemoved?: unknown } => value != null;
-const isAccountCallback = (value: unknown): value is (identity: Invalidation) => void | Promise<void> => value instanceof Function;
+const isAccountCallback = (value: unknown): value is (identity: Invalidation) => void | Promise<void> => typeof value === 'function';
 const errorFields = (cause: unknown): BindingFailure => hasErrorFields(cause) ? cause : {};
 const hasCodeMethod = (value: unknown): value is { startsWith?: unknown } => value != null;
 const isPrefixMethod = (value: unknown): value is (prefix: string) => BindingFailure['code'] => typeof value === 'function';
