@@ -1,5 +1,6 @@
 import net from 'node:net';
 
+import type { CommandOptions, RunCommand } from '../command-contracts.js';
 import { SpaceError } from '../errors.js';
 import { createGatekeeperChannel } from '../gatekeeper-channel.js';
 import {
@@ -12,6 +13,7 @@ import {
   findHardeningViolations,
   requireMemoryBytes,
 } from '../hardening.js';
+import type { HardeningViolation } from '../hardening.js';
 import {
   ROLE_GATEKEEPER,
   ROLE_NETWORK,
@@ -31,9 +33,14 @@ import { SPACE_CONNECT_COMMAND, SPACE_IDLE_EXIT_CODE, SPACE_USER, TOOLS_MOUNT_PA
 import { openCommandStream as openCommandStreamProcess } from '../run-command.js';
 import { START_CONFIG_VARIABLE } from '../space-opencode.js';
 import { createSpaceServerChannel, createSpaceToken } from '../space-server.js';
-import { CHANGE_TIMEOUT_MS, ROLLBACK_SETTLE_MS, createDockerEngine, entryLabels, entryName, isInterrupted, pause } from './docker-engine.js';
+import type { ToolsSource } from '../tools.js';
+import { CHANGE_TIMEOUT_MS, ROLLBACK_SETTLE_MS, createDockerEngine, entryLabels, entryName, failureField, isInterrupted, pause } from './docker-engine.js';
+import type { DockerRemovalFailure } from './docker-engine.js';
 import { createDockerDisk } from './docker-disk.js';
+import type { ImagePullState } from './docker-disk.js';
 import { createDockerTools } from './docker-tools.js';
+import { parseDockerJson } from './docker-wire.js';
+import type { DockerContainer, DockerContainerSettings, DockerListedEntry, DockerResourceKind, DockerServerVersion } from './docker-wire.js';
 
 const DOCKER_PLACE_ID = 'docker';
 export const DOCKER_SSH_PLACE_ID = 'docker-ssh';
@@ -48,18 +55,57 @@ const HOST_ISOLATION_MIN_ENGINE = 28;
 const REMOTE_DAEMON_DOWN = /Cannot connect to the Docker daemon|Is the docker daemon running/i;
 const REMOTE_DOCKER_MISSING = /docker: (?:command )?not found|No such file or directory/i;
 const LOCAL_SOCKET_DENIED = /permission denied while trying to connect to the docker daemon/i;
-const machineOf = (dockerHost) => String(dockerHost).replace(/^[a-z]+:\/\//i, '');
+const machineOf = (dockerHost: string) => String(dockerHost).replace(/^[a-z]+:\/\//i, '');
 const ASIDE_SUFFIX = 'old';
 
-const KINDS = ['container', 'volume', 'network'];
+const KINDS = ['container', 'volume', 'network'] as const;
 
-function startConfigOf(container) {
+type SpaceLabels = NonNullable<ReturnType<typeof parseSpaceLabels<string>>>;
+
+export interface ExecOptions extends CommandOptions {
+  target?: string;
+}
+
+interface SpaceResource {
+  kind: DockerResourceKind;
+  name: string;
+  labels: SpaceLabels;
+  entry: DockerListedEntry;
+}
+
+export interface SpaceSpec {
+  id: string;
+  name: string;
+  project: string;
+  created: string;
+  memoryBytes: number;
+}
+
+export interface DockerPlaceOptions {
+  runCommand: RunCommand;
+  openCommandStream?: typeof openCommandStreamProcess;
+  dockerPath: string;
+  dockerHost?: string | null;
+  id?: string;
+  colimaPath?: string | null;
+  owner: string;
+  toolsSource: ToolsSource;
+  wait?: (milliseconds: number) => Promise<void>;
+  now?: () => Date;
+}
+
+const errnoOf = <Cause>(error: Cause) => {
+  const details = failureField(error, 'details');
+  return details == null ? undefined : failureField(details, 'errno');
+};
+
+function startConfigOf(container: DockerContainerSettings) {
   const prefix = `${START_CONFIG_VARIABLE}=`;
   const entry = (container?.Config?.Env ?? []).find((candidate) => String(candidate).startsWith(prefix));
   return entry === undefined ? null : String(entry).slice(prefix.length);
 }
 
-function execRole(target) {
+function execRole(target: string | undefined) {
   if (target === undefined || target === ROLE_SPACE) {
     return ROLE_SPACE;
   }
@@ -69,21 +115,21 @@ function execRole(target) {
   throw new SpaceError('invalid_exec_target', `A command runs in the space or in its gatekeeper, not in '${target}'`);
 }
 
-export function createDockerPlace({ runCommand, openCommandStream = openCommandStreamProcess, dockerPath, dockerHost = null, id = DOCKER_PLACE_ID, colimaPath = null, owner, toolsSource, wait = pause, now = () => new Date() }) {
+export function createDockerPlace({ runCommand, openCommandStream = openCommandStreamProcess, dockerPath, dockerHost = null, id = DOCKER_PLACE_ID, colimaPath = null, owner, toolsSource, wait = pause, now = () => new Date() }: DockerPlaceOptions) {
   requireOwner(owner);
 
   const engine = createDockerEngine({ runCommand, dockerPath, dockerHost });
   const machine = dockerHost === null ? null : machineOf(dockerHost);
   const { run, docker, inspect, removeOne, removeStoppedContainer } = engine;
   const tools = createDockerTools({ engine, owner, toolsSource, image: SPACE_BASE_IMAGE, now, wait });
-  let imagePull = null;
-  let imagePullFailure = null;
-  const imagePullState = () => ({ pulling: imagePull !== null, failure: imagePullFailure });
+  let imagePull: Promise<void> | null = null;
+  let imagePullFailure: ImagePullState['failure'] = null;
+  const imagePullState = (): ImagePullState => ({ pulling: imagePull !== null, failure: imagePullFailure });
   const disk = createDockerDisk({ engine, runCommand, colimaPath, owner, image: SPACE_BASE_IMAGE, retiredImages: RETIRED_SPACE_BASE_IMAGES, tools, imagePullState });
 
-  const findResources = async (spaceId) => {
+  const findResources = async (spaceId: string | null) => {
     const filters = labelFilterArgs({ owner, spaceId });
-    const resources = [];
+    const resources: SpaceResource[] = [];
     for (const kind of KINDS) {
       for (const entry of await engine.findByLabel(kind, filters)) {
         const labels = parseSpaceLabels(entryLabels(kind, entry));
@@ -95,19 +141,24 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     return resources;
   };
 
-  const inspectOwnContainer = async (spaceId, name) => {
+  const ownLabelsOf = (spaceId: string, name: string, entry: DockerContainer) => {
+    const labels = parseSpaceLabels(entry.Config?.Labels);
+    if (labels === null || labels.id !== spaceId || labels.owner !== owner) {
+      throw new SpaceError('space_not_ours', `Container ${name} exists but this OpenChamber installation did not create it`);
+    }
+    return labels;
+  };
+
+  const inspectOwnContainer = async (spaceId: string, name: string) => {
     const entry = await inspect('container', name);
     if (!entry) {
       return null;
     }
-    const labels = parseSpaceLabels(entry.Config?.Labels);
-    if (labels?.id !== spaceId || labels?.owner !== owner) {
-      throw new SpaceError('space_not_ours', `Container ${name} exists but this OpenChamber installation did not create it`);
-    }
+    ownLabelsOf(spaceId, name, entry);
     return entry;
   };
 
-  const requireSpaceContainer = async (spaceId) => {
+  const requireSpaceContainer = async (spaceId: string) => {
     const name = spaceResourceName(spaceId, ROLE_SPACE);
     const entry = await inspectOwnContainer(spaceId, name);
     if (entry) {
@@ -120,31 +171,31 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
   };
 
   const check = async () => {
-    const unavailable = (code, message) => ({ available: false, code, message });
+    const unavailable = (code: string, message: string) => ({ available: false as const, code, message });
     let version;
     let info;
     try {
       version = await run(['version', '--format', '{{json .}}'], CHECK_TIMEOUT_MS);
       info = await run(['info', '--format', '{{json .SecurityOptions}}'], CHECK_TIMEOUT_MS);
     } catch (error) {
-      if (error.code === 'command_spawn_failed' && error.details?.errno === 'ENOENT') {
+      if (failureField(error, 'code') === 'command_spawn_failed' && errnoOf(error) === 'ENOENT') {
         return unavailable('docker_cli_missing', 'The docker command was not found. Install Docker Desktop, Colima or Docker Engine, then try again.');
       }
-      if (error.code === 'command_spawn_failed') {
-        return unavailable('docker_cli_unusable', `The docker command could not be started (${error.details?.errno ?? 'unknown error'}). Check that ${dockerPath} is a program this user may run.`);
+      if (failureField(error, 'code') === 'command_spawn_failed') {
+        return unavailable('docker_cli_unusable', `The docker command could not be started (${errnoOf(error) ?? 'unknown error'}). Check that ${dockerPath} is a program this user may run.`);
       }
-      if (error.code === 'command_timeout') {
+      if (failureField(error, 'code') === 'command_timeout') {
         return machine === null
           ? unavailable('docker_daemon_unreachable', 'Docker did not answer in time. Restart Docker Desktop or Colima, then try again.')
           : unavailable('place_unreachable', `${machine} did not answer. Check that it is on and reachable over SSH.`);
       }
       throw error;
     }
-    let server = null;
-    let securityOptions = [];
+    let server: DockerServerVersion | null = null;
+    let securityOptions: string[] = [];
     try {
-      server = JSON.parse(version.stdout).Server ?? null;
-      securityOptions = JSON.parse(info.stdout) ?? [];
+      server = parseDockerJson<'version'>(version.stdout).Server ?? null;
+      securityOptions = parseDockerJson<'info security options'>(info.stdout) ?? [];
     } catch {
       server = null;
     }
@@ -165,7 +216,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     }
 
     return {
-      available: true,
+      available: true as const,
       version: server.Version,
       os: server.Os,
       arch: server.Arch,
@@ -186,7 +237,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
           imagePullFailure = null;
         })
         .catch((error) => {
-          imagePullFailure = { code: error.code ?? 'image_pull_failed', message: error.message };
+          imagePullFailure = { code: failureField(error, 'code') ?? 'image_pull_failed', message: failureField(error, 'message') };
           throw error;
         })
         .finally(() => { imagePull = null; });
@@ -194,7 +245,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     return imagePull;
   };
 
-  const ensureImage = async (onPull = () => {}) => {
+  const ensureImage = async (onPull: () => void = () => {}) => {
     const present = await inspect('image', SPACE_BASE_IMAGE);
     if (present) {
       return;
@@ -203,19 +254,19 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     await pullImage();
   };
 
-  const verifyContainer = async (spaceId, container) => {
+  const verifyContainer = async (spaceId: string, container: DockerContainerSettings) => {
     const network = await inspect('network', spaceResourceName(spaceId, ROLE_NETWORK));
     const toolsMount = (container.Mounts ?? []).find((mount) => mount.Destination === TOOLS_MOUNT_PATH);
     const toolsVolume = toolsMount?.Name ? await inspect('volume', toolsMount.Name) : null;
     return findHardeningViolations({ spaceId, owner, container, network, toolsVolume });
   };
 
-  const verifyGatekeeperContainer = async (spaceId, container) => {
+  const verifyGatekeeperContainer = async (spaceId: string, container: DockerContainerSettings) => {
     const outerNetwork = await inspect('network', spaceResourceName(spaceId, ROLE_OUTER_NETWORK));
     return findGatekeeperHardeningViolations({ spaceId, owner, container, outerNetwork });
   };
 
-  const verify = async (spaceId) => {
+  const verify = async (spaceId: string) => {
     const violations = await verifyContainer(spaceId, await requireSpaceContainer(spaceId));
     const gatekeeperContainer = await inspectOwnContainer(spaceId, spaceResourceName(spaceId, ROLE_GATEKEEPER));
     if (!gatekeeperContainer) {
@@ -224,7 +275,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     return [...violations, ...(await verifyGatekeeperContainer(spaceId, gatekeeperContainer))];
   };
 
-  const requireNoViolations = (violations, what) => {
+  const requireNoViolations = (violations: HardeningViolation[], what: string) => {
     if (violations.length > 0) {
       throw new SpaceError(
         'space_verification_failed',
@@ -234,14 +285,14 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     }
   };
 
-  const requireVerified = async (spaceId, container) => requireNoViolations(await verifyContainer(spaceId, container), 'container');
+  const requireVerified = async (spaceId: string, container: DockerContainerSettings) => requireNoViolations(await verifyContainer(spaceId, container), 'container');
 
-  const requireGatekeeperVerified = async (spaceId, container) => requireNoViolations(await verifyGatekeeperContainer(spaceId, container), 'gatekeeper');
+  const requireGatekeeperVerified = async (spaceId: string, container: DockerContainerSettings) => requireNoViolations(await verifyGatekeeperContainer(spaceId, container), 'gatekeeper');
 
-  const remove = async (spaceId) => {
+  const remove = async (spaceId: string) => {
     const resources = await findResources(requireSpaceId(spaceId));
-    const removed = [];
-    const failed = [];
+    const removed: { kind: DockerResourceKind; name: string }[] = [];
+    const failed: DockerRemovalFailure[] = [];
     for (const { kind, name } of resources) {
       const problem = await removeOne(kind, name);
       if (problem) {
@@ -253,34 +304,38 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     return { removed, failed };
   };
 
-  const rollBack = async (spaceId) => {
+  const rollBack = async (spaceId: string): Promise<DockerRemovalFailure[]> => {
     try {
       return (await remove(spaceId)).failed;
     } catch (error) {
-      return [{ kind: 'space', name: spaceId, message: error.message }];
+      return [{ kind: 'space', name: spaceId, message: failureField(error, 'message') }];
     }
   };
 
-  const execInContainer = (spaceId, argv, options = {}) => run(
-    ['exec', '--interactive', '--user', SPACE_USER, spaceResourceName(spaceId, execRole(options.target)), ...argv],
-    options.timeoutMs ?? EXEC_TIMEOUT_MS,
-    {
-      stdin: options.stdin ?? '',
-      ...(options.maxOutputBytes === undefined ? {} : { maxOutputBytes: options.maxOutputBytes }),
-      ...(options.keepTail === true ? { keepTail: true } : {}),
-      ...(options.killTree === true ? { killTree: true } : {}),
-    },
-  );
+  const execInContainer = (spaceId: string, argv: string[], options: ExecOptions = {}) => {
+    const args = ['exec', '--interactive', '--user', SPACE_USER, spaceResourceName(spaceId, execRole(options.target)), ...argv];
+    const timeoutMs = options.timeoutMs ?? EXEC_TIMEOUT_MS;
+    const commandOptions: CommandOptions = { stdin: options.stdin ?? '' };
+    if (options.maxOutputBytes !== undefined) commandOptions.maxOutputBytes = options.maxOutputBytes;
+    if (options.keepTail === true) commandOptions.keepTail = true;
+    if (options.killTree === true) commandOptions.killTree = true;
+    return run(args, timeoutMs, commandOptions);
+  };
 
   const server = createSpaceServerChannel({ exec: execInContainer, wait, now: () => now().getTime() });
   const gatekeeper = createGatekeeperChannel({ exec: execInContainer, wait, now: () => now().getTime() });
 
-  const create = async ({ id, name, project, created, memoryBytes }, { onStep = () => {}, startConfig = null } = {}) => {
+  const create = async ({ id, name, project, created, memoryBytes }: SpaceSpec, { onStep = () => {}, startConfig = null }: { onStep?: ((step: string) => void) | undefined; startConfig?: string | null } = {}) => {
     requireMemoryBytes(memoryBytes);
-    const labelArguments = new Map([ROLE_NETWORK, ROLE_OUTER_NETWORK, ROLE_VOLUME, ROLE_SETUP, ROLE_GATEKEEPER, ROLE_SPACE].map((role) => (
-      [role, labelArgs(buildSpaceLabels({ id, role, owner, project, name, created }))]
-    )));
-    const labelsFor = (role) => labelArguments.get(role);
+    const labelsOf = (role: string) => labelArgs(buildSpaceLabels({ id, role, owner, project, name, created }));
+    const labels = {
+      network: labelsOf(ROLE_NETWORK),
+      outerNetwork: labelsOf(ROLE_OUTER_NETWORK),
+      volume: labelsOf(ROLE_VOLUME),
+      setup: labelsOf(ROLE_SETUP),
+      gatekeeper: labelsOf(ROLE_GATEKEEPER),
+      space: labelsOf(ROLE_SPACE),
+    };
     const resources = {
       spaceId: id,
       network: spaceResourceName(id, ROLE_NETWORK),
@@ -291,7 +346,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     const outerNetwork = spaceResourceName(id, ROLE_OUTER_NETWORK);
     const containerName = spaceResourceName(id, ROLE_SPACE);
     const gatekeeperName = spaceResourceName(id, ROLE_GATEKEEPER);
-    const taken = [
+    const taken: [DockerResourceKind, string][] = [
       ['container', containerName],
       ['container', spaceResourceName(id, ROLE_SETUP)],
       ['container', gatekeeperName],
@@ -307,24 +362,24 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
       }
     }
 
-    let toolsVolume = null;
+    let toolsVolume: string | null = null;
     try {
       let slowStep = false;
       await ensureImage(() => { slowStep = true; onStep('downloading_image'); });
       toolsVolume = await tools.ensure({ onFill: () => { slowStep = true; onStep('preparing_tools'); } });
       if (slowStep) onStep('creating');
-      await docker(buildSpaceNetworkArgs({ network: resources.network, labelArguments: labelsFor(ROLE_NETWORK) }), CHANGE_TIMEOUT_MS);
-      await docker(buildGatekeeperNetworkArgs({ network: outerNetwork, labelArguments: labelsFor(ROLE_OUTER_NETWORK) }), CHANGE_TIMEOUT_MS);
-      await docker(['volume', 'create', ...labelsFor(ROLE_VOLUME), resources.workVolume], CHANGE_TIMEOUT_MS);
-      await docker(['volume', 'create', ...labelsFor(ROLE_VOLUME), resources.homeVolume], CHANGE_TIMEOUT_MS);
+      await docker(buildSpaceNetworkArgs({ network: resources.network, labelArguments: labels.network }), CHANGE_TIMEOUT_MS);
+      await docker(buildGatekeeperNetworkArgs({ network: outerNetwork, labelArguments: labels.outerNetwork }), CHANGE_TIMEOUT_MS);
+      await docker(['volume', 'create', ...labels.volume, resources.workVolume], CHANGE_TIMEOUT_MS);
+      await docker(['volume', 'create', ...labels.volume, resources.homeVolume], CHANGE_TIMEOUT_MS);
       await docker(buildVolumeOwnershipRunArgs({
         ...resources,
         containerName: spaceResourceName(id, ROLE_SETUP),
-        labelArguments: labelsFor(ROLE_SETUP),
+        labelArguments: labels.setup,
       }), CHANGE_TIMEOUT_MS);
       await docker(buildGatekeeperCreateArgs({
         containerName: gatekeeperName,
-        labelArguments: labelsFor(ROLE_GATEKEEPER),
+        labelArguments: labels.gatekeeper,
         network: resources.network,
         image: SPACE_BASE_IMAGE,
       }), CHANGE_TIMEOUT_MS);
@@ -336,7 +391,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
       await docker(buildSpaceCreateArgs({
         ...resources,
         containerName,
-        labelArguments: labelsFor(ROLE_SPACE),
+        labelArguments: labels.space,
         toolsVolume,
         memoryBytes,
         startConfig,
@@ -360,9 +415,9 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
         ? ` Clean-up also failed for: ${rollbackFailures.map((item) => `${item.kind} ${item.name}`).join(', ')}.`
         : '';
       const wrapped = new SpaceError(
-        error.code ?? 'space_create_failed',
-        `Could not create the space. ${error.message}${leftovers}${uncertain ? ' Docker may still finish the interrupted step, so look at the spaces list.' : ''}`,
-        { original: error.details ?? null, rollbackFailures, uncertain },
+        failureField(error, 'code') ?? 'space_create_failed',
+        `Could not create the space. ${failureField(error, 'message')}${leftovers}${uncertain ? ' Docker may still finish the interrupted step, so look at the spaces list.' : ''}`,
+        { original: failureField(error, 'details') ?? null, rollbackFailures, uncertain },
       );
       wrapped.cause = error;
       throw wrapped;
@@ -370,11 +425,11 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
   };
 
   const list = async () => {
-    const byId = new Map();
+    const byId = new Map<string, [SpaceResource, ...SpaceResource[]]>();
     for (const resource of await findResources(null)) {
-      const group = byId.get(resource.labels.id) ?? [];
-      group.push(resource);
-      byId.set(resource.labels.id, group);
+      const group = byId.get(resource.labels.id);
+      if (group) group.push(resource);
+      else byId.set(resource.labels.id, [resource]);
     }
     return Array.from(byId.entries(), ([id, group]) => {
       const containers = group.filter((resource) => resource.labels.role === ROLE_SPACE);
@@ -396,15 +451,15 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
       if (space && (!guard || (state === 'running' && guard.entry.State?.Running !== true))) {
         missing.push(spaceResourceName(id, ROLE_GATEKEEPER));
       }
-      const stoppedIdle = state === 'exited' && space.entry.State?.ExitCode === SPACE_IDLE_EXIT_CODE;
+      const stoppedIdle = state === 'exited' && space?.entry.State?.ExitCode === SPACE_IDLE_EXIT_CODE;
       const gatekeeperRunning = guard?.entry.State?.Running === true;
       return { id, name, project, created, state, stoppedIdle, gatekeeperRunning, orphans, damaged: missing.length > 0, missing };
     });
   };
 
-  const starting = new Map();
+  const starting = new Map<string, Promise<void>>();
 
-  const innerAddressOf = async (spaceId) => {
+  const innerAddressOf = async (spaceId: string) => {
     const entry = await inspectOwnContainer(spaceId, spaceResourceName(spaceId, ROLE_GATEKEEPER));
     const address = String(entry?.NetworkSettings?.Networks?.[spaceResourceName(spaceId, ROLE_NETWORK)]?.IPAddress ?? '');
     if (net.isIP(address) === 0) {
@@ -413,7 +468,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     return address;
   };
 
-  const requireGatekeeperContainer = async (spaceId) => {
+  const requireGatekeeperContainer = async (spaceId: string) => {
     const name = spaceResourceName(spaceId, ROLE_GATEKEEPER);
     const entry = await inspectOwnContainer(spaceId, name);
     if (!entry) {
@@ -422,7 +477,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     return entry;
   };
 
-  const exec = async (spaceId, argv, options = {}) => {
+  const exec = async (spaceId: string, argv: string[], options: ExecOptions = {}) => {
     if (!Array.isArray(argv) || argv.length === 0) {
       throw new SpaceError('invalid_command', 'A command is a non-empty array of arguments');
     }
@@ -434,7 +489,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     return execInContainer(spaceId, argv, options);
   };
 
-  const execArgv = async (spaceId) => {
+  const execArgv = async (spaceId: string): Promise<[string, ...string[]]> => {
     const entry = await requireSpaceContainer(spaceId);
     if (entry.State?.Running !== true) {
       throw new SpaceError('space_not_running', `Space ${spaceId} is stopped. Start it, then try again.`);
@@ -442,12 +497,12 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     return [dockerPath, ...engine.argsFor(['exec', '--interactive', '--user', SPACE_USER, spaceResourceName(spaceId, ROLE_SPACE)])];
   };
 
-  const connect = async (spaceId) => {
+  const connect = async (spaceId: string) => {
     const [file, ...args] = await execArgv(spaceId);
     return openCommandStream(file, [...args, ...SPACE_CONNECT_COMMAND]);
   };
 
-  const stop = async (spaceId) => {
+  const stop = async (spaceId: string) => {
     await starting.get(spaceId)?.catch(() => {});
     await requireSpaceContainer(spaceId);
     await docker(['stop', spaceResourceName(spaceId, ROLE_SPACE)], CHANGE_TIMEOUT_MS);
@@ -457,7 +512,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     }
   };
 
-  const startGatekeeper = async (spaceId) => {
+  const startGatekeeper = async (spaceId: string) => {
     const name = spaceResourceName(spaceId, ROLE_GATEKEEPER);
     const container = await requireGatekeeperContainer(spaceId);
     if (container.State?.Running !== true) {
@@ -468,10 +523,10 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     await gatekeeper.waitUntilReady(spaceId);
   };
 
-  const recreate = async (spaceId, old, toolsVolume) => {
+  const recreate = async (spaceId: string, old: DockerContainer, toolsVolume: string) => {
     const name = spaceResourceName(spaceId, ROLE_SPACE);
     const aside = spaceResourceName(spaceId, ROLE_SPACE, ASIDE_SUFFIX);
-    const labels = buildSpaceLabels({ ...parseSpaceLabels(old.Config?.Labels), role: ROLE_SPACE, owner });
+    const labels = buildSpaceLabels({ ...ownLabelsOf(spaceId, name, old), role: ROLE_SPACE, owner });
     await docker(['rename', name, aside], CHANGE_TIMEOUT_MS);
     let createdId = '';
     try {
@@ -486,28 +541,28 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
         memoryBytes: old.HostConfig?.Memory,
         image: SPACE_BASE_IMAGE,
         startConfig: startConfigOf(old),
-      }), CHANGE_TIMEOUT_MS)).trim().split('\n').pop();
+      }), CHANGE_TIMEOUT_MS)).trim().split('\n').pop() ?? '';
       await requireVerified(spaceId, await inspectOwnContainer(spaceId, createdId) ?? {});
       await docker(['start', createdId], CHANGE_TIMEOUT_MS);
       await server.waitUntilReady(spaceId);
     } catch (error) {
-      const rollbackFailures = [];
+      const rollbackFailures: DockerRemovalFailure[] = [];
       const problem = createdId ? await removeOne('container', createdId) : null;
       if (problem) rollbackFailures.push({ ...problem, name });
       try {
         await docker(['rename', aside, name], CHANGE_TIMEOUT_MS);
       } catch (renameError) {
         const current = await inspect('container', name).catch(() => null);
-        if (current?.Id !== old.Id) rollbackFailures.push({ kind: 'container', name: aside, message: renameError.message });
+        if (current?.Id !== old.Id) rollbackFailures.push({ kind: 'container', name: aside, message: failureField(renameError, 'message') });
       }
       rollbackFailures.push(...(await tools.removeIfUnlabelled(toolsVolume)));
       const outcome = rollbackFailures.length === 0
         ? 'The space keeps its old container.'
         : `Putting the old container back failed for: ${rollbackFailures.map((item) => `${item.kind} ${item.name}`).join(', ')}. Start the space again to repair it.`;
       const wrapped = new SpaceError(
-        error.code ?? 'space_recreate_failed',
-        `Could not move the space to the current tools. ${error.message} ${outcome}`,
-        { original: error.details ?? null, rollbackFailures },
+        failureField(error, 'code') ?? 'space_recreate_failed',
+        `Could not move the space to the current tools. ${failureField(error, 'message')} ${outcome}`,
+        { original: failureField(error, 'details') ?? null, rollbackFailures },
       );
       wrapped.cause = error;
       throw wrapped;
@@ -516,14 +571,11 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     await tools.prune();
   };
 
-  const startOnce = async (spaceId) => {
+  const startOnce = async (spaceId: string) => {
     const name = spaceResourceName(spaceId, ROLE_SPACE);
     const aside = spaceResourceName(spaceId, ROLE_SPACE, ASIDE_SUFFIX);
     let container = await inspectOwnContainer(spaceId, name);
     const waiting = await inspectOwnContainer(spaceId, aside);
-    if (!container && !waiting) {
-      throw new SpaceError('space_not_found', `Space ${spaceId} has no container in Docker`);
-    }
     if (container?.State?.Running === true) {
       await startGatekeeper(spaceId);
       return;
@@ -543,10 +595,13 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
         throw new SpaceError('space_not_found', `Space ${spaceId} lost its container during the repair of a move`);
       }
     }
+    if (!container) {
+      throw new SpaceError('space_not_found', `Space ${spaceId} has no container in Docker`);
+    }
     await ensureImage();
     const toolsVolume = await tools.ensure();
     await startGatekeeper(spaceId);
-    const mounted = (container?.Mounts ?? []).find((mount) => mount.Destination === TOOLS_MOUNT_PATH)?.Name;
+    const mounted = (container.Mounts ?? []).find((mount) => mount.Destination === TOOLS_MOUNT_PATH)?.Name;
     if (mounted !== toolsVolume) {
       await recreate(spaceId, container, toolsVolume);
       return;
@@ -555,12 +610,13 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     await server.waitUntilReady(spaceId);
   };
 
-  const start = async (spaceId) => {
+  const start = async (spaceId: string) => {
     requireSpaceId(spaceId);
-    if (!starting.has(spaceId)) {
-      starting.set(spaceId, startOnce(spaceId).finally(() => { starting.delete(spaceId); }));
-    }
-    return starting.get(spaceId);
+    const pending = starting.get(spaceId);
+    if (pending) return pending;
+    const started = startOnce(spaceId).finally(() => { starting.delete(spaceId); });
+    starting.set(spaceId, started);
+    return started;
   };
 
   return { id, machine, check, create, list, exec, execArgv, connect, stop, start, remove, verify, readDisk: disk.read, cleanUpDisk: disk.cleanUp, pullImage, imagePulling: () => imagePull !== null };
