@@ -2,7 +2,7 @@ import { Readable } from 'node:stream';
 import express from 'express';
 import { pipeline } from 'node:stream/promises';
 
-import { isString } from '../shared/guards.js';
+import { hasProperties, isString } from '../shared/guards.js';
 import { createOAuthFlowRegistry } from './oauth-flow-registry.js';
 import { mutationReceipt } from './mutation-executor.js';
 import { readBranchTip } from './change-id.js';
@@ -73,8 +73,7 @@ interface SourceControlErrorBody { error: unknown; code: unknown; current?: unkn
 interface ChangeRequestStatus { fetchedAt?: unknown }
 interface FailedIdentity { provider?: unknown; instance?: unknown; accountId?: unknown }
 interface StartedMutation { settle: (() => void) | null }
-const hasBodyFields = <Body>(body: Body): body is Body & Readonly<Record<string, unknown>> => body != null;
-const bodyField = <Body>(body: Body, key: string) => (hasBodyFields(body) ? body[key] : undefined);
+const bodyField = <Body>(body: Body, key: string) => (hasProperties(body) ? body[key] : undefined);
 
 
 const STATUS_CACHE_TTL_MS = 90_000;
