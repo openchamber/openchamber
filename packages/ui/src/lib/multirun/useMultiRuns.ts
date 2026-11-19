@@ -36,19 +36,28 @@ export function useMultiRunSessions(): MultiRunSessions {
 const isActiveRoot = (session: Session): boolean => !session.time?.archived && !session.parentID;
 
 export function useMultiRunTitle(runKey: string | null): string | null {
-  return useGlobalSessionsStore(React.useCallback((state) => {
-    if (!runKey) return null;
-    let title: string | null = null;
-    let members = 0;
-    for (const session of state.activeSessions) {
-      if (!isActiveRoot(session)) continue;
-      const identity = readMultiRunIdentityWith(session, resolveLegacyScope);
-      if (identity?.key !== runKey) continue;
-      members += 1;
-      title = identity.title ?? title ?? identity.groupSlug;
-    }
-    return members >= 2 ? title : null;
-  }, [runKey]));
+  const selectTitle = React.useMemo(() => {
+    const title = memoizeSessionListProjection((
+      sessions: Session[],
+      key: string,
+      _worktrees: ReturnType<typeof useSessionUIStore.getState>['worktreeMetadata'],
+    ) => {
+      let found: string | null = null;
+      let members = 0;
+      for (const session of sessions) {
+        if (!isActiveRoot(session)) continue;
+        const identity = readMultiRunIdentityWith(session, resolveLegacyScope);
+        if (identity?.key !== key) continue;
+        members += 1;
+        found = identity.title ?? found ?? identity.groupSlug;
+      }
+      return members >= 2 ? found : null;
+    });
+    return (state: ReturnType<typeof useGlobalSessionsStore.getState>): string | null => (
+      runKey ? title(state.activeSessions, runKey, useSessionUIStore.getState().worktreeMetadata) : null
+    );
+  }, [runKey]);
+  return useGlobalSessionsStore(selectTitle);
 }
 
 export function useMultiRunMemberIds(sessionId: string | null): readonly string[] {
