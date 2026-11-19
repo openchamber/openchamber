@@ -2082,7 +2082,7 @@ uses `useSessionStartTimes`, which changes only when a session is added or
 removed. A list that must ignore sessions another source already holds reads
 `useLiveSessionsExcluding(ids)` instead of filtering `useAllLiveSessions()`.
 
-Scoped permissions and forms skip the subtree walk entirely while no session has a pending request.
+A published session list is never edited, so indexes over it are built once per list and shared through a `WeakMap`: the parent-to-children index in `scoped-blocking-requests.ts` backs `computeSubtreeIds` and `readChildSessions` (the running-subagent rows read a parent's children there instead of scanning the list on every flush). Scoped permissions and forms skip the subtree walk entirely while no session has a pending request.
 
 ## Store splitting pattern
 
