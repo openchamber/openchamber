@@ -104,18 +104,18 @@ them. Renewal keeps only a nonempty string token and a positive finite expiry.
 Process output becomes text only after the shared string predicate accepts it.
 Numeric process exit codes and transport failure codes remain separate checks.
 
-### Why resource orchestration remains JavaScript
+### Why resource replies keep their wire types
 
 GitBeaker's `ProjectSchema.forked_from_project`,
 `MergeRequestSchema.head_pipeline`, `MergeRequestSchema.pipeline` and
 `MergeRequestSchema.user` are unchecked extension fields. The local GitBeaker
-declaration reflects the requester factory's concrete response body and leaves
-resource replies unchecked. `Projects.show` stringifies unchecked fork IDs before
+declaration reflects the requester factory's JSON, text, Blob and stream
+responses and GitBeaker's expanded page shape. It promises no endpoint-specific
+schema. `Projects.show` stringifies unchecked fork IDs before
 encoding them; `RepositoryFiles.showRaw` passes its ref to the query formatter.
 GraphQL responses need their own field checks since the requester also returns
-text, blobs and streams. Resource orchestration still reads and forwards some
-unchecked fields, including the draft note position. Provider dispatch still
-uses a route string to look up a normalizer and its matching mutation arguments.
+text, blobs and streams. Draft note positions and response fields forwarded
+without validation retain their wire types.
 
 ### Why payload checks remain in the mappers
 

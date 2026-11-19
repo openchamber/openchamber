@@ -1,10 +1,15 @@
 declare module '@gitbeaker/rest' {
   type ProjectId = string | number;
   type Options = import('./client.js').GitLabRequesterOptions['searchParams'];
-  type Reply = Promise<unknown>;
+  type ResponseBody = Awaited<ReturnType<import('./client.js').GitLabRequester['get']>>['body'];
+  type ExpandedPage = import('../shared/json-values.js').JsonObject & {
+    data: import('../shared/json-values.js').JsonValue[];
+    paginationInfo: { [key: string]: string | number | null | undefined };
+  };
+  type Reply = Promise<ResponseBody | ExpandedPage>;
 
   interface Notes {
-    all(projectId: ProjectId, number: number, options?: Options): Reply;
+    all(projectId: ProjectId, number: import('../shared/json-values.js').JsonValue | undefined, options?: Options): Reply;
     show(projectId: ProjectId, number: number, noteId: number): Reply;
     create(projectId: ProjectId, number: number, body: string): Reply;
     edit(projectId: ProjectId, number: number, noteId: number, options: Options): Reply;

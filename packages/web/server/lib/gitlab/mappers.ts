@@ -1,5 +1,7 @@
 import { isPlainObject, isString } from './validation.js';
 import { parseGitLabRemoteUrl, parseGitLabSshProjectPath } from './repo.js';
+import type { SourceControlProjectRef } from '@openchamber/sdk';
+import type { JsonValue } from '../shared/json-values.js';
 
 export interface GitLabIdentity { provider: string; instance: string }
 export interface GitLabPayload {
@@ -20,19 +22,20 @@ export interface GitLabPayload {
 export interface GitLabMappedUser extends GitLabIdentity {
   id: string; username: string; avatarUrl?: string; name?: string; email?: unknown;
 }
-export interface GitLabMappedProject extends GitLabIdentity {
-  id: string; owner: string; name: string | undefined; url: string;
+export interface GitLabMappedProject extends GitLabIdentity, SourceControlProjectRef {
+  url: string;
   cloneUrl?: string; sshUrl?: string; defaultBranch?: string; remoteName?: string;
 }
 export interface GitLabMappedLabel { name: string; color?: string }
-export interface GitLabMappedMergeRequest extends GitLabIdentity {
-  id: string; number: number; project: GitLabMappedProject; title: string; url: string;
+export interface GitLabMappedMergeRequest<Project = GitLabMappedProject> extends GitLabIdentity {
+  id: string; number: number; project: Project; title: string; url: string;
   state: 'open' | 'closed' | 'merged'; draft: boolean; base: string; head: string;
   body?: string; headSha?: string; author?: GitLabMappedUser; createdAt?: string; updatedAt?: string;
   headLabel?: string; labels?: GitLabMappedLabel[]; mergeableState?: string; mergeable?: boolean;
+  headProject?: GitLabMappedProject;
 }
-export interface GitLabMappedIssue extends GitLabIdentity {
-  id: string; number: number; project: GitLabMappedProject; title: string; url: string;
+export interface GitLabMappedIssue<Project = GitLabMappedProject> extends GitLabIdentity {
+  id: string; number: number; project: Project; title: string; url: string;
   state: 'open' | 'closed'; body?: string; author?: GitLabMappedUser;
   assignees?: Array<GitLabMappedUser | null>; labels?: GitLabMappedLabel[]; createdAt?: string; updatedAt?: string;
 }
@@ -40,14 +43,14 @@ export interface GitLabMappedThread {
   id: string; resolved: boolean; resolvable: boolean; first: boolean; canResolve?: boolean; canReply?: boolean;
 }
 export interface GitLabMappedNote extends GitLabIdentity {
-  id: string; url: string; body: string; author?: GitLabMappedUser; createdAt?: string; updatedAt?: string;
+  id: string; url: JsonValue; body: string; author?: GitLabMappedUser; createdAt?: string; updatedAt?: string;
   thread?: GitLabMappedThread; path?: unknown; line?: number;
 }
 export interface GitLabMappedDiff {
   path: unknown; status: string; patch?: string; additions?: number; deletions?: number;
 }
 export interface GitLabMappedVerdict {
-  state: string; url: string; createdAt: string | null; author?: GitLabMappedUser;
+  state: string; url: JsonValue; createdAt: string | null; author?: GitLabMappedUser;
 }
 export interface GitLabMappedCISummary {
   state: string; total: number; success: number; failure: number; pending: number; startedAt?: string;
@@ -91,7 +94,8 @@ export function mapGitLabUser(value: GitLabPayload | null | undefined, identity:
 export function mapGitLabProject(value: GitLabPayload | null | undefined, identity: GitLabIdentity, remoteName?: string) {
   if (!isPayload(value) || !integer(value.id) || !text(value.path_with_namespace) || !text(value.web_url)) return null;
   const segments = value.path_with_namespace.split('/').filter(Boolean);
-  if (segments.length < 2) return null;
+  const name = segments.at(-1);
+  if (segments.length < 2 || name === undefined) return null;
   const expectedPath = segments.join('/').toLowerCase();
   const matchesProject = (url: unknown): url is string => parseGitLabRemoteUrl(isString(url) ? url : null, identity.instance)?.projectPath.toLowerCase() === expectedPath;
   if (!matchesProject(value.web_url)
@@ -101,7 +105,7 @@ export function mapGitLabProject(value: GitLabPayload | null | undefined, identi
     ...identity,
     id: String(value.id),
     owner: segments.slice(0, -1).join('/'),
-    name: segments.at(-1),
+    name,
     url: value.web_url,
   };
   if (text(value.http_url_to_repo)) project.cloneUrl = value.http_url_to_repo;
@@ -117,12 +121,12 @@ function mapState(value: 'opened' | 'open' | 'locked' | 'merged' | 'closed' | un
   return value === 'closed' ? 'closed' : null;
 }
 
-export function mapGitLabMergeRequest(value: GitLabPayload | null | undefined, identity: GitLabIdentity, project: GitLabMappedProject) {
+export function mapGitLabMergeRequest<Project extends SourceControlProjectRef>(value: GitLabPayload | null | undefined, identity: GitLabIdentity, project: Project) {
   if (!isPayload(value) || !integer(value.iid) || !text(value.title) || !text(value.web_url)) return null;
   const rawState = value.state;
   const state = mapState(isMappedState(rawState) ? rawState : undefined);
   if (!state || !text(value.source_branch) || !text(value.target_branch)) return null;
-  const request: GitLabMappedMergeRequest = {
+  const request: GitLabMappedMergeRequest<Project> = {
     ...identity,
     id: `${project.id}#${value.iid}`,
     number: value.iid,
@@ -165,13 +169,13 @@ function mapLabels(labels: unknown[] | undefined): GitLabMappedLabel[] {
   });
 }
 
-export function mapGitLabIssue(value: GitLabPayload | null | undefined, identity: GitLabIdentity, project: GitLabMappedProject) {
+export function mapGitLabIssue<Project extends SourceControlProjectRef>(value: GitLabPayload | null | undefined, identity: GitLabIdentity, project: Project) {
   if (!isPayload(value) || !integer(value.iid) || !text(value.title) || !text(value.web_url)) return null;
   if (value.issue_type === 'incident' || value.issue_type === 'test_case') return null;
   const rawState = value.state;
   const state = mapState(isMappedState(rawState) ? rawState : undefined);
   if (state !== 'open' && state !== 'closed') return null;
-  const issue: GitLabMappedIssue = {
+  const issue: GitLabMappedIssue<Project> = {
     ...identity,
     id: `${project.id}#${value.iid}`,
     number: value.iid,
@@ -192,7 +196,7 @@ export function mapGitLabIssue(value: GitLabPayload | null | undefined, identity
   return issue;
 }
 
-export function mapGitLabNote(value: GitLabPayload | null | undefined, identity: GitLabIdentity, fallbackUrl = '') {
+export function mapGitLabNote(value: GitLabPayload | null | undefined, identity: GitLabIdentity, fallbackUrl: JsonValue = '') {
   if (!isPayload(value) || !integer(value.id) || !isString(value.body) || value.system === true) return null;
   const note: GitLabMappedNote = { ...identity, id: String(value.id), url: fieldText(value, 'web_url') || fallbackUrl, body: value.body };
   const authorValue = value.author;
@@ -220,7 +224,7 @@ const VERDICT_NOTES = new Map([
   ['requested changes', 'changes_requested'],
 ]);
 
-export function mapGitLabVerdictNote(value: GitLabPayload | null | undefined, identity: GitLabIdentity, fallbackUrl = '') {
+export function mapGitLabVerdictNote(value: GitLabPayload | null | undefined, identity: GitLabIdentity, fallbackUrl: JsonValue = '') {
   if (!isPayload(value) || value.system !== true || !isString(value.body)) return null;
   const state = VERDICT_NOTES.get(value.body.trim().toLowerCase());
   if (!state) return null;

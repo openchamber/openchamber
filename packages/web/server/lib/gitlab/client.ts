@@ -1,8 +1,9 @@
 import { Gitlab } from '@gitbeaker/rest';
 import { isPlainObject, isString } from './validation.js';
 import type { SourceControlJson } from '@openchamber/sdk';
+import type { JsonValue } from '../shared/json-values.js';
 
-type RequestValue = SourceControlJson | Date | undefined | RequestValue[] | RequestFields;
+type RequestValue = JsonValue | Date | undefined | RequestValue[] | RequestFields;
 interface RequestFields { [key: string]: RequestValue }
 
 export interface GitLabClientOptions {
@@ -67,7 +68,7 @@ function formatQuery(searchParams?: RequestFields) {
   return params.join('&');
 }
 
-async function parseBody(response: Response, asStream: boolean) {
+async function parseBody(response: Response, asStream: boolean): Promise<JsonValue | Blob | ReadableStream<Uint8Array> | null> {
   if (asStream) return response.body;
   if (response.status === 204) return null;
   const contentType = ((response.headers.get('content-type') || '').split(';')[0] ?? '').trim();
