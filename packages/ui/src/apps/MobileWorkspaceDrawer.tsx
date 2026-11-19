@@ -16,7 +16,7 @@ import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { usePhoneGuestPanelModes } from '@/hooks/useGuestSurfaces';
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
-import { useGuestsStore } from '@/lib/guests/store';
+import { useGuestCatalogFailed, useGuestsStore } from '@/lib/guests/store';
 import { guestHasSharedSurface, guestSurfaceDocking } from '@/lib/guests/surfaces';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { isPluginContextPanelMode, pluginIdFromMode, type PluginContextPanelMode } from '@/lib/surfaces/modes';
@@ -67,6 +67,7 @@ export const MobileWorkspaceDrawer: React.FC<{
   const extensionTabs = usePhoneGuestPanelModes();
   const receivedPagesShown = hasReceivedPages(useReceivedPages());
   const guests = useGuestsStore((state) => state.guests);
+  const catalogFailed = useGuestCatalogFailed();
   const guestBadges = useGuestBadgeStore((state) => state.countByGuest);
   const [statusSectionsOpen, setStatusSectionsOpen] = React.useState(false);
   const tabRef = React.useRef(tab);
@@ -240,6 +241,11 @@ export const MobileWorkspaceDrawer: React.FC<{
           <Icon name="close" className="size-5" />
         </button>
       </div>
+      {catalogFailed ? (
+        <p role="status" className="px-3 pb-1 typography-meta text-destructive">
+          {t('settings.extensions.toast.loadFailed')}
+        </p>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-hidden">
         {visitedTabs.has('status') ? (
           <div className={cn('h-full', tab !== 'status' && 'hidden')}>

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { useGuestsStore } from './store.ts';
+import { selectGuestCatalogFailed, useGuestsStore } from './store.ts';
 import type { InstalledGuest } from './types.ts';
 
 const hello: InstalledGuest = {
@@ -65,6 +65,39 @@ describe('useGuestsStore', () => {
     expect(useGuestsStore.getState().failure).toEqual({ method: 'GET', path: '/api/guests', kind: 'http', status: 503 });
     useGuestsStore.getState().resetForRuntimeSwitch('instance-b');
     expect(useGuestsStore.getState().failure).toBeNull();
+  });
+
+  test('a read that failed and left nothing loaded is the failure the phone reports', () => {
+    resetStore();
+    useGuestsStore.getState().resetForRuntimeSwitch('instance-a');
+    expect(selectGuestCatalogFailed(useGuestsStore.getState())).toBe(false);
+
+    useGuestsStore.getState().markFailed('instance-a', { method: 'GET', path: '/api/guests', kind: 'http', status: 500 });
+    expect(useGuestsStore.getState().status).toBe('error');
+    expect(useGuestsStore.getState().guests).toEqual([]);
+    expect(selectGuestCatalogFailed(useGuestsStore.getState())).toBe(true);
+
+    useGuestsStore.getState().replaceCatalog([hello], 'instance-a');
+    expect(useGuestsStore.getState().status).toBe('ready');
+    expect(selectGuestCatalogFailed(useGuestsStore.getState())).toBe(false);
+  });
+
+  test('a failed refresh of a loaded catalog keeps it and raises nothing', () => {
+    resetStore();
+    useGuestsStore.getState().resetForRuntimeSwitch('instance-a');
+    useGuestsStore.getState().replaceCatalog([hello], 'instance-a');
+    useGuestsStore.getState().markFailed('instance-a', { method: 'GET', path: '/api/guests', kind: 'http', status: 500 });
+
+    expect(useGuestsStore.getState().status).toBe('ready');
+    expect(useGuestsStore.getState().guests).toEqual([hello]);
+    expect(selectGuestCatalogFailed(useGuestsStore.getState())).toBe(false);
+  });
+
+  test('an unsupported runtime is not a failed catalog', () => {
+    resetStore();
+    useGuestsStore.getState().resetForRuntimeSwitch('vscode-a');
+    useGuestsStore.getState().markUnsupported('vscode-a');
+    expect(selectGuestCatalogFailed(useGuestsStore.getState())).toBe(false);
   });
 
   test('overlays update checks without touching untouched rows', () => {

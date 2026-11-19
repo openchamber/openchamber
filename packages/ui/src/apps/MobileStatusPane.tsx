@@ -11,6 +11,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useGuestCatalogFailed } from '@/lib/guests/store';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 export const MobileStatusPane: React.FC<{
@@ -28,6 +29,7 @@ export const MobileStatusPane: React.FC<{
     if (visible) setRenderedSections((count) => Math.max(count, 1));
   }, [visible]);
   const showNothing = !layout.allSectionsHidden && renderedSections === 0;
+  const catalogFailed = useGuestCatalogFailed();
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -57,7 +59,11 @@ export const MobileStatusPane: React.FC<{
       {layout.allSectionsHidden || showNothing ? (
         <div className="absolute inset-x-0 top-16 flex flex-col items-center px-6 text-center">
           <span className="typography-ui-label text-muted-foreground">
-            {layout.allSectionsHidden ? t('chat.workStatus.sections.allHidden') : t('chat.workStatus.mobileEmpty')}
+            {layout.allSectionsHidden
+              ? t('chat.workStatus.sections.allHidden')
+              : catalogFailed
+                ? t('settings.extensions.toast.loadFailed')
+                : t('chat.workStatus.mobileEmpty')}
           </span>
           {layout.allSectionsHidden ? (
             <Button variant="link" size="sm" onClick={() => onSectionsDialogOpenChange(true)} className="mt-2 normal-case text-muted-foreground hover:text-foreground">

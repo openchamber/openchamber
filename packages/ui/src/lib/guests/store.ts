@@ -80,3 +80,7 @@ export const useGuestsStore = create<GuestsState>((set, get) => ({
     set({ status: 'idle', guests: [], unreadable: [], opencodePlugins: null, runtimeKey, failure: null });
   },
 }));
+
+export const selectGuestCatalogFailed = (state: Pick<GuestsState, 'status'>): boolean => state.status === 'error';
+
+export const useGuestCatalogFailed = (): boolean => useGuestsStore(selectGuestCatalogFailed);
