@@ -63,7 +63,7 @@ interface AccountInput {
   id: string; credentialId?: string; credentialRevision?: number; providerUserId?: string; providerUserStatus?: string;
   user?: UserInput; scope?: string; current?: boolean; source?: string; status?: string; usable?: boolean;
 }
-interface PullInput {
+export interface PullInput {
   number?: unknown; title?: unknown; html_url?: unknown; state?: unknown; user?: unknown;
   base?: { ref?: unknown } | null;
   head?: { ref?: unknown; repo?: {

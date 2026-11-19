@@ -14,7 +14,7 @@ GitHub sits on the shared source-control route shell (`../source-control/provide
 - `accounts.ts`: auth per instance in the neutral `SourceControlAuthStatus` shape: github.com's device flow and Settings gh switch, an enterprise host's PATs and own gh switch, activation, removal.
 - `gh-cli-logins.js`: a host's gh logins, each with the GitHub account it belongs to (`<host>#cli:<id>`), and the exact login a `#cli:` account id names.
 - `resources.js`: the bound reads (status, lists, context, issues, upstream, branches, labels, reviewer candidates), the reference picker reads, and the change-request head and source behind worktrees, all answering neutral DTOs. It keeps the short PR context cache.
-- `mutations.js`: the durable mutations: `prepare` (GitHub's kinds and digests, byte-identical to the records already stored), `resolveTarget` (preflight against GitHub), `perform`, `reconcile`, `afterSuccess` (drops the target's pull context and the repository's pull lists; the shell calls it best effort after the record is durable, so a cache failure never turns a landed write into `outcome-unknown`), and how failures are classified and worded.
+- `mutations.ts`: the durable mutations: `prepare` (GitHub's kinds and digests, byte-identical to the records already stored), `resolveTarget` (preflight against GitHub), `perform`, `reconcile`, `afterSuccess` (drops the target's pull context and the repository's pull lists; the shell calls it best effort after the record is durable, so a cache failure never turns a landed write into `outcome-unknown`), and how failures are classified and worded.
 - `mappers.js`: strict checks of GitHub REST payloads and the mappers to neutral DTOs (`Project`, `ChangeRequest`, `Issue`, `IssueComment`, `CI`, users, accounts).
 - `auth.ts`: auth storage, multi-account support, client id, scope config.
 - `device-flow.js`: OAuth device flow.
@@ -304,23 +304,19 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 
 ## Decisions
 
-### Why some implementation files remain JavaScript
+### Why account and mutation inputs retain unchecked fields
 
 - Device completion forwards the truthy `access_token` from `exchangeDeviceCode`
   as received. The token is still JSON at that point. The Octokit factory
   passes the original value to `Hash.update`, whose native argument validation
   rejects non-string JSON. A separate email lookup may fail when the token
   lacks the email scope; the account status still uses the profile email.
-- `mutations.js` depends on
-  `ProviderImplementation.mutations.resolveTarget`. Its context is now
-  `ProviderMutationContext` and its normalized input and provider target have
-  generic contracts. Its replay record still exposes
-  `mutation-storage.ts:MutationRecord.target` as `SourceControlMutationTarget`,
-  whose `number`, `head`, `base` and `headSha` are independently optional.
-  The owner must retain the operation-specific target variant through replay
-  and perform: creation needs `head` and `base`, existing numbered operations
-  need `number`, and merge and review operations use `headSha`. A provider
-  cannot assert those fields merely because a replay record was read.
+- A replay record's `number`, `head`, `base` and `headSha` are independently
+  optional. Preflight establishes fields for new operations. Reconciliation
+  keeps the stored shape and checks a number before a numbered REST read.
+  The waiting-merge GraphQL call forwards the stored fields as read. A
+  pending review's node ID also reaches GraphQL unchanged; matching the
+  viewer does not validate the node ID.
 
 The nested repository-network helper now supplies its host and its
 `origin`/`upstream` source union.
