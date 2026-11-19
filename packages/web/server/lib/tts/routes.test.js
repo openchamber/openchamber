@@ -3,6 +3,9 @@ import express from 'express';
 import request from 'supertest';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { registerTtsRoutes, speechVoiceHeaderValue } from './routes.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
@@ -59,6 +62,42 @@ describe('tts routes', () => {
       expect(response.headers['x-speech-language']).toBe('uk');
     } else {
       expect(response.status).toBe(503);
+    }
+  });
+
+  it('refuses a say form post, which another site can send without asking', async () => {
+    const app = express();
+    app.use(express.urlencoded({ extended: true }));
+    registerTtsRoutes(app, { sayTTSCapability: null });
+
+    const response = await request(app)
+      .post('/api/tts/say/speak')
+      .set('Origin', 'https://elsewhere.example')
+      .type('form')
+      .send({ text: 'Hello', voice: 'Samantha' });
+
+    expect(response.status).toBe(415);
+  });
+
+  it.skipIf(process.platform !== 'darwin')('hands voice, rate and text to say as plain values, never to a shell', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-say-'));
+    try {
+      const app = createApp(Promise.resolve({ available: true, voices: [] }));
+      const viaVoice = path.join(dir, 'voice');
+      const viaRate = path.join(dir, 'rate');
+      const viaText = path.join(dir, 'text.m4a');
+
+      await request(app).post('/api/tts/say/speak').send({ text: 'Hello', voice: `$(touch ${viaVoice})` });
+      await request(app).post('/api/tts/say/speak').send({ text: 'Hello', voice: 'Samantha', rate: `200 $(touch ${viaRate})` });
+      const spoken = await request(app).post('/api/tts/say/speak').send({ text: `-o${viaText}`, voice: 'Samantha' });
+
+      expect(fs.existsSync(viaVoice)).toBe(false);
+      expect(fs.existsSync(viaRate)).toBe(false);
+      expect(fs.existsSync(viaText)).toBe(false);
+      expect(spoken.status).toBe(200);
+      expect(spoken.headers['content-type']).toBe('audio/mp4');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 

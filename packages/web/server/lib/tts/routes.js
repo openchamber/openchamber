@@ -187,6 +187,9 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
   });
 
   app.post('/api/tts/say/speak', async (req, res) => {
+    if (!req.is('application/json')) {
+      return res.status(415).json({ error: 'Send the speech request as JSON' });
+    }
     try {
       const { text, rate = 200, language, languageSample } = req.body || {};
       let voice = typeof req.body?.voice === 'string' && req.body.voice.trim() ? req.body.voice.trim() : 'Samantha';
@@ -212,22 +215,19 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
         }
       }
       
-      const { exec } = await import('child_process');
+      const { execFile } = await import('child_process');
       const { promisify } = await import('util');
       const fs = await import('fs');
       const os = await import('os');
       const path = await import('path');
-      const execAsync = promisify(exec);
-      
+      const execFileAsync = promisify(execFile);
+
       const tempDir = os.tmpdir();
       const tempFile = path.join(tempDir, `say-${Date.now()}.m4a`);
-      
-      const escapedText = text.trim().replace(/'/g, "'\\''").replace(/"/g, '\\"');
-      
-      const cmd = `say -v "${voice}" -r ${rate} -o "${tempFile}" --data-format=aac '${escapedText}'`;
+
       console.log('[TTS-Say] Generating speech:', { textLength: text.length, voice, rate });
-      
-      await execAsync(cmd);
+
+      await execFileAsync('say', ['-v', voice, '-r', String(rate), '-o', tempFile, '--data-format=aac', '--', text.trim()]);
       
       const audioBuffer = await fs.promises.readFile(tempFile);
       
