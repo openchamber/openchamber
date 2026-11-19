@@ -16,7 +16,7 @@ GitHub sits on the shared source-control route shell (`../source-control/provide
 - `resources.js`: the bound reads (status, lists, context, issues, upstream, branches, labels, reviewer candidates), the reference picker reads, and the change-request head and source behind worktrees, all answering neutral DTOs. It keeps the short PR context cache.
 - `mutations.js`: the durable mutations: `prepare` (GitHub's kinds and digests, byte-identical to the records already stored), `resolveTarget` (preflight against GitHub), `perform`, `reconcile`, `afterSuccess` (drops the target's pull context and the repository's pull lists; the shell calls it best effort after the record is durable, so a cache failure never turns a landed write into `outcome-unknown`), and how failures are classified and worded.
 - `mappers.js`: strict checks of GitHub REST payloads and the mappers to neutral DTOs (`Project`, `ChangeRequest`, `Issue`, `IssueComment`, `CI`, users, accounts).
-- `auth.js`: auth storage, multi-account support, client id, scope config.
+- `auth.ts`: auth storage, multi-account support, client id, scope config.
 - `device-flow.js`: OAuth device flow.
 - `octokit.js`: Octokit factories for a host's current credential and for exact account IDs.
 - `repo/index.js`: remote URL parsing and directory-to-repo resolution.
@@ -306,17 +306,7 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 
 ### Why some implementation files remain JavaScript
 
-- `auth.js:parseVersionThree` checks that each instance is an object, then calls
-  `rawInstance.credentials.map` without validating that collection. Its
-  `activeCredentialId`, CLI flags and login also bypass `parseInstance`.
-  `createSourceControlAuthStore` now accepts an omitted `refreshOAuthToken`,
-  so that declared options boundary no longer blocks host-trust conversion.
-  Typing the unchecked file fields as a parsed instance would conceal the
-  remaining storage boundary.
-- `accounts.js` depends on the auth-store boundary above. The
-  `AccountEvents.connected` contract now permits nullable profile `name` and
-  `email`, so those fields no longer block conversion. Its device completion
-  also forwards the truthy `access_token` from `exchangeDeviceCode` to
+- `accounts.js` device completion forwards the truthy `access_token` from `exchangeDeviceCode` to
   `createOctokit` without a string check. That response remains unknown;
   declaring its token a string would overstate the validation. Octokit's
   credential digest passes the token to Node's `Hash.update`, which does not
@@ -334,6 +324,18 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 
 The nested repository-network helper now supplies its host and its
 `origin`/`upstream` source union.
+
+### Why version 3 retains unparsed CLI settings
+
+Version 3 validates credentials and the active credential reference. The CLI
+flags and login bypass the version 2 instance parser and retain their JSON
+values until a reader or writer interprets them. A missing or non-array
+credential collection still raises a `TypeError`.
+
+Enterprise invalidation forwards the original instance and account values from
+error metadata. The shared store uses the instance as a JavaScript property key
+and compares the account by strict equality. It does not normalize either value
+before that lookup.
 
 ### Why provider invalidation retains unchecked identity fields
 
