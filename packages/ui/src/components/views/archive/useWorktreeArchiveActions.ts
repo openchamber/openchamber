@@ -6,11 +6,6 @@ import { useI18n } from '@/lib/i18n';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { archivedWorktreeLabel, deleteArchivedWorktree, restoreArchivedWorktree } from '@/lib/worktrees/worktreeArchive';
 
-/**
- * Restore and delete for archived worktrees, with their toasts and the
- * confirmation deleting asks for. `busyIds` are the archives being worked on,
- * so their buttons wait.
- */
 export function useWorktreeArchiveActions() {
   const { t } = useI18n();
   const { confirm, dialog } = useConfirmDialog();

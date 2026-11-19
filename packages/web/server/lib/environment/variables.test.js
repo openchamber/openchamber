@@ -58,6 +58,21 @@ describe('parseEnvironmentOutput', () => {
     expect(parseEnvironmentOutput('{"variables":{"IFS":{"type":"var","value":" "}}}')).toBeNull();
     expect(parseEnvironmentOutput('[1,2]')).toBeNull();
   });
+
+  it('expands only own names and preserves explicitly undefined inherited values', () => {
+    expect(parseEnvironmentOutput('A=$constructor\nB=${toString}\nconstructor=own\nC=$constructor\nD=$EMPTY', { EMPTY: undefined }))
+      .toEqual({ A: '$constructor', B: '${toString}', constructor: 'own', C: 'own', D: 'undefined' });
+  });
+
+  it('ignores unexported or non-string Nix values', () => {
+    expect(parseEnvironmentOutput('{"variables":{"A":[],"B":null,"C":"plain","D":{"type":"exported","value":7},"E":{"type":"exported","value":"ok"}}}'))
+      .toEqual({ E: 'ok' });
+  });
+
+  it('preserves failures when a JSON value cannot be coerced to a string', () => {
+    expect(() => parseEnvironmentOutput('{"A":{"toString":null}}')).toThrow(TypeError);
+    expect(() => parseEnvironmentOutput('{"variables":{"A":{"type":"exported","value":{"toString":null}}}}')).toThrow(TypeError);
+  });
 });
 
 describe('overlayEnvironment', () => {

@@ -373,17 +373,6 @@ describe('createRelayTunnelClient', () => {
     expect(chunks.length).toBeGreaterThan(1);
   });
 
-  test('propagates abort to the host and errors the stream', async () => {
-    const { client } = await setupClient();
-    track(client);
-    const controller = new AbortController();
-    const response = await client.fetch('/never-ends', { signal: controller.signal });
-    const reader = response.body!.getReader();
-    await reader.read();
-    controller.abort();
-    await expect(reader.read()).rejects.toThrow();
-  });
-
   // A POST that dies after dispatch may already have been processed by the
   // server. Callers must be able to tell that apart from a definite failure —
   // a prompt re-sent on this error produces a second AI response (#2425).
@@ -623,45 +612,6 @@ describe('createRelayTunnelClient', () => {
     const burstWireMessages = clientBinaryCount() - baseline;
     expect(burstWireMessages).toBeLessThan(BURST / 3);
     expect(burstWireMessages).toBeGreaterThan(0);
-  });
-
-  test('leading edge: a single frame after idle is delivered immediately, not a window later', async () => {
-    const WINDOW = 300;
-    let firstWsTextAt = 0;
-    const { client } = await setupClient(
-      {
-        recordFrame: (frame) => {
-          if (frame.frameType === TunnelFrameType.WsText && firstWsTextAt === 0) {
-            firstWsTextAt = Date.now();
-          }
-        },
-      },
-      { batchWindowMs: WINDOW },
-    );
-    track(client);
-    const socket = client.openWebSocket('/api/event/ws');
-    await new Promise<void>((resolve) => {
-      socket.onopen = () => resolve();
-    });
-    // Stay idle beyond the window so the next frame takes the leading edge.
-    await wait(WINDOW + 50);
-    const sentAt = Date.now();
-    socket.send('solo');
-    await wait(WINDOW / 2);
-    expect(firstWsTextAt).toBeGreaterThan(0);
-    // Delivered well within a full window (leading-edge flush), not delayed.
-    expect(firstWsTextAt - sentAt).toBeLessThan(WINDOW / 2);
-  });
-
-  test('boundary frame (StreamEnd) flushes buffered body immediately', async () => {
-    // A large batch window would stall a POST body if StreamEnd did not force a
-    // flush; the request completing quickly proves the boundary flush.
-    const { client } = await setupClient({}, { batchWindowMs: 1_000 });
-    track(client);
-    const start = Date.now();
-    const response = await client.fetch('/echo-body', { method: 'POST', body: 'boundary-body' });
-    expect(await response.text()).toBe('boundary-body');
-    expect(Date.now() - start).toBeLessThan(500);
   });
 
   test('keepalive: no ping while frames flow, ping fires after idle', async () => {

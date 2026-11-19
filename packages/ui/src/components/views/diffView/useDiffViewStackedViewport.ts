@@ -2,11 +2,8 @@ import React from 'react';
 import { findDiffScrollAnchor, type DiffScrollAnchor } from '../diffScrollAnchor';
 import type { FileEntry, DiffScope } from './types';
 
-// Minimum width for side-by-side diff view (px)
 const SIDE_BY_SIDE_MIN_WIDTH = 1100;
 const STACKED_DIFF_MOUNT_MARGIN = 300;
-// Perf: limit concurrent expanded diffs in stacked view.
-// Expanding many diffs mounts many Pierre instances + lots of DOM.
 const getStackedViewDefaultExpandedCount = (fileCount: number): number => {
     if (fileCount <= 6) return fileCount;
     if (fileCount <= 12) return 6;
@@ -126,9 +123,6 @@ export function useDiffViewStackedViewport({
         if (visibleSyncFrameRef.current !== null) return;
         visibleSyncFrameRef.current = window.requestAnimationFrame(syncVisibleStackedFiles);
     }, [syncVisibleStackedFiles, visible]);
-    // The file entries' callbacks reach the sync through this ref, so they
-    // keep their identity when the view is shown or hidden: a new callback
-    // re-rendered every entry (150 of them in a large change) on each open.
     const queueVisibleStackedFilesSyncRef = React.useRef(queueVisibleStackedFilesSync);
     queueVisibleStackedFilesSyncRef.current = queueVisibleStackedFilesSync;
 

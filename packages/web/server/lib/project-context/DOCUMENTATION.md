@@ -142,7 +142,7 @@ Git and removing entries from it would delete them for the team.
 
 A plan's progress is its `## Steps` checklist: the knowledge tool tells agents
 to open every plan with one and to tick a step when it is done, and
-`plan-progress.js` counts ticked and total items in that section only (later
+`plan-progress.ts` counts ticked and total items in that section only (later
 checklists are detail). There is no separate status field to drift from the
 file. Listed plans carry `progress: { done, total }`; a plan without the
 section, or whose file cannot be read, carries none, and one unreadable plan
@@ -343,9 +343,39 @@ The legacy keys are removed only after `context.json` is durably written, so any
 failure simply leaves the migration to run again on the next read. Repeat and
 concurrent reads converge on identical content.
 
+## TypeScript boundaries
+
+`contracts.ts` owns the stored and public context shapes, mutation inputs and
+injected filesystem dependencies. File and mutation inputs keep unvalidated
+fields until their existing sanitizers or validators run. Optional stored links
+stay absent when cleared; a mutation's explicit `null` still removes a plan link.
+
+### Why sanitizers are boundary parsers
+
+Stored JSON can contain malformed entries and legacy note strings. Zod transforms
+retain the existing sanitization and timestamp defaults while producing the
+typed lists used by mutations. Record guards establish only that fields can be
+read; each field remains untrusted until its existing validation runs.
+
+### Route conversion contracts
+
+`registerProjectContextRoutes` imports application and response types
+from `../shared/http-contracts.js`. The shared Express declaration supplies the
+existing JSON middleware factory. Route parameters name the fields Express
+matches; request bodies remain unknown until their existing checks pass.
+
+### Why store tokens remain unchecked until comparison
+
+The route's regular expression coerces a supplied store token to text. A list
+such as `["local:token"]` can pass that check, but the runtime compares the
+original value strictly with the current token and refuses it with `409`.
+`saveTodos` therefore accepts an unchecked store value until that comparison;
+declaring it a string or coercing the value passed to the runtime would
+misrepresent or change this behavior.
+
 ## Cross-module contract
 
-`packages/web/server/lib/opencode/settings-runtime.js` merges project storage
+`packages/web/server/lib/settings/settings-runtime.js` merges project storage
 when a project id changes. Its `mergeProjectContextFiles` step must run before
 `moveDirectoryContents`, because that mover only renames into a free
 destination and would otherwise discard the old `context.json` whenever the
@@ -363,4 +393,4 @@ migration picks it up from the merged destination afterwards.
 ## Tests
 
 - `runtime.test.js` — storage, sanitization, migration, locking, plan lifecycle, repository notes and todos.
-- `routes.test.js` — status-code mapping, payload validation, failure surfacing.
+- `routes.http.test.js` — status-code mapping, payload validation, failure surfacing.

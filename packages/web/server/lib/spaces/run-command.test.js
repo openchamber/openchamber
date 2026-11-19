@@ -10,6 +10,7 @@ import { SpaceError } from './errors.js';
 import { killLiveTrees, killProcessTree, liveTreeCount, runCommand } from './run-command.js';
 
 const node = process.execPath;
+const sourceHook = new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href;
 
 // Only ever a real pid of a process this test started: an integer greater than 1.
 const isRealPid = (pid) => Number.isInteger(pid) && pid > 1;
@@ -258,7 +259,7 @@ const ready = setInterval(() => {
       const pidFile = path.join(directory, 'pids.json');
       const wrapperPath = path.join(directory, 'wrapper.mjs');
       fs.writeFileSync(wrapperPath, WRAPPER(new URL('./run-command.js', import.meta.url).href, parentOfSleeper(pidFile)));
-      const wrapper = spawn(node, [wrapperPath, pidFile, mode], { stdio: 'ignore' });
+      const wrapper = spawn(node, ['--import', sourceHook, wrapperPath, pidFile, mode], { stdio: 'ignore' });
       const exited = new Promise((resolve) => { wrapper.on('exit', resolve); });
       if (mode === 'sigint') {
         expect(await waitFor(() => fs.existsSync(`${pidFile}.ready`))).toBe(true);
@@ -325,7 +326,7 @@ import { runCommand } from ${JSON.stringify(new URL('./run-command.js', import.m
 runCommand('git', ['-C', ${JSON.stringify(repo)}, 'apply', '--binary', ${JSON.stringify(patch)}], { env: ${JSON.stringify(env)}, killTree: true, keepAtExit: true, keepTail: true, maxOutputBytes: 65536, timeoutMs: 60000 }).catch(() => {});
 setTimeout(() => process.exit(0), 1000);
 `);
-      const host = spawn(node, [wrapper], { stdio: 'ignore' });
+      const host = spawn(node, ['--import', sourceHook, wrapper], { stdio: 'ignore' });
       await new Promise((resolve) => { host.on('exit', resolve); });
       const holds = (name) => fs.existsSync(path.join(repo, name)) && fs.readFileSync(path.join(repo, name), 'utf8') === 'changed\n';
       // Four seconds of smudging in all, most of it after the host left.

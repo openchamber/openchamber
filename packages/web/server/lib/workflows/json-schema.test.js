@@ -10,6 +10,13 @@ const schema = {
 };
 
 describe('validateJsonSchema', () => {
+  it('retains inherited dictionary members and native coercion of unchecked keywords', () => {
+    expect(validateJsonSchema({ type: 'constructor' }, 42)).toBeNull();
+    expect(() => validateJsonSchema({ type: '__proto__' }, 42)).toThrow(TypeError);
+    expect(validateJsonSchema({ type: [['string']] }, 'answer')).toBeNull();
+    expect(validateJsonSchema({ required: [null, {}] }, { null: 1, '[object Object]': 2 })).toBeNull();
+  });
+
   it('accepts a matching value', () => {
     expect(validateJsonSchema(schema, { files: ['a.ts'], verdict: 'ok' })).toBeNull();
   });

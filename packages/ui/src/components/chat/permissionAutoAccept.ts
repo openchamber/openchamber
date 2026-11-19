@@ -3,7 +3,6 @@ import { nextPermissionMode, type PermissionMode } from '@/stores/utils/permissi
 type PermissionModeCycleArgs = {
     permissionScopeSessionId: string | null;
     newSessionDraftOpen: boolean;
-    /** The mode the button shows now, before `displayedPermissionMode` hides an unavailable safety net. */
     currentMode: PermissionMode;
     safetyAvailable: boolean;
     setDraftPermissionMode: (mode: PermissionMode) => void;
@@ -12,7 +11,6 @@ type PermissionModeCycleArgs = {
     onToggleFailed: () => void;
 };
 
-/** One press of the composer's shield button: the next mode, on the draft or on the session. */
 export const cyclePermissionMode = (args: PermissionModeCycleArgs): void => {
     const {
         permissionScopeSessionId,

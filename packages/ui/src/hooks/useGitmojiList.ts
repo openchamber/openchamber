@@ -1,4 +1,5 @@
 import React from 'react';
+import { fetchBypassingRuntimeBridge } from '@/lib/runtime-fetch';
 
 type GitmojiEntry = {
   emoji: string;
@@ -70,7 +71,7 @@ const fetchGitmojiList = async (): Promise<GitmojiEntry[]> => {
 
   const promise = (async () => {
     try {
-      const response = await fetch(GITMOJI_SOURCE_URL);
+      const response = await fetchBypassingRuntimeBridge(GITMOJI_SOURCE_URL);
       if (!response.ok) {
         throw new Error(`Failed to load gitmojis: ${response.statusText}`);
       }

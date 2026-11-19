@@ -54,6 +54,31 @@ This module owns shared Markdown parsing, sanitization, presentation, code highl
 
 ## Decisions
 
+### Why renderer identity stays fixed for a mount
+
+A renderer uses the already loaded implementation synchronously when available,
+avoiding Suspense's delayed reveal even for a resolved import. That choice stays
+fixed for its mount because replacing a lazy component with the loaded component
+would remount content and reload media.
+
+### Why a live part keeps its block tree after settlement
+
+Settlement preserves the streaming part's mounted blocks and their media. Already
+completed history uses whole-document static rendering; windowed documents use
+block splitting unless footnotes or link definitions require the whole source.
+
+### Why block arrival reads a stable ref and not changing context
+
+Arrival metadata is captured when each block mounts, so updating the stream does
+not rerender every existing block. Initial blocks never reveal as new content;
+later commits retain their reveal decision across settlement, with bounded
+staggering when several blocks arrive together.
+
+### Why static Markdown bypasses the block splitter
+
+Static rendering consumes the complete document. Bypassing Streamdown's unused
+split avoids running a full-text lexer whose result static rendering discards.
+
 ### Why parser switches and not source escaping for literal text
 
 Disabling HTML and character references in the parser preserves typed characters in prose, code and formulas. Escaping the source makes entities appear literally in code and can break formulas.

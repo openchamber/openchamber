@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import { test } from "node:test"
 
 import { createSelector, diffMap, keepingChangedFiles, parseImports, resolveImport } from "./changed.mjs"
@@ -19,6 +20,20 @@ const zone = (name, sources, features) => ({ zone: name, sources, features })
 
 const NO_MAP_CHANGES = { features: new Set(), names: new Set() }
 const pick = (selector, files, mapChanges = NO_MAP_CHANGES) => Object.fromEntries(selector.explain(files, mapChanges).map((entry) => [entry.file, { reason: entry.reason, features: entry.features }]))
+
+test("settings scenarios are selected for the code that applies their choices", () => {
+  const settings = JSON.parse(readFileSync(new URL("./zones/openchamber.json", import.meta.url), "utf8"))
+  const cases = [
+    ["packages/ui/src/contexts/ThemeSystemContext.tsx", "openchamber.themes"],
+    ["packages/ui/src/components/chat/composer/keyboardPolicy.ts", "openchamber.chat"],
+    ["packages/ui/src/components/chat/composer/input/createComposerKeyHandler.ts", "openchamber.chat"],
+  ]
+  const tree = Object.fromEntries(cases.map(([file]) => [file, ""]))
+  const selector = createSelector([settings], memoryFiles(tree))
+  for (const [file, expected] of cases) {
+    assert.ok(selector.explain([file], NO_MAP_CHANGES)[0].features.includes(expected), `${file} must select ${expected}`)
+  }
+})
 
 test("runtime imports are read; type-only ones are not", () => {
   const source = [

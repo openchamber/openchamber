@@ -130,6 +130,18 @@ describe('limit failover decisions', () => {
     await expect(runtime.decide(quotaReport())).resolves.toEqual({ action: 'none' });
   });
 
+  it('ignores invalid stored selections and non-array account settings', async () => {
+    const { runtime } = createRuntime({
+      settings: { accountSwitchProviders: 'anthropic', fallbackModel: 123, fallbackVariant: {} },
+    });
+    await expect(runtime.decide(quotaReport())).resolves.toEqual({ action: 'none' });
+    const fallback = createRuntime({
+      settings: { fallbackModel: 'openai/gpt-5.6', fallbackVariant: 123 },
+    });
+    await expect(fallback.runtime.decide(quotaReport()))
+      .resolves.toMatchObject({ action: 'switch-model', model: { providerID: 'openai', id: 'gpt-5.6' } });
+  });
+
   it('ignores a short throttle', async () => {
     const { runtime } = createRuntime();
     const report = quotaReport({ error: { type: 'provider.rate-limit', message: '', body: null }, proposed: { retry: true, delay: 4_000 } });

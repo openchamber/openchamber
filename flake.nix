@@ -7,7 +7,8 @@
     bun2nix.inputs.nixpkgs.follows = "nixpkgs";
     # OpenCode CLI, pinned to the tag matching OpenChamber's OpenCode 2.x
     # requirement. Keep in sync with packages/electron/package.json
-    # (opencodeCli.version) and the @opencode/client pin. Bump all together.
+    # (devDependencies."@opencode/server", the OpenCode the release desktop
+    # bundles) and the @opencode/client pin. Bump all together.
     # OpenCode 2.3.0 targets Bun 1.4.4. Built with nixpkgs' Bun 1.4.2 it
     # compiles, then exits on start with "Export named 'extension' not found
     # in module 'ws'" (its ws workaround, anomalyco/opencode#61518), so keep
@@ -30,7 +31,7 @@
       ];
       version = (builtins.fromJSON (builtins.readFile ./package.json)).version;
       opencodeCliVersion =
-        (builtins.fromJSON (builtins.readFile ./packages/electron/package.json)).opencodeCli.version;
+        (builtins.fromJSON (builtins.readFile ./packages/electron/package.json)).devDependencies."@opencode/server";
       opencodeTag =
         ((builtins.fromJSON (builtins.readFile ./flake.lock)).nodes.opencode).original.ref or "no-tag";
     in
@@ -45,7 +46,7 @@
           pkgs = nixpkgs.legacyPackages.${system};
           # The desktop's Electron: the major is read from packages/electron
           # devDependencies ("electron": "^45.0.0") at eval time, the same
-          # file that pins the bundled CLI, so an upstream bump fails
+          # file that pins the bundled OpenCode, so an upstream bump fails
           # evaluation with the next step named instead of reaching the
           # runtime as a startup crash (2.4.0 shipped while the flake still
           # built electron_43, and every desktop launch died on "setZoomMode
@@ -61,7 +62,7 @@
               or (throw "packages/electron pins electron ${electronSpec}, but nixpkgs has no electron_${electronMajor}. Pin an older electron in packages/electron or wait for nixpkgs-unstable to carry the major.");
           opencode-cli =
             nixpkgs.lib.throwIf (opencodeTag != "v${opencodeCliVersion}")
-              "flake pins opencode ${opencodeTag}, but packages/electron pins opencode CLI ${opencodeCliVersion}; update the opencode input URL and run nix flake update opencode"
+              "flake pins opencode ${opencodeTag}, but packages/electron pins @opencode/server ${opencodeCliVersion}; update the opencode input URL and run nix flake update opencode"
               (
                 (pkgs.callPackage "${opencode}/nix/opencode.nix" {
                   node_modules = pkgs.callPackage "${opencode}/nix/node_modules.nix" {
@@ -116,8 +117,8 @@
           default = openchamber;
         })
         // {
-          # The pinned OpenCode CLI that OpenChamber bundles, exposed on its
-          # own so hosts can use the same 2.x build as the system opencode.
+          # The pinned OpenCode CLI that OpenChamber's Nix packages run, exposed
+          # on its own so hosts can use the same 2.x build as the system opencode.
           opencode-cli = opencode-cli;
         }
       );

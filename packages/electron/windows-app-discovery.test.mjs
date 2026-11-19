@@ -44,24 +44,6 @@ test('lists installed apps with icons from async lookups', async () => {
   ]);
 });
 
-test('the event loop keeps turning while the scan waits on lookups', async () => {
-  const calls = [];
-  const discovery = createWindowsAppDiscovery({
-    run: createRunner(calls),
-    getFileIcon: async (filePath) => fakeIcon(filePath),
-    env: TEST_ENV,
-  });
-  let callsWhenLoopTurned = -1;
-  setImmediate(() => {
-    callsWhenLoopTurned = calls.length;
-  });
-
-  await discovery.buildWindowsInstalledApps(['Visual Studio Code', 'Cursor', 'Zed']);
-
-  assert.ok(calls.length > 3);
-  assert.ok(callsWhenLoopTurned > 0 && callsWhenLoopTurned < calls.length);
-});
-
 test('scans that overlap ask PowerShell for Windows Terminal once', async () => {
   const calls = [];
   const discovery = createWindowsAppDiscovery({

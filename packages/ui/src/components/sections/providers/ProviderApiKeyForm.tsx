@@ -1,5 +1,5 @@
 import React from 'react';
-import type { FormValue, IntegrationKeyMethod } from '@opencode/client';
+import type { FormValue, IntegrationKeyMethod } from '@/lib/opencode/model';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';

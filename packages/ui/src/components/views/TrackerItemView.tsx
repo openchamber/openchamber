@@ -42,31 +42,14 @@ import { useUIStore } from '@/stores/useUIStore';
 const NO_FOLLOWED: TrackedItem[] = [];
 
 type TrackerItemViewProps = {
-    /** The item's link, as its tab keeps it. */
     url: string;
-    /** The folder the item is read through: its project's, or the panel's own. */
     directory: string;
-    /** The panel the tab lives in, and the tab itself. */
     panelDirectory: string;
     tabId: string;
-    /** The tab reads through another project than the panel's. */
     foreign: boolean;
     visible: boolean;
 };
 
-/**
- * One issue, discussion, pull or merge request or tracker item in the Tracker, drawn as
- * the issues and PRs board previews it: description, activity, checks,
- * labels, reviewers, a reply box, merge and close. Nothing here starts a
- * session or a worktree; the item can be attached to the session on screen.
- * A link past its project's repository network is read with the project's
- * account where the hosts match, and only read: the description, activity,
- * checks and Changes show, and everything that acts on the item stays away.
- * One no account can read, opened just now, opens in the browser instead and
- * its tab closes; restored on launch, the tab says so in place.
- * A project that is a folder of repositories reads the link through the
- * repository whose remote it points into.
- */
 export const TrackerItemView: React.FC<TrackerItemViewProps> = (props) => {
     const urls = useRepositoryUrlMatcher();
     const trackerUrls = useTrackerUrlMatcher();
@@ -86,7 +69,6 @@ export const TrackerItemView: React.FC<TrackerItemViewProps> = (props) => {
             ? <TrackerWorkItem url={url} provider={target.provider} identifier={target.identifier} visible={props.visible} onUnavailable={fallBack} onShown={settle} />
             : <RepositoryTrackerItem {...props} kind={target.kind} onUnavailable={fallBack} onShown={settle} />;
 
-    // The preview scrolls on its own, with its actions pinned under it.
     return <div className="h-full min-h-0">{content}</div>;
 };
 
@@ -100,7 +82,6 @@ const TrackerState: React.FC<{ message: string; onRetry?: () => void }> = ({ mes
     );
 };
 
-/** What a restored tab shows when its project cannot read the item. */
 const UnavailableState: React.FC<{ url: string }> = ({ url }) => {
     const { t } = useI18n();
     return (
@@ -111,13 +92,8 @@ const UnavailableState: React.FC<{ url: string }> = ({ url }) => {
     );
 };
 
-/** Opens the item in the browser and closes its tab when a click just opened it; else the tab says why. */
 type FallBack = () => void;
 
-/**
- * The item a link names, as a lookup through `directory` finds it: the link
- * itself is the search, so it finds that one item, whatever its state.
- */
 const useLinkItem = ({ enabled, directory, url, kind, linked }: {
     enabled: boolean;
     directory: string;
@@ -126,15 +102,8 @@ const useLinkItem = ({ enabled, directory, url, kind, linked }: {
     linked: boolean;
 }) => {
     const issueLookup = useRepositoryReferenceList({ enabled, directory, kind, filter: DEFAULT_REPOSITORY_FILTER, query: url, linked });
-    // Only the item the link names: a lookup that fell back to a search lists others.
     const urls = useRepositoryUrlMatcher();
     const named = (items: readonly RepositoryReference[]) => items.find((item) => isSameRepositoryItemLink(item.url, url, urls)) ?? null;
-    // Where issues and change requests share one number, an issue link may
-    // name a change request (`#12` in an item's text links its issue page,
-    // which the host forwards). A host whose issue lookup does not answer it
-    // (a list-backed one) reads the number as a change request, by that
-    // request's own link. Once the issue is known missing, it stays so for
-    // this link, so a background refresh does not swap the shown item out.
     const pullUrl = React.useMemo(() => {
         const context = kind === 'issue' ? repositoryLinkContextOfUrl(url, urls) : null;
         const item = urls.match(url);
@@ -156,7 +125,6 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
     const { t } = useI18n();
     const { sourceControl } = useRuntimeAPIs();
     const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-    // A folder of repositories reads the link through the one it points into.
     const linkRepository = useLinkRepository(directory, url);
     const readDirectory = linkRepository.directory;
     const urls = useRepositoryUrlMatcher();
@@ -164,9 +132,6 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
     const boundContext = readContext && readContext !== 'missing' ? readContext : null;
     const bound = useLinkItem({ enabled: linkRepository.status === 'ready', directory: readDirectory, url, kind, linked: false });
 
-    // The project's own reads stop at its fork network. A link past it is read
-    // with the project's account where that account's host is the link's; a
-    // project that owns the repository keeps its failure and its Retry.
     const linkHost = urls.match(url);
     const sameHost = boundContext !== null && linkHost?.provider === boundContext.provider && linkHost.instance === boundContext.instance;
     const boundGaveUp = linkRepository.status === 'ready' && !bound.reference
@@ -175,7 +140,6 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
     const reference = bound.reference ?? outside.reference;
     const lookup = bound.reference || !boundGaveUp ? bound.lookup : outside.lookup;
     const linked = reference?.linked === true;
-    // What reads the item, and what acts on it: a linked item is only read.
     const context = React.useMemo(() => (boundContext && linked ? { ...boundContext, linked: true as const } : boundContext), [boundContext, linked]);
     const writeContext = linked ? null : context;
     const followed = React.useMemo(
@@ -184,9 +148,6 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
     );
     useTrackedItems(visible ? followed : NO_FOLLOWED);
 
-    // Answered without it: the project's host does not know the link, or no
-    // account can read it. A failed read of the project's own item stays here
-    // with a retry instead.
     const unavailable = boundGaveUp && !reference && (!sameHost || outside.missing || outside.lookup.status === 'error');
     React.useEffect(() => {
         if (unavailable) onUnavailable();
@@ -200,22 +161,16 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
     const pullStatusOf = useRepositoryPullStatuses(readDirectory, reference ? [reference] : []);
     const attachments = usePullAttachments(reference);
     const [checksOpen, setChecksOpen] = React.useState(false);
-    // The tab can stay open for hours; a frozen clock read every newer comment as "Just now".
     const now = useMinuteTickerNow(true);
 
     const { retry: retryLookup } = lookup;
-    // After a change to the item: its detail and the item itself read again.
     const refreshItem = React.useCallback(
         () => Promise.all([refreshDetail(), retryLookup()]).then(() => undefined),
         [refreshDetail, retryLookup],
     );
     const threadActions = useThreadActions(reference, writeContext, refreshItem);
-    // Another layer of the PR's stack opens as a tab of its own, read through the same folder.
     const showTrackerItem = useShowTrackerItem();
     const stack = detail.status === 'ready' ? detail.value.pull?.stack ?? null : null;
-    // For a change made on the host's own site, which the server's
-    // short-lived answers would otherwise hide for up to half a minute: this
-    // tab's item alone, its state and checks included.
     const refreshFromHost = async () => {
         if (writeContext && reference) {
             const item = { owner: reference.sourceRepo.owner, repo: reference.sourceRepo.repo, number: reference.number };
@@ -237,13 +192,10 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
 
     const item: ReferencePickerItem = { source: 'repository', reference };
     const pull = reference.kind === 'pull' ? reference : null;
-    // An edit of the item's title and description: the host's own edit, then the item read again.
     const saveText = writeContext ? async (input: { title: string; body: string }) => {
         await updateRepositoryItemText(sourceControl, writeContext, reference, input);
         await refreshItem();
     } : undefined;
-    // Editing or removing one of the item's conversation comments: the host's
-    // own change, then the item read again.
     const commentActions: ReferenceCommentActions | undefined = writeContext ? {
         update: async (comment, body) => {
             if (!comment.id) return;
@@ -269,7 +221,6 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                 includeDiff={false}
                 onIncludeDiffChange={() => undefined}
                 now={now}
-                // Starting work happens on the board and in New Worktree; here the item is read and acted on.
                 footer={<SourceBoardActions item={item} project={null} context={context} onStartWorktree={() => undefined} onChanged={() => void refreshItem()} worktreeAvailable={false} stack={stack} />}
                 onOpenStackLayer={(layer) => { showTrackerItem(layer.url, directory); }}
                 onOpenChecks={pull && context ? () => setChecksOpen(true) : undefined}
@@ -286,7 +237,6 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                 reviewersControl={pull && writeContext ? (
                     <SourceBoardReviewers pull={pull} detail={detail} context={writeContext} onChanged={refreshItem} />
                 ) : undefined}
-                // A locked discussion takes no comment from someone who may not update it.
                 reply={writeContext && (detail.status !== 'ready' || detail.value.discussion?.canComment !== false)
                     ? <SourceBoardReply reference={reference} context={writeContext} onRefresh={refreshItem} />
                     : undefined}
@@ -324,15 +274,11 @@ const TrackerWorkItem: React.FC<{
 }> = ({ url, provider, identifier, visible, onUnavailable, onShown }) => {
     const { t } = useI18n();
     const source = useTrackerSourceStatus(provider);
-    // A tracker's get takes its human identifier as well as its own id.
     const { detail, refresh, followed } = useTrackerItemDetail(source === 'ready' ? { provider, id: identifier } : null, true);
     useTrackedItems(visible ? followed : NO_FOLLOWED);
     const showTrackerItem = useShowTrackerItem();
     const now = useMinuteTickerNow(true);
 
-    // A tracker answers the same for an item it cannot find and a read that
-    // failed, so only a tab just opened that never showed its item gives up
-    // on a failure; any other one offers Retry.
     const disconnected = source !== 'ready';
     const failed = detail.status === 'error';
     const ready = detail.status === 'ready';
@@ -364,7 +310,6 @@ const TrackerWorkItem: React.FC<{
             now={now}
             footer={<SourceBoardActions item={item} project={null} context={null} onStartWorktree={() => undefined} onChanged={() => void refresh()} worktreeAvailable={false} />}
             trackerStateControl={<SourceBoardTrackerStatus item={detail.value} onChanged={() => void refresh()} />}
-            // A parent or child opens as a tab of its own.
             onOpenTrackerItem={(child) => { showTrackerItem(child.url, null); }}
         />
     );

@@ -1,5 +1,6 @@
 import type { Session } from '@/lib/opencode/model';
 import { isReviewSession } from '@/lib/sessionReviewMetadata';
+import { isOperatorChildSession } from '@/lib/sessionOperatorChild';
 
 export const resolveChatPromptReadOnly = (
     session: Session | null | undefined,
@@ -8,9 +9,7 @@ export const resolveChatPromptReadOnly = (
     ownFolderAdmitted = true,
 ): boolean => {
     if (!ownFolderAdmitted) return true;
-    // Review sessions are independent conversations even if an older server or
-    // cached record still carries parentID. Their explicit metadata is the
-    // authority; only the surface itself may make them read-only.
+    if (isOperatorChildSession(session)) return true;
     if (isReviewSession(session)) {
         return readOnly;
     }

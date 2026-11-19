@@ -3,21 +3,26 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createFsSearchRuntime } from '../../web/server/lib/fs/search.js';
 
 const uri = (fsPath) => ({ fsPath });
+let directoryEntries;
 mock.module('vscode', () => ({
   Uri: { file: uri, joinPath: (base, name) => uri(path.join(base.fsPath, name)) },
   FileType: { File: 1, Directory: 2 },
   workspace: {
     workspaceFolders: [],
     fs: {
-      readDirectory: async (directory) => (await fs.readdir(directory.fsPath, { withFileTypes: true }))
-        .map((entry) => [entry.name, entry.isDirectory() ? 2 : entry.isFile() ? 1 : 64]),
+      readDirectory: async (directory) => directoryEntries
+        ? directoryEntries.get(directory.fsPath) ?? []
+        : (await fs.readdir(directory.fsPath, { withFileTypes: true }))
+          .map((entry) => [entry.name, entry.isDirectory() ? 2 : entry.isFile() ? 1 : 64]),
     },
   },
 }));
 mock.module('./bridge-git-process-runtime', () => ({
   execGit: async (args, cwd, options) => {
+    if (directoryEntries) return { stdout: '', exitCode: 1 };
     try {
       return { stdout: execFileSync('git', args, { cwd, encoding: 'utf8', input: options?.input }), exitCode: 0 };
     } catch (error) {
@@ -30,6 +35,45 @@ const { searchDirectory } = await import('./bridge-fs-helpers-runtime');
 let root;
 afterEach(async () => {
   if (root) await fs.rm(root, { recursive: true, force: true });
+});
+
+describe('filesystem search inspected-file ceiling', () => {
+  const web = createFsSearchRuntime({
+    path,
+    fsPromises: {
+      readdir: async (directory) => (directoryEntries.get(directory) ?? []).map(([name, type]) => ({
+        name, isFile: () => type === 1, isDirectory: () => type === 2,
+      })),
+    },
+    spawn: () => { throw new Error('Not a Git repository'); },
+    resolveGitBinaryForSpawn: () => 'git',
+  });
+  const searches = [
+    ['VS Code', () => searchDirectory('/workspace', 'needle', 1)],
+    ['web', () => web.searchFilesystemFiles('/workspace', { query: 'needle', limit: 1 })],
+  ];
+  for (const [label, search] of searches) {
+    test(`${label} query searches stop on inspected files, not the old candidate cap`, async () => {
+      try {
+        directoryEntries = new Map([
+          ['/workspace', [...Array.from({ length: 201 }, (_, index) => [`${'needle'.split('').join('x'.repeat(30))}-${index}`, 1]), ['deep', 2]]],
+          ['/workspace/deep', [['needle', 1]]],
+        ]);
+        expect((await search()).map((file) => file.relativePath)).toEqual(['deep/needle']);
+
+        for (const inspected of [9_999, 10_000]) {
+          directoryEntries = new Map([
+            ['/workspace', [...Array.from({ length: inspected }, (_, index) => [`haystack-${index}`, 1]), ['deep', 2]]],
+            ['/workspace/deep', [['needle', 1]]],
+          ]);
+          expect((await search()).map((file) => file.relativePath))
+            .toEqual(inspected === 9_999 ? ['deep/needle'] : []);
+        }
+      } finally {
+        directoryEntries = undefined;
+      }
+    });
+  }
 });
 
 describe('workspace file search supplements', () => {

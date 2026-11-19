@@ -116,6 +116,14 @@ describe('gh config directory', () => {
 });
 
 describe('isTrustedGitHubHost', () => {
+  test('treats a null hosts document as unavailable', () => {
+    process.env.GH_HOST = '';
+    createHostsYaml('null\n');
+    expect(isTrustedGitHubHost('github.enterprise.test')).toBe(false);
+    expect(hasStoredGhLogin('github.enterprise.test')).toBe(false);
+    expect(listTrustedGitHubHosts()).toEqual([]);
+  });
+
   test('always trusts github.com and an omitted host', () => {
     expect(isTrustedGitHubHost('github.com')).toBe(true);
     expect(isTrustedGitHubHost('GitHub.COM')).toBe(true);

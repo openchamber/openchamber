@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -31,6 +31,7 @@ describe('MobileToaster', () => {
   };
 
   beforeEach(async () => {
+    jest.useFakeTimers();
     windowInstance = new Window({ width: 390, height: 844 });
     viewport = Object.assign(new windowInstance.EventTarget(), { offsetTop: 0 });
     Object.defineProperty(windowInstance, 'visualViewport', { value: viewport });
@@ -51,14 +52,18 @@ describe('MobileToaster', () => {
     await act(async () => root.render(<MobileToaster />));
     await act(async () => {
       toast.info('Large paste');
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      jest.advanceTimersByTime(0);
     });
   });
 
   afterEach(async () => {
-    await act(async () => root.unmount());
-    toast.dismiss();
-    windowInstance.close();
+    try {
+      await act(async () => root.unmount());
+      toast.dismiss();
+      windowInstance.close();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test('anchors phone toasts to the visible area below the notch', () => {

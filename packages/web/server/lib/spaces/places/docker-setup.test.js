@@ -74,6 +74,16 @@ describe('docker setup: what gets Docker going', () => {
     expect((await setup.describe(UP)).memory).toBeNull();
   });
 
+  it.each(['null', '{}', '"123"', '[]', '["1024"]', '[0]', '[-1]', 'not JSON'])('has no memory for %s', async (stdout) => {
+    const { setup } = makeSetup({ answer: () => ({ code: 0, stdout, stderr: '' }) });
+    expect((await setup.describe(UP)).memory).toBeNull();
+  });
+
+  it('coerces the machine name without requiring the other JSON fields to be strings', async () => {
+    const { setup } = makeSetup({ answer: () => ({ code: 0, stdout: '[1024,42,{}]', stderr: '' }) });
+    expect((await setup.describe(UP)).memory).toEqual({ bytes: 1024, engine: 'other', low: true });
+  });
+
   it('reads no memory while Docker cannot take a space', async () => {
     const { setup, commands } = makeSetup({ programs: ['colima'] });
     expect((await setup.describe(DOWN)).memory).toBeNull();
@@ -129,6 +139,29 @@ describe('docker setup: the action', () => {
     await setup.start('start_colima');
     await settle(setup);
     expect(commands[1].args).toEqual(['start', 'work']);
+  });
+
+  it('skips malformed profile lines and keeps a nonempty string name', async () => {
+    const answer = (_file, args) => ({
+      code: 0,
+      stdout: args[0] === 'list' ? 'null\n42\n"work"\n{}\n{"name":42}\n{"name":""}\nnot JSON\n{"name":"constructor"}\n' : '',
+      stderr: '',
+    });
+    const { setup, commands } = makeSetup({ programs: ['colima'], checks: [DOWN], answer });
+    await setup.start('start_colima');
+    await settle(setup);
+    expect(commands[1].args).toEqual(['start', 'constructor']);
+  });
+
+  it('passes unchecked failure fields through without promising strings', async () => {
+    const failure = { code: 42, message: { reason: 'failed' }, details: { output: ['tail'] } };
+    const { setup } = makeSetup({ programs: ['colima'], checks: [DOWN], answer: () => { throw failure; } });
+    await setup.start('start_colima');
+    expect(await settle(setup)).toEqual({
+      action: 'start_colima',
+      running: false,
+      failure: { code: 42, message: failure.message, output: failure.details.output },
+    });
   });
 
   it('installs only the CLI, and starts Colima only when Docker still does not answer', async () => {

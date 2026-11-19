@@ -8,6 +8,12 @@ import {
 } from './executable-search.js';
 
 describe('getExecutableSearchDirectories', () => {
+  it('skips inherited non-string environment members', () => {
+    const env = Object.create({ PATH: Object });
+    env.Path = '/usr/bin:/bin';
+    expect(getExecutableSearchDirectories({ env, platform: 'linux' })).toEqual(['/usr/bin', '/bin']);
+  });
+
   it('adds the WindowsApps app-alias directory on Windows', () => {
     const directories = getExecutableSearchDirectories({
       platform: 'win32',

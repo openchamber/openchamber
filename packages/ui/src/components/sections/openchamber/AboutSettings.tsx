@@ -24,6 +24,7 @@ import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { getUpdateCheckErrorMessage } from '@/lib/updateCheckError';
 import { InstanceServiceUrls } from './InstanceServiceUrls';
 import { AboutReleaseNotes } from './AboutReleaseNotes';
+import { AboutUpdateBanners } from './AboutUpdateBanners';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   SettingsChipGroup,
@@ -702,11 +703,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         {t('settings.openchamber.about.state.checking')}
       </span>
     </>
-  ) : update.available && !installBlocked ? (
-    <Button size="sm" variant="default" onClick={() => setUpdateDialogOpen(true)} disabled={needsNewerOpenCode(update.info)}>
-      <Icon name="download" className="size-4" />
-      {openChamberUpdateLabel}
-    </Button>
   ) : !update.available && !update.error ? (
     <>
       {statusSeparator}
@@ -716,7 +712,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const versionValue = (version: string) => (
     <span className="typography-meta font-mono text-muted-foreground">{version}</span>
   );
-  const valueRow = 'min-h-8 flex-wrap @xl:flex-initial';
+  const valueRow = { alignEnd: false, controlClassName: 'min-h-8 flex-wrap @xl:flex-initial' };
   const notes = [
     manualUpdateNotice,
     remoteHostUpdateNotice,
@@ -758,33 +754,36 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       </SettingsSection>
 
       <SettingsSection contentClassName="space-y-4">
+        <AboutUpdateBanners describeVersion={describeVersion}
+          main={!isChecking && update.available && !installBlocked ? { info: update.info, owner: isDesktopRemote ? 'app' : isNativeApp ? 'server' : 'openchamber', onUpdate: () => setUpdateDialogOpen(true) } : null}
+          remoteHost={remoteHostUpdateButton ? { info: remoteHostUpdate?.info ?? null, onUpdate: () => setServerUpdateDialogOpen(true) } : null}
+          appDownload={appDownloadUrl ? { version: describeVersion(updateStore.info?.version || '', nativeAppVersion), url: appDownloadUrl } : null}
+        />
         <div>
           {isDesktopRemote ? (
             <>
-              <SettingsFieldRow label={t('settings.openchamber.about.field.appVersion')} controlClassName={valueRow}>
+              <SettingsFieldRow label={t('settings.openchamber.about.field.appVersion')} {...valueRow}>
                 {versionValue(appVersion)}
                 {openChamberStatus}
               </SettingsFieldRow>
-              <SettingsFieldRow label={t('settings.openchamber.about.field.serverVersion')} controlClassName={valueRow}>
+              <SettingsFieldRow label={t('settings.openchamber.about.field.serverVersion')} {...valueRow}>
                 {versionValue(remoteHostVersion)}
-                {remoteHostUpdateButton}
               </SettingsFieldRow>
             </>
           ) : isNativeApp ? (
             <>
               {nativeAppVersion && (
-                <SettingsFieldRow label={t('settings.openchamber.about.field.appVersion')} controlClassName={valueRow}>
+                <SettingsFieldRow label={t('settings.openchamber.about.field.appVersion')} {...valueRow}>
                   {versionValue(describeVersion(nativeAppVersion, updateStore.info?.version))}
-                  {appUpdateButton}
                 </SettingsFieldRow>
               )}
-              <SettingsFieldRow label={t('settings.openchamber.about.field.serverVersion')} controlClassName={valueRow}>
+              <SettingsFieldRow label={t('settings.openchamber.about.field.serverVersion')} {...valueRow}>
                 {versionValue(currentVersion)}
                 {openChamberStatus}
               </SettingsFieldRow>
             </>
           ) : (
-            <SettingsFieldRow label={t('settings.openchamber.about.field.version')} controlClassName={valueRow}>
+            <SettingsFieldRow label={t('settings.openchamber.about.field.version')} {...valueRow}>
               {versionValue(currentVersion)}
               {openChamberStatus}
             </SettingsFieldRow>
@@ -792,14 +791,15 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           <SettingsFieldRow
             label={t('settings.openchamber.about.field.updateChannel')}
             info={updateChannelControl ? t('settings.openchamber.about.field.updateChannelHint') : undefined}
-            controlClassName={valueRow}
+            {...valueRow}
           >
             {updateChannelControl}
-            <Button size="sm" variant="outline" onClick={checkAll} disabled={isChecking}>
+            <Button size="sm" variant="ghost" onClick={checkAll} disabled={isChecking}>
+              <Icon name="refresh" className="size-4" />
               {t('settings.openchamber.about.actions.checkForUpdates')}
             </Button>
           </SettingsFieldRow>
-          <SettingsFieldRow label={t('settings.openchamber.about.field.openCodeVersion')} controlClassName={valueRow}>
+          <SettingsFieldRow label={t('settings.openchamber.about.field.openCodeVersion')} {...valueRow}>
             {versionValue(openCodeVersion || t('settings.openchamber.about.state.unknown'))}
             {openCodeUpdate?.action}
           </SettingsFieldRow>

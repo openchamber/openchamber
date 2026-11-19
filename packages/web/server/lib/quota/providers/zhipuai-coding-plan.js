@@ -1,5 +1,5 @@
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
-import { readConfigLayers } from '../../opencode/shared.js';
+import { readConfigLayers } from '../../opencode/config-files.js';
 import {
   resolveConfigApiKey,
   getAuthEntry,

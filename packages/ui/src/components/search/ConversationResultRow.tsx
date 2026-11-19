@@ -12,11 +12,8 @@ import type { ConversationResultContext } from './conversationResultContext';
 
 type Props = {
   result: ConversationResult;
-  /** The mark that says where the conversation lives (its project's icon), at the start of the title. */
   leading?: React.ReactNode;
-  /** How long ago the conversation changed, at the end of the title line. */
   age?: string;
-  /** A line of where-it-lives details under the title, for lists that have no leading mark. */
   context?: ConversationResultContext;
   selected?: boolean;
   mobile?: boolean;
@@ -26,11 +23,6 @@ type Props = {
   onShowMoreMatches?: () => void;
 };
 
-/**
- * One found conversation: its title, then the matching excerpt led by who
- * wrote it. The title opens the conversation, the excerpt opens it at that
- * message, and the count after the excerpt lists the other matches.
- */
 export const ConversationResultRow: React.FC<Props> = ({ result, leading, age, context, selected = false, mobile = false, trailing, onOpen, onOpenExcerpt, onShowMoreMatches }) => {
   const { t } = useI18n();
   const authorKey = result.excerpt?.role === 'user' ? 'search.omni.result.byYou' : result.excerpt?.role === 'reasoning' ? 'search.omni.result.inReasoning' : 'search.omni.result.byAgent';
@@ -50,7 +42,6 @@ export const ConversationResultRow: React.FC<Props> = ({ result, leading, age, c
         </span>
         <SearchMetaList items={contextItems} className={cn('mt-px text-muted-foreground', mobile ? 'typography-meta' : 'typography-micro')} />
       </button>
-      {/* On a phone the title and its excerpt read as one row: each keeps a 36px target and they sit close. */}
       {result.excerpt ? <div className={cn('flex min-w-0 gap-1.5 typography-meta text-muted-foreground', mobile ? 'items-start' : 'items-baseline')}>
         <button data-conversation-excerpt-action type="button" onClick={onOpenExcerpt} className={cn('min-w-0 flex-1 overflow-hidden text-start hover:text-foreground', mobile ? 'min-h-9 line-clamp-2 pb-1.5' : 'truncate')}>
           <span data-conversation-excerpt-author className="me-1 font-medium">{t('search.omni.result.authorPrefix', { author: t(authorKey) })}</span>

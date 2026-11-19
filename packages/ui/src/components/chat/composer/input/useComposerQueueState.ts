@@ -24,7 +24,6 @@ export function useComposerQueueState({
         isBtwActive,
     } = sessionScope;
 
-    // Message queue
     const messageQueueDirectory = currentSessionDirectoryForSync ?? currentDirectory;
 
     const parentMessageQueueTarget = React.useMemo(() => (currentSessionId

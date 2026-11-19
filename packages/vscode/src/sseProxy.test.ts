@@ -1,4 +1,4 @@
-import { describe, test } from 'node:test';
+import { describe, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { OpenCodeManager } from './opencode';
 import { openSseProxy } from './sseProxy';
@@ -51,9 +51,13 @@ const createManager = (): OpenCodeManager => ({
 describe('VS Code SSE proxy', () => {
   test('closes a quiet upstream SSE stream after the stall timeout', async () => {
     const originalFetch = globalThis.fetch;
+    mock.timers.enable({ apis: ['setTimeout'] });
+    let cancelled = false;
 
     try {
-      globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>({}), {
+      globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>({
+        cancel() { cancelled = true; },
+      }), {
         status: 200,
         headers: { 'content-type': 'text/event-stream' },
       })) as typeof fetch;
@@ -67,21 +71,30 @@ describe('VS Code SSE proxy', () => {
         onChunk: () => assert.fail('quiet stream should not emit chunks'),
       });
 
+      mock.timers.tick(19);
+      assert.equal(cancelled, false);
+      mock.timers.tick(1);
+      assert.equal(cancelled, true);
       await assert.doesNotReject(proxy.run);
     } finally {
       globalThis.fetch = originalFetch;
+      mock.timers.reset();
     }
   });
 
   test('resets the stall timeout when upstream bytes arrive', async () => {
     const originalFetch = globalThis.fetch;
+    mock.timers.enable({ apis: ['setTimeout'] });
+    let cancelled = false;
+    let upstream: ReadableStreamDefaultController<Uint8Array>;
+    let delivered = () => {};
 
     try {
       globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>({
         start(controller) {
-          setTimeout(() => controller.enqueue(new TextEncoder().encode(':first\n\n')), 5);
-          setTimeout(() => controller.enqueue(new TextEncoder().encode('data: second\n\n')), 15);
+          upstream = controller;
         },
+        cancel() { cancelled = true; },
       }), {
         status: 200,
         headers: { 'content-type': 'text/event-stream' },
@@ -94,13 +107,27 @@ describe('VS Code SSE proxy', () => {
         path: '/api/event',
         signal: controller.signal,
         stallTimeoutMs: 18,
-        onChunk: (chunk) => chunks.push(chunk),
+        onChunk: (chunk) => { chunks.push(chunk); delivered(); },
       });
 
+      const send = (chunk: string) => new Promise<void>((resolve) => {
+        delivered = resolve;
+        upstream.enqueue(new TextEncoder().encode(chunk));
+      });
+      mock.timers.tick(5);
+      await send(':first\n\n');
+      mock.timers.tick(14);
+      assert.equal(cancelled, false);
+      await send('data: second\n\n');
+      mock.timers.tick(17);
+      assert.equal(cancelled, false);
+      mock.timers.tick(1);
+      assert.equal(cancelled, true);
       await assert.doesNotReject(proxy.run);
       assert.deepEqual(chunks, [':first\n\n', 'data: second\n\n']);
     } finally {
       globalThis.fetch = originalFetch;
+      mock.timers.reset();
     }
   });
 });

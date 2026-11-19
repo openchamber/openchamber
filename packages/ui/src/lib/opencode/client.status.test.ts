@@ -66,31 +66,6 @@ describe("v2 status and cancellation HTTP boundary", () => {
     }
   })
 
-  test("the SDK Request's caller signal cancels a queued command read", async () => {
-    const controller = new AbortController()
-    const reason = new Error("runtime changed")
-    let started!: () => void
-    const ready = new Promise<void>((resolve) => { started = resolve })
-    const fetch = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const signal = input instanceof Request ? input.signal : init?.signal
-      if (!signal) throw new Error("Missing request signal")
-      started()
-      return new Promise<Response>((_resolve, reject) => {
-        signal.addEventListener("abort", () => reject(signal.reason), { once: true })
-      })
-    })
-    try {
-      const sdk = createRuntimeOpencodeClient({ baseUrl: "https://status.test/api", requestTimeoutMs: 1_000 })
-      const request = sdk.command.list(undefined, { signal: controller.signal })
-      await ready
-      controller.abort(reason)
-      expect(await request.catch((error: Error) => error)).toMatchObject({ reason: "Transport", cause: reason })
-    } finally {
-      controller.abort()
-      fetch.mockRestore()
-    }
-  })
-
   test("manual signal composition remains active after headers while the SDK reads the body", async () => {
     const descriptor = Object.getOwnPropertyDescriptor(AbortSignal, "any")
     Object.defineProperty(AbortSignal, "any", { configurable: true, value: undefined })

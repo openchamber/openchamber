@@ -83,6 +83,186 @@ Creating, finding, stopping, starting, and removing isolated spaces on a place, 
 - The corridor reserves a tunnel slot before DNS resolution begins. Otherwise concurrent lookups can all pass the cap before any connection takes a slot.
 - A quarantine-size watcher never rejects while the fetch runs beside it. Its caller awaits it only after the fetch ends, so a watcher failure would become an unhandled rejection. The size check after the fetch still enforces the transfer cap.
 - Auto-review updates truncate long error text and still reach the browsers. Dropping the update can leave a completed run displayed as running.
+- Curl requests keep `--disable` first, bypass environment proxies and suppress
+  `Expect: 100-continue`. Bodies use `data-raw`, so a leading `@` stays literal.
+- Label text rejects C0 controls, DEL, NEL and Unicode line separators. Other
+  C1 characters remain accepted. Task-title sanitization removes all C0 and C1
+  controls.
+
+### Type boundaries
+
+Code-in, label, route, server-channel, tools and WebSocket implementations use
+TypeScript and retain `.js` import specifiers. Already converted implementations
+keep their existing owner contracts. Code-in history promises carry only the
+three existing completion statuses and are present before entering the run map.
+Upgrade auth accepts raw Node requests and a null HTTP response. Forwarded
+handshake headers retain the dispatcher's outgoing-header type.
+
+Label fields and tools versions remain unchecked after coercing regular
+expressions. Optional error reads box primitive values; required nullish reads
+retain the JavaScript TypeError. Test-only bait helpers remain outside product
+imports. Git's `--initial-branch` requires Git 2.28 inside the space
+([git-init](https://git-scm.com/docs/git-init/2.28.0)); the bundled image satisfies
+that floor. Server close frames stay unmasked
+([RFC 6455 section 5.1](https://www.rfc-editor.org/rfc/rfc6455#section-5.1)).
+
+The catalog reader returns the provider and model schemas' inferred data.
+Their optional fields may explicitly contain `undefined`, because failed field
+parses use `.catch(undefined)`. A window is derived only after URL and header
+checks; reading a catalog entry alone does not establish that it has a window.
+
+Provider configuration and login renewal share the auth and provider entity
+contracts owned by `opencode`. Chat exports retain the export schema's inferred
+type, including unchecked message fields kept by `passthrough`. Archive imports
+add only the archive-owned time, location and deny permissions. A null login
+still fails on its first `methodID` read after the old credential rows are removed.
+
+Archive files are parsed as unchecked data. `archivedChatOf` copies fields
+without validating them, so its imported fields remain `unknown`; only the
+archive-owned directory, archive timestamp and deny permissions have checked
+types. Its property reader preserves primitive boxing, inherited fields,
+getter receivers and failure on required nullish reads. Entries loaded at
+startup follow the archive schema. Newly written names remain unchecked because
+Docker's labels can supply non-string names before the next startup read.
+
+Config layers contain checked objects with unchecked field values. Provider
+settings remain unchecked until the key schema or URL parser consumes them.
+URL parsing preserves JavaScript's string-hint coercion, including a refusal
+when coercion throws. The keeper's renewal map contains its promise before a
+read, and its per-space fingerprint map exists before a fingerprint is stored.
+
+`opencode/config-v2.js` constructs custom provider entities through
+`Object.fromEntries` without a typed per-field contract. In particular, provider
+settings pass through as an arbitrary configuration object. Callers must not
+declare its unchecked `baseURL`, `apiKey` or model settings to be validated
+strings.
+
+`places/docker-engine.js` checks that inspect output is JSON, then passes its
+entries and labels through without a shape check. Label parsing checks the
+marker, role and coercible id and owner, but passes the other fields through.
+Its result cannot promise that every field is a string. The place registry
+checks method presence and keeps the original place object; it establishes no
+contract for those methods' results.
+
+The manager declares the place operations it calls, including a string start
+configuration and progress callbacks that receive a step. Docker's check result
+narrows through its existing `available` test; its JavaScript return inference
+alone does not retain the success discriminant.
+
+The tools manifest reader validates versions with a coercing regular expression.
+That check alone does not prove the original JSON value was a string. A tools
+source is accepted by factory identity in a `WeakSet`, rather than by its shape.
+
+Code transfer uses the host Git runner's command and option contracts. Temporary
+Git sessions preserve the callback's result type, including an intentional
+`undefined` result. Error properties remain unchecked; accessing a property of
+`null` or `undefined` still fails, and extending error details uses object spread
+so own keys such as `__proto__` remain data. A null place is supported for
+host-only apply calls and still fails when a transfer first asks for `execArgv`.
+
+Code out keeps git side fields optional where a split listing has not checked
+them. Its required-entry accessor covers dense loop positions and maps populated
+earlier in the same call. A missing object-size answer retains the native
+`TypeError` for reading `size`. The external argument-array check stays in
+`buildExtUrl`; its type does not replace the runtime refusal.
+
+Record reads return a discriminated result whose successful record is inferred
+from the schema. Invalid grants, setup state and task titles retain their
+independent recovery paths. The task-title sanitizer accepts unchecked input
+and returns an empty title when its string parse fails.
+
+Environment-key reads stay unchecked until the model-grant string test. A name
+such as `constructor` can select an inherited object member, both for an initial
+grant and when a space starts again. The journey keeps both string tests.
+Creation-error lookup also keeps the object's inherited-property behavior.
+
+The manager preserves unchecked failure codes when wrapping a place error.
+`SpaceError` carries that code's inferred type rather than promising a string
+for a value the manager did not validate. Error-property access preserves
+inherited fields and the existing optional access on nullish failures.
+Required error-property reads still fail on nullish values.
+
+The command runner shares `CommandOptions` and `CommandResult` with host Git.
+Its output events carry buffers because these private child pipes never set an
+encoding. The tail window contains a first chunk while trimming and tracks the
+byte count for each of its two buffers. Required-entry accessors preserve those
+invariants under indexed-access checking. Node's general spawn declaration makes
+stdin nullable when stderr is a file descriptor; the runner always requests a
+stdin pipe and requires it before writing. Error fields remain unchecked, and
+required reads still fail for nullish errors. Both process-tree kill paths keep
+the integer-greater-than-one pid check.
+
+Dispatcher directory headers retain Node's string-or-array input type. URI
+decoding and percent-escape matching coerce arrays as before; an undecoded array
+still fails with the original `trim` TypeError. Empty header arrays are ignored.
+The directory-to-id accessor runs only after the space-directory check, so its
+normalized directory is non-null and its split always has a first element.
+Listed ids remain unchecked values in the dispatcher's set: a coercible label
+may pass label parsing without being a string, and set membership must not
+coerce it to match a request's string id.
+
+The HTTP agent's connection callback receives either an error alone or a null
+error and a duplex stream. Node's declaration requires the stream even on
+failure. The dispatcher installs its override with `Object.assign` and a named
+callback union that describes the actual Node invocation. HTTP client response
+events always carry a numeric status; Node's shared `IncomingMessage` type also
+covers server-side requests, where that property is absent.
+
+Setup output removes C0, C1 and bidi characters.
+Unicode categories express the control range without a lint suppression;
+tab, newline and carriage return remain outside that removal range. Escape
+and bell delimiters still consume complete terminal sequences.
+
+Space event payloads retain the SSE parser's JSON contract. Queue items stay
+unchecked after the queue schema's array check. Event source callbacks and the
+session index share their owning contracts; session records remain unchecked
+after the JavaScript proxy sanitizer. The index reads only their id field and
+does not claim that the sanitizer validates every retained field.
+
+### Why space streams accept Node web streams
+
+The space transport uses `Readable.toWeb` on an HTTP client response. Node's
+web-stream declarations differ from the DOM declarations on completed reads,
+but the upstream reader consumes both through `getReader`, `read` and `cancel`.
+Its response contract accepts both stream types. HTTP client responses have a
+numeric status code; the dispatcher's response type distinguishes them from
+server-side requests covered by Node's general `IncomingMessage` declaration.
+
+### Why unchecked Docker consumers remain JavaScript
+
+`hardening.js` calls `filter`, `map`, `some` and `includes` on nested inspect
+fields without checking their shapes. `docker-engine.inspect` returns an
+unchecked first entry. Declaring its `Config.Env`, `HostConfig` arrays, mounts
+or network entries as validated objects would overstate that boundary.
+`host.js` also passes the Docker label parser's unchecked ids and project values
+into string-only space and directory operations. The label parser deliberately
+accepts coercible ids and passes other label values through. Neither boundary
+can become a checked shape through a type-only correction.
+
+`createDockerEngine.inspect` returns `unknown` after parsing JSON and selecting
+its first entry. Typing `findCommonViolations` needs the existing calls on
+`Config.Env`, `HostConfig.ExtraHosts`, `SecurityOpt`, `Mounts` and
+`IPAM.Config` to remain possible without claiming those fields were checked.
+An exported type, a corrected declaration or a dependency augmentation cannot
+establish those array shapes. In `createSpacesHost`, `knownSpaces` forwards
+unchecked label ids into `spaceProjectPath` and the manager's string-id
+operations. Widening those signatures alone still leaves the unchanged
+string-only regular-expression checks and path operations untyped.
+
+### Why control ranges use Unicode categories
+
+Transfer arguments reject ASCII controls only, while Windows names reject
+characters 1 through 31 as well as the reserved punctuation. Unicode category
+checks exclude the C1 range explicitly, preserving these ranges under the server
+lint rules. The global path-redaction expression retains the Unicode flag.
+`code-transfer.test.js` checks every UTF-16 code unit for transfer arguments and
+the Windows control range separately.
+
+The Git version floor comes from
+[git-fetch 2.29](https://git-scm.com/docs/git-fetch/2.29.0), and argument escaping
+follows [git-remote-ext](https://git-scm.com/docs/git-remote-ext). Windows name
+rules follow [Microsoft's naming rules](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)
+and [Git for Windows](https://github.com/git-for-windows/git/blob/main/compat/mingw.c).
 
 ## Place contract
 
@@ -1201,6 +1381,11 @@ The manager verifies again after `create` and removes a space that reports viola
 ## Process rules
 
 `run-command.js` spawns the executable directly with an argv array, `shell: false`, and `windowsHide: true`. No `cmd.exe`, no shell strings. Every call has a timeout that kills the child, and an output cap. The Docker place receives the runner as a dependency, so tests pass a fake and never mock a module.
+
+libuv's [Windows process implementation](https://github.com/libuv/libuv/blob/v1.x/src/win/process.c)
+uses silent breakaway, leaving subprocesses outside Node's job object.
+[Node's detached option](https://nodejs.org/api/child_process.html#optionsdetached)
+gives a Windows child its own console, so tree-kill children detach only on POSIX.
 
 A timeout kills the `docker` CLI only. A command started with `exec` keeps running inside the space or the gatekeeper.
 

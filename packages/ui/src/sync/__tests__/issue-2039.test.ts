@@ -637,7 +637,7 @@ describe("issue 2039 draft auto-accept", () => {
     expect(applyDefaultModelAgentSelectionCalls).toEqual([])
   })
 
-  test("loads the selected worktree's config when a project draft changes directories", async () => {
+  test("loads the selected worktree's config when a project draft changes directories", () => {
     const project = { id: "project-1", path: "/repo" }
     projectsState.projects = [project]
 
@@ -646,7 +646,6 @@ describe("issue 2039 draft auto-accept", () => {
       selectedProjectId: project.id,
       directoryOverride: project.path,
     })
-    await new Promise((resolve) => setTimeout(resolve, 0))
     activateDirectoryCalls.length = 0
     activationOptions.length = 0
 
@@ -654,7 +653,6 @@ describe("issue 2039 draft auto-accept", () => {
       projectId: project.id,
       directoryOverride: "/repo-worktree",
     })
-    await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(activateDirectoryCalls).toEqual(["/repo-worktree"])
     expect(activationOptions).toEqual([{ preserveManualModel: true }])
