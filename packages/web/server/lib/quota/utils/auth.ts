@@ -2,14 +2,24 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { getOpenCodeDataDir, OPENCODE_CONFIG_DIR } from '../../opencode/config-files.js';
+import { isString } from '../../shared/object-guards.js';
 import { asNonEmptyString } from './transformers.js';
+import type { JsonValue } from './contracts.js';
+
+export interface ConfigApiKeyOptions {
+  configDir?: string;
+  homeDir?: string;
+  env?: NodeJS.ProcessEnv;
+}
 
 export const ANTIGRAVITY_ACCOUNTS_PATHS = [
   path.join(OPENCODE_CONFIG_DIR, 'antigravity-accounts.json'),
   path.join(getOpenCodeDataDir(), 'antigravity-accounts.json')
 ];
 
-export const readJsonFile = (filePath) => {
+const isObjectEntry = (value: unknown): value is object => typeof value === 'object';
+
+export const readJsonFile = (filePath: string): JsonValue | null => {
   if (!fs.existsSync(filePath)) {
     return null;
   }
@@ -24,21 +34,22 @@ export const readJsonFile = (filePath) => {
   }
 };
 
-export const getAuthEntry = (auth, aliases) => {
+export const getAuthEntry = <Entry>(auth: Readonly<Record<string, Entry>>, aliases: readonly string[]) => {
   for (const alias of aliases) {
-    if (auth[alias]) {
-      return auth[alias];
+    const entry = auth[alias];
+    if (entry) {
+      return entry;
     }
   }
   return null;
 };
 
-export const normalizeAuthEntry = (entry) => {
+export const normalizeAuthEntry = <Entry>(entry: Entry): object | null => {
   if (!entry) return null;
-  if (typeof entry === 'string') {
+  if (isString(entry)) {
     return { token: entry };
   }
-  if (typeof entry === 'object') {
+  if (isObjectEntry(entry)) {
     return entry;
   }
   return null;
@@ -47,17 +58,17 @@ export const normalizeAuthEntry = (entry) => {
 const CONFIG_FILE_REFERENCE = /^\{file:(.+)\}$/i;
 const CONFIG_ENV_REFERENCE = /^\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/;
 
-export const resolveConfigApiKey = (value, { configDir = OPENCODE_CONFIG_DIR, homeDir = os.homedir(), env = process.env } = {}) => {
+export const resolveConfigApiKey = <Value>(value: Value, { configDir = OPENCODE_CONFIG_DIR, homeDir = os.homedir(), env = process.env }: ConfigApiKeyOptions = {}) => {
   const trimmed = asNonEmptyString(value);
   if (!trimmed) return null;
-  const envMatch = trimmed.match(CONFIG_ENV_REFERENCE);
-  if (envMatch) {
-    const resolved = env[envMatch[1]]?.trim();
+  const envName = trimmed.match(CONFIG_ENV_REFERENCE)?.[1];
+  if (envName !== undefined) {
+    const resolved = env[envName]?.trim();
     return resolved || null;
   }
-  const fileMatch = trimmed.match(CONFIG_FILE_REFERENCE);
-  if (!fileMatch) return trimmed;
-  let target = fileMatch[1].trim();
+  const fileTarget = trimmed.match(CONFIG_FILE_REFERENCE)?.[1];
+  if (fileTarget === undefined) return trimmed;
+  let target = fileTarget.trim();
   if (target === '~' || target.startsWith('~/')) target = path.join(homeDir, target.slice(1));
   else if (!path.isAbsolute(target)) target = path.join(configDir, target);
   try {

@@ -4,7 +4,7 @@
 
 Shared quota helpers normalize provider JSON, select credentials and format quota
 windows and result envelopes. Provider modules own HTTP reads and credential
-discovery. `contracts.ts` owns the converted helpers' data types.
+discovery. `contracts.ts` owns the helpers' data types.
 
 ## Invariants
 
@@ -26,11 +26,12 @@ discovery. `contracts.ts` owns the converted helpers' data types.
 
 ## Decisions
 
-### Why auth remains JavaScript
+### Why auth lookups keep their loose results
 
-`auth.js` imports `getOpenCodeDataDir` and `OPENCODE_CONFIG_DIR` from
-`../../opencode/config-files.js`. The caller supplies its own field checks:
-`auth.d.ts` exposes the JSON and credential lookup results as unchecked values.
+`readJsonFile` returns parsed JSON and `normalizeAuthEntry` promises only
+`object`: neither checks fields, so each provider validates the fields it
+reads. `getAuthEntry` returns the first truthy entry with the caller's own
+entry type.
 
 ### Why external scalar guards remain
 
