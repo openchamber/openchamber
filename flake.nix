@@ -76,6 +76,8 @@
                     hash =
                       {
                         "v2.3.2" = {
+                          "x86_64-linux" = "sha256-TZJtdK3IULtOnbeYjrYZy9U47etQ63V7BplXGVstNPI=";
+                          "aarch64-linux" = "sha256-Wc12QabEi5HW9FUGgItsiJOOp0MddyjC/FlNnExyV5U=";
                           "aarch64-darwin" = "sha256-5ZAz0jWNhW+7zGfqOLUFFFhMUMxo76djVwixfvcMPhY=";
                         };
                       }.${opencodeTag}.${system}
