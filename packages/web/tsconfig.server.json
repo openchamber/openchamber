@@ -25,7 +25,7 @@
     "**/*.test-support.*",
     "**/*.fixture.*",
     "**/test-support/**",
-    "**/*-live-support.js",
+    "**/*-live-support.*",
     "server/built-in-extensions/**",
     "build",
     "node_modules"
