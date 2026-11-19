@@ -1,6 +1,7 @@
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import type { IncomingMessage } from 'node:http';
 import path from 'node:path';
 
 import { z } from 'zod';
@@ -32,6 +33,20 @@ import { createPlaceRegistry } from './places/registry.js';
 import { openCommandStream as openCommandStreamProcess, runCommand as runCommandProcess } from './run-command.js';
 import { createSpaceServerChannel } from './space-server.js';
 import { createRegistryToolsSource, readHostToolVersions } from './tools.js';
+import { isJsonObject, parseJson } from './json.js';
+import { isRecord } from '../shared/object-guards.js';
+import type { JsonValue } from './json.js';
+import { spaceErrorProperty } from './errors.js';
+import type { RunCommand } from './command-contracts.js';
+import type { InsideRequest, InsideResponse } from './dispatcher.js';
+import type { SpaceJourneyOptions } from './journey.js';
+import type { LoginKeeperOptions } from './login-keeper.js';
+import type { HostCatalogOptions } from './host-catalog.js';
+import type { createSpaceArchive } from './space-archive.js';
+import type { SpaceEventSourcesOptions } from './space-events.js';
+import type { createGlobalMessageStreamHub } from '../event-stream/global-hub.js';
+import type { RequestOriginChecker } from '../security/request-security.js';
+import type { createUiAuth } from '../ui-auth/ui-auth.js';
 
 const storedApiKeySchema = z.object({ type: z.literal('api'), key: z.string().min(1) });
 
@@ -48,10 +63,10 @@ const MAX_RESTART_ANSWER_BYTES = 64 * 1024;
 const restartedSchema = z.object({ success: z.literal(true), requiresReload: z.literal(true) });
 const nextCursorSchema = z.string().min(1);
 
-const readBody = (response, cap) => new Promise((resolve, reject) => {
-  const chunks = [];
+const readBody = (response: IncomingMessage, cap: number) => new Promise<string>((resolve, reject) => {
+  const chunks: Buffer[] = [];
   let size = 0;
-  response.on('data', (chunk) => {
+  response.on('data', (chunk: Buffer) => {
     size += chunk.length;
     if (size > cap) { response.destroy(); reject(new Error(`the answer exceeds ${cap} bytes`)); return; }
     chunks.push(chunk);
@@ -60,7 +75,61 @@ const readBody = (response, cap) => new Promise((resolve, reject) => {
   response.on('error', reject);
 });
 
-export const restartOpenCodeInside = async (requestInside, spaceId) => {
+const fieldOf = (value: JsonValue | undefined, key: string) => (value !== undefined && isJsonObject(value) ? value[key] : undefined);
+
+type AnnouncedPayload = Parameters<NonNullable<SpaceJourneyOptions<string, unknown>['announce']>>[1];
+
+const wirePayload = (payload: AnnouncedPayload): JsonValue => JSON.parse(JSON.stringify(payload));
+
+const errorSummary = <Cause>(error: Cause) => spaceErrorProperty(error, 'code') ?? spaceErrorProperty(error, 'message') ?? error;
+
+type RequestInside = (spaceId: string, request: InsideRequest) => Promise<InsideResponse>;
+
+type GlobalEventHub = ReturnType<typeof createGlobalMessageStreamHub>;
+type SpaceSockets = ReturnType<typeof createSpaceWebSocketForwarder>;
+
+interface KnownSpaces {
+  spaces: KnownSpace[];
+  readAt: number;
+}
+
+interface KnownSpace {
+  id: string;
+  name: string;
+  state: string;
+  projectDirectory: string | null;
+  directory: string | null;
+}
+
+export interface SpacesHostOptions {
+  dataDir: string;
+  dockerPath?: string;
+  colimaPath?: string | null;
+  findProgram?: (name: string) => string | null;
+  sshDockerHost?: string | null;
+  gitPath?: string;
+  hostEnvironment?: NodeJS.ProcessEnv;
+  listProjectDirectories?: () => Promise<string[]>;
+  readIdleStop?: SpaceJourneyOptions<string, unknown>['readIdleStop'];
+  saveIdleStop?: SpaceJourneyOptions<string, unknown>['saveIdleStop'];
+  readPermissionDefault?: SpaceJourneyOptions<string, unknown>['readPermissionDefault'];
+  archive?: Pick<ReturnType<typeof createSpaceArchive>, 'saveChats'> | null;
+  readHostLogin?: LoginKeeperOptions['readLogin'];
+  renewHostLogin?: LoginKeeperOptions['renewLogin'];
+  loginWindowOf?: SpaceJourneyOptions<string, unknown>['loginWindowOf'];
+  hostProviders?: SpaceJourneyOptions<string, unknown>['hostProviders'] | null;
+  readHostCatalog?: HostCatalogOptions['readCatalog'];
+  userAgent?: string;
+  runCommand?: RunCommand;
+  openCommandStream?: typeof openCommandStreamProcess;
+  place?: ReturnType<typeof createDockerPlace> | null;
+  logger?: Pick<Console, 'warn'> & Partial<Pick<Console, 'info'>>;
+  now?: () => number;
+  setTimer?: (callback: () => void, milliseconds: number) => ReturnType<typeof setInterval>;
+  clearTimer?: (timer: ReturnType<typeof setInterval>) => void;
+}
+
+export const restartOpenCodeInside = async (requestInside: RequestInside, spaceId: string) => {
   const response = await requestInside(spaceId, {
     method: 'POST',
     path: '/api/config/reload',
@@ -78,14 +147,18 @@ export const restartOpenCodeInside = async (requestInside, spaceId) => {
   if (!succeeded) throw new SpaceError('opencode_restart_failed', `OpenCode inside the space did not restart (status ${response.statusCode}).`);
 };
 
-export function readOrCreateOwner(dataDir) {
-  const file = path.join(dataDir, OWNER_FILE);
+const readOwnerFile = (file: string) => {
   try {
-    const existing = fs.readFileSync(file, 'utf8').trim();
-    if (/^[a-z0-9]{16,64}$/.test(existing)) return existing;
+    return fs.readFileSync(file, 'utf8').trim();
   } catch {
-    // Made below.
+    return null;
   }
+};
+
+export function readOrCreateOwner(dataDir: string) {
+  const file = path.join(dataDir, OWNER_FILE);
+  const existing = readOwnerFile(file);
+  if (existing !== null && /^[a-z0-9]{16,64}$/.test(existing)) return existing;
   const owner = crypto.randomBytes(12).toString('hex');
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   fs.writeFileSync(file, `${owner}\n`, { encoding: 'utf8', mode: 0o600 });
@@ -118,7 +191,7 @@ export function createSpacesHost({
   now = Date.now,
   setTimer = setInterval,
   clearTimer = clearInterval,
-}) {
+}: SpacesHostOptions) {
   const owner = readOrCreateOwner(dataDir);
   const toolsSource = createRegistryToolsSource(readHostToolVersions());
   const dockerPlace = place ?? createDockerPlace({ runCommand, openCommandStream, dockerPath, colimaPath, owner, toolsSource });
@@ -140,11 +213,11 @@ export function createSpacesHost({
   const codeOut = createCodeOut({ git, place: manager });
 
   const listSpaces = async () => (await manager.listAllSpaces()).spaces;
-  const unreachableIds = async () => new Set((await knownSpaces()).filter((space) => space.state === 'unreachable').map((space) => space.id));
-  const requireReachable = async (spaceId) => {
+  const unreachableIds = async (): Promise<Set<string>> => new Set((await knownSpaces()).filter((space) => space.state === 'unreachable').map((space) => space.id));
+  const requireReachable = async (spaceId: string) => {
     if ((await unreachableIds()).has(spaceId)) throw new SpaceError('place_unreachable', 'The machine this space runs on cannot be reached.');
   };
-  const connectReachable = async (spaceId) => {
+  const connectReachable = async (spaceId: string) => {
     await requireReachable(spaceId);
     return manager.connect(spaceId);
   };
@@ -157,7 +230,7 @@ export function createSpacesHost({
         return { ids: spaces.map((space) => space.id), failure };
       },
       connect: connectReachable,
-      readToken: async (spaceId) => {
+      readToken: async (spaceId: string) => {
         await requireReachable(spaceId);
         return serverInside.readToken(spaceId);
       },
@@ -167,21 +240,21 @@ export function createSpacesHost({
   const spaceOpenCode = createSpaceOpenCode({ exec: manager.exec, requestInside: dispatcher.requestInside });
 
   const index = createSpaceSessionIndex({ logger });
-  let events = null;
-  let unsubscribeHostEvents = null;
-  let followTimer = null;
-  let keepTimer = null;
-  let known = { spaces: [], readAt: -Infinity };
-  let listing = null;
-  const listReadAt = new Map();
+  let events: ReturnType<typeof createSpaceEventSources> | null = null;
+  let unsubscribeHostEvents: (() => void) | null = null;
+  let followTimer: ReturnType<typeof setInterval> | null = null;
+  let keepTimer: ReturnType<typeof setInterval> | null = null;
+  let known: KnownSpaces = { spaces: [], readAt: -Infinity };
+  let listing: Promise<void> | null = null;
+  const listReadAt = new Map<string, number>();
 
-  const resolveProjects = async (spaces) => {
-    if (spaces.length === 0) return new Map();
-    let directories = [];
+  const resolveProjects = async (spaces: Awaited<ReturnType<typeof listSpaces>>) => {
+    if (spaces.length === 0) return new Map<string, string | null>();
+    let directories: string[] = [];
     try {
       directories = await listProjectDirectories();
     } catch (error) {
-      logger.warn?.(`[spaces] could not read the projects: ${error?.code ?? error?.message ?? error}`);
+      logger.warn?.(`[spaces] could not read the projects: ${errorSummary(error)}`);
     }
     const byHash = new Map(directories.map((directory) => [hashProjectDirectory(directory), directory]));
     return new Map(spaces.map((space) => [space.id, byHash.get(space.project) ?? null]));
@@ -207,7 +280,7 @@ export function createSpacesHost({
             readAt: now(),
           };
         })
-        .catch((error) => { logger.warn?.(`[spaces] could not list the spaces: ${error?.code ?? error?.message ?? error}`); })
+        .catch((error) => { logger.warn?.(`[spaces] could not list the spaces: ${errorSummary(error)}`); })
         .finally(() => { listing = null; });
     }
     await listing;
@@ -224,7 +297,7 @@ export function createSpacesHost({
     return follow();
   };
 
-  let hub = null;
+  let hub: GlobalEventHub | null = null;
   const keeper = createLoginKeeper({
     readLogin: readHostLogin,
     renewLogin: renewHostLogin,
@@ -261,45 +334,48 @@ export function createSpacesHost({
         listChats: async () => {
           if (!running) throw new SpaceError('space_not_running', 'The space is not running');
           const { records: chats, complete } = await readSpaceSessions(spaceId);
-          return { chats: chats.map((chat) => ({ id: chat?.id, title: chat?.title })), complete };
+          return { chats: chats.map((chat) => ({ id: fieldOf(chat, 'id'), title: fieldOf(chat, 'title') })), complete };
         },
-        exportChat: (chatId) => spaceOpenCode.exportChat(spaceId, chatId),
+        exportChat: (chatId: string) => spaceOpenCode.exportChat(spaceId, chatId),
       },
     }) : null,
     readHostSecret: (name) => hostEnvironment[name],
     readHostLogin: keeper.fresh,
     loginWindowOf,
-    hostProviders: hostProviders ?? createHostProviders({ readStoredKey: async (providerId) => (await getProviderAuth(providerId))?.key ?? null, hostEnvironment }),
+    hostProviders: hostProviders ?? createHostProviders({ readStoredKey: async (providerId) => {
+      const entry = await getProviderAuth(providerId);
+      return (entry !== null && 'key' in entry ? entry.key : undefined) ?? null;
+    }, hostEnvironment }),
     hostCatalog: createHostCatalog({ readCatalog: readHostCatalog, readStoredKey: async (integration) => storedApiKeySchema.safeParse(await getProviderAuth(integration)).data?.key ?? null }),
     readIdleStop,
     saveIdleStop,
     readPermissionDefault,
-    announce: (spaceId, payload) => { hub?.injectEvent({ payload, directory: 'global', spaceId }); },
+    announce: (spaceId, payload) => { hub?.injectEvent({ payload: wirePayload(payload), directory: 'global', spaceId }); },
     onSpacesChanged: () => { void refresh().catch(() => {}); },
     logger,
   });
 
-  const readSpaceSessions = async (spaceId) => {
-    const records = [];
-    let cursor = null;
+  const readSpaceSessions = async (spaceId: string) => {
+    const records: JsonValue[] = [];
+    let cursor: string | null = null;
     for (let page = 0; page < SESSION_MAX_PAGES; page += 1) {
       const query = new URLSearchParams({ limit: String(SESSION_PAGE_LIMIT) });
       if (cursor !== null) query.set('cursor', cursor);
       const response = await dispatcher.requestInside(spaceId, { path: `/api/session?${query}`, headers: { accept: 'application/json' }, timeoutMs: SESSION_LIST_TIMEOUT_MS });
       if (response.statusCode !== 200) { response.resume(); throw new Error(`status ${response.statusCode}`); }
-      const payload = JSON.parse(await readBody(response, MAX_SESSION_LIST_BYTES));
-      const data = Array.isArray(payload) ? payload : payload?.data;
+      const payload = parseJson(await readBody(response, MAX_SESSION_LIST_BYTES));
+      const data = Array.isArray(payload) ? payload : fieldOf(payload, 'data');
       if (!Array.isArray(data)) throw new Error('the list is not a list');
       records.push(...data);
-      const next = nextCursorSchema.safeParse(payload?.cursor?.next);
+      const next = nextCursorSchema.safeParse(fieldOf(fieldOf(payload, 'cursor'), 'next'));
       if (!next.success || data.length === 0) return { records, complete: true };
       cursor = next.data;
     }
     return { records, complete: false };
   };
 
-  const mergeSessionList = async (hostPayload) => {
-    const hostRecords = Array.isArray(hostPayload) ? hostPayload : hostPayload?.data;
+  const mergeSessionList = async <Payload>(hostPayload: Payload) => {
+    const hostRecords: unknown = Array.isArray(hostPayload) ? hostPayload : (isRecord(hostPayload) ? hostPayload.data : undefined);
     if (Array.isArray(hostRecords)) index.observeHostRecords(hostRecords);
     const spaces = await knownSpaces();
     if (spaces.length === 0) return hostPayload;
@@ -315,7 +391,7 @@ export function createSpacesHost({
         index.acceptSpaceList(spaceId, records, { complete });
         listReadAt.set(spaceId, now());
       } catch (error) {
-        logger.warn?.(`[spaces] the session list of space ${spaceId} did not come: ${error?.code ?? error?.message ?? error}`);
+        logger.warn?.(`[spaces] the session list of space ${spaceId} did not come: ${errorSummary(error)}`);
         index.markUnreachable(spaceId);
         listReadAt.delete(spaceId);
       }
@@ -327,7 +403,7 @@ export function createSpacesHost({
     }));
   };
 
-  let sockets = null;
+  let sockets: SpaceSockets | null = null;
 
   return {
     manager,
@@ -339,11 +415,11 @@ export function createSpacesHost({
     dockerSetup,
     localPlaceId: dockerPlace.id,
     middleware: dispatcher.middleware,
-    prepareUpgrades: ({ uiAuthController, isRequestOriginAllowed }) => {
+    prepareUpgrades: ({ uiAuthController, isRequestOriginAllowed }: { uiAuthController: ReturnType<typeof createUiAuth> | null; isRequestOriginAllowed: RequestOriginChecker }) => {
       sockets = createSpaceWebSocketForwarder({ dispatcher, connect: connectReachable, uiAuthController, isRequestOriginAllowed, logger });
     },
-    upgradeHandler: (...args) => sockets?.upgradeHandler(...args),
-    startEvents: (globalEventHub, { broadcastUiEvent = null, broadcastGlobalUiEvent = null } = {}) => {
+    upgradeHandler: (...args: Parameters<SpaceSockets['upgradeHandler']>) => sockets?.upgradeHandler(...args),
+    startEvents: (globalEventHub: GlobalEventHub, { broadcastUiEvent = null, broadcastGlobalUiEvent = null }: Pick<SpaceEventSourcesOptions, 'broadcastUiEvent' | 'broadcastGlobalUiEvent'> = {}) => {
       hub = globalEventHub;
       events = createSpaceEventSources({ requestInside: dispatcher.requestInside, index, hub: globalEventHub, broadcastUiEvent, broadcastGlobalUiEvent, logger, now,
         onTaskTitle: (spaceId, title) => {
@@ -351,7 +427,7 @@ export function createSpacesHost({
             const result = records.setTaskTitle(spaceId, { title, by: 'agent' });
             if (result.applied) globalEventHub.injectEvent({ payload: { type: 'openchamber:space-task-title.updated', properties: { spaceId, taskTitle: result.taskTitle } }, directory: 'global', spaceId });
           } catch (error) {
-            logger.warn?.(`[spaces] could not save the task title of space ${spaceId}: ${error?.code ?? error?.message ?? error}`);
+            logger.warn?.(`[spaces] could not save the task title of space ${spaceId}: ${errorSummary(error)}`);
           }
         },
       });
@@ -365,8 +441,8 @@ export function createSpacesHost({
     },
     keepLoginsFresh: () => keeper.tick(),
     mergeSessionList,
-    skipsBodyParsing: (req) => dispatcher.isSpaceRequest(req),
-    refuseDirectory: (candidate) => (dispatcher.isSpaceDirectory(candidate)
+    skipsBodyParsing: (req: Parameters<typeof dispatcher.isSpaceRequest>[0]) => dispatcher.isSpaceRequest(req),
+    refuseDirectory: (candidate: Parameters<typeof dispatcher.isSpaceDirectory>[0]) => (dispatcher.isSpaceDirectory(candidate)
       ? 'A directory under /spaces/ belongs to an isolated space and is named in the query or the directory header of a request to it'
       : null),
     close: () => {

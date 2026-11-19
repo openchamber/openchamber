@@ -228,7 +228,7 @@ Its response contract accepts both stream types. HTTP client responses have a
 numeric status code; the dispatcher's response type distinguishes them from
 server-side requests covered by Node's general `IncomingMessage` declaration.
 
-### Why hardening trusts Docker's inspect shapes and the host stays JavaScript
+### Why hardening trusts Docker's inspect shapes
 
 `hardening.ts` reads `docker inspect` through the wire shapes of
 `places/docker-wire.ts`: Docker CLI output is a documented format of a program
@@ -237,18 +237,21 @@ is typed and not validated" in `places/DOCUMENTATION.md`. Each checker keeps
 its fallbacks for fields that may be absent, and verification still fails
 closed on whatever the inspect output says.
 
-Space ids reach `spaceProjectPath` in `host.js` from Docker labels, which are
+Space ids reach `spaceProjectPath` in `host.ts` from Docker labels, which are
 strings, or from record file names, which match the id pattern; both are
 checked against that pattern before a path is built. Nothing a container
 controls reaches it.
 
-`host.js` stays JavaScript for one line. The journey's `announce` payload has
-`properties: object` and carries a failure whose `code`, `message` and
-`details` are `unknown`, and the event hub's `injectEvent` accepts only
-`JsonValue`. Passing one to the other needs a cast or a conversion. Either the
-hub accepts the payloads it serializes as unknown values, or the journey
-declares JSON payloads with checked failure fields; both belong to their
-owners, not to the host.
+### Why the host copies journey announcements as JSON
+
+The journey announces progress with a failure whose `code`, `message` and
+`details` are unknown values, and the event hub takes only JSON values,
+because it serializes every payload for the UI streams and its subscribers
+read fields of it. The host passes the hub a JSON copy of the announcement.
+Clients receive the same bytes as before; a payload that cannot be serialized
+now fails at the announcement instead of at the hub's first serialization.
+Typing the journey's failures as JSON would need a check of every error
+detail, which belongs to the journey and buys nothing the copy does not.
 
 ### Why control ranges use Unicode categories
 
