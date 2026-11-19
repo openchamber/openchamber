@@ -380,12 +380,12 @@ boundary in `sendBindingError`. Its `resolveDirectoryQuery` also uses a String
 tag check before passing the original value to the binding service's string
 directory parameter. A boxed or String-tagged value remains unchanged.
 
-`mutation-executor.js` checks a thrown code's String tag before reading its
-unchecked `length` and copying the original code into a failure result. That
-check can accept boxed strings and String-tagged objects, so the result cannot
-promise the mutation store's primitive-string `failureCode`. Receipt and audit
-identity checks similarly call `trim` after a tag check. A missing method must
-retain its existing TypeError rather than become a newly rejected input.
+`mutation-executor.ts` checks a thrown code's String tag before reading its
+unchecked `length` and copying the original code into a completion input. The
+input keeps that code unchecked because boxed strings and String-tagged objects
+can pass the tag check. The mutation store checks for a primitive string before
+writing or returning the result. Receipt and audit identity checks still
+require the original value to equal its trimmed form.
 
 `provider-registry.js` invokes the dynamically selected `createProvider` with
 host services and a registry descriptor. The remaining GitLab, Gitea, Gerrit

@@ -50,6 +50,11 @@ export interface MutationCompletion {
   state: Exclude<MutationRecord['state'], 'running'>;
   result?: MutationResult | undefined;
 }
+type MutationResultInput = Omit<MutationResult, 'failureCode'> & { failureCode?: unknown };
+export interface MutationCompletionInput {
+  state: MutationCompletion['state'];
+  result?: MutationResultInput | undefined;
+}
 
 export interface MutationClaimResult {
   status: 'claimed' | 'existing' | 'conflict';
@@ -70,8 +75,8 @@ interface MutationStoreOptions {
   terminalTtlMs?: number;
 }
 
-type MutationValue = MutationSnapshot | MutationRecord | MutationClaim | MutationCompletion | AccountIdentity
-  | SourceControlProjectRef | SourceControlMutationTarget | MutationResult;
+type MutationValue = MutationSnapshot | MutationRecord | MutationClaim | MutationCompletionInput | AccountIdentity
+  | SourceControlProjectRef | SourceControlMutationTarget | MutationResultInput;
 
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 500;
@@ -120,7 +125,7 @@ const MERGE_OUTCOMES = ['queued', 'merging', 'auto-merge', 'cancelled'];
 const emptyState = (): MutationSnapshot => ({ version: VERSION, records: {} });
 const isBoolean = (value: boolean) => Object.prototype.toString.call(value) === '[object Boolean]';
 const isFunction = (value: () => number) => Object.prototype.toString.call(value) === '[object Function]';
-const isNonEmptyString = (value: string) => isString(value) && value.length > 0;
+const isNonEmptyString = (value: unknown): value is string => isString(value) && value.length > 0;
 const hasExactKeys = (value: MutationValue, required: string[], optional: string[] = []) => {
   const keys = Object.keys(value);
   return required.every((key) => keys.includes(key))
@@ -169,7 +174,7 @@ const isTarget = (value: SourceControlMutationTarget, provider: string) => isPla
   && (value.base === undefined || isNonEmptyString(value.base))
   && (value.headSha === undefined || isNonEmptyString(value.headSha));
 
-const isTerminalResult = (value: MutationResult, provider: string) => isPlainObject(value)
+const isTerminalResult = (value: MutationResultInput, provider: string): value is MutationResult => isPlainObject(value)
   && hasExactKeys(value, [], ['project', ...RESULT_KEYS])
   && (value.project === undefined || isProject(value.project, provider))
   && (value.number === undefined || isPositiveInteger(value.number))
@@ -355,7 +360,7 @@ export function createMutationStore({
     return { status: 'claimed', record: candidate };
   });
 
-  const complete = (key: string, inputDigest: string, completion: MutationCompletion) => enqueueWrite(async () => {
+  const complete = (key: string, inputDigest: string, completion: MutationCompletionInput) => enqueueWrite(async () => {
     if (!isNonEmptyString(key)
       || !isNonEmptyString(inputDigest)
       || !isPlainObject(completion)

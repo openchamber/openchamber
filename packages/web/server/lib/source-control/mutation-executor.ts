@@ -1,12 +1,16 @@
 import { createHash } from 'node:crypto';
 
 import { providerTargetKind } from './audit-storage.js';
+import { isSourceControlInteger } from './input-guards.js';
+import type { AuditPlan, AuditRuntime, createSourceControlAuditStore } from './audit-storage.js';
+import type { MutationClaim, MutationCompletion, MutationCompletionInput, MutationRecord, MutationResult, createMutationStore } from './mutation-storage.js';
 
-const valueTag = (value) => Object.prototype.toString.call(value);
-const isPlainObject = (value) => value === Object(value)
+const valueTag = <Value>(value: Value) => Object.prototype.toString.call(value);
+const isPlainObject = (value: unknown): value is object => value === Object(value)
   && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+const isArray = (value: unknown): value is unknown[] => Array.isArray(value);
 
-const canonicalJson = (value, ancestors = new Set()) => {
+const canonicalJson = <Value>(value: Value, ancestors = new Set<object>()): string => {
   if (value === null) return 'null';
   if (value !== Object(value)) {
     const tag = valueTag(value);
@@ -16,13 +20,13 @@ const canonicalJson = (value, ancestors = new Set()) => {
       return JSON.stringify(value);
     }
   }
-  if (!Array.isArray(value) && !isPlainObject(value)) {
+  if (!isArray(value) && !isPlainObject(value)) {
     throw new TypeError('Mutation input contains an unsupported value');
   }
   if (ancestors.has(value)) throw new TypeError('Mutation input contains an unsupported value');
   ancestors.add(value);
   try {
-    if (Array.isArray(value)) {
+    if (isArray(value)) {
       if (Reflect.ownKeys(value).length !== value.length + 1) throw new TypeError('Mutation input contains an unsupported value');
       const items = [];
       for (let index = 0; index < value.length; index += 1) {
@@ -48,12 +52,8 @@ const canonicalJson = (value, ancestors = new Set()) => {
   }
 };
 
-const mutationError = (code, message, status = 409) => {
-  const error = new Error(message);
-  error.code = code;
-  error.status = status;
-  return error;
-};
+const mutationError = (code: string, message: string, status = 409) =>
+  Object.assign(new Error(message), { code, status });
 
 const conflictError = () => mutationError(
   'SOURCE_CONTROL_MUTATION_CONFLICT',
@@ -63,22 +63,30 @@ const outcomeUnknownError = () => mutationError(
   'SOURCE_CONTROL_MUTATION_OUTCOME_UNKNOWN',
   'Source control mutation outcome is unknown',
 );
-const failedReplayError = (record) => mutationError(
+const failedReplayError = (record: MutationRecord) => mutationError(
   record.result?.failureCode || 'SOURCE_CONTROL_MUTATION_FAILED',
   'Source control mutation previously failed',
   record.result?.failureStatus || 409,
 );
 
-const failureResult = (error) => {
-  const result = {};
-  if (Number.isSafeInteger(error?.status) && error.status >= 400 && error.status <= 599) {
+interface FailureFields { status?: unknown; code?: unknown; message?: unknown }
+const hasFailureFields = (value: unknown): value is FailureFields => value != null;
+const hasCodeFields = (value: unknown): value is { length?: unknown; startsWith?: unknown } => value != null;
+const isPrefixMethod = (value: unknown): value is (prefix: string) => NonNullable<unknown> | null | undefined => typeof value === 'function';
+
+const failureResult = (cause: unknown) => {
+  const error = hasFailureFields(cause) ? cause : undefined;
+  const result: NonNullable<MutationCompletionInput['result']> = {};
+  if (isSourceControlInteger(error?.status) && error.status >= 400 && error.status <= 599) {
     result.failureStatus = error.status;
   }
-  if (valueTag(error?.code) === '[object String]' && error.code.length > 0) result.failureCode = error.code;
+  if (valueTag(error?.code) === '[object String]' && hasCodeFields(error?.code) && Number(error.code.length) > 0) {
+    result.failureCode = error.code;
+  }
   return Object.keys(result).length ? result : undefined;
 };
 
-export function digestMutationInput(value) {
+export function digestMutationInput<Value>(value: Value) {
   let canonical;
   try {
     canonical = canonicalJson(value);
@@ -88,13 +96,13 @@ export function digestMutationInput(value) {
   return createHash('sha256').update(canonical).digest('hex');
 }
 
-export const mutationReceipt = (record, replayed, providerAccountId) => {
+export const mutationReceipt = (record: MutationRecord, replayed: boolean, providerAccountId: string) => {
   if (valueTag(providerAccountId) !== '[object String]'
     || !providerAccountId || providerAccountId.trim() !== providerAccountId) {
     throw new TypeError('Mutation receipt requires a verified provider account ID');
   }
   return {
-    status: 'succeeded',
+    status: 'succeeded' as const,
     actor: {
       provider: record.actor.provider,
       instance: record.actor.instance,
@@ -106,7 +114,23 @@ export const mutationReceipt = (record, replayed, providerAccountId) => {
   };
 };
 
-export function createMutationExecutor({ store, auditStore, runtimeIdentity }) {
+interface ExecutorOptions {
+  store: ReturnType<typeof createMutationStore>;
+  auditStore?: ReturnType<typeof createSourceControlAuditStore> | undefined;
+  runtimeIdentity?: AuditRuntime | undefined;
+}
+export interface MutationExecution {
+  record: MutationClaim;
+  providerAccountId?: string;
+  perform(record: MutationRecord): Promise<MutationResult | undefined>;
+  reconcile?(record: MutationRecord): Promise<{ state: string; result?: MutationResult | undefined }>;
+  classifyError?(cause: unknown): string | Promise<string>;
+}
+interface ExecutionResult { record: MutationRecord; replayed: boolean }
+type AuditStep = 'provider-request' | 'provider-reconciliation';
+const AUDIT_TARGET_KEYS = ['number', 'head', 'base', 'headSha'] as const;
+
+export function createMutationExecutor({ store, auditStore, runtimeIdentity }: ExecutorOptions) {
   if (!store
     || !(store.claim instanceof Function)
     || !(store.complete instanceof Function)
@@ -120,36 +144,38 @@ export function createMutationExecutor({ store, auditStore, runtimeIdentity }) {
     || !isPlainObject(runtimeIdentity))) {
     throw new TypeError('Mutation executor audit dependencies are invalid');
   }
-  const inFlight = new Map();
+  const inFlight = new Map<string, { inputDigest: string; promise: Promise<ExecutionResult> }>();
 
-  const auditId = (record) => `provider:${record.key}`;
-  const planAudit = async (record, providerAccountId) => {
+  const auditId = (record: MutationRecord) => `provider:${record.key}`;
+  const planAudit = async (record: MutationRecord, providerAccountId: string | undefined) => {
     if (!auditStore) return null;
     if (valueTag(providerAccountId) !== '[object String]'
       || !providerAccountId || providerAccountId.trim() !== providerAccountId) {
       throw new TypeError('Mutation executor requires a verified provider account ID for audit');
     }
     const existing = await auditStore.read(auditId(record));
-    const target = {
+    const target: Extract<AuditPlan['target'], { projectId: string }> = {
       kind: providerTargetKind(record.kind),
       operation: record.kind,
       projectId: record.target.project.id,
     };
-    for (const key of ['number', 'head', 'base', 'headSha']) {
-      if (record.target[key] !== undefined) target[key] = record.target[key];
+    for (const key of AUDIT_TARGET_KEYS) {
+      if (record.target[key] !== undefined) Object.assign(target, { [key]: record.target[key] });
     }
+    const runtime = existing?.runtime ?? runtimeIdentity;
+    if (!runtime) throw new TypeError('Mutation executor audit dependencies are invalid');
     return auditStore.plan({
       id: auditId(record),
       initiator: 'user',
       executorKind: 'provider-api',
-      runtime: existing?.runtime ?? runtimeIdentity,
+      runtime,
       repositoryId: record.target.repositoryId,
       providerAccountId,
       transportReference: null,
       target,
     });
   };
-  const finishAudit = async (record, step) => {
+  const finishAudit = async (record: MutationRecord, step: AuditStep) => {
     if (!auditStore) return;
     let errorCode = null;
     if (record.state === 'failed') {
@@ -164,14 +190,19 @@ export function createMutationExecutor({ store, auditStore, runtimeIdentity }) {
     });
   };
 
-  const complete = async (record, completion, auditStep) => {
+  const complete = async (record: MutationRecord, completion: MutationCompletionInput, auditStep: AuditStep) => {
     let completed;
     try {
       completed = await store.complete(record.key, record.inputDigest, completion);
-    } catch (error) {
-      if (error?.code?.startsWith('SOURCE_CONTROL_LOCK_')) {
-        error.message += ' Provider outcome could not be recorded. Use the same idempotency key for reconciliation; do not submit a new mutation.';
-        throw error;
+    } catch (failure) {
+      const error = hasFailureFields(failure) ? failure : undefined;
+      const code = error?.code;
+      if (error && hasCodeFields(code)) {
+        if (!isPrefixMethod(code.startsWith)) throw new TypeError('error?.code?.startsWith is not a function');
+        if (code.startsWith('SOURCE_CONTROL_LOCK_')) {
+          error.message += ' Provider outcome could not be recorded. Use the same idempotency key for reconciliation; do not submit a new mutation.';
+          throw failure;
+        }
       }
       throw outcomeUnknownError();
     }
@@ -179,12 +210,12 @@ export function createMutationExecutor({ store, auditStore, runtimeIdentity }) {
     return completed;
   };
 
-  const markOutcomeUnknown = async (record, auditStep) => {
+  const markOutcomeUnknown = async (record: MutationRecord, auditStep: AuditStep) => {
     await complete(record, { state: 'outcome-unknown' }, auditStep);
     throw outcomeUnknownError();
   };
 
-  const recover = async (record, reconcile) => {
+  const recover = async (record: MutationRecord, reconcile: MutationExecution['reconcile']) => {
     let reconciliation;
     try {
       if (!(reconcile instanceof Function)) throw new TypeError('Mutation reconciliation is required');
@@ -193,10 +224,10 @@ export function createMutationExecutor({ store, auditStore, runtimeIdentity }) {
       return markOutcomeUnknown(record, 'provider-reconciliation');
     }
     if (!isPlainObject(reconciliation)
-      || !['succeeded', 'failed', 'outcome-unknown'].includes(reconciliation.state)) {
+      || (reconciliation.state !== 'succeeded' && reconciliation.state !== 'failed' && reconciliation.state !== 'outcome-unknown')) {
       return markOutcomeUnknown(record, 'provider-reconciliation');
     }
-    const completion = { state: reconciliation.state };
+    const completion: MutationCompletion = { state: reconciliation.state };
     if (reconciliation.result !== undefined) completion.result = reconciliation.result;
     const completed = await complete(record, completion, 'provider-reconciliation');
     if (completed.state === 'succeeded') return { record: completed, replayed: true };
@@ -204,7 +235,7 @@ export function createMutationExecutor({ store, auditStore, runtimeIdentity }) {
     throw outcomeUnknownError();
   };
 
-  const runOwner = async ({ record, providerAccountId, perform, reconcile, classifyError }) => {
+  const runOwner = async ({ record, providerAccountId, perform, reconcile, classifyError }: MutationExecution) => {
     const claim = await store.claim(record);
     if (claim.status === 'conflict') throw conflictError();
     const auditClaim = await planAudit(claim.record, providerAccountId);
@@ -215,7 +246,7 @@ export function createMutationExecutor({ store, auditStore, runtimeIdentity }) {
         return recover(claim.record, reconcile);
       }
       if (!['succeeded', 'failed', 'outcome-unknown'].includes(claim.record.state)) throw conflictError();
-      if (auditRecord && ['planned', 'running'].includes(auditRecord.state)) {
+      if (auditStore && auditRecord && ['planned', 'running'].includes(auditRecord.state)) {
         await auditStore.start(auditId(claim.record));
         await finishAudit(claim.record, 'provider-request');
       }
@@ -241,7 +272,7 @@ export function createMutationExecutor({ store, auditStore, runtimeIdentity }) {
       if (classification === 'outcome-unknown') {
         return markOutcomeUnknown(claim.record, 'provider-request');
       }
-      const completion = { state: 'failed' };
+      const completion: MutationCompletionInput = { state: 'failed' };
       const replayResult = failureResult(error);
       if (replayResult) completion.result = replayResult;
       await complete(claim.record, completion, 'provider-request');
@@ -252,10 +283,10 @@ export function createMutationExecutor({ store, auditStore, runtimeIdentity }) {
   };
 
   return {
-    read(key) {
+    read(key: string) {
       return store.read(key);
     },
-    execute(input) {
+    execute(input: MutationExecution) {
       if (auditStore && (valueTag(input.providerAccountId) !== '[object String]'
         || !input.providerAccountId || input.providerAccountId.trim() !== input.providerAccountId)) {
         return Promise.reject(new TypeError('Mutation executor requires a verified provider account ID for audit'));
