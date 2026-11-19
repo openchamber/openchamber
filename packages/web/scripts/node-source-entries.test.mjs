@@ -30,7 +30,7 @@ const preloadedEntries = [
   'packages/web/server/lib/spaces/run-command.ts',
 ];
 const fixtures = [
-  'packages/web/server/lib/git/storage-process.fixture.js',
+  'packages/web/server/lib/git/storage-process.fixture.ts',
   'packages/web/server/lib/source-control/storage-process.fixture.js',
 ];
 let root;

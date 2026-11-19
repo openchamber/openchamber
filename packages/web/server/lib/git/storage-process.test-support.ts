@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
 
 export async function gitStorageProcess(kind: string, filePath: string) {
-  const child = fork(new URL('./storage-process.fixture.js', import.meta.url), [kind, filePath], {
+  const child = fork(new URL('./storage-process.fixture.ts', import.meta.url), [kind, filePath], {
     execArgv: ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href], stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
   });
   const events: JsonObject[] = [];
