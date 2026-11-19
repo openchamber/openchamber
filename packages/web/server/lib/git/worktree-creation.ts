@@ -5,7 +5,7 @@ import { fingerprintRemoteUrl, redactRemoteUrl } from '../source-control/url-red
 import type { SourceControlChangeRequestSource } from '@openchamber/sdk';
 import type { BindingRead } from '../source-control/binding-service-contracts.js';
 import type { ProviderReadContext } from '../source-control/provider-contract.js';
-import type { GitRouteDependencies } from './route-dependencies.js';
+import type { GitRouteDependencies } from './routes.js';
 import type { SourceRequest } from './network-execution-contracts.js';
 import type { WorktreeCreateInput, WorktreeServerOptions } from './service-contracts.js';
 

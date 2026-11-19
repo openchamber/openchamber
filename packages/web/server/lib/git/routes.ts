@@ -2,18 +2,113 @@ import { z } from 'zod';
 import { registerGitStatusBatchRoute } from './status-batch.js';
 import { isPlainObject, isString } from '../shared/guards.js';
 import { OpenCode } from '@opencode/client';
-import { createGitRedactor, redactGitText } from './redaction.js';
+import { createGitRedactor } from './redaction.js';
 import { runAsUserAction } from '../environment/refresh-scope.js';
 import { isDiskPathRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
 import { parsePublicGitIdentityProfile, toPublicGitIdentityProfile } from './identity-storage.js';
 import { WorktreeCreationError, createWorktreeCreation, hasClientContributorAuthority } from './worktree-creation.js';
+import type { Application, NextFunction, Request, Response } from '../shared/http-contracts.js';
+import type { JsonValue } from '../shared/json-values.js';
+import type { registerSourceControlRoutes } from '../source-control/routes.js';
+import type { createBindingService } from '../source-control/binding-service.js';
+import type { ContributorProvenance, createContributorProvenanceStore } from './contributor-provenance-storage.js';
+import type { createManagedSshInventory } from './credentials.js';
+import type { createHttpsCredentialReference } from './credential-resolver.js';
+import type { createNetworkOperations } from './network-operations.js';
+import type { subscribeWorktreeTopologyChanges } from './service.js';
+import type { createWorktreeBootstrapStore } from './worktree-bootstrap-storage.js';
+
+type BindingRoutes = ReturnType<typeof registerSourceControlRoutes>;
+
+export interface GitRouteDependencies {
+  networkOperations?: ReturnType<typeof createNetworkOperations>;
+  managedSshInventory?: ReturnType<typeof createManagedSshInventory>;
+  contributorProvenance?: ReturnType<typeof createContributorProvenanceStore>;
+  getSourceControlBinding?: ReturnType<typeof createBindingService>['get'];
+  resolveChangeRequestSource?: BindingRoutes['resolveChangeRequestSource'];
+  backfillIdentities?: BindingRoutes['backfillConnectedIdentities'];
+  createHttpsCredentialReference?: typeof createHttpsCredentialReference;
+  resolveSourceControlAccount?: NonNullable<Parameters<typeof createNetworkOperations>[0]>['resolveSourceControlAccount'];
+  errorRedactionSecrets?: NonNullable<Parameters<typeof createGitRedactor>[0]>['secrets'];
+  worktreeBootstrapStore?: ReturnType<typeof createWorktreeBootstrapStore>;
+  emitWorktreeChanged?: Parameters<typeof subscribeWorktreeTopologyChanges>[0];
+  buildOpenCodeUrl?: (path: string, prefix?: string | null) => string;
+  getOpenCodeAuthHeaders?: () => Record<string, string>;
+  onBranchRewritten?: BindingRoutes['invalidateBranchStatus'];
+}
+type InstanceDisposerDependencies = {
+  buildOpenCodeUrl: (path: string, prefix: string) => string;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+};
+type GitLibraries = typeof import('./index.js');
+type WorktreeCreationErrorBody = { error: unknown; code: unknown; remoteName?: unknown };
+type UncheckedFields = {
+  readonly operation?: unknown; readonly passphrase?: unknown; readonly candidateId?: unknown;
+  readonly expectedFingerprint?: unknown; readonly confirmed?: unknown; readonly directory?: unknown;
+  readonly destinationPath?: unknown; readonly digest?: unknown; readonly decision?: unknown;
+  readonly fields?: unknown; readonly directories?: unknown; readonly shas?: unknown;
+  readonly tempWorktreePath?: unknown; readonly plan?: unknown; readonly state?: unknown;
+  readonly repoRoot?: unknown; readonly sourceBranch?: unknown; readonly targetBranch?: unknown;
+  readonly commits?: unknown; readonly cleanTargetWorktrees?: unknown; readonly remainingCommits?: unknown;
+  readonly currentCommit?: unknown; readonly paths?: unknown; readonly staged?: unknown; readonly context?: unknown;
+  readonly path?: unknown; readonly scope?: unknown; readonly patch?: unknown; readonly action?: unknown;
+  readonly refs?: unknown; readonly remote?: unknown; readonly expectedHead?: unknown; readonly onto?: unknown;
+  readonly branch?: unknown; readonly message?: unknown; readonly addAll?: unknown; readonly files?: unknown;
+  readonly stageFiles?: unknown; readonly branches?: unknown; readonly name?: unknown; readonly startPoint?: unknown;
+  readonly force?: unknown; readonly oldName?: unknown; readonly newName?: unknown; readonly hash?: unknown;
+  readonly mode?: unknown; readonly deleteLocalBranch?: unknown; readonly teardownCommand?: unknown;
+  readonly ref?: unknown; readonly id?: unknown; readonly sessionIds?: unknown; readonly title?: unknown;
+  readonly deleteBranch?: unknown; readonly worktreeRoot?: unknown; readonly user?: unknown;
+  readonly login?: unknown; readonly username?: unknown;
+};
+type ErrorFields = {
+  readonly message?: unknown; readonly code?: unknown; readonly status?: unknown; readonly statusCode?: unknown;
+  readonly reason?: unknown; readonly stderr?: unknown; readonly stdout?: unknown; readonly remoteName?: unknown;
+};
+type RouteHandler = (req: Request, res: Response, next: NextFunction) => Promise<void | Response>;
+
+const hasFields = (value: unknown): value is UncheckedFields => value !== null && value !== undefined;
+const hasErrorFields = (value: unknown): value is ErrorFields => value !== null && value !== undefined;
+const fieldsOf = <Value>(value: Value) => (hasFields(value) ? value : undefined);
+const requiredFields = <Value>(value: Value) => {
+  if (!hasFields(value)) throw new TypeError('Request body is missing');
+  return value;
+};
+const errorFields = <Value>(error: Value) => (hasErrorFields(error) ? error : undefined);
+const messageOf = <Value>(error: Value) => errorFields(error)?.message;
+const statusOf = <Value>(error: Value) => {
+  const status = errorFields(error)?.status;
+  return isInteger(status) ? status : undefined;
+};
+const textOf = <Value>(value: Value) => (isString(value) ? value : undefined);
+const isInteger = (value: unknown): value is number => Number.isInteger(value);
+const isJsonScalar = (value: unknown): value is null | string | number | boolean => value === null
+  || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+const isJsonContainer = (value: unknown): value is object => typeof value === 'object' && value !== null;
+const isJsonValue = (value: unknown): value is JsonValue => {
+  const pending: unknown[] = [value];
+  while (pending.length) {
+    const current = pending.pop();
+    if (isJsonScalar(current)) continue;
+    if (Array.isArray(current)) pending.push(...current);
+    else if (isJsonContainer(current)) pending.push(...Object.values(current));
+    else return false;
+  }
+  return true;
+};
+const jsonBody = <Value>(value: Value) => (isJsonValue(value) ? value : null);
+const SSH_INVENTORY_OPERATIONS = ['inventory', 'discover', 'import'] as const;
+const isSshInventoryOperation = (value: unknown): value is typeof SSH_INVENTORY_OPERATIONS[number] =>
+  SSH_INVENTORY_OPERATIONS.some((operation) => operation === value);
+const RESET_MODES = ['soft', 'mixed', 'hard'] as const;
+const isResetMode = (value: unknown): value is typeof RESET_MODES[number] => RESET_MODES.some((mode) => mode === value);
 
 const NETWORK_OPERATION_ID = /^[A-Za-z0-9_-]{1,200}$/;
-const toGitIdentitySummary = (identity) => identity ? {
+const toGitIdentitySummary = (identity: { userName?: string | null; userEmail?: string | null } | null | undefined) => identity ? {
   userName: identity.userName ?? null,
   userEmail: identity.userEmail ?? null,
 } : null;
-const toGitRemoteSummary = (remote) => ({
+const toGitRemoteSummary = (remote: { name?: unknown; fetchUrl?: string | null; pushUrl?: string | null } | null | undefined) => ({
   name: String(remote?.name || ''),
   fetchUrl: redactRemoteUrl(remote?.fetchUrl),
   pushUrl: redactRemoteUrl(remote?.pushUrl),
@@ -21,17 +116,17 @@ const toGitRemoteSummary = (remote) => ({
 
 const WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS = 5_000;
 
-const toLocationKey = (directory) => String(directory || '').replace(/\\/g, '/').replace(/\/+$/, '');
+const toLocationKey = (directory: string) => String(directory || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
-export const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
-  return async (worktreeDirectory) => {
+export const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders }: InstanceDisposerDependencies) => {
+  return async (worktreeDirectory: string) => {
     const client = OpenCode.make({
       baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
       headers: getOpenCodeAuthHeaders(),
       fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS) }),
     });
     const root = toLocationKey(worktreeDirectory);
-    const errors = [];
+    const errors: unknown[] = [];
     const inside = await client.debug.location.list().then(
       (locations) => locations.map((location) => location.directory)
         .filter((directory) => toLocationKey(directory).startsWith(`${root}/`)),
@@ -54,15 +149,14 @@ export const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAu
 const worktreeTitleBodySchema = z.object({ title: z.string(), by: z.enum(['user', 'agent']).default('user') });
 const worktreePinBodySchema = z.object({ pinned: z.boolean(), list: z.string().nullable().optional() });
 
-const userAction = (handler) => (req, res, next) => runAsUserAction(() => handler(req, res, next));
-/** @param {import('../shared/http-contracts.js').Application} app @param {import('./route-dependencies.js').GitRouteDependencies} [dependencies] */
-export function registerGitRoutes(app, {
+const userAction = (handler: RouteHandler) => (req: Request, res: Response, next: NextFunction) => runAsUserAction(() => handler(req, res, next));
+export function registerGitRoutes(app: Application, {
   networkOperations, managedSshInventory, getSourceControlBinding, contributorProvenance, resolveChangeRequestSource,
   backfillIdentities,
   createHttpsCredentialReference, resolveSourceControlAccount, errorRedactionSecrets = [], worktreeBootstrapStore,
   emitWorktreeChanged, buildOpenCodeUrl, getOpenCodeAuthHeaders, onBranchRewritten,
-} = {}) {
-  let gitLibraries = null;
+}: GitRouteDependencies = {}) {
+  let gitLibraries: GitLibraries | null = null;
   const getGitLibraries = async () => {
     if (!gitLibraries) {
       gitLibraries = await import('./index.js');
@@ -74,27 +168,28 @@ export function registerGitRoutes(app, {
   };
 
   const GIT_DIFFS_MAX_PATHS = 1000;
-  const GIT_PATH_ERROR_STATUS = new Map([['path_not_found', 404], ['nested_repository', 422], ['untracked_directory', 422]]);
-  const sendGitPathError = (res, error) => {
-    const status = GIT_PATH_ERROR_STATUS.get(error?.code);
+  const GIT_PATH_ERROR_STATUS = new Map<unknown, number>([['path_not_found', 404], ['nested_repository', 422], ['untracked_directory', 422]]);
+  const sendGitPathError = <Cause>(res: Response, error: Cause) => {
+    const status = GIT_PATH_ERROR_STATUS.get(errorFields(error)?.code);
     if (!status) return false;
-    res.status(status).json({ error: error.message, code: error.code });
+    res.status(status).json({ error: messageOf(error), code: errorFields(error)?.code });
     return true;
   };
 
-  const resolveDirectoryQuery = (value, preserveWhitespace = false) => {
+  const resolveDirectoryQuery = <Value>(value: Value, preserveWhitespace = false) => {
     const raw = Array.isArray(value) ? value[0] : value;
-    if (typeof raw !== 'string') {
+    if (!isString(raw)) {
       return null;
     }
     const normalized = preserveWhitespace ? raw : raw.trim();
     return normalized || null;
   };
 
-  const extractGitErrorText = (error) => {
-    const message = typeof error?.message === 'string' ? error.message : '';
-    const stderr = typeof error?.stderr === 'string' ? error.stderr : '';
-    const stdout = typeof error?.stdout === 'string' ? error.stdout : '';
+  const extractGitErrorText = <Cause>(error: Cause) => {
+    const fields = errorFields(error);
+    const message = isString(fields?.message) ? fields.message : '';
+    const stderr = isString(fields?.stderr) ? fields.stderr : '';
+    const stdout = isString(fields?.stdout) ? fields.stdout : '';
     const fallback = !message && error != null ? String(error) : '';
     return [message, stderr, stdout, fallback]
       .map((value) => String(value || '').trim())
@@ -102,12 +197,14 @@ export function registerGitRoutes(app, {
       .join('\n');
   };
 
-  const isNonRepoGitError = (error) => /not a git repository/i.test(extractGitErrorText(error));
-  const isUnreadableRepositoryError = (error) => error?.code === 'GIT_REPOSITORY_UNREADABLE';
-  const unreadableRepositoryBody = (error) => ({ error: error.message, code: error.code });
+  const isNonRepoGitError = <Cause>(error: Cause) => /not a git repository/i.test(extractGitErrorText(error));
+  const isUnreadableRepositoryError = <Cause>(error: Cause) => errorFields(error)?.code === 'GIT_REPOSITORY_UNREADABLE';
+  const unreadableRepositoryBody = <Cause>(error: Cause) => ({ error: messageOf(error), code: errorFields(error)?.code });
   const probeOptions = { failOnGitError: true };
 
-  const canDisposeWorktreeInstance = Boolean(buildOpenCodeUrl && getOpenCodeAuthHeaders);
+  const instanceDisposer = () => (buildOpenCodeUrl && getOpenCodeAuthHeaders
+    ? createWorktreeInstanceDisposer({ buildOpenCodeUrl, getOpenCodeAuthHeaders })
+    : undefined);
 
   const nonRepoStatusPayload = () => ({
     isGitRepository: false,
@@ -117,13 +214,14 @@ export function registerGitRoutes(app, {
     behind: 0,
   });
 
-  const enrichWorktreeProvenance = async (worktrees) => {
+  type ListedWorktree = { path: string; provenance?: { kind: 'contributor-fork'; revision: number; trust: 'untrusted'; push: 'destination-selection-required' } };
+  const enrichWorktreeProvenance = async <Worktree extends ListedWorktree>(worktrees: Worktree[]) => {
     if (contributorProvenance?.readMany instanceof Function) {
       const records = await contributorProvenance.readMany(worktrees.map((worktree) => worktree.path));
       for (let index = 0; index < worktrees.length; index += 1) {
         const worktree = worktrees[index];
         const record = records[index];
-        if (record.provenance?.kind === 'contributor-fork') {
+        if (worktree && record?.provenance?.kind === 'contributor-fork') {
           worktree.provenance = {
             kind: 'contributor-fork', revision: record.revision,
             trust: 'untrusted', push: 'destination-selection-required',
@@ -135,15 +233,45 @@ export function registerGitRoutes(app, {
   };
 
   const isContributorCheckout = contributorProvenance?.read instanceof Function
-    ? async (worktreeDirectory) => (await contributorProvenance.read(worktreeDirectory)).provenance?.kind === 'contributor-fork'
+    ? async (worktreeDirectory: string) => (await contributorProvenance.read(worktreeDirectory)).provenance?.kind === 'contributor-fork'
     : undefined;
-  const worktreeTeardownCodeOf = (error) => (error?.code === 'WORKTREE_TEARDOWN_FAILED' ? error.code : undefined);
+  const checkoutProvenance = (provenance: ContributorProvenance) => {
+    const { sourceSha } = provenance;
+    if (!isString(sourceSha)) {
+      throw Object.assign(new Error('Contributor worktree HEAD changed'), { code: 'STALE_CONFIG', status: 409 });
+    }
+    return { ...provenance, sourceSha };
+  };
+  const worktreeTeardownCodeOf = <Cause>(error: Cause) => (errorFields(error)?.code === 'WORKTREE_TEARDOWN_FAILED' ? 'WORKTREE_TEARDOWN_FAILED' : undefined);
 
-  const sendNetworkOperationError = (req, res, error) => {
-    const code = isString(error?.code) ? error.code : 'UNKNOWN';
+  const NETWORK_ERROR_MESSAGES = {
+    NOT_FOUND: 'Git network operation was not found',
+    INVALID_REQUEST: 'Invalid Git network operation request',
+    STALE_REPOSITORY: 'Git repository authority changed',
+    STALE_BINDING: 'Source control binding changed',
+    STALE_CONFIG: 'Git repository configuration changed',
+    REMOTE_CHANGED: 'Git remote or transport binding changed',
+    REMOTE_URL_USERINFO: 'Remove the name before @ from remote URL',
+    AUTHENTICATION_REQUIRED: 'Git authentication is required',
+    DESTINATION_SELECTION_REQUIRED: 'Contributor push destination selection is required',
+    CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED: 'Contributor transfers require managed credentials',
+    TIMEOUT: 'Git network operation timed out',
+    RUNTIME_UNSUPPORTED: 'Git network operations are unavailable',
+    UNKNOWN: 'Git network operation request failed',
+  };
+  type PublicNetworkCode = keyof typeof NETWORK_ERROR_MESSAGES;
+  const PRESERVED_NETWORK_CODES: readonly PublicNetworkCode[] = [
+    'STALE_REPOSITORY', 'STALE_BINDING', 'STALE_CONFIG', 'REMOTE_CHANGED',
+    'AUTHENTICATION_REQUIRED', 'TIMEOUT', 'RUNTIME_UNSUPPORTED',
+    'DESTINATION_SELECTION_REQUIRED', 'CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED',
+  ];
+  const sendNetworkOperationError = <Cause>(req: Request, res: Response, error: Cause) => {
+    const fields = errorFields(error);
+    const code = isString(fields?.code) ? fields.code : 'UNKNOWN';
     const storageFailure = code === 'GIT_NETWORK_OPERATION_STORAGE_INVALID';
     let status = 500;
-    if (Number.isInteger(error?.status)) status = error.status;
+    const errorStatus = fields?.status;
+    if (isInteger(errorStatus)) status = errorStatus;
     else if (code === 'GIT_NETWORK_OPERATION_NOT_FOUND') status = 404;
     else if (!storageFailure && code.includes('INVALID')) status = 400;
     else if (code.includes('STALE') || code.includes('CHANGED') || code.includes('CONFLICT')) status = 409;
@@ -151,52 +279,35 @@ export function registerGitRoutes(app, {
     else if (code === 'DESTINATION_SELECTION_REQUIRED' || code === 'CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED') status = 409;
     else if (code === 'RUNTIME_UNSUPPORTED') status = 501;
 
-    const preservedCodes = [
-      'STALE_REPOSITORY', 'STALE_BINDING', 'STALE_CONFIG', 'REMOTE_CHANGED',
-      'AUTHENTICATION_REQUIRED', 'TIMEOUT', 'RUNTIME_UNSUPPORTED',
-      'DESTINATION_SELECTION_REQUIRED', 'CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED',
-    ];
-    let publicCode;
+    let publicCode: PublicNetworkCode | undefined;
     if (code === 'GIT_NETWORK_OPERATION_NOT_FOUND') publicCode = 'NOT_FOUND';
-    else if (error?.reason === 'needs-attention') publicCode = 'AUTHENTICATION_REQUIRED';
+    else if (fields?.reason === 'needs-attention') publicCode = 'AUTHENTICATION_REQUIRED';
     else if (code === 'SOURCE_CONTROL_BINDING_STALE') publicCode = 'STALE_BINDING';
     else if (code === 'UNSUPPORTED_SOURCE_CONTROL_REPOSITORY') publicCode = 'STALE_REPOSITORY';
     else if (code === 'GIT_NETWORK_OPERATION_AUTHORITY_CHANGED') publicCode = 'REMOTE_CHANGED';
     else if (code === 'INVALID_GIT_REMOTE_USERINFO') publicCode = 'REMOTE_URL_USERINFO';
     if (!publicCode && !storageFailure && code.includes('INVALID')) publicCode = 'INVALID_REQUEST';
-    if (!publicCode && preservedCodes.includes(code)) publicCode = code;
+    if (!publicCode) publicCode = PRESERVED_NETWORK_CODES.find((preserved) => preserved === code);
     publicCode ??= 'UNKNOWN';
-    const requestPaths = [req.body?.directory, req.body?.destinationPath].filter(isString);
+    const body = fieldsOf(req.body);
+    const requestPaths = [body?.directory, body?.destinationPath].filter(isString);
     const redactor = createGitRedactor({ secrets: [...errorRedactionSecrets, ...requestPaths] });
-    const messages = {
-      NOT_FOUND: 'Git network operation was not found',
-      INVALID_REQUEST: 'Invalid Git network operation request',
-      STALE_REPOSITORY: 'Git repository authority changed',
-      STALE_BINDING: 'Source control binding changed',
-      STALE_CONFIG: 'Git repository configuration changed',
-      REMOTE_CHANGED: 'Git remote or transport binding changed',
-      REMOTE_URL_USERINFO: 'Remove the name before @ from remote URL',
-      AUTHENTICATION_REQUIRED: 'Git authentication is required',
-      DESTINATION_SELECTION_REQUIRED: 'Contributor push destination selection is required',
-      CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED: 'Contributor transfers require managed credentials',
-      TIMEOUT: 'Git network operation timed out',
-      RUNTIME_UNSUPPORTED: 'Git network operations are unavailable',
-      UNKNOWN: 'Git network operation request failed',
-    };
-    const reason = redactor.error(error, messages[publicCode]);
+    const reason = redactor.error(error, NETWORK_ERROR_MESSAGES[publicCode]);
     console.error('Git network operation request failed:', reason);
-    return res.status(status).json({ error: publicCode === 'INVALID_REQUEST' ? reason : messages[publicCode], code: publicCode });
+    return res.status(status).json({ error: publicCode === 'INVALID_REQUEST' ? reason : NETWORK_ERROR_MESSAGES[publicCode], code: publicCode });
   };
-  const operationId = (req) => isString(req.params?.id) && NETWORK_OPERATION_ID.test(req.params.id)
-    ? req.params.id : null;
-  const hasEmptyBody = (req) => req.body === undefined
-    || (req.body && Object.getPrototypeOf(req.body) === Object.prototype && Object.keys(req.body).length === 0);
+  const operationId = (req: Request) => {
+    const id = fieldsOf(req.params)?.id;
+    return isString(id) && NETWORK_OPERATION_ID.test(id) ? id : null;
+  };
+  const hasEmptyBody = (req: Request) => req.body === undefined
+    || Boolean(req.body && Object.getPrototypeOf(req.body) === Object.prototype && Object.keys(req.body).length === 0);
   app.post('/api/git/managed-ssh-credentials', async (req, res) => {
-    const input = req.body;
+    const input = fieldsOf(req.body);
     const keys = input?.operation === 'import' ? ['operation', 'candidateId', 'expectedFingerprint', 'confirmed'] : ['operation'];
     if (input?.operation !== 'inventory' && Object.hasOwn(input ?? {}, 'passphrase')) keys.push('passphrase');
     if (!input || Object.getPrototypeOf(input) !== Object.prototype
-      || !['inventory', 'discover', 'import'].includes(input.operation)
+      || !isSshInventoryOperation(input.operation)
       || Object.keys(input).length !== keys.length || !keys.every((key) => Object.hasOwn(input, key))
       || (Object.hasOwn(input, 'passphrase') && (!isString(input.passphrase)
         || input.passphrase.length > 1024 || /[\0\r\n]/.test(input.passphrase)))
@@ -205,17 +316,22 @@ export function registerGitRoutes(app, {
         || !/^SHA256:[A-Za-z0-9+/]{43}=?$/.test(input.expectedFingerprint)))) {
       return res.status(400).json({ code: 'INVALID_REQUEST', error: 'Invalid managed SSH inventory request' });
     }
+    const { operation, passphrase, candidateId, expectedFingerprint } = input;
+    const passphraseInput = isString(passphrase) ? { passphrase } : {};
     res.set('Cache-Control', 'no-store');
     if (!managedSshInventory) return res.status(501).json({ code: 'RUNTIME_UNSUPPORTED', error: 'Managed SSH inventory is unavailable' });
     try {
-      return res.json(await managedSshInventory[input.operation](input));
+      if (operation === 'inventory') return res.json(await managedSshInventory.inventory());
+      if (operation === 'discover') return res.json(await managedSshInventory.discover(passphraseInput));
+      if (!isString(candidateId) || !isString(expectedFingerprint)) throw new TypeError('Managed SSH import input is invalid');
+      return res.json(await managedSshInventory.import({ candidateId, expectedFingerprint, confirmed: true, ...passphraseInput }));
     } catch {
       const errors = {
         inventory: 'Managed SSH inventory could not be read',
         discover: 'Managed SSH keys could not be discovered',
         import: 'Managed SSH key could not be imported',
       };
-      return res.status(500).json({ code: 'UNKNOWN', error: errors[input.operation] });
+      return res.status(500).json({ code: 'UNKNOWN', error: errors[operation] });
     }
   });
   const worktreeCreation = createWorktreeCreation({
@@ -228,7 +344,7 @@ export function registerGitRoutes(app, {
     resolveSourceControlAccount,
     worktreeBootstrapStore,
   });
-  const rejectLegacyNetworkOperation = async (directory, res) => {
+  const rejectLegacyNetworkOperation = async (directory: string, res: Response) => {
     if (contributorProvenance?.read instanceof Function) {
       try {
         const record = await contributorProvenance.read(directory);
@@ -254,7 +370,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/network-operations', async (req, res) => {
     if (!networkOperations) return res.status(501).json({ error: 'Git network operations are unavailable', code: 'RUNTIME_UNSUPPORTED' });
     try {
-      return res.status(201).json(await networkOperations.plan(req.body));
+      return res.status(201).json(await networkOperations.plan(jsonBody(req.body)));
     } catch (error) {
       return sendNetworkOperationError(req, res, error);
     }
@@ -265,7 +381,7 @@ export function registerGitRoutes(app, {
       return res.status(501).json({ error: 'Contributor destination selection is unavailable', code: 'RUNTIME_UNSUPPORTED' });
     }
     try {
-      return res.status(201).json(await networkOperations.issueContributorDestination(req.body));
+      return res.status(201).json(await networkOperations.issueContributorDestination(jsonBody(req.body)));
     } catch (error) {
       return sendNetworkOperationError(req, res, error);
     }
@@ -281,7 +397,8 @@ export function registerGitRoutes(app, {
       const [record, bindingRead] = await Promise.all([
         contributorProvenance.read(directory), getSourceControlBinding(directory),
       ]);
-      if (record.provenance?.kind !== 'contributor-fork') {
+      const provenance = record.provenance;
+      if (provenance?.kind !== 'contributor-fork') {
         return res.json({ kind: 'ordinary' });
       }
       const binding = bindingRead.binding;
@@ -289,8 +406,9 @@ export function registerGitRoutes(app, {
         || binding.repositoryId !== bindingRead.repository.repositoryId || binding.revision !== bindingRead.revision) {
         return res.status(409).json({ error: 'Contributor push destination selection is required', code: 'DESTINATION_SELECTION_REQUIRED' });
       }
-      const accountCache = new Map();
-      const accountFor = async (provider) => {
+      type BoundProvider = (typeof binding.providers)[number];
+      const accountCache = new Map<string, Promise<unknown>>();
+      const accountFor = async (provider: BoundProvider) => {
         const key = `${provider.provider}\0${provider.instance}\0${provider.accountId}`;
         if (!accountCache.has(key)) {
           accountCache.set(key, resolveSourceControlAccount instanceof Function
@@ -310,18 +428,18 @@ export function registerGitRoutes(app, {
           let classification = 'other';
           const providers = binding.providers.filter((provider) => provider.primaryRemote === remote.name
             && provider.readiness === 'ready' && provider.endpoint?.fingerprint === remote.fetch.fingerprint);
-          const boundRepository = providers.some((provider) => provider.provider === record.provenance.provider
-            && provider.instance === record.provenance.instance
-            && provider.accountId === record.provenance.accountId
-            && remote.name === record.provenance.primaryRemote);
-          if (remote.push.fingerprint === record.provenance.endpointFingerprint) {
+          const boundRepository = providers.some((provider) => provider.provider === provenance.provider
+            && provider.instance === provenance.instance
+            && provider.accountId === provenance.accountId
+            && remote.name === provenance.primaryRemote);
+          if (remote.push.fingerprint === provenance.endpointFingerprint) {
             classification = 'contributor-fork';
           } else if (boundRepository) {
             classification = 'bound-repository';
           } else {
             for (const provider of providers) {
-              const account = await accountFor(provider);
-              const login = String(account?.user?.login || account?.user?.username || '').toLowerCase();
+              const user = fieldsOf(fieldsOf(await accountFor(provider))?.user);
+              const login = String(user?.login || user?.username || '').toLowerCase();
               if (login && provider.repository?.owner?.toLowerCase() === login) {
                 classification = 'own-fork';
                 break;
@@ -361,7 +479,7 @@ export function registerGitRoutes(app, {
       if (record.provenance?.kind !== 'contributor-fork') {
         return res.status(409).json({ error: 'Contributor worktree is required', code: 'STALE_CONFIG' });
       }
-      const inspection = await inspectContributorCheckoutActions(directory, record.provenance);
+      const inspection = await inspectContributorCheckoutActions(directory, checkoutProvenance(record.provenance));
       return res.json({
         state: inspection.state,
         digest: inspection.digest,
@@ -377,24 +495,29 @@ export function registerGitRoutes(app, {
 
   app.post('/api/git/worktrees/checkout-trust', async (req, res) => {
     const directory = resolveDirectoryQuery(req.query?.directory);
-    if (!directory || !isString(req.body?.digest) || !['run', 'skip'].includes(req.body?.decision)
+    const digest = fieldsOf(req.body)?.digest;
+    const decision = fieldsOf(req.body)?.decision;
+    if (!directory || !isString(digest) || (decision !== 'run' && decision !== 'skip')
       || Object.keys(req.body || {}).some((key) => !['digest', 'decision'].includes(key))) {
       return res.status(400).json({ error: 'Invalid checkout trust decision', code: 'INVALID_REQUEST' });
     }
     try {
       const { inspectContributorCheckoutActions } = await getGitLibraries();
+      if (!contributorProvenance) throw new TypeError('Contributor provenance is unavailable');
       const record = await contributorProvenance.read(directory);
       if (record.provenance?.kind !== 'contributor-fork') {
         return res.status(409).json({ error: 'Contributor worktree changed', code: 'STALE_CONFIG' });
       }
+      const provenance = checkoutProvenance(record.provenance);
+      if (!networkOperations) throw new TypeError('Git network operations are unavailable');
       const result = await networkOperations.decideCheckoutTrust({
         directory,
         repositoryId: record.repositoryId,
-        digest: req.body.digest,
-        decision: req.body.decision,
-        headSha: record.provenance.sourceSha,
+        digest,
+        decision,
+        headSha: provenance.sourceSha,
         nullRef: '0'.repeat(40),
-        inspect: () => inspectContributorCheckoutActions(directory, record.provenance),
+        inspect: () => inspectContributorCheckoutActions(directory, provenance),
       });
       return res.json(result);
     } catch (error) {
@@ -463,7 +586,7 @@ export function registerGitRoutes(app, {
     }
   });
 
-  app.put('/api/git/identities/:id', async (req, res) => {
+  app.put<unknown, { id: string }>('/api/git/identities/:id', async (req, res) => {
     const { updateProfile } = await getGitLibraries();
     try {
       const profile = updateProfile(req.params.id, parsePublicGitIdentityProfile(req.body, req.params.id));
@@ -474,7 +597,7 @@ export function registerGitRoutes(app, {
     }
   });
 
-  app.delete('/api/git/identities/:id', async (req, res) => {
+  app.delete<unknown, { id: string }>('/api/git/identities/:id', async (req, res) => {
     const { deleteProfile } = await getGitLibraries();
     try {
       deleteProfile(req.params.id);
@@ -522,11 +645,12 @@ export function registerGitRoutes(app, {
   const PROJECT_BATCH_MAX_DIRECTORIES = 200;
   const PROJECT_BATCH_CONCURRENCY = 4;
 
-  const resolveBatchDirectories = (body) => {
+  const resolveBatchDirectories = <Body>(body: Body) => {
     if (!isPlainObject(body) || !Array.isArray(body.directories)) return null;
-    const directories = [];
-    const seen = new Set();
-    for (const value of body.directories) {
+    const directories: string[] = [];
+    const seen = new Set<string>();
+    const values: unknown[] = body.directories;
+    for (const value of values) {
       const directory = resolveDirectoryQuery(value);
       if (!directory || seen.has(directory)) continue;
       seen.add(directory);
@@ -535,7 +659,7 @@ export function registerGitRoutes(app, {
     return directories;
   };
 
-  const readProjectBatch = async (req, res, readDirectory) => {
+  const readProjectBatch = async <Entry>(req: Request, res: Response, readDirectory: (directory: string) => Promise<Entry>) => {
     const directories = resolveBatchDirectories(req.body);
     if (!directories || directories.length === 0) {
       return res.status(400).json({ error: 'directories array is required' });
@@ -544,14 +668,15 @@ export function registerGitRoutes(app, {
       return res.status(400).json({ error: `At most ${PROJECT_BATCH_MAX_DIRECTORIES} directories may be read at once` });
     }
 
-    const projects = new Array(directories.length);
+    const projects: Entry[] = [];
     let nextIndex = 0;
     const worker = async () => {
       for (;;) {
         const index = nextIndex;
         nextIndex += 1;
         if (index >= directories.length) return;
-        projects[index] = await readDirectory(directories[index]);
+        const directory = directories[index];
+        if (directory !== undefined) projects[index] = await readDirectory(directory);
       }
     };
     await Promise.all(Array.from({ length: Math.min(PROJECT_BATCH_CONCURRENCY, directories.length) }, worker));
@@ -560,11 +685,13 @@ export function registerGitRoutes(app, {
 
   app.post('/api/git/projects', async (req, res) => {
     const { isGitRepository, getStatus, resolvePrimaryWorktreeRoot, observeWorktreeTopology } = await getGitLibraries();
-    const fields = Array.isArray(req.body?.fields) ? req.body.fields : [];
+    const requestedFields = fieldsOf(req.body)?.fields;
+    const fields: unknown[] = Array.isArray(requestedFields) ? requestedFields : [];
     const wantsStatus = fields.includes('status');
     const wantsRoot = fields.includes('root');
-    const nonRepoEntry = (directory) => {
-      const entry = { directory, isGitRepository: false };
+    type ProjectEntry = { directory: string; isGitRepository: boolean; status?: unknown; root?: string | null; errors?: string[] };
+    const nonRepoEntry = (directory: string) => {
+      const entry: ProjectEntry = { directory, isGitRepository: false };
       if (wantsStatus) entry.status = nonRepoStatusPayload();
       if (wantsRoot) entry.root = null;
       return entry;
@@ -576,9 +703,9 @@ export function registerGitRoutes(app, {
           return nonRepoEntry(directory);
         }
 
-        const entry = { directory, isGitRepository: true };
-        const failures = [];
-        const reads = [];
+        const entry: ProjectEntry = { directory, isGitRepository: true };
+        const failures: string[] = [];
+        const reads: Promise<void>[] = [];
         if (wantsStatus) {
           void observeWorktreeTopology(directory);
           reads.push((async () => {
@@ -638,10 +765,10 @@ export function registerGitRoutes(app, {
     const { getRemoteUrl } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
-      const remote = req.query.remote || 'origin';
+      const remote = textOf(req.query.remote) || 'origin';
 
       const url = await getRemoteUrl(directory, remote);
       const displayUrl = url ? redactRemoteUrl(url) : '';
@@ -656,7 +783,7 @@ export function registerGitRoutes(app, {
     const { getCurrentIdentity } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
@@ -672,7 +799,7 @@ export function registerGitRoutes(app, {
     const { hasLocalIdentity } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
@@ -688,7 +815,7 @@ export function registerGitRoutes(app, {
     const { getProfile, setLocalIdentity, clearLocalIdentity, getGlobalIdentity } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
@@ -725,7 +852,7 @@ export function registerGitRoutes(app, {
       res.json({ success: true, profile: publicProfile });
     } catch (error) {
       console.error('Failed to set git identity:', error);
-      res.status(500).json({ error: error.message || 'Failed to set git identity' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to set git identity' });
     }
   });
 
@@ -768,7 +895,7 @@ export function registerGitRoutes(app, {
         return res.json(nonRepoStatusPayload());
       }
       console.error('Failed to get git status:', error);
-      res.status(500).json({ error: error.message || 'Failed to get git status' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get git status' });
     }
   });
 
@@ -776,14 +903,14 @@ export function registerGitRoutes(app, {
     const { resolvePrimaryWorktreeRoot } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
       const result = await resolvePrimaryWorktreeRoot(directory);
       res.json(result);
     } catch (error) {
       console.error('Failed to resolve git primary root:', error);
-      res.status(500).json({ error: error.message || 'Failed to resolve git primary root' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to resolve git primary root' });
     }
   });
 
@@ -791,14 +918,14 @@ export function registerGitRoutes(app, {
     const { resolveWorktreeTopLevel } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
       const result = await resolveWorktreeTopLevel(directory);
       res.json(result);
     } catch (error) {
       console.error('Failed to resolve git worktree toplevel:', error);
-      res.status(500).json({ error: error.message || 'Failed to resolve git worktree toplevel' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to resolve git worktree toplevel' });
     }
   });
 
@@ -806,70 +933,70 @@ export function registerGitRoutes(app, {
     const { getCommitSummaries } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
-      const result = await getCommitSummaries(directory, req.body?.shas);
+      const result = await getCommitSummaries(directory, fieldsOf(req.body)?.shas);
       res.json(result);
     } catch (error) {
       console.error('Failed to get git commit summaries:', error);
-      res.status(400).json({ error: error.message || 'Failed to get git commit summaries' });
+      res.status(400).json({ error: messageOf(error) || 'Failed to get git commit summaries' });
     }
   });
 
-  const handleIntegrateAction = (action, loadHandler) => {
+  const handleIntegrateAction = <Result>(action: string, loadHandler: () => Promise<(body: UncheckedFields) => Promise<Result>>) => {
     app.post(`/api/git/integrate/${action}`, async (req, res) => {
       try {
         const handler = await loadHandler();
-        const result = await handler(req.body || {});
+        const result = await handler(requiredFields(req.body || {}));
         res.json(result);
       } catch (error) {
         console.error(`Failed to run git integrate ${action}:`, error);
-        res.status(400).json({ error: error.message || `Failed to run git integrate ${action}` });
+        res.status(400).json({ error: messageOf(error) || `Failed to run git integrate ${action}` });
       }
     });
   };
 
   handleIntegrateAction('plan', async () => {
     const { computeIntegratePlan } = await getGitLibraries();
-    return (body) => computeIntegratePlan(body);
+    return (body: UncheckedFields) => computeIntegratePlan(body);
   });
 
   handleIntegrateAction('conflict-details', async () => {
     const { getIntegrateConflictDetails } = await getGitLibraries();
-    return (body) => getIntegrateConflictDetails(body?.tempWorktreePath);
+    return (body: UncheckedFields) => getIntegrateConflictDetails(body.tempWorktreePath);
   });
 
   handleIntegrateAction('cherry-pick-status', async () => {
     const { isCherryPickInProgress } = await getGitLibraries();
-    return (body) => isCherryPickInProgress(body?.tempWorktreePath);
+    return (body: UncheckedFields) => isCherryPickInProgress(body.tempWorktreePath);
   });
 
   handleIntegrateAction('run', async () => {
     const { integrateWorktreeCommits } = await getGitLibraries();
-    return (body) => runAsUserAction(() => integrateWorktreeCommits(body?.plan));
+    return (body: UncheckedFields) => runAsUserAction(() => integrateWorktreeCommits(fieldsOf(body.plan)));
   });
 
   handleIntegrateAction('abort', async () => {
     const { abortIntegrate } = await getGitLibraries();
-    return (body) => abortIntegrate(body?.state);
+    return (body: UncheckedFields) => abortIntegrate(fieldsOf(body.state));
   });
 
   handleIntegrateAction('continue', async () => {
     const { continueIntegrate } = await getGitLibraries();
-    return (body) => runAsUserAction(() => continueIntegrate(body?.state));
+    return (body: UncheckedFields) => runAsUserAction(() => continueIntegrate(fieldsOf(body.state)));
   });
 
   app.get('/api/git/diff', async (req, res) => {
     const { getPathDiff } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
       const path = req.query.path;
-      if (!path || typeof path !== 'string') {
+      if (!path || !isString(path)) {
         return res.status(400).json({ error: 'path parameter is required' });
       }
 
@@ -891,7 +1018,7 @@ export function registerGitRoutes(app, {
         return res.status(409).json({ error: 'This directory is not a Git repository.', code: 'not_repository' });
       }
       console.error('Failed to get git diff:', error);
-      res.status(500).json({ error: error.message || 'Failed to get git diff' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get git diff' });
     }
   });
 
@@ -903,13 +1030,13 @@ export function registerGitRoutes(app, {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const paths = req.body?.paths;
+      const paths = fieldsOf(req.body)?.paths;
       if (!Array.isArray(paths) || paths.length === 0 || paths.length > GIT_DIFFS_MAX_PATHS || !paths.every((path) => isString(path) && path)) {
         return res.status(400).json({ error: `paths must be 1 to ${GIT_DIFFS_MAX_PATHS} non-empty strings` });
       }
 
-      const staged = req.body?.staged === true;
-      const context = Number(req.body?.context);
+      const staged = fieldsOf(req.body)?.staged === true;
+      const context = Number(fieldsOf(req.body)?.context);
 
       const diffs = await getPathDiffs(directory, {
         paths,
@@ -923,7 +1050,7 @@ export function registerGitRoutes(app, {
         return res.status(409).json({ error: 'This directory is not a Git repository.', code: 'not_repository' });
       }
       console.error('Failed to get git diffs:', error);
-      res.status(500).json({ error: error.message || 'Failed to get git diffs' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get git diffs' });
     }
   });
 
@@ -931,12 +1058,12 @@ export function registerGitRoutes(app, {
     const { getFileDiff } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory || typeof directory !== 'string') {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
       const pathParam = req.query.path;
-      if (!pathParam || typeof pathParam !== 'string') {
+      if (!pathParam || !isString(pathParam)) {
         return res.status(400).json({ error: 'path parameter is required' });
       }
 
@@ -962,7 +1089,7 @@ export function registerGitRoutes(app, {
         return res.status(409).json({ error: 'This directory is not a Git repository.', code: 'not_repository' });
       }
       console.error('Failed to get git file diff:', error);
-      res.status(500).json({ error: error.message || 'Failed to get git file diff' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get git file diff' });
     }
   });
 
@@ -970,17 +1097,17 @@ export function registerGitRoutes(app, {
     const { getRangeDiff } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory || typeof directory !== 'string') {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
       const base = req.query.base;
       const head = req.query.head;
-      if (!base || typeof base !== 'string' || !head || typeof head !== 'string') {
+      if (!base || !isString(base) || !head || !isString(head)) {
         return res.status(400).json({ error: 'base and head parameters are required' });
       }
 
-      const pathParam = typeof req.query.path === 'string' && req.query.path ? req.query.path : undefined;
+      const pathParam = isString(req.query.path) && req.query.path ? req.query.path : undefined;
       const context = req.query.context ? parseInt(String(req.query.context), 10) : undefined;
       const previousPath = String(req.query.previousPath ?? '') || undefined;
 
@@ -996,7 +1123,7 @@ export function registerGitRoutes(app, {
       res.json({ diff });
     } catch (error) {
       console.error('Failed to get git range diff:', error);
-      res.status(500).json({ error: error.message || 'Failed to get git range diff' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get git range diff' });
     }
   });
 
@@ -1015,7 +1142,7 @@ export function registerGitRoutes(app, {
       res.json(await getRangeFileVersions(directory, { base, head, path: filePath, previousPath, includeWorkingTree: req.query.includeWorkingTree === 'true' }));
     } catch (error) {
       console.error('Failed to read file versions:', error);
-      res.status(500).json({ error: error.message || 'Failed to read file versions' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to read file versions' });
     }
   });
 
@@ -1036,7 +1163,7 @@ export function registerGitRoutes(app, {
       res.json(result);
     } catch (error) {
       console.error('Failed to get branch base:', error);
-      res.status(500).json({ error: error.message || 'Failed to get branch base' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get branch base' });
     }
   });
 
@@ -1058,7 +1185,7 @@ export function registerGitRoutes(app, {
       res.json({ files });
     } catch (error) {
       console.error('Failed to get git range files:', error);
-      res.status(500).json({ error: error.message || 'Failed to get git range files' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get git range files' });
     }
   });
 
@@ -1066,12 +1193,12 @@ export function registerGitRoutes(app, {
     const { revertFile } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { path, scope } = req.body || {};
-      if (!path || typeof path !== 'string') {
+      const { path, scope } = fieldsOf(req.body) ?? {};
+      if (!path || !isString(path)) {
         return res.status(400).json({ error: 'path parameter is required' });
       }
 
@@ -1079,7 +1206,7 @@ export function registerGitRoutes(app, {
       res.json({ success: true });
     } catch (error) {
       console.error('Failed to revert git file:', error);
-      res.status(500).json({ error: error.message || 'Failed to revert git file' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to revert git file' });
     }
   });
 
@@ -1087,13 +1214,13 @@ export function registerGitRoutes(app, {
     const { stageFiles } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { path, paths } = req.body || {};
+      const { path, paths } = fieldsOf(req.body) ?? {};
       const filePaths = Array.isArray(paths) ? paths : [path];
-      if (!filePaths.some((value) => typeof value === 'string' && value.trim())) {
+      if (!filePaths.some((value) => isString(value) && value.trim())) {
         return res.status(400).json({ error: 'path parameter is required' });
       }
 
@@ -1101,7 +1228,7 @@ export function registerGitRoutes(app, {
       res.json({ success: true });
     } catch (error) {
       console.error('Failed to stage git file:', error);
-      res.status(500).json({ error: error.message || 'Failed to stage git file' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to stage git file' });
     }
   });
 
@@ -1109,13 +1236,13 @@ export function registerGitRoutes(app, {
     const { unstageFiles } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { path, paths } = req.body || {};
+      const { path, paths } = fieldsOf(req.body) ?? {};
       const filePaths = Array.isArray(paths) ? paths : [path];
-      if (!filePaths.some((value) => typeof value === 'string' && value.trim())) {
+      if (!filePaths.some((value) => isString(value) && value.trim())) {
         return res.status(400).json({ error: 'path parameter is required' });
       }
 
@@ -1123,7 +1250,7 @@ export function registerGitRoutes(app, {
       res.json({ success: true });
     } catch (error) {
       console.error('Failed to unstage git file:', error);
-      res.status(500).json({ error: error.message || 'Failed to unstage git file' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to unstage git file' });
     }
   });
 
@@ -1131,15 +1258,15 @@ export function registerGitRoutes(app, {
     const { applyHunk } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { path: filePath, patch, action } = req.body || {};
-      if (!filePath || typeof filePath !== 'string') {
+      const { path: filePath, patch, action } = fieldsOf(req.body) ?? {};
+      if (!filePath || !isString(filePath)) {
         return res.status(400).json({ error: 'path parameter is required' });
       }
-      if (typeof patch !== 'string' || !patch.trim()) {
+      if (!isString(patch) || !patch.trim()) {
         return res.status(400).json({ error: 'patch is required' });
       }
       if (action !== 'stage' && action !== 'unstage' && action !== 'discard') {
@@ -1150,19 +1277,19 @@ export function registerGitRoutes(app, {
       res.json({ success: true });
     } catch (error) {
       console.error('Failed to apply git hunk:', error);
-      res.status(500).json({ error: error.message || 'Failed to apply git hunk' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to apply git hunk' });
     }
   });
 
   app.post('/api/git/pull', async (req, res) => {
     const directory = req.query.directory;
-    if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+    if (!directory || !isString(directory)) return res.status(400).json({ error: 'directory parameter is required' });
     await rejectLegacyNetworkOperation(directory, res);
   });
 
   app.post('/api/git/push', async (req, res) => {
     const directory = req.query.directory;
-    if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+    if (!directory || !isString(directory)) return res.status(400).json({ error: 'directory parameter is required' });
     await rejectLegacyNetworkOperation(directory, res);
   });
 
@@ -1170,11 +1297,11 @@ export function registerGitRoutes(app, {
     const { listStashes } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+      if (!directory || !isString(directory)) return res.status(400).json({ error: 'directory parameter is required' });
       res.json({ stashes: await listStashes(directory) });
     } catch (error) {
       console.error('Failed to list stashes:', error);
-      res.status(500).json({ error: error.message || 'Failed to list stashes' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to list stashes' });
     }
   });
 
@@ -1182,11 +1309,11 @@ export function registerGitRoutes(app, {
     const { countStashFiles } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
-      res.json({ counts: await countStashFiles(directory, req.body?.refs) });
+      if (!directory || !isString(directory)) return res.status(400).json({ error: 'directory parameter is required' });
+      res.json({ counts: await countStashFiles(directory, fieldsOf(req.body)?.refs) });
     } catch (error) {
       console.error('Failed to count stash files:', error);
-      res.status(500).json({ error: error.message || 'Failed to count stash files' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to count stash files' });
     }
   });
 
@@ -1194,11 +1321,11 @@ export function registerGitRoutes(app, {
     const { stashPush } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
-      res.json(await stashPush(directory, req.body));
+      if (!directory || !isString(directory)) return res.status(400).json({ error: 'directory parameter is required' });
+      res.json(await stashPush(directory, fieldsOf(req.body)));
     } catch (error) {
       console.error('Failed to stash changes:', error);
-      res.status(500).json({ error: error.message || 'Failed to stash changes' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to stash changes' });
     }
   });
 
@@ -1206,11 +1333,11 @@ export function registerGitRoutes(app, {
     const { stashApply } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
-      res.json(await stashApply(directory, req.body));
+      if (!directory || !isString(directory)) return res.status(400).json({ error: 'directory parameter is required' });
+      res.json(await stashApply(directory, fieldsOf(req.body)));
     } catch (error) {
       console.error('Failed to apply stash:', error);
-      res.status(500).json({ error: error.message || 'Failed to apply stash' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to apply stash' });
     }
   });
 
@@ -1218,11 +1345,11 @@ export function registerGitRoutes(app, {
     const { stashPop } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
-      res.json(await stashPop(directory, req.body));
+      if (!directory || !isString(directory)) return res.status(400).json({ error: 'directory parameter is required' });
+      res.json(await stashPop(directory, fieldsOf(req.body)));
     } catch (error) {
       console.error('Failed to pop stash:', error);
-      res.status(500).json({ error: error.message || 'Failed to pop stash' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to pop stash' });
     }
   });
 
@@ -1230,17 +1357,17 @@ export function registerGitRoutes(app, {
     const { stashDrop } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
-      res.json(await stashDrop(directory, req.body));
+      if (!directory || !isString(directory)) return res.status(400).json({ error: 'directory parameter is required' });
+      res.json(await stashDrop(directory, fieldsOf(req.body)));
     } catch (error) {
       console.error('Failed to drop stash:', error);
-      res.status(500).json({ error: error.message || 'Failed to drop stash' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to drop stash' });
     }
   });
 
   app.post('/api/git/fetch', async (req, res) => {
     const directory = req.query.directory;
-    if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+    if (!directory || !isString(directory)) return res.status(400).json({ error: 'directory parameter is required' });
     await rejectLegacyNetworkOperation(directory, res);
   });
 
@@ -1248,7 +1375,7 @@ export function registerGitRoutes(app, {
     const { getRemotes, getRepositoryRemoteUrls } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
@@ -1259,7 +1386,7 @@ export function registerGitRoutes(app, {
       res.json(remotes.filter((remote) => !onDisk.has(remote.name)).map(toGitRemoteSummary));
     } catch (error) {
       console.error('Failed to get remotes:', error);
-      res.status(500).json({ error: error.message || 'Failed to get remotes' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get remotes' });
     }
   });
 
@@ -1267,11 +1394,11 @@ export function registerGitRoutes(app, {
     const { removeRemote } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const remote = String(req.body?.remote || '').trim();
+      const remote = String(fieldsOf(req.body)?.remote || '').trim();
       if (!remote) {
         return res.status(400).json({ error: 'remote is required' });
       }
@@ -1280,7 +1407,7 @@ export function registerGitRoutes(app, {
       res.json(result);
     } catch (error) {
       console.error('Failed to remove remote:', error);
-      res.status(500).json({ error: error.message || 'Failed to remove remote' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to remove remote' });
     }
   });
 
@@ -1289,13 +1416,14 @@ export function registerGitRoutes(app, {
     if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
     try {
       const { addChangeIdToHead } = await import('../source-control/change-id.js');
-      const { sha, changeId, branch } = await addChangeIdToHead(directory, req.body?.expectedHead);
+      const { sha, changeId, branch } = await addChangeIdToHead(directory, fieldsOf(req.body)?.expectedHead);
       onBranchRewritten?.({ directory, branch });
       return res.json({ sha, changeId });
     } catch (error) {
-      if (Number.isInteger(error?.status) && error.status < 500) return res.status(error.status).json({ error: error.message, code: error.code });
-      console.error('Failed to add a Change-Id:', error?.message);
-      return res.status(500).json({ error: 'Failed to add a Change-Id', code: error?.code ?? 'CHANGE_ID_FAILED' });
+      const status = statusOf(error);
+      if (status !== undefined && status < 500) return res.status(status).json({ error: messageOf(error), code: errorFields(error)?.code });
+      console.error('Failed to add a Change-Id:', messageOf(error));
+      return res.status(500).json({ error: 'Failed to add a Change-Id', code: errorFields(error)?.code ?? 'CHANGE_ID_FAILED' });
     }
   }));
 
@@ -1303,15 +1431,16 @@ export function registerGitRoutes(app, {
     const { rebase } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const result = await rebase(directory, req.body);
+      const onto = textOf(fieldsOf(req.body)?.onto);
+      const result = await rebase(directory, onto === undefined ? {} : { onto });
       res.json(result);
     } catch (error) {
       console.error('Failed to rebase:', error);
-      res.status(500).json({ error: error.message || 'Failed to rebase' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to rebase' });
     }
   }));
 
@@ -1319,7 +1448,7 @@ export function registerGitRoutes(app, {
     const { abortRebase } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
@@ -1327,7 +1456,7 @@ export function registerGitRoutes(app, {
       res.json(result);
     } catch (error) {
       console.error('Failed to abort rebase:', error);
-      res.status(500).json({ error: error.message || 'Failed to abort rebase' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to abort rebase' });
     }
   });
 
@@ -1335,15 +1464,16 @@ export function registerGitRoutes(app, {
     const { merge } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const result = await merge(directory, req.body);
+      const branch = textOf(fieldsOf(req.body)?.branch);
+      const result = await merge(directory, branch === undefined ? {} : { branch });
       res.json(result);
     } catch (error) {
       console.error('Failed to merge:', error);
-      res.status(500).json({ error: error.message || 'Failed to merge' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to merge' });
     }
   }));
 
@@ -1351,7 +1481,7 @@ export function registerGitRoutes(app, {
     const { abortMerge } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
@@ -1359,7 +1489,7 @@ export function registerGitRoutes(app, {
       res.json(result);
     } catch (error) {
       console.error('Failed to abort merge:', error);
-      res.status(500).json({ error: error.message || 'Failed to abort merge' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to abort merge' });
     }
   });
 
@@ -1367,7 +1497,7 @@ export function registerGitRoutes(app, {
     const { continueRebase } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
@@ -1375,7 +1505,7 @@ export function registerGitRoutes(app, {
       res.json(result);
     } catch (error) {
       console.error('Failed to continue rebase:', error);
-      res.status(500).json({ error: error.message || 'Failed to continue rebase' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to continue rebase' });
     }
   }));
 
@@ -1383,7 +1513,7 @@ export function registerGitRoutes(app, {
     const { continueMerge } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
@@ -1391,7 +1521,7 @@ export function registerGitRoutes(app, {
       res.json(result);
     } catch (error) {
       console.error('Failed to continue merge:', error);
-      res.status(500).json({ error: error.message || 'Failed to continue merge' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to continue merge' });
     }
   }));
 
@@ -1399,7 +1529,7 @@ export function registerGitRoutes(app, {
     const { getConflictDetails } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
@@ -1407,7 +1537,7 @@ export function registerGitRoutes(app, {
       res.json(result);
     } catch (error) {
       console.error('Failed to get conflict details:', error);
-      res.status(500).json({ error: error.message || 'Failed to get conflict details' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get conflict details' });
     }
   });
 
@@ -1415,12 +1545,12 @@ export function registerGitRoutes(app, {
     const { commit } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { message, addAll, files, stageFiles } = req.body;
-      if (!message) {
+      const { message, addAll, files, stageFiles } = requiredFields(req.body);
+      if (!message || !isString(message)) {
         return res.status(400).json({ error: 'message is required' });
       }
 
@@ -1432,7 +1562,7 @@ export function registerGitRoutes(app, {
       res.json(result);
     } catch (error) {
       console.error('Failed to commit:', error);
-      res.status(500).json({ error: error.message || 'Failed to create commit' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to create commit' });
     }
   }));
 
@@ -1440,7 +1570,7 @@ export function registerGitRoutes(app, {
     const { getBranches } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
@@ -1448,7 +1578,7 @@ export function registerGitRoutes(app, {
       res.json(branches);
     } catch (error) {
       console.error('Failed to get branches:', error);
-      res.status(500).json({ error: error.message || 'Failed to get branches' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get branches' });
     }
   });
 
@@ -1456,15 +1586,16 @@ export function registerGitRoutes(app, {
     const { getUnpushedBranchCounts } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      const branches = req.body?.branches;
-      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
-      if (!Array.isArray(branches) || branches.some((branch) => typeof branch !== 'string')) {
+      const branches = fieldsOf(req.body)?.branches;
+      if (!directory || !isString(directory)) return res.status(400).json({ error: 'directory parameter is required' });
+      const branchNames: unknown[] = Array.isArray(branches) ? branches : [];
+      if (!Array.isArray(branches) || !branchNames.every(isString)) {
         return res.status(400).json({ error: 'branches must be an array of branch names' });
       }
-      res.json(await getUnpushedBranchCounts(directory, branches));
+      res.json(await getUnpushedBranchCounts(directory, branchNames));
     } catch (error) {
       console.error('Failed to get branch push status:', error);
-      res.status(500).json({ error: error.message || 'Failed to get branch push status' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get branch push status' });
     }
   });
 
@@ -1472,20 +1603,21 @@ export function registerGitRoutes(app, {
     const { createBranch } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { name, startPoint } = req.body;
-      if (!name) {
+      const { name, startPoint } = requiredFields(req.body);
+      if (!name || !isString(name)) {
         return res.status(400).json({ error: 'name is required' });
       }
 
-      const result = await createBranch(directory, name, { startPoint });
+      const branchStart = textOf(startPoint);
+      const result = await createBranch(directory, name, branchStart === undefined ? {} : { startPoint: branchStart });
       res.json(result);
     } catch (error) {
       console.error('Failed to create branch:', error);
-      res.status(500).json({ error: error.message || 'Failed to create branch' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to create branch' });
     }
   }));
 
@@ -1493,12 +1625,12 @@ export function registerGitRoutes(app, {
     const { deleteBranch } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { branch, force } = req.body;
-      if (!branch) {
+      const { branch, force } = requiredFields(req.body);
+      if (!branch || !isString(branch)) {
         return res.status(400).json({ error: 'branch is required' });
       }
 
@@ -1506,7 +1638,7 @@ export function registerGitRoutes(app, {
       res.json(result);
     } catch (error) {
       console.error('Failed to delete branch:', error);
-      res.status(500).json({ error: error.message || 'Failed to delete branch' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to delete branch' });
     }
   });
 
@@ -1514,31 +1646,31 @@ export function registerGitRoutes(app, {
     const { renameBranch } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { oldName, newName } = req.body;
-      if (!oldName) {
+      const { oldName, newName } = requiredFields(req.body);
+      if (!oldName || !isString(oldName)) {
         return res.status(400).json({ error: 'oldName is required' });
       }
-      if (!newName) {
+      if (!newName || !isString(newName)) {
         return res.status(400).json({ error: 'newName is required' });
       }
 
       const result = await renameBranch(directory, oldName, newName);
       res.json(result);
     } catch (error) {
-      if (error.statusCode === 409) {
-        return res.status(409).json({ error: error.message });
+      if (errorFields(error)?.statusCode === 409) {
+        return res.status(409).json({ error: messageOf(error) });
       }
       console.error('Failed to rename branch:', error);
-      res.status(500).json({ error: error.message || 'Failed to rename branch' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to rename branch' });
     }
   });
   app.delete('/api/git/remote-branches', async (req, res) => {
     const directory = req.query.directory;
-    if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+    if (!directory || !isString(directory)) return res.status(400).json({ error: 'directory parameter is required' });
     await rejectLegacyNetworkOperation(directory, res);
   });
 
@@ -1546,12 +1678,12 @@ export function registerGitRoutes(app, {
     const { checkoutBranch } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { branch } = req.body;
-      if (!branch) {
+      const { branch } = requiredFields(req.body);
+      if (!branch || !isString(branch)) {
         return res.status(400).json({ error: 'branch is required' });
       }
 
@@ -1559,7 +1691,7 @@ export function registerGitRoutes(app, {
       res.json(result);
     } catch (error) {
       console.error('Failed to checkout branch:', error);
-      res.status(500).json({ error: error.message || 'Failed to checkout branch' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to checkout branch' });
     }
   }));
 
@@ -1567,18 +1699,18 @@ export function registerGitRoutes(app, {
     const { checkoutCommit } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
-      const { hash } = req.body;
-      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+      const { hash } = requiredFields(req.body);
+      if (!hash || !isString(hash) || !/^[0-9a-fA-F]{7,40}$/.test(hash)) {
         return res.status(400).json({ error: 'Invalid commit hash' });
       }
       const result = await checkoutCommit(directory, hash);
       res.json(result);
     } catch (error) {
       console.error('Failed to checkout commit:', error);
-      res.status(500).json({ error: error.message || 'Failed to checkout commit' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to checkout commit' });
     }
   }));
 
@@ -1586,18 +1718,18 @@ export function registerGitRoutes(app, {
     const { cherryPick } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
-      const { hash } = req.body;
-      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+      const { hash } = requiredFields(req.body);
+      if (!hash || !isString(hash) || !/^[0-9a-fA-F]{7,40}$/.test(hash)) {
         return res.status(400).json({ error: 'Invalid commit hash' });
       }
       const result = await cherryPick(directory, hash);
       res.json(result);
     } catch (error) {
       console.error('Failed to cherry-pick:', error);
-      res.status(500).json({ error: error.message || 'Failed to cherry-pick' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to cherry-pick' });
     }
   }));
 
@@ -1605,18 +1737,18 @@ export function registerGitRoutes(app, {
     const { revertCommit } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
-      const { hash } = req.body;
-      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+      const { hash } = requiredFields(req.body);
+      if (!hash || !isString(hash) || !/^[0-9a-fA-F]{7,40}$/.test(hash)) {
         return res.status(400).json({ error: 'Invalid commit hash' });
       }
       const result = await revertCommit(directory, hash);
       res.json(result);
     } catch (error) {
       console.error('Failed to revert commit:', error);
-      res.status(500).json({ error: error.message || 'Failed to revert commit' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to revert commit' });
     }
   }));
 
@@ -1624,21 +1756,21 @@ export function registerGitRoutes(app, {
     const { resetToCommit } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
-      const { hash, mode, force } = req.body;
-      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+      const { hash, mode, force } = requiredFields(req.body);
+      if (!hash || !isString(hash) || !/^[0-9a-fA-F]{7,40}$/.test(hash)) {
         return res.status(400).json({ error: 'Invalid commit hash' });
       }
-      if (!['soft', 'mixed', 'hard'].includes(mode)) {
+      if (!isResetMode(mode)) {
         return res.status(400).json({ error: 'mode must be soft, mixed, or hard' });
       }
       const result = await resetToCommit(directory, hash, mode, force === true);
       res.json(result);
     } catch (error) {
       console.error('Failed to reset to commit:', error);
-      res.status(500).json({ error: error.message || 'Failed to reset' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to reset' });
     }
   });
 
@@ -1646,7 +1778,7 @@ export function registerGitRoutes(app, {
     const { getWorktrees, observeWorktreeTopology } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
@@ -1656,11 +1788,11 @@ export function registerGitRoutes(app, {
       }
       res.json(worktrees);
     } catch (error) {
-      if (error?.code === 'CONTRIBUTOR_PROVENANCE_STORE_INVALID') {
+      if (errorFields(error)?.code === 'CONTRIBUTOR_PROVENANCE_STORE_INVALID') {
         return res.status(500).json({ error: 'Failed to verify contributor worktree provenance', code: 'UNKNOWN' });
       }
       console.error('Failed to get worktrees:', error);
-      res.status(500).json({ error: error.message || 'Failed to get worktrees' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get worktrees' });
     }
   });
 
@@ -1678,7 +1810,7 @@ export function registerGitRoutes(app, {
       res.json(await setWorktreeTaskTitle(directory, body.data));
     } catch (error) {
       console.error('Failed to set the worktree task title:', error);
-      res.status(Number.isInteger(error?.status) ? error.status : 500).json({ error: error.message || 'Failed to set the task title' });
+      res.status(statusOf(error) ?? 500).json({ error: messageOf(error) || 'Failed to set the task title' });
     }
   }));
 
@@ -1696,23 +1828,19 @@ export function registerGitRoutes(app, {
       res.json(await setWorktreePinned(directory, body.data.pinned, body.data.list ?? null));
     } catch (error) {
       console.error('Failed to pin the worktree:', error);
-      res.status(Number.isInteger(error?.status) ? error.status : 500).json({ error: error.message || 'Failed to pin the worktree' });
+      res.status(statusOf(error) ?? 500).json({ error: messageOf(error) || 'Failed to pin the worktree' });
     }
   }));
 
   app.post('/api/git/worktrees/validate', async (req, res) => {
     const { validateWorktreeCreate } = await getGitLibraries();
-    if (typeof validateWorktreeCreate !== 'function') {
-      return res.status(501).json({ error: 'Worktree validation is not available' });
-    }
-
     try {
       const directory = req.query.directory;
-      if (!directory || typeof directory !== 'string') {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      if (hasClientContributorAuthority(req.body)) {
+      if (hasClientContributorAuthority(req.body || {})) {
         return res.status(400).json({ error: 'Invalid contributor worktree request', code: 'INVALID_CONTRIBUTOR_WORKTREE' });
       }
       const input = await worktreeCreation.validationInput(directory, req.body || {});
@@ -1720,43 +1848,40 @@ export function registerGitRoutes(app, {
       res.json(result);
     } catch (error) {
       if (error instanceof WorktreeCreationError) {
-        return res.status(error.status).json({ error: error.message, code: error.code });
+        return res.status(error.status).json({ error: messageOf(error), code: errorFields(error)?.code });
       }
       console.error('Failed to validate worktree creation:', error);
-      res.status(500).json({ error: error.message || 'Failed to validate worktree creation' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to validate worktree creation' });
     }
   });
 
   app.post('/api/git/worktrees', userAction(async (req, res) => {
     try {
       const directory = req.query.directory;
-      if (!directory || typeof directory !== 'string') {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
       res.json(await worktreeCreation.create(directory, req.body || {}));
     } catch (error) {
       if (error instanceof WorktreeCreationError) {
-        const body = { error: error.message, code: error.code };
-        if (error.remoteName !== undefined) body.remoteName = error.remoteName;
+        const { remoteName } = errorFields(error) ?? {};
+        const body: WorktreeCreationErrorBody = { error: messageOf(error), code: errorFields(error)?.code };
+        if (remoteName !== undefined) body.remoteName = remoteName;
         return res.status(error.status).json(body);
       }
       console.error('Failed to create worktree:', error);
-      res.status(Number.isInteger(error?.status) ? error.status : 500).json({
-        error: error.message || 'Failed to create worktree',
-        code: error?.code,
+      res.status(statusOf(error) ?? 500).json({
+        error: messageOf(error) || 'Failed to create worktree',
+        code: errorFields(error)?.code,
       });
     }
   }));
 
   app.post('/api/git/worktrees/preview', async (req, res) => {
     const { previewWorktreeCreate } = await getGitLibraries();
-    if (typeof previewWorktreeCreate !== 'function') {
-      return res.status(501).json({ error: 'Worktree preview is not available' });
-    }
-
     try {
       const directory = req.query.directory;
-      if (!directory || typeof directory !== 'string') {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
@@ -1764,19 +1889,15 @@ export function registerGitRoutes(app, {
       res.json(preview);
     } catch (error) {
       console.error('Failed to preview worktree:', error);
-      res.status(500).json({ error: error.message || 'Failed to preview worktree' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to preview worktree' });
     }
   });
 
   app.get('/api/git/worktrees/bootstrap-status', async (req, res) => {
     const { getWorktreeBootstrapStatus } = await getGitLibraries();
-    if (typeof getWorktreeBootstrapStatus !== 'function') {
-      return res.status(501).json({ error: 'Worktree bootstrap status is not available' });
-    }
-
     try {
       const directory = req.query.directory;
-      if (!directory || typeof directory !== 'string') {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
       if (!(worktreeBootstrapStore?.read instanceof Function)
@@ -1788,23 +1909,19 @@ export function registerGitRoutes(app, {
       res.json(status);
     } catch (error) {
       console.error('Failed to get worktree bootstrap status:', error);
-      res.status(500).json({ error: error.message || 'Failed to get worktree bootstrap status' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get worktree bootstrap status' });
     }
   });
 
   app.delete('/api/git/worktrees', userAction(async (req, res) => {
     const { removeWorktree } = await getGitLibraries();
-    if (typeof removeWorktree !== 'function') {
-      return res.status(501).json({ error: 'Worktree removal is not available' });
-    }
-
     try {
       const directory = req.query.directory;
-      if (!directory || typeof directory !== 'string') {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const worktreeDirectory = typeof req.body?.directory === 'string' ? req.body.directory : '';
+      const worktreeDirectory = textOf(fieldsOf(req.body)?.directory) ?? '';
       if (!worktreeDirectory) {
         return res.status(400).json({ error: 'worktree directory is required' });
       }
@@ -1814,19 +1931,17 @@ export function registerGitRoutes(app, {
 
       const result = await removeWorktree(directory, {
         directory: worktreeDirectory,
-        deleteLocalBranch: req.body?.deleteLocalBranch === true,
-        teardownCommand: z.string().safeParse(req.body?.teardownCommand).data,
+        deleteLocalBranch: fieldsOf(req.body)?.deleteLocalBranch === true,
+        teardownCommand: z.string().safeParse(fieldsOf(req.body)?.teardownCommand).data,
         isContributorCheckout,
-        disposeInstance: canDisposeWorktreeInstance
-          ? createWorktreeInstanceDisposer({ buildOpenCodeUrl, getOpenCodeAuthHeaders })
-          : undefined,
+        disposeInstance: instanceDisposer(),
       }, {
         bootstrapStore: worktreeBootstrapStore,
       });
       res.json({ success: Boolean(result) });
     } catch (error) {
       console.error('Failed to remove worktree:', error);
-      res.status(500).json({ error: error.message || 'Failed to remove worktree', code: worktreeTeardownCodeOf(error) });
+      res.status(500).json({ error: messageOf(error) || 'Failed to remove worktree', code: worktreeTeardownCodeOf(error) });
     }
   }));
 
@@ -1834,18 +1949,18 @@ export function registerGitRoutes(app, {
     const { teardownWorktree } = await getGitLibraries();
     const directory = resolveDirectoryQuery(req.query.directory);
     if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
-    const worktreeDirectory = z.string().min(1).safeParse(req.body?.directory).data;
+    const worktreeDirectory = z.string().min(1).safeParse(fieldsOf(req.body)?.directory).data;
     if (!worktreeDirectory) return res.status(400).json({ error: 'worktree directory is required' });
     try {
       await teardownWorktree(directory, {
         directory: worktreeDirectory,
-        teardownCommand: z.string().safeParse(req.body?.teardownCommand).data,
+        teardownCommand: z.string().safeParse(fieldsOf(req.body)?.teardownCommand).data,
         isContributorCheckout,
       });
       res.json({ success: true });
     } catch (error) {
       console.error('Failed to tear down worktree:', error);
-      res.status(500).json({ error: error.message || 'Failed to tear down worktree', code: worktreeTeardownCodeOf(error) });
+      res.status(500).json({ error: messageOf(error) || 'Failed to tear down worktree', code: worktreeTeardownCodeOf(error) });
     }
   }));
 
@@ -1856,22 +1971,22 @@ export function registerGitRoutes(app, {
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
-      res.json(await snapshotWorktree(directory, { ref: req.body?.ref }));
+      res.json(await snapshotWorktree(directory, { ref: fieldsOf(req.body)?.ref }));
     } catch (error) {
       console.error('Failed to snapshot worktree:', error);
-      res.status(500).json({ error: error.message || 'Failed to snapshot worktree' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to snapshot worktree' });
     }
   });
 
-  const ARCHIVE_ERROR_STATUS = new Map([
+  const ARCHIVE_ERROR_STATUS = new Map<unknown, number>([
     ['WORKTREE_ARCHIVE_NOT_FOUND', 404],
     ['WORKTREE_ARCHIVE_IN_PROGRESS', 409],
     ['WORKTREE_ARCHIVE_NOT_APPLIED', 409],
   ]);
-  const sendArchiveError = (res, error, fallback) => {
-    const status = ARCHIVE_ERROR_STATUS.get(error?.code) ?? 500;
+  const sendArchiveError = <Cause>(res: Response, error: Cause, fallback: string) => {
+    const status = ARCHIVE_ERROR_STATUS.get(errorFields(error)?.code) ?? 500;
     if (status === 500) console.error(`${fallback}:`, error);
-    res.status(status).json({ error: error?.message || fallback, code: error?.code });
+    res.status(status).json({ error: messageOf(error) || fallback, code: errorFields(error)?.code });
   };
 
   app.get('/api/git/worktrees/archives', async (req, res) => {
@@ -1889,7 +2004,7 @@ export function registerGitRoutes(app, {
     const { archiveWorktree } = await getGitLibraries();
     const directory = resolveDirectoryQuery(req.query.directory);
     if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
-    const worktreeDirectory = z.string().min(1).safeParse(req.body?.directory).data;
+    const worktreeDirectory = z.string().min(1).safeParse(fieldsOf(req.body)?.directory).data;
     if (!worktreeDirectory) return res.status(400).json({ error: 'worktree directory is required' });
     if (!(worktreeBootstrapStore?.remove instanceof Function)) {
       return res.status(501).json({ error: 'Worktree bootstrap storage is not available' });
@@ -1897,12 +2012,10 @@ export function registerGitRoutes(app, {
     try {
       res.json(await archiveWorktree(directory, {
         directory: worktreeDirectory,
-        id: req.body.id,
-        sessionIds: req.body.sessionIds,
-        title: req.body.title,
-        disposeInstance: canDisposeWorktreeInstance
-          ? createWorktreeInstanceDisposer({ buildOpenCodeUrl, getOpenCodeAuthHeaders })
-          : undefined,
+        id: fieldsOf(req.body)?.id,
+        sessionIds: fieldsOf(req.body)?.sessionIds,
+        title: fieldsOf(req.body)?.title,
+        disposeInstance: instanceDisposer(),
       }, { bootstrapStore: worktreeBootstrapStore }));
     } catch (error) {
       sendArchiveError(res, error, 'Failed to archive worktree');
@@ -1914,7 +2027,7 @@ export function registerGitRoutes(app, {
     const directory = resolveDirectoryQuery(req.query.directory);
     if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
     try {
-      res.json(await restoreWorktreeArchive(directory, { id: req.body?.id }));
+      res.json(await restoreWorktreeArchive(directory, { id: fieldsOf(req.body)?.id }));
     } catch (error) {
       sendArchiveError(res, error, 'Failed to restore worktree archive');
     }
@@ -1925,7 +2038,7 @@ export function registerGitRoutes(app, {
     const directory = resolveDirectoryQuery(req.query.directory);
     if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
     try {
-      res.json(await deleteWorktreeArchive(directory, { id: req.body?.id, deleteBranch: req.body?.deleteBranch === true }));
+      res.json(await deleteWorktreeArchive(directory, { id: fieldsOf(req.body)?.id, deleteBranch: fieldsOf(req.body)?.deleteBranch === true }));
     } catch (error) {
       sendArchiveError(res, error, 'Failed to delete worktree archive');
     }
@@ -1935,53 +2048,47 @@ export function registerGitRoutes(app, {
     const { isLinkedWorktree } = await getGitLibraries();
     try {
       const { directory } = req.query;
-      if (!directory || typeof directory !== 'string') {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
       const linked = await isLinkedWorktree(directory);
       res.json({ linked });
     } catch (error) {
       console.error('Failed to determine worktree type:', error);
-      res.status(500).json({ error: error.message || 'Failed to determine worktree type' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to determine worktree type' });
     }
   });
 
   app.post('/api/git/validate-directory', async (req, res) => {
     const { validateWorktreeDirectory } = await getGitLibraries();
-    if (typeof validateWorktreeDirectory !== 'function') {
-      return res.status(501).json({ error: 'validateWorktreeDirectory is not available' });
-    }
     try {
-      const { directory, worktreeRoot } = req.body || {};
-      if (!directory || typeof directory !== 'string') {
+      const { directory, worktreeRoot } = fieldsOf(req.body) ?? {};
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory is required' });
       }
-      if (!worktreeRoot || typeof worktreeRoot !== 'string') {
+      if (!worktreeRoot || !isString(worktreeRoot)) {
         return res.status(400).json({ error: 'worktreeRoot is required' });
       }
       const result = await validateWorktreeDirectory(directory, worktreeRoot);
       res.json(result);
     } catch (error) {
       console.error('Failed to validate worktree directory:', error);
-      res.status(500).json({ error: error.message || 'Failed to validate worktree directory' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to validate worktree directory' });
     }
   });
 
   app.post('/api/git/canonicalize-worktree-state', async (req, res) => {
     const { canonicalizeWorktreeState } = await getGitLibraries();
-    if (typeof canonicalizeWorktreeState !== 'function') {
-      return res.status(501).json({ error: 'canonicalizeWorktreeState is not available' });
-    }
     try {
-      const { directory } = req.body || {};
-      if (!directory || typeof directory !== 'string') {
+      const { directory } = fieldsOf(req.body) ?? {};
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory is required' });
       }
       const result = await canonicalizeWorktreeState(directory);
       res.json(result);
     } catch (error) {
       console.error('Failed to canonicalize worktree state:', error);
-      res.status(500).json({ error: error.message || 'Failed to canonicalize worktree state' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to canonicalize worktree state' });
     }
   });
 
@@ -1989,26 +2096,26 @@ export function registerGitRoutes(app, {
     const { getLog } = await getGitLibraries();
     try {
       const directory = req.query.directory;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { maxCount, from, to, file } = req.query;
+      const maxCount = textOf(req.query.maxCount);
       const all = req.query.all === 'true';
       const log = await getLog(directory, {
         maxCount: maxCount ? parseInt(maxCount) : undefined,
-        from,
-        to,
-        file,
+        from: textOf(req.query.from),
+        to: textOf(req.query.to),
+        file: textOf(req.query.file),
         all
       });
       res.json(log);
     } catch (error) {
-      if (error?.code === 'revision_not_found') {
-        return res.status(404).json({ error: error.message, code: error.code });
+      if (errorFields(error)?.code === 'revision_not_found') {
+        return res.status(404).json({ error: messageOf(error), code: errorFields(error)?.code });
       }
       console.error('Failed to get log:', error);
-      res.status(500).json({ error: error.message || 'Failed to get commit log' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get commit log' });
     }
   });
 
@@ -2016,7 +2123,7 @@ export function registerGitRoutes(app, {
     const { getCommitFiles } = await getGitLibraries();
     try {
       const { directory, hash } = req.query;
-      if (!directory) {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
       if (!hash) {
@@ -2027,7 +2134,7 @@ export function registerGitRoutes(app, {
       res.json(result);
     } catch (error) {
       console.error('Failed to get commit files:', error);
-      res.status(500).json({ error: error.message || 'Failed to get commit files' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get commit files' });
     }
   });
 
@@ -2046,7 +2153,7 @@ export function registerGitRoutes(app, {
       });
       res.json({ diff });
     } catch (error) {
-      res.status(500).json({ error: error.message || 'Failed to get commit diff' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get commit diff' });
     }
   });
 
@@ -2054,16 +2161,16 @@ export function registerGitRoutes(app, {
     const { getCommitFileDiff } = await getGitLibraries();
     try {
       const { directory, hash, path: filePath } = req.query;
-      if (!directory || typeof directory !== 'string') {
+      if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
-      if (!hash || typeof hash !== 'string') {
+      if (!hash || !isString(hash)) {
         return res.status(400).json({ error: 'hash parameter is required' });
       }
       if (!/^[0-9a-fA-F]{7,40}$/.test(hash)) {
         return res.status(400).json({ error: 'hash must be a valid commit SHA' });
       }
-      if (!filePath || typeof filePath !== 'string') {
+      if (!filePath || !isString(filePath)) {
         return res.status(400).json({ error: 'path parameter is required' });
       }
 
@@ -2072,7 +2179,7 @@ export function registerGitRoutes(app, {
       res.json(result);
     } catch (error) {
       console.error('Failed to get commit file diff:', error);
-      res.status(500).json({ error: error.message || 'Failed to get commit file diff' });
+      res.status(500).json({ error: messageOf(error) || 'Failed to get commit file diff' });
     }
   });
 
