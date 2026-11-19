@@ -760,6 +760,61 @@ describe('core-routes', () => {
     expect(dependencies.clientPairingRuntime.redeemPairingSession).toHaveBeenCalledTimes(11);
   });
 
+  it('exempts each allowlisted prefix through one normalized path', async () => {
+    const app = express();
+    const requireAuth = vi.fn((_req, res) => res.status(401).type('text/plain').send('Authentication required'));
+
+    registerAuthAndAccessRoutes(app, {
+      express,
+      tunnelAuthController: {
+        classifyRequestScope: () => 'local',
+        requireTunnelSession: vi.fn(),
+        getTunnelSessionFromRequest: vi.fn(),
+        clearTunnelSessionCookie: vi.fn(),
+        exchangeBootstrapToken: vi.fn(),
+      },
+      uiAuthController: {
+        requireAuth,
+        handleSessionStatus: vi.fn(),
+        handleSessionCreate: vi.fn(),
+        handlePasskeyStatus: vi.fn(),
+        handlePasskeyAuthenticationOptions: vi.fn(),
+        handlePasskeyAuthenticationVerify: vi.fn(),
+        handlePasskeyRegistrationOptions: vi.fn(),
+        handlePasskeyRegistrationVerify: vi.fn(),
+        handlePasskeyList: vi.fn(),
+        handlePasskeyRevoke: vi.fn(),
+        handleResetAuth: vi.fn(),
+      },
+      readSettingsFromDiskMigrated: vi.fn(async () => ({})),
+      normalizeTunnelSessionTtlMs: vi.fn(),
+    });
+
+    for (const path of [
+      '/api/guest-files/abc123/shot.png',
+      '/api/fs/preview/abc123/shot.png',
+      '/api/mcp/oauth/tools/callback',
+      '/api/guests/example/oauth/callback',
+      '/api/tracker/ext-example/oauth/callback',
+      '/api/git/repository-credential',
+    ]) {
+      const response = await request(app).get(path);
+      expect(response.status).toBe(404);
+    }
+
+    for (const path of [
+      '/api/guest-files/abc123',
+      '/api/fs/preview/abc123',
+      '/api/mcp/oauth/tools/callback/extra',
+      '/api/guests/example/oauth/callback/extra',
+      '/api/tracker/ext-example/oauth/callback/extra',
+      '/api/git/repository-credential/extra',
+    ]) {
+      const response = await request(app).get(path);
+      expect(response.status).toBe(401);
+    }
+  });
+
   it('no longer exempts preview-proxy style credentials from API auth', async () => {
     const app = express();
     const requireAuth = vi.fn((_req, res) => res.status(401).type('text/plain').send('Authentication required'));
