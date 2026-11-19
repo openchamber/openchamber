@@ -24,3 +24,5 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export const isPresent = <Value>(value: Value): value is NonNullable<Value> => Boolean(value);
+
+export const hasProperties = <Value>(value: Value): value is Value & Readonly<Record<string, unknown>> => value != null;
