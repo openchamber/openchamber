@@ -52,6 +52,19 @@ per session object (records are replaced on update), so the index can be
 rebuilt on every session-list change. Lanes sort by variant then creation;
 fusions come first.
 
+### Why the index resolves the legacy scope lazily and keeps its last result
+
+`RunAutoFusion` rebuilds the index on every streamed step of any session,
+because each step changes the deferred spend and the live records. Resolving
+every session's project scope (a worktree lookup and a path normalization) per
+step cost more than the rest of the index together, and only a session whose
+title names a run without membership metadata reads that scope.
+`readMultiRunIdentityWith` therefore asks for the scope only in that case and
+caches whether the identity read it. The index itself reads only the sessions
+that carry an identity, so `buildMultiRunIndex` returns the index it built last
+when those members are the same records with the same identities in the same
+order.
+
 Consumers: the sidebar row model and mobile sheet (see the sidebar
 DOCUMENTATION), the overview (`useMultiRun`), the header title
 (`useMultiRunTitle`) and the header tabs (`useMultiRunMemberIds`: the lanes of a

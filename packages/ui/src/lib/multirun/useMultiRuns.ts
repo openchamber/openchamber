@@ -6,7 +6,7 @@ import { memoizeSessionListProjection } from '@/stores/sessionListProjection';
 import { useDeferredGlobalUpdates, withDeferredGlobalUpdate } from '@/sync/session-event-router';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions } from '@/sync/sync-context';
-import { buildMultiRunIndex, readMultiRunIdentity, type MultiRunIndex, type MultiRunSummary } from './runs';
+import { buildMultiRunIndex, readMultiRunIdentityWith, type MultiRunIndex, type MultiRunSummary } from './runs';
 
 export type MultiRunSessions = {
   index: MultiRunIndex;
@@ -42,7 +42,7 @@ export function useMultiRunTitle(runKey: string | null): string | null {
     let members = 0;
     for (const session of state.activeSessions) {
       if (!isActiveRoot(session)) continue;
-      const identity = readMultiRunIdentity(session, resolveLegacyScope(session));
+      const identity = readMultiRunIdentityWith(session, resolveLegacyScope);
       if (identity?.key !== runKey) continue;
       members += 1;
       title = identity.title ?? title ?? identity.groupSlug;
@@ -59,14 +59,14 @@ export function useMultiRunMemberIds(sessionId: string | null): readonly string[
       _worktrees: ReturnType<typeof useSessionUIStore.getState>['worktreeMetadata'],
     ) => {
       const ids = sessions
-        .filter((session) => isActiveRoot(session) && readMultiRunIdentity(session, resolveLegacyScope(session))?.key === key)
+        .filter((session) => isActiveRoot(session) && readMultiRunIdentityWith(session, resolveLegacyScope)?.key === key)
         .map((session) => session.id);
       return ids.length >= 2 ? ids.join('\n') : '';
     });
     return (state: ReturnType<typeof useGlobalSessionsStore.getState>): string => {
       if (!sessionId) return '';
       const own = state.entityById.get(sessionId);
-      const key = own && isActiveRoot(own) ? readMultiRunIdentity(own, resolveLegacyScope(own))?.key : undefined;
+      const key = own && isActiveRoot(own) ? readMultiRunIdentityWith(own, resolveLegacyScope)?.key : undefined;
       if (!key) return '';
       return members(state.activeSessions, key, useSessionUIStore.getState().worktreeMetadata);
     };
