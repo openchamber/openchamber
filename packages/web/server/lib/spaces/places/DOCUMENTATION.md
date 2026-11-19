@@ -84,27 +84,99 @@ strings; property lookup preserves inherited values and primitive boxing.
 Setup failure fields remain unchecked data from a rejected operation and
 therefore have `unknown` types. The setup code does not validate them.
 
-### Why live test support remains JavaScript
+### Why the live suites check what a container prints
 
-`escape-suite.js` reads JSON printed by probes inside the space, by its
-gatekeeper and by the server inside, and calls string and array methods on it:
-`startsWith` on every probe answer, `filter` on the window's `headerNames`,
-`flatMap` and `map` on `/api/integration`, the first `set-cookie` header and
-the tunnel counts. That is data from a container, which the Docker decision
-does not cover. A type would claim a shape nobody checks, and a check would
-change how a malformed answer fails: a probe answer that is not a string would
-drop out of `connected()` and let an assertion pass on nothing, where today it
-throws and fails the test.
+`escape-suite.ts` reads JSON printed by probes inside the space, by its
+gatekeeper and by the server inside. `docker-live-support.ts` reads the address
+list a helper container prints and the log of the stand-in upstream, which
+holds what the space sent. Docker's own output keeps the wire decision above;
+these do not, so each has a parser that refuses the wrong shape:
+`parseProbeAnswers`, `parseWindowSeen`, `parseTunnelCounts`,
+`parseIntegrationConnections`, `sessionCookieOf`, `parseListenerAddresses` and
+`parseUpstreamLog`. Before, a probe answer that was not text, or a candidate
+address that was not text, travelled on unchecked; a malformed answer now fails
+the test at the parse with the reason, never by passing an assertion on
+nothing. A probe answer must be `connected:<ip>` or `failed:<reason>`, so an empty or
+unknown answer cannot count as a refusal, and tunnel counts must be the probe's
+`done:` report of nonnegative counts that add up to its 80 attempts. Upstream
+records keep every field they carry and the original log line, because the
+grant tests search the whole record for a leaked key and a parse drops an own
+`__proto__` property. `escape-suite.test.js` pins each
+refusal.
 
-`docker-live-support.js` spreads the address list a helper container prints
-into the host listener's candidates, which the suite then uses as connection
-targets, and returns the window upstream's log lines, which hold what the
-space sent, as parsed JSON. Both are container data. Its inspect reads also
-destructure the first entry and read `NetworkSettings.Networks` without a
-guard and let `JSON.parse` throw its own `SyntaxError`; the wire parser wraps
-that error and declares those fields optional because the place guards them.
-Typing these reads would either change the failure or add a second inspect
-document for one test helper.
+The live helpers read inspect output through `parseInspectOutput`; an inspect
+that names no networks fails with a message instead of a `TypeError`.
+
+### Why the escape suite is built the way it is
+
+The suite runs inside a real space as the attacker and passes only when the
+attempt fails; every place runs it. Its `host` is the test's own view from
+outside the space, `EscapeHost`; the Docker implementation is
+`createLiveDockerPlace` in `docker-live-support.ts`. That helper gives each run
+an owner id and a tools volume of its own, so parallel runs and real spaces stay
+apart, and `dispose` removes helpers first, because a network with a container
+on it cannot go, and then asserts that Docker holds nothing with the owner
+label. Helper containers carry the marker and the owner, so the leftover check
+sees them. `OPENCHAMBER_TEST_DOCKER_HOST=ssh://<machine>` runs every live suite
+against that machine's daemon through the Docker over SSH place.
+
+Choices a later reader could undo by mistake:
+
+- Every probe prints one line and exits 0 within ten seconds, so a refusal is
+  an answer and not a hang. A probe is inconclusive, never passed, when its
+  positive control fails: the internet baseline, a 502 from the corridor (the
+  Docker machine's link, not the restriction), a name that does not resolve
+  on the host. The refusals themselves stay hard assertions.
+- Memory is 1 GiB: the server and OpenCode take about 370 MiB at rest, so the
+  process that allocates without end is the largest when the limit is hit and
+  the one that gets killed.
+- The host listener runs with `--network host` and prints every IPv4 address of
+  the Docker host from the kernel's local route table, because
+  `os.networkInterfaces()` misses a bridge without a running container. A plain
+  internal network is created first, so its gateway is among those addresses,
+  and a probe from that network must reach the host, or the test could never
+  fail. The `.1` address of the space's own subnet belongs to the gatekeeper,
+  the first container there (measured on Docker 29.2.1), and is never read as
+  the host.
+- Only the kernel's "Read-only file system" counts for the tools mount: root
+  owns those files, so "Permission denied" would stop the space user on a
+  writable mount too. Appending to the launcher is the one attempt the mount
+  does not answer, so that test proves the ownership.
+- The corridor's positive control carries to IANA's documentation domains only.
+  A product service once answered 502 on one machine and reported a failed
+  restriction where it had worked. There is deliberately no live large
+  download: `joinSockets` in `gatekeeper-program.test.js` proves a byte-exact
+  full-duplex transfer without a network.
+- In open mode the refusal of `auth.openai.com` is a lock, not a guarantee: the
+  space reaches every public host on 443 and could use an intermediary. The
+  guarantee in both modes is that no long-lived credential is inside the space.
+  Every form of a refused address is refused too (integer, hex, three-part,
+  IPv4-mapped, 6to4), because in open mode the space could resolve a name
+  through a DNS-over-HTTPS resolver; the integer form once carried a real TLS
+  session in an earlier draft.
+- The blocked-address rule is proved with a name of our own on the space's
+  outer network, answered by Docker's resolver, because third-party wildcard
+  DNS made runs inconclusive. That name not resolving is a suite bug, not an
+  inconclusive run.
+- Journal checks use a mark counted in records ever written, never a time: the
+  record's stamp comes from a clock inside a container, and on Windows the two
+  clocks disagreed by a timer tick.
+- The window listens on the gatekeeper's inner address only: on a Linux Docker
+  host every local process reaches the outer bridge. A neighbour on the outer
+  network stands in for such a process.
+- The model key is made on the host and never sent inside, not even as a search
+  pattern; the host searches what the space prints. The stand-in upstream
+  answers with hashes of what it saw.
+- The credential search reads binary files as text (`-a`), because OpenCode 2
+  keeps logins in `opencode.db`, and prints only the matched shape. Its patterns
+  carry punctuation so a log line saying "refresh" does not match. The clean
+  search runs before the control plants decoys, because SQLite keeps a deleted
+  row's bytes in its write-ahead log. The control writes an OAuth row and a
+  custom provider's key straight into OpenCode's `credential` table with Node's
+  SQLite, waiting for OpenCode's lock, and reads the table back, because
+  OpenCode's integration listing cannot see a provider its catalog does not
+  know.
+- The second space shares the owner's tools volume, so its create costs seconds.
 
 ### Why fake Docker resources have separate entry types
 
