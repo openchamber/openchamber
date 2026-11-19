@@ -45,14 +45,14 @@ properties without copying or filtering them. Each numeric or string conversion
 retains its existing acceptance rules. In particular, string `credits_used`
 values are trimmed before numeric conversion so blank strings remain unavailable.
 
-### Why MiniMax's shared reader remains JavaScript
+### Why MiniMax model names keep their native failure
 
-`pickChatModel` calls `m.model_name.toLowerCase()` after checking only truthiness.
-A truthy number or object can reach that call and throw the native method-call
-error, which `fetchQuota` returns to the caller. The HTTP response has not
-established a string or a callable method. Declaring either would overpromise;
-adding validation or coercion would change the result for malformed model names.
-Type-only changes to neighbouring modules cannot establish that missing check.
+`pickChatModel` checks only that a model name is truthy. The prefix test still
+converts it with `String`, as `RegExp.prototype.test` did, and the text-model
+match lower-cases it through `lowerCaseLabel`, which throws the original
+`m.model_name.toLowerCase is not a function` for a truthy non-string.
+`fetchQuota` returns that message to the caller as before. Count comparisons
+treat a missing count as not positive, the result `null > 0` gave.
 
 ### Why MiniMax status fields remain unknown
 
