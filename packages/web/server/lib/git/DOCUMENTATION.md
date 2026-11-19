@@ -711,7 +711,7 @@ Clone publication creates every directory, file, and symlink exclusively and rec
 
 #### Why clone and repository identity share the birthtime probe
 
-`directory-birthtime.js` owns the stability check used by clone ownership and saved repository IDs. Both must reject a positive birthtime that follows ctime, or normal Git writes look like a replaced directory. The probe uses exclusive temporary-directory creation and removes only that empty directory, so existing checkout entries cannot be overwritten or recursively deleted by the check. Clone ownership falls back to device and inode when the probe fails or is inconclusive. Source control permits that fallback only without an established identity record; an uncertain replacement must not regain an old credential grant.
+`directory-birthtime.js` owns the stability check used by clone ownership and saved repository IDs. Both must reject a positive birthtime that follows ctime, or normal Git writes look like a replaced directory. The probe uses exclusive temporary-directory creation and removes only that empty directory, so existing checkout entries cannot be overwritten or recursively deleted by the check. A probe that leaves ctime unchanged is inconclusive rather than failed: Linux moves ctime on a kernel clock tick, so a probe in the same tick as the last write shows no change. The check then probes again, up to four probes 10 ms apart, and gives up only if ctime still has not moved. Clone ownership falls back to device and inode when the probe fails or stays inconclusive. Source control permits that fallback only without an established identity record; an uncertain replacement must not regain an old credential grant.
 
 ### Why failed secret encoding retains earlier variants
 
