@@ -228,26 +228,27 @@ Its response contract accepts both stream types. HTTP client responses have a
 numeric status code; the dispatcher's response type distinguishes them from
 server-side requests covered by Node's general `IncomingMessage` declaration.
 
-### Why unchecked Docker consumers remain JavaScript
+### Why hardening trusts Docker's inspect shapes and the host stays JavaScript
 
-`hardening.js` calls `filter`, `map`, `some` and `includes` on nested inspect
-fields without checking their shapes. `docker-engine.inspect` returns an
-unchecked first entry. Declaring its `Config.Env`, `HostConfig` arrays, mounts
-or network entries as validated objects would overstate that boundary.
-`host.js` also passes the Docker label parser's unchecked ids and project values
-into string-only space and directory operations. The label parser deliberately
-accepts coercible ids and passes other label values through. Neither boundary
-can become a checked shape through a type-only correction.
+`hardening.ts` reads `docker inspect` through the wire shapes of
+`places/docker-wire.ts`: Docker CLI output is a documented format of a program
+we run, so its fields are typed and not validated, see "Why Docker CLI output
+is typed and not validated" in `places/DOCUMENTATION.md`. Each checker keeps
+its fallbacks for fields that may be absent, and verification still fails
+closed on whatever the inspect output says.
 
-`createDockerEngine.inspect` returns `unknown` after parsing JSON and selecting
-its first entry. Typing `findCommonViolations` needs the existing calls on
-`Config.Env`, `HostConfig.ExtraHosts`, `SecurityOpt`, `Mounts` and
-`IPAM.Config` to remain possible without claiming those fields were checked.
-An exported type, a corrected declaration or a dependency augmentation cannot
-establish those array shapes. In `createSpacesHost`, `knownSpaces` forwards
-unchecked label ids into `spaceProjectPath` and the manager's string-id
-operations. Widening those signatures alone still leaves the unchanged
-string-only regular-expression checks and path operations untyped.
+Space ids reach `spaceProjectPath` in `host.js` from Docker labels, which are
+strings, or from record file names, which match the id pattern; both are
+checked against that pattern before a path is built. Nothing a container
+controls reaches it.
+
+`host.js` stays JavaScript for one line. The journey's `announce` payload has
+`properties: object` and carries a failure whose `code`, `message` and
+`details` are `unknown`, and the event hub's `injectEvent` accepts only
+`JsonValue`. Passing one to the other needs a cast or a conversion. Either the
+hub accepts the payloads it serializes as unknown values, or the journey
+declares JSON payloads with checked failure fields; both belong to their
+owners, not to the host.
 
 ### Why control ranges use Unicode categories
 

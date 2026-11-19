@@ -18,6 +18,8 @@ hardening verification, command execution and space errors. Its
   settings produce no Docker host. Relative imports retain `.js` specifiers.
 - Docker JSON and command failures retain their existing acceptance and failure
   behavior. Resource verification belongs to the parent hardening module.
+- Docker CLI JSON gets its types from `docker-wire.ts` only, at the parse.
+  Output of a container or of a space's network never takes a wire type.
 
 ## Decisions
 
@@ -27,76 +29,51 @@ The registry checks method presence only. A generic registration preserves each
 implementation's arguments and results without claiming that registration
 validated the full place protocol.
 
-### Why Docker conversion depends on the parent contracts
+### Why Docker CLI output is typed and not validated
 
-The remaining implementations are `docker.js`, `docker-tools.js` and
-`docker-disk.js`. Labels and tools sources now have TypeScript owners.
-`labelFilterArgs.spaceId`, `toolsLabelFilterArgs.role` and
-`toolsLabelFilterArgs.key` accept strings. `ToolsSource` retains the factories'
-description, package text, files and canonical content.
+The operator decided that the output of the docker CLI is a documented format
+of a program OpenChamber runs itself. `docker-wire.ts` declares it once as
+named wire interfaces, and the engine and the disk reader apply them where the
+JSON is parsed: `parseInspectOutput` for `inspect` and `parseDockerJson` for
+the other documents. Each interface holds what Docker documents, restricted to
+the fields the code reads. A field is optional or nullable where the code
+already guards it. Nothing validates the shapes at run time: the parse keeps
+the `docker_output_unreadable` error for text that is not JSON, the first-entry
+lookup and the native property reads, so wrong-shaped JSON fails the way it did
+before. Adding a validator was rejected because it would change those failures
+for a format we do not control and do not need to distrust.
 
-`../hardening.js` still infers `buildSpaceCreateArgs.startConfig` as
-`null | undefined`, although its implementation interpolates a supplied string
-into an environment argument. A string argument produces TS2322. There is no
-declared type to correct or export; converting this 392-line module exceeds the
-200-line outside-helper allowance. Dependency augmentation cannot correct a
-local JavaScript implementation, and replacement declarations or JSDoc comments
-are outside the conversion rules.
+The trusted shapes:
 
-Raw Docker inspect data needs a contract shared with
-`../hardening.js`'s `findHardeningViolations` and
-`findGatekeeperHardeningViolations` checkers and `../labels.js`'s
-`parseSpaceLabels` and `parseToolsLabels`. The engine establishes JSON syntax
-only. Its first-entry lookup, `entryLabels` and the consumers' nested property
-reads do not establish an inspect shape. Unchecked entries and label fields
-cannot be declared validated containers or string dictionaries. Calling
-`filter` on `findByLabel` output produces TS18046; reading `.Labels` from an
-unchecked inspect entry produces TS2339. Passing `entryLabels` output to a
-typed label parser produces TS2345. The disk reader
-and tools operations use these same unchecked entries. This boundary involves
-all three remaining implementations. The shared contract must represent
-unchecked fields as `unknown`, with narrowing owned by the operations that
-inspect them. The label parsers retain `unknown` for fields their existing
-checks do not validate, including id, owner, project, name, creation time and
-description. Coercing regular expressions do not establish string types:
-passing a parsed space id to `spaceResourceName` produces TS2345. Widening that
-helper's parameter alone cannot type the unchanged regular-expression checks
-it calls.
-The disk reader also calls `map` on unchecked `system df` fields and `every` on
-unchecked image tags. Declaring those fields as arrays would promise validation
-that did not happen. Adding array refusals would replace the existing native
-method-call failures.
+- `inspect --type container`: `Id`, `Name`, `State.Running`,
+  `State.ExitCode`, `Config.Labels`, `Config.Env`, `Config.User`, `Mounts`
+  (`Type`, `Name`, `Source`, `Destination`, `RW`), `NetworkSettings.Networks`
+  (`IPAddress`, `Aliases`, `DNSNames`), and the `HostConfig` fields the
+  hardening checkers compare.
+- `network inspect`: `Name`, `Labels`, `Internal`, `EnableIPv6`,
+  `IPAM.Config[].Gateway`, `Options`.
+- `volume inspect`: `Name`, `Labels`.
+- `image inspect`: `Id`, `RepoTags`.
+- `version --format '{{json .}}'`: `Server` with `Version`, `Os`, `Arch`, or
+  null when the daemon does not answer.
+- `info --format '{{json .SecurityOptions}}'`: a string list or null.
+- `info --format '{{json .Name}}'`: a string.
+- `system df --verbose --format '{{json .}}'`: `Volumes` (`Name`, `Size`,
+  `Links`, all strings) and `Images` (`ID`, `UniqueSize`).
 
-`docker-tools.js` and `docker-disk.js` no longer have the filter-argument or
-tools-source mismatches. Both still consume unchecked `findByLabel` and
-`inspect` results; disk usage and image tags also remain unchecked. Giving those
-results array or inspect interfaces would promise checks the engine never
-performs. These files stay JavaScript until that boundary can be typed without
-adding validation or replacing native method-call failures.
+Labels are string dictionaries, so the label parsers return string ids for
+Docker input. The parsers take their value type from the input: unchecked
+input still gives `unknown` values, and a missing id, owner or tools key is
+refused before the patterns run, as the patterns already refused it.
 
-Correcting declared types in neighbouring modules does not resolve these
-unchecked method calls. `createDockerEngine().findByLabel` returns `unknown`,
-and its implementation validates JSON syntax only. The place iterates that
-value, tools calls its `filter`, and disk calls its `flatMap`. An array return
-type would claim a check that the engine does not perform. A new array guard
-would change the existing failure path for valid JSON with the wrong shape.
+The decision covers Docker's own output only. What a container prints, what
+the server or the gatekeeper inside a space answers, and what crosses a
+space's network stay unchecked data with their owner's types. The engine's
+failure accessor keeps `code`, `message`, `details` and `errno` of a rejection
+`unknown` and still throws a `TypeError` for a nullish rejection.
 
-The same restriction applies to the disk reader's `Volumes.map`, `Images.map`
-and `RepoTags.every`, and to the place's `Config.Env.find` and `Mounts.find`.
-Exporting an inspect interface cannot establish those methods on unchecked
-JSON. Dependency augmentation and conversion of a small outside helper cannot
-establish them either. The engine must keep its unchecked result contract
-until a separate behavior change defines validation and malformed-output errors.
-
-### Why the engine returns unchecked entries
-
-JSON syntax does not establish an inspect array, an entry object or label
-values. `inspect` retains the original first-property lookup, including
-array-like objects and strings; `findByLabel` returns the parsed value unchanged.
-The engine's field accessor establishes only that a value is not null or
-undefined. Every exposed field remains `unknown`, including rejected command
-messages. It preserves inherited properties and primitive boxing without
-asserting that the input is a validated object.
+The tools prune swallows a failed listing or removal on purpose: the next fill
+or the next move to new tools tries again.
 
 ### Why setup checks command output
 
@@ -107,21 +84,27 @@ strings; property lookup preserves inherited values and primitive boxing.
 Setup failure fields remain unchecked data from a rejected operation and
 therefore have `unknown` types. The setup code does not validate them.
 
-### Why live test support retains unchecked JSON
+### Why live test support remains JavaScript
 
-`escape-suite.js` reads `/api/integration` through `JSON.parse(answer.body).data`
-and calls `flatMap` on it and `map` on each integration's connections. The
-window probes also call `filter` on an unchecked `headerNames` field. These
-operations establish neither arrays nor their element types. The suite cannot
-declare those results as checked API entities without adding validation and
-changing how malformed answers fail.
+`escape-suite.js` reads JSON printed by probes inside the space, by its
+gatekeeper and by the server inside, and calls string and array methods on it:
+`startsWith` on every probe answer, `filter` on the window's `headerNames`,
+`flatMap` and `map` on `/api/integration`, the first `set-cookie` header and
+the tunnel counts. That is data from a container, which the Docker decision
+does not cover. A type would claim a shape nobody checks, and a check would
+change how a malformed answer fails: a probe answer that is not a string would
+drop out of `connected()` and let an assertion pass on nothing, where today it
+throws and fails the test.
 
-`docker-live-support.js` spreads the host listener's parsed address list and
-destructures parsed inspect output before reading
-`NetworkSettings.Networks[network].IPAddress`. It checks JSON syntax only.
-Its `spaceAddress`, `gatekeeperAddresses` and `startBlockedName` results must
-remain unchecked until a separate change defines validation. Exporting a type
-or correcting a neighbouring declaration cannot establish these shapes.
+`docker-live-support.js` spreads the address list a helper container prints
+into the host listener's candidates, which the suite then uses as connection
+targets, and returns the window upstream's log lines, which hold what the
+space sent, as parsed JSON. Both are container data. Its inspect reads also
+destructure the first entry and read `NetworkSettings.Networks` without a
+guard and let `JSON.parse` throw its own `SyntaxError`; the wire parser wraps
+that error and declares those fields optional because the place guards them.
+Typing these reads would either change the failure or add a second inspect
+document for one test helper.
 
 ### Why fake Docker resources have separate entry types
 
