@@ -246,7 +246,7 @@ none, and a session can allow what this layer denies. A user rule after ours
 in that user's sessions. On the fallback path the same rules are merged into
 `OPENCODE_CONFIG_CONTENT` (`appendManagedPermissions`).
 - `packages/web/server/lib/opencode/model-discovery.js`: bounded custom-provider `/models` discovery and optional models.dev enrichment. It accepts only http(s), does not follow redirects, filters transport headers, never returns credentials, and treats models.dev failure as unenriched success. Edit requests may name the provider so the host can fall back to a stored credential when the form leaves the key blank — the key from OpenCode's credential store or, failing that, the provider's stored config entry (`settings.apiKey`, else the first `env` variable name that is set in the server environment) — but only while the form's base URL still matches the saved one, so a changed URL never receives the stored credential; an explicitly entered replacement key wins.
-- `packages/web/server/lib/opencode/skill-routes.js`: route registration for skill config CRUD, supporting files, and skills catalog scan/install flows.
+- `packages/web/server/lib/opencode/skill-routes.ts`: route registration for skill config CRUD, supporting files, and skills catalog scan/install flows.
 - `packages/web/server/lib/opencode/proxy.js`: OpenCode API/SSE forwarding and readiness-gate route registration.
 - `packages/web/server/lib/opencode/session-runtime.js`: session status/activity runtime for OpenCode SSE events.
 - `packages/web/server/lib/opencode/watcher.js`: global SSE watcher runtime for push/session event fanout.
@@ -1283,7 +1283,7 @@ headers }` or v1 `{ npm, options }`. The stored entry is always a
 ## Public exports (skills.ts)
 - `getSkillSources(skillName, workingDirectory, discoveredSkill?, options?)`: returns the skill's Markdown metadata and instructions, source paths and scopes, and supporting files. Supporting files are included by default. `GET /api/config/skills` calls it once per skill with `{ includeSupportingFiles: false }`, which omits `md.supportingFiles` and skips walking supporting files.
 
-## Public exports (skill-routes.js)
+## Public exports (skill-routes.ts)
 - `registerSkillRoutes(app, dependencies)`: registers skills-related routes:
   - Skills config CRUD and metadata under `/api/config/skills*`
   - `DELETE /api/config/skills/:name` removes every copy of the name, in the project and the user's skill folders. With `scope` (`user`|`project`) and `source` (`opencode`|`claude`|`agents`) in the query it removes only the copy there and fails when that copy is missing; the integrations catalog uninstalls this way so it never removes a same-named skill the user keeps elsewhere
@@ -1302,6 +1302,11 @@ headers }` or v1 `{ npm, options }`. The stored entry is always a
     back to the active project / `lastDirectory` so repository-local
     `.agents/skills` and `.opencode/skills` remain discoverable when the client
     omits `directory`. Requests without any project still list user-scoped skills.
+
+Catalog cache reads establish the object container. The route still checks
+metadata fields individually and passes cached skill fields through as read.
+For supporting-file routes Express can supply a wildcard as an array. It is
+converted to the same string the URL decoder received in JavaScript.
 
 ### Why parsed markdown is shared within a request
 

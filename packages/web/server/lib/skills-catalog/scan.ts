@@ -7,6 +7,7 @@ import { assertGitAvailable, looksLikeAuthError, runGit } from './git.js';
 import { parseSkillRepoSource } from './source.js';
 import { removeDirectory, removeStaleCatalogFolders } from './remove-directory.js';
 import type { CatalogGitOptions, GitResult } from './git.js';
+import type { JsonValue } from '../shared/json-values.js';
 
 interface CatalogCloneOptions extends Pick<CatalogGitOptions, 'identity' | 'credentialResolver'> {
   cloneUrl: string;
@@ -17,9 +18,9 @@ interface CatalogCloneOptions extends Pick<CatalogGitOptions, 'identity' | 'cred
 type CatalogCloneResult = { ok: true } | { ok: false; error: GitResult };
 
 export interface SkillsScanOptions extends Pick<CatalogGitOptions, 'identity' | 'credentialResolver'> {
-  source?: string;
-  subpath?: string | null | undefined;
-  defaultSubpath?: string;
+  source?: string | undefined;
+  subpath?: JsonValue | undefined;
+  defaultSubpath?: string | undefined;
 }
 
 export interface SkillsCatalogItem {

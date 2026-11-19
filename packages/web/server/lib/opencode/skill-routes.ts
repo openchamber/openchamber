@@ -3,16 +3,156 @@ import { buildAppliedResponse } from './config-mutation-response.js';
 import { OPENCODE_CONFIG_DIR } from './config-files.js';
 import { skillSwitchRequestSchema } from './config-v2.js';
 import { setSkillEnabled } from './skill-switch.js';
-import { asNonEmptyString } from '../shared/guards.js';
+import { asNonEmptyString, isString } from '../shared/guards.js';
 import { appendInstalledSources, isInstalledFromSource, readInstalledSources, removeInstalledSources } from '../skills-catalog/installed-sources.js';
+import type { Application, Request } from '../shared/http-contracts.js';
+import type { JsonObject, JsonValue } from '../shared/json-values.js';
+import type { createProjectDirectoryRuntime } from '../projects/project-directory-runtime.js';
+import type { createHttpsCredentialReference } from '../git/credential-resolver.js';
+import type { ProviderAccount } from '../git/network-plan-contracts.js';
+import type { getCacheKey, scanWithCache } from '../skills-catalog/cache.js';
+import type { CuratedSkillsSource, getCuratedSkillsSources } from '../skills-catalog/curated-sources.js';
+import type { CatalogGitIdentity, CatalogGitOptions } from '../skills-catalog/git.js';
+import type { fetchGitHubRepoMetas } from '../skills-catalog/github-meta.js';
+import type { installSkillsFromRepository } from '../skills-catalog/install.js';
+import type { scanSkillsRepository } from '../skills-catalog/scan.js';
+import type { parseSkillRepoSource } from '../skills-catalog/source.js';
+import type { SKILL_SCOPE } from './config-files.js';
+import type { createOpenCodeLifecycleRuntime } from './lifecycle.js';
+import type { readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile } from './skill-files.js';
+import type { ListedSkill, ParsedSkillFiles, createSkill, deleteSkill, discoverSkills, getSkillSources, isManagedSkillPath, mergeDiscoveredSkills, renameSkill, updateSkill } from './skills.js';
 
-const isEnvFlagEnabled = (value) => {
-  if (typeof value !== 'string') return false;
+type Directory = string | null;
+type SkillSource = ListedSkill['source'];
+interface SkillParams { name: string }
+interface SkillFileParams extends SkillParams { filePath: string | string[] }
+interface GitProfile {
+  id: string;
+  name: string;
+  account?: ProviderAccount | null;
+  sshCredentialId?: string;
+  transport?: 'account' | 'ssh' | 'anonymous' | 'system';
+}
+interface TransportAccount {
+  credentialId: string;
+  status: string;
+  credentialRevision: number;
+  providerUserId: string;
+}
+interface CustomSource {
+  id: string;
+  label: string;
+  description: string;
+  source: string;
+  defaultSubpath: string | undefined;
+  gitIdentityId: string | undefined;
+}
+type CatalogSource = (CuratedSkillsSource & { gitIdentityId?: undefined }) | (CustomSource & { excludedSkills?: undefined });
+type CatalogIdentity = { ok: true; identity: CatalogGitIdentity | null } | {
+  ok: false; error: { kind: 'authRequired'; message: string };
+};
+interface CatalogBody {
+  source?: JsonValue;
+  subpath?: JsonValue;
+  sourceId?: JsonValue;
+  gitIdentityId?: JsonValue;
+  scope?: JsonValue;
+  targetSource?: JsonValue;
+  selections?: JsonValue;
+  conflictPolicy?: JsonValue;
+  conflictDecisions?: JsonValue;
+}
+interface MutationFields { content?: JsonValue; scope?: JsonValue; source?: JsonValue; renameTo?: JsonValue; targetPath?: JsonValue }
+interface WireSkill {
+  id?: unknown;
+  name?: unknown;
+  path?: unknown;
+  location?: unknown;
+  description?: unknown;
+  content?: unknown;
+}
+interface RepoMetaFields { stars?: unknown; repoUpdatedAt?: unknown }
+interface SkillSettings { skillCatalogs?: unknown }
+interface CustomCatalogSetting { id: string; label: string; source: string; subpath?: string; gitIdentityId?: string }
+interface ErrorFields { code?: unknown; message?: unknown }
+interface CachedScan {
+  ok?: unknown;
+  error?: unknown;
+  items?: unknown;
+}
+interface CachedSkill { skillName?: unknown; skillDir?: unknown }
+type SkillRouteOptions =
+  & Pick<ReturnType<typeof createProjectDirectoryRuntime>, 'resolveProjectDirectory' | 'resolveOptionalProjectDirectory'>
+  & Pick<CatalogGitOptions, 'credentialResolver'>
+  & {
+    fs: typeof import('node:fs');
+    path: typeof import('node:path');
+    os: Pick<typeof import('node:os'), 'homedir'>;
+    refreshOpenCodeAfterConfigChange?: ReturnType<typeof createOpenCodeLifecycleRuntime>['refreshOpenCodeAfterConfigChange'];
+    clientReloadDelayMs?: number;
+    buildOpenCodeUrl: (path: string, prefix: string) => string;
+    getOpenCodeAuthHeaders: () => Record<string, string>;
+    getOpenCodePort: () => number | null | undefined;
+    readSettingsFromDisk: () => Promise<SkillSettings>;
+    sanitizeSkillCatalogs: (value: SkillSettings['skillCatalogs']) => CustomCatalogSetting[] | undefined;
+    isUnsafeSkillRelativePath: (value: string) => boolean;
+    getSkillSources: typeof getSkillSources;
+    discoverSkills: typeof discoverSkills;
+    mergeDiscoveredSkills: typeof mergeDiscoveredSkills;
+    createSkill: typeof createSkill;
+    updateSkill: typeof updateSkill;
+    deleteSkill: typeof deleteSkill;
+    renameSkill: typeof renameSkill;
+    isManagedSkillPath: typeof isManagedSkillPath;
+    readSkillSupportingFile: typeof readSkillSupportingFile;
+    writeSkillSupportingFile: typeof writeSkillSupportingFile;
+    deleteSkillSupportingFile: typeof deleteSkillSupportingFile;
+    SKILL_SCOPE: typeof SKILL_SCOPE;
+    SKILL_DIR: string;
+    getCuratedSkillsSources: typeof getCuratedSkillsSources;
+    getCacheKey: typeof getCacheKey;
+    scanWithCache: typeof scanWithCache;
+    parseSkillRepoSource: typeof parseSkillRepoSource;
+    scanSkillsRepository: typeof scanSkillsRepository;
+    installSkillsFromRepository: typeof installSkillsFromRepository;
+    fetchGitHubRepoMetas: typeof fetchGitHubRepoMetas;
+    getProfiles: () => GitProfile[];
+    getProfile: (id: JsonValue) => GitProfile | null;
+    createHttpsCredentialReference?: typeof createHttpsCredentialReference;
+    resolveSourceControlAccount?: (account: ProviderAccount) => Promise<TransportAccount | null>;
+  };
+
+const hasCatalogFields = (value: unknown): value is CatalogBody => value != null;
+const hasMutationFields = (value: unknown): value is MutationFields => value != null;
+const hasErrorFields = (value: unknown): value is ErrorFields => value != null;
+const hasScanFields = (value: unknown): value is CachedScan => value != null;
+const hasCachedSkillFields = (value: unknown): value is CachedSkill => value != null;
+const hasKind = (value: unknown): value is { kind?: unknown } => value != null;
+const isList = (value: unknown): value is readonly unknown[] => Array.isArray(value);
+const readInstallSelections = (value: CatalogBody['selections']) => {
+  if (!isList(value)) return undefined;
+  return value.map((item) => {
+    const selection: { skillDir?: JsonValue } = Object(item);
+    return selection;
+  });
+};
+const isAccessError = (value: unknown): value is ErrorFields & { code: 'EACCES' | 'EPERM' } =>
+  value !== null && typeof value === 'object' && hasErrorFields(value) && (value.code === 'EACCES' || value.code === 'EPERM');
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+const isScope = (value: string | null): value is ListedSkill['scope'] => value === 'user' || value === 'project';
+const isSource = (value: string | null): value is SkillSource => value === 'opencode' || value === 'claude' || value === 'agents';
+const isEnvFlagEnabled = (value: NodeJS.ProcessEnv[string]) => {
+  if (!isString(value)) return false;
   const normalized = value.trim().toLowerCase();
   return normalized.length > 0 && normalized !== '0' && normalized !== 'false';
 };
 
-export const registerSkillRoutes = (app, dependencies) => {
+const errorMessage = (cause: unknown) => {
+  if (!hasErrorFields(cause)) throw new TypeError('Cannot read skill error message');
+  return cause.message;
+};
+
+export const registerSkillRoutes = (app: Application, dependencies: SkillRouteOptions) => {
   const {
     fs,
     path,
@@ -53,7 +193,7 @@ export const registerSkillRoutes = (app, dependencies) => {
     credentialResolver,
   } = dependencies;
 
-  const resolveCatalogGitIdentity = async (identityId, source) => {
+  const resolveCatalogGitIdentity = async (identityId: JsonValue | undefined, source: JsonValue | undefined): Promise<CatalogIdentity> => {
     if (!identityId || identityId === 'global') return { ok: true, identity: null };
 
     const profile = getProfile(identityId);
@@ -81,7 +221,7 @@ export const registerSkillRoutes = (app, dependencies) => {
 
     if (transport === 'account' && profile.account && resolveSourceControlAccount && createHttpsCredentialReference) {
       const account = await resolveSourceControlAccount(profile.account);
-      if (account?.credentialId !== profile.account.accountId
+      if (!account || account.credentialId !== profile.account.accountId
         || account.status !== 'valid'
         || !Number.isSafeInteger(account.credentialRevision)
         || account.credentialRevision < 1) {
@@ -114,7 +254,7 @@ export const registerSkillRoutes = (app, dependencies) => {
     return { ok: false, error: { kind: 'authRequired', message: 'Selected Git identity is unavailable' } };
   };
 
-  const findWorktreeRootForSkills = (workingDirectory) => {
+  const findWorktreeRootForSkills = (workingDirectory: Directory) => {
     if (!workingDirectory) return null;
     let current = path.resolve(workingDirectory);
     while (true) {
@@ -129,7 +269,7 @@ export const registerSkillRoutes = (app, dependencies) => {
     }
   };
 
-  const getSkillProjectAncestors = (workingDirectory) => {
+  const getSkillProjectAncestors = (workingDirectory: Directory) => {
     if (!workingDirectory) return [];
     const result = [];
     let current = path.resolve(workingDirectory);
@@ -144,17 +284,17 @@ export const registerSkillRoutes = (app, dependencies) => {
     return result;
   };
 
-  const isPathInside = (candidatePath, parentPath) => {
+  const isPathInside = (candidatePath: string, parentPath: string | null | undefined) => {
     if (!candidatePath || !parentPath) return false;
     const normalizedCandidate = path.resolve(candidatePath);
     const normalizedParent = path.resolve(parentPath);
     return normalizedCandidate === normalizedParent || normalizedCandidate.startsWith(`${normalizedParent}${path.sep}`);
   };
 
-  const inferSkillScopeAndSourceFromPath = (skillPath, projectAncestors) => {
-    const resolvedPath = typeof skillPath === 'string' ? path.resolve(skillPath) : '';
+  const inferSkillScopeAndSourceFromPath = (skillPath: string, projectAncestors: string[]) => {
+    const resolvedPath = path.resolve(skillPath);
     const home = os.homedir();
-    const source = resolvedPath.includes(`${path.sep}.agents${path.sep}skills${path.sep}`)
+    const source: SkillSource = resolvedPath.includes(`${path.sep}.agents${path.sep}skills${path.sep}`)
       ? 'agents'
       : resolvedPath.includes(`${path.sep}.claude${path.sep}skills${path.sep}`)
         ? 'claude'
@@ -188,18 +328,18 @@ export const registerSkillRoutes = (app, dependencies) => {
     return { scope: SKILL_SCOPE.USER, source };
   };
 
-  const fetchOpenCodeDiscoveredSkills = async (workingDirectory) => {
+  const fetchOpenCodeDiscoveredSkills = async (workingDirectory: Directory) => {
     if (!getOpenCodePort()) {
       return null;
     }
 
     try {
+      const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
+      const headers = { ...getOpenCodeAuthHeaders() };
+      if (workingDirectory) headers['x-opencode-directory'] = encodeURIComponent(workingDirectory);
       const client = OpenCode.make({
-        baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
-        headers: {
-          ...getOpenCodeAuthHeaders(),
-          ...(workingDirectory ? { 'x-opencode-directory': encodeURIComponent(workingDirectory) } : {}),
-        },
+        baseUrl,
+        headers,
         fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(8_000) }),
       });
 
@@ -211,12 +351,12 @@ export const registerSkillRoutes = (app, dependencies) => {
 
       const projectAncestors = getSkillProjectAncestors(workingDirectory);
       return payload
-        .map((item) => {
-          const name = typeof item?.name === 'string' ? item.name.trim() : '';
-          const rawLocation = typeof item?.path === 'string' ? item.path : (typeof item?.location === 'string' ? item.location : '');
+        .map((item: WireSkill | null | undefined): ListedSkill | null => {
+          const name = isString(item?.name) ? item.name.trim() : '';
+          const rawLocation = isString(item?.path) ? item.path : (isString(item?.location) ? item.location : '');
           const location = rawLocation.startsWith('/builtin/') || rawLocation.startsWith('skill://') ? '<built-in>' : rawLocation;
-          const description = typeof item?.description === 'string' ? item.description : '';
-          const content = typeof item?.content === 'string' ? item.content : '';
+          const description = isString(item?.description) ? item.description : '';
+          const content = isString(item?.content) ? item.content : '';
           if (!name || !location) {
             return null;
           }
@@ -232,7 +372,7 @@ export const registerSkillRoutes = (app, dependencies) => {
             };
           }
           const inferred = inferSkillScopeAndSourceFromPath(location, projectAncestors);
-          const skill = {
+          const skill: ListedSkill = {
             name,
             path: location,
             scope: inferred.scope,
@@ -244,7 +384,7 @@ export const registerSkillRoutes = (app, dependencies) => {
           }
           return skill;
         })
-        .filter(Boolean);
+        .filter((skill) => skill !== null);
     } catch (error) {
       console.error('Failed to list OpenCode skills:', error);
       return null;
@@ -260,7 +400,7 @@ export const registerSkillRoutes = (app, dependencies) => {
     }
   };
 
-  const resolveSkillsDirectory = async (req) => {
+  const resolveSkillsDirectory = async (req: Pick<Request, 'get' | 'query'>) => {
     const optional = await resolveOptionalProjectDirectory(req);
     if (optional.error) {
       return optional;
@@ -275,7 +415,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         return { directory: fallback.directory, error: null };
       }
     } catch {
-      // ignore — listing user-scoped skills without a project is valid
+      return { directory: null, error: null };
     }
 
     return { directory: null, error: null };
@@ -288,14 +428,14 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
       const openCodeSkills = await fetchOpenCodeDiscoveredSkills(directory);
-      const parsedFiles = new Map();
+      const parsedFiles: ParsedSkillFiles = new Map();
       const localSkills = await discoverSkills(directory, { parsedFiles });
       const skills = mergeDiscoveredSkills(openCodeSkills ?? [], localSkills);
 
       const enrichedSkills = [];
       for (const skill of skills) {
         const sources = await getSkillSources(skill.name, directory, skill, { includeSupportingFiles: false, parsedFiles });
-        const skillPath = typeof skill.path === 'string' ? skill.path : null;
+        const skillPath = isString(skill.path) ? skill.path : null;
         enrichedSkills.push({
           ...skill,
           sources,
@@ -315,10 +455,7 @@ export const registerSkillRoutes = (app, dependencies) => {
           allDisabled: isEnvFlagEnabled(process.env.OPENCODE_DISABLE_EXTERNAL_SKILLS),
         },
       };
-      if (openCodeSkills === null) {
-        body.openCodeSkillsUnavailable = true;
-      }
-      res.json(body);
+      res.json(openCodeSkills === null ? { ...body, openCodeSkillsUnavailable: true } : body);
     } catch (error) {
       console.error('Failed to list skills:', error);
       res.status(500).json({ error: 'Failed to list skills' });
@@ -339,7 +476,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       res.json(setSkillEnabled({ id, enabled, scope, directory }));
     } catch (error) {
       console.error('Failed to switch skill:', error);
-      res.status(500).json({ error: error.message || 'Failed to switch skill' });
+      res.status(500).json({ error: errorMessage(error) || 'Failed to switch skill' });
     }
   });
 
@@ -363,30 +500,29 @@ export const registerSkillRoutes = (app, dependencies) => {
         gitIdentityId: entry.gitIdentityId,
       }));
 
-      const sources = [...curatedSources, ...customSources];
+      const sources: CatalogSource[] = [...curatedSources, ...customSources];
 
       const githubRepos = sources
         .map((src) => parseSkillRepoSource(src.source))
-        .filter((parsed) => parsed.ok && parsed.host === 'github.com')
-        .map((parsed) => parsed.normalizedRepo);
+        .flatMap((parsed) => parsed.ok && parsed.host === 'github.com' ? [parsed.normalizedRepo] : []);
       const repoMetas = await fetchGitHubRepoMetas(githubRepos);
 
-      const sourcesForUi = sources.map(({ gitIdentityId, excludedSkills, ...rest }) => {
+      const sourcesForUi = sources.map(({ gitIdentityId: _gitIdentityId, excludedSkills: _excludedSkills, ...rest }) => {
         const parsed = parseSkillRepoSource(rest.source);
-        const meta = parsed.ok && parsed.host === 'github.com'
+        const meta: RepoMetaFields = parsed.ok && parsed.host === 'github.com'
           ? repoMetas[parsed.normalizedRepo] || {}
           : {};
         return {
           ...rest,
-          stars: typeof meta.stars === 'number' ? meta.stars : null,
-          repoUpdatedAt: typeof meta.repoUpdatedAt === 'string' ? meta.repoUpdatedAt : null,
+          stars: isNumber(meta.stars) ? meta.stars : null,
+          repoUpdatedAt: isString(meta.repoUpdatedAt) ? meta.repoUpdatedAt : null,
         };
       });
 
       res.json({ ok: true, sources: sourcesForUi, itemsBySource: {} });
     } catch (error) {
       console.error('Failed to load skills catalog:', error);
-      res.status(500).json({ ok: false, error: { kind: 'unknown', message: error.message || 'Failed to load catalog' } });
+      res.status(500).json({ ok: false, error: { kind: 'unknown', message: errorMessage(error) || 'Failed to load catalog' } });
     }
   });
 
@@ -397,7 +533,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ ok: false, error: { kind: 'invalidSource', message: error } });
       }
 
-      const sourceId = typeof req.query.sourceId === 'string' ? req.query.sourceId : null;
+      const sourceId = isString(req.query.sourceId) ? req.query.sourceId : null;
       if (!sourceId) {
         return res.status(400).json({ ok: false, error: { kind: 'invalidSource', message: 'Missing sourceId' } });
       }
@@ -417,7 +553,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         gitIdentityId: entry.gitIdentityId,
       }));
 
-      const sources = [...curatedSources, ...customSources];
+      const sources: CatalogSource[] = [...curatedSources, ...customSources];
       const src = sources.find((entry) => entry.id === sourceId);
 
       if (!src) {
@@ -462,8 +598,9 @@ export const registerSkillRoutes = (app, dependencies) => {
         { refresh },
       );
 
+      if (!hasScanFields(scanResult)) throw new TypeError('Cannot read catalog scan');
       if (!scanResult.ok) {
-        if (scanResult.error?.kind === 'authRequired') {
+        if (hasKind(scanResult.error) && scanResult.error.kind === 'authRequired') {
           return res.status(401).json({
             ok: false,
             error: { ...scanResult.error, identities: listGitIdentitiesForResponse() },
@@ -472,12 +609,18 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(500).json({ ok: false, error: scanResult.error });
       }
 
-      const excludedSkills = new Set(src.excludedSkills || []);
+      const excludedSkills = new Set<unknown>(src.excludedSkills || []);
       const provenanceByName = readInstalledSources();
-      const items = (scanResult.items || []).filter((item) => !excludedSkills.has(item.skillName)).map((item) => {
-        const installed = installedByName.get(item.skillName);
-        const isInstalled = Boolean(installed)
-          && isInstalledFromSource(provenanceByName, item.skillName, src.id, item.skillDir);
+      const scannedItems = scanResult.items || [];
+      if (!isList(scannedItems)) throw new TypeError('Catalog scan items must be an array');
+      const items = scannedItems.filter((item): item is CachedSkill => {
+        if (!hasCachedSkillFields(item)) throw new TypeError('Cannot read catalog skill');
+        return !excludedSkills.has(item.skillName);
+      }).map((item) => {
+        const skillName = isString(item.skillName) ? item.skillName : undefined;
+        const installed = skillName === undefined ? undefined : installedByName.get(skillName);
+        const isInstalled = installed && skillName !== undefined
+          && isInstalledFromSource(provenanceByName, skillName, src.id, item.skillDir);
         return {
           sourceId: src.id,
           ...item,
@@ -493,14 +636,14 @@ export const registerSkillRoutes = (app, dependencies) => {
       console.error('Failed to load catalog source:', error);
       return res.status(500).json({
         ok: false,
-        error: { kind: 'unknown', message: error.message || 'Failed to load catalog source' },
+        error: { kind: 'unknown', message: errorMessage(error) || 'Failed to load catalog source' },
       });
     }
   });
 
   app.post('/api/config/skills/scan', async (req, res) => {
     try {
-      const { source, subpath, gitIdentityId } = req.body || {};
+      const { source, subpath, gitIdentityId } = hasCatalogFields(req.body) ? req.body : {};
       const resolvedIdentity = await resolveCatalogGitIdentity(gitIdentityId, source);
       if (!resolvedIdentity.ok) {
         return res.status(401).json({
@@ -510,7 +653,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       }
 
       const result = await scanSkillsRepository({
-        source,
+        source: isString(source) ? source : undefined,
         subpath,
         identity: resolvedIdentity.identity,
         credentialResolver,
@@ -533,7 +676,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       res.json({ ok: true, items: result.items });
     } catch (error) {
       console.error('Failed to scan skills repository:', error);
-      res.status(500).json({ ok: false, error: { kind: 'unknown', message: error.message || 'Failed to scan repository' } });
+      res.status(500).json({ ok: false, error: { kind: 'unknown', message: errorMessage(error) || 'Failed to scan repository' } });
     }
   });
 
@@ -549,7 +692,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         selections,
         conflictPolicy,
         conflictDecisions,
-      } = req.body || {};
+      } = hasCatalogFields(req.body) ? req.body : {};
 
       let workingDirectory = null;
       if (scope === 'project') {
@@ -571,6 +714,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         });
       }
 
+      const decisions: JsonObject | null | undefined = conflictDecisions == null ? conflictDecisions : Object(conflictDecisions);
       const result = await installSkillsFromRepository({
         source,
         subpath,
@@ -580,9 +724,9 @@ export const registerSkillRoutes = (app, dependencies) => {
         targetSource,
         workingDirectory,
         userSkillDir: SKILL_DIR,
-        selections,
+        selections: readInstallSelections(selections),
         conflictPolicy,
-        conflictDecisions,
+        conflictDecisions: decisions,
       });
 
       if (!result.ok) {
@@ -636,11 +780,11 @@ export const registerSkillRoutes = (app, dependencies) => {
       });
     } catch (error) {
       console.error('Failed to install skills:', error);
-      res.status(500).json({ ok: false, error: { kind: 'unknown', message: error.message || 'Failed to install skills' } });
+      res.status(500).json({ ok: false, error: { kind: 'unknown', message: errorMessage(error) || 'Failed to install skills' } });
     }
   });
 
-  app.get('/api/config/skills/:name', async (req, res) => {
+  app.get<unknown, SkillParams>('/api/config/skills/:name', async (req, res) => {
     try {
       const skillName = req.params.name;
       const { directory, error } = await resolveSkillsDirectory(req);
@@ -664,10 +808,10 @@ export const registerSkillRoutes = (app, dependencies) => {
     }
   });
 
-  app.get('/api/config/skills/:name/files/*filePath', async (req, res) => {
+  app.get<unknown, SkillFileParams>('/api/config/skills/:name/files/*filePath', async (req, res) => {
     try {
       const skillName = req.params.name;
-      const filePath = decodeURIComponent(req.params.filePath);
+      const filePath = decodeURIComponent(String(req.params.filePath));
       if (isUnsafeSkillRelativePath(filePath)) {
         return res.status(400).json({ error: 'Invalid file path' });
       }
@@ -690,7 +834,7 @@ export const registerSkillRoutes = (app, dependencies) => {
 
       res.json({ path: filePath, content });
     } catch (error) {
-      if (error && typeof error === 'object' && (error.code === 'EACCES' || error.code === 'EPERM')) {
+      if (isAccessError(error)) {
         return res.status(403).json({ error: 'Access to file denied' });
       }
       console.error('Failed to read skill file:', error);
@@ -698,9 +842,10 @@ export const registerSkillRoutes = (app, dependencies) => {
     }
   });
 
-  app.post('/api/config/skills/:name', async (req, res) => {
+  app.post<unknown, SkillParams>('/api/config/skills/:name', async (req, res) => {
     try {
       const skillName = req.params.name;
+      if (!hasMutationFields(req.body)) throw new TypeError('Cannot read skill fields');
       const { scope, source: skillSource, ...config } = req.body;
       const { directory, error } = scope === SKILL_SCOPE.PROJECT
         ? await resolveProjectDirectory(req)
@@ -718,11 +863,11 @@ export const registerSkillRoutes = (app, dependencies) => {
       ));
     } catch (error) {
       console.error('Failed to create skill:', error);
-      res.status(500).json({ error: error.message || 'Failed to create skill' });
+      res.status(500).json({ error: errorMessage(error) || 'Failed to create skill' });
     }
   });
 
-  app.patch('/api/config/skills/:name', async (req, res) => {
+  app.patch<unknown, SkillParams>('/api/config/skills/:name', async (req, res) => {
     try {
       const skillName = req.params.name;
       const updates = req.body;
@@ -731,7 +876,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      if (typeof updates?.renameTo === 'string') {
+      if (hasMutationFields(updates) && isString(updates.renameTo)) {
         const newName = updates.renameTo.trim();
         console.log(`[Server] Renaming skill: ${skillName} -> ${newName}`);
         console.log('[Server] Working directory:', directory);
@@ -745,23 +890,24 @@ export const registerSkillRoutes = (app, dependencies) => {
       console.log(`[Server] Updating skill: ${skillName}`);
       console.log('[Server] Working directory:', directory);
 
-      await updateSkill(skillName, updates, directory, updates?.targetPath);
+      await updateSkill(skillName, updates, directory, hasMutationFields(updates) ? updates.targetPath : undefined);
       res.json(buildAppliedResponse(
         `Skill ${skillName} updated successfully.`,
       ));
     } catch (error) {
       console.error('[Server] Failed to update skill:', error);
-      res.status(500).json({ error: error.message || 'Failed to update skill' });
+      res.status(500).json({ error: errorMessage(error) || 'Failed to update skill' });
     }
   });
 
-  app.put('/api/config/skills/:name/files/*filePath', async (req, res) => {
+  app.put<unknown, SkillFileParams>('/api/config/skills/:name/files/*filePath', async (req, res) => {
     try {
       const skillName = req.params.name;
-      const filePath = decodeURIComponent(req.params.filePath);
+      const filePath = decodeURIComponent(String(req.params.filePath));
       if (isUnsafeSkillRelativePath(filePath)) {
         return res.status(400).json({ error: 'Invalid file path' });
       }
+      if (!hasMutationFields(req.body)) throw new TypeError('Cannot read skill file content');
       const { content } = req.body;
       const { directory, error } = await resolveSkillsDirectory(req);
       if (error) {
@@ -782,18 +928,18 @@ export const registerSkillRoutes = (app, dependencies) => {
         message: `File ${filePath} saved successfully`,
       });
     } catch (error) {
-      if (error && typeof error === 'object' && (error.code === 'EACCES' || error.code === 'EPERM')) {
+      if (isAccessError(error)) {
         return res.status(403).json({ error: 'Access to file denied' });
       }
       console.error('Failed to write skill file:', error);
-      res.status(500).json({ error: error.message || 'Failed to write skill file' });
+      res.status(500).json({ error: errorMessage(error) || 'Failed to write skill file' });
     }
   });
 
-  app.delete('/api/config/skills/:name/files/*filePath', async (req, res) => {
+  app.delete<unknown, SkillFileParams>('/api/config/skills/:name/files/*filePath', async (req, res) => {
     try {
       const skillName = req.params.name;
-      const filePath = decodeURIComponent(req.params.filePath);
+      const filePath = decodeURIComponent(String(req.params.filePath));
       if (isUnsafeSkillRelativePath(filePath)) {
         return res.status(400).json({ error: 'Invalid file path' });
       }
@@ -816,15 +962,15 @@ export const registerSkillRoutes = (app, dependencies) => {
         message: `File ${filePath} deleted successfully`,
       });
     } catch (error) {
-      if (error && typeof error === 'object' && (error.code === 'EACCES' || error.code === 'EPERM')) {
+      if (isAccessError(error)) {
         return res.status(403).json({ error: 'Access to file denied' });
       }
       console.error('Failed to delete skill file:', error);
-      res.status(500).json({ error: error.message || 'Failed to delete skill file' });
+      res.status(500).json({ error: errorMessage(error) || 'Failed to delete skill file' });
     }
   });
 
-  app.delete('/api/config/skills/:name', async (req, res) => {
+  app.delete<unknown, SkillParams>('/api/config/skills/:name', async (req, res) => {
     try {
       const skillName = req.params.name;
       const { directory, error } = await resolveSkillsDirectory(req);
@@ -836,7 +982,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       const source = asNonEmptyString(req.query.source);
       let location;
       if (scope || source) {
-        if (!['user', 'project'].includes(scope) || !['opencode', 'claude', 'agents'].includes(source)) {
+        if (!isScope(scope) || !isSource(source)) {
           return res.status(400).json({ error: 'scope must be user or project and source opencode, claude or agents' });
         }
         location = { scope, source };
@@ -853,7 +999,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       ));
     } catch (error) {
       console.error('Failed to delete skill:', error);
-      res.status(500).json({ error: error.message || 'Failed to delete skill' });
+      res.status(500).json({ error: errorMessage(error) || 'Failed to delete skill' });
     }
   });
 };
