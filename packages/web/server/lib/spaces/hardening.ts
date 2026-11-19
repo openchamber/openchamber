@@ -28,6 +28,24 @@ import {
 import { isStartConfig, START_CONFIG_VARIABLE } from './space-opencode.js';
 import { FILLER_PROGRAM } from './tools-filler.js';
 import { TOOLS_STAGING_PATH } from './tools.js';
+import type { DockerContainerSettings, DockerEndpoint, DockerMount, DockerNetwork, DockerVolume } from './places/docker-wire.js';
+
+export interface HardeningViolation {
+  check: string;
+  message: string;
+}
+
+interface NetworkCreate {
+  network: string;
+  labelArguments: string[];
+}
+
+interface OneShotRun {
+  containerName: string;
+  labelArguments: string[];
+  toolsVolume: string;
+  image: string;
+}
 
 const SPACE_PIDS_LIMIT = 512;
 const SPACE_SHM_BYTES = 64 * 1024 * 1024;
@@ -57,21 +75,21 @@ const HOST_NAME_ENTRY = `${HOST_NAME}:host-gateway`;
 
 const NO_NEW_PRIVILEGES = ['no-new-privileges', 'no-new-privileges:true'];
 const PRIVATE_NAMESPACE_MODES = ['', 'private'];
-const NAMESPACE_FIELDS = ['PidMode', 'IpcMode', 'UTSMode', 'UsernsMode', 'CgroupnsMode'];
+const NAMESPACE_FIELDS = ['PidMode', 'IpcMode', 'UTSMode', 'UsernsMode', 'CgroupnsMode'] as const;
 
-const volumeMount = (volume, destination) => ['--mount', `type=volume,src=${volume},dst=${destination}`];
-const readOnlyVolumeMount = (volume, destination) => ['--mount', `type=volume,src=${volume},dst=${destination},readonly`];
+const volumeMount = (volume: string, destination: string) => ['--mount', `type=volume,src=${volume},dst=${destination}`];
+const readOnlyVolumeMount = (volume: string, destination: string) => ['--mount', `type=volume,src=${volume},dst=${destination},readonly`];
 
-const memoryArgs = (bytes) => ['--memory', String(bytes), '--memory-swap', String(bytes)];
+const memoryArgs = (bytes: number) => ['--memory', String(bytes), '--memory-swap', String(bytes)];
 
-export function requireMemoryBytes(value) {
-  if (!Number.isSafeInteger(value) || value < MIN_MEMORY_BYTES) {
+export function requireMemoryBytes(value: number | undefined) {
+  if (value === undefined || !Number.isSafeInteger(value) || value < MIN_MEMORY_BYTES) {
     throw new SpaceError('invalid_memory_limit', `A space needs a memory limit of at least ${MIN_MEMORY_BYTES} bytes`);
   }
   return value;
 }
 
-export function buildSpaceNetworkArgs({ network, labelArguments }) {
+export function buildSpaceNetworkArgs({ network, labelArguments }: NetworkCreate) {
   return [
     'network', 'create',
     '--driver', 'bridge',
@@ -83,7 +101,7 @@ export function buildSpaceNetworkArgs({ network, labelArguments }) {
   ];
 }
 
-export function buildGatekeeperNetworkArgs({ network, labelArguments }) {
+export function buildGatekeeperNetworkArgs({ network, labelArguments }: NetworkCreate) {
   return [
     'network', 'create',
     '--driver', 'bridge',
@@ -93,7 +111,7 @@ export function buildGatekeeperNetworkArgs({ network, labelArguments }) {
   ];
 }
 
-export function buildGatekeeperCreateArgs({ containerName, labelArguments, network, image }) {
+export function buildGatekeeperCreateArgs({ containerName, labelArguments, network, image }: { containerName: string; labelArguments: string[]; network: string; image: string }) {
   return [
     'create',
     '--name', containerName,
@@ -119,7 +137,18 @@ export function buildGatekeeperCreateArgs({ containerName, labelArguments, netwo
   ];
 }
 
-export function buildSpaceCreateArgs({ spaceId, containerName, labelArguments, network, workVolume, homeVolume, toolsVolume, memoryBytes, image, startConfig = null }) {
+export function buildSpaceCreateArgs({ spaceId, containerName, labelArguments, network, workVolume, homeVolume, toolsVolume, memoryBytes, image, startConfig = null }: {
+  spaceId: string;
+  containerName: string;
+  labelArguments: string[];
+  network: string;
+  workVolume: string;
+  homeVolume: string;
+  toolsVolume: string;
+  memoryBytes: number | undefined;
+  image: string;
+  startConfig?: string | null;
+}) {
   return [
     'create',
     '--name', containerName,
@@ -147,7 +176,7 @@ export function buildSpaceCreateArgs({ spaceId, containerName, labelArguments, n
   ];
 }
 
-export function buildVolumeOwnershipRunArgs({ spaceId, containerName, labelArguments, workVolume, homeVolume, image }) {
+export function buildVolumeOwnershipRunArgs({ spaceId, containerName, labelArguments, workVolume, homeVolume, image }: { spaceId: string; containerName: string; labelArguments: string[]; workVolume: string; homeVolume: string; image: string }) {
   return [
     'run', '--rm',
     '--name', containerName,
@@ -169,7 +198,7 @@ export function buildVolumeOwnershipRunArgs({ spaceId, containerName, labelArgum
   ];
 }
 
-export function buildToolsFillRunArgs({ containerName, labelArguments, toolsVolume, image }) {
+export function buildToolsFillRunArgs({ containerName, labelArguments, toolsVolume, image }: OneShotRun) {
   return [
     'run', '--rm', '--interactive',
     '--name', containerName,
@@ -196,7 +225,7 @@ export function buildToolsFillRunArgs({ containerName, labelArguments, toolsVolu
 export const TOOLS_MARKER_MISSING_EXIT_CODE = 42;
 const MARKER_CHECK_SCRIPT = `[ -f "$1" ] || exit ${TOOLS_MARKER_MISSING_EXIT_CODE}; ${IMAGE_CAT} "$1"`;
 
-export function buildToolsCheckRunArgs({ containerName, labelArguments, toolsVolume, image }) {
+export function buildToolsCheckRunArgs({ containerName, labelArguments, toolsVolume, image }: OneShotRun) {
   return [
     'run', '--rm',
     '--name', containerName,
@@ -216,11 +245,18 @@ export function buildToolsCheckRunArgs({ containerName, labelArguments, toolsVol
   ];
 }
 
-const mentionsRuntimeSocket = (text) => String(text ?? '').includes('docker.sock');
+const mentionsRuntimeSocket = (text: string | undefined) => String(text ?? '').includes('docker.sock');
 
-function findCommonViolations({ container, tmpfsOptions, networkMode, mountViolations, allowedEnvironment, allowedExtraHosts = [] }) {
-  const violations = [];
-  const violate = (check, message) => violations.push({ check, message });
+function findCommonViolations({ container, tmpfsOptions, networkMode, mountViolations, allowedEnvironment, allowedExtraHosts = [] }: {
+  container: DockerContainerSettings | null | undefined;
+  tmpfsOptions: string;
+  networkMode: string;
+  mountViolations: (mounts: DockerMount[]) => HardeningViolation[];
+  allowedEnvironment: Set<string>;
+  allowedExtraHosts?: string[];
+}) {
+  const violations: HardeningViolation[] = [];
+  const violate = (check: string, message: string) => violations.push({ check, message });
 
   const config = container?.Config ?? {};
   const host = container?.HostConfig ?? {};
@@ -229,7 +265,10 @@ function findCommonViolations({ container, tmpfsOptions, networkMode, mountViola
   const unexpectedHosts = (host.ExtraHosts ?? []).filter((entry) => !allowedExtraHosts.includes(entry));
   if (unexpectedHosts.length > 0) violate('extra_hosts', `The container was given names nobody set for it: ${unexpectedHosts.join(', ')}`);
 
-  const variableNames = (config.Env ?? []).map((entry) => String(entry).split('=')[0]);
+  const variableNames = (config.Env ?? []).map((entry) => {
+    const [name = ''] = String(entry).split('=');
+    return name;
+  });
   const secretVariables = variableNames.filter((name) => FORBIDDEN_ENVIRONMENT.includes(name));
   if (secretVariables.length > 0) violate('environment', `The container environment holds a secret: ${secretVariables.join(', ')}`);
   const unexpectedVariables = variableNames.filter((name) => !FORBIDDEN_ENVIRONMENT.includes(name) && !allowedEnvironment.has(name));
@@ -238,7 +277,8 @@ function findCommonViolations({ container, tmpfsOptions, networkMode, mountViola
   if (host.ReadonlyRootfs !== true) violate('read_only', 'The root filesystem is writable');
   if (host.Privileged !== false) violate('privileged', 'The container is privileged');
   if (!(host.CapDrop ?? []).includes('ALL')) violate('cap_drop', 'Capabilities are not all dropped');
-  if ((host.CapAdd ?? []).length > 0) violate('cap_add', `Capabilities were added: ${host.CapAdd.join(', ')}`);
+  const addedCapabilities = host.CapAdd ?? [];
+  if (addedCapabilities.length > 0) violate('cap_add', `Capabilities were added: ${addedCapabilities.join(', ')}`);
 
   const securityOptions = host.SecurityOpt ?? [];
   if (!securityOptions.some((option) => NO_NEW_PRIVILEGES.includes(option))) {
@@ -248,8 +288,8 @@ function findCommonViolations({ container, tmpfsOptions, networkMode, mountViola
   if (extraSecurityOptions.length > 0) violate('security_options', `Unexpected security options: ${extraSecurityOptions.join(', ')}`);
 
   if (host.Init !== true) violate('init', 'There is no init process');
-  if (!(host.PidsLimit > 0)) violate('pids_limit', 'There is no process limit');
-  if (!(host.Memory > 0)) violate('memory', 'There is no memory limit');
+  if (!((host.PidsLimit ?? 0) > 0)) violate('pids_limit', 'There is no process limit');
+  if (!((host.Memory ?? 0) > 0)) violate('memory', 'There is no memory limit');
   if (host.MemorySwap !== host.Memory) violate('memory_swap', 'Swap is allowed on top of the memory limit');
   if (host.ShmSize !== SPACE_SHM_BYTES) violate('shm_size', `Shared memory is ${host.ShmSize ?? 'unset'} bytes, expected ${SPACE_SHM_BYTES}`);
 
@@ -264,11 +304,12 @@ function findCommonViolations({ container, tmpfsOptions, networkMode, mountViola
     violate('tmpfs', 'The only tmpfs must be /tmp with nosuid and a size limit');
   }
 
-  if ((host.Binds ?? []).length > 0) violate('binds', `Host paths are mounted: ${host.Binds.join(', ')}`);
+  const binds = host.Binds ?? [];
+  if (binds.length > 0) violate('binds', `Host paths are mounted: ${binds.join(', ')}`);
   if ((host.VolumesFrom ?? []).length > 0) violate('volumes_from', 'Volumes of another container are attached');
   violations.push(...mountViolations(mounts));
   const socketMounted = mounts.some((mount) => mentionsRuntimeSocket(mount.Source) || mentionsRuntimeSocket(mount.Destination))
-    || (host.Binds ?? []).some(mentionsRuntimeSocket);
+    || binds.some(mentionsRuntimeSocket);
   if (socketMounted) violate('runtime_socket', 'The container runtime socket is mounted');
 
   for (const field of NAMESPACE_FIELDS) {
@@ -283,9 +324,9 @@ function findCommonViolations({ container, tmpfsOptions, networkMode, mountViola
   return violations;
 }
 
-function findSpaceMountViolations({ mounts, prefix, owner, toolsVolume }) {
-  const violations = [];
-  const violate = (check, message) => violations.push({ check, message });
+function findSpaceMountViolations({ mounts, prefix, owner, toolsVolume }: { mounts: DockerMount[]; prefix: string; owner: string; toolsVolume: DockerVolume | null | undefined }) {
+  const violations: HardeningViolation[] = [];
+  const violate = (check: string, message: string) => violations.push({ check, message });
 
   for (const mount of mounts.filter((candidate) => candidate.Destination !== TOOLS_MOUNT_PATH)) {
     if (mount.Type !== 'volume' || !String(mount.Name ?? '').startsWith(prefix)) {
@@ -293,11 +334,11 @@ function findSpaceMountViolations({ mounts, prefix, owner, toolsVolume }) {
     }
   }
   const toolsMounts = mounts.filter((candidate) => candidate.Destination === TOOLS_MOUNT_PATH);
-  if (toolsMounts.length !== 1) {
+  const [mount, ...otherToolsMounts] = toolsMounts;
+  if (mount === undefined || otherToolsMounts.length > 0) {
     violate('tools_mount', `Expected one tools volume at ${TOOLS_MOUNT_PATH}, found ${toolsMounts.length}`);
     return violations;
   }
-  const [mount] = toolsMounts;
   const key = toolsKeyFromVolumeName(mount.Name, owner);
   if (mount.Type !== 'volume' || key === null) {
     violate('tools_mount', `Mount at ${TOOLS_MOUNT_PATH} is not a tools volume of this installation`);
@@ -310,7 +351,13 @@ function findSpaceMountViolations({ mounts, prefix, owner, toolsVolume }) {
   return violations;
 }
 
-export function findHardeningViolations({ spaceId, owner, container, network, toolsVolume }) {
+export function findHardeningViolations({ spaceId, owner, container, network, toolsVolume }: {
+  spaceId: string;
+  owner: string;
+  container: DockerContainerSettings | null | undefined;
+  network: DockerNetwork | null | undefined;
+  toolsVolume: DockerVolume | null | undefined;
+}) {
   const prefix = spaceResourcePrefix(spaceId);
   const networkName = spaceResourceName(spaceId, ROLE_NETWORK);
   const violations = findCommonViolations({
@@ -320,7 +367,7 @@ export function findHardeningViolations({ spaceId, owner, container, network, to
     mountViolations: (mounts) => findSpaceMountViolations({ mounts, prefix, owner, toolsVolume }),
     allowedEnvironment: SPACE_ENVIRONMENT_NAMES,
   });
-  const violate = (check, message) => violations.push({ check, message });
+  const violate = (check: string, message: string) => violations.push({ check, message });
 
   const startConfigs = (container?.Config?.Env ?? []).filter((entry) => String(entry).startsWith(`${START_CONFIG_VARIABLE}=`));
   if (startConfigs.length > 1 || startConfigs.some((entry) => !isStartConfig(String(entry).slice(START_CONFIG_VARIABLE.length + 1)))) {
@@ -335,9 +382,9 @@ export function findHardeningViolations({ spaceId, owner, container, network, to
   return violations;
 }
 
-function findInnerNetworkViolations({ spaceId, owner, network }) {
-  const violations = [];
-  const violate = (check, message) => violations.push({ check, message });
+function findInnerNetworkViolations({ spaceId, owner, network }: { spaceId: string; owner: string; network: DockerNetwork | null | undefined }) {
+  const violations: HardeningViolation[] = [];
+  const violate = (check: string, message: string) => violations.push({ check, message });
 
   if (network?.Internal !== true) violate('network_internal', 'The network of this space can reach outside');
   if (network?.EnableIPv6 === true) violate('network_ipv6', 'The network of this space has IPv6');
@@ -352,9 +399,14 @@ function findInnerNetworkViolations({ spaceId, owner, network }) {
   return violations;
 }
 
-const aliasesOf = (entry) => [...(entry?.Aliases ?? []), ...(entry?.DNSNames ?? [])];
+const aliasesOf = (entry: DockerEndpoint | undefined) => [...(entry?.Aliases ?? []), ...(entry?.DNSNames ?? [])];
 
-export function findGatekeeperHardeningViolations({ spaceId, owner, container, outerNetwork }) {
+export function findGatekeeperHardeningViolations({ spaceId, owner, container, outerNetwork }: {
+  spaceId: string;
+  owner: string;
+  container: DockerContainerSettings | null | undefined;
+  outerNetwork: DockerNetwork | null | undefined;
+}) {
   const innerName = spaceResourceName(spaceId, ROLE_NETWORK);
   const outerName = spaceResourceName(spaceId, ROLE_OUTER_NETWORK);
   const violations = findCommonViolations({
@@ -368,10 +420,10 @@ export function findGatekeeperHardeningViolations({ spaceId, owner, container, o
     allowedEnvironment: GATEKEEPER_ENVIRONMENT_NAMES,
     allowedExtraHosts: [HOST_NAME_ENTRY],
   });
-  const violate = (check, message) => violations.push({ check, message });
+  const violate = (check: string, message: string) => violations.push({ check, message });
 
   const host = container?.HostConfig ?? {};
-  if (host.Memory > 0 && host.Memory !== GATEKEEPER_MEMORY_BYTES) {
+  if ((host.Memory ?? 0) > 0 && host.Memory !== GATEKEEPER_MEMORY_BYTES) {
     violate('memory_limit', `The memory limit is ${host.Memory} bytes, expected ${GATEKEEPER_MEMORY_BYTES}`);
   }
 
