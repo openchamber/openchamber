@@ -126,6 +126,7 @@ describe('VoiceSettings custom server voice list', () => {
   let globalDescriptors: Map<string, PropertyDescriptor | undefined>;
   let initialConfig: ReturnType<typeof useConfigStore.getState>;
   let voicesAnswer: () => Promise<Response>;
+  let keysAnswer: () => Promise<Response>;
   let voiceRequests: number;
 
   const SERVER_URL = 'http://localhost:8880/v1';
@@ -144,6 +145,7 @@ describe('VoiceSettings custom server voice list', () => {
     initialConfig = useConfigStore.getState();
     voiceRequests = 0;
     voicesAnswer = listed([]);
+    keysAnswer = () => Promise.resolve(Response.json({ openai: false, openaiCompatible: false, stt: false }));
     globalDescriptors = new Map(globalNames.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
     Object.assign(globalThis, {
       window: windowInstance,
@@ -161,7 +163,7 @@ describe('VoiceSettings custom server voice list', () => {
           voiceRequests += 1;
           return voicesAnswer();
         }
-        if (url.includes('/api/voice/keys')) return Response.json({ openai: false, openaiCompatible: false, stt: false });
+        if (url.includes('/api/voice/keys')) return keysAnswer();
         return new Response('', { status: 503 });
       },
     });
@@ -366,6 +368,39 @@ describe('VoiceSettings custom server voice list', () => {
 
     expect(voiceRequests).toBe(2);
     expect(descendants(view).some((node) => node.type === Select)).toBe(true);
+  });
+
+  test('a key saved while the address is being edited sends nothing to the old address', async () => {
+    voicesAnswer = listed(['af_bella', 'af_sky']);
+    const Probe = ({ keyRevision }: { keyRevision: number }) => {
+      CompatibleVoiceField({ committedUrl: SERVER_URL, keyRevision, children: null });
+      return null;
+    };
+    await act(async () => root.render(<I18nProvider><Probe keyRevision={0} /></I18nProvider>));
+    await settle(() => voiceRequests === 1);
+
+    await act(async () => { useConfigStore.getState().setOpenaiCompatibleUrl('http://localhost:8881/v'); });
+    await act(async () => root.render(<I18nProvider><Probe keyRevision={1} /></I18nProvider>));
+    for (let round = 0; round < 5; round += 1) await act(async () => {});
+
+    expect(voiceRequests).toBe(1);
+  });
+
+  test('the first read waits until a key kept by an earlier build has moved to the server', async () => {
+    const keys = held();
+    keysAnswer = () => keys.answer().then((response) => response.clone());
+    localStorage.setItem('openaiCompatibleApiKey', 'sk-legacy');
+    const moving = useConfigStore.getState().refreshVoiceApiKeys({ force: true });
+    voicesAnswer = listed(['af_bella', 'af_sky']);
+    await renderPage();
+    for (let round = 0; round < 5; round += 1) await act(async () => {});
+    expect(voiceRequests).toBe(0);
+
+    keys.release(Response.json({ openai: false, openaiCompatible: true, stt: false }));
+    await act(async () => { await moving; });
+    await settle(() => voiceTrigger() !== null);
+    expect(voiceRequests).toBe(1);
+    expect(voiceTrigger()).not.toBeNull();
   });
 
   test('picking Custom… keeps the saved voice and opens the field', async () => {

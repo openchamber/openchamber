@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { useConfigStore } from '@/stores/useConfigStore';
 
 const VOICE_LIST_FAILURES = ['invalid_base_url', 'remote_disabled', 'enterprise_mode', 'rejected_key', 'unreachable', 'upstream_error'] as const;
 export type VoiceListFailure = (typeof VOICE_LIST_FAILURES)[number];
@@ -57,17 +58,20 @@ export function useCustomServerVoices(serverUrl: string, committedUrl: string, k
   const baseURL = serverUrl.trim();
   const requestedURL = committedUrl.trim();
   const runtimeKey = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeKey, getRuntimeKey);
+  const loadVoiceKeys = useConfigStore((state) => state.refreshVoiceApiKeys);
   const [answer, setAnswer] = React.useState<VoiceListAnswer | null>(null);
   const [retries, setRetries] = React.useState(0);
 
   React.useEffect(() => {
-    if (!requestedURL) return;
+    if (!requestedURL || baseURL !== requestedURL) return;
     const controller = new AbortController();
-    void fetchCustomServerVoices(requestedURL, controller.signal).then((list) => {
-      if (!controller.signal.aborted) setAnswer({ baseURL: requestedURL, runtimeKey, list });
-    });
+    void loadVoiceKeys()
+      .then(() => (controller.signal.aborted ? null : fetchCustomServerVoices(requestedURL, controller.signal)))
+      .then((list) => {
+        if (list && !controller.signal.aborted) setAnswer({ baseURL: requestedURL, runtimeKey, list });
+      });
     return () => controller.abort();
-  }, [requestedURL, runtimeKey, keyRevision, retries]);
+  }, [baseURL, requestedURL, runtimeKey, keyRevision, retries, loadVoiceKeys]);
 
   const retry = React.useCallback(() => setRetries((count) => count + 1), []);
 
