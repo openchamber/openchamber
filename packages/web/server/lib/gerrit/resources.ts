@@ -413,7 +413,7 @@ export function createGerritResourceService({
       return { original, modified };
     },
 
-    async liveSummaries({ refs = [] }: { refs?: Array<{ owner: string; repo: string; number: number }> }) {
+    async liveSummaries({ refs = [] }: { refs?: Array<{ owner: string; repo: string; number: number }> | undefined }) {
       const summaries = await mapLimited(refs, LIVE_SUMMARY_CONCURRENCY, async (ref) => {
         try {
           if (ref === undefined) return null;
