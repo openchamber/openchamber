@@ -28,7 +28,7 @@ type SkillSource = ListedSkill['source'];
 interface SkillParams { name: string }
 interface SkillFileParams extends SkillParams { filePath: string | string[] }
 interface TransportAccount {
-  credentialId: string;
+  credentialId: string | null | undefined;
   status: string;
   credentialRevision: number;
   providerUserId: string;

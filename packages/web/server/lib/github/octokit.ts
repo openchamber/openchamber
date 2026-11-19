@@ -177,8 +177,8 @@ export async function getGitHubCliCredential(accountId: string | null | undefine
     credentialRevision: 1,
     providerUserId: `${host}#${login.id}`,
     accessToken: token,
-    source: 'cli',
-    status: 'valid',
+    source: 'cli' as const,
+    status: 'valid' as const,
     user: login.profile,
   };
 }

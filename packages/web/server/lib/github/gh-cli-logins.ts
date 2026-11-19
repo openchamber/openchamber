@@ -7,6 +7,7 @@ import { hasProperty } from './contracts.js';
 import type { Octokit } from '@octokit/rest';
 
 type CreateOctokit = (token: string, accountId: string, host: string) => Octokit | Promise<Octokit>;
+type AuthenticatedUser = Awaited<ReturnType<Octokit['rest']['users']['getAuthenticated']>>['data'];
 type Login = NonNullable<ReturnType<typeof toLogin>>;
 
 interface LoginCache {
@@ -37,7 +38,7 @@ const authenticatedUserSchema = z.object({
 
 const text = (value: string | null | undefined) => (value?.trim() ? value : null);
 
-const toLogin = <Data>(data: Data, selector: string | null) => {
+const toLogin = (data: AuthenticatedUser, selector: string | null) => {
   const parsed = authenticatedUserSchema.safeParse(data);
   if (!parsed.success) return null;
   const { id, login, avatar_url: avatarUrl, name } = parsed.data;

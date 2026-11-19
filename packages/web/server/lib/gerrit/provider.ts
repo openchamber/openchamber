@@ -18,7 +18,7 @@ type AuthStore = ReturnType<typeof createSourceControlAuthStore>;
 export type GerritProviderOptions = {
   descriptor?: ProviderDescriptor;
   events: PatAccountAuthOptions['events'];
-  fetch?: typeof fetch;
+  fetch?: typeof fetch | undefined;
   timeoutMs?: number;
   createClient?: typeof createGerritClient;
   createResourceService?: typeof createGerritResourceService;

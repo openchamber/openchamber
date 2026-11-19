@@ -391,27 +391,40 @@ can pass the tag check. The mutation store checks for a primitive string before
 writing or returning the result. Receipt and audit identity checks still
 require the original value to equal its trimmed form.
 
-`provider-registry.js` invokes the dynamically selected `createProvider` with
-host services and a registry descriptor. The remaining GitLab, Gitea, Gerrit
-and Forgejo JavaScript factories infer incompatible literal descriptor defaults
-and required construction services rather than declaring their accepted options.
-Gitea's family factory, for example, infers `authStore` and `resolveRepos` as
-required even when the caller supplies `store` and uses the resolver's default.
-Its 276-line implementation exceeds the small-helper conversion allowance.
-Adding JSDoc or a replacement implementation declaration is outside this
-conversion's constraints. Broadening the descriptor constants would discard
-their precise types without establishing the missing factory-options contract.
-
 Type-only corrections and dependency overloads do not validate these unchecked
 values or establish missing methods. The implementations retain these boundaries
 until their existing failure behavior can be represented without casts or new
 runtime validation.
 
+### Why the registry requires an auth store
+
+`createSourceControlProviders` takes the runtime's auth store as a required
+option and passes it to every built-in factory and extension provider. GitLab,
+Gitea, Gerrit, Forgejo and extensions read their section from it unless host
+services hand them a `store`; the registry resolves providers by a runtime id,
+so it cannot prove that a host-service `store` exists for the provider it
+loads. Requiring the store keeps each factory's options type exact instead of
+widening them to accept a construction that fails on the first account read.
+JavaScript tests that build a registry around an injected `store` still omit it.
+
+Host services are typed per built-in provider without the fields the registry
+supplies (`descriptor`, `authStore`, `events`). The settings reader, config root
+and `fetch` every factory receives keep the registry's types, so a host-service
+override of one of them is checked once for all providers; each factory accepts
+an absent or explicitly undefined `fetch` and falls back to its default. Account events carry the invalidation payload GitHub reports, whose
+instance and account id come from unchecked failure data.
+`readTransportCredential` answers what the provider read: a gh login's credential
+id keeps its nullable parameter type, and a stored account's token may be absent.
+The binding validators, the credential resolver, the clone planner and the skill
+installer each compare the id with the one requested and check the secret before
+using it.
+
 ### Why test adapters retain their boundary values
 
 The GitHub route test adapter forwards the provider's construction options,
 binding validators, executor, OAuth registry and account callbacks to the shared
-shell. Descriptor tests detach extensions after each test so the singleton
+shell. Its auth store points at a file it never creates: the route shell reads
+no instance or account list, so the GitHub provider never opens it. Descriptor tests detach extensions after each test so the singleton
 facade cannot retain another test's provider.
 
 Storage-process test replies retain the child-process `Serializable` type.

@@ -24,7 +24,7 @@ export type GitLabProviderOptions = {
   descriptor?: ProviderDescriptor;
   events: Pick<AccountEvents, 'connected' | 'invalidated' | 'removed'>;
   readSettings?: Parameters<typeof resolveGitLabClientId>[1];
-  fetch?: typeof fetch;
+  fetch?: typeof fetch | undefined;
   timeoutMs?: number;
   execFile?: GlabLookupOptions['execFile'];
   cliTimeoutMs?: GlabLookupOptions['timeoutMs'];

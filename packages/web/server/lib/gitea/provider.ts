@@ -21,7 +21,7 @@ type AuthStore = ReturnType<typeof createSourceControlAuthStore>;
 type Store = PatAccountAuthOptions['store'];
 type FamilyServices = {
   events: PatAccountAuthOptions['events'];
-  fetch?: GiteaFetch;
+  fetch?: GiteaFetch | undefined;
   timeoutMs?: number;
   createClient?: typeof createGiteaClient;
   createResourceService?: typeof createGiteaResourceService;

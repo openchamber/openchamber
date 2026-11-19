@@ -44,8 +44,10 @@ export interface BindingServiceOptions {
   readProviderSshUrl?: (identity: { provider: string; instance: string }) => Promise<string | null>;
 }
 
-export type BindingTransportAccount = Omit<TransportCredential, 'user'> & {
+export type BindingTransportAccount = Omit<TransportCredential, 'credentialId' | 'user' | 'secret'> & {
+  credentialId: string | null | undefined;
   user: Omit<TransportCredential['user'], 'id'> & Pick<AuthUser, 'id'>;
+  secret: string | undefined;
 };
 
 export type ProviderBindingInput = SourceControlProviderBinding;
