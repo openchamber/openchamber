@@ -4,7 +4,7 @@ import os from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
 import { collectForwardProxyHeaders } from '../../proxy-headers.js';
 import { requestOrigin } from '../guests/routes.js';
-import { isRecord } from '../shared/guards.js';
+import { isRecord, isString } from '../shared/guards.js';
 import { writeFileAtomic } from './atomic-write.js';
 import type { Request, Response as HttpResponse, NextFunction, Application } from '../shared/http-contracts.js';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
@@ -41,7 +41,7 @@ const isAddressInfo = (value: unknown): value is net.AddressInfo => value != nul
 type DirectoryRequest = ReturnType<typeof directoryRequest>;
 type McpConfigEntry = McpEntity & { name: string };
 interface RoutingInput {
-  name: WireFields['name'];
+  name: string;
   directory: string | null;
   entry: McpConfigEntry;
   origin: string | null;
@@ -75,9 +75,9 @@ export interface McpOAuthDependencies {
   buildOpenCodeUrl: (path: string, prefix: string) => string;
   getOpenCodeAuthHeaders: () => Record<string, string>;
   resolveProjectDirectory: (request: DirectoryRequest) => Promise<{ directory?: string | null; error?: string | null }>;
-  getMcpConfig: (name: WireFields['name'], directory: string | null) => McpConfigEntry | null;
+  getMcpConfig: (name: string, directory: string | null) => McpConfigEntry | null;
   listMcpConfigs: (directory: string | null) => McpConfigEntry[];
-  updateMcpConfig: (name: WireFields['name'], updates: { oauth: Omit<McpOAuth, 'callback_port'> & { callback_port: number | undefined } }, directory: string | null) => void;
+  updateMcpConfig: (name: string, updates: { oauth: Omit<McpOAuth, 'callback_port'> & { callback_port: number | undefined } }, directory: string | null) => void;
   allocatePort?: (ports: Set<number | undefined>) => Promise<number>;
   isPortFree?: (port: number | undefined) => Promise<boolean>;
   configPickupTimeoutMs?: number;
@@ -338,7 +338,7 @@ export const createMcpOAuthSignIn = ({
     return result;
   };
 
-  const startBoundAttempt = async ({ req, res, integrationID, search, name, serverKey, routing }: StartInput & { name: WireFields['name']; serverKey: string; routing: Routing }) => {
+  const startBoundAttempt = async ({ req, res, integrationID, search, name, serverKey, routing }: StartInput & { name: string; serverKey: string; routing: Routing }) => {
     const body = JSON.stringify(req.body ?? {});
     const deadline = Date.now() + configPickupTimeoutMs;
     const path = `/api/integration/${integrationID}/connect/oauth${search}`;
@@ -410,7 +410,7 @@ export const createMcpOAuthSignIn = ({
     const payload: unknown = await upstream.json();
     const data = optionalFields(payload)?.data;
     const integration = optionalFields(isRecord(data) ? data : payload);
-    return { name: optionalFields(integration?.metadata)?.source === 'mcp' ? integration?.name : null };
+    return { name: optionalFields(integration?.metadata)?.source === 'mcp' && isString(integration?.name) ? integration.name : null };
   };
 
   const startSignIn = async (req: Request<unknown, { integrationID: string }>, res: HttpResponse, next: NextFunction, readBody: McpOAuthBodyReader['readBody']) => {
