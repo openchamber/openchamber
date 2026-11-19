@@ -42,7 +42,6 @@
         "scripts/build-server.mjs",
         "scripts/check-server-types.mjs",
         "scripts/register-server-sources.mjs",
-        "scripts/server-conversion-waves.mjs",
         "scripts/smoke-server-build.mjs",
         "src/mobile-main.tsx",
         "src/mini-chat-main.tsx",

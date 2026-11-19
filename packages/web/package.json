@@ -40,7 +40,6 @@
     "type-check:server": "node scripts/check-server-types.mjs",
     "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives src && bun run lint:server",
     "lint:server": "node scripts/check-server-types.mjs --lint",
-    "conversion:waves": "node scripts/server-conversion-waves.mjs",
     "smoke:server-build": "node scripts/smoke-server-build.mjs",
     "test": "vitest run",
     "start": "bun bin/cli.js serve"
