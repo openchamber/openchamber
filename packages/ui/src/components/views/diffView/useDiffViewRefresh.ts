@@ -29,7 +29,6 @@ export function useDiffViewRefresh({
     captureScrollAnchor, lastScrollAnchorRef, clearDiffCache, setFileDiffRefreshNonce, setWorkingTreeRevision,
     fetchStatus, diffScrollRef, fileSectionRefs, fileDiffRefreshNonce,
 }: DiffViewRefreshOptions) {
-    // Ensure git status on mount
     React.useEffect(() => {
         if (visible && effectiveDirectory) {
             setActiveDirectory(effectiveDirectory);
@@ -49,8 +48,6 @@ export function useDiffViewRefresh({
         if (!effectiveDirectory) {
             return;
         }
-        // Named paths bump their entries' revision and an unscoped hint bumps
-        // every live diff's; either way the entry refetches in place.
         const refresh = (paths: string[], unscoped: boolean) => {
             if (paths.length) {
                 pendingScrollAnchorRestoreRef.current = captureScrollAnchor() ?? lastScrollAnchorRef.current;

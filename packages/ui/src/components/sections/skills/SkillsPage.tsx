@@ -43,6 +43,7 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { SkillsCatalogPage } from './catalog/SkillsCatalogPage';
 import { SkillUseField } from './SkillUseField';
+import { useDraftFill } from './useDraftFill';
 import {
   SKILL_LOCATION_OPTIONS,
   locationPartsFrom,
@@ -222,6 +223,7 @@ const SkillsInstalledPage: React.FC = () => {
 
   const skillEditorKey = JSON.stringify([settingsDirectory, selectedSkillName, selectedSkill?.path, isNewSkill]);
   const hydratedSkill = React.useRef<string | null>(null);
+  const draftNeedsFill = useDraftFill<NonNullable<typeof skillDraft>>();
   const currentEditor = React.useRef({ key: skillEditorKey, markdown: skillMarkdown, disableModelInvocation });
   currentEditor.current = { key: skillEditorKey, markdown: skillMarkdown, disableModelInvocation };
   const savedMarkdown = React.useRef('');
@@ -249,14 +251,12 @@ const SkillsInstalledPage: React.FC = () => {
       }
     };
     const loadSkillDetails = async () => {
-      if (isNewSkill && skillDraft) {
+      if (draftNeedsFill(skillEditorKey, isNewSkill ? skillDraft : null) && skillDraft) {
         setIsLoading(false);
-        const nextDescription = skillDraft.description || '';
-        const nextInstructions = skillDraft.instructions || '';
         setDraftName(skillDraft.name || '');
         setDraftScope(skillDraft.scope || 'user');
         setDraftSource(skillDraft.source === 'agents' ? 'agents' : 'opencode');
-        hydrateText(nextDescription, nextInstructions, false);
+        hydrateText(skillDraft.description || '', skillDraft.instructions || '', false);
         setOriginalDescription('');
         setOriginalInstructions('');
         setOriginalDisableModelInvocation(false);
@@ -287,7 +287,7 @@ const SkillsInstalledPage: React.FC = () => {
 
     void loadSkillDetails();
     return () => { cancelled = true; };
-  }, [selectedSkill, isNewSkill, selectedSkillName, settingsDirectory, skills, skillDraft, getSkillDetail, skillEditorKey]);
+  }, [selectedSkill, isNewSkill, selectedSkillName, settingsDirectory, skills, skillDraft, getSkillDetail, skillEditorKey, draftNeedsFill]);
 
   const editorFontSize = useUIStore((state) => state.editorFontSize);
 

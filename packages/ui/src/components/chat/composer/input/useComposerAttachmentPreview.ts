@@ -12,9 +12,6 @@ export function useComposerAttachmentPreview() {
         content: '',
     });
 
-    // Mount the lazy preview dialog only after its first open; rendering it
-    // closed would fetch the ToolOutputDialog chunk (with the @pierre/diffs
-    // stack) on the draft screen before any preview is requested.
     const [attachmentPreviewMounted, setAttachmentPreviewMounted] = React.useState(false);
 
     React.useEffect(() => {
@@ -22,8 +19,6 @@ export function useComposerAttachmentPreview() {
             setAttachmentPreviewMounted(true);
         }
     }, [attachmentPreview.open]);
-    // An image opens the image viewer, a text file (a pasted text, a JSON
-    // file) the text dialog, as the same chip in a sent message does.
     const handleShowAttachmentPreview = React.useCallback((content: ToolPopupContent) => {
         setAttachmentPreview(content);
         setImagePreviewOpen(true);

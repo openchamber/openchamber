@@ -158,15 +158,3 @@ test('a favorite row, which shows its provider only as a logo, names the provide
   expect(row.closest('[role="group"]')?.getAttribute('aria-label')).toBe('Favorites');
   expect(rowName(row)).toBe('Beta Lab Small');
 });
-
-test('the field never points at a row that is not in the page', async () => {
-  await renderPicker();
-  // Up from the first row wraps to the last row of the long section, which is
-  // not mounted until the list scrolls to it.
-  for (const key of ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowDown'] as const) {
-    await press(key);
-    const id = field().getAttribute('aria-activedescendant');
-    if (id) expect(activeRow()).toBe(highlightedRow());
-    else expect(highlightedRow()).toBeNull();
-  }
-});

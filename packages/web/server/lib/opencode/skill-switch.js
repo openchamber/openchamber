@@ -5,7 +5,7 @@ import {
   readConfigFile,
   readConfigLayers,
   writeConfig,
-} from './shared.js';
+} from './config-files.js';
 import { writeSkillDisabled } from './config-v2.js';
 
 export function setSkillEnabled({ id, enabled, scope, directory }) {

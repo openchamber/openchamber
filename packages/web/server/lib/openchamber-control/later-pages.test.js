@@ -21,12 +21,14 @@ const tempDir = async () => {
 const manualTimers = () => {
   const queue = [];
   const delays = [];
+  let finishAttempt;
   return {
     timers: {
       setTimeout: (fn, delay) => {
         const timer = { fn, cleared: false };
         queue.push(timer);
         delays.push(delay);
+        finishAttempt?.();
         return timer;
       },
       clearTimeout: (timer) => {
@@ -34,13 +36,17 @@ const manualTimers = () => {
       },
     },
     delays,
+    delivered: () => finishAttempt?.(),
     // At most `limit` timers, so a delivery that keeps failing ends the test.
     run: async (limit = 50) => {
       for (let ran = 0; queue.length > 0 && ran < limit; ran += 1) {
         const timer = queue.shift();
-        if (!timer.cleared) timer.fn();
-        // Let the delivery and its save finish.
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        if (timer.cleared) continue;
+        // Each attempt either schedules its retry or publishes its saved delivery.
+        const finished = new Promise((resolve) => { finishAttempt = resolve; });
+        timer.fn();
+        await finished;
+        finishAttempt = undefined;
       }
     },
   };
@@ -49,7 +55,7 @@ const manualTimers = () => {
 const response = (status) => ({ ok: status >= 200 && status < 300, status, body: null });
 
 const createPages = (dataDir, { statuses = [], otherwise = 200, broadcastUiEvent = vi.fn(), readArchiveState, archiveReadTimeoutMs } = {}) => {
-  const { timers, run, delays } = manualTimers();
+  const { timers, run, delays, delivered } = manualTimers();
   const posts = [];
   const fetchImpl = vi.fn(async (url, init) => {
     posts.push({ url, body: JSON.parse(init.body) });
@@ -59,7 +65,10 @@ const createPages = (dataDir, { statuses = [], otherwise = 200, broadcastUiEvent
     dataDir,
     buildOpenCodeUrl: (fetchPath) => `http://opencode${fetchPath}`,
     getOpenCodeAuthHeaders: () => ({}),
-    broadcastUiEvent,
+    broadcastUiEvent: (event) => {
+      broadcastUiEvent(event);
+      if (event.properties.pages.every((page) => page.status !== 'open' && !page.undelivered)) delivered();
+    },
     readArchiveState,
     archiveReadTimeoutMs,
     fetchImpl,
@@ -68,7 +77,7 @@ const createPages = (dataDir, { statuses = [], otherwise = 200, broadcastUiEvent
     slowRetryMs: 300_000,
     warn: () => {},
   });
-  return { pages, posts, run, delays, broadcastUiEvent };
+  return { pages, posts, run: async (limit) => { await run(limit); await pages.flush(); }, delays, broadcastUiEvent };
 };
 
 // The one JSON line of a delivered message: everything the page or the client gave.

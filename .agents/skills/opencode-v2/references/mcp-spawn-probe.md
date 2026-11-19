@@ -18,7 +18,8 @@ stack that started it.
 3. **Server with a request log.** Run the API server and vite directly under
    `env -i` with scratch `XDG_*` dirs, `OPENCHAMBER_DATA_DIR`,
    `OPENCHAMBER_PORT`, `OPENCHAMBER_RELAY_HOST=off` and
-   `OPENCODE_BINARY` (the installed app's bundled CLI): in `packages/web`,
+   `OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR=<checkout>/packages/electron/resources/opencode-server`
+   (the OpenCode the desktop bundles, staged by `bun run --cwd packages/electron prepare:opencode-server`): in `packages/web`,
    `bun --preload <fetch-log.mjs> server/index.js --port <api>` and
    `bun x vite --port <ui>`. `BUN_OPTIONS` breaks `bun run dev`, so the
    preload only works this way. The preload wraps `globalThis.fetch` and logs

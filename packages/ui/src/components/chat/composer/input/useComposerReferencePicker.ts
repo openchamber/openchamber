@@ -44,10 +44,7 @@ export function useComposerReferencePicker({
 
     const addLinkedReferences = React.useCallback((references: ComposerReference[]) => {
         if (isBtwActive) return;
-        // The picker keeps this callback while context loads, including across a session switch.
         updateLinkedReferencesFor(chatDraftIdentity, (current) => withComposerReferences(current, references));
-        // A draft no longer on screen gets the links in its saved text; the one
-        // on screen gets them at the caret (the effect on the draft's items).
         const onScreen = chatDraftIdentityKeyRef.current;
         if (chatDraftIdentity && getChatDraftIdentityKey(chatDraftIdentity) !== onScreen) {
             const saved = readChatDraft(chatDraftIdentity);

@@ -1,11 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
-import { classifyGerritFailure, createGerritClient } from './client.js';
+import { classifyGerritFailure, createGerritClient, GerritRequestError } from './client.js';
 import { fakeGerrit, fixtures, gerritBase64, ORIGIN, replay } from './fixtures/fake-fetch.js';
 
 const noDelay = async () => {};
 const basic = (login, password) => `Basic ${Buffer.from(`${login}:${password}`).toString('base64')}`;
 
 describe('Gerrit client', () => {
+  it('keeps an explicitly undefined fetch body on reads', async () => {
+    const fetch = vi.fn(async () => new Response('null'));
+    await createGerritClient({ origin: ORIGIN, fetch }).get('/config/server/version');
+    const init = fetch.mock.calls[0][1];
+    expect(Object.hasOwn(init, 'body')).toBe(true);
+    expect(init.body).toBeUndefined();
+  });
+
+  it('omits an error status until one was supplied', () => {
+    expect(Object.hasOwn(new GerritRequestError('provider-error', 'failed'), 'status')).toBe(false);
+    expect(new GerritRequestError('provider-error', 'failed', 403).status).toBe(403);
+  });
+
   it('sends Basic credentials to the /a/ API only, never following redirects', async () => {
     const { fetch, calls } = fakeGerrit({ 'GET /accounts/self': fixtures.accountSelf });
     const client = createGerritClient({ origin: ORIGIN, login: 'alice', password: 'http-pw', fetch });

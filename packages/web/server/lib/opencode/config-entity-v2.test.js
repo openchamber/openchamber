@@ -10,7 +10,7 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-entity-v2-'));
 process.env.XDG_CONFIG_HOME = path.join(root, 'xdg');
 delete process.env.OPENCODE_CONFIG;
 
-const { parseMdFile } = await import('./shared.js');
+const { parseMdFile } = await import('./markdown-files.js');
 const { getAgentConfig, getAgentPermissions, updateAgent, createAgent, listDisabledAgents } = await import('./agents.js');
 const { getCommandConfig, updateCommand } = await import('./commands.js');
 const { getMcpConfig, listMcpConfigs, updateMcpConfig } = await import('./mcp.js');

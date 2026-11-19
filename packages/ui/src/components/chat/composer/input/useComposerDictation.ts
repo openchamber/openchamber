@@ -36,17 +36,9 @@ export function useComposerDictation({
         },
     });
 
-    // Dictation: insert the transcript inline; optionally submit immediately.
-    // getCurrentInputSnapshot reads composerRef.current.getValue() first, so setting
-    // it synchronously lets handleSubmit pick up the text in the same tick.
-    // A transcript belongs to the draft that was on screen when recording
-    // started. After a session switch it is kept for that draft and must not
-    // be inserted or sent here.
     const handleDictationInsert = React.useCallback((text: string) => {
         if (keepTranscriptForOrigin(text)) return;
         dictationSendEndRef.current?.();
-        // The editor writes the new text on the render setMessage causes, so
-        // no imperative write is needed.
         setMessage(appendInlineText(composerText.get(), text));
         setTimeout(() => {
             composerRef.current?.focus();
@@ -55,15 +47,7 @@ export function useComposerDictation({
 
     const handleDictationInsertAndSend = React.useCallback((text: string) => {
         if (keepTranscriptForOrigin(text)) return;
-        // Read the pending draft from the ref, NOT from the editor: the
-        // transcript resolves asynchronously, and on mobile the shell may have
-        // already collapsed into the pill by then, so the editor is unmounted
-        // and getValue() returns '' — which silently dropped the user's typed
-        // text and (once the composer cleared) the transcript with it.
         const next = appendInlineText(composerText.get(), text);
-        // Land the composed text in the composer state first, so a failed send
-        // restores exactly what the user dictated, then submit it as an
-        // explicit override (the textarea may be unmounted at this point).
         setMessage(next);
         dictationSendInFlightRef.current = true;
         void handleSubmitRef.current({ presetText: next }).finally(() => {

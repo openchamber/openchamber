@@ -20,7 +20,6 @@ export function useComposerReferenceDrafts({
     const { currentChatDraftIdentityRef } = draftText;
     const { isBtwActive } = sessionScope;
 
-    // Relays whose share links turn into a page chip (none where the server opens none).
     const receivedPageBases = useReceivedPageBases();
 
     const setLinkedReferencesFor = React.useCallback((
@@ -37,14 +36,12 @@ export function useComposerReferenceDrafts({
         useLinkedReferenceDrafts.getState().set(update(readLinkedReferences(target)), target);
     }, []);
 
-    // UI actions act on the draft on screen now; a send keeps its own target.
     const updateLinkedReferences = React.useCallback((update: (current: ComposerReference[]) => ComposerReference[]) => {
         updateLinkedReferencesFor(currentChatDraftIdentityRef.current, update);
     }, [updateLinkedReferencesFor, currentChatDraftIdentityRef]);
 
     const [attachDialogGuestId, setAttachDialogGuestId] = React.useState<string | null>(null);
 
-    // The chip the attach dialog was opened from; null when opened from the + menu.
     const [attachDialogItem, setAttachDialogItem] = React.useState<AttachIssueRequest | null>(null);
 
     const handleGuestAttach = React.useCallback((issue: AttachIssueRequest) => {
@@ -66,8 +63,6 @@ export function useComposerReferenceDrafts({
         updateLinkedReferences((current) => withComposerReferences(current, [reference]));
         setAttachDialogGuestId(null);
         setAttachDialogItem(null);
-        // A message or session action may have opened the guest in the
-        // layout-level dialog; attaching from there closes it the same way.
         useGuestDialogStore.getState().close();
     }, [isBtwActive, updateLinkedReferences]);
 

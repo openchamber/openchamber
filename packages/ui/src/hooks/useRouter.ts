@@ -30,6 +30,10 @@ export function useRouter(): void {
 
   const applyRouteState = React.useCallback(
     async (route: RouteState) => {
+      if (!route.settingsPath && useUIStore.getState().isSettingsDialogOpen) {
+        setSettingsDialogOpen(false);
+      }
+
       if (route.sessionId) {
         await openSessionLink(route.sessionId, route.messageId);
       }
@@ -38,10 +42,6 @@ export function useRouter(): void {
         setSettingsPage(resolveSettingsSlug(route.settingsPath));
         setSettingsDialogOpen(true);
         return;
-      }
-
-      if (useUIStore.getState().isSettingsDialogOpen) {
-        setSettingsDialogOpen(false);
       }
 
       if (route.tab && route.tab !== 'chat') {
@@ -165,15 +165,15 @@ export function useRouter(): void {
     let prevSettingsPath: string = useUIStore.getState().settingsPage;
 
     const unsubscribe = useUIStore.subscribe((state) => {
-      if (isApplyingRouteRef.current) {
-        return;
-      }
-
       const settingsOpenChanged = state.isSettingsDialogOpen !== prevSettingsOpen;
       const settingsPathChanged = state.settingsPage !== prevSettingsPath;
 
       prevSettingsOpen = state.isSettingsDialogOpen;
       prevSettingsPath = state.settingsPage;
+
+      if (isApplyingRouteRef.current) {
+        return;
+      }
 
       if (settingsOpenChanged || settingsPathChanged) {
         syncURLFromState();

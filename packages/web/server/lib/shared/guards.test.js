@@ -25,11 +25,15 @@ const label = (value) => {
 };
 
 describe('isString', () => {
-  it('accepts primitive and boxed strings, including the empty string', () => {
+  it('accepts primitive strings, including the empty string', () => {
     expect(isString('s')).toBe(true);
     expect(isString('')).toBe(true);
     expect(isString('   ')).toBe(true);
-    expect(isString(boxedString)).toBe(true);
+  });
+
+  it('rejects objects that only claim to be strings', () => {
+    expect(isString(boxedString)).toBe(false);
+    expect(isString({ [Symbol.toStringTag]: 'String' })).toBe(false);
   });
 
   it('rejects every non-string value', () => {

@@ -4,9 +4,9 @@
 
 Server storage for Magic Prompt overrides in two scopes: global (`<data dir>/magic-prompts.json`) and project (the `magicPrompts` key of the checkout's `.openchamber/project.json`, written through `../projects`, which owns that file). For a directory it answers which overrides apply; built-in text lives only in the client (`packages/ui/src/lib/magicPrompts.ts`).
 
-`service.js` handles every request for both transports: `routes.js` adapts Express, and the VS Code extension host (`packages/vscode/src/magic-prompts.ts`) calls it with its own project list and owner resolution. Keep `runtime.js` and `service.js` free of imports outside this folder, so the extension bundle takes nothing else from the server.
+`service.ts` handles every request for both transports: `routes.ts` adapts Express, and the VS Code extension host (`packages/vscode/src/magic-prompts.ts`) calls it with its own project list and owner resolution. Keep `runtime.ts` and `service.ts` free of runtime imports outside this folder, so the extension bundle takes nothing else from the server. Relative import specifiers retain `.js` for source resolution and emitted Node modules.
 
-`routes.js` returns `overridesForDirectory` for server features whose prompt
+`routes.ts` returns `overridesForDirectory` for server features whose prompt
 runs on the server. The walkthrough reads `walkthrough.instructions` through it
 (`../walkthrough/DOCUMENTATION.md`); that prompt has no built-in text, so the
 server needs none.
@@ -49,3 +49,18 @@ Express parses a repeated or nested parameter into an array or object. Passing i
 ### Why legacy combined keys still expand
 
 Older builds stored `git.commit.generate` and `git.pr.generate` as a single value. Merging still expands that key: its first line fills `<key>.visible` and the rest `<key>.instructions`, only where the same map has no split key and the part is not blank. Ignoring the combined key would silently lose overrides saved by an older build.
+
+### Why raw selectors retain arrays and objects
+
+The request contract includes the parsed query values Express can pass, including repeated and nested values. Only one non-empty string passes the service's selector parser. VS Code supplies string arrays through the same contract.
+
+### Why the route adapter uses the shared HTTP contract
+
+`../shared/http-contracts.ts` owns the request, response and router types.
+The adapter specializes its query and path parameters without copying the
+transport contract. Request bodies stay unparsed until the text and selector
+guards run.
+
+### Why storage checks remain after conversion
+
+JSON text supplies JSON values, with object shape and entry validation applied after parsing. Global reads still filter invalid entries; project reads still reject the whole map. Filesystem and shared-project errors are checked where they enter the runtime. Internal prompt ids and text arrive through typed service calls, after transport validation. A present legacy key must have a string value, and an invalid project scope must have an owner; explicit invariant failures retain those assumptions without assertions or fallback values.

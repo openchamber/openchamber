@@ -4,6 +4,7 @@ import { transformWithEsbuild } from 'vite';
 import { escapeRegexLiterals, escapeRemainingWide } from './vite-one-byte-chunks';
 import { dictionaryLocale, localeSliceId, sliceLocale } from './vite-locale-slices';
 import { chunkHasModule, preloadScript, staticImportClosure } from './vite-preload-app-graph';
+import { appStoreModules, shareDocumentShim } from './vite-share-document';
 
 const evaluate = (expression: string) => new Function(`return ${expression}`)();
 const WIDE = /[Ā-\u{10FFFF}]/u;
@@ -120,5 +121,36 @@ describe('preloadAppGraph', () => {
     expect(chunkHasModule(modules, 'D:\\a\\openchamber\\packages\\ui\\src\\main.tsx')).toBe(true);
     expect(chunkHasModule(modules, 'D:\\a\\openchamber\\packages\\ui\\src\\other.tsx')).toBe(false);
     expect(chunkHasModule({ '/repo/packages/ui/src/main.tsx': {} }, '/repo/packages/ui/src/main.tsx')).toBe(true);
+  });
+});
+
+describe('appStoreModules', () => {
+  test('finds app stores in the share document bundle, and nothing else', () => {
+    const ids = [
+      '/repo/packages/ui/src/share-document/shims/ui-store.ts',
+      '/repo/packages/ui/src/stores/useConfigStore.ts',
+      '/repo/packages/ui/src/storesExtra/x.ts',
+      '/repo/node_modules/zustand/esm/index.mjs',
+    ];
+    expect(appStoreModules(ids, '/repo/packages/ui/src')).toEqual(['/repo/packages/ui/src/stores/useConfigStore.ts']);
+  });
+
+  test('matches Windows paths whichever separator each side uses', () => {
+    expect(appStoreModules(['D:/a/packages/ui/src/stores/useUIStore.ts'], 'D:\\a\\packages\\ui\\src')).toHaveLength(1);
+  });
+});
+
+describe('shareDocumentShim', () => {
+  test('a shimmed module resolves to its shim, any other module is left alone', () => {
+    expect(shareDocumentShim('/repo/packages/ui/src/stores/useUIStore.ts?v=1', '/repo/packages/ui/src')).toBe('/repo/packages/ui/src/share-document/shims/ui-store.ts');
+    expect(shareDocumentShim('/repo/packages/ui/src/stores/useConfigStore.ts', '/repo/packages/ui/src')).toBeNull();
+  });
+
+  test('a Windows source folder matches the forward-slash id Vite resolves to', () => {
+    expect(shareDocumentShim('D:/a/packages/ui/src/lib/desktop.ts', 'D:\\a\\packages\\ui\\src', true)).toBe('D:/a/packages/ui/src/share-document/shims/desktop.ts');
+  });
+
+  test('a backslash in a folder name outside Windows stays part of the name', () => {
+    expect(shareDocumentShim('/re\\po/src/lib/desktop.ts', '/re\\po/src', false)).toBe('/re\\po/src/share-document/shims/desktop.ts');
   });
 });

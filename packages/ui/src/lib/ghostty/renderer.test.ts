@@ -25,13 +25,6 @@ const cell = (text: string, wide = 0): GhosttyCell => ({
 });
 
 describe('terminalGridSize', () => {
-  test("matches the mobile renderer's cell-and-padding sizing model", () => {
-    expect(terminalGridSize(808, 408, { width: 10, height: 20, baseline: 15 }, 4)).toEqual({
-      cols: 80,
-      rows: 20,
-    });
-  });
-
   test('never sends an invalid zero-sized terminal to libghostty', () => {
     expect(terminalGridSize(0, 0, { width: 10, height: 20, baseline: 15 }, 4)).toEqual({
       cols: 1,

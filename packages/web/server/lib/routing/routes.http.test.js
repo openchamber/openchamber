@@ -33,6 +33,7 @@ const createApp = ({ routeSend, autoSessions = new Set() } = {}) => {
     clearCustomEndpoint: vi.fn(async () => ({ available: true })),
     setGeminiKey: vi.fn(async () => ({ available: true, geminiKeyPresent: true })),
     clearGeminiKey: vi.fn(async () => ({ available: true, geminiKeyPresent: false })),
+    testClassifier: vi.fn(async () => ({ ok: true })),
   };
   const app = express();
   registerRoutingRoutes(app, runtime);
@@ -198,9 +199,48 @@ describe('routing send rewrite', () => {
     expect(response.body).toEqual({ error: 'no fallback' });
     expect(forwarded).toEqual([]);
   });
+
+  it.each([
+    [],
+    { text: 42, files: 'invalid', agent: false },
+  ])('passes an unchecked JSON body through routing unchanged: %j', async (body) => {
+    const { app, runtime, forwarded } = createApp({ autoSessions: new Set(['s1']) });
+    await request(app).post('/api/session/s1/prompt').send(body).expect(204);
+    expect(runtime.routeSend).toHaveBeenCalledWith({ sessionId: 's1', directory: undefined, body });
+    expect(forwarded[0].body).toEqual(body);
+  });
+
+  it.each([
+    [{ status: 409, message: false }, 409, false],
+    [{ status: '400', message: 42 }, 500, 42],
+    [null, 500, 'Routing request failed'],
+  ])('preserves loose thrown error fields: %j', async (error, status, message) => {
+    const { app, forwarded } = createApp({
+      autoSessions: new Set(['s1']),
+      routeSend: vi.fn(async () => { throw error; }),
+    });
+    const response = await request(app).post('/api/session/s1/prompt').send({ text: 'hi' });
+    expect(response.status).toBe(status);
+    expect(response.body).toEqual({ error: message });
+    expect(forwarded).toEqual([]);
+  });
 });
 
 describe('routing routes', () => {
+  it('leaves input validation to the runtime', async () => {
+    const { app, runtime } = createApp();
+    await request(app).put('/api/routing/token').send({ token: false }).expect(200);
+    expect(runtime.setToken).toHaveBeenCalledWith(false);
+    await request(app).put('/api/routing/classifier').send({ source: [] }).expect(200);
+    expect(runtime.setClassifierSource).toHaveBeenCalledWith([]);
+    await request(app).put('/api/routing/classifier/custom').send({ url: 42, model: false }).expect(200);
+    expect(runtime.setCustomEndpoint).toHaveBeenCalledWith({ url: 42, model: false, key: undefined });
+    await request(app).post('/api/routing/classifier/test').send({ custom: 'invalid' }).expect(200);
+    expect(runtime.testClassifier).toHaveBeenCalledWith({ url: undefined, model: undefined, key: undefined });
+    await request(app).post('/api/routing/classifier/test').send({ custom: null }).expect(200);
+    expect(runtime.testClassifier).toHaveBeenLastCalledWith(undefined);
+  });
+
   it('serves state, saves config and manages the token', async () => {
     const { app, runtime } = createApp();
     const state = await request(app).get('/api/routing').expect(200);

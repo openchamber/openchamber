@@ -31,6 +31,7 @@ import { fileURLToPath } from 'node:url';
 import { cancel, intro, isCancel, log, outro, select, text } from '@clack/prompts';
 import { RELEASE_PACKAGE_FILES } from './bump-version.mjs';
 import { pointSdkAtArchive } from './lib/sdk-override.mjs';
+import { installedWebCli, installedWebCliProbe } from './lib/installed-web-cli.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -56,7 +57,7 @@ Actions:
   start-web-dev                    Start web development loop
   mobile-tools                     Mobile build/sync/deploy helper menu
   start-electron-app               Start Electron app in dev mode
-  prepare-opencode-cli             Download/cache bundled OpenCode CLI for Electron
+  prepare-opencode-server          Bundle the OpenCode server for Electron
   build-electron-app               Build Electron app artifacts
   start-vscode-extension           Build + launch VS Code extension host
   install-vscode-extension-local   Build, package, and install local VSIX
@@ -211,8 +212,8 @@ function normalizeAction(action = '') {
     'mobile-menu': 'mobile-tools',
     'remote-deploy-web': 'remote-deploy-web',
     'electron-dev': 'start-electron-app',
-    'opencode-cli': 'prepare-opencode-cli',
-    'electron-opencode-cli': 'prepare-opencode-cli',
+    'opencode-server': 'prepare-opencode-server',
+    'electron-opencode-server': 'prepare-opencode-server',
     'electron-build': 'build-electron-app',
     'vscode-dev': 'start-vscode-extension',
     'vscode-install-local': 'install-vscode-extension-local',
@@ -284,11 +285,6 @@ function resetDirectory(directory) {
     rmSync(path.join(directory, entry), { force: true });
   }
   rmSync(path.join(directory, 'node_modules'), { recursive: true, force: true });
-}
-
-function installedWebCli(directory) {
-  const cliPath = path.join(directory, 'node_modules', '@openchamber', 'web', 'bin', 'cli.js');
-  return existsSync(cliPath) ? cliPath : '';
 }
 
 function globalBunDir() {
@@ -439,7 +435,7 @@ async function deployRemoteWeb(options, config) {
   if (!host || !dir || !port) throw new Error(`Remote deployment ${remote.id} must define host, dir, and port.`);
 
   step('Preparing remote directories', () => run('ssh', [host, `mkdir -p ~/${dir}/releases`]));
-  step(`Stopping remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; ${REMOTE_RUNTIME_ENV}; cd ~/${dir} 2>/dev/null || exit 0; PORT=${quote(port)}; TMPDIR=$(node -p "require('os').tmpdir()" 2>/dev/null || echo /tmp); PIDFILE="$TMPDIR/openchamber-${port}.pid"; INSTANCEFILE="$TMPDIR/openchamber-${port}.json"; if [ -f ./node_modules/@openchamber/web/bin/cli.js ]; then bun ./node_modules/@openchamber/web/bin/cli.js stop --port "$PORT" >/dev/null 2>&1 || node ./node_modules/@openchamber/web/bin/cli.js stop --port "$PORT" >/dev/null 2>&1 || true; fi; if command -v lsof >/dev/null 2>&1; then lsof -ti :"$PORT" | xargs -r kill >/dev/null 2>&1 || true; sleep 0.5; lsof -ti :"$PORT" | xargs -r kill -9 >/dev/null 2>&1 || true; fi; rm -f "$PIDFILE" "$INSTANCEFILE"`], { label: 'stop remote instance' }));
+  step(`Stopping remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; ${REMOTE_RUNTIME_ENV}; cd ~/${dir} 2>/dev/null || exit 0; PORT=${quote(port)}; TMPDIR=$(node -p "require('os').tmpdir()" 2>/dev/null || echo /tmp); PIDFILE="$TMPDIR/openchamber-${port}.pid"; INSTANCEFILE="$TMPDIR/openchamber-${port}.json"; CLI=$(node -e ${quote(installedWebCliProbe)}); if [ -n "$CLI" ]; then bun "$CLI" stop --port "$PORT" >/dev/null 2>&1 || node "$CLI" stop --port "$PORT" >/dev/null 2>&1 || true; fi; if command -v lsof >/dev/null 2>&1; then lsof -ti :"$PORT" | xargs -r kill >/dev/null 2>&1 || true; sleep 0.5; lsof -ti :"$PORT" | xargs -r kill -9 >/dev/null 2>&1 || true; fi; rm -f "$PIDFILE" "$INSTANCEFILE"`], { label: 'stop remote instance' }));
   step('Copying package to remote', () => {
     run('ssh', [host, `mkdir -p ~/${dir}/releases && rm -f ~/${dir}/releases/*.tgz`]);
     run('scp', ['-q', packageFile, `${host}:~/${dir}/releases/${packageBase}`]);
@@ -448,7 +444,7 @@ async function deployRemoteWeb(options, config) {
   step('Resetting remote install state', () => run('ssh', [host, `cd ~/${dir} && rm -f package.json package-lock.json pnpm-lock.yaml bun.lockb && rm -rf node_modules`]));
   step('Preparing remote package manifest', () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; if command -v bun >/dev/null 2>&1; then bun init -y; else npm init -y; fi; ${sdkOverrideScript(`./releases/${sdkBase}`)}`]));
   step('Installing remote package', () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; if command -v bun >/dev/null 2>&1; then bun add ./releases/${packageBase}; else npm install ./releases/${packageBase}; fi`]));
-  step(`Starting remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; PASSWORD_VALUE=$(grep '^export OPENCHAMBER_UI_PASSWORD=' ~/.bashrc 2>/dev/null | sed -E 's/.*=["“]?([^"”]+)["”]?/\\1/' || true); if [ -n "$PASSWORD_VALUE" ]; then export OPENCHAMBER_UI_PASSWORD="$PASSWORD_VALUE"; fi; if [ ${quote(apiOnly)} = 'true' ]; then export OPENCHAMBER_API_ONLY=true; fi; if command -v bun >/dev/null 2>&1; then OPENCHAMBER_HOST=${quote(bindHost)} bun ./node_modules/@openchamber/web/bin/cli.js --port ${quote(port)} >/dev/null 2>&1; else OPENCHAMBER_HOST=${quote(bindHost)} node ./node_modules/@openchamber/web/bin/cli.js --port ${quote(port)} >/dev/null 2>&1; fi; sleep 0.5; if command -v lsof >/dev/null 2>&1; then lsof -ti :${quote(port)} >/dev/null 2>&1 || exit 1; fi`]));
+  step(`Starting remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; CLI=$(node -e ${quote(installedWebCliProbe)}); test -n "$CLI"; PASSWORD_VALUE=$(grep '^export OPENCHAMBER_UI_PASSWORD=' ~/.bashrc 2>/dev/null | sed -E 's/.*=["“]?([^"”]+)["”]?/\\1/' || true); if [ -n "$PASSWORD_VALUE" ]; then export OPENCHAMBER_UI_PASSWORD="$PASSWORD_VALUE"; fi; if [ ${quote(apiOnly)} = 'true' ]; then export OPENCHAMBER_API_ONLY=true; fi; if command -v bun >/dev/null 2>&1; then OPENCHAMBER_HOST=${quote(bindHost)} bun "$CLI" --port ${quote(port)} >/dev/null 2>&1; else OPENCHAMBER_HOST=${quote(bindHost)} node "$CLI" --port ${quote(port)} >/dev/null 2>&1; fi; sleep 0.5; if command -v lsof >/dev/null 2>&1; then lsof -ti :${quote(port)} >/dev/null 2>&1 || exit 1; fi`]));
   log.success(`Remote deployment ready: ${host}:${port}`);
 }
 
@@ -567,16 +563,16 @@ async function chooseOpencodeConfigDir(options, config) {
 
 async function startElectronApp(options, config) {
   const env = devAppEnv(await chooseOpencodeConfigDir(options, config));
-  prepareOpenCodeCli();
+  prepareOpenCodeServer();
   run('bun', ['run', 'electron:dev'], { env });
 }
 
-function prepareOpenCodeCli() {
-  step('Preparing bundled OpenCode CLI', () => run('bun', ['--filter', '@openchamber/electron', 'prepare:opencode-cli']));
+function prepareOpenCodeServer() {
+  step('Preparing bundled OpenCode server', () => run('bun', ['--filter', '@openchamber/electron', 'prepare:opencode-server']));
 }
 
 function buildElectronApp() {
-  prepareOpenCodeCli();
+  prepareOpenCodeServer();
   run('bun', ['run', 'electron:build'], { env: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' } });
   const distDir = path.join(repoRoot, 'packages/electron/dist');
   if (!existsSync(distDir) || !isMac) return;
@@ -647,7 +643,7 @@ async function chooseAction(config) {
     { value: 'start-web-dev', label: 'Start web dev' },
     { value: 'mobile-tools', label: 'Mobile tools' },
     { value: 'start-electron-app', label: 'Start Electron app' },
-    { value: 'prepare-opencode-cli', label: 'Prepare bundled OpenCode CLI' },
+    { value: 'prepare-opencode-server', label: 'Prepare bundled OpenCode server' },
     { value: 'build-electron-app', label: 'Build Electron app' },
     { value: 'start-vscode-extension', label: 'Start VS Code extension' },
     { value: 'install-vscode-extension-local', label: 'Install VS Code extension locally' },
@@ -691,8 +687,8 @@ async function main() {
     case 'start-electron-app':
       await startElectronApp(options, config);
       break;
-    case 'prepare-opencode-cli':
-      prepareOpenCodeCli();
+    case 'prepare-opencode-server':
+      prepareOpenCodeServer();
       break;
     case 'build-electron-app':
       buildElectronApp();

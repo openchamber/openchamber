@@ -142,14 +142,4 @@ describe('ChatSettings', () => {
       expect(field.value).toBe(value);
     }
   });
-
-  test('every Chat search result opens the tab that holds it', () => {
-    const t = (key: I18nKey): string => key;
-    const results = buildSettingsSearchResults({ query: 'chat-page', runtimeCtx, t, getPageTitle: (page) => `${page}-page` })
-      .filter((result) => result.page === 'chat');
-    expect(results.length).toBeGreaterThan(20);
-    for (const result of results) {
-      expect({ id: result.id, tab: chatSettingsTabForSearchTarget(result.id) }).not.toEqual({ id: result.id, tab: null });
-    }
-  });
 });

@@ -31,10 +31,6 @@ import { NestedRepositoryChanges } from './NestedRepositoryChanges';
 import { LARGE_DIFF_CHANGED_LINES, FULL_CONTEXT_DIFF_LINES, DEFAULT_CONTEXT_DIFF_LINES } from './diffContextLines';
 
 const DIFF_REQUEST_TIMEOUT_MS = 15000;
-// A file header's content fades out over its end while the file's actions show
-// there: clear for the actions' width (less the row's 12px end padding, which
-// the content does not reach), then a 1.5rem ramp. Devices without hover keep
-// the actions in the row's flow and never mask.
 const FILE_ACTIONS_MASK = '[mask-image:linear-gradient(to_left,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))] rtl:[mask-image:linear-gradient(to_right,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]';
 const FILE_ACTIONS_MASK_CLASS = `${FILE_ACTIONS_MASK} [@media(hover:none)]:![mask-image:none]`;
 const FILE_ACTIONS_MASK_ON_REVEAL_CLASS = [
@@ -50,7 +46,6 @@ interface MultiFileDiffEntryProps {
     file: FileEntry;
     layout: 'inline' | 'side-by-side';
     wrapLines: boolean;
-    /** Show lines that changed only by whitespace as unchanged, without hunk actions. */
     hideWhitespace?: boolean;
     isSelected: boolean;
     isExpanded: boolean;
@@ -62,36 +57,18 @@ interface MultiFileDiffEntryProps {
     isOpeningInEditor?: boolean;
     onOpenInEditor?: (filePath: string, diffData: DiffData | null) => void;
     staged?: boolean;
-    /**
-     * Start with full file contents instead of the 3-line patch. Off in the
-     * app: a file loads in full when the user expands its collapsed context.
-     */
     loadFullFiles?: boolean;
     initialDiffData?: DiffData | null;
     comparisonDiff?: ComparisonDiffResult;
-    /** The comparison `comparisonDiff` comes from, for comments. */
     commentOrigin?: DiffCommentOrigin;
     onRetryComparisonDiff?: () => void;
-    /** Full-context variant of `comparisonDiff` for this file, fetched when the user expands collapsed context. */
     loadFullComparisonDiff?: (filePath: string) => Promise<ComparisonDiffResult>;
-    /** Hide stage/unstage/revert actions for branch and commit comparisons. */
     readOnlyActions?: boolean;
-    /** Hunk mutations require a live working/index diff, never a turn snapshot. */
     hunkActionsEnabled?: boolean;
-    /**
-     * Bumped when the working tree may have changed without the status row
-     * changing: an edit inside an already-modified line keeps `+1/-1`. A live
-     * diff older than this revision is refetched in place, behind the data it
-     * still shows.
-     */
     contentRevision?: number;
-    /** Find-in-diff: register this file's rendered viewer handle. */
     registerViewerRef?: (path: string, handle: PierreDiffViewerHandle | null) => void;
-    /** Reports a primary-modifier word click on `path` so the owner can open find on it. */
     onFindWordRequest?: (path: string, request: DiffFindWordRequest) => void;
-    /** Reports whether this entry shows the whole file, so find reads it the same way. */
     onFullContextChange?: (path: string, full: boolean) => void;
-    /** A find jump into this entry; null when the active match is elsewhere. */
     findReveal?: DiffFindReveal | null;
 }
 
@@ -141,8 +118,6 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const [diffRetryNonce, setDiffRetryNonce] = React.useState(0);
     const [localDiffLoadFailure, setDiffLoadFailure] = React.useState<DiffLoadFailure | null>(null);
     const [isFetching, setIsLoading] = React.useState(false);
-    // Range diffs (branch/commit) are cached per range with 3-line context;
-    // the full-context copy for this one file lives here until the range entry changes.
     const [fullComparisonDiff, setFullComparisonDiff] = React.useState<{ source: ComparisonDiffResult; result: ComparisonDiffResult } | null>(null);
     const comparisonDiff = fullComparisonDiff !== null && fullComparisonDiff.source === rangeComparisonDiff ? fullComparisonDiff.result : rangeComparisonDiff;
     const canLoadFullFile = Boolean(directory) && !initialDiffData && (!rangeComparisonDiff || Boolean(loadFullComparisonDiff));
@@ -158,8 +133,6 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const [forceRenderLarge, setForceRenderLarge] = React.useState(false);
     const [localDiffData, setLocalDiffData] = React.useState<DiffData | null>(null);
     const [stagedDiffData, setStagedDiffData] = React.useState<DiffData | null>(null);
-    // Set when the user expands collapsed context on the patch-only diff:
-    // this file alone switches to full contents, then replays the expansion.
     const [contextExpansion, setContextExpansion] = React.useState<ContextExpansionRequest | null>(null);
     const loadFullFiles = loadAllFullFiles || contextExpansion !== null;
     React.useEffect(() => {
@@ -167,8 +140,6 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         onFullContextChange(file.path, true);
         return () => onFullContextChange(file.path, false);
     }, [file.path, loadFullFiles, onFullContextChange]);
-    // A find jump into this file shows it even when it is over the large-diff
-    // limit: the match the bar points at has to be on screen.
     React.useEffect(() => {
         if (findReveal?.key === file.path) setForceRenderLarge(true);
     }, [file.path, findReveal]);
@@ -211,7 +182,6 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     }, [comparisonDiff, cachedDiff, initialDiffData, localDiffData, staged, stagedDiffData]);
 
     const diffDataMatchesContextMode = diffData?.contextMode === desiredContextMode;
-    // A pure rename's patch has no hunks to draw.
     const renameOnlyDiff = Boolean(
         diffData && file.previousPath && !diffData.isBinary && !diffData.submodule
         && diffData.fileDiff?.hunks.length === 0
@@ -226,8 +196,6 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         registerViewerRef?.(file.path, handle);
     }, [file.path, registerViewerRef]);
 
-    // Stable per file, so the memoized viewer is not re-rendered by a new
-    // closure on every parent render; `onFindWordRequest` itself is stable.
     const handleFindWordRequest = React.useCallback((request: DiffFindWordRequest) => {
         onFindWordRequest?.(file.path, request);
     }, [file.path, onFindWordRequest]);
@@ -240,9 +208,6 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         onSelect(file.path);
     }, [file.path, onSelect]);
 
-    // Switching between the staged and unstaged side shows a different diff,
-    // so the side being switched to must not show what it held before. Reset
-    // while hidden or collapsed too: the entry loads again only once shown.
     const appliedStagedRef = React.useRef(staged);
     React.useEffect(() => {
         if (appliedStagedRef.current === staged) return;
@@ -257,10 +222,6 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         lastDiffRequestRef.current = null;
     }, [staged]);
 
-    // Version the displayed live diff was fetched for: the content revision
-    // and the file's status row, which moves with every edit. An older diff
-    // stays on screen while its replacement loads instead of collapsing to a
-    // spinner, so an agent editing the file does not make it flicker.
     const diffVersion = `${contentRevision}:${fileStatusKey}`;
     const [loadedVersion, setLoadedVersion] = React.useState(diffVersion);
     const isDiffCurrent = loadedVersion === diffVersion;
@@ -338,8 +299,6 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                         setStagedDiffData(nextDiff);
                     } else {
                         setDiff(directory, file.path, nextDiff, runtimeKey);
-                        // Also held locally: a refresh clears the shared cache
-                        // and the entry keeps showing this until it refetches.
                         setLocalDiffData(nextDiff);
                     }
                 }
@@ -351,8 +310,6 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                 setIsLoading(false);
                 if (error instanceof GitPathUnavailableError) {
                     setDiffLoadFailure({ kind: 'unavailable', reason: error.reason });
-                    // The row came from a status listing that is now stale. A
-                    // cached or joined status read would return the same list.
                     if (error.reason === 'path_not_found') void fetchStatus(directory, git, { force: true, silent: true });
                     return;
                 }
@@ -396,7 +353,6 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         }
 
         if ((staged && action !== 'unstage') || (!staged && action === 'unstage')) return;
-        // Discard sits next to stage, so one stray click must not lose work.
         if (action === 'discard' && !await confirmDiscard({
             title: t('diffView.hunk.discardDialogTitle'),
             message: t('diffView.hunk.discardDescription', { path: file.path }),
@@ -441,15 +397,9 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         ? { anchors: hunkAnchors, render: renderHunkActions } : undefined, [hunkAnchors, renderHunkActions]);
 
     const actionsPinned = wholeFileComment.isOpen || isOpeningInEditor;
-    // The actions' width sets how much of the row's end the mask clears; the
-    // row (their parent) carries it as --file-actions-w.
     const [fileActionsElement, setFileActionsElement] = React.useState<HTMLSpanElement | null>(null);
     React.useLayoutEffect(() => {
         if (!fileActionsElement) return;
-        // The observer reports the width as soon as it observes, in the same
-        // frame and before paint, from the layout the browser already did.
-        // Read here through `offsetWidth`, every file of a long change forced
-        // a layout of its own while the list mounted.
         const observer = new ResizeObserver((entries) => {
             const width = entries[entries.length - 1]?.borderBoxSize?.[0]?.inlineSize;
             if (width !== undefined) fileActionsElement.parentElement?.style.setProperty('--file-actions-w', `${Math.ceil(width)}px`);
@@ -487,8 +437,6 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     );
 
     return (
-        // No lines between files: the header's tone sets each one apart, in
-        // light and dark alike.
         <div ref={setSectionRef} className="scroll-mt-9">
             <div className="sticky top-0 z-30 bg-[var(--surface-elevated)]/90 backdrop-blur-md supports-[backdrop-filter]:bg-[var(--surface-elevated)]/80">
                 <div
@@ -504,9 +452,6 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     }}
                     className={cn(
                         'cursor-pointer',
-                        // isolate: the hover layer sits under the content (-z-10)
-                        // without making each part a positioned box, so the
-                        // file's actions can place themselves on the row.
                         'group/header relative isolate flex min-h-9 w-full min-w-0 items-center overflow-hidden px-3 py-2',
                         'bg-transparent',
                         'text-muted-foreground hover:text-foreground',
@@ -514,11 +459,6 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     )}
                 >
                     <div className="absolute inset-0 -z-10 pointer-events-none group-hover/header:bg-[var(--interactive-hover)]/50" />
-                    {/* The path and counts. While the file's actions show, the
-                        row's end fades out under a mask, so the actions stand on
-                        the header's own backdrop (the diff blurred under it):
-                        no painted patch to disagree with it, nothing reserved,
-                        nothing moves. */}
                     <div className={cn(
                         'grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2',
                         actionsPinned ? FILE_ACTIONS_MASK_CLASS : FILE_ACTIONS_MASK_ON_REVEAL_CLASS,
@@ -555,14 +495,9 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     <div className="flex shrink-0 items-center justify-self-end gap-2">
                         <ReviewFileMark path={file.path} />
                         {formatDiffTotals(file.insertions, file.deletions)}
-                        {/* Without hover (touch) the actions sit after the counts,
-                            always shown, as before the overlay. */}
                         <span className="hidden items-center gap-2 [@media(hover:none)]:flex">{fileActions}</span>
                     </div>
                     </div>
-                    {/* The file's actions, with no background of their own: on
-                        the row's hover or keyboard focus they fade in over the
-                        masked end; one in use stays. */}
                     <span
                         ref={setFileActionsElement}
                         className={cn(
@@ -579,9 +514,6 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
             </div>
             {wholeFileComment.cards}
             {isExpanded && (
-                // Clip, not hidden: a hidden overflow is a scroll box of its
-                // own, and the diff's sticky scrollbar would stick to it
-                // instead of to the panel.
                 <div className="relative bg-background overflow-clip">
                     {!isMounted && !diffLoadFailure ? (
                         <div className="h-40 border border-edge-muted bg-background/40" />

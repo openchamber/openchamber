@@ -79,7 +79,6 @@ export function useComposerEditorActions({
     const { pastedSessionIds, linkPastedSessionId, setOpenSharedPageKey } = language;
     const { receivedPageBases, updateLinkedReferences } = referenceDrafts;
 
-    // The open picker sits at the caret, right above the line being typed.
     const {
         position: autocompleteOverlayPosition,
         update: updateAutocompleteOverlayPosition,
@@ -95,8 +94,6 @@ export function useComposerEditorActions({
     const handleAbort = React.useCallback(() => {
         clearAbortPrompt();
 
-        // btw mode: the stop button stops the fork's turn, not the main
-        // session's.
         const abortTarget = isBtwActive && btwSessionId ? btwSessionId : currentSessionId;
         void abortCurrentOperation(abortTarget || undefined);
     }, [abortCurrentOperation, btwSessionId, clearAbortPrompt, currentSessionId, isBtwActive]);
@@ -108,8 +105,6 @@ export function useComposerEditorActions({
     const handleOpenThinkingPanel = React.useCallback(() => handleOpenMobilePanel('variant'), [handleOpenMobilePanel]);
 
     const handleCycleAgent = React.useCallback((direction: 1 | -1 = 1) => {
-        // Auto hides the agent control, so the shortcut must not change a
-        // choice the user cannot see.
         if (isAutoModel(currentProviderId, currentModelId)) return;
         const nextAgentName = getCycledPrimaryAgentName(agents, currentAgentName, direction, useUIStore.getState().favoriteAgents);
         if (!nextAgentName) return;
@@ -118,18 +113,11 @@ export function useComposerEditorActions({
             pickSessionAgent(currentSessionId, nextAgentName);
         }
 
-        // A pinned column's agent is its own session's choice only.
         if (!columnPinned) setAgent(nextAgentName);
     }, [agents, columnPinned, currentAgentName, currentModelId, currentProviderId, currentSessionId, setAgent, pickSessionAgent]);
 
-    // Height the failed-dictation salvage text needs. Its overlay sits
-    // absolutely over the composer, so the composer must be able to grow for
-    // it. Apply the editor's line and screen bounds before using that height as
-    // a floor, otherwise long salvage text can push the action row off-screen.
     const dictationHeightHostRef = React.useRef<HTMLDivElement | null>(null);
 
-    // The short hint drops the @, $ and / pointers, so it only replaces the
-    // full one when that would wrap.
     const fullChatPlaceholderFits = usePlaceholderFitsOneLine(dictationHeightHostRef, t('chat.chatInput.placeholder.chat'));
 
     const useCompactChatPlaceholder = isMobile || !fullChatPlaceholderFits;
@@ -161,8 +149,6 @@ export function useComposerEditorActions({
             inputSource,
             insertedText,
             mentionIsCompleted: (start) => mentionCompletion.isCompleted(start),
-            // Session titles hold spaces, so `@release notes` keeps looking.
-            // VS Code lists no sessions under `@`.
             mentionContinuesPastSpace: isVSCodeRuntime()
                 ? undefined
                 : (query) => continuesSessionMention(query, currentSessionId),
@@ -181,8 +167,6 @@ export function useComposerEditorActions({
 
         const editor = composerRef.current;
         if (!editor) {
-            // No mounted editor (collapsed mobile pill): append to the state
-            // the editor will be seeded from.
             const nextValue = composerText.get() + text;
             setMessage(nextValue);
             updateAutocompleteState(nextValue, nextValue.length, inputSource, text);
@@ -190,14 +174,10 @@ export function useComposerEditorActions({
         }
 
         const { start, end } = editor.getSelection();
-        // Read the live document — delayed toast actions must not use a
-        // paste-time React `message` closure.
         const currentMessage = editor.getValue();
         const nextValue = `${currentMessage.substring(0, start)}${text}${currentMessage.substring(end)}`;
         const cursorPosition = start + text.length;
 
-        // One dispatch places both the text and the caret, so there is no
-        // frame where the caret sits at a stale offset.
         editor.insertText(text);
         updateAutocompleteState(nextValue, cursorPosition, inputSource, text);
     }, [updateAutocompleteState, setMessage, composerText, composerRef]);
@@ -259,13 +239,10 @@ export function useComposerEditorActions({
             return;
         }
 
-        // VS Code drops the dragged path as text as well as firing the drop
-        // handler; swallow that duplicate insertion.
         if (isVSCodeRuntime() && suppressNextFileDropTextInsertRef.current) {
             const candidateAbsolutePaths = pendingDroppedAbsolutePathsRef.current;
             if (candidateAbsolutePaths.some((path) => path.length > 0 && value.includes(path))) {
                 clearDropTextSuppression();
-                // The editor goes back to the text without the path.
                 setEditorValueRevision((revision) => revision + 1);
                 return;
             }
@@ -278,10 +255,6 @@ export function useComposerEditorActions({
         }
         const inputSource: FileMentionAutocompleteInputSource = isPasteInput ? 'paste' : 'manual';
 
-        // A leading `!` switches the composer into shell mode and is consumed.
-        // Mobile keyboards and paste may update the document without a usable
-        // keydown, so consume the trigger in the same editor transaction rather
-        // than moving the caret in a later frame against stale text.
         if (!isBtwActive && inputMode === 'normal' && value.startsWith('!')) {
             const shellCommand = value.slice(1);
             const nextCursor = Math.max(0, selection.start - 1);
@@ -297,10 +270,6 @@ export function useComposerEditorActions({
             return;
         }
 
-        // A share link someone sent becomes a page chip: the link, with its
-        // key, goes to the server and only the link without its key stays in
-        // the text, where it draws as the chip. Its card opens at once, since
-        // the page needs its PIN.
         const shareLink = !fromValueProp && !isBtwActive && inputMode === 'normal' ? findShareLink(value, receivedPageBases) : null;
         if (shareLink && composerRef.current) {
             const link = withoutShareLinkKeys(shareLink.url);
@@ -312,8 +281,6 @@ export function useComposerEditorActions({
         }
 
         composerText.set(value);
-        // Text the app set (a restored draft, a prepared prompt) is not a
-        // trigger being typed: a `#` line in it must not open the snippet list.
         if (fromValueProp) {
             closeAutocomplete();
             return;

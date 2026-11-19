@@ -66,6 +66,11 @@ OpenCode and the fixture provider on Ctrl-C. Pass `--dir tmp/perf-serve/project`
 to the session commands. Every command except `profile:animation` and
 `profile:startup` without `--url` needs a running server.
 
+The isolated Node launcher preloads a checkout's server source resolver when
+it exists, before loading the source CLI. This preserves `.js` specifiers as
+server and CLI folders convert to TypeScript; older comparison checkouts keep
+their original arguments.
+
 ## Running An Isolated Copy
 
 Any server, dev shell or Electron an agent starts for a check runs beside the
@@ -78,9 +83,12 @@ maintainer's own app and dev shell, on the same machine.
   `desktopUiPassword`, when the run needs the saved projects or hosts. A shell
   inside the desktop app inherits its `OPENCHAMBER_*` variables (UI password,
   dist dir, agent-tool URL and token) and `OPENCODE_PASSWORD`: start copies
-  with `env -i HOME USER PATH SHELL TMPDIR` or unset them first, and use
-  `OPENCODE_BINARY=/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode`
-  when `~/.opencode/bin/opencode` lags the version the repo needs.
+  with `env -i HOME USER PATH SHELL TMPDIR` or unset them first. When
+  `~/.opencode/bin/opencode` lags the version the repo needs, run the OpenCode
+  the desktop bundles instead: `bun run --cwd packages/electron prepare:opencode-server`,
+  then `OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR=$PWD/packages/electron/resources/opencode-server`
+  for a server started from `packages/web/server` (the CLI's `serve` still needs a real
+  CLI in `OPENCODE_BINARY`).
 - **Dev server:** from the repo root, after the env is clean,
   `OPENCHAMBER_DATA_DIR=<scratch>/oc-data OPENCHAMBER_HMR_UI_PORT=5391 OPENCHAMBER_HMR_API_PORT=3991 bun run dev`
   in the background; the UI is at `http://127.0.0.1:5391/`. It runs React
@@ -168,11 +176,12 @@ To run the same probe against OpenCode's app on the stand's data, with
 ```bash
 HOME=$PWD/../state/home \
 OPENCODE_CONFIG_CONTENT="$(node ../../../scripts/perf/fixture-provider.mjs 4798 --print-config)" \
-/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode serve --hostname 127.0.0.1 --port 4870
+~/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4870
 ```
 
-It serves its web app at `/` and prints a throwaway `server password` in its
-log. In the page choose "Use password", enter `http://127.0.0.1:4870` and that
+This needs the OpenCode CLI: the server the desktop bundles has no web app.
+The CLI serves its web app at `/` and prints a throwaway `server password` in
+its log. In the page choose "Use password", enter `http://127.0.0.1:4870` and that
 password, and connect; it lists the same sessions as `profile:serve`. Its
 controls carry `data-slot` and `data-component` attributes
 (`[data-slot=session-review-toggle] button`, `[data-component=resize-handle]`),
@@ -366,6 +375,16 @@ processes, with the trace events that spent it. `--save-trace` writes the raw
 timeline for the DevTools Performance panel.
 
 ### Deterministic stimulus
+
+`scripts/verify` starts the provider with `--verify-control`. In that mode,
+`GET /__verify/active?session=<id>&prompt=<text>` reports only whether a matching
+streaming request is active, using `x-opencode-session-id` and the latest user
+message. Closed requests are removed immediately. Normal profiling launches
+have no control endpoint.
+
+The verification stand also supplies `startFixture`'s optional `onSpawn`
+callback to record process ownership before the fixture starts listening.
+Profiling callers retain their existing fixture lifecycle.
 
 A hosted model returns a different length at a different speed on every run,
 and streaming cost follows the rate of deltas, not the amount of text. Two

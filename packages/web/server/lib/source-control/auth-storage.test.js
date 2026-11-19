@@ -336,6 +336,57 @@ describe('source-control auth storage', () => {
     expect(written.providers.github.instances[host].sshUrl).toBe(sshUrl);
   });
 
+  it('reads a null SSH address and omits it on the next write', async () => {
+    const { filePath, store } = await makeStore();
+    const origin = 'https://gitlab.example.com';
+    await fs.writeFile(filePath, JSON.stringify({
+      version: 5,
+      providers: {
+        gitlab: { instances: { [origin]: {
+          activeCredentialId: null, credentials: [], cliDisabled: true, cliActive: false, sshUrl: null,
+        } } },
+        github: { instances: {} },
+      },
+    }), 'utf8');
+
+    await expect(store.readInstance(origin)).resolves.toEqual({
+      activeAccountId: null, accounts: [], cliDisabled: true, cliActive: false,
+    });
+    await store.setCliDisabled(origin, false);
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual({
+      version: 2, providers: { gitlab: { instances: {} } },
+    });
+  });
+
+  it.each([false, 0, '', [], {}])('refuses an unnormalized SSH address %j without rewriting it', async (sshUrl) => {
+    const { filePath, store } = await makeStore();
+    const original = {
+      version: 5,
+      providers: {
+        gitlab: { instances: { 'https://gitlab.example.com': {
+          activeCredentialId: null, credentials: [], cliDisabled: false, cliActive: false, sshUrl,
+        } } },
+        github: { instances: {} },
+      },
+    };
+    await fs.writeFile(filePath, JSON.stringify(original), 'utf8');
+    await expect(store.listInstances()).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_AUTH' });
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual(original);
+  });
+
+  it('omits nullable profile fields while preserving extension string identities', async () => {
+    const { store } = await makeStore();
+    const origin = 'https://forge.example.com';
+    const credential = await store.section('ext-forge').setAccount(origin, {
+      token: 'pat', source: 'pat',
+      user: { id: 'external-user', login: 'person', name: null, email: null, avatarUrl: null },
+    });
+    expect(credential.user).toEqual({ id: 'external-user', login: 'person' });
+    await expect(store.section('ext-forge').readAccount(origin, credential.id)).resolves.toMatchObject({
+      user: { id: 'external-user', login: 'person' },
+    });
+  });
+
   it('keeps version 5 while an unparsed extra section carries an SSH address, and returns to version 4 once it is cleared', async () => {
     const { filePath } = await makeStore();
     const origin = 'https://gitea.example.com';
@@ -404,8 +455,8 @@ describe('source-control auth storage', () => {
     `;
 
     await Promise.all([
-      execFileAsync(process.execPath, ['-e', worker({ token: 'one', id: 1, login: 'one', source: 'pat' })]),
-      execFileAsync(process.execPath, ['-e', worker({ token: 'two', id: 2, login: 'two', source: 'oauth' })]),
+      execFileAsync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '-e', worker({ token: 'one', id: 1, login: 'one', source: 'pat' })]),
+      execFileAsync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '-e', worker({ token: 'two', id: 2, login: 'two', source: 'oauth' })]),
     ]);
 
     await expect(store.listAccounts(origin)).resolves.toHaveLength(2);
@@ -493,4 +544,3 @@ describe('source-control auth storage', () => {
     });
   });
 });
-

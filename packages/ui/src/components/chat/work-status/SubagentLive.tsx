@@ -3,6 +3,7 @@ import React from 'react';
 import { formatSessionActivityDuration } from '@/components/session/sessionActivityDurationFormat';
 import { useDurationTickerNow } from '@/hooks/useDurationTicker';
 import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 import { getLastConversationMessage, type Session } from '@/lib/opencode/model';
 import { resolveUsageTone } from '@/lib/quota';
 import { formatRetryCountdown, toRetryTargetTimestamp } from '@/lib/retryCountdown';
@@ -143,7 +144,7 @@ export const SubagentContextValue: React.FC<{ child: Session; directory: string 
   return (
     <span
       dir="ltr"
-      className={tone === 'muted' ? 'text-muted-foreground' : undefined}
+      className={cn('text-[0.6875rem] leading-4', tone === 'muted' && 'text-muted-foreground')}
       style={TONE_STYLE[tone]}
       aria-label={t('chat.workStatus.subagent.contextAria', { percent: rounded })}
     >

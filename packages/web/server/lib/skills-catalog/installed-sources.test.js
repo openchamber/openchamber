@@ -31,6 +31,15 @@ const entry = (overrides = {}) => ({
 });
 
 describe('installed skill provenance registry', () => {
+  it('retains unchecked metadata and the original untrimmed identity fields', () => {
+    const raw = entry({ skillName: ' skill-creator ', sourceId: ' acme ', scope: 42, source: null, sourceRef: { raw: true } });
+    fs.writeFileSync(path.join(dataDir, 'skills-installed-sources.json'), JSON.stringify({ version: 1, entries: [raw] }));
+
+    expect(readInstalledSources().get('skill-creator')).toEqual([raw]);
+    appendInstalledSources([entry({ skillName: 'other', skillDir: 'other' })]);
+    expect(readInstalledSources().get('skill-creator')).toEqual([raw]);
+  });
+
   it('round-trips entries keyed by skill name', () => {
     appendInstalledSources([entry(), entry({ skillName: 'other', sourceId: 'other', skillDir: 'skills/other' })]);
 

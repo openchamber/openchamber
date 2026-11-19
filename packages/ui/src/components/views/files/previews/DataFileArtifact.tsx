@@ -15,7 +15,7 @@ import { collectRows, documentTransport, newDocumentId } from './documentClient'
 import { TableGrid } from './TableArtifact';
 
 type LoadBytes = (path: string, signal: AbortSignal) => Promise<Uint8Array<ArrayBuffer>>;
-type Table = { columns: string[]; rows: string[][]; totalRows: number; columnCount?: number };
+type Table = { columns: string[]; rows: string[][]; totalRows: number; columnCount?: number; dataColumnCount?: number };
 type Sort = { column: number; direction: 'ascending' | 'descending' };
 
 const sortedQuery = (query: string, columns: string[], sort: Sort | null): string => {
@@ -200,6 +200,7 @@ export const DataFileArtifact: React.FC<{
       header={state.table.columns}
       rows={state.table.rows}
       columnCount={state.table.columnCount ?? state.table.columns.length}
+      dataColumnCount={state.table.dataColumnCount}
       totalRows={state.table.totalRows}
       sizeBytes={sizeBytes}
       commentTarget={{ fileLabel: path }}

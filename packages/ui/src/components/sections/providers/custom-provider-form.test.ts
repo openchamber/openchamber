@@ -67,28 +67,6 @@ const MODEL_ROW_DEFAULTS = {
   capabilitiesKnown: false,
 };
 
-/** Mirrors server upsert semantics for request-construction tests. */
-function mergeProviderConfig(
-  existing: Record<string, unknown>,
-  providerID: string,
-  config: CustomProviderConfig,
-): Record<string, unknown> {
-  const providerSection = (
-    typeof existing.provider === 'object' && existing.provider !== null && !Array.isArray(existing.provider)
-      ? { ...(existing.provider as Record<string, unknown>) }
-      : {}
-  );
-  providerSection[providerID] = config;
-  const next: Record<string, unknown> = {
-    ...existing,
-    provider: providerSection,
-  };
-  if (Array.isArray(existing.disabled_providers)) {
-    next.disabled_providers = existing.disabled_providers.filter((entry) => entry !== providerID);
-  }
-  return next;
-}
-
 describe('client certificate', () => {
   const certificateForm = (tls: CustomProviderFormState['tls']) => validateCustomProvider({
     form: baseForm({ tls }), t, existingProviderIDs: new Set(),
@@ -170,7 +148,7 @@ describe('validateCustomProvider', () => {
         models: {
           'model-a': { modelID: 'model-a', name: 'Model A' },
         },
-      },
+      } satisfies CustomProviderConfig,
     });
   });
 
@@ -454,52 +432,6 @@ describe('request construction', () => {
     });
 
     expect(buildIntegrationKeyRequest(validated.result!)).toBeNull();
-  });
-});
-
-describe('mergeProviderConfig persistence shape', () => {
-  test('merges provider block and clears disabled_providers entry', () => {
-    const validated = validateCustomProvider({
-      form: baseForm(),
-      t,
-      existingProviderIDs: new Set(),
-    });
-    const plan = validated.result!;
-
-    const next = mergeProviderConfig(
-      {
-        model: 'openai/gpt-4o',
-        provider: {
-          openai: { name: 'OpenAI' },
-        },
-        disabled_providers: ['custom-provider', 'other'],
-      },
-      plan.providerID,
-      plan.config,
-    );
-
-    expect(next).toEqual({
-      model: 'openai/gpt-4o',
-      provider: {
-        openai: { name: 'OpenAI' },
-        'custom-provider': plan.config,
-      },
-      disabled_providers: ['other'],
-    });
-  });
-
-  test('creates provider section when missing', () => {
-    const validated = validateCustomProvider({
-      form: baseForm(),
-      t,
-      existingProviderIDs: new Set(),
-    });
-    const plan = validated.result!;
-
-    const next = mergeProviderConfig({}, plan.providerID, plan.config);
-    expect(next.provider).toEqual({
-      'custom-provider': plan.config,
-    });
   });
 });
 

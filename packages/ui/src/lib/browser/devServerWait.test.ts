@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   DEV_SERVER_AFTER_ACTION_MS,
+  DEV_SERVER_ANSWER_WAIT_MS,
   DEV_SERVER_FIRST_RETRY_MS,
   DEV_SERVER_MAX_RETRY_MS,
   DEV_SERVER_WAIT_MS,
@@ -9,6 +10,7 @@ import {
   type DevServerWaitRun,
   forgetBrowserTabOpenedWithAddress,
   noteBrowserTabOpenedWithAddress,
+  planErrorAnswerRetry,
   planFailedLoadRetry,
   requestBrowserTabLoad,
   subscribeBrowserTabLoadRequests,
@@ -119,6 +121,51 @@ describe('dev server wait', () => {
     expect(plan.next).toBe('stop');
   });
 
+  describe('a page that loaded with an error status', () => {
+    // portless answers 404 for a name until the app behind it registers.
+    const proxied = { url: 'http://myapp.localhost:1355/', httpStatus: 404 };
+
+    test('is waited on while its project action runs', () => {
+      const first = planErrorAnswerRetry(proxied, { ...watching, run: null, now: 1_000, actionRunning: true });
+      expect(first).toEqual({ next: 'retry', delayMs: DEV_SERVER_FIRST_RETRY_MS, run: { url: proxied.url, startedAt: 1_000, paused: false } });
+
+      const gateway = planErrorAnswerRetry({ url: 'http://localhost:3000/', httpStatus: 502 }, { ...watching, run: null, now: 1_000, actionRunning: true });
+      expect(gateway.next).toBe('retry');
+    });
+
+    test('is the app\'s own answer without a project action', () => {
+      expect(planErrorAnswerRetry(proxied, { ...watching, run: null, now: 1_000 }).next).toBe('stop');
+    });
+
+    test('stops being waited on at the cap, even while the action runs', () => {
+      const run = { url: proxied.url, startedAt: 0, paused: false };
+      expect(planErrorAnswerRetry(proxied, { ...watching, run, now: DEV_SERVER_ANSWER_WAIT_MS, actionRunning: true }).next).toBe('retry');
+      expect(planErrorAnswerRetry(proxied, { ...watching, run, now: DEV_SERVER_ANSWER_WAIT_MS + 1, actionRunning: true }).next).toBe('stop');
+    });
+
+    test('gets quick retries for a moment after the action stops', () => {
+      const run = { url: proxied.url, startedAt: 0, paused: false };
+      const actionStoppedAt = 10_000;
+      expect(planErrorAnswerRetry(proxied, { ...watching, run, now: actionStoppedAt + 100, actionStoppedAt }))
+        .toEqual({ next: 'retry', delayMs: DEV_SERVER_FIRST_RETRY_MS, run });
+      expect(planErrorAnswerRetry(proxied, { ...watching, run, now: actionStoppedAt + DEV_SERVER_AFTER_ACTION_MS + 1, actionStoppedAt }).next).toBe('stop');
+    });
+
+    test('is not waited on when it worked, is public, has no status, or was restored', () => {
+      const context = { ...watching, run: null, now: 1_000, actionRunning: true };
+      expect(planErrorAnswerRetry({ ...proxied, httpStatus: 200 }, context).next).toBe('stop');
+      expect(planErrorAnswerRetry({ ...proxied, httpStatus: 403 }, context).next).toBe('stop');
+      expect(planErrorAnswerRetry({ url: 'https://example.com/', httpStatus: 404 }, context).next).toBe('stop');
+      expect(planErrorAnswerRetry({ url: proxied.url }, context).next).toBe('stop');
+      expect(planErrorAnswerRetry(proxied, { ...context, restored: true }).next).toBe('stop');
+    });
+
+    test('holds its retry while nobody watches the tab', () => {
+      const plan = planErrorAnswerRetry(proxied, { ...watching, watched: false, run: null, now: 1_000, actionRunning: true });
+      expect(plan).toEqual({ next: 'pause', run: { url: proxied.url, startedAt: 1_000, paused: true } });
+    });
+  });
+
   test('a tab opened with an address counts as opened now only until it has mounted', () => {
     const tabID = 'browser:http://localhost:8481/';
     expect(wasBrowserTabOpenedWithAddress('/repo', tabID)).toBe(false);
@@ -161,6 +208,10 @@ describe('dev server wait', () => {
     expect(acceptsBrowserTabLoadRequest({ kind: 'idle' }, false)).toBe(true);
 
     expect(acceptsBrowserTabLoadRequest(ready, true)).toBe(false);
+    expect(acceptsBrowserTabLoadRequest({ ...ready, httpStatus: 200 }, true)).toBe(false);
     expect(acceptsBrowserTabLoadRequest(loading, true)).toBe(false);
+    // A local proxy's 404 for an app that is not up is no working page.
+    expect(acceptsBrowserTabLoadRequest({ ...ready, httpStatus: 404 }, true)).toBe(true);
+    expect(acceptsBrowserTabLoadRequest({ ...ready, httpStatus: 502 }, true)).toBe(true);
   });
 });

@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { EventEmitter, once } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -15,10 +16,11 @@ afterEach(async () => {
 const createHarness = async ({ enabled = true, now, hasUnreadChat } = {}) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-secret-run-'));
   temporaryDirectories.push(directory);
-  const onWaitChange = vi.fn();
+  const events = new EventEmitter();
+  const onWaitChange = vi.fn((change) => events.emit(change.type));
   const leases = createSecretLeases({ now });
   const requests = createSecretRequests({ isEnabled: async () => enabled, files: null, onWaitChange, hasUnreadChat, leases });
-  return { directory, requests, onWaitChange, leases };
+  return { directory, requests, onWaitChange, leases, waitForCard: () => once(events, 'waiting') };
 };
 
 // The real runtime, so the child, its environment and its output are what a user gets.
@@ -29,14 +31,12 @@ const printToken = {
   inputs: [{ env: 'API_TOKEN', label: 'Staging API token' }, { env: 'API_USER', label: 'User name' }],
 };
 const call = (directory, extra = {}) => ({ sessionId: 'ses_1', callId: 'call_1', directory, authorized: true, ...extra });
-// The call starts waiting once its checks have run.
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('secret.run', () => {
   it('runs the command once with the values in its environment and keeps them out of the result', async () => {
-    const { directory, requests, onWaitChange } = await createHarness();
+    const { directory, requests, onWaitChange, waitForCard } = await createHarness();
     const pending = requests.run(printToken, call(directory));
-    await settle();
+    await waitForCard();
     expect(requests.fields({ sessionId: 'ses_1', callId: 'call_1' })).toEqual({ fields: ['API_TOKEN', 'API_USER'], reused: [] });
     expect(onWaitChange).toHaveBeenCalledWith(expect.objectContaining({ type: 'waiting', title: 'Staging API token, User name' }));
 
@@ -52,22 +52,22 @@ describe('secret.run', () => {
   });
 
   it('runs in the session directory', async () => {
-    const { directory, requests } = await createHarness();
+    const { directory, requests, waitForCard } = await createHarness();
     const pending = requests.run({ ...printToken, args: ['-e', 'console.log(process.cwd())'], inputs: [printToken.inputs[0]] }, call(directory));
-    await settle();
+    await waitForCard();
     requests.answer({ sessionId: 'ses_1', callId: 'call_1', values: { API_TOKEN: 'x-1234' } });
     expect((await pending).stdout.trim()).toBe(await fs.realpath(directory));
   });
 
   it('reuses only the fields the user let the chat remember, and asks for the rest', async () => {
-    const { directory, requests } = await createHarness();
+    const { directory, requests, waitForCard } = await createHarness();
     const first = requests.run(printToken, call(directory));
-    await settle();
+    await waitForCard();
     requests.answer({ sessionId: 'ses_1', callId: 'call_1', values: { API_TOKEN: 'tok-secret-1', API_USER: 'alice-secret' }, remember: ['API_TOKEN'] });
     expect((await first).remembered).toEqual(['API_TOKEN']);
 
     const second = requests.run(printToken, call(directory, { callId: 'call_2' }));
-    await settle();
+    await waitForCard();
     expect(requests.fields({ sessionId: 'ses_1', callId: 'call_2' })).toEqual({ fields: ['API_USER'], reused: ['API_TOKEN'] });
     // A value for a field the card did not ask for is refused.
     await expect(requests.answer({ sessionId: 'ses_1', callId: 'call_2', values: { API_USER: 'bob', API_TOKEN: 'other' } })).rejects.toMatchObject({ statusCode: 400 });
@@ -78,14 +78,14 @@ describe('secret.run', () => {
   });
 
   it('runs at once when every field is remembered, in this session only', async () => {
-    const { directory, requests, leases, onWaitChange } = await createHarness();
+    const { directory, requests, leases, onWaitChange, waitForCard } = await createHarness();
     leases.keep('ses_1', 'API_TOKEN', 'tok-secret-1');
     const result = await requests.run({ ...printToken, inputs: [printToken.inputs[0]] }, call(directory));
     expect(onWaitChange).not.toHaveBeenCalled();
     expect(result.stdout.trim()).toBe('token is [secret:API_TOKEN]');
 
     const other = requests.run({ ...printToken, inputs: [printToken.inputs[0]] }, call(directory, { sessionId: 'ses_2' }));
-    await settle();
+    await waitForCard();
     expect(requests.fields({ sessionId: 'ses_2', callId: 'call_1' })).toEqual({ fields: ['API_TOKEN'], reused: [] });
     requests.answer({ sessionId: 'ses_2', callId: 'call_1', declined: true });
     await expect(other).resolves.toMatchObject({ answer: { status: 'declined' } });
@@ -106,10 +106,10 @@ describe('secret.run', () => {
   });
 
   it('does not run when the user declines', async () => {
-    const { directory, requests } = await createHarness();
+    const { directory, requests, waitForCard } = await createHarness();
     const marker = path.join(directory, 'ran');
     const pending = requests.run({ ...printToken, args: ['-e', `require("fs").writeFileSync(${JSON.stringify(marker)}, "x")`] }, call(directory));
-    await settle();
+    await waitForCard();
     requests.answer({ sessionId: 'ses_1', callId: 'call_1', declined: true });
     await expect(pending).resolves.toMatchObject({ answer: { status: 'declined' } });
     await expect(fs.access(marker)).rejects.toThrow();
@@ -118,25 +118,26 @@ describe('secret.run', () => {
   });
 
   it('stops the command when the call is stopped', async () => {
-    const { directory, requests } = await createHarness();
+    const { directory, requests, waitForCard } = await createHarness();
     const controller = new AbortController();
-    const pending = requests.run({ ...printToken, args: ['-e', 'setTimeout(() => {}, 60000)'], inputs: [printToken.inputs[0]] }, call(directory, { signal: controller.signal }));
-    await settle();
+    const marker = path.join(directory, 'started');
+    const pending = requests.run({ ...printToken, args: ['-e', `require("fs").writeFileSync(${JSON.stringify(marker)}, "ready"); setTimeout(() => {}, 60000)`], inputs: [printToken.inputs[0]] }, call(directory, { signal: controller.signal }));
+    await waitForCard();
     requests.answer({ sessionId: 'ses_1', callId: 'call_1', values: { API_TOKEN: 'x-1234' } });
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await vi.waitFor(async () => expect(await fs.readFile(marker, 'utf8')).toBe('ready'), { timeout: 10_000 });
     controller.abort();
     await expect(pending).rejects.toMatchObject({ statusCode: 499 });
   });
 
   it('reports a timeout and a program that does not start, with the values out of the message', async () => {
-    const { directory, requests } = await createHarness();
+    const { directory, requests, waitForCard } = await createHarness();
     const slow = requests.run({ ...printToken, args: ['-e', 'setTimeout(() => {}, 60000)'], inputs: [printToken.inputs[0]], timeoutMs: 300 }, call(directory));
-    await settle();
+    await waitForCard();
     requests.answer({ sessionId: 'ses_1', callId: 'call_1', values: { API_TOKEN: 'x-1234' } });
     await expect(slow).resolves.toMatchObject({ answer: { status: 'ran', outcome: 'timeout', exitCode: null } });
 
     const missing = requests.run({ ...printToken, program: 'no-such-program-oc', inputs: [printToken.inputs[0]] }, call(directory, { callId: 'call_2' }));
-    await settle();
+    await waitForCard();
     requests.answer({ sessionId: 'ses_1', callId: 'call_2', values: { API_TOKEN: 'x-1234' } });
     await expect(missing).resolves.toMatchObject({ answer: { outcome: 'not-started' }, error: expect.stringContaining('no-such-program-oc') });
   });
@@ -164,9 +165,9 @@ describe('secret.run', () => {
   });
 
   it('refuses a value no environment can hold, so the runtime never quotes it', async () => {
-    const { directory, requests } = await createHarness();
+    const { directory, requests, waitForCard } = await createHarness();
     const pending = requests.run({ ...printToken, inputs: [printToken.inputs[0]] }, call(directory));
-    await settle();
+    await waitForCard();
     const nul = String.fromCharCode(0);
     await expect(requests.answer({ sessionId: 'ses_1', callId: 'call_1', values: { API_TOKEN: `head${nul}tail` } })).rejects.toMatchObject({ statusCode: 400 });
     requests.answer({ sessionId: 'ses_1', callId: 'call_1', declined: true });
@@ -174,12 +175,12 @@ describe('secret.run', () => {
   });
 
   it('drops a secret cut in half where the output was cut at its limit', async () => {
-    const { directory, requests } = await createHarness();
+    const { directory, requests, waitForCard } = await createHarness();
     const secret = `S${'k'.repeat(15_000)}END-OF-SECRET`;
     // About 1.05 MB, so the runner keeps the last 1 MB and cuts one copy apart.
     const script = 'for (let i = 0; i < 70; i++) process.stdout.write(process.env.API_TOKEN + "\\n")';
     const pending = requests.run({ ...printToken, args: ['-e', script], inputs: [printToken.inputs[0]] }, call(directory));
-    await settle();
+    await waitForCard();
     requests.answer({ sessionId: 'ses_1', callId: 'call_1', values: { API_TOKEN: secret } });
     const result = await pending;
     expect(result.truncated).toEqual({ stdout: true, stderr: false });
@@ -189,11 +190,11 @@ describe('secret.run', () => {
   });
 
   it('hides a repeating secret cut at the limit, where a shifted match would leave a piece', async () => {
-    const { directory, requests } = await createHarness();
+    const { directory, requests, waitForCard } = await createHarness();
     const secret = '0123456789'.repeat(1500);
     const script = 'for (let i = 0; i < 70; i++) process.stdout.write(process.env.API_TOKEN + "\\n")';
     const pending = requests.run({ ...printToken, args: ['-e', script], inputs: [printToken.inputs[0]] }, call(directory));
-    await settle();
+    await waitForCard();
     requests.answer({ sessionId: 'ses_1', callId: 'call_1', values: { API_TOKEN: secret } });
     const { stdout } = await pending;
     expect(stdout).not.toMatch(/\d/);

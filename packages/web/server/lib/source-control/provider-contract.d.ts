@@ -1,5 +1,8 @@
 
-export type ProviderId = string;
+import type { ProviderId } from './provider-id.js';
+import type { SourceControlMutationTarget } from '@openchamber/sdk';
+import type { MutationRecord } from './mutation-storage.js';
+export type { ProviderId } from './provider-id.js';
 
 export type ChangeRequestTerm = 'pullRequest' | 'mergeRequest' | 'change';
 type CiTerm = 'checks' | 'pipeline';
@@ -13,7 +16,7 @@ export interface ProviderCapabilities {
   changeRequests: boolean;
   draftChangeRequests: boolean;
   draftConversion?: boolean;
-  merge: false | { methods: MergeMethod[] };
+  merge: false | { methods: readonly MergeMethod[] };
   ci: boolean;
   comments: boolean;
   commentEdit?: boolean;
@@ -43,39 +46,39 @@ export interface ProviderDescriptor {
   iconId: string;
   instance: {
     form: 'host' | 'origin';
-    defaultInstances: string[];
+    defaultInstances: readonly string[];
     normalize(raw: string): string;
     origin(instance: string): URL;
   };
   repositoryPath: 'owner/name' | 'namespace/name' | 'path';
-  projectPathOfRemote?(remote: { protocol: 'https' | 'http' | 'ssh'; path: string }): string;
+  projectPathOfRemote?(remote: { protocol: string; path: string }): string;
   capabilities: ProviderCapabilities;
-  authMethods: { device: boolean; pat: boolean; cli: false | { tool: string } | { kind: 'service'; hint: string } };
+  authMethods: { device: boolean; pat: boolean; cli: false | { tool: string; kind?: never; hint?: never } | { kind: 'service'; hint: string; tool?: never } };
   transport: {
     httpsUsername: { kind: 'fixed'; value: string } | { kind: 'login' };
     managedHttpsInstances: 'default-only' | 'any';
     appendDotGitToHttpsClone: boolean;
   };
-  urls: { thread: { hosts: string[] | 'any'; pattern: RegExp } };
+  urls: { thread: { hosts: readonly string[] | 'any'; pattern: RegExp } };
   trackedItems: { nestedOwners: boolean; defaultInstance: string | null; batchLimit: number };
   limits: { commentMaxLength: number; reviewerId: RegExp; labelsMax: number; reviewersMax: number };
-  identity: { noReplyEmail: ((user: { id: number; login: string }) => string | null) | null };
-  settings: Array<{ key: string; type: SettingsFieldKind; secret: boolean; scope: 'global' | 'instance' }>;
+  identity: { noReplyEmail: ((user: { id?: number | undefined; login: string }) => string | null) | null };
+  settings: ReadonlyArray<{ key: string; type: SettingsFieldKind; secret: boolean; scope: 'global' | 'instance' }>;
   instances: { legacyFlow: { instance: string; kind: 'github-com-device' } | null };
   presentation: {
     sharedNumberSpace: boolean;
     abbreviation: string;
     promptNoun: string;
     icon: { sprite?: string; filledSprite?: string; path?: string };
-    instances: { multiple: boolean; allowLoopbackHttp: boolean; allowPort: boolean; reserved: string[]; placeholder: string };
+    instances: { multiple: boolean; allowLoopbackHttp: boolean; allowPort: boolean; reserved: readonly string[]; placeholder: string };
     cliTransport: boolean;
-    token?: { scopes: string[]; createPath?: string };
-    urls: { changeRequest: string[]; issue: string[]; discussion?: string[]; commit?: string[]; user?: string[] };
+    token?: { scopes: readonly string[]; createPath?: string };
+    urls: { changeRequest: readonly string[]; issue: readonly string[]; discussion?: readonly string[]; commit?: readonly string[]; user?: readonly string[] };
     features: {
       referenceSearch: boolean; referenceDetail: boolean; listStatuses: boolean; referencesAcross: boolean;
       startThread: boolean; authorCanReview: boolean; projectUploads: boolean; issueCloseReason: boolean;
       reviewDrafts?: boolean; reviewDraftFileComments?: boolean;
-      changeRequestTemplates: string[];
+      changeRequestTemplates: readonly string[];
       branchHeads?: boolean;
       submitRequirements?: boolean;
       advancedSearch?: boolean;
@@ -84,8 +87,8 @@ export interface ProviderDescriptor {
   };
   routeAliases?: {
     authAliasPrefix: string;
-    retiredGet: string[];
-    retiredPost: string[];
+    retiredGet: readonly string[];
+    retiredPost: readonly string[];
     extraAuthAliases: Record<string, string>;
   };
   extension?: {
@@ -114,6 +117,7 @@ export interface PublicProviderDescriptor {
   instances: {
     format: 'host' | 'origin';
     defaultInstance: string | null;
+    defaultInstances: string[];
     multiple: boolean;
     allowLoopbackHttp: boolean;
     allowPort: boolean;
@@ -131,6 +135,7 @@ export interface PublicProviderDescriptor {
   settings: { fields: Array<{ id: string; kind: SettingsFieldKind; secret: boolean }> };
   urls: { changeRequest: string[]; issue: string[]; discussion?: string[]; commit?: string[]; user?: string[] };
   features: ProviderDescriptor['presentation']['features'] & {
+    changeRequestPatch: boolean;
     reviewModel?: ReviewModel;
     revisions?: boolean;
     createByPush?: boolean;
@@ -156,13 +161,18 @@ export interface TransportCredential {
   providerUserId: string;
   status: 'valid' | 'invalid';
   source: 'oauth' | 'pat' | 'cli';
-  user: { id: number; login?: string; username?: string; name?: string; email?: string; avatarUrl?: string };
+  user: { id: number; login?: string; username?: string; name?: string | null; email?: string | null; avatarUrl?: string };
   secret: string;
 }
 
 export interface ConnectedAccount {
   account: AccountIdentity;
-  user: TransportCredential['user'];
+  user: Omit<TransportCredential['user'], 'id' | 'avatarUrl' | 'name' | 'email'> & {
+    id: number | string;
+    avatarUrl?: string | null | undefined;
+    name?: string | null | undefined;
+    email?: string | null | undefined;
+  };
   credential: { credentialRevision: number; providerUserId: string };
 }
 
@@ -173,11 +183,27 @@ export interface AccountEvents {
   subscribe(listener: Partial<Omit<AccountEvents, 'subscribe'>>): () => void;
 }
 
-type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-type ReadInput = { session: ProviderSession; context: Json; directory: string; remote: string };
+export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
+export interface ProviderReadContext {
+  directory: string;
+  repositoryId: string;
+  provider: ProviderId;
+  instance: string;
+  accountId: string;
+  bindingRevision: number;
+  primaryRemote: string;
+  linked?: boolean;
+}
+
+export interface ProviderMutationContext extends ProviderReadContext {
+  idempotencyKey: string;
+  target: SourceControlMutationTarget;
+}
+
+type ReadInput = { session: ProviderSession; context: ProviderReadContext; directory: string; remote: string };
 type ProjectSelector = { owner: string; name: string };
 
-export interface ProviderImplementation {
+export interface ProviderImplementation<MutationInput = Json, ProviderTarget = Json> {
   descriptor: ProviderDescriptor;
   classifyFailure?(error: Error): string;
   auth: {
@@ -242,27 +268,29 @@ export interface ProviderImplementation {
       expectedHeadSha: string; requestedRemoteName: string;
     }): Promise<Json>;
     references?(input: ReadInput & { kind: 'issue' | 'pull' | 'discussion'; state: string; people: string; query: string; cursor: string | null }): Promise<Json>;
-    referencesAcross?(input: { body: Json; validateReadContext(context: Json): Promise<Json> }): Promise<Json>;
+    referencesAcross?(input: { body: Json; validateReadContext(context: Json): Promise<ProviderReadContext> }): Promise<Json>;
     referenceDetail?(input: ReadInput & { project: ProjectSelector; number: number; host: string; kind: 'item' | 'discussion' }): Promise<Json>;
     reviewState?(input: ReadInput & { project: ProjectSelector; number: number }): Promise<Json>;
     referenceStatuses?(input: Omit<ReadInput, 'session'> & { pulls: string }): Promise<Json>;
   };
   mutations?: {
     routes: string[];
-    prepare(input: { route: string; input: Json; context: Json; actor: AccountIdentity; credential: { accountId: string; credentialRevision: number } }): {
-      kind: string; input: Json; digest(target: Json): string;
+    prepare(input: { route: string; input: Json; context: ProviderMutationContext; actor: AccountIdentity; credential: { accountId: string; credentialRevision: number } }): {
+      kind: string; input: MutationInput; digest(target: SourceControlMutationTarget): string;
     };
-    resolveTarget(input: { session: ProviderSession; context: Json; kind: string; input: Json; replayOf?: Json }): Promise<{ providerTarget: Json; target: Json }>;
-    perform(input: { session: ProviderSession; route: string; kind: string; input: Json; resolved: { providerTarget: Json; target: Json } }): Promise<Json>;
-    reconcile(input: { session: ProviderSession; route: string; kind: string; input: Json; resolved: { providerTarget: Json; target: Json } }): Promise<{ state: string; result?: Json }>;
-    afterSuccess?(input: { session: ProviderSession; target: Json }): Promise<void>;
+    resolveTarget(input: { session: ProviderSession; context: ProviderMutationContext; kind: string; input: MutationInput; replayOf?: MutationRecord }): Promise<{ providerTarget: ProviderTarget; target: SourceControlMutationTarget }>;
+    perform(input: { session: ProviderSession; route: string; kind: string; input: MutationInput; resolved: { providerTarget: ProviderTarget; target: SourceControlMutationTarget } }): Promise<Json>;
+    reconcile(input: { session: ProviderSession; route: string; kind: string; input: MutationInput; resolved: { providerTarget: ProviderTarget; target: SourceControlMutationTarget } }): Promise<{ state: string; result?: Json }>;
+    afterSuccess?(input: { session: ProviderSession; target: SourceControlMutationTarget }): Promise<void>;
     classifyError?(error: Error): 'failed' | 'outcome-unknown';
     presentError?(error: Error): { status: number; body: Json };
   };
 }
 
+export type ProviderMutations<MutationInput = Json, ProviderTarget = Json> = NonNullable<ProviderImplementation<MutationInput, ProviderTarget>['mutations']>;
+
 export type VerifyToken = (origin: string, token: string, credentials?: { username: string }) => Promise<TransportCredential['user']>;
-export type ProbeInstance = (origin: string, token?: string, credentials?: { username: string }) => Promise<{ supported: boolean; version?: string; message?: string }>;
+export type ProbeInstance = (origin: string, token?: string, credentials?: { username: string }) => Promise<{ supported: boolean; version?: string | null; message?: string; edition?: string | null }>;
 
 
 export interface ChangeRequestVoteLabel {

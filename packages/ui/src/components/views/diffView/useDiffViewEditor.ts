@@ -26,8 +26,6 @@ export function useDiffViewEditor({
     setDiffLayoutForAllFiles, rootDirectory, effectiveDirectory, git, activeDiffStaged, setDiff, files,
     openContextFileAtLine, setComparisonRetryRevision,
 }: DiffViewEditorOptions) {
-    // The header toggle picks the layout for every diff from now on: it writes
-    // the Appearance setting and drops the per-file choices.
     const handleHeaderLayoutChange = React.useCallback((mode: DiffViewMode) => {
         setDiffLayoutForAllFiles(mode === 'side-by-side' ? 'side-by-side' : 'inline');
     }, [setDiffLayoutForAllFiles]);
@@ -90,9 +88,6 @@ export function useDiffViewEditor({
                 return;
             }
 
-            // The editor tab belongs to the panel's root. Keyed by the nested
-            // repository being diffed, it would park under a key the panel
-            // never displays.
             openContextFileAtLine(
                 rootDirectory,
                 absolutePath,

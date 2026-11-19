@@ -46,8 +46,10 @@ const resolveCommand = (file) => {
   // TypeScript goes to Bun even when the file imports `node:test`, which Bun
   // implements. Node's ESM loader cannot resolve the extensionless local
   // specifiers these files use (`./sseProxy`), so it never ran them at all.
+  // `@openchamber/web` exports its emitted build by default; tests run on its
+  // sources, which CI's test job never builds.
   if (isTypeScript || /(?:from\s+|require\(\s*)['"]bun:test['"]/.test(source)) {
-    return { label: 'bun', command: bunExecutable, args: ['test', file] };
+    return { label: 'bun', command: bunExecutable, args: ['test', '--conditions=openchamber-source', file] };
   }
   if (/(?:from\s+|require\(\s*)['"]node:test['"]/.test(source)) {
     return { label: 'node', command: 'node', args: ['--test', file] };

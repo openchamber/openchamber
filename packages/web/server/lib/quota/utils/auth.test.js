@@ -36,4 +36,8 @@ describe('resolveConfigApiKey', () => {
   it('keeps a plain key as it is', () => {
     expect(resolveConfigApiKey(' plain-key ', options)).toBe('plain-key');
   });
+
+  it('retains the existing missing-os failure when homeDir is omitted', () => {
+    expect(() => resolveConfigApiKey('plain-key')).toThrow('os is not defined');
+  });
 });

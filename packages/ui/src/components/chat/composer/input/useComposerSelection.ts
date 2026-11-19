@@ -30,22 +30,14 @@ export function useComposerSelection({
         btwAgentSelection, btwModelSelection,
     } = sessionScope;
 
-    // A pinned column's composer sends with its own selection; the app-wide
-    // current model, agent and effort belong to the main chat.
     const pinnedComposerSelection = usePinnedComposerSelection({
         enabled: columnPinned,
         sessionId: currentSessionId,
         directory: currentDirectory ?? null,
     });
 
-    // Pending text and context other parts of the app leave for "the
-    // composer" are the main chat's; a pinned composer takes only what was
-    // addressed to its session (see input-store `pendingInputTarget`).
     const mailboxTarget = columnPinned ? currentSessionId : null;
 
-    // The session this composer is talking to, which `/btw` changes. Text
-    // addressed to a session (a revert of that session's message) belongs here
-    // only while this composer is the one showing it.
     const shownSessionId = isBtwActive ? btwComposerSessionId : currentSessionId;
 
     const configProviderId = useConfigStore((state) => state.currentProviderId);
@@ -64,8 +56,6 @@ export function useComposerSelection({
 
     const autoReady = useRoutingStore(selectAutoReady);
 
-    // The composer renders on every keystroke; for a model models.dev does not
-    // list, a lookup scans the whole metadata catalog and builds a new object.
     const currentModelMetadata = React.useMemo(
         () => currentProviderId && currentModelId
             ? resolveModelMetadata(modelsMetadata, providerCatalog, currentProviderId, currentModelId)
@@ -85,9 +75,6 @@ export function useComposerSelection({
 
     const setAgent = useConfigStore((state) => state.setAgent);
 
-    // Filtered here rather than through `getVisibleAgents()`, which returns a
-    // new array on every call: that identity would rebuild the language
-    // context, and with it re-tokenize the editor, on every keystroke.
     const allAgents = useConfigStore((state) => state.agents);
 
     const agents = React.useMemo(() => filterVisibleAgents(allAgents), [allAgents]);
@@ -104,13 +91,10 @@ export function useComposerSelection({
         [btwAgentSelection, btwComposerSessionId, btwModelSelection],
     ));
 
-    // A pinned chat's `/btw` starts on that chat's level, as it does on its model.
     const btwComposerVariant = pinnedComposerSelection
         ? pinnedComposerSelection.variant
         : currentVariantSelection.override === null ? null : currentVariantSelection.override ?? configVariant;
 
-    // Memoized: the footer and its model controls compare this selection by
-    // identity, and nothing in it changes while the user types.
     const effectiveBtwSelection = React.useMemo(() => resolveBtwSelection({
         agents,
         savedAgent: btwAgentSelection,
@@ -132,12 +116,6 @@ export function useComposerSelection({
         selections.saveAgentModelVariantForSession(btwComposerSessionId, agent, model.providerId, model.modelId, variant);
     }, [btwComposerSessionId, effectiveBtwSelection, isBtwActive]);
 
-    // While BTW is open the app-wide model, effort and favorite-model handlers
-    // decline, so the parent's selection never moves; these act on the BTW
-    // selection its chips show and save it the way the BTW picker does
-    // (#5914, #6403). As with permission keys, a key pressed in a chat pinned
-    // in the side panel is that chat's and a key pressed anywhere else is the
-    // main chat's.
     const [btwModelSelectorOpen, setBtwModelSelectorOpen] = React.useState(false);
 
     if (!isBtwActive && btwModelSelectorOpen) setBtwModelSelectorOpen(false);

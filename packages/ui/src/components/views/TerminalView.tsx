@@ -50,15 +50,10 @@ import { registerCloseTabTarget } from '@/lib/closeTabTarget';
 type TerminalViewProps = {
     visible?: boolean;
     directory?: string | null;
-    /** Closing the last tab closes the terminal surface instead of opening a
-        fresh tab; the host removes it, and reopening starts a new terminal. */
     onLastTabClosed?: () => void;
 };
 
 const FALLBACK_TERMINAL_SIZE = { cols: 80, rows: 24 } as const;
-// The terminal socket retries forever with a growing delay (0.5 s doubling to
-// 8 s). Five failed attempts in a row take about 8 s: a server restart is back
-// by then, so only a connection that stays down shows the error.
 const RECONNECT_ATTEMPTS_BEFORE_ERROR = 5;
 
 type TerminalTabViewportProps = {
@@ -78,17 +73,10 @@ type TerminalTabViewportProps = {
     clipboard: RuntimeAPIs['clipboard'];
 };
 
-/**
- * One mounted emulator per tab. Inactive tabs stay mounted but hidden so
- * switching back shows the last drawn screen at once instead of rebuilding
- * the WASM terminal, re-measuring fonts and replaying history from scratch.
- * Only the active tab holds a stream; its buffer refresh replays in place.
- */
 const TerminalTabViewport: React.FC<TerminalTabViewportProps> = ({
     directory, tabId, isActive, isTerminalVisible, registerController,
     onInput, onResize, onProvisionalSize, theme, monoFont, fontFamily, fontSize, enableTouchScroll, clipboard,
 }) => {
-    // Scrollback is a leaf subscription: streaming output must not rerender the tab strip.
     const chunks = useTerminalStore((s) => s.getBuffer(directory, tabId).chunks);
     const viewportKey = `${directory}::${tabId}`;
     return (
@@ -118,7 +106,6 @@ const resolveTabIconName = (iconKey: string | null): IconName => {
     return matchedIcon?.Icon ?? 'terminal';
 };
 
-/** A project action that starts, runs or stops shows the shared spinner on its tab. */
 const TerminalTabIcon: React.FC<{ iconName: IconName; active: boolean }> = ({ iconName, active }) => (
     active ? <Spinner className="h-4 w-4 text-muted-foreground" /> : <Icon name={iconName} className="h-4 w-4" />
 );
@@ -138,7 +125,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
     const isTouchTerminal = isMobile || isTablet;
     const inPanelHeader = useInContextPanelHeader();
     const useTouchTerminalInput = (isTouchTerminal || hasTouchOnlyPointer) && runtime.platform === 'web';
-    // Tabs are supported for web + desktop runtimes, including mobile (not VSCode).
     const enableTabs = runtime.platform !== 'vscode';
     const showTerminalQuickKeysOnDesktop = useUIStore((state) => state.showTerminalQuickKeysOnDesktop);
     const showQuickKeys = isTouchTerminal || showTerminalQuickKeysOnDesktop;
@@ -148,8 +134,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
     const hasActiveContext = currentSessionId !== null || newSessionDraft?.open === true;
 
     const contextDirectory = useEffectiveDirectory() ?? null;
-    // A draft waiting for a new space keeps the project's folder for its composer and its panel
-    // tabs; its shell goes to the space, and nowhere until the space runs.
     const draftSpace = useDraftSpaceTarget();
     const shellDirectory = panelContentDirectory(draftSpace, contextDirectory);
     const targetDirectory = directory ?? null;
@@ -216,9 +200,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
     const [connectionError, setConnectionError] = React.useState<string | null>(null);
     const [isFatalError, setIsFatalError] = React.useState(false);
     const [isReconnectPending, setIsReconnectPending] = React.useState(false);
-    // The terminal whose reconnect kept failing. It stays set through "Try
-    // again" until a snapshot shows the stream is back, so a retry that fails
-    // does not blank the pane while the attempt count starts over.
     const [unreachableTerminalId, setUnreachableTerminalId] = React.useState<string | null>(null);
     const [isRetryingConnection, setIsRetryingConnection] = React.useState(false);
     const [activeModifier, setActiveModifier] = React.useState<Modifier | null>(null);
@@ -232,18 +213,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
     const terminalControllerRef = React.useRef<TerminalController | null>(null);
     const tabControllersRef = React.useRef(new Map<string, TerminalController>());
     const lastViewportSizeRef = React.useRef<{ cols: number; rows: number } | null>(null);
-    // The grid Ghostty actually fitted for a tab. A visible tab spawns its shell
-    // at this size and not before: a shell started wider than the real grid
-    // prints its first prompt for that width, and after the corrective resize
-    // zsh only repaints the prompt row, leaving the `%` end-of-line mark above it.
     const fittedViewportRef = React.useRef<{ tabId: string; cols: number; rows: number } | null>(null);
     const isTerminalVisibleRef = React.useRef(false);
     const pendingTerminalCreatesRef = React.useRef(new Set<string>());
     const previewScanTailRef = React.useRef('');
     const pendingPreviewProbeUrlsRef = React.useRef<Set<string>>(new Set());
     const previewProbeGenerationRef = React.useRef(0);
-    // Loopback ports portless announced a named address for; the server's own
-    // announcement of that port must not replace the name.
     const previewProxiedPortsRef = React.useRef<number[]>([]);
 
     const resetTerminalPreviewScan = React.useCallback(() => {
@@ -308,7 +283,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
         directoryRef.current = terminalDirectory;
     }, [terminalDirectory]);
 
-    // Only a visible panel requests discovery; failed reads preserve known state.
     React.useEffect(() => {
         if (!terminalHydrated || !terminalDirectory || !isTerminalVisible) return;
         return observeTerminalSessions(terminal, terminalDirectory, captureStartedActionMutationRevisions, result => {
@@ -392,14 +366,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
         [setTabPreviewUrl]
     );
 
-    // Hosts pass an inline callback; reading it through a ref keeps a parent
-    // re-render from reconnecting the stream that depends on this close.
     const onLastTabClosedRef = React.useRef(onLastTabClosed);
     onLastTabClosedRef.current = onLastTabClosed;
 
-    // `processExited` is for a tab whose process is already gone: the tab goes
-    // at once and the server's record is released after. Waiting for that
-    // reply would let an action re-run that reuses the tab meanwhile lose it.
     const closeTerminalTab = React.useCallback(
         (directory: string, tabId: string, { processExited = false } = {}) => {
             if (tabId === activeTabIdRef.current) {
@@ -412,8 +381,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
             const tabs = useTerminalStore.getState().getDirectoryState(directory)?.tabs ?? [];
             const sessionId = tabs.find((tab) => tab.id === tabId)?.terminalSessionId;
             const isLastTab = tabs.length === 1 && tabs[0]?.id === tabId;
-            // Removing the surface in the same update unmounts this view
-            // before the store's replacement tab could start a shell.
             const removeTab = () => {
                 if (isLastTab) onLastTabClosedRef.current?.();
                 closeTab(directory, tabId);
@@ -431,9 +398,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
         [closeTab, disconnectStream, t, terminal]
     );
 
-    // A shell or project action that exits takes its tab with it when the user
-    // chose so. VS Code has no tabs and no such setting, so its terminal keeps
-    // the exited output.
     const closesOnExit = React.useCallback(
         () => enableTabs && useUIStore.getState().terminalCloseOnExit,
         [enableTabs],
@@ -451,7 +415,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
 
             disconnectStream();
 
-            // Mark active before connect so early events aren't dropped.
             activeTerminalIdRef.current = terminalId;
             const ownsStream = () => activeTerminalIdRef.current === terminalId
                 && useTerminalStore.getState().getDirectoryState(directory)?.tabs
@@ -540,11 +503,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                         }
                     },
                     onError: (error, fatal) => {
-                        // A stopped action the server had to force-kill ends with
-                        // KILLED and no exit event, and the server has already
-                        // dropped it. The action runner may have cleared the tab's
-                        // session for the same message just before, so ownership
-                        // here accepts that cleared session too.
                         if (error.code === 'KILLED' && activeTerminalIdRef.current === terminalId && closesOnExit()) {
                             const killedTab = useTerminalStore.getState().getDirectoryState(directory)?.tabs.find((tab) => tab.id === tabId);
                             if (killedTab && (killedTab.terminalSessionId === terminalId || killedTab.terminalSessionId === null)) {
@@ -610,8 +568,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
         ]
     );
 
-    // Spawns the PTY for a tab. Pending creates are single-flight per tab;
-    // the session effect and the first fitted-grid report both funnel here.
     const createTerminalSession = React.useCallback(
         async (directory: string, tabId: string, initialSize: { cols: number; rows: number }) => {
         const createKey = `${directory}\u0000${tabId}`;
@@ -657,16 +613,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
             ) {
                 void terminal.resize({ sessionId: session.sessionId, ...viewportSize, directory }).catch(() => {});
             }
-            // Storing the session ID reruns the session effect. Let that
-            // effect own stream startup.
             return;
         } catch (error) {
             const owningTab = useTerminalStore.getState().getDirectoryState(directory)?.tabs.find((entry) => entry.id === tabId);
             if (!owningTab || owningTab.terminalSessionId) return;
 
             setConnecting(directory, tabId, false);
-            // Use current store ownership so a rejected create cannot
-            // leave a tab spinning that no longer owns the request.
             if (directoryRef.current !== directory || activeTabIdRef.current !== tabId) return;
             setConnectionError(
                 error instanceof Error
@@ -740,10 +692,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                     return;
                 }
 
-                // A visible tab waits for Ghostty's fitted grid; the resize
-                // handler spawns it the moment that grid arrives. A hidden tab
-                // cannot be fitted, so it launches at the container estimate or
-                // 80x24 and resizes once shown.
                 const fitted = fittedViewportRef.current;
                 const fittedSize = fitted && fitted.tabId === tabId ? { cols: fitted.cols, rows: fitted.rows } : null;
                 if (isTerminalVisibleRef.current && !fittedSize) return;
@@ -789,8 +737,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
         terminalShell,
     ]);
 
-    // A zone opening around the terminal keeps it inert until the animation
-    // settles; focus taken before that is lost.
     const zoneInteractive = useZoneInteractive();
     React.useEffect(() => {
         if (!isTerminalVisible || !zoneInteractive || useTouchTerminalInput) {
@@ -862,13 +808,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
     }, [activeTabId, disconnectStream, terminalDirectory, enableTabs, isActionTab, isRestarting, resetTerminalPreviewScan, setTabLifecycle, setTabSessionId, startStream, t, terminal, terminalLoginShell, terminalShell]);
 
     const handleHardRestart = React.useCallback(async () => {
-        // Keep semantics: “close tab -> new clean tab”.
         await handleRestart();
     }, [handleRestart]);
 
-    // A fresh subscription dials at once instead of waiting out the backoff.
-    // When an action runner still holds the session, subscribing replays its
-    // cached snapshot at once; the error stays until the socket itself answers.
     const handleRetryConnection = React.useCallback(() => {
         if (!terminalDirectory || !activeTabId || !terminalSessionId) return;
         disconnectStream();
@@ -909,8 +851,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
         queueMicrotask(focusChatInput);
     }, [activeTab, addContextDraft, contextDirectory, t]);
 
-    // Touch hosts have no keyboard shortcut for copy, so the toolbar offers the
-    // same action the desktop gets from Cmd/Ctrl+C on a selection.
     const handleCopySelection = React.useCallback(() => {
         const selection = terminalControllerRef.current?.getSelection();
         if (!selection?.text) return;
@@ -920,9 +860,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
         });
     }, [t]);
 
-    // Touch terminals have no right-click menu and no paste shortcut, so the
-    // toolbar offers Paste next to Copy. The clipboard read starts inside the
-    // click, which iOS and Android require.
     const handlePasteClipboard = React.useCallback(() => {
         void terminalControllerRef.current?.pasteClipboard();
     }, []);
@@ -947,8 +884,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
         [closeTerminalTab, terminalDirectory]
     );
 
-    // While a terminal tab is on screen, Cmd/Ctrl+W in the desktop app closes
-    // it as its close button does, instead of the whole window.
     const rootRef = React.useRef<HTMLDivElement | null>(null);
     const handleCloseTabRef = React.useRef(handleCloseTab);
     handleCloseTabRef.current = handleCloseTab;
@@ -978,8 +913,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
         [renamingTabId, setTabLabel, terminalDirectory]
     );
 
-    // Project action tabs are named by their action and renamed on every run,
-    // so only plain terminals offer Rename.
     const zoneDragOut = useZoneSurfaceDragOut();
     const handleTabDragOut = React.useMemo(
         () => (zoneDragOut ? (_tabId: string, isOutside: (point: { x: number; y: number }) => boolean) => zoneDragOut(isOutside) : undefined),
@@ -1001,7 +934,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                         <Icon name="close" className="me-2 size-4" />
                         {t('terminalView.tabs.closeTabTitle')}
                     </ContextMenuItem>
-                    {/* In a zone, a tab moves the whole terminal, like a zone's own tabs. */}
                     {zoneDragOut ? (
                         <>
                             <ContextMenuSeparator />
@@ -1047,10 +979,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
         [activeModifier, focusTerminalController, isReconnectPending, setActiveModifier, t, terminal]
     );
 
-    // The estimate only seeds the size a brand-new shell is spawned with. A
-    // running PTY keeps its size until Ghostty has fitted the viewport for
-    // real; resizing it to an estimate makes the shell redraw for a width the
-    // emulator never shows.
     const handleProvisionalSize = React.useCallback((cols: number, rows: number) => {
         lastViewportSizeRef.current = { cols, rows };
     }, []);
@@ -1067,7 +995,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
             if (!isTerminalVisible) {
                 return;
             }
-            // The fitted grid is what a visible tab was waiting for to spawn.
             const tab = tabId && directory
                 ? useTerminalStore.getState().getDirectoryState(directory)?.tabs.find((entry) => entry.id === tabId)
                 : undefined;
@@ -1167,11 +1094,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
 
     const xtermTheme = React.useMemo(() => convertThemeToXterm(currentTheme, pageBackground), [currentTheme, pageBackground]);
 
-    // Viewport identity is the tab, not the PTY session. Including the session id
-    // here tore down and rebuilt the Ghostty terminal (WASM VT + canvas + font
-    // atlas) a second time the moment `createSession` resolved, doubling the cost
-    // of every terminal open. Session changes are handled by the chunk replay path.
-    // Every tab keeps its viewport mounted; this key names the active one.
     const terminalViewportKey = `${terminalDirectory ?? 'no-dir'}::${activeTabId ?? 'no-tab'}`;
 
     React.useEffect(() => {
@@ -1244,7 +1166,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
 
     const quickKeysDisabled = !terminalSessionId || isConnecting || isRestarting || isReconnectPending;
     const shouldRenderViewport = hasOpenedTerminalViewport;
-    // Without tabs (VS Code) only the first tab exists; with tabs every open tab stays mounted.
     const mountedTabIds = enableTabs
         ? (directoryTerminalState?.tabs ?? []).map((tab) => tab.id)
         : (activeTabId ? [activeTabId] : []);
@@ -1253,7 +1174,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
     const preserveTerminalFocus = (event: React.PointerEvent<HTMLButtonElement>) => {
         if (isTouchTerminal) event.preventDefault();
     };
-    // A long press opens a tooltip and swallows the click, so keys on a touch screen go without one.
     const quickKeyTooltip = (label: string, key: React.ReactElement) => (
         isTouchTerminal || hasTouchOnlyPointer
             ? key
@@ -1503,14 +1423,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
 
             {!isTouchTerminal && showQuickKeys ? (
                 <div className="app-region-no-drag shrink-0 bg-[var(--surface-background)] pb-1 ps-4 pe-2.5 pt-1 text-xs">
-                    {/* Keys are physical: arrows keep pointing where the key does. */}
                     <div dir="ltr" className="flex flex-wrap items-center gap-1">
                         {quickKeysControls}
                     </div>
                 </div>
             ) : null}
 
-            {/* Terminal output is left to right in every language. */}
             <div
                 dir="ltr"
                 className="relative flex-1 overflow-hidden"
@@ -1542,7 +1460,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                         className="absolute inset-0 flex items-center justify-center px-6"
                         style={{ backgroundColor: xtermTheme.background }}
                     >
-                        {/* The pane is forced left to right for terminal output; this text follows its own language. */}
                         <div dir="auto" className="max-w-sm text-center">
                             <p role="alert" className="typography-ui-label font-medium text-[var(--status-error)]">
                                 {t('terminalView.error.cannotConnect')}
@@ -1582,7 +1499,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
             </div>
             {isTouchTerminal && showQuickKeys ? (
                 <div data-keyboard-inset-reader="" data-keyboard-rider="" className="shrink-0 overflow-x-auto border-t border-edge-muted bg-[var(--surface-background)] px-2 pt-1.5 pb-[max(0.375rem,calc(var(--oc-app-bottom-safe,0px)-var(--oc-keyboard-inset,0px)))] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                    {/* Keys are physical: arrows keep pointing where the key does. */}
                     <div dir="ltr" className="flex min-w-max items-center gap-1.5">
                         {quickKeysControls}
                     </div>
