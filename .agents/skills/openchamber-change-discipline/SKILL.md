@@ -134,7 +134,7 @@ A split, move or rewrite of a large file keeps behavior identical. `bun run veri
 3. Give each behavior your change touches and no scenario plays a scenario now, green on the old code (format in `scripts/verify/DOCUMENTATION.md`).
 4. After the change, run `bun run verify -- --changed`. Done means the selected scenarios green, and the files it lists as uncovered named in your report. A red one is a behavior change, so fix the code. Edit a scenario only when the markup it points at moved, and then the selector in `vocabulary.json`, with the step's meaning unchanged. A split or a rename of a listed source updates the feature's `sources` in the same change; the run refuses a source that does not exist.
 
-While iterating, `--keep` holds the stand and `--attach <run>/stand.json` reruns against it in seconds. A run is one heavy job (a dev server and Chrome). Runs in separate worktrees do not disturb each other, and a machine runs two at once: a third waits for a free slot by itself and says so, so never work around the wait.
+While iterating, `--keep` holds the stand and `--attach <run>/stand.json` reruns against it in seconds. A run is one heavy job (a dev server and Chrome). Runs in separate worktrees do not disturb each other, and a machine runs two at once: a third waits for a free slot by itself and says so, so never work around the wait. Start every net run as a background command and carry on or end the turn; its result arrives when it finishes. A run prints nothing useful for minutes even without a queue, so a foreground call only blocks the session.
 
 ## Test Design
 
