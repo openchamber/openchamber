@@ -5,10 +5,9 @@ import express from 'express';
 import { buildRestartNotification } from './lib/notifications/restart-notification.js';
 import compression from 'compression';
 import path from 'path';
-import { spawn, spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import fs from 'fs';
 import http from 'http';
-import net from 'net';
 import { webPackagePaths } from './lib/web-package-paths.js';
 import { fileURLToPath } from 'url';
 import os from 'os';
@@ -230,6 +229,66 @@ import { applyConnectAttemptTimeout } from './lib/network-defaults.js';
 import { applyOutboundProxyFromEnv } from './lib/outbound-proxy.js';
 import { applySystemCertificates } from './lib/system-ca.js';
 import { readOpenCodeLoad } from './lib/diagnostics/opencode-load.js';
+import type { OpenCodeLifecycleState } from './lib/opencode/lifecycle.js';
+import type { OpenCodeEnvState } from './lib/opencode/env-runtime.js';
+import type { TunnelWiringDependencies } from './lib/tunnels/tunnel-wiring-runtime.js';
+import type { Request, Response } from './lib/shared/http-contracts.js';
+import type { StreamSocket } from './lib/event-stream/contracts.js';
+import type { ScheduledTaskEventClient } from './lib/scheduled-tasks/routes.js';
+import type { MetadataDecider, MetadataReadOptions, SessionMetadata } from './lib/openchamber-sessions/session-metadata-store.js';
+import { isBoolean, isRecord, isString } from './lib/shared/object-guards.js';
+import type { JsonValue } from './lib/shared/json-values.js';
+import type { ForwardEventPayload } from './lib/event-stream/contracts.js';
+import type { TranslatedEvent } from './lib/event-stream/translate-v2.js';
+import type { SessionCreatedEvent } from './lib/openchamber-sessions/routes.js';
+import type { MemoryChangedEvent } from './lib/agent-memory/contracts.js';
+import type { BrowserProviderReset } from './lib/browser-control/provider.js';
+import type { ControlInput, SessionReadAction, SessionReadResults } from './lib/openchamber-control/contracts.js';
+import type { ControlOptions, SessionActionResult } from './lib/openchamber-control/service.js';
+
+type BootstrapResult = ReturnType<ReturnType<typeof createBootstrapRuntime>['setupBaseRoutes']>;
+type StartupPipelineInput = Parameters<ReturnType<typeof createStartupPipelineRuntime>['run']>[0];
+type StartupPipelineResult = Awaited<ReturnType<ReturnType<typeof createStartupPipelineRuntime>['run']>>;
+type BootstrapInput = Parameters<ReturnType<typeof createBootstrapRuntime>['setupBaseRoutes']>[1];
+
+interface ScheduledTaskRanProperties {
+  projectId: string;
+  taskId: string;
+  ranAt: number;
+  status: string;
+  sessionId?: string;
+}
+
+interface SessionCreatedProperties {
+  sessionId: string;
+  directory: string;
+  createdAt: number;
+  promptDispatched: boolean;
+  dispatchedAsCommand: boolean;
+  projectId?: string;
+  title?: string;
+}
+
+interface WebUiServerOptions {
+  port?: number | undefined;
+  host?: string | undefined;
+  uiPassword?: string | null | undefined;
+  tryCfTunnel?: boolean | undefined;
+  apiOnly?: boolean | undefined;
+  tunnelMode?: string | undefined;
+  tunnelProvider?: string | undefined;
+  tunnelConfigPath?: string | null | undefined;
+  tunnelToken?: string | undefined;
+  tunnelHostname?: string | undefined;
+  attachSignals?: boolean | undefined;
+  exitOnShutdown?: boolean | undefined;
+  onTunnelReady?: StartupPipelineInput['onTunnelReady'] | undefined;
+  onDesktopNotification?: Parameters<ReturnType<typeof createNotificationEmitterRuntime>['setOnDesktopNotification']>[0] | undefined;
+  getIsWindowFocused?: Parameters<ReturnType<typeof createNotificationTriggerRuntime>['setGetIsWindowFocused']>[0] | undefined;
+  getDesktopRuntimeConfig?: Parameters<typeof attachRealtimeProxy>[0]['getDesktopRuntimeConfig'] | undefined;
+  desktopUpdater?: BootstrapInput['desktopUpdater'] | undefined;
+  builtInExtensionsDir?: string | undefined;
+}
 
 applyConnectAttemptTimeout();
 applySystemCertificates();
@@ -237,9 +296,9 @@ applyOutboundProxyFromEnv();
 
 const DEFAULT_PORT = 3000;
 const DESKTOP_NOTIFY_PREFIX = '[OpenChamberDesktopNotify] ';
-const uiNotificationClients = new Set();
-const uiNotificationWsClients = new Set();
-const uiOpenChamberEventClients = new Set();
+const uiNotificationClients = new Set<Response>();
+const uiNotificationWsClients = new Set<StreamSocket>();
+const uiOpenChamberEventClients = new Set<ScheduledTaskEventClient>();
 const HEALTH_CHECK_INTERVAL = 15000;
 const SHUTDOWN_TIMEOUT = 10000;
 const MODELS_DEV_API_URL = 'https://models.dev/api.json';
@@ -254,13 +313,16 @@ const TUNNEL_SESSION_TTL_DEFAULT_MS = 8 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MIN_MS = 5 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MAX_MS = 30 * 24 * 60 * 60 * 1000;
 
-function headerIncludesEventStream(value) {
-  if (typeof value === 'string') {
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+const isCallback = <Callback extends (...args: never[]) => void>(value: Callback | null | undefined): value is Callback => typeof value === 'function';
+
+function headerIncludesEventStream(value: string | number | readonly string[] | undefined) {
+  if (isString(value)) {
     return value.toLowerCase().includes('text/event-stream');
   }
 
   if (Array.isArray(value)) {
-    return value.some((entry) => typeof entry === 'string' && entry.toLowerCase().includes('text/event-stream'));
+    return value.some((entry) => isString(entry) && entry.toLowerCase().includes('text/event-stream'));
   }
 
   return false;
@@ -274,7 +336,7 @@ const SSE_PATH_PREFIXES = [
   '/api/openchamber/realtime-proxy/sse',
 ];
 
-function shouldSkipCompression(req, res) {
+function shouldSkipCompression(req: Request, res: Response) {
   if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
     return true;
   }
@@ -301,25 +363,26 @@ const OPENCHAMBER_VERSION = (() => {
   try {
     const packagePath = webPackagePaths.packageJson;
     const raw = fs.readFileSync(packagePath, 'utf8');
-    const pkg = JSON.parse(raw);
-    if (pkg && typeof pkg.version === 'string' && pkg.version.trim().length > 0) {
+    const pkg: unknown = JSON.parse(raw);
+    if (isRecord(pkg) && isString(pkg.version) && pkg.version.trim().length > 0) {
       return pkg.version.trim();
     }
   } catch {
+    return 'unknown';
   }
   return 'unknown';
 })();
 
-const isEnvFlagEnabled = (value) => {
+const isEnvFlagEnabled = (value: string | boolean | number | undefined) => {
   if (value === true || value === 1) return true;
-  if (typeof value !== 'string') return false;
+  if (!isString(value)) return false;
   const normalized = value.trim().toLowerCase();
   return normalized === '1' || normalized === 'true';
 };
 
-const isEnvFlagDisabled = (value) => {
+const isEnvFlagDisabled = (value: string | boolean | number | undefined) => {
   if (value === false || value === 0) return true;
-  if (typeof value !== 'string') return false;
+  if (!isString(value)) return false;
   const normalized = value.trim().toLowerCase();
   return normalized === '0' || normalized === 'false';
 };
@@ -349,23 +412,23 @@ const settingsNormalizationRuntime = createSettingsNormalizationRuntime({
   tunnelSessionTtlMaxMs: TUNNEL_SESSION_TTL_MAX_MS,
 });
 
-const normalizeDirectoryPath = (...args) => settingsNormalizationRuntime.normalizeDirectoryPath(...args);
-const normalizePathForPersistence = (...args) => settingsNormalizationRuntime.normalizePathForPersistence(...args);
-const normalizeSettingsPaths = (...args) => settingsNormalizationRuntime.normalizeSettingsPaths(...args);
-const normalizeTunnelBootstrapTtlMs = (...args) => settingsNormalizationRuntime.normalizeTunnelBootstrapTtlMs(...args);
-const normalizeTunnelSessionTtlMs = (...args) => settingsNormalizationRuntime.normalizeTunnelSessionTtlMs(...args);
-const normalizeManagedRemoteTunnelHostname = (...args) =>
+const normalizeDirectoryPath: typeof settingsNormalizationRuntime.normalizeDirectoryPath = (...args) => settingsNormalizationRuntime.normalizeDirectoryPath(...args);
+const normalizePathForPersistence: typeof settingsNormalizationRuntime.normalizePathForPersistence = (...args) => settingsNormalizationRuntime.normalizePathForPersistence(...args);
+const normalizeSettingsPaths: typeof settingsNormalizationRuntime.normalizeSettingsPaths = (...args) => settingsNormalizationRuntime.normalizeSettingsPaths(...args);
+const normalizeTunnelBootstrapTtlMs: typeof settingsNormalizationRuntime.normalizeTunnelBootstrapTtlMs = (...args) => settingsNormalizationRuntime.normalizeTunnelBootstrapTtlMs(...args);
+const normalizeTunnelSessionTtlMs: typeof settingsNormalizationRuntime.normalizeTunnelSessionTtlMs = (...args) => settingsNormalizationRuntime.normalizeTunnelSessionTtlMs(...args);
+const normalizeManagedRemoteTunnelHostname: typeof settingsNormalizationRuntime.normalizeManagedRemoteTunnelHostname = (...args) =>
   settingsNormalizationRuntime.normalizeManagedRemoteTunnelHostname(...args);
-const normalizeManagedRemoteTunnelPresets = (...args) =>
+const normalizeManagedRemoteTunnelPresets: typeof settingsNormalizationRuntime.normalizeManagedRemoteTunnelPresets = (...args) =>
   settingsNormalizationRuntime.normalizeManagedRemoteTunnelPresets(...args);
-const normalizeManagedRemoteTunnelPresetTokens = (...args) =>
+const normalizeManagedRemoteTunnelPresetTokens: typeof settingsNormalizationRuntime.normalizeManagedRemoteTunnelPresetTokens = (...args) =>
   settingsNormalizationRuntime.normalizeManagedRemoteTunnelPresetTokens(...args);
-const isUnsafeSkillRelativePath = (...args) => settingsNormalizationRuntime.isUnsafeSkillRelativePath(...args);
-const normalizeStringArray = (...args) => settingsNormalizationRuntime.normalizeStringArray(...args);
-const sanitizeModelRefs = (...args) => settingsNormalizationRuntime.sanitizeModelRefs(...args);
-const sanitizeSkillCatalogs = (...args) => settingsNormalizationRuntime.sanitizeSkillCatalogs(...args);
-const sanitizeProjects = (...args) => settingsNormalizationRuntime.sanitizeProjects(...args);
-const sanitizeProjectList = (projects) => sanitizeProjects(projects) ?? [];
+const isUnsafeSkillRelativePath: typeof settingsNormalizationRuntime.isUnsafeSkillRelativePath = (...args) => settingsNormalizationRuntime.isUnsafeSkillRelativePath(...args);
+const normalizeStringArray: typeof settingsNormalizationRuntime.normalizeStringArray = (...args) => settingsNormalizationRuntime.normalizeStringArray(...args);
+const sanitizeModelRefs: typeof settingsNormalizationRuntime.sanitizeModelRefs = (...args) => settingsNormalizationRuntime.sanitizeModelRefs(...args);
+const sanitizeSkillCatalogs: typeof settingsNormalizationRuntime.sanitizeSkillCatalogs = (...args) => settingsNormalizationRuntime.sanitizeSkillCatalogs(...args);
+const sanitizeProjects: typeof settingsNormalizationRuntime.sanitizeProjects = (...args) => settingsNormalizationRuntime.sanitizeProjects(...args);
+const sanitizeProjectList = (projects: Parameters<typeof sanitizeProjects>[0]) => sanitizeProjects(projects) ?? [];
 
 const OPENCHAMBER_DEFAULT_CONFIG_ROOT = path.join(os.homedir(), '.config', 'openchamber');
 const OPENCHAMBER_USER_CONFIG_ROOT = process.env.OPENCHAMBER_DATA_DIR
@@ -388,27 +451,23 @@ const themeRuntime = createThemeRuntime({
   logger: console,
 });
 
-const readCustomThemesFromDisk = (...args) => themeRuntime.readCustomThemesFromDisk(...args);
-const saveImportedTheme = (...args) => themeRuntime.saveImportedTheme(...args);
-const deleteImportedTheme = (...args) => themeRuntime.deleteImportedTheme(...args);
+const readCustomThemesFromDisk: typeof themeRuntime.readCustomThemesFromDisk = (...args) => themeRuntime.readCustomThemesFromDisk(...args);
+const saveImportedTheme: typeof themeRuntime.saveImportedTheme = (...args) => themeRuntime.saveImportedTheme(...args);
+const deleteImportedTheme: typeof themeRuntime.deleteImportedTheme = (...args) => themeRuntime.deleteImportedTheme(...args);
 
-let notificationTemplateRuntime = null;
-let agentToolRuntime = null;
-let limitFailoverRuntime = null;
-let managedConfigRuntime = null;
+let agentToolRuntime: ReturnType<typeof createAgentToolRuntime> | null = null;
+let limitFailoverRuntime: ReturnType<typeof createLimitFailoverRuntime> | null = null;
+let managedConfigRuntime: ReturnType<typeof createManagedConfigRuntime> | null = null;
 let stopEnterprisePolicyWatch = () => {};
 
-const createTimeoutSignal = (...args) => notificationTemplateRuntime.createTimeoutSignal(...args);
-const formatProjectLabel = (...args) => notificationTemplateRuntime.formatProjectLabel(...args);
-const resolveNotificationTemplate = (...args) => notificationTemplateRuntime.resolveNotificationTemplate(...args);
-const shouldApplyResolvedTemplateMessage = (...args) => notificationTemplateRuntime.shouldApplyResolvedTemplateMessage(...args);
-const fetchFreeZenModels = (...args) => notificationTemplateRuntime.fetchFreeZenModels(...args);
-const extractTextFromParts = (...args) => notificationTemplateRuntime.extractTextFromParts(...args);
-const extractLastMessageText = (...args) => notificationTemplateRuntime.extractLastMessageText(...args);
-const fetchLastAssistantMessageText = (...args) => notificationTemplateRuntime.fetchLastAssistantMessageText(...args);
-const maybeCacheSessionInfoFromEvent = (...args) => notificationTemplateRuntime.maybeCacheSessionInfoFromEvent(...args);
-const buildTemplateVariables = (...args) => notificationTemplateRuntime.buildTemplateVariables(...args);
-const getCachedZenModels = (...args) => notificationTemplateRuntime.getCachedZenModels(...args);
+const resolveNotificationTemplate: typeof notificationTemplateRuntime.resolveNotificationTemplate = (...args) => notificationTemplateRuntime.resolveNotificationTemplate(...args);
+const shouldApplyResolvedTemplateMessage: typeof notificationTemplateRuntime.shouldApplyResolvedTemplateMessage = (...args) => notificationTemplateRuntime.shouldApplyResolvedTemplateMessage(...args);
+const fetchFreeZenModels: typeof notificationTemplateRuntime.fetchFreeZenModels = (...args) => notificationTemplateRuntime.fetchFreeZenModels(...args);
+const extractLastMessageText: typeof notificationTemplateRuntime.extractLastMessageText = (...args) => notificationTemplateRuntime.extractLastMessageText(...args);
+const fetchLastAssistantMessageText: typeof notificationTemplateRuntime.fetchLastAssistantMessageText = (...args) => notificationTemplateRuntime.fetchLastAssistantMessageText(...args);
+const maybeCacheSessionInfoFromEvent: typeof notificationTemplateRuntime.maybeCacheSessionInfoFromEvent = (...args) => notificationTemplateRuntime.maybeCacheSessionInfoFromEvent(...args);
+const buildTemplateVariables: typeof notificationTemplateRuntime.buildTemplateVariables = (...args) => notificationTemplateRuntime.buildTemplateVariables(...args);
+const getCachedZenModels: typeof notificationTemplateRuntime.getCachedZenModels = (...args) => notificationTemplateRuntime.getCachedZenModels(...args);
 
 const OPENCHAMBER_DATA_DIR = OPENCHAMBER_USER_CONFIG_ROOT;
 const SETTINGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
@@ -451,10 +510,10 @@ const managedTunnelConfigRuntime = createManagedTunnelConfigRuntime({
   },
 });
 
-const readManagedRemoteTunnelConfigFromDisk = (...args) => managedTunnelConfigRuntime.readManagedRemoteTunnelConfigFromDisk(...args);
-const syncManagedRemoteTunnelConfigWithPresets = (...args) => managedTunnelConfigRuntime.syncManagedRemoteTunnelConfigWithPresets(...args);
-const upsertManagedRemoteTunnelToken = (...args) => managedTunnelConfigRuntime.upsertManagedRemoteTunnelToken(...args);
-const resolveManagedRemoteTunnelToken = (...args) => managedTunnelConfigRuntime.resolveManagedRemoteTunnelToken(...args);
+const readManagedRemoteTunnelConfigFromDisk: typeof managedTunnelConfigRuntime.readManagedRemoteTunnelConfigFromDisk = (...args) => managedTunnelConfigRuntime.readManagedRemoteTunnelConfigFromDisk(...args);
+const syncManagedRemoteTunnelConfigWithPresets: typeof managedTunnelConfigRuntime.syncManagedRemoteTunnelConfigWithPresets = (...args) => managedTunnelConfigRuntime.syncManagedRemoteTunnelConfigWithPresets(...args);
+const upsertManagedRemoteTunnelToken: typeof managedTunnelConfigRuntime.upsertManagedRemoteTunnelToken = (...args) => managedTunnelConfigRuntime.upsertManagedRemoteTunnelToken(...args);
+const resolveManagedRemoteTunnelToken: typeof managedTunnelConfigRuntime.resolveManagedRemoteTunnelToken = (...args) => managedTunnelConfigRuntime.resolveManagedRemoteTunnelToken(...args);
 
 const settingsHelpers = createSettingsHelpers({
   normalizePathForPersistence,
@@ -473,11 +532,11 @@ const settingsHelpers = createSettingsHelpers({
   sanitizeProjects,
 });
 
-const normalizePwaAppName = (...args) => settingsHelpers.normalizePwaAppName(...args);
-const normalizePwaOrientation = (...args) => settingsHelpers.normalizePwaOrientation(...args);
-const sanitizeSettingsUpdate = (...args) => settingsHelpers.sanitizeSettingsUpdate(...args);
-const mergePersistedSettings = (...args) => settingsHelpers.mergePersistedSettings(...args);
-const formatSettingsResponse = (...args) => settingsHelpers.formatSettingsResponse(...args);
+const normalizePwaAppName: typeof settingsHelpers.normalizePwaAppName = (...args) => settingsHelpers.normalizePwaAppName(...args);
+const normalizePwaOrientation: typeof settingsHelpers.normalizePwaOrientation = (...args) => settingsHelpers.normalizePwaOrientation(...args);
+const sanitizeSettingsUpdate: typeof settingsHelpers.sanitizeSettingsUpdate = (...args) => settingsHelpers.sanitizeSettingsUpdate(...args);
+const mergePersistedSettings: typeof settingsHelpers.mergePersistedSettings = (...args) => settingsHelpers.mergePersistedSettings(...args);
+const formatSettingsResponse: typeof settingsHelpers.formatSettingsResponse = (...args) => settingsHelpers.formatSettingsResponse(...args);
 
 const projectDirectoryRuntime = createProjectDirectoryRuntime({
   fsPromises,
@@ -488,10 +547,10 @@ const projectDirectoryRuntime = createProjectDirectoryRuntime({
   refuseDirectory: (candidate) => spacesHost?.refuseDirectory(candidate) ?? null,
 });
 
-const resolveDirectoryCandidate = (...args) => projectDirectoryRuntime.resolveDirectoryCandidate(...args);
-const validateDirectoryPath = (...args) => projectDirectoryRuntime.validateDirectoryPath(...args);
-const resolveProjectDirectory = (...args) => projectDirectoryRuntime.resolveProjectDirectory(...args);
-const resolveOptionalProjectDirectory = (...args) => projectDirectoryRuntime.resolveOptionalProjectDirectory(...args);
+const resolveDirectoryCandidate: typeof projectDirectoryRuntime.resolveDirectoryCandidate = (...args) => projectDirectoryRuntime.resolveDirectoryCandidate(...args);
+const validateDirectoryPath: typeof projectDirectoryRuntime.validateDirectoryPath = (...args) => projectDirectoryRuntime.validateDirectoryPath(...args);
+const resolveProjectDirectory: typeof projectDirectoryRuntime.resolveProjectDirectory = (...args) => projectDirectoryRuntime.resolveProjectDirectory(...args);
+const resolveOptionalProjectDirectory: typeof projectDirectoryRuntime.resolveOptionalProjectDirectory = (...args) => projectDirectoryRuntime.resolveOptionalProjectDirectory(...args);
 
 const settingsRuntime = createSettingsRuntime({
   fsPromises,
@@ -520,24 +579,25 @@ const settingsRuntime = createSettingsRuntime({
     });
   },
   onLastDirectoryChanged: (directory) => {
+    if (!isString(directory)) return;
     void openCodeTrust.isTrusted(directory).then((trusted) => {
       if (trusted) openCodeLifecycleRuntime.noteCurrentDirectory(directory);
     }, () => {});
   },
 });
 
-const readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFromDiskMigrated(...args);
-const readSettingsFromDisk = (...args) => settingsRuntime.readSettingsFromDisk(...args);
-const readSettingsFromDiskStrict = (...args) => settingsRuntime.readSettingsFromDiskStrict(...args);
-const writeSettingsToDisk = (...args) => settingsRuntime.writeSettingsToDisk(...args);
-const persistSettings = (...args) => settingsRuntime.persistSettings(...args);
+const readSettingsFromDiskMigrated: typeof settingsRuntime.readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFromDiskMigrated(...args);
+const readSettingsFromDisk: typeof settingsRuntime.readSettingsFromDisk = (...args) => settingsRuntime.readSettingsFromDisk(...args);
+const readSettingsFromDiskStrict: typeof settingsRuntime.readSettingsFromDiskStrict = (...args) => settingsRuntime.readSettingsFromDiskStrict(...args);
+const writeSettingsToDisk: typeof settingsRuntime.writeSettingsToDisk = (...args) => settingsRuntime.writeSettingsToDisk(...args);
+const persistSettings: typeof settingsRuntime.persistSettings = (...args) => settingsRuntime.persistSettings(...args);
 
 const requestSecurityRuntime = createRequestSecurityRuntime({
   readSettingsFromDiskMigrated,
   allowLocalDevOrigins: allowsLocalDevOrigins(process.env),
 });
 
-const getUiSessionTokenFromRequest = (...args) => requestSecurityRuntime.getUiSessionTokenFromRequest(...args);
+const getUiSessionTokenFromRequest: typeof requestSecurityRuntime.getUiSessionTokenFromRequest = (...args) => requestSecurityRuntime.getUiSessionTokenFromRequest(...args);
 
 const pushRuntime = createPushRuntime({
   fsPromises,
@@ -549,20 +609,20 @@ const pushRuntime = createPushRuntime({
   getInvalidSessionKeys: () => clientPushAccess.invalidSessionKeys(),
 });
 
-const getOrCreateVapidKeys = (...args) => pushRuntime.getOrCreateVapidKeys(...args);
-const addOrUpdatePushSubscription = (...args) => pushRuntime.addOrUpdatePushSubscription(...args);
-const removePushSubscription = (...args) => pushRuntime.removePushSubscription(...args);
-const sendPushToAllUiSessions = (...args) => pushRuntime.sendPushToAllUiSessions(...args);
+const getOrCreateVapidKeys: typeof pushRuntime.getOrCreateVapidKeys = (...args) => pushRuntime.getOrCreateVapidKeys(...args);
+const addOrUpdatePushSubscription: typeof pushRuntime.addOrUpdatePushSubscription = (...args) => pushRuntime.addOrUpdatePushSubscription(...args);
+const removePushSubscription: typeof pushRuntime.removePushSubscription = (...args) => pushRuntime.removePushSubscription(...args);
+const sendPushToAllUiSessions: typeof pushRuntime.sendPushToAllUiSessions = (...args) => pushRuntime.sendPushToAllUiSessions(...args);
 let clearPendingPushBadge = () => {};
-const updateUiVisibility = (token, visible, platform) => {
+const updateUiVisibility = (token: string, visible: boolean, platform?: string) => {
   if (visible === true) clearPendingPushBadge();
   return pushRuntime.updateUiVisibility(token, visible, platform);
 };
-const isAnyUiVisible = (...args) => pushRuntime.isAnyUiVisible(...args);
-const isAnyInteractiveClientVisible = (...args) => pushRuntime.isAnyInteractiveClientVisible(...args);
-const isUiVisible = (...args) => pushRuntime.isUiVisible(...args);
-const ensurePushInitialized = (...args) => pushRuntime.ensurePushInitialized(...args);
-const setPushInitialized = (...args) => pushRuntime.setPushInitialized(...args);
+const isAnyUiVisible: typeof pushRuntime.isAnyUiVisible = (...args) => pushRuntime.isAnyUiVisible(...args);
+const isAnyInteractiveClientVisible: typeof pushRuntime.isAnyInteractiveClientVisible = (...args) => pushRuntime.isAnyInteractiveClientVisible(...args);
+const isUiVisible: typeof pushRuntime.isUiVisible = (...args) => pushRuntime.isUiVisible(...args);
+const ensurePushInitialized: typeof pushRuntime.ensurePushInitialized = (...args) => pushRuntime.ensurePushInitialized(...args);
+const setPushInitialized: typeof pushRuntime.setPushInitialized = (...args) => pushRuntime.setPushInitialized(...args);
 
 const relayKeyStore = createRelayKeyStore({
   fsPromises,
@@ -584,19 +644,19 @@ const apnsRuntime = createApnsRuntime({
   getInvalidSessionKeys: () => clientPushAccess.invalidSessionKeys(),
 });
 
-const addOrUpdateApnsToken = (...args) => apnsRuntime.addOrUpdateApnsToken(...args);
-const removeApnsToken = (...args) => apnsRuntime.removeApnsToken(...args);
-const sendApnsToAllUiSessions = (...args) => apnsRuntime.sendApnsToAllUiSessions(...args);
-const clearApnsNotifications = (...args) => apnsRuntime.clearApnsNotifications(...args);
+const addOrUpdateApnsToken: typeof apnsRuntime.addOrUpdateApnsToken = (...args) => apnsRuntime.addOrUpdateApnsToken(...args);
+const removeApnsToken: typeof apnsRuntime.removeApnsToken = (...args) => apnsRuntime.removeApnsToken(...args);
+const sendApnsToAllUiSessions: typeof apnsRuntime.sendApnsToAllUiSessions = (...args) => apnsRuntime.sendApnsToAllUiSessions(...args);
+const clearApnsNotifications: typeof apnsRuntime.clearApnsNotifications = (...args) => apnsRuntime.clearApnsNotifications(...args);
 
 const TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW = 128;
 const TERMINAL_INPUT_WS_REBIND_WINDOW_MS = 60 * 1000;
 const TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS = 15 * 1000;
 
-const rejectWebSocketUpgrade = (...args) => requestSecurityRuntime.rejectWebSocketUpgrade(...args);
+const rejectWebSocketUpgrade: typeof requestSecurityRuntime.rejectWebSocketUpgrade = (...args) => requestSecurityRuntime.rejectWebSocketUpgrade(...args);
 
 
-const isRequestOriginAllowed = (...args) => requestSecurityRuntime.isRequestOriginAllowed(...args);
+const isRequestOriginAllowed: typeof requestSecurityRuntime.isRequestOriginAllowed = (...args) => requestSecurityRuntime.isRequestOriginAllowed(...args);
 
 const notificationEmitterRuntime = createNotificationEmitterRuntime({
   process,
@@ -607,14 +667,14 @@ const notificationEmitterRuntime = createNotificationEmitterRuntime({
   getBroadcastGlobalUiEvent: () => broadcastGlobalUiEvent,
 });
 
-const writeSseEvent = (...args) => notificationEmitterRuntime.writeSseEvent(...args);
-const emitDesktopNotification = (...args) => notificationEmitterRuntime.emitDesktopNotification(...args);
+const writeSseEvent: typeof notificationEmitterRuntime.writeSseEvent = (...args) => notificationEmitterRuntime.writeSseEvent(...args);
+const emitDesktopNotification: typeof notificationEmitterRuntime.emitDesktopNotification = (...args) => notificationEmitterRuntime.emitDesktopNotification(...args);
 const broadcastGlobalUiEvent = createGlobalUiEventBroadcaster({
   sseClients: uiNotificationClients,
   wsClients: uiNotificationWsClients,
   writeSseEvent,
 });
-const broadcastUiNotification = (...args) => notificationEmitterRuntime.broadcastUiNotification(...args);
+const broadcastUiNotification: typeof notificationEmitterRuntime.broadcastUiNotification = (...args) => notificationEmitterRuntime.broadcastUiNotification(...args);
 
 const broadcastOpenChamberUiEvent = createGlobalUiEventBroadcaster({
   sseClients: uiOpenChamberEventClients,
@@ -627,7 +687,7 @@ const broadcastControlSseEvent = createGlobalUiEventBroadcaster({
   wsClients: new Set(),
   writeSseEvent,
 });
-const broadcastPermissionUiEvent = (payload) => {
+const broadcastPermissionUiEvent = <Payload>(payload: Payload) => {
   broadcastControlSseEvent(payload);
   broadcastGlobalUiEvent(payload);
 };
@@ -636,26 +696,28 @@ const sessionMetadataStore = createSessionMetadataStore({
   dataDir: OPENCHAMBER_DATA_DIR,
   openCode: {
     read: (...args) => createOpenCodeSessionMetadata({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).read(...args),
-    write: (sessionID, metadata, options) => createOpenCodeSessionMetadata({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).write(sessionID, metadata, options).then(() => sessionLineage.noteMetadata(sessionID, metadata) && permissionAutoAcceptRuntime.forgetSession(sessionID)),
+    write: (sessionID, metadata, options) => createOpenCodeSessionMetadata({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).write(sessionID, metadata, options).then(() => {
+      if (sessionLineage.noteMetadata(sessionID, metadata)) permissionAutoAcceptRuntime.forgetSession(sessionID);
+    }),
   },
 });
 
-const readStoredSessionMetadata = (sessionID, options) => sessionMetadataStore.get(sessionID, options);
+const readStoredSessionMetadata = (sessionID: string | null, options?: MetadataReadOptions) => sessionMetadataStore.get(sessionID, options);
 
-const persistSessionMetadataPatch = async (sessionID, patch, { directory = '' } = {}) => {
+const persistSessionMetadataPatch = async (sessionID: string, patch: SessionMetadata, { directory = '' }: { directory?: string | undefined } = {}) => {
   const metadata = await sessionMetadataStore.setSessionMetadata(sessionID, patch, { directory });
   broadcastOpenChamberUiEvent({
     type: 'openchamber:session-metadata',
     properties: { sessionID, metadata },
   });
-  if (patch?.openchamber && 'goal' in patch.openchamber) {
+  if (isRecord(patch.openchamber) && 'goal' in patch.openchamber) {
     void Promise.resolve(sessionGoalRuntime.notifyGoalChanged(sessionID, directory, metadata))
       .catch((error) => console.warn('[session-goal] could not arm after a goal change:', error?.message ?? error));
   }
   return metadata;
 };
 
-const updateSessionMetadataWith = async (sessionID, decide, { directory = '' } = {}) => {
+const updateSessionMetadataWith = async (sessionID: string, decide: MetadataDecider, { directory = '' }: { directory?: string | undefined } = {}) => {
   const result = await sessionMetadataStore.updateSessionMetadata(sessionID, decide, { directory });
   if (result.changed) {
     broadcastOpenChamberUiEvent({
@@ -734,27 +796,27 @@ const hmrStateRuntime = createHmrStateRuntime({
 const hmrState = hmrStateRuntime.getOrCreateHmrState();
 hmrStateRuntime.ensureUserProvidedOpenCodePassword(hmrState);
 
-let healthCheckInterval = null;
-let server = null;
-let expressApp = null;
-let currentRestartPromise = null;
+let healthCheckInterval: OpenCodeLifecycleState['healthCheckInterval'] = null;
+let server: http.Server | null = null;
+let expressApp: OpenCodeLifecycleState['expressApp'] = null;
+let currentRestartPromise: OpenCodeLifecycleState['currentRestartPromise'] = null;
 let isRestartingOpenCode = false;
 let openCodeApiPrefix = '';
 let openCodeApiPrefixDetected = true;
-let openCodeApiDetectionTimer = null;
-let lastOpenCodeError = null;
-let lastOpenCodeLaunchDiagnostics = null;
-let lastOpenCodeHealthFailure = null;
-let lastManagedOpenCodeProcess = null;
-let lastOpenCodeRestartDiagnostics = null;
+let openCodeApiDetectionTimer: OpenCodeLifecycleState['openCodeApiDetectionTimer'] = null;
+let lastOpenCodeError: OpenCodeLifecycleState['lastOpenCodeError'] = null;
+let lastOpenCodeLaunchDiagnostics: OpenCodeLifecycleState['lastOpenCodeLaunchDiagnostics'] = null;
+let lastOpenCodeHealthFailure: OpenCodeLifecycleState['lastOpenCodeHealthFailure'] = null;
+let lastManagedOpenCodeProcess: OpenCodeLifecycleState['lastManagedOpenCodeProcess'] = null;
+let lastOpenCodeRestartDiagnostics: OpenCodeLifecycleState['lastOpenCodeRestartDiagnostics'] = null;
 let isOpenCodeReady = false;
 let openCodeNotReadySince = 0;
 let isExternalOpenCode = false;
 let exitOnShutdown = true;
-let uiAuthController = null;
-let spacesHost = null;
-let activeTunnelController = null;
-let globalWatcherStartPromise = null;
+let uiAuthController: BootstrapResult['uiAuthController'] | null = null;
+let spacesHost: Awaited<ReturnType<typeof createSpacesHost>> | null = null;
+let activeTunnelController: ReturnType<TunnelWiringDependencies['getActiveTunnelController']> = null;
+let globalWatcherStartPromise: ReturnType<typeof openCodeWatcherRuntime.start> | null = null;
 const tunnelProviderRegistry = createTunnelProviderRegistry([
   createCloudflareTunnelProvider(),
   createNgrokTunnelProvider(),
@@ -763,14 +825,14 @@ const tunnelProviderRegistry = createTunnelProviderRegistry([
 tunnelProviderRegistry.seal();
 const tunnelAuthController = createTunnelAuth();
 let runtimeManagedRemoteTunnelToken = '';
-let runtimeManagedRemoteTunnelHostname = '';
-let terminalRuntime = null;
-let dictationRuntime = null;
-let guestSurfaceRuntime = null;
-let realtimeProxyRuntime = null;
-let relayServiceInstance = null;
-let relayReconcileTimer = null;
-let messageStreamRuntime = null;
+let runtimeManagedRemoteTunnelHostname: string | undefined = '';
+let terminalRuntime: StartupPipelineResult['terminalRuntime'] | null = null;
+let dictationRuntime: StartupPipelineResult['dictationRuntime'] | null = null;
+let guestSurfaceRuntime: ReturnType<typeof createGuestSurfaceRuntime> | null = null;
+let realtimeProxyRuntime: ReturnType<typeof attachRealtimeProxy> | null = null;
+let relayServiceInstance: ReturnType<typeof createRelayService> | null = null;
+let relayReconcileTimer: ReturnType<typeof setInterval> | null = null;
+let messageStreamRuntime: StartupPipelineResult['messageStreamRuntime'] | null = null;
 const userProvidedOpenCodePassword = hmrStateRuntime.getUserProvidedOpenCodePassword(hmrState);
 const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
   hmrState,
@@ -835,8 +897,8 @@ const ENV_DESKTOP_NOTIFY = (() => {
     return true;
   }
 
-  const argv0 = typeof process.argv?.[0] === 'string' ? process.argv[0] : '';
-  const argv1 = typeof process.argv?.[1] === 'string' ? process.argv[1] : '';
+  const argv0 = isString(process.argv?.[0]) ? process.argv[0] : '';
+  const argv1 = isString(process.argv?.[1]) ? process.argv[1] : '';
   return /openchamber-server/i.test(argv0) || /openchamber-server/i.test(argv1);
 })();
 const openCodeAuthStateRuntime = createOpenCodeAuthStateRuntime({
@@ -854,18 +916,22 @@ const openCodeAuthStateRuntime = createOpenCodeAuthStateRuntime({
   syncToHmrState,
 });
 
-const getOpenCodeAuthHeaders = (...args) => openCodeAuthStateRuntime.getOpenCodeAuthHeaders(...args);
-const isOpenCodeConnectionSecure = (...args) => openCodeAuthStateRuntime.isOpenCodeConnectionSecure(...args);
-const ensureLocalOpenCodeServerPassword = (...args) => openCodeAuthStateRuntime.ensureLocalOpenCodeServerPassword(...args);
+const getOpenCodeAuthHeaders: typeof openCodeAuthStateRuntime.getOpenCodeAuthHeaders = (...args) => openCodeAuthStateRuntime.getOpenCodeAuthHeaders(...args);
+const isOpenCodeConnectionSecure: typeof openCodeAuthStateRuntime.isOpenCodeConnectionSecure = (...args) => openCodeAuthStateRuntime.isOpenCodeConnectionSecure(...args);
+const ensureLocalOpenCodeServerPassword: typeof openCodeAuthStateRuntime.ensureLocalOpenCodeServerPassword = (...args) => openCodeAuthStateRuntime.ensureLocalOpenCodeServerPassword(...args);
 
-const openCodeNetworkState = {};
-Object.defineProperties(openCodeNetworkState, {
-  openCodePort: { get: () => openCodePort, set: (value) => { openCodePort = value; } },
-  openCodeBaseUrl: { get: () => openCodeBaseUrl, set: (value) => { openCodeBaseUrl = value; } },
-  openCodeApiPrefix: { get: () => openCodeApiPrefix, set: (value) => { openCodeApiPrefix = value; } },
-  openCodeApiPrefixDetected: { get: () => openCodeApiPrefixDetected, set: (value) => { openCodeApiPrefixDetected = value; } },
-  openCodeApiDetectionTimer: { get: () => openCodeApiDetectionTimer, set: (value) => { openCodeApiDetectionTimer = value; } },
-});
+const openCodeNetworkState = {
+  get openCodePort() { return openCodePort; },
+  set openCodePort(value: typeof openCodePort) { openCodePort = value; },
+  get openCodeBaseUrl() { return openCodeBaseUrl; },
+  set openCodeBaseUrl(value: typeof openCodeBaseUrl) { openCodeBaseUrl = value; },
+  get openCodeApiPrefix() { return openCodeApiPrefix; },
+  set openCodeApiPrefix(value: typeof openCodeApiPrefix) { openCodeApiPrefix = value; },
+  get openCodeApiPrefixDetected() { return openCodeApiPrefixDetected; },
+  set openCodeApiPrefixDetected(value: typeof openCodeApiPrefixDetected) { openCodeApiPrefixDetected = value; },
+  get openCodeApiDetectionTimer() { return openCodeApiDetectionTimer; },
+  set openCodeApiDetectionTimer(value: typeof openCodeApiDetectionTimer) { openCodeApiDetectionTimer = value; },
+};
 
 const openCodeNetworkRuntime = createOpenCodeNetworkRuntime({
   state: openCodeNetworkState,
@@ -873,12 +939,12 @@ const openCodeNetworkRuntime = createOpenCodeNetworkRuntime({
   configuredOpenCodeHostname: ENV_CONFIGURED_OPENCODE_HOSTNAME,
 });
 
-const waitForReady = (...args) => openCodeNetworkRuntime.waitForReady(...args);
-const normalizeApiPrefix = (...args) => openCodeNetworkRuntime.normalizeApiPrefix(...args);
-const setDetectedOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.setDetectedOpenCodeApiPrefix(...args);
-const buildOpenCodeUrl = (...args) => openCodeNetworkRuntime.buildOpenCodeUrl(...args);
-const ensureOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.ensureOpenCodeApiPrefix(...args);
-const scheduleOpenCodeApiDetection = (...args) => openCodeNetworkRuntime.scheduleOpenCodeApiDetection(...args);
+const waitForReady: typeof openCodeNetworkRuntime.waitForReady = (...args) => openCodeNetworkRuntime.waitForReady(...args);
+const normalizeApiPrefix: typeof openCodeNetworkRuntime.normalizeApiPrefix = (...args) => openCodeNetworkRuntime.normalizeApiPrefix(...args);
+const setDetectedOpenCodeApiPrefix: typeof openCodeNetworkRuntime.setDetectedOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.setDetectedOpenCodeApiPrefix(...args);
+const buildOpenCodeUrl: typeof openCodeNetworkRuntime.buildOpenCodeUrl = (...args) => openCodeNetworkRuntime.buildOpenCodeUrl(...args);
+const ensureOpenCodeApiPrefix: typeof openCodeNetworkRuntime.ensureOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.ensureOpenCodeApiPrefix(...args);
+const scheduleOpenCodeApiDetection: typeof openCodeNetworkRuntime.scheduleOpenCodeApiDetection = (...args) => openCodeNetworkRuntime.scheduleOpenCodeApiDetection(...args);
 
 configureOpenCodeRuntimeProviders({
   buildOpenCodeUrl,
@@ -894,30 +960,39 @@ const ENV_CONFIGURED_API_PREFIX = normalizeApiPrefix(
   console.warn('Ignoring configured OpenCode API prefix; API runs at root.');
 }
 
-let cachedLoginShellEnvSnapshot;
-let resolvedOpencodeBinary = null;
-let resolvedOpencodeBinarySource = null;
-let resolvedNodeBinary = null;
-let resolvedBunBinary = null;
-let resolvedGitBinary = null;
-let useWslForOpencode = false;
-let resolvedWslBinary = null;
-let resolvedWslOpencodePath = null;
-let resolvedWslDistro = null;
+let cachedLoginShellEnvSnapshot: OpenCodeEnvState['cachedLoginShellEnvSnapshot'];
+let resolvedOpencodeBinary: Exclude<OpenCodeEnvState['resolvedOpencodeBinary'], undefined> = null;
+let resolvedOpencodeBinarySource: OpenCodeEnvState['resolvedOpencodeBinarySource'] = null;
+let resolvedNodeBinary: Exclude<OpenCodeEnvState['resolvedNodeBinary'], undefined> = null;
+let resolvedBunBinary: Exclude<OpenCodeEnvState['resolvedBunBinary'], undefined> = null;
+let resolvedGitBinary: Exclude<OpenCodeEnvState['resolvedGitBinary'], undefined> = null;
+let useWslForOpencode: Exclude<OpenCodeEnvState['useWslForOpencode'], undefined> = false;
+let resolvedWslBinary: Exclude<OpenCodeEnvState['resolvedWslBinary'], undefined> = null;
+let resolvedWslOpencodePath: Exclude<OpenCodeEnvState['resolvedWslOpencodePath'], undefined> = null;
+let resolvedWslDistro: Exclude<OpenCodeEnvState['resolvedWslDistro'], undefined> = null;
 
-const openCodeEnvState = {};
-Object.defineProperties(openCodeEnvState, {
-  cachedLoginShellEnvSnapshot: { get: () => cachedLoginShellEnvSnapshot, set: (value) => { cachedLoginShellEnvSnapshot = value; } },
-  resolvedOpencodeBinary: { get: () => resolvedOpencodeBinary, set: (value) => { resolvedOpencodeBinary = value; } },
-  resolvedOpencodeBinarySource: { get: () => resolvedOpencodeBinarySource, set: (value) => { resolvedOpencodeBinarySource = value; } },
-  resolvedNodeBinary: { get: () => resolvedNodeBinary, set: (value) => { resolvedNodeBinary = value; } },
-  resolvedBunBinary: { get: () => resolvedBunBinary, set: (value) => { resolvedBunBinary = value; } },
-  resolvedGitBinary: { get: () => resolvedGitBinary, set: (value) => { resolvedGitBinary = value; } },
-  useWslForOpencode: { get: () => useWslForOpencode, set: (value) => { useWslForOpencode = value; } },
-  resolvedWslBinary: { get: () => resolvedWslBinary, set: (value) => { resolvedWslBinary = value; } },
-  resolvedWslOpencodePath: { get: () => resolvedWslOpencodePath, set: (value) => { resolvedWslOpencodePath = value; } },
-  resolvedWslDistro: { get: () => resolvedWslDistro, set: (value) => { resolvedWslDistro = value; } },
-});
+const openCodeEnvState = {
+  get cachedLoginShellEnvSnapshot() { return cachedLoginShellEnvSnapshot; },
+  set cachedLoginShellEnvSnapshot(value: typeof cachedLoginShellEnvSnapshot) { cachedLoginShellEnvSnapshot = value; },
+  get resolvedOpencodeBinary() { return resolvedOpencodeBinary; },
+  set resolvedOpencodeBinary(value: typeof resolvedOpencodeBinary) { resolvedOpencodeBinary = value; },
+  get resolvedOpencodeBinarySource() { return resolvedOpencodeBinarySource; },
+  set resolvedOpencodeBinarySource(value: typeof resolvedOpencodeBinarySource) { resolvedOpencodeBinarySource = value; },
+  get resolvedNodeBinary() { return resolvedNodeBinary; },
+  set resolvedNodeBinary(value: typeof resolvedNodeBinary) { resolvedNodeBinary = value; },
+  get resolvedBunBinary() { return resolvedBunBinary; },
+  set resolvedBunBinary(value: typeof resolvedBunBinary) { resolvedBunBinary = value; },
+  get resolvedGitBinary() { return resolvedGitBinary; },
+  set resolvedGitBinary(value: typeof resolvedGitBinary) { resolvedGitBinary = value; },
+  get useWslForOpencode() { return useWslForOpencode; },
+  set useWslForOpencode(value: typeof useWslForOpencode) { useWslForOpencode = value; },
+  get resolvedWslBinary() { return resolvedWslBinary; },
+  set resolvedWslBinary(value: typeof resolvedWslBinary) { resolvedWslBinary = value; },
+  get resolvedWslOpencodePath() { return resolvedWslOpencodePath; },
+  set resolvedWslOpencodePath(value: typeof resolvedWslOpencodePath) { resolvedWslOpencodePath = value; },
+  get resolvedWslDistro() { return resolvedWslDistro; },
+  set resolvedWslDistro(value: typeof resolvedWslDistro) { resolvedWslDistro = value; },
+};
 
 const openCodeEnvRuntime = createOpenCodeEnvRuntime({
   state: openCodeEnvState,
@@ -926,17 +1001,17 @@ const openCodeEnvRuntime = createOpenCodeEnvRuntime({
   providedLoginShellEnvSnapshot,
 });
 
-const applyLoginShellEnvSnapshot = (...args) => openCodeEnvRuntime.applyLoginShellEnvSnapshot(...args);
-const getLoginShellEnvSnapshot = (...args) => openCodeEnvRuntime.getLoginShellEnvSnapshot(...args);
-const ensureOpencodeCliEnv = (...args) => openCodeEnvRuntime.ensureOpencodeCliEnv(...args);
-const applyOpencodeBinaryFromSettings = (...args) => openCodeEnvRuntime.applyOpencodeBinaryFromSettings(...args);
-const resolveOpencodeCliPath = (...args) => openCodeEnvRuntime.resolveOpencodeCliPath(...args);
-const isBundledOpenCodePath = (...args) => openCodeEnvRuntime.isBundledOpenCodePath(...args);
-const isExecutable = (...args) => openCodeEnvRuntime.isExecutable(...args);
-const searchPathFor = (...args) => openCodeEnvRuntime.searchPathFor(...args);
-const resolveGitBinaryForSpawn = (...args) => openCodeEnvRuntime.resolveGitBinaryForSpawn(...args);
-const resolveManagedOpenCodeLaunchSpec = (...args) => openCodeEnvRuntime.resolveManagedOpenCodeLaunchSpec(...args);
-const clearResolvedOpenCodeBinary = (...args) => openCodeEnvRuntime.clearResolvedOpenCodeBinary(...args);
+const applyLoginShellEnvSnapshot: typeof openCodeEnvRuntime.applyLoginShellEnvSnapshot = (...args) => openCodeEnvRuntime.applyLoginShellEnvSnapshot(...args);
+const getLoginShellEnvSnapshot: typeof openCodeEnvRuntime.getLoginShellEnvSnapshot = (...args) => openCodeEnvRuntime.getLoginShellEnvSnapshot(...args);
+const ensureOpencodeCliEnv: typeof openCodeEnvRuntime.ensureOpencodeCliEnv = (...args) => openCodeEnvRuntime.ensureOpencodeCliEnv(...args);
+const applyOpencodeBinaryFromSettings: typeof openCodeEnvRuntime.applyOpencodeBinaryFromSettings = (...args) => openCodeEnvRuntime.applyOpencodeBinaryFromSettings(...args);
+const resolveOpencodeCliPath: typeof openCodeEnvRuntime.resolveOpencodeCliPath = (...args) => openCodeEnvRuntime.resolveOpencodeCliPath(...args);
+const isBundledOpenCodePath: typeof openCodeEnvRuntime.isBundledOpenCodePath = (...args) => openCodeEnvRuntime.isBundledOpenCodePath(...args);
+const isExecutable: typeof openCodeEnvRuntime.isExecutable = (...args) => openCodeEnvRuntime.isExecutable(...args);
+const searchPathFor: typeof openCodeEnvRuntime.searchPathFor = (...args) => openCodeEnvRuntime.searchPathFor(...args);
+const resolveGitBinaryForSpawn: typeof openCodeEnvRuntime.resolveGitBinaryForSpawn = (...args) => openCodeEnvRuntime.resolveGitBinaryForSpawn(...args);
+const resolveManagedOpenCodeLaunchSpec: typeof openCodeEnvRuntime.resolveManagedOpenCodeLaunchSpec = (...args) => openCodeEnvRuntime.resolveManagedOpenCodeLaunchSpec(...args);
+const clearResolvedOpenCodeBinary: typeof openCodeEnvRuntime.clearResolvedOpenCodeBinary = (...args) => openCodeEnvRuntime.clearResolvedOpenCodeBinary(...args);
 const openCodeResolutionRuntime = createOpenCodeResolutionRuntime({
   path,
   resolveOpencodeCliPath,
@@ -957,14 +1032,13 @@ const openCodeResolutionRuntime = createOpenCodeResolutionRuntime({
     resolvedOpencodeBinarySource = value;
   },
 });
-const getOpenCodeResolutionSnapshot = (...args) =>
+const getOpenCodeResolutionSnapshot: typeof openCodeResolutionRuntime.getOpenCodeResolutionSnapshot = (...args) =>
   openCodeResolutionRuntime.getOpenCodeResolutionSnapshot(...args);
 
 applyLoginShellEnvSnapshot();
 
-notificationTemplateRuntime = createNotificationTemplateRuntime({
+const notificationTemplateRuntime = createNotificationTemplateRuntime({
   readSettingsFromDisk,
-  persistSettings,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   resolveGitBinaryForSpawn,
@@ -1002,9 +1076,10 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   openPushTagsStore: {
     read: async () => {
       try {
-        return JSON.parse(await fsPromises.readFile(PUSH_OPEN_TAGS_FILE_PATH, 'utf8'));
+        const saved: JsonValue = JSON.parse(await fsPromises.readFile(PUSH_OPEN_TAGS_FILE_PATH, 'utf8'));
+        return saved;
       } catch (error) {
-        if (error?.code === 'ENOENT') return null;
+        if (isRecord(error) && error.code === 'ENOENT') return null;
         throw error;
       }
     },
@@ -1023,8 +1098,8 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   deliverToExtensionChannels: (delivery) => extensionNotificationChannels.deliver(delivery),
 });
 
-const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
-const setAutoAcceptSession = (sessionId, enabled) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled);
+const maybeSendPushForTrigger: typeof notificationTriggerRuntime.maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
+const setAutoAcceptSession = (sessionId: string, enabled: boolean) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled);
 clearPendingPushBadge = () => notificationTriggerRuntime.clearPendingPushBadge();
 
 const sessionLineage = createSessionLineage();
@@ -1077,7 +1152,7 @@ const sessionGoalRuntime = createSessionGoalRuntime({
     const detail = goal?.statusReason && goal.statusReason !== 'verified by audit' && goal.statusReason !== 'reported by agent'
       ? goal.statusReason
       : '';
-    const objective = typeof goal?.objective === 'string' ? goal.objective.slice(0, 140) : '';
+    const objective = isString(goal?.objective) ? goal.objective.slice(0, 140) : '';
     const notificationPayload = {
       title,
       body: [objective, detail].filter(Boolean).join(' — ').slice(0, 240),
@@ -1100,7 +1175,7 @@ const sessionGoalRuntime = createSessionGoalRuntime({
   },
 });
 
-const openCodeSessionClient = (directory) => createOpenCodeClient({
+const openCodeSessionClient = (directory?: string) => createOpenCodeClient({
   baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
   headers: getOpenCodeAuthHeaders(),
   directory,
@@ -1228,6 +1303,7 @@ const sessionWorkRuntime = createSessionWorkRuntime({
   activityProbe: createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: 2_000 }),
 });
 
+const spacePermissionDefaultFile = process.env.OPENCHAMBER_SPACE_PERMISSION_DEFAULT_FILE;
 const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   globalEventHub: globalMessageStreamHub,
   buildOpenCodeUrl,
@@ -1238,8 +1314,8 @@ const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   evaluatePermission: (permission, directory) => routingRuntime.evaluatePermission(permission, directory),
   onPermissionReplied: (permissionId) => routingRuntime.forgetPermission(permissionId),
   resolveLegacyEnabledMode: async () => ((await routingRuntime.legacySafetyNetEnabled()) ? 'safety' : 'auto'),
-  readDefaultMode: process.env.OPENCHAMBER_SPACE_PERMISSION_DEFAULT_FILE
-    ? () => readSpacePermissionDefault(process.env.OPENCHAMBER_SPACE_PERMISSION_DEFAULT_FILE)
+  readDefaultMode: spacePermissionDefaultFile
+    ? () => readSpacePermissionDefault(spacePermissionDefaultFile)
     : undefined,
 });
 permissionAutoAcceptRuntime.start();
@@ -1410,7 +1486,6 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
-  parseSseDataPayload: (...args) => parseSseDataPayload(...args),
   globalEventHub: globalMessageStreamHub,
   onWirePayload: (payload, { spaceId }) => {
     if (!spaceId) chatDirectoryCleanupRuntime.observeWirePayload(payload);
@@ -1431,15 +1506,16 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
 });
 
 globalMessageStreamHub.subscribeEvent((event) => {
-  if (event?.payload?.type !== 'location.shutdown') return;
-  const directory = event.payload.location?.directory ?? event.directory;
-  if (directory && directory !== 'global') void openCodeTrust.forget(directory);
+  const payload = event?.payload;
+  if (!isRecord(payload) || payload.type !== 'location.shutdown') return;
+  const directory = (isRecord(payload.location) ? payload.location.directory : undefined) ?? event.directory;
+  if (isString(directory) && directory && directory !== 'global') void openCodeTrust.forget(directory);
 });
 globalMessageStreamHub.subscribeStatus((status) => {
   if (status?.type === 'connect') {
     openCodeTrust.followLocations(true);
     void sessionGoalRuntime.recoverActiveGoals();
-    void hiddenSessions.seed(async (cursor) => {
+    void hiddenSessions.seed(async (cursor): Promise<JsonValue> => {
       const query = cursor ? `?limit=200&cursor=${encodeURIComponent(cursor)}` : '?limit=200';
       const response = await fetch(buildOpenCodeUrl(`/api/session${query}`, ''), { headers: getOpenCodeAuthHeaders() });
       return response.ok ? response.json() : null;
@@ -1449,16 +1525,16 @@ globalMessageStreamHub.subscribeStatus((status) => {
 
 console.log('[session-assist] listening for session events');
 globalMessageStreamHub.subscribeEvent((event) => {
-  const directory = typeof event?.directory === 'string' && event.directory && event.directory !== 'global'
+  const directory = isString(event?.directory) && event.directory && event.directory !== 'global'
     ? event.directory
     : '';
   for (const payload of event?.translated?.() ?? []) {
     // external: https://github.com/anomalyco/opencode OpenCode 2 supplies no plugin abort signal; turn cancellation stops pending OpenChamber actions here.
-    if (payload.type === 'session.idle' && payload.properties?.aborted === true) {
+    if (payload.type === 'session.idle' && 'aborted' in payload.properties && payload.properties.aborted === true) {
       agentToolRuntime?.abortSession?.(payload.properties.sessionID);
     }
-    if (payload.type === 'session.idle' || payload.type === 'session.error') {
-      openChamberControlService.releaseAnswerWaits(payload.properties?.sessionID);
+    if ((payload.type === 'session.idle' || payload.type === 'session.error') && payload.properties.sessionID !== undefined) {
+      openChamberControlService.releaseAnswerWaits(payload.properties.sessionID);
     }
     sessionLineage.observe(payload);
     turnDurationRecorder.processPayload(payload, directory || payload.properties?.directory || '');
@@ -1472,8 +1548,8 @@ globalMessageStreamHub.subscribeEvent((event) => {
   }
 });
 
-const processForwardedEventPayload = (payload, emitSyntheticEvent, { spaceId = null } = {}) => {
-  if (!payload || typeof payload !== 'object' || typeof emitSyntheticEvent !== 'function') {
+const processForwardedEventPayload: ForwardEventPayload = (payload, emitSyntheticEvent, { spaceId = null } = { spaceId: null }) => {
+  if ((!isRecord(payload) && !Array.isArray(payload)) || !isCallback(emitSyntheticEvent)) {
     return;
   }
 
@@ -1482,20 +1558,17 @@ const processForwardedEventPayload = (payload, emitSyntheticEvent, { spaceId = n
   }
 };
 
-const processForwardedServerEvent = (payload, emitSyntheticEvent, spaceId = null) => {
+const processForwardedServerEvent = (payload: TranslatedEvent, emitSyntheticEvent: Parameters<ForwardEventPayload>[1], spaceId: string | null = null) => {
   maybeCacheSessionInfoFromEvent(payload, { spaceId });
 
   if (payload.type !== 'session.status') {
     return;
   }
 
-  const properties = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
-  const statusInfo = properties.status && typeof properties.status === 'object' ? properties.status : {};
-  const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
-  const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID.trim() : '';
-  const status = typeof statusInfo.type === 'string'
-    ? statusInfo.type.trim()
-    : (typeof info.type === 'string' ? info.type.trim() : '');
+  const { properties } = payload;
+  const statusInfo = properties.status ?? {};
+  const sessionId = isString(properties.sessionID) ? properties.sessionID.trim() : '';
+  const status = isString(statusInfo.type) ? statusInfo.type.trim() : '';
 
   if (!sessionId || !status) {
     return;
@@ -1510,15 +1583,9 @@ const processForwardedServerEvent = (payload, emitSyntheticEvent, spaceId = null
       timestamp: Date.now(),
       turnStartedAt: running ? (properties.turnStartedAt ?? sessionRuntime.getRunningTurnStart(sessionId) ?? undefined) : undefined,
       metadata: {
-        attempt: typeof statusInfo.attempt === 'number'
-          ? statusInfo.attempt
-          : (typeof info.attempt === 'number' ? info.attempt : undefined),
-        message: typeof statusInfo.message === 'string'
-          ? statusInfo.message
-          : (typeof info.message === 'string' ? info.message : undefined),
-        next: typeof statusInfo.next === 'number'
-          ? statusInfo.next
-          : (typeof info.next === 'number' ? info.next : undefined),
+        attempt: isNumber(statusInfo.attempt) ? statusInfo.attempt : undefined,
+        message: isString(statusInfo.message) ? statusInfo.message : undefined,
+        next: isNumber(statusInfo.next) ? statusInfo.next : undefined,
       },
     },
   });
@@ -1547,7 +1614,10 @@ const serverUtilsRuntime = createServerUtilsRuntime({
   getArchivedSessions: () => openChamberSessionService.archiveStore.getAll(),
   getUnreadBaseline: () => unreadBaseline.get(),
   getStoredSessionMetadata: () => sessionMetadataStore.listUnmigrated(),
-  getMergeSpaceSessionList: () => (spacesHost ? (payload) => spacesHost.mergeSessionList(payload) : null),
+  getMergeSpaceSessionList: () => (spacesHost ? (payload) => {
+    if (!spacesHost) throw new TypeError("Cannot read properties of null (reading 'mergeSessionList')");
+    return spacesHost.mergeSessionList(payload);
+  } : null),
   getSpaceEventHub: () => (spacesHost ? globalMessageStreamHub : null),
   hiddenSessions,
   openCodeTrust,
@@ -1587,17 +1657,17 @@ const serverUtilsRuntime = createServerUtilsRuntime({
   },
   getLoginShellPath: () => {
     const snapshot = getLoginShellEnvSnapshot();
-    if (!snapshot || typeof snapshot.PATH !== 'string' || snapshot.PATH.length === 0) {
+    if (!snapshot || !isString(snapshot.PATH) || snapshot.PATH.length === 0) {
       return null;
     }
     return snapshot.PATH;
   },
 });
 
-const setOpenCodePort = (...args) => serverUtilsRuntime.setOpenCodePort(...args);
-const waitForOpenCodePort = (...args) => serverUtilsRuntime.waitForOpenCodePort(...args);
-const buildAugmentedPath = (...args) => serverUtilsRuntime.buildAugmentedPath(...args);
-const buildManagedOpenCodePath = (...args) => serverUtilsRuntime.buildManagedOpenCodePath(...args);
+const setOpenCodePort: typeof serverUtilsRuntime.setOpenCodePort = (...args) => serverUtilsRuntime.setOpenCodePort(...args);
+const waitForOpenCodePort: typeof serverUtilsRuntime.waitForOpenCodePort = (...args) => serverUtilsRuntime.waitForOpenCodePort(...args);
+const buildAugmentedPath: typeof serverUtilsRuntime.buildAugmentedPath = (...args) => serverUtilsRuntime.buildAugmentedPath(...args);
+const buildManagedOpenCodePath: typeof serverUtilsRuntime.buildManagedOpenCodePath = (...args) => serverUtilsRuntime.buildManagedOpenCodePath(...args);
 
 const environmentStore = createEnvironmentStore({
   filePath: path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'environment.json'),
@@ -1615,7 +1685,6 @@ const environmentRuntime = createEnvironmentRuntime({
   isEnterpriseMode: () => isEnterpriseMode(),
 });
 configureGitEnvironment(environmentRuntime);
-const parseSseDataPayload = (...args) => serverUtilsRuntime.parseSseDataPayload(...args);
 const staticRoutesRuntime = createStaticRoutesRuntime({
   fs,
   path,
@@ -1712,33 +1781,56 @@ const startupPipelineRuntime = createStartupPipelineRuntime({
   createServerStartupRuntime,
 });
 
-const openCodeLifecycleState = {};
-Object.defineProperties(openCodeLifecycleState, {
-  openCodeProcess: { get: () => openCodeProcess, set: (value) => { openCodeProcess = value; } },
-  openCodePort: { get: () => openCodePort, set: (value) => { openCodePort = value; } },
-  openCodeBaseUrl: { get: () => openCodeBaseUrl, set: (value) => { openCodeBaseUrl = value; } },
-  openCodeWorkingDirectory: { get: () => openCodeWorkingDirectory, set: (value) => { openCodeWorkingDirectory = value; } },
-  currentRestartPromise: { get: () => currentRestartPromise, set: (value) => { currentRestartPromise = value; } },
-  isRestartingOpenCode: { get: () => isRestartingOpenCode, set: (value) => { isRestartingOpenCode = value; } },
-  openCodeApiPrefix: { get: () => openCodeApiPrefix, set: (value) => { openCodeApiPrefix = value; } },
-  openCodeApiPrefixDetected: { get: () => openCodeApiPrefixDetected, set: (value) => { openCodeApiPrefixDetected = value; } },
-  openCodeApiDetectionTimer: { get: () => openCodeApiDetectionTimer, set: (value) => { openCodeApiDetectionTimer = value; } },
-  lastOpenCodeError: { get: () => lastOpenCodeError, set: (value) => { lastOpenCodeError = value; } },
-  lastOpenCodeLaunchDiagnostics: { get: () => lastOpenCodeLaunchDiagnostics, set: (value) => { lastOpenCodeLaunchDiagnostics = value; } },
-  lastOpenCodeHealthFailure: { get: () => lastOpenCodeHealthFailure, set: (value) => { lastOpenCodeHealthFailure = value; } },
-  lastManagedOpenCodeProcess: { get: () => lastManagedOpenCodeProcess, set: (value) => { lastManagedOpenCodeProcess = value; } },
-  lastOpenCodeRestartDiagnostics: { get: () => lastOpenCodeRestartDiagnostics, set: (value) => { lastOpenCodeRestartDiagnostics = value; } },
-  isOpenCodeReady: { get: () => isOpenCodeReady, set: (value) => { isOpenCodeReady = value; } },
-  openCodeNotReadySince: { get: () => openCodeNotReadySince, set: (value) => { openCodeNotReadySince = value; } },
-  isExternalOpenCode: { get: () => isExternalOpenCode, set: (value) => { isExternalOpenCode = value; } },
-  isShuttingDown: { get: () => isShuttingDown, set: (value) => { isShuttingDown = value; } },
-  healthCheckInterval: { get: () => healthCheckInterval, set: (value) => { healthCheckInterval = value; } },
-  expressApp: { get: () => expressApp, set: (value) => { expressApp = value; } },
-  useWslForOpencode: { get: () => useWslForOpencode, set: (value) => { useWslForOpencode = value; } },
-  resolvedWslBinary: { get: () => resolvedWslBinary, set: (value) => { resolvedWslBinary = value; } },
-  resolvedWslOpencodePath: { get: () => resolvedWslOpencodePath, set: (value) => { resolvedWslOpencodePath = value; } },
-  resolvedWslDistro: { get: () => resolvedWslDistro, set: (value) => { resolvedWslDistro = value; } },
-});
+const openCodeLifecycleState = {
+  get openCodeProcess() { return openCodeProcess; },
+  set openCodeProcess(value: typeof openCodeProcess) { openCodeProcess = value; },
+  get openCodePort() { return openCodePort; },
+  set openCodePort(value: typeof openCodePort) { openCodePort = value; },
+  get openCodeBaseUrl() { return openCodeBaseUrl; },
+  set openCodeBaseUrl(value: typeof openCodeBaseUrl) { openCodeBaseUrl = value; },
+  get openCodeWorkingDirectory() { return openCodeWorkingDirectory; },
+  set openCodeWorkingDirectory(value: typeof openCodeWorkingDirectory) { openCodeWorkingDirectory = value; },
+  get currentRestartPromise() { return currentRestartPromise; },
+  set currentRestartPromise(value: typeof currentRestartPromise) { currentRestartPromise = value; },
+  get isRestartingOpenCode() { return isRestartingOpenCode; },
+  set isRestartingOpenCode(value: typeof isRestartingOpenCode) { isRestartingOpenCode = value; },
+  get openCodeApiPrefix() { return openCodeApiPrefix; },
+  set openCodeApiPrefix(value: typeof openCodeApiPrefix) { openCodeApiPrefix = value; },
+  get openCodeApiPrefixDetected() { return openCodeApiPrefixDetected; },
+  set openCodeApiPrefixDetected(value: typeof openCodeApiPrefixDetected) { openCodeApiPrefixDetected = value; },
+  get openCodeApiDetectionTimer() { return openCodeApiDetectionTimer; },
+  set openCodeApiDetectionTimer(value: typeof openCodeApiDetectionTimer) { openCodeApiDetectionTimer = value; },
+  get lastOpenCodeError() { return lastOpenCodeError; },
+  set lastOpenCodeError(value: typeof lastOpenCodeError) { lastOpenCodeError = value; },
+  get lastOpenCodeLaunchDiagnostics() { return lastOpenCodeLaunchDiagnostics; },
+  set lastOpenCodeLaunchDiagnostics(value: typeof lastOpenCodeLaunchDiagnostics) { lastOpenCodeLaunchDiagnostics = value; },
+  get lastOpenCodeHealthFailure() { return lastOpenCodeHealthFailure; },
+  set lastOpenCodeHealthFailure(value: typeof lastOpenCodeHealthFailure) { lastOpenCodeHealthFailure = value; },
+  get lastManagedOpenCodeProcess() { return lastManagedOpenCodeProcess; },
+  set lastManagedOpenCodeProcess(value: typeof lastManagedOpenCodeProcess) { lastManagedOpenCodeProcess = value; },
+  get lastOpenCodeRestartDiagnostics() { return lastOpenCodeRestartDiagnostics; },
+  set lastOpenCodeRestartDiagnostics(value: typeof lastOpenCodeRestartDiagnostics) { lastOpenCodeRestartDiagnostics = value; },
+  get isOpenCodeReady() { return isOpenCodeReady; },
+  set isOpenCodeReady(value: typeof isOpenCodeReady) { isOpenCodeReady = value; },
+  get openCodeNotReadySince() { return openCodeNotReadySince; },
+  set openCodeNotReadySince(value: typeof openCodeNotReadySince) { openCodeNotReadySince = value; },
+  get isExternalOpenCode() { return isExternalOpenCode; },
+  set isExternalOpenCode(value: typeof isExternalOpenCode) { isExternalOpenCode = value; },
+  get isShuttingDown() { return isShuttingDown; },
+  set isShuttingDown(value: typeof isShuttingDown) { isShuttingDown = value; },
+  get healthCheckInterval() { return healthCheckInterval; },
+  set healthCheckInterval(value: typeof healthCheckInterval) { healthCheckInterval = value; },
+  get expressApp() { return expressApp; },
+  set expressApp(value: typeof expressApp) { expressApp = value; },
+  get useWslForOpencode() { return useWslForOpencode; },
+  set useWslForOpencode(value: typeof useWslForOpencode) { useWslForOpencode = value; },
+  get resolvedWslBinary() { return resolvedWslBinary; },
+  set resolvedWslBinary(value: typeof resolvedWslBinary) { resolvedWslBinary = value; },
+  get resolvedWslOpencodePath() { return resolvedWslOpencodePath; },
+  set resolvedWslOpencodePath(value: typeof resolvedWslOpencodePath) { resolvedWslOpencodePath = value; },
+  get resolvedWslDistro() { return resolvedWslDistro; },
+  set resolvedWslDistro(value: typeof resolvedWslDistro) { resolvedWslDistro = value; },
+};
 
 const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   state: openCodeLifecycleState,
@@ -1772,13 +1864,13 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     if (!settings) return [];
     const directories = [];
-    if (typeof settings.lastDirectory === 'string' && settings.lastDirectory) {
+    if (isString(settings.lastDirectory) && settings.lastDirectory) {
       directories.push(settings.lastDirectory);
     }
     const projects = Array.isArray(settings.projects) ? [...settings.projects] : [];
     projects.sort((a, b) => (b?.lastOpenedAt ?? 0) - (a?.lastOpenedAt ?? 0));
     for (const project of projects) {
-      if (typeof project?.path === 'string' && project.path) {
+      if (isString(project?.path) && project.path) {
         directories.push(project.path);
       }
     }
@@ -1797,14 +1889,14 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     try {
       messageStreamRuntime?.rebindUpstream();
     } catch (error) {
-      console.warn('Failed to rebind message stream after OpenCode restart:', error?.message ?? error);
+      console.warn('Failed to rebind message stream after OpenCode restart:', isRecord(error) ? error.message ?? error : error);
     }
     try {
       const recovery = sessionRuntime.interruptBusySessionsAfterRestart();
       const notification = buildRestartNotification(recovery);
       if (notification) broadcastUiNotification(notification);
     } catch (error) {
-      console.warn('Failed to reconcile sessions after OpenCode restart:', error?.message ?? error);
+      console.warn('Failed to reconcile sessions after OpenCode restart:', isRecord(error) ? error.message ?? error : error);
     }
   },
   getManagedOpenCodeEnv: async () => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
@@ -1845,10 +1937,9 @@ const getOpenCodeUpgradeCapability = () => {
   });
 };
 
-const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
-const waitForOpenCodeReady = (...args) => openCodeLifecycleRuntime.waitForOpenCodeReady(...args);
-const waitForAgentPresence = (...args) => openCodeLifecycleRuntime.waitForAgentPresence(...args);
-const refreshOpenCodeAfterConfigChange = (...args) => openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange(...args);
+const restartOpenCode: typeof openCodeLifecycleRuntime.restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
+const waitForOpenCodeReady: typeof openCodeLifecycleRuntime.waitForOpenCodeReady = (...args) => openCodeLifecycleRuntime.waitForOpenCodeReady(...args);
+const refreshOpenCodeAfterConfigChange: typeof openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange = (...args) => openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange(...args);
 const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitoring(HEALTH_CHECK_INTERVAL);
 const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
 const scheduledChatsScope = createChatsScope(OPENCHAMBER_CHATS_DIR);
@@ -1889,16 +1980,14 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   emitTaskRunEvent: (event) => {
     for (const client of uiOpenChamberEventClients) {
       try {
-        writeSseEvent(client, {
-          type: 'openchamber:scheduled-task-ran',
-          properties: {
-            projectId: scheduledChatsScope.toPublicID(event.projectID),
-            taskId: event.taskID,
-            ranAt: event.ranAt,
-            status: event.status,
-            ...(event.sessionID ? { sessionId: event.sessionID } : {}),
-          },
-        });
+        const properties: ScheduledTaskRanProperties = {
+          projectId: scheduledChatsScope.toPublicID(event.projectID),
+          taskId: event.taskID,
+          ranAt: event.ranAt,
+          status: event.status,
+        };
+        if (event.sessionID) properties.sessionId = event.sessionID;
+        writeSseEvent(client, { type: 'openchamber:scheduled-task-ran', properties });
       } catch {
         uiOpenChamberEventClients.delete(client);
       }
@@ -1906,21 +1995,19 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   },
   logger: console,
 });
-const emitSessionCreatedEvent = (event) => {
+const emitSessionCreatedEvent = (event: SessionCreatedEvent) => {
   for (const client of uiOpenChamberEventClients) {
     try {
-      writeSseEvent(client, {
-        type: 'openchamber:session-created',
-        properties: {
-          sessionId: event.sessionID,
-          directory: event.directory,
-          createdAt: event.createdAt,
-          promptDispatched: event.promptDispatched === true,
-          dispatchedAsCommand: event.dispatchedAsCommand === true,
-          ...(event.projectID ? { projectId: event.projectID } : {}),
-          ...(event.title ? { title: event.title } : {}),
-        },
-      });
+      const properties: SessionCreatedProperties = {
+        sessionId: event.sessionID,
+        directory: event.directory,
+        createdAt: event.createdAt,
+        promptDispatched: event.promptDispatched === true,
+        dispatchedAsCommand: event.dispatchedAsCommand === true,
+      };
+      if (event.projectID) properties.projectId = event.projectID;
+      if (event.title) properties.title = event.title;
+      writeSseEvent(client, { type: 'openchamber:session-created', properties });
     } catch {
       uiOpenChamberEventClients.delete(client);
     }
@@ -1935,16 +2022,12 @@ const resolveMemoryProjectId = createMemoryProjectResolver({
   managedProjectRoots: [...new Set([path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR])],
 });
 
-const emitAgentMemoryChangedEvent = (event) => {
+const emitAgentMemoryChangedEvent = (event: MemoryChangedEvent) => {
   for (const client of uiOpenChamberEventClients) {
     try {
-      writeSseEvent(client, {
-        type: 'openchamber:agent-memory-changed',
-        properties: {
-          scope: event.scope,
-          ...(event.projectId ? { projectId: event.projectId } : {}),
-        },
-      });
+      const properties: MemoryChangedEvent = { scope: event.scope };
+      if (event.projectId) properties.projectId = event.projectId;
+      writeSseEvent(client, { type: 'openchamber:agent-memory-changed', properties });
     } catch {
       uiOpenChamberEventClients.delete(client);
     }
@@ -2030,7 +2113,7 @@ const browserControlBroker = createBrowserControlBroker({
   },
 });
 
-const emitBrowserProviderResetEvent = ({ guestId, guestName }) => {
+const emitBrowserProviderResetEvent = ({ guestId, guestName }: BrowserProviderReset) => {
   for (const client of uiOpenChamberEventClients) {
     try {
       writeSseEvent(client, {
@@ -2096,7 +2179,7 @@ onGuestServiceEnded((guestId) => {
 const serviceHostApi = createServiceHostApi({
   listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
   control: {
-    execute: (...args) => openChamberControlService.execute(...args),
+    execute: executeServiceControl,
     resolveSessionDirectory: (sessionID) => openChamberControlService.resolveSessionDirectory(sessionID),
     stopSession: (sessionID) => openChamberControlService.stopSession(sessionID),
     answerPermission: (input) => openChamberControlService.answerPermission(input),
@@ -2121,6 +2204,12 @@ const serviceHostApi = createServiceHostApi({
   },
 });
 serviceHostApi.register();
+
+function executeServiceControl(action: 'session.create' | 'session.send', input?: ControlInput, contextDirectory?: ControlInput['directory'], options?: ControlOptions): Promise<SessionActionResult>;
+function executeServiceControl<Action extends SessionReadAction>(action: Action, input?: ControlInput, contextDirectory?: ControlInput['directory'], options?: ControlOptions): Promise<SessionReadResults[Action]>;
+function executeServiceControl(action: string, input?: ControlInput, contextDirectory?: ControlInput['directory'], options?: ControlOptions) {
+  return openChamberControlService.execute(action, input, contextDirectory, options);
+}
 
 const browserUploadStore = createUploadStore();
 const openChamberControlService = createOpenChamberControlService({
@@ -2178,7 +2267,7 @@ const openChamberControlService = createOpenChamberControlService({
       };
       broadcastOpenChamberUiEvent(payload);
       void maybeSendPushForTrigger(payload);
-      extensionSessionEvents.processPayload(payload, change.directory);
+      extensionSessionEvents.processPayload(payload, change.directory ?? undefined);
       return;
     }
     const settled = {
@@ -2187,7 +2276,7 @@ const openChamberControlService = createOpenChamberControlService({
     };
     broadcastOpenChamberUiEvent(settled);
     void maybeSendPushForTrigger(settled);
-    extensionSessionEvents.processPayload(settled, change.directory);
+    extensionSessionEvents.processPayload(settled);
   },
   notifyUser: async (input) => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
@@ -2238,7 +2327,7 @@ const ensureGlobalWatcherStarted = async () => {
 
   return globalWatcherStartPromise;
 };
-const bootstrapOpenCodeAtStartup = async (...args) => {
+const bootstrapOpenCodeAtStartup = async (...args: Parameters<typeof openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup>) => {
   await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
   if (openCodeLifecycleRuntime.scheduleBootstrapRetry(bootstrapOpenCodeAtStartup, finishOpenCodeBootstrap)) return;
   finishOpenCodeBootstrap();
@@ -2258,10 +2347,10 @@ const finishOpenCodeBootstrap = () => {
     .then(() => openChamberSessionService.sessionArchive.migrateLegacy())
     .catch((error) => console.warn('[openchamber-sessions] session archive migration failed:', error?.message ?? error));
 };
-const killProcessOnPort = (...args) => openCodeLifecycleRuntime.killProcessOnPort(...args);
-const waitForPortRelease = (...args) => openCodeLifecycleRuntime.waitForPortRelease(...args);
+const killProcessOnPort: typeof openCodeLifecycleRuntime.killProcessOnPort = (...args) => openCodeLifecycleRuntime.killProcessOnPort(...args);
+const waitForPortRelease: typeof openCodeLifecycleRuntime.waitForPortRelease = (...args) => openCodeLifecycleRuntime.waitForPortRelease(...args);
 
-const setupProxy = (...args) => serverUtilsRuntime.setupProxy(...args);
+const setupProxy: typeof serverUtilsRuntime.setupProxy = (...args) => serverUtilsRuntime.setupProxy(...args);
 const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   process,
   shutdownTimeoutMs: SHUTDOWN_TIMEOUT,
@@ -2333,15 +2422,15 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   },
 });
 
-const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
+const gracefulShutdown: typeof gracefulShutdownRuntime.gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
 
-async function main(options = {}) {
+async function main(options: WebUiServerOptions = {}) {
   beginGuestServiceHost({ registryDir: guestServiceRegistryDir(OPENCHAMBER_DATA_DIR) });
   applyOutboundProxyFromEnv();
-  const port = Number.isFinite(options.port) && options.port >= 0 ? Math.trunc(options.port) : DEFAULT_PORT;
-  const host = typeof options.host === 'string' && options.host.length > 0 ? options.host : undefined;
+  const port = isNumber(options.port) && Number.isFinite(options.port) && options.port >= 0 ? Math.trunc(options.port) : DEFAULT_PORT;
+  const host = isString(options.host) && options.host.length > 0 ? options.host : undefined;
   const effectiveBindHost = host
-    || (typeof process.env.OPENCHAMBER_HOST === 'string' && process.env.OPENCHAMBER_HOST.trim().length > 0
+    || (isString(process.env.OPENCHAMBER_HOST) && process.env.OPENCHAMBER_HOST.trim().length > 0
       ? process.env.OPENCHAMBER_HOST.trim()
       : '127.0.0.1');
   const instanceDir = await prepareInstanceDir({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR });
@@ -2355,16 +2444,22 @@ async function main(options = {}) {
     resolveSessionDirectory: (sessionID) => openChamberControlService.resolveSessionDirectory(sessionID),
     getActivePort: () => {
       const address = server?.address?.();
-      return typeof address === 'object' && address ? address.port : null;
+      return address && !isString(address) ? address.port : null;
     },
-    getActiveHost: () => server?.address?.()?.address ?? null,
+    getActiveHost: () => {
+      const address = server?.address?.();
+      return address && !isString(address) ? address.address : null;
+    },
   });
   limitFailoverRuntime = createLimitFailoverRuntime({
     fsPromises,
     path,
     instanceDir,
     readSettings: () => readSettingsFromDiskMigrated(),
-    authorizeRequest: (req) => agentToolRuntime.authorizeRequest(req),
+    authorizeRequest: (req) => {
+      if (!agentToolRuntime) throw new TypeError("Cannot read properties of null (reading 'authorizeRequest')");
+      return agentToolRuntime.authorizeRequest(req);
+    },
     broadcastUiEvent: (event) => broadcastOpenChamberUiEvent(event),
   });
   managedConfigRuntime = createManagedConfigRuntime({
@@ -2382,6 +2477,7 @@ async function main(options = {}) {
   });
   stopEnterprisePolicyWatch = watchEnterprisePolicy({
     onChange: () => {
+      if (!managedConfigRuntime) throw new TypeError("Cannot read properties of null (reading 'refreshManagedConfigFile')");
       managedConfigRuntime.refreshManagedConfigFile().catch((error) => {
         console.warn('Failed to rewrite the managed OpenCode config after a policy change:', error?.message ?? error);
       });
@@ -2390,21 +2486,21 @@ async function main(options = {}) {
   });
   await ensureChatsDir({ fsPromises, chatsDir: OPENCHAMBER_CHATS_DIR, warn: (message) => console.warn(`[data-dir] ${message}`) });
 
-  const requestReachedLanAddress = (req) => {
-    const raw = typeof req?.socket?.localAddress === 'string' ? req.socket.localAddress : '';
+  const requestReachedLanAddress = (req: Request) => {
+    const raw = isString(req?.socket?.localAddress) ? req.socket.localAddress : '';
     const address = raw.startsWith('::ffff:') ? raw.slice(7) : raw;
     if (!/^\d+\.\d+\.\d+\.\d+$/.test(address)) return null;
     if (address.startsWith('127.')) return null;
     return address;
   };
   const advertisedLanUrl = readAdvertisedLanUrl();
-  const resolvePairingTransports = (req) => {
+  const resolvePairingTransports = (req: Request) => {
     const activePort = tunnelRuntimeContext.getActivePort() || port;
     const local = `http://127.0.0.1:${activePort}`;
     if (advertisedLanUrl) {
       return { local, lan: advertisedLanUrl, relayAvailable: !relayBlockedByEnterprise() };
     }
-    let lanHost = null;
+    let lanHost: string | null = null;
     if (isNetworkExposedBindHost(effectiveBindHost)) {
       lanHost = requestReachedLanAddress(req);
       try {
@@ -2426,12 +2522,12 @@ async function main(options = {}) {
     const lan = lanHost ? `http://${lanHost.includes(':') ? `[${lanHost}]` : lanHost}:${activePort}` : null;
     return { local, lan, relayAvailable: !relayBlockedByEnterprise() };
   };
-  const resolveDirectLanUrls = (req) => {
+  const resolveDirectLanUrls = (req: Request) => {
     if (advertisedLanUrl) return [advertisedLanUrl];
     const activePort = tunnelRuntimeContext.getActivePort() || port;
-    const urls = [];
-    const push = (host) => {
-      if (typeof host !== 'string' || !host) return;
+    const urls: string[] = [];
+    const push = (host: string | null | undefined) => {
+      if (!isString(host) || !host) return;
       const url = `http://${host.includes(':') ? `[${host}]` : host}:${activePort}`;
       if (!urls.includes(url)) urls.push(url);
     };
@@ -2444,7 +2540,7 @@ async function main(options = {}) {
           }
         }
       } catch {
-        // interface scan failure → whatever we already collected
+        return urls;
       }
     } else {
       const h = String(effectiveBindHost || '').toLowerCase();
@@ -2452,12 +2548,12 @@ async function main(options = {}) {
     }
     return urls;
   };
-  const uiPassword = typeof options.uiPassword === 'string'
+  const uiPassword = isString(options.uiPassword)
     ? options.uiPassword
-    : (typeof process.env.OPENCHAMBER_UI_PASSWORD === 'string' ? process.env.OPENCHAMBER_UI_PASSWORD : null);
+    : (isString(process.env.OPENCHAMBER_UI_PASSWORD) ? process.env.OPENCHAMBER_UI_PASSWORD : null);
   if (
     isNetworkExposedBindHost(effectiveBindHost)
-    && !(typeof uiPassword === 'string' && uiPassword.trim().length > 0)
+    && !(isString(uiPassword) && uiPassword.trim().length > 0)
     && !isUnsafeUnauthenticatedLanAllowed(process.env)
   ) {
     throw new Error(getUnauthenticatedLanErrorMessage(effectiveBindHost));
@@ -2467,18 +2563,18 @@ async function main(options = {}) {
   }
   const tryCfTunnel = options.tryCfTunnel === true;
   const apiOnly = options.apiOnly === true || isEnvFlagEnabled(process.env.OPENCHAMBER_API_ONLY);
-  const shouldUseCanonicalTunnelConfig = typeof options.tunnelMode === 'string'
-    || typeof options.tunnelProvider === 'string'
+  const shouldUseCanonicalTunnelConfig = isString(options.tunnelMode)
+    || isString(options.tunnelProvider)
     || options.tunnelConfigPath === null
-    || typeof options.tunnelConfigPath === 'string'
-    || typeof options.tunnelToken === 'string'
-    || typeof options.tunnelHostname === 'string';
+    || isString(options.tunnelConfigPath)
+    || isString(options.tunnelToken)
+    || isString(options.tunnelHostname);
   const startupTunnelRequest = shouldUseCanonicalTunnelConfig
     ? normalizeTunnelStartRequest({
         provider: normalizeTunnelProvider(options.tunnelProvider),
         mode: options.tunnelMode,
         configPath: normalizeOptionalPath(options.tunnelConfigPath),
-        token: typeof options.tunnelToken === 'string' ? options.tunnelToken.trim() : '',
+        token: isString(options.tunnelToken) ? options.tunnelToken.trim() : '',
         hostname: normalizeManagedRemoteTunnelHostname(options.tunnelHostname),
       })
     : (tryCfTunnel
@@ -2491,23 +2587,23 @@ async function main(options = {}) {
         }
       : null);
   const attachSignals = options.attachSignals !== false;
-  const onTunnelReady = typeof options.onTunnelReady === 'function' ? options.onTunnelReady : null;
-  if (typeof options.exitOnShutdown === 'boolean') {
+  const onTunnelReady = isCallback(options.onTunnelReady) ? options.onTunnelReady : null;
+  if (isBoolean(options.exitOnShutdown)) {
     exitOnShutdown = options.exitOnShutdown;
   }
-  if (typeof options.onDesktopNotification === 'function') {
+  if (isCallback(options.onDesktopNotification)) {
     notificationEmitterRuntime.setOnDesktopNotification(options.onDesktopNotification);
   }
-  if (typeof options.getIsWindowFocused === 'function') {
+  if (isCallback(options.getIsWindowFocused)) {
     notificationTriggerRuntime.setGetIsWindowFocused(options.getIsWindowFocused);
   }
-  const getDesktopRuntimeConfig = typeof options.getDesktopRuntimeConfig === 'function'
+  const getDesktopRuntimeConfig = isCallback(options.getDesktopRuntimeConfig)
     ? options.getDesktopRuntimeConfig
     : null;
   const desktopUpdater = options.desktopUpdater
-    && typeof options.desktopUpdater.check === 'function'
-    && typeof options.desktopUpdater.install === 'function'
-    && typeof options.desktopUpdater.restart === 'function'
+    && isCallback(options.desktopUpdater.check)
+    && isCallback(options.desktopUpdater.install)
+    && isCallback(options.desktopUpdater.restart)
     ? options.desktopUpdater
     : null;
 
@@ -2527,10 +2623,14 @@ async function main(options = {}) {
     },
   });
 
+  const readSshHostSetting = async () => {
+    const sshHost = (await readSettingsFromDiskMigrated().catch(() => null))?.isolatedSpacesSshHost;
+    return isString(sshHost) ? sshHost : undefined;
+  };
   const buildSpacesHost = async () => createSpacesHost({
     dataDir: OPENCHAMBER_DATA_DIR,
     dockerPath: searchPathFor('docker', buildAugmentedPath()) ?? 'docker',
-    sshDockerHost: dockerHostOf((await readSettingsFromDiskMigrated().catch(() => null))?.isolatedSpacesSshHost),
+    sshDockerHost: dockerHostOf(await readSshHostSetting()),
     colimaPath: searchPathFor('colima', buildAugmentedPath()),
     findProgram: (name) => searchPathFor(name, buildAugmentedPath()) ?? null,
     gitPath: searchPathFor('git', buildAugmentedPath()) ?? 'git',
@@ -2550,7 +2650,7 @@ async function main(options = {}) {
     try {
       spacesHost = await buildSpacesHost();
     } catch (error) {
-      console.error(`[spaces] isolated spaces are unavailable this start: ${error?.code ?? ''} ${error?.message ?? error}`.trim());
+      console.error(`[spaces] isolated spaces are unavailable this start: ${isRecord(error) ? error.code ?? '' : ''} ${isRecord(error) ? error.message ?? error : error}`.trim());
       spacesHost = null;
     }
   }
@@ -2582,7 +2682,7 @@ async function main(options = {}) {
     res.type('text/plain').send('User-agent: *\nDisallow: /\n');
   });
   app.use((req, res, next) => {
-    const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
+    const origin = isString(req.headers.origin) ? req.headers.origin : '';
     if (packagedClientOrigins.has(origin) || (allowLocalDevOrigins && isLocalDevClientOrigin(origin))) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -2600,7 +2700,7 @@ async function main(options = {}) {
     next();
   });
   app.use(compression({
-    filter: (req, res) => {
+    filter: (req: Request, res: Response) => {
       if (shouldSkipCompression(req, res)) return false;
       return compression.filter(req, res);
     },
@@ -2616,7 +2716,7 @@ async function main(options = {}) {
       if (!isLoopbackBindHost(socket.remoteAddress ?? '') && isNetworkAccessBlocked()) socket.destroy();
     });
   }
-  let tunnelRuntimeContextHolder = null;
+  let tunnelRuntimeContextHolder: ReturnType<typeof tunnelWiringRuntime.initialize> | null = null;
 
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
     process,
@@ -2659,7 +2759,7 @@ async function main(options = {}) {
     },
     getServerPort: () => {
       const activePort = tunnelRuntimeContextHolder?.getActivePort?.();
-      if (Number.isFinite(activePort) && activePort > 0) return activePort;
+      if (isNumber(activePort) && Number.isFinite(activePort) && activePort > 0) return activePort;
       return Number.isFinite(port) && port > 0 ? port : null;
     },
     getTunnelUrl: () => tunnelRuntimeContextHolder?.tunnelService?.getPublicUrl?.() ?? null,
@@ -2682,7 +2782,7 @@ async function main(options = {}) {
     getServerLabel: () => {
       try {
         const name = os.hostname();
-        return typeof name === 'string' && name.trim().length > 0 ? name.trim() : 'OpenChamber';
+        return isString(name) && name.trim().length > 0 ? name.trim() : 'OpenChamber';
       } catch {
         return 'OpenChamber';
       }
@@ -2730,7 +2830,7 @@ async function main(options = {}) {
   app.use(spaceArchive.guard);
   app.use((req, res, next) => (spacesHost ? spacesHost.middleware(req, res, next) : next()));
   server.prependListener('upgrade', (...args) => { spacesHost?.upgradeHandler(...args); });
-  const startSpacesHost = (host) => {
+  const startSpacesHost = (host: NonNullable<typeof spacesHost>) => {
     host.prepareUpgrades({ uiAuthController, isRequestOriginAllowed });
     void host.startEvents(globalMessageStreamHub, { broadcastUiEvent: broadcastOpenChamberUiEvent, broadcastGlobalUiEvent: broadcastPermissionUiEvent }).catch((error) => {
       console.warn(`[spaces] could not follow the spaces: ${error?.message ?? error}`);
@@ -2772,11 +2872,9 @@ async function main(options = {}) {
 
   const relayService = createRelayService({
     crypto,
-    os,
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
     relayKeyStore,
-    remoteClientAuthRuntime,
     getLocalPort: () => tunnelRuntimeContext.getActivePort(),
     hostLock: createRelayHostLock({
       lockFilePath: path.join(OPENCHAMBER_DATA_DIR, 'relay-host.lock'),
@@ -2810,7 +2908,7 @@ async function main(options = {}) {
 
   const devServerScanner = createDevServerScanner({ spawn, platform: process.platform });
   const listDevServers = () => devServerScanner.discover({
-    ownPorts: [port, openCodePort].filter((value) => Number.isInteger(value) && value > 0),
+    ownPorts: [port, openCodePort].filter((value): value is number => isNumber(value) && Number.isInteger(value) && value > 0),
   });
 
   createDevTunnelRuntime({
@@ -2922,12 +3020,15 @@ async function main(options = {}) {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     getOpenCodePort: () => openCodePort,
-    getOwnPorts: () => [port, openCodePort].filter((value) => Number.isInteger(value) && value > 0),
+    getOwnPorts: () => [port, openCodePort].filter((value): value is number => isNumber(value) && Number.isInteger(value) && value > 0),
     getActivePort: () => {
       const address = server?.address?.();
-      return address && Number.isInteger(address.port) ? address.port : null;
+      return address && !isString(address) && Number.isInteger(address.port) ? address.port : null;
     },
-    getActiveHost: () => server?.address?.()?.address ?? null,
+    getActiveHost: () => {
+      const address = server?.address?.();
+      return address && !isString(address) ? address.address : null;
+    },
     devServerScanner,
     buildAugmentedPath,
     projectConfigRuntime,
@@ -3030,7 +3131,7 @@ async function main(options = {}) {
   try {
     await scheduledTasksRuntime.start();
   } catch (error) {
-    console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
+    console.warn('[ScheduledTasks] Failed to start runtime:', (isRecord(error) && error.message) || error);
   }
   memoryDreaming.start();
 
@@ -3073,11 +3174,11 @@ async function main(options = {}) {
       const managed = Boolean((openCodeProcess || openCodePort) && !ENV_SKIP_OPENCODE_START && !isExternalOpenCode);
       return {
         managed,
-        pid: managed && typeof openCodeProcess?.pid === 'number' ? openCodeProcess.pid : null,
+        pid: managed && isNumber(openCodeProcess?.pid) ? openCodeProcess.pid : null,
         port: managed ? openCodePort : null,
       };
     },
-    stop: (shutdownOptions = {}) => gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false }),
+    stop: (shutdownOptions: { exitProcess?: boolean } = {}) => gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false }),
   };
 }
 

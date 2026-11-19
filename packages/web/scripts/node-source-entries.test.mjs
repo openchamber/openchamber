@@ -9,7 +9,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
 const entries = [
   ['packages/web/bin/cli.js', 'packages/web/bin/cli-runtime.ts', ['--version'], 0],
-  ['packages/web/server/index.js', 'packages/web/server/runtime.js'],
+  ['packages/web/server/index.js', 'packages/web/server/runtime.ts'],
   ['packages/web/server/lib/git/credential-helper.js', 'packages/web/server/lib/git/credential-helper-runtime.ts', [], 0],
   ['packages/web/server/lib/git/repository-credential-helper.js', 'packages/web/server/lib/git/repository-credential-helper-runtime.ts', [], 0],
   ['packages/web/server/lib/git/ssh-wrapper.js', 'packages/web/server/lib/git/ssh-wrapper-runtime.ts', [], 1],

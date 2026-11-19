@@ -2,8 +2,8 @@
 
 ## Ownership
 
-`index.js` enables source maps before dynamically loading `runtime.js`. Node collects maps only for modules loaded after `setSourceMapsSupport` is called, which is why the runtime is a dynamic import; Bun handles maps itself and does not expose that API, hence the optional call. In a source checkout, the Node entry also registers source resolution before that import.
-`runtime.js` composes the HTTP server and feature runtimes for web, desktop and
+`index.js` enables source maps before dynamically loading `runtime.ts` (through its `.js` specifier). Node collects maps only for modules loaded after `setSourceMapsSupport` is called, which is why the runtime is a dynamic import; Bun handles maps itself and does not expose that API, hence the optional call. In a source checkout, the Node entry also registers source resolution before that import.
+`runtime.ts` composes the HTTP server and feature runtimes for web, desktop and
 mobile clients. Each feature owns its contract in `lib/<feature>/DOCUMENTATION.md`.
 This document covers composition, process-wide helpers, enterprise policy and
 server update ownership. VS Code runs its own host and shares only the helpers
