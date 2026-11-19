@@ -1,4 +1,4 @@
-import type { QuotaResult, QuotaResultInput, ResetTimestamp, UsageWindow, UsageWindowInput } from './contracts.js';
+import type { ProviderUsage, QuotaResult, QuotaResultInput, ResetTimestamp, UsageWindow, UsageWindowInput } from './contracts.js';
 
 export const formatResetTime = (timestamp: ResetTimestamp) => {
   try {
@@ -39,11 +39,13 @@ export const calculateResetAfterSeconds = (resetAt: ResetTimestamp | null | unde
   return delta < 0 ? 0 : delta;
 };
 
-export const toUsageWindow = <Input extends UsageWindowInput>({ usedPercent, windowSeconds, resetAt, valueLabel, creditsUsed }: Input): UsageWindow & { usedPercent: Input['usedPercent'] } => {
+const isFiniteNumber = (value: unknown): value is number => Number.isFinite(value);
+
+export const toUsageWindow = <Input extends UsageWindowInput<unknown, unknown>>({ usedPercent, windowSeconds, resetAt, valueLabel, creditsUsed }: Input): UsageWindow<Input['usedPercent'], NonNullable<Input['windowSeconds']> | null> => {
   const resetAfterSeconds = calculateResetAfterSeconds(resetAt);
   const resetFormatted = hasResetTimestamp(resetAt) ? formatResetTime(resetAt) : null;
-  const hasFiniteUsedPercent = usedPercent !== null && usedPercent !== undefined && Number.isFinite(usedPercent);
-  const window: UsageWindow & { usedPercent: Input['usedPercent'] } = {
+  const hasFiniteUsedPercent = isFiniteNumber(usedPercent);
+  const window: UsageWindow<Input['usedPercent'], NonNullable<Input['windowSeconds']> | null> = {
     usedPercent,
     remainingPercent: hasFiniteUsedPercent ? Math.max(0, 100 - usedPercent) : null,
     windowSeconds: windowSeconds ?? null,
@@ -57,8 +59,8 @@ export const toUsageWindow = <Input extends UsageWindowInput>({ usedPercent, win
   return window;
 };
 
-export const buildResult = <ProviderId extends string | null, ProviderName extends string | null>({ providerId, providerName, ok, configured, usage, error, planLabel, accountLabel }: QuotaResultInput<ProviderId, ProviderName>): QuotaResult<ProviderId, ProviderName> => {
-  const result: QuotaResult<ProviderId, ProviderName> = { providerId, providerName, ok, configured, usage: usage ?? null, fetchedAt: Date.now() };
+export const buildResult = <ProviderId extends string | null, ProviderName extends string | null, Usage = ProviderUsage>({ providerId, providerName, ok, configured, usage, error, planLabel, accountLabel }: QuotaResultInput<ProviderId, ProviderName, Usage>): QuotaResult<ProviderId, ProviderName, Usage> => {
+  const result: QuotaResult<ProviderId, ProviderName, Usage> = { providerId, providerName, ok, configured, usage: usage ?? null, fetchedAt: Date.now() };
   if (error) result.error = error;
   if (planLabel) result.planLabel = planLabel;
   if (accountLabel) result.accountLabel = accountLabel;

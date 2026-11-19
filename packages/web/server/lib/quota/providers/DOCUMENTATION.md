@@ -149,10 +149,10 @@ Zhipu reads the merged OpenCode config without a working directory, so no
 project layer participates. The provider's `options.apiKey` remains unchecked
 until the shared resolver reads it.
 
-### Why the internal OpenAI reader remains JavaScript
+### Why the internal OpenAI reader keeps raw window fields
 
 The internal OpenAI reader copies unchecked percentages and window durations to
-the formatter and multiplies unchecked reset timestamps. Validating or coercing
-these values differently would change its existing output or failure behavior.
-Its result cannot honestly promise the numeric quota contract without those
-checks.
+its result, and uses numeric coercion for reset timestamps. Its result type keeps
+those copied fields unchecked. Only finite numeric percentages produce a derived
+remaining percentage. The reader stays outside the dispatcher's numeric usage
+contract.
