@@ -38,7 +38,7 @@ interface NotificationRouteDependencies extends Pick<PushRuntime,
   addOrUpdateApnsToken?: (token: string, deviceToken: string, userAgent: string | undefined, platform: string, environment: string, pushKey: JsonValue | undefined) => Promise<void>;
   removeApnsToken?: (token: string, deviceToken: string) => Promise<void>;
   clearPendingPushBadge?: () => void;
-  clearSessionPushNotifications?: (sessionId: string) => Promise<void>;
+  clearSessionPushNotifications?: (sessionId: string, options?: { turnStart?: boolean; withSubagents?: boolean }) => Promise<string[] | void>;
   getUiNotificationClients: () => Set<NotificationResponse>;
   writeSseEvent: (res: SseWriter, payload: { type: string; properties: { uiToken: string } }) => void;
   getPendingBlockingRequestsSnapshot?: SessionRuntime['getPendingBlockingRequestsSnapshot'];
@@ -390,15 +390,17 @@ export const registerNotificationRoutes = (app: {
     });
   });
 
-  app.post('/api/sessions/:id/view', (req, res) => {
+  app.post('/api/sessions/:id/view', async (req, res) => {
     const sessionId = req.params.id;
     if (clearPendingPushBadge) clearPendingPushBadge();
-    void clearSessionPushNotifications?.(sessionId);
+    const cleared = await clearSessionPushNotifications?.(sessionId, { withSubagents: true }).catch(() => []);
+    const clearedSessionIds = Array.isArray(cleared) ? cleared : [];
 
     return res.json({
       success: true,
       sessionId,
       viewed: true,
+      clearedSessionIds,
     });
   });
 

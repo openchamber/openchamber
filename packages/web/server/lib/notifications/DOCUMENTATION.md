@@ -14,6 +14,8 @@ This module provides notification message preparation utilities for the web serv
 - `packages/web/server/lib/notifications/emitter-runtime.ts`: desktop/stdout + UI SSE notification emission runtime.
 - `packages/web/server/lib/notifications/emit-route.ts`: `POST /api/notifications/emit` for OpenCode plugins.
 - `packages/web/server/lib/notifications/runtime.js`: trigger runtime for OpenCode event-driven notification fanout.
+- `packages/web/server/lib/notifications/session-push-clearing.ts`: what clearing a session's pushed notifications means, including the subagent walk a view adds (*Clearing handled notifications*). The trigger runtime owns the tag store and hands it in.
+- `packages/web/server/lib/notifications/session-parent-cache.ts`: the one-minute session-parent cache, keyed by space, directory and session, with a host-wide lookup by session id for a walk that has no directory.
 - `packages/web/server/lib/notifications/template-runtime.ts`: notification template variables and session text/title enrichment runtime. Zen-model helpers are retained as compatibility stubs only.
 - `packages/web/server/lib/notifications/template-locales.ts`: the notification text OpenChamber writes itself, per interface language. An empty template field means "no custom text", so the notification uses these defaults and the settings page shows them as placeholders. `settings-runtime.js` no longer seeds English template text into an install; it clears the seed older builds wrote. The server keeps its own list because it cannot import `packages/ui`; an unknown tag falls back to English.
 - `packages/web/server/lib/notifications/extension-channels.ts`: extension notification channels (`provides: ["notifications"]`), see *Extension notification channels* below. `channel-accounts.ts` is their account store, `channel-routes.js` the account card's routes.
@@ -40,7 +42,7 @@ This module provides notification message preparation utilities for the web serv
   - `GET /api/sessions/snapshot`
   - `GET /api/sessions/status`
   - `GET /api/sessions/:id/status`
-  - `POST /api/sessions/:id/view` and `POST /api/sessions/:id/message-sent`: reset the native push badge and clear the session's pushed notifications (*Clearing handled notifications*). Whether a session is unread is OpenCode's own `time.viewed`.
+  - `POST /api/sessions/:id/view` and `POST /api/sessions/:id/message-sent`: reset the native push badge and clear the session's pushed notifications (*Clearing handled notifications*); a view also clears those of its subagents on the phones and answers their session ids in `clearedSessionIds`, which the client uses to close its own copies there. The answer waits for the bounded walk. Whether a session is unread is OpenCode's own `time.viewed`.
 
 ### Trigger runtime API (runtime.js)
 
@@ -76,6 +78,8 @@ A pushed notification is removed from the phones and browsers once its cause is 
 | `ready-<sessionId>`, `error-<sessionId>`, `goal-<sessionId>`, `review-<sessionId>`, `share-<sessionId>` | the session's next turn starts (`session.status` busy with `turnStartedAt`, which only `session.execution.started` carries), or the session is viewed or sent a message from any OpenChamber client (`POST /api/sessions/:id/view`, `/message-sent`) |
 | `question-<sessionId>` | the form it shows settles (`form.settled`) or the page it shows stops waiting (`openchamber:page-settled`), or as above |
 | `permission-<sessionId>` | the request it shows is replied to (`permission.replied`), or as above |
+
+Viewing a session (`POST /api/sessions/:id/view`, `clearSessionPushNotifications(id, { withSubagents: true })`) also clears the open notifications of its subagents, children and deeper: a subagent's banner carries the subagent's own id, and the user reaches it through the parent. The session's own tags are cleared first and sent in their own request. Then each other session with an open tag (the 50 newest) is walked up its parent chain by `session-activity.js` `collectDescendantSessions`, at most 8 steps. One abort budget and one 2 s signal cover that whole batch, every walk shares one parent-read map, and at most four walks are in flight, so a view reads each chain once instead of each candidate separately. A parent the event stream already recorded comes from the trigger runtime's cache, looked up by session id for the host, instead of a record read. A chain that reaches the viewed session is cleared, all of those tags go to the phones in one clearing request, and the route answers those session ids so the client can close its own copies there too. A session whose record cannot be read, and a walk that runs out of budget, leave their tags alone. A repeated id ends that chain as a cycle. Only tags whose `nid` is unchanged since the view started are cleared, so a notification raised while the walk runs is not removed unseen. Only the host's OpenCode is asked, since an open tag does not record a space. A message sent, a turn start and a settled request clear the session itself only.
 
 A `share-` tag survives the turn its own answer woke (`skipTurnStart`, see `notifyShareAnswer`). Pull request notifications have no cause the server can see handled, and stay until dismissed.
 

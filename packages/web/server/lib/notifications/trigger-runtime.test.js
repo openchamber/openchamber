@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNotificationTriggerRuntime } from './runtime.js';
 import { createNotificationTemplateRuntime } from './template-runtime.js';
 import { translateWireEvent } from '../event-stream/translate-v2.js';
+import { createSessionActivityProbe } from '../opencode/session-activity.js';
 
 /**
  * The "ready" push is built from the translated `message.updated` events.
@@ -889,6 +890,141 @@ describe('clearing a pushed notification once its cause is handled', () => {
     expect(clearApnsNotifications.mock.calls[0][0].tags.sort()).toEqual([entryOf('permission-ses_1'), entryOf('question-ses_1')]);
   });
 
+  describe('viewing a session with subagents', () => {
+    const questionFor = (sessionID, id) => ({ type: 'form.created', properties: { sessionID, form: { id, sessionID, title: 'Pick', fields: [] } } });
+    // `parents` answers each session record read; a session absent from it cannot be read.
+    const stubParents = (parents) => {
+      const fetchMock = vi.fn(async (url) => {
+        const id = decodeURIComponent(new URL(url).pathname.split('/').pop());
+        if (!(id in parents)) return new Response('missing', { status: 500 });
+        return Response.json({ data: { id, parentID: parents[id] } });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      return fetchMock;
+    };
+    const askAll = async (runtime, sessionIds) => {
+      for (const [index, sessionID] of sessionIds.entries()) {
+        await runtime.maybeSendPushForTrigger(questionFor(sessionID, `frm_${index}`));
+      }
+      await vi.advanceTimersByTimeAsync(600);
+    };
+    const clearedTags = (clearApnsNotifications) => clearApnsNotifications.mock.calls.flatMap(([{ tags }]) => tags);
+
+    it('clears the questions of its subagents and theirs, and leaves unrelated sessions alone', async () => {
+      vi.useFakeTimers();
+      const { runtime, clearApnsNotifications } = makeClearRuntime();
+      await askAll(runtime, ['ses_parent', 'ses_child', 'ses_grandchild', 'ses_other', 'ses_other_child']);
+      stubParents({ ses_child: 'ses_parent', ses_grandchild: 'ses_child', ses_other: null, ses_other_child: 'ses_other' });
+
+      const clearedSessionIds = await runtime.clearSessionPushNotifications('ses_parent', { withSubagents: true });
+
+      expect(clearedSessionIds.sort()).toEqual(['ses_child', 'ses_grandchild']);
+      // The viewed session clears first, then every subagent in one request.
+      expect(clearApnsNotifications).toHaveBeenCalledTimes(2);
+      expect(clearApnsNotifications.mock.calls[0][0].tags).toEqual([entryOf('question-ses_parent')]);
+      expect(clearApnsNotifications.mock.calls[1][0].tags.sort()).toEqual([
+        entryOf('question-ses_child'),
+        entryOf('question-ses_grandchild'),
+      ]);
+    });
+
+    it('reads each parent chain once for the whole view', async () => {
+      vi.useFakeTimers();
+      const { runtime } = makeClearRuntime();
+      await askAll(runtime, ['ses_parent', 'ses_child', 'ses_grandchild']);
+      const fetchMock = stubParents({ ses_child: 'ses_parent', ses_grandchild: 'ses_child' });
+
+      await runtime.clearSessionPushNotifications('ses_parent', { withSubagents: true });
+
+      const readIds = fetchMock.mock.calls.map(([url]) => decodeURIComponent(new URL(url).pathname.split('/').pop()));
+      expect(readIds.sort()).toEqual(['ses_child', 'ses_grandchild']);
+    });
+
+    it('reads a parent the event stream already recorded instead of asking OpenCode', async () => {
+      vi.useFakeTimers();
+      const { runtime, clearApnsNotifications } = makeClearRuntime();
+      await askAll(runtime, ['ses_parent', 'ses_child']);
+      await runtime.maybeSendPushForTrigger({
+        type: 'session.updated',
+        properties: { sessionID: 'ses_child', directory: '/repo', info: { sessionID: 'ses_child', parentID: 'ses_parent' } },
+      });
+      const fetchMock = stubParents({});
+
+      await runtime.clearSessionPushNotifications('ses_parent', { withSubagents: true });
+
+      expect(clearedTags(clearApnsNotifications).sort()).toEqual([entryOf('question-ses_child'), entryOf('question-ses_parent')]);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('leaves a subagent notification raised while the walk runs for the user', async () => {
+      vi.useFakeTimers();
+      const { runtime, clearApnsNotifications } = makeClearRuntime();
+      await askAll(runtime, ['ses_parent', 'ses_child']);
+
+      let releaseChild;
+      const childGate = new Promise((resolve) => { releaseChild = resolve; });
+      let childReadStarted;
+      const readStarted = new Promise((resolve) => { childReadStarted = resolve; });
+      vi.stubGlobal('fetch', vi.fn(async (url) => {
+        const id = decodeURIComponent(new URL(url).pathname.split('/').pop());
+        if (id !== 'ses_child') return Response.json({ data: { id, parentID: null } });
+        childReadStarted();
+        await childGate;
+        return Response.json({ data: { id, parentID: 'ses_parent' } });
+      }));
+
+      const clearing = runtime.clearSessionPushNotifications('ses_parent', { withSubagents: true });
+      await readStarted;
+
+      await runtime.maybeSendPushForTrigger(questionFor('ses_child', 'frm_late'));
+      await vi.advanceTimersByTimeAsync(600);
+
+      releaseChild();
+      await clearing;
+
+      expect(clearApnsNotifications).toHaveBeenCalledTimes(1);
+      expect(clearedTags(clearApnsNotifications)).toEqual([entryOf('question-ses_parent')]);
+
+      await runtime.clearSessionPushNotifications('ses_child');
+      expect(clearedTags(clearApnsNotifications)).toEqual([entryOf('question-ses_parent'), entryOf('question-ses_child')]);
+    });
+
+    it('stops at a cycle in the parent chain', async () => {
+      vi.useFakeTimers();
+      const { runtime, clearApnsNotifications } = makeClearRuntime();
+      await askAll(runtime, ['ses_parent', 'ses_a']);
+      const fetchMock = stubParents({ ses_a: 'ses_b', ses_b: 'ses_a' });
+
+      await runtime.clearSessionPushNotifications('ses_parent', { withSubagents: true });
+
+      expect(clearedTags(clearApnsNotifications)).toEqual([entryOf('question-ses_parent')]);
+      expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(2);
+    });
+
+    it('still clears the session own notifications when the lookup fails', async () => {
+      vi.useFakeTimers();
+      const { runtime, clearApnsNotifications } = makeClearRuntime();
+      await askAll(runtime, ['ses_parent', 'ses_child']);
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+
+      await runtime.clearSessionPushNotifications('ses_parent', { withSubagents: true });
+
+      expect(clearedTags(clearApnsNotifications)).toEqual([entryOf('question-ses_parent')]);
+    });
+
+    it('leaves the subagents alone on a message or a turn start', async () => {
+      vi.useFakeTimers();
+      const { runtime, clearApnsNotifications } = makeClearRuntime();
+      await askAll(runtime, ['ses_parent', 'ses_child']);
+      const fetchMock = stubParents({ ses_child: 'ses_parent' });
+
+      await runtime.clearSessionPushNotifications('ses_parent');
+
+      expect(clearedTags(clearApnsNotifications)).toEqual([entryOf('question-ses_parent')]);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
   it('sends no clearing push for a notification the phones never got, but still drops it in browsers', async () => {
     const { runtime, sendPushToAllUiSessions, clearApnsNotifications } = makeClearRuntime({ desktopVisible: true });
     await readyFor(runtime, 'ses_1');
@@ -1008,4 +1144,68 @@ describe('clearing a pushed notification once its cause is handled', () => {
     await runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
     vi.unstubAllGlobals();
   };
+});
+
+describe('the subagent walk behind a view', () => {
+  const makeProbe = ({ fetchImpl, timeoutMs = 500 }) => createSessionActivityProbe({
+    buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
+    getOpenCodeAuthHeaders: () => ({}),
+    fetchImpl,
+    timeoutMs,
+  });
+  const idOf = (url) => decodeURIComponent(new URL(url).pathname.split('/').pop());
+
+  it('shares one parent-read map across the candidates', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      const id = idOf(url);
+      const parentID = id === 'ses_child' ? 'ses_parent' : id === 'ses_grandchild' ? 'ses_child' : null;
+      return Response.json({ data: { id, parentID } });
+    });
+
+    const descendants = await makeProbe({ fetchImpl }).collectDescendantSessions('ses_parent', ['ses_child', 'ses_grandchild']);
+
+    expect(descendants).toEqual(['ses_child', 'ses_grandchild']);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps at most four walks in flight', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const fetchImpl = vi.fn(async (url) => {
+      const id = idOf(url);
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await gate;
+      inFlight -= 1;
+      return Response.json({ data: { id, parentID: 'ses_parent' } });
+    });
+    const candidates = Array.from({ length: 10 }, (_, index) => `ses_${index}`);
+
+    const walking = makeProbe({ fetchImpl }).collectDescendantSessions('ses_parent', candidates);
+    for (let tick = 0; tick < 100 && inFlight < 4; tick += 1) await Promise.resolve();
+    expect(peak).toBe(4);
+
+    release();
+    expect(await walking).toEqual(candidates);
+    expect(fetchImpl).toHaveBeenCalledTimes(10);
+  });
+
+  it('answers nothing when a chain cannot be read', async () => {
+    const descendants = await makeProbe({ fetchImpl: vi.fn(async () => new Response('missing', { status: 500 })) })
+      .collectDescendantSessions('ses_parent', ['ses_child']);
+
+    expect(descendants).toBeNull();
+  });
+
+  it('spends one abort budget on the whole walk', async () => {
+    const fetchImpl = vi.fn((url, init) => new Promise((resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(new Error('aborted')));
+    }));
+
+    const descendants = await makeProbe({ fetchImpl, timeoutMs: 5 }).collectDescendantSessions('ses_parent', ['ses_child', 'ses_other']);
+
+    expect(descendants).toBeNull();
+  });
 });

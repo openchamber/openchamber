@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { sessionParentId } from '../session-lineage.js';
+import { createSessionPushClearing } from './session-push-clearing.js';
+import { createSessionParentCache } from './session-parent-cache.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { genericNotificationTitle, truncateNotificationText } from './message.js';
 import { pullRequestNotificationTitle } from './pull-request-locales.js';
@@ -59,7 +61,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         isSpace: true,
       }
     : hostSource);
-  const hostActivityProbe = createSessionActivityProbe({ ...hostSource, timeoutMs: 2000 });
+  const hostActivityProbe = createSessionActivityProbe({ ...hostSource, timeoutMs: 2000, readSessionParent: (sessionId, signal) => readSessionParentForClearing(sessionId, signal) });
 
   const isPausedForSubagents = async (sessionId, spaceId) => {
     const activityProbe = spaceId ? createSessionActivityProbe({ ...sourceFor(spaceId), timeoutMs: 2000 }) : hostActivityProbe;
@@ -211,25 +213,18 @@ export const createNotificationTriggerRuntime = (deps) => {
     shareAnswerBatch = null;
   };
 
-  const clearSessionPushNotifications = async (sessionId, { turnStart = false } = {}) => {
-    if (!sessionId) return;
-    sessionClearedAt.delete(sessionId);
-    sessionClearedAt.set(sessionId, Date.now());
-    keepNewest(sessionClearedAt, OPEN_PUSH_TAGS_LIMIT);
-    dropPendingShareAnswers(sessionId, turnStart);
-    await restoredOpenPushTags;
-    const tags = [];
-    for (const [tag, open] of openPushTags) {
-      if (open.sessionId !== sessionId) continue;
-      if (turnStart && open.skipTurnStart) {
-        open.skipTurnStart = false;
-        persistOpenPushTags();
-        continue;
-      }
-      tags.push(tag);
-    }
-    clearPushTags(tags);
-  };
+  const clearSessionPushNotifications = createSessionPushClearing({
+    openPushTags,
+    sessionClearedAt,
+    sessionClearedAtLimit: OPEN_PUSH_TAGS_LIMIT,
+    keepNewest,
+    restoredOpenPushTags,
+    clearPushTags,
+    persistOpenPushTags,
+    dropPendingShareAnswers,
+    locationScopedSessionIds: [LOCATION_SCOPED_FORM_SESSION_ID],
+    collectDescendantSessions: (ancestorId, candidateIds) => hostActivityProbe.collectDescendantSessions(ancestorId, candidateIds),
+  });
 
   const genericTitleOf = (payload) => genericNotificationTitle(payload?.data?.type);
 
@@ -339,8 +334,7 @@ export const createNotificationTriggerRuntime = (deps) => {
   const lastReadyNotificationAt = new Map();
   const lastErrorNotificationAt = new Map();
 
-  const sessionParentIdCache = new Map();
-  const SESSION_PARENT_CACHE_TTL_MS = 60 * 1000;
+  const sessionParentCache = createSessionParentCache();
 
   const autoAcceptingSessions = new Set();
   const setAutoAcceptSession = (sessionId, enabled) => {
@@ -357,23 +351,6 @@ export const createNotificationTriggerRuntime = (deps) => {
       return '/';
     }
     return `/?session=${encodeURIComponent(sessionId)}`;
-  };
-
-  const getSessionParentCacheKey = (sessionId, directory, spaceId) => `${spaceId || ''}\0${directory || ''}\0${sessionId}`;
-
-  const getCachedSessionParentId = (sessionId, directory, spaceId) => {
-    const cacheKey = getSessionParentCacheKey(sessionId, directory, spaceId);
-    const entry = sessionParentIdCache.get(cacheKey);
-    if (!entry) return undefined;
-    if (Date.now() - entry.at > SESSION_PARENT_CACHE_TTL_MS) {
-      sessionParentIdCache.delete(cacheKey);
-      return undefined;
-    }
-    return entry.parentID;
-  };
-
-  const setCachedSessionParentId = (sessionId, directory, spaceId, parentID) => {
-    sessionParentIdCache.set(getSessionParentCacheKey(sessionId, directory, spaceId), { parentID: parentID ?? null, at: Date.now() });
   };
 
   const getParentIdFromPayload = (payload) => {
@@ -425,10 +402,10 @@ export const createNotificationTriggerRuntime = (deps) => {
     const directory = extractDirectoryFromPayload(payload);
     const parentID = getParentIdFromPayload(payload);
     if (parentID === undefined) return;
-    setCachedSessionParentId(sessionId, directory, spaceId, parentID);
+    sessionParentCache.set(sessionId, directory, spaceId, parentID);
   };
 
-  const fetchSessionRecord = async (sessionId, directory, spaceId) => {
+  const fetchSessionRecord = async (sessionId, directory, spaceId, signal = null) => {
     try {
       const source = sourceFor(spaceId);
       const base = source.buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}`, '');
@@ -439,7 +416,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           Accept: 'application/json',
           ...source.getOpenCodeAuthHeaders(),
         },
-        signal: AbortSignal.timeout(2000),
+        signal: signal ?? AbortSignal.timeout(2000),
       });
       if (!response.ok) return null;
       const session = unwrapOpenCodeResponse(await response.json().catch(() => null));
@@ -452,13 +429,23 @@ export const createNotificationTriggerRuntime = (deps) => {
   const fetchSessionParentId = async (sessionId, directory, spaceId = null) => {
     if (!sessionId) return undefined;
 
-    const cached = getCachedSessionParentId(sessionId, directory, spaceId);
+    const cached = sessionParentCache.get(sessionId, directory, spaceId);
     if (cached !== undefined) return cached;
 
     const session = await fetchSessionRecord(sessionId, directory, spaceId);
     if (!session) return undefined;
     const parentID = sessionParentId(session);
-    setCachedSessionParentId(sessionId, directory, spaceId, parentID);
+    sessionParentCache.set(sessionId, directory, spaceId, parentID);
+    return parentID;
+  };
+
+  const readSessionParentForClearing = async (sessionId, signal) => {
+    const cached = sessionParentCache.getForHost(sessionId);
+    if (cached !== undefined) return cached;
+    const session = await fetchSessionRecord(sessionId, undefined, null, signal);
+    if (!session) return undefined;
+    const parentID = sessionParentId(session);
+    sessionParentCache.set(sessionId, undefined, null, parentID);
     return parentID;
   };
 

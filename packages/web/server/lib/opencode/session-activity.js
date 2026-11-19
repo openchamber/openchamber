@@ -6,6 +6,7 @@ import { unwrapOpenCodeResponse } from './response-envelope.js';
 
 const IMAGE_JOB_LIFETIME_MS = 31 * 60 * 1000;
 const MAX_SUBAGENT_DEPTH = 8;
+const MAX_LINEAGE_WALKS = 4;
 const sessionLineageSchema = z.object({
   id: z.string().min(1),
   parentID: z.string().min(1).nullish(),
@@ -25,7 +26,7 @@ const backgroundJobsSchema = z.array(z.object({
   time: z.object({ started: z.number() }),
 }));
 
-export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs = 10_000, fetchImpl = fetch, signal: parentSignal }) => {
+export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs = 10_000, fetchImpl = fetch, signal: parentSignal, readSessionParent = null }) => {
   const requestSignal = () => {
     const timeout = AbortSignal.timeout(timeoutMs);
     return parentSignal ? AbortSignal.any([parentSignal, timeout]) : timeout;
@@ -49,39 +50,59 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     return statuses && typeof statuses === 'object' && !Array.isArray(statuses) ? statuses : null;
   };
 
+  const readLineageOnce = (parents, sessionId, signal) => {
+    if (!parents.has(sessionId)) {
+      const pending = readSessionParent
+        ? readSessionParent(sessionId, signal).then((parentID) => (
+          parentID === undefined ? undefined : { id: parentID, viaWorkflowLink: false }
+        ))
+        : openCodeGet(`/api/session/${encodeURIComponent(sessionId)}`, undefined, signal).then((body) => {
+          const parsed = sessionLineageSchema.safeParse(body);
+          if (!parsed.success || parsed.data.id !== sessionId) return undefined;
+          const parentID = sessionParentId(parsed.data);
+          return { id: parentID, viaWorkflowLink: !parsed.data.parentID && parentID !== null };
+        });
+      parents.set(sessionId, Promise.resolve(pending).catch(() => undefined));
+    }
+    return parents.get(sessionId);
+  };
+
+  const walkAncestors = async ({ sessionId, maxDepth, signal, parents, visit }) => {
+    let current = sessionId;
+    const visited = new Set();
+    for (let depth = 0; current && depth < maxDepth; depth += 1) {
+      if (signal.aborted) return 'unknown';
+      if (visited.has(current)) return 'cycle';
+      visited.add(current);
+      const parent = await readLineageOnce(parents, current, signal);
+      if (parent === undefined) return 'unknown';
+      const outcome = visit(parent, depth);
+      if (outcome) return outcome;
+      current = parent.id;
+    }
+    return 'end';
+  };
+
   const hasWorkingWithinDepth = async (sessionId, statuses, maxDepth, directOnly = false) => {
     const parents = new Map();
     const signal = requestSignal();
     let unknown = false;
     for (const activeId of Object.keys(statuses)) {
       if (activeId === sessionId) continue;
-      let current = activeId;
-      const visited = new Set();
-      for (let depth = 0; current && depth < maxDepth; depth += 1) {
-        if (signal.aborted) return null;
-        if (visited.has(current)) {
-          unknown = true;
-          break;
-        }
-        visited.add(current);
-        if (!parents.has(current)) {
-          const body = await openCodeGet(`/api/session/${encodeURIComponent(current)}`, undefined, signal).catch(() => null);
-          const parsed = sessionLineageSchema.safeParse(body);
-          parents.set(current, parsed.success && parsed.data.id === current
-            ? { id: sessionParentId(parsed.data), viaWorkflowLink: !parsed.data.parentID && sessionParentId(parsed.data) !== null }
-            : undefined);
-        }
-        const parent = parents.get(current);
-        if (parent === undefined) {
-          unknown = true;
-          break;
-        }
-        if (parent.id === sessionId) {
-          if (!directOnly || depth === 0 || parent.viaWorkflowLink) return true;
-          break;
-        }
-        current = parent.id;
-      }
+      const outcome = await walkAncestors({
+        sessionId: activeId,
+        maxDepth,
+        signal,
+        parents,
+        visit: (parent, depth) => {
+          if (parent.id !== sessionId) return null;
+          if (!directOnly || depth === 0 || parent.viaWorkflowLink) return 'found';
+          return 'end';
+        },
+      });
+      if (signal.aborted) return null;
+      if (outcome === 'found') return true;
+      if (outcome === 'unknown' || outcome === 'cycle') unknown = true;
     }
     return unknown ? null : false;
   };
@@ -128,8 +149,42 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
       .map((job) => ({ kind: job.kind, sessionID: job.sessionID, command: job.command, startedAt: job.time.started }));
   };
 
+  const collectDescendantSessions = async (ancestorId, candidateIds, maxDepth = MAX_SUBAGENT_DEPTH) => {
+    if (!ancestorId || candidateIds.length === 0) return [];
+    const signal = requestSignal();
+    const parents = new Map();
+    const descendants = new Set();
+    let unknown = false;
+
+    const isDescendant = async (candidateId) => {
+      const outcome = await walkAncestors({
+        sessionId: candidateId,
+        maxDepth,
+        signal,
+        parents,
+        visit: (parent) => (parent.id === ancestorId ? 'found' : null),
+      });
+      if (outcome === 'found') descendants.add(candidateId);
+      else if (outcome === 'unknown') unknown = true;
+    };
+
+    let next = 0;
+    const walk = async () => {
+      while (!signal.aborted && next < candidateIds.length) {
+        const candidateId = candidateIds[next];
+        next += 1;
+        await isDescendant(candidateId);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(MAX_LINEAGE_WALKS, candidateIds.length) }, walk));
+
+    if (unknown || signal.aborted) return null;
+    return candidateIds.filter((candidateId) => descendants.has(candidateId));
+  };
+
   return {
     fetchActiveSessionStatuses,
+    collectDescendantSessions,
     hasWorkingChildren: (sessionId, statuses) => hasWorkingWithinDepth(sessionId, statuses, MAX_SUBAGENT_DEPTH, true),
     hasWorkingDescendants: (sessionId, statuses) => hasWorkingWithinDepth(sessionId, statuses, MAX_SUBAGENT_DEPTH),
     fetchRunningShells,

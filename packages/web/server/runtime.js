@@ -2700,7 +2700,7 @@ async function main(options = {}) {
     removeApnsToken,
     updateUiVisibility,
     clearPendingPushBadge: () => clearPendingPushBadge(),
-    clearSessionPushNotifications: (sessionId) => notificationTriggerRuntime.clearSessionPushNotifications(sessionId),
+    clearSessionPushNotifications: (sessionId, options) => notificationTriggerRuntime.clearSessionPushNotifications(sessionId, options),
     isUiVisible,
     getUiNotificationClients: () => uiNotificationClients,
     writeSseEvent,

@@ -1,5 +1,6 @@
 
 import { create } from "zustand"
+import { z } from "zod"
 import { clearDesktopSessionNotifications } from "@/lib/desktop"
 import { runtimeFetch } from "@/lib/runtime-fetch"
 import { getUnreadSessionIds, markSessionsUnreadSeen, markSessionUnreadSeen } from "./session-unread"
@@ -48,10 +49,27 @@ function closeWebPushSessionNotifications(sessionId: string) {
     .catch(() => { /* a browser without push notifications has nothing to close */ })
 }
 
-function clearSessionNotifications(sessionId: string) {
+const viewResponseSchema = z.object({ clearedSessionIds: z.array(z.string()).optional() })
+
+export async function sessionsToClearFromView(response: Response, viewedSessionId: string): Promise<string[]> {
+  const parsed = viewResponseSchema.safeParse(await response.json().catch(() => null))
+  if (!parsed.success) return []
+  const ids = (parsed.data.clearedSessionIds ?? []).filter((id) => id.length > 0 && id !== viewedSessionId)
+  return [...new Set(ids)]
+}
+
+function clearLocalSessionNotifications(sessionId: string) {
   clearDesktopSessionNotifications(sessionId)
   closeWebPushSessionNotifications(sessionId)
+}
+
+function clearSessionNotifications(sessionId: string) {
+  clearLocalSessionNotifications(sessionId)
   runtimeFetch(`/api/sessions/${encodeURIComponent(sessionId)}/view`, { method: "POST" })
+    .then((response) => (response.ok ? sessionsToClearFromView(response, sessionId) : []))
+    .then((cleared) => {
+      for (const id of cleared) clearLocalSessionNotifications(id)
+    })
     .catch(() => { /* the phones drop them with the next push */ })
 }
 
