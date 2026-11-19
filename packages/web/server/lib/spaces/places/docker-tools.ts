@@ -13,29 +13,40 @@ import {
 } from '../labels.js';
 import { buildFillInput } from '../tools-filler.js';
 import { requireToolsSource, toolsContentKey } from '../tools.js';
-import { CHANGE_TIMEOUT_MS, ROLLBACK_SETTLE_MS, entryLabels, entryName, isInterrupted } from './docker-engine.js';
+import type { ToolsSource } from '../tools.js';
+import { CHANGE_TIMEOUT_MS, ROLLBACK_SETTLE_MS, entryLabels, entryName, failureField, isInterrupted } from './docker-engine.js';
+import type { DockerEngine, DockerRemovalFailure } from './docker-engine.js';
 
 const FILL_TIMEOUT_MS = 30 * 60_000;
 const FILL_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const ERROR_TAIL_CHARACTERS = 2_000;
 
-export function createDockerTools({ engine, owner, toolsSource, image, now, wait }) {
+export interface DockerToolsOptions {
+  engine: DockerEngine;
+  owner: string;
+  toolsSource: ToolsSource;
+  image: string;
+  now: () => Date;
+  wait: (milliseconds: number) => Promise<void>;
+}
+
+export function createDockerTools({ engine, owner, toolsSource, image, now, wait }: DockerToolsOptions) {
   const source = requireToolsSource(toolsSource);
   const key = toolsContentKey(source, image);
   const volume = toolsResourceName(owner, key);
-  let inFlight = null;
+  let inFlight: Promise<string> | null = null;
   let filling = false;
-  const fillListeners = new Set();
+  const fillListeners = new Set<() => void>();
 
-  const labelsFor = (role) => labelArgs(buildToolsLabels({ role, owner, key, description: source.description, created: now().toISOString() }));
-  const oneShotArgs = (role) => ({ containerName: toolsResourceName(owner, key, role), labelArguments: labelsFor(role), toolsVolume: volume, image });
+  const labelsFor = (role: string) => labelArgs(buildToolsLabels({ role, owner, key, description: source.description, created: now().toISOString() }));
+  const oneShotArgs = (role: string) => ({ containerName: toolsResourceName(owner, key, role), labelArguments: labelsFor(role), toolsVolume: volume, image });
 
-  const findOurs = async (kind, filter) => (await engine.findByLabel(kind, toolsLabelFilterArgs({ owner, ...filter })))
+  const findOurs = async (kind: 'container' | 'volume', filter: { key?: string; role?: string }) => (await engine.findByLabel(kind, toolsLabelFilterArgs({ owner, ...filter })))
     .filter((entry) => parseToolsLabels(entryLabels(kind, entry))?.owner === owner)
     .map(entryName);
 
   const removeOneShots = async () => {
-    const failed = [];
+    const failed: DockerRemovalFailure[] = [];
     for (const name of await findOurs('container', { key })) {
       const problem = await engine.removeOne('container', name);
       if (problem) failed.push(problem);
@@ -55,11 +66,11 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
     return result.stdout.trim() === key ? 'filled' : 'wrong';
   };
 
-  const cleanUpFill = async () => {
+  const cleanUpFill = async (): Promise<DockerRemovalFailure[]> => {
     try {
       return [...(await removeOneShots()), ...(await engine.removeByName([['volume', volume]]))];
     } catch (error) {
-      return [{ kind: 'volume', name: volume, message: error.message }];
+      return [{ kind: 'volume', name: volume, message: failureField(error, 'message') }];
     }
   };
 
@@ -89,7 +100,7 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
       const leftovers = rollbackFailures.length > 0
         ? ` Clean-up also failed for: ${rollbackFailures.map((item) => `${item.kind} ${item.name}`).join(', ')}.`
         : '';
-      const wrapped = new SpaceError(error.code ?? 'tools_fill_failed', `Could not prepare the tools for spaces. ${error.message}${leftovers}`, { rollbackFailures, uncertain });
+      const wrapped = new SpaceError(failureField(error, 'code') ?? 'tools_fill_failed', `Could not prepare the tools for spaces. ${failureField(error, 'message')}${leftovers}`, { rollbackFailures, uncertain });
       wrapped.cause = error;
       throw wrapped;
     }
@@ -101,7 +112,7 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
         if (name !== volume) await engine.removeOne('volume', name);
       }
     } catch {
-      // The next fill or the next recreate tries again.
+      return;
     }
   };
 
@@ -139,7 +150,7 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
     return volume;
   };
 
-  const ensure = ({ onFill } = {}) => {
+  const ensure = ({ onFill }: { onFill?: () => void } = {}) => {
     if (onFill) {
       if (filling) onFill();
       else fillListeners.add(onFill);
@@ -152,14 +163,14 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
     return inFlight;
   };
 
-  const removeIfUnlabelled = async (name) => {
+  const removeIfUnlabelled = async (name: string): Promise<DockerRemovalFailure[]> => {
     try {
       const entry = await engine.inspect('volume', name);
       const unlabelled = entry && Object.keys(entry.Labels ?? {}).length === 0;
       const problem = unlabelled ? await engine.removeOne('volume', name) : null;
       return problem ? [problem] : [];
     } catch (error) {
-      return [{ kind: 'volume', name, message: error.message }];
+      return [{ kind: 'volume', name, message: failureField(error, 'message') }];
     }
   };
 
