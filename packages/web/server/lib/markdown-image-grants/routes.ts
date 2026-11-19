@@ -4,29 +4,52 @@ import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { fitRenderPageImages, renderPageImageSources } from '../openchamber-control/render-page.js';
 import { generatedImagePaths } from '../openchamber-control/generate-image.js';
 import { capturedScreenshotPaths } from '../openchamber-control/screenshots.js';
-import { isRecord, isString } from '../shared/guards.js';
+import { asNonEmptyString, isRecord, isString } from '../shared/guards.js';
 import { inspectLocalImage } from './inspect-image.js';
+import type { PageImageInspection } from '../openchamber-control/render-page.js';
+import type { DirectoryValidation } from '../projects/contracts.js';
+import type { Application } from '../shared/http-contracts.js';
+import type { JsonObject, JsonValue } from '../shared/json-values.js';
+import type { LocalImageInspection, LocalImageInspectionOptions } from './inspect-image.js';
 
-const asString = (value) => typeof value === 'string' ? value.trim() : '';
+type OutsideFileGrantOptions = NonNullable<Parameters<typeof mintOutsideFileGrant>[1]>;
 
-const normalizeReferenceLabel = (value) => value.trim().replace(/\s+/g, ' ').toLowerCase();
+export interface MarkdownImageGrantDependencies {
+  fsPromises: LocalImageInspectionOptions['fsPromises'] & NonNullable<OutsideFileGrantOptions['fsPromises']>;
+  path: NonNullable<OutsideFileGrantOptions['path']>;
+  crypto: NonNullable<OutsideFileGrantOptions['crypto']>;
+  validateDirectoryPath: (directory: string) => Promise<DirectoryValidation>;
+  buildOpenCodeUrl: (route: string, prefix: string) => string;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+}
 
-const unescapeMarkdownDestination = (value) => value.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\]^_`{|}~\\])/g, '$1');
+type MessageLookup = Pick<MarkdownImageGrantDependencies, 'buildOpenCodeUrl' | 'getOpenCodeAuthHeaders'> & {
+  sessionId: string;
+  messageId: string;
+  directory: string;
+};
 
-const isEscapedAt = (value, index) => {
+const isJsonRecord = (value: JsonValue | undefined): value is JsonObject => isRecord(value);
+const hasErrorMessage = (value: unknown): value is { message?: unknown } => value != null;
+
+const normalizeReferenceLabel = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
+
+const unescapeMarkdownDestination = (value: string) => value.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\]^_`{|}~\\])/g, '$1');
+
+const isEscapedAt = (value: string, index: number) => {
   let slashes = 0;
   for (let cursor = index - 1; cursor >= 0 && value[cursor] === '\\'; cursor -= 1) slashes += 1;
   return slashes % 2 === 1;
 };
 
-const findClosingBracket = (value, start) => {
+const findClosingBracket = (value: string, start: number) => {
   for (let cursor = start; cursor < value.length; cursor += 1) {
     if (value[cursor] === ']' && !isEscapedAt(value, cursor)) return cursor;
   }
   return -1;
 };
 
-const findInlineImageEnd = (value, start) => {
+const findInlineImageEnd = (value: string, start: number) => {
   let cursor = start;
   while (/\s/.test(value[cursor] || '')) cursor += 1;
   if (value[cursor] === ')') return cursor;
@@ -44,7 +67,7 @@ const findInlineImageEnd = (value, start) => {
   return -1;
 };
 
-const parseInlineDestination = (value, start) => {
+const parseInlineDestination = (value: string, start: number) => {
   let cursor = start;
   while (/\s/.test(value[cursor] || '')) cursor += 1;
   if (value[cursor] === '<') {
@@ -59,9 +82,9 @@ const parseInlineDestination = (value, start) => {
   let source = '';
   let depth = 0;
   for (; cursor < value.length; cursor += 1) {
-    const char = value[cursor];
+    const char = value.charAt(cursor);
     if (char === '\\' && cursor + 1 < value.length) {
-      source += char + value[cursor + 1];
+      source += char + value.charAt(cursor + 1);
       cursor += 1;
       continue;
     }
@@ -85,7 +108,7 @@ const parseInlineDestination = (value, start) => {
   return null;
 };
 
-const parseDefinitionDestination = (value) => {
+const parseDefinitionDestination = (value: string) => {
   const trimmed = value.trimStart();
   if (trimmed.startsWith('<')) {
     const end = trimmed.indexOf('>', 1);
@@ -95,24 +118,23 @@ const parseDefinitionDestination = (value) => {
   return match ? unescapeMarkdownDestination(match[0]) : '';
 };
 
-const messageContent = (message) => {
-  if (Array.isArray(message?.content)) return message.content;
-  if (typeof message?.text === 'string') return [{ type: 'text', text: message.text }];
+const messageContent = (message: JsonObject): JsonValue[] => {
+  if (Array.isArray(message.content)) return message.content;
+  if (isString(message.text)) return [{ type: 'text', text: message.text }];
   return [];
 };
 
-const collectMarkdownLinesOutsideCode = (message) => {
+const collectMarkdownLinesOutsideCode = (message: JsonObject) => {
   const lines = [];
   for (const part of messageContent(message)) {
-    if (part?.type !== 'text' || typeof part.text !== 'string') continue;
-    let fence = null;
+    if (!isJsonRecord(part) || part.type !== 'text' || !isString(part.text)) continue;
+    let fence: { char: string; size: number } | null = null;
     for (const line of part.text.split('\n')) {
-      const fenceMatch = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
-      if (fenceMatch) {
-        const marker = fenceMatch[1];
+      const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+      if (marker !== undefined) {
         if (!fence) {
-          fence = { char: marker[0], size: marker.length };
-        } else if (marker[0] === fence.char && marker.length >= fence.size) {
+          fence = { char: marker.charAt(0), size: marker.length };
+        } else if (marker.charAt(0) === fence.char && marker.length >= fence.size) {
           fence = null;
         }
         continue;
@@ -124,13 +146,13 @@ const collectMarkdownLinesOutsideCode = (message) => {
   return lines;
 };
 
-const markdownImageSources = (message) => {
-  const sources = new Set();
+const markdownImageSources = (message: JsonObject) => {
+  const sources = new Set<string>();
   const markdownLines = collectMarkdownLinesOutsideCode(message);
-  const definitions = new Map();
+  const definitions = new Map<string, string>();
   for (const line of markdownLines) {
     const match = /^\s{0,3}\[([^\]]+)]\s*:\s*(.*)$/.exec(line);
-    if (!match) continue;
+    if (match?.[1] === undefined || match[2] === undefined) continue;
     const source = parseDefinitionDestination(match[2]);
     if (source) definitions.set(normalizeReferenceLabel(match[1]), source);
   }
@@ -164,40 +186,50 @@ const markdownImageSources = (message) => {
   return sources;
 };
 
-const spilledPageHtml = (input) => {
+const spilledPageHtml = (input: JsonObject | undefined) => {
   if (!isString(input?.action) || !input.action.trim().startsWith('{')) return undefined;
-  let revived;
+  let revived: JsonValue;
   try {
     revived = JSON.parse(input.action);
   } catch {
     return undefined;
   }
-  if (!isRecord(revived)) return undefined;
-  return isRecord(revived.parameters) && Object.hasOwn(revived.parameters, 'html')
+  if (!isJsonRecord(revived)) return undefined;
+  return isJsonRecord(revived.parameters) && Object.hasOwn(revived.parameters, 'html')
     ? revived.parameters.html
     : revived.html;
 };
 
-const renderPages = (message) => {
-  const pages = new Map();
+const renderPages = (message: JsonObject) => {
+  const pages = new Map<JsonValue | undefined, string>();
   for (const part of messageContent(message)) {
-    if (part?.type !== 'tool' || part.name !== 'openchamber_render') continue;
-    const input = part.state?.input;
-    const html = [input?.parameters?.html, input?.html, spilledPageHtml(input)].find(isString);
-    if (isString(html)) pages.set(part.id, html);
+    if (!isJsonRecord(part) || part.type !== 'tool' || part.name !== 'openchamber_render') continue;
+    const state = isJsonRecord(part.state) ? part.state : undefined;
+    const input = isJsonRecord(state?.input) ? state.input : undefined;
+    const parameters = isJsonRecord(input?.parameters) ? input.parameters : undefined;
+    const html = [parameters?.html, input?.html, spilledPageHtml(input)].find(isString);
+    if (html !== undefined) pages.set(part.id, html);
   }
   return pages;
 };
 
-const renderPageSources = (message) => {
-  const sources = new Set();
+const renderPageSources = (message: JsonObject) => {
+  const sources = new Set<string>();
   for (const html of renderPages(message).values()) {
     for (const source of renderPageImageSources(html)) sources.add(source);
   }
   return sources;
 };
 
-const comparablePath = (value) => {
+const decodeComparablePath = (value: string) => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+const comparablePath = (value: string) => {
   let text = value;
   if (/^file:\/\//i.test(text)) {
     try {
@@ -206,12 +238,7 @@ const comparablePath = (value) => {
       return '';
     }
   }
-  try {
-    text = decodeURIComponent(text);
-  } catch {
-    // A stray % in a literal path stays as written.
-  }
-  text = text.replace(/\\/g, '/');
+  text = decodeComparablePath(text).replace(/\\/g, '/');
   return /^\/[A-Za-z]:\//.test(text) ? text.slice(1) : text;
 };
 
@@ -221,20 +248,21 @@ const TOOL_RESULT_IMAGE_PATHS = new Map([
   ['execute', capturedScreenshotPaths],
 ]);
 
-const toolResultImageSources = (message) => {
-  const sources = new Set();
+const toolResultImageSources = (message: JsonObject) => {
+  const sources = new Set<string>();
   for (const part of messageContent(message)) {
-    const readPaths = part?.type === 'tool' ? TOOL_RESULT_IMAGE_PATHS.get(part.name) : undefined;
-    if (!readPaths || part.state?.status !== 'completed') continue;
+    if (!isJsonRecord(part)) continue;
+    const readPaths = part.type === 'tool' && isString(part.name) ? TOOL_RESULT_IMAGE_PATHS.get(part.name) : undefined;
+    if (!readPaths || !isJsonRecord(part.state) || part.state.status !== 'completed') continue;
     for (const item of Array.isArray(part.state.content) ? part.state.content : []) {
-      if (item?.type !== 'text' || !isString(item.text)) continue;
+      if (!isJsonRecord(item) || item.type !== 'text' || !isString(item.text)) continue;
       for (const source of readPaths(item.text)) sources.add(comparablePath(source));
     }
   }
   return sources;
 };
 
-const fetchMessage = async ({ sessionId, messageId, directory, buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
+const fetchMessage = async ({ sessionId, messageId, directory, buildOpenCodeUrl, getOpenCodeAuthHeaders }: MessageLookup) => {
   const url = new URL(buildOpenCodeUrl(
     `/api/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(messageId)}`,
     '',
@@ -250,11 +278,12 @@ const fetchMessage = async ({ sessionId, messageId, directory, buildOpenCodeUrl,
   });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`OpenCode returned ${response.status}`);
-  const message = unwrapOpenCodeResponse(await response.json().catch(() => null));
-  return message && typeof message === 'object' && typeof message.id === 'string' ? message : null;
+  const body: JsonValue = await response.json().catch(() => null);
+  const message = unwrapOpenCodeResponse(body);
+  return isJsonRecord(message) && isString(message.id) ? message : null;
 };
 
-export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
+export const registerMarkdownImageGrantRoutes = (app: Application, dependencies: MarkdownImageGrantDependencies) => {
   const {
     fsPromises,
     path,
@@ -268,16 +297,17 @@ export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
     '/api/openchamber/sessions/:sessionId/markdown-image-grants',
     express.json({ limit: '256kb' }),
     async (req, res) => {
-      const sessionId = asString(req.params.sessionId);
-      const messageId = asString(req.body?.messageId);
-      const sources = Array.isArray(req.body?.sources)
-        ? [...new Set(req.body.sources.map(asString).filter(Boolean))]
+      const body = isRecord(req.body) ? req.body : undefined;
+      const sessionId = asNonEmptyString(req.params.sessionId);
+      const messageId = asNonEmptyString(body?.messageId);
+      const sources = Array.isArray(body?.sources)
+        ? [...new Set(body.sources.map(asNonEmptyString).filter((source) => source !== null))]
         : [];
-      const callId = asString(req.body?.callId);
+      const callId = asNonEmptyString(body?.callId);
       if (!sessionId || !messageId || sources.length === 0) {
         return res.status(400).json({ error: 'sessionId, messageId, and sources are required' });
       }
-      const validatedDirectory = await validateDirectoryPath(asString(req.body?.directory));
+      const validatedDirectory = await validateDirectoryPath(asNonEmptyString(body?.directory) ?? '');
       if (!validatedDirectory.ok) {
         return res.status(400).json({ error: validatedDirectory.error || 'Invalid directory' });
       }
@@ -293,13 +323,13 @@ export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
         if (!message || message.id !== messageId || message.type !== 'assistant') {
           return res.status(404).json({ error: 'Assistant message not found' });
         }
-        const inspect = (source) => inspectLocalImage({
+        const inspect = (source: string) => inspectLocalImage({
           source,
           directory: validatedDirectory.directory,
           fsPromises,
           path,
-        }).catch(() => ({ status: 'error' }));
-        let check;
+        }).catch((): LocalImageInspection => ({ status: 'error' }));
+        let check: (source: string) => LocalImageInspection | PageImageInspection | Promise<LocalImageInspection>;
         if (callId) {
           const html = renderPages(message).get(callId);
           if (html === undefined) return res.status(404).json({ error: 'Page not found' });
@@ -340,7 +370,7 @@ export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
         }
         return res.json({ results });
       } catch (error) {
-        console.warn('[MarkdownImageGrants] failed to prepare images:', error?.message || error);
+        console.warn('[MarkdownImageGrants] failed to prepare images:', (hasErrorMessage(error) && error.message) || error);
         return res.status(503).json({ error: 'Failed to prepare session images' });
       }
     },
