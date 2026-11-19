@@ -1,4 +1,6 @@
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import type { LegacyAuthFile } from '../../opencode/auth.js';
+import type { UsageWindow } from '../utils/contracts.js';
 import {
   normalizeAuthEntry,
   buildResult,
@@ -14,7 +16,44 @@ import {
 
 const MOONSHOT_BALANCE_URL = 'https://api.moonshot.ai/v1/users/me/balance';
 
-const fetchMoonshotBalanceWindows = async (apiKey, fetchImpl, refreshSignal) => {
+export interface KimiDependencies {
+  readAuth?: () => LegacyAuthFile | Promise<LegacyAuthFile>;
+  fetchImpl?: typeof fetch;
+}
+
+interface KimiUsageFields {
+  used_ratio?: unknown;
+  reset_time?: unknown;
+  limit?: unknown;
+  used?: unknown;
+  remaining?: unknown;
+  resetTime?: unknown;
+}
+
+interface KimiWindowFields {
+  window?: unknown;
+  detail?: unknown;
+}
+
+interface KimiRatioFields {
+  limit_5h?: unknown;
+  limit_7d?: unknown;
+  limit_month_total?: unknown;
+}
+
+const hasPayloadFields = (value: unknown): value is { usages?: unknown; usage?: unknown; limits?: unknown } => value != null;
+const hasBalanceData = (value: unknown): value is { data?: unknown } => asObject(value) !== null;
+const hasBalance = (value: unknown): value is { available_balance?: unknown } => asObject(value) !== null;
+const isFiniteNumber = (value: unknown): value is number => Number.isFinite(value);
+const hasUsageFields = (value: unknown): value is KimiUsageFields => asObject(value) !== null;
+const hasRatioFields = (value: unknown): value is KimiRatioFields => asObject(value) !== null;
+const hasLegacyWindowFields = (value: unknown): value is KimiWindowFields => value != null;
+const hasDetailFields = (value: unknown): value is KimiUsageFields => value != null;
+const hasDurationFields = (value: unknown): value is { duration?: unknown; timeUnit?: unknown } => value != null;
+const isLimitArray = (value: unknown): value is unknown[] => Array.isArray(value);
+const hasAuthFields = (value: unknown): value is { key?: unknown; token?: unknown } => value != null;
+
+const fetchMoonshotBalanceWindows = async (apiKey: string, fetchImpl: typeof fetch, refreshSignal: AbortSignal) => {
   try {
     const response = await fetchImpl(MOONSHOT_BALANCE_URL, {
       method: 'GET',
@@ -22,8 +61,10 @@ const fetchMoonshotBalanceWindows = async (apiKey, fetchImpl, refreshSignal) => 
       signal: AbortSignal.any([refreshSignal, AbortSignal.timeout(5_000)])
     });
     if (!response.ok) return null;
-    const balance = asObject(asObject(await response.json())?.data)?.available_balance;
-    if (!Number.isFinite(balance)) return null;
+    const payload: unknown = await response.json();
+    const data = hasBalanceData(payload) ? payload.data : null;
+    const balance = hasBalance(data) ? data.available_balance : null;
+    if (!isFiniteNumber(balance)) return null;
     return {
       credits_balance: toUsageWindow({
         usedPercent: null,
@@ -45,17 +86,18 @@ const RATIO_WINDOWS = [
   { key: 'limit_5h', label: '5h', windowSeconds: 5 * 60 * 60 },
   { key: 'limit_7d', label: 'weekly', windowSeconds: 7 * 24 * 60 * 60 },
   { key: 'limit_month_total', label: 'monthly', windowSeconds: null }
-];
+] as const;
 
-const toRatioPercent = (entry) => {
+const toRatioPercent = (entry: KimiUsageFields) => {
   const ratio = toNumber(entry?.used_ratio);
   return ratio === null ? null : Math.max(0, Math.min(100, ratio * 100));
 };
 
-const ratioWindows = (usages) => {
-  const windows = {};
+const ratioWindows = (usages: KimiRatioFields) => {
+  const windows: Record<string, UsageWindow> = {};
   for (const { key, label, windowSeconds } of RATIO_WINDOWS) {
-    const entry = asObject(usages[key]);
+    const entry = usages[key];
+    if (!hasUsageFields(entry)) continue;
     const usedPercent = toRatioPercent(entry);
     if (usedPercent === null) continue;
     windows[label] = toUsageWindow({
@@ -67,7 +109,7 @@ const ratioWindows = (usages) => {
   return windows;
 };
 
-const computeUsedPercent = (total, used, remaining) => {
+const computeUsedPercent = (total: number | null, used: number | null, remaining: number | null) => {
   if (!total) return null;
   if (used !== null) {
     return Math.max(0, Math.min(100, (used / total) * 100));
@@ -78,10 +120,10 @@ const computeUsedPercent = (total, used, remaining) => {
   return null;
 };
 
-const legacyWindows = (payload) => {
-  const windows = {};
-  const usage = asObject(payload?.usage);
-  if (usage) {
+const legacyWindows = (payload: { usage?: unknown; limits?: unknown } | null) => {
+  const windows: Record<string, UsageWindow> = {};
+  const usage = payload?.usage;
+  if (hasUsageFields(usage)) {
     windows.weekly = toUsageWindow({
       usedPercent: computeUsedPercent(toNumber(usage.limit), toNumber(usage.used), toNumber(usage.remaining)),
       windowSeconds: null,
@@ -89,12 +131,14 @@ const legacyWindows = (payload) => {
     });
   }
 
-  const limits = Array.isArray(payload?.limits) ? payload.limits : [];
+  const limits = isLimitArray(payload?.limits) ? payload.limits : [];
   for (const limit of limits) {
-    const window = limit?.window;
-    const detail = limit?.detail;
-    const rawLabel = durationToLabel(window?.duration, window?.timeUnit);
-    const windowSeconds = durationToSeconds(window?.duration, window?.timeUnit);
+    const window = hasLegacyWindowFields(limit) ? limit.window : undefined;
+    const rawDetail = hasLegacyWindowFields(limit) ? limit.detail : undefined;
+    const detail = hasDetailFields(rawDetail) ? rawDetail : undefined;
+    const { duration, timeUnit } = hasDurationFields(window) ? window : {};
+    const rawLabel = durationToLabel(duration, timeUnit);
+    const windowSeconds = durationToSeconds(duration, timeUnit);
     const label = windowSeconds === 5 * 60 * 60 ? `Rate Limit (${rawLabel})` : rawLabel;
     windows[label] = toUsageWindow({
       usedPercent: computeUsedPercent(toNumber(detail?.limit), toNumber(detail?.used), toNumber(detail?.remaining)),
@@ -105,11 +149,12 @@ const legacyWindows = (payload) => {
   return windows;
 };
 
-const collectApiKeys = (auth) => {
+const collectApiKeys = (auth: LegacyAuthFile) => {
   const keys = [];
   const seen = new Set();
   for (const alias of aliases) {
-    const entry = normalizeAuthEntry(auth?.[alias] ?? null);
+    const rawEntry: unknown = normalizeAuthEntry(auth?.[alias] ?? null);
+    const entry = hasAuthFields(rawEntry) ? rawEntry : null;
     const apiKey = asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
     const endpoint = alias === 'kimi-code-plan-global'
       ? 'https://api.kimi.ai/coding/v1/usages'
@@ -123,9 +168,9 @@ const collectApiKeys = (auth) => {
   return keys;
 };
 
-export const isConfigured = (auth) => collectApiKeys(auth).length > 0;
+export const isConfigured = (auth: LegacyAuthFile) => collectApiKeys(auth).length > 0;
 
-export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: KimiDependencies = {}) => {
   const apiKeys = collectApiKeys(await readAuth());
 
   if (apiKeys.length === 0) {
@@ -153,9 +198,10 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
       });
 
       if (response.ok) {
-        const payload = await response.json();
-        const usages = asObject(asObject(payload)?.usages);
-        const windows = usages ? ratioWindows(usages) : legacyWindows(payload);
+        const rawPayload: unknown = await response.json();
+        const payload = hasPayloadFields(rawPayload) ? rawPayload : null;
+        const usages = asObject(rawPayload) ? payload?.usages : undefined;
+        const windows = hasRatioFields(usages) ? ratioWindows(usages) : legacyWindows(payload);
 
         return buildResult({
           providerId,

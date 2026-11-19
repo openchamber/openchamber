@@ -65,7 +65,9 @@ export const buildResult = <ProviderId extends string | null, ProviderName exten
   return result;
 };
 
-export const durationToLabel = (duration: number | null | undefined, unit: string | null | undefined) => {
+type DurationInput = [duration: unknown, unit: unknown];
+
+export const durationToLabel = (...[duration, unit]: DurationInput) => {
   if (!duration || !unit) return 'limit';
   if (unit === 'TIME_UNIT_MINUTE') return `${duration}m`;
   if (unit === 'TIME_UNIT_HOUR') return `${duration}h`;
@@ -73,11 +75,11 @@ export const durationToLabel = (duration: number | null | undefined, unit: strin
   return 'limit';
 };
 
-export const durationToSeconds = (duration: number | null | undefined, unit: string | null | undefined) => {
+export const durationToSeconds = (...[duration, unit]: DurationInput) => {
   if (!duration || !unit) return null;
-  if (unit === 'TIME_UNIT_MINUTE') return duration * 60;
-  if (unit === 'TIME_UNIT_HOUR') return duration * 3600;
-  if (unit === 'TIME_UNIT_DAY') return duration * 86400;
+  if (unit === 'TIME_UNIT_MINUTE') return +duration * 60;
+  if (unit === 'TIME_UNIT_HOUR') return +duration * 3600;
+  if (unit === 'TIME_UNIT_DAY') return +duration * 86400;
   return null;
 };
 
