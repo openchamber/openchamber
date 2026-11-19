@@ -153,11 +153,15 @@ This module provides Git repository operations for the web server runtime, inclu
 - Sparse listing inputs retain their undefined slots. Identity resolvers receive
   those slots unchanged; the Git-directory probe's overload preserves the native
   `path.join` argument failure before the filesystem catch.
-- Identity-file validation establishes only `id`, `userName`, and `userEmail`;
-  legacy fields such as `sshKey` remain unchecked. `prepareGuestGitNetwork` in
-  `../guests/clone.ts` currently passes a truthy `sshKey` directly to
-  `quoteSshPath`, which requires a string. A typed identity-store result needs
-  that consumer to narrow the legacy field first.
+- Identity-file validation establishes only `id`, `userName`, and `userEmail`,
+  so `StoredGitIdentityProfile` types every other field, legacy `sshKey`
+  included, as `unknown`. Readers narrow a field before use:
+  `toPublicGitIdentityProfile` drops what it cannot read, and
+  `prepareGuestGitNetwork` in `../guests/clone.ts` treats a non-string `sshKey`
+  as no key, so the clone falls back to the host SSH configuration.
+- A stored state is a fresh `{ profiles }` object holding the validated
+  profile records themselves, so retained migration fields round-trip
+  unchanged.
 - Provisioning accepts partial provider account/user metadata. Legacy stored
   account fields remain unchecked until their existing equality comparisons.
   The provider descriptor permits the absent user id passed to `noReplyEmail`.

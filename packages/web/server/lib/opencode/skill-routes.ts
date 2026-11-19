@@ -3,13 +3,14 @@ import { buildAppliedResponse } from './config-mutation-response.js';
 import { OPENCODE_CONFIG_DIR } from './config-files.js';
 import { skillSwitchRequestSchema } from './config-v2.js';
 import { setSkillEnabled } from './skill-switch.js';
-import { asNonEmptyString, isString } from '../shared/guards.js';
+import { asNonEmptyString, isRecord, isString } from '../shared/guards.js';
 import { appendInstalledSources, isInstalledFromSource, readInstalledSources, removeInstalledSources } from '../skills-catalog/installed-sources.js';
 import type { Application, Request } from '../shared/http-contracts.js';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
 import type { createProjectDirectoryRuntime } from '../projects/project-directory-runtime.js';
 import type { createHttpsCredentialReference } from '../git/credential-resolver.js';
 import type { ProviderAccount } from '../git/network-plan-contracts.js';
+import type { StoredGitIdentityProfile } from '../git/identity-storage.js';
 import type { getCacheKey, scanWithCache } from '../skills-catalog/cache.js';
 import type { CuratedSkillsSource, getCuratedSkillsSources } from '../skills-catalog/curated-sources.js';
 import type { CatalogGitIdentity, CatalogGitOptions } from '../skills-catalog/git.js';
@@ -26,13 +27,6 @@ type Directory = string | null;
 type SkillSource = ListedSkill['source'];
 interface SkillParams { name: string }
 interface SkillFileParams extends SkillParams { filePath: string | string[] }
-interface GitProfile {
-  id: string;
-  name: string;
-  account?: ProviderAccount | null;
-  sshCredentialId?: string;
-  transport?: 'account' | 'ssh' | 'anonymous' | 'system';
-}
 interface TransportAccount {
   credentialId: string;
   status: string;
@@ -116,13 +110,15 @@ type SkillRouteOptions =
     scanSkillsRepository: typeof scanSkillsRepository;
     installSkillsFromRepository: typeof installSkillsFromRepository;
     fetchGitHubRepoMetas: typeof fetchGitHubRepoMetas;
-    getProfiles: () => GitProfile[];
-    getProfile: (id: JsonValue) => GitProfile | null;
+    getProfiles: () => StoredGitIdentityProfile[];
+    getProfile: (id: JsonValue) => StoredGitIdentityProfile | null;
     createHttpsCredentialReference?: typeof createHttpsCredentialReference;
     resolveSourceControlAccount?: (account: ProviderAccount) => Promise<TransportAccount | null>;
   };
 
 const hasCatalogFields = (value: unknown): value is CatalogBody => value != null;
+const isProviderAccount = (value: unknown): value is ProviderAccount => isRecord(value)
+  && isString(value.provider) && isString(value.instance) && isString(value.accountId);
 const hasMutationFields = (value: unknown): value is MutationFields => value != null;
 const hasErrorFields = (value: unknown): value is ErrorFields => value != null;
 const hasScanFields = (value: unknown): value is CachedScan => value != null;
@@ -209,6 +205,7 @@ export const registerSkillRoutes = (app: Application, dependencies: SkillRouteOp
     if (!parsed.ok) return { ok: true, identity: null };
 
     if (transport === 'ssh') {
+      if (profile.sshCredentialId !== undefined && !isString(profile.sshCredentialId)) return { ok: false, error: { kind: 'authRequired', message: 'Selected Git identity is unavailable' } };
       return {
         ok: true,
         identity: {
@@ -219,9 +216,10 @@ export const registerSkillRoutes = (app: Application, dependencies: SkillRouteOp
       };
     }
 
-    if (transport === 'account' && profile.account && resolveSourceControlAccount && createHttpsCredentialReference) {
-      const account = await resolveSourceControlAccount(profile.account);
-      if (!account || account.credentialId !== profile.account.accountId
+    const profileAccount = isProviderAccount(profile.account) ? profile.account : null;
+    if (transport === 'account' && profileAccount && resolveSourceControlAccount && createHttpsCredentialReference) {
+      const account = await resolveSourceControlAccount(profileAccount);
+      if (!account || account.credentialId !== profileAccount.accountId
         || account.status !== 'valid'
         || !Number.isSafeInteger(account.credentialRevision)
         || account.credentialRevision < 1) {
@@ -231,8 +229,8 @@ export const registerSkillRoutes = (app: Application, dependencies: SkillRouteOp
       let credentialId;
       try {
         credentialId = createHttpsCredentialReference({
-          provider: profile.account.provider,
-          instance: profile.account.instance,
+          provider: profileAccount.provider,
+          instance: profileAccount.instance,
           credentialId: account.credentialId,
           credentialRevision: account.credentialRevision,
           providerUserId: account.providerUserId,
