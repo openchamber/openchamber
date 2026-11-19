@@ -14,20 +14,38 @@ const ALLOWED_PHASES = new Set([
   'opencode.attempt.error',
   'proxy.readiness-hold',
 ]);
-const ALLOWED_OUTCOMES = new Set(['ready', 'timeout', 'aborted', 'error']);
-const ALLOWED_ROUTE_CLASSES = new Set(['session-messages', 'session', 'events', 'other']);
+type OptionalLabelLookup = Pick<ReadonlySet<string | undefined>, 'has'>;
+const ALLOWED_OUTCOMES: OptionalLabelLookup = new Set(['ready', 'timeout', 'aborted', 'error']);
+const ALLOWED_ROUTE_CLASSES: OptionalLabelLookup = new Set(['session-messages', 'session', 'events', 'other']);
 
-const finiteNonNegative = (value) => Number.isFinite(value) && value >= 0 ? value : undefined;
-const nonNegativeInteger = (value) => Number.isInteger(value) && value >= 0 ? value : undefined;
+export interface StartupPerformanceDetails {
+  durationMs?: number;
+  totalDurationMs?: number;
+  attempt?: number;
+  outcome?: string;
+  routeClass?: string;
+}
+
+interface StartupPerformanceEvent extends Omit<StartupPerformanceDetails, 'outcome' | 'routeClass'> {
+  phase: string;
+  at: number;
+  outcome?: string | undefined;
+  routeClass?: string | undefined;
+}
+
+const finiteNonNegative = (value: number | undefined) =>
+  Number.isFinite(value) && value !== undefined && value >= 0 ? value : undefined;
+const nonNegativeInteger = (value: number | undefined) =>
+  Number.isInteger(value) && value !== undefined && value >= 0 ? value : undefined;
 
 const isStartupPerformanceEnabled = () => (
   ENABLED_VALUES.has(String(process.env.OPENCHAMBER_STARTUP_PERF ?? '').toLowerCase())
 );
 
-export const recordStartupPerformance = (phase, details = {}) => {
+export const recordStartupPerformance = (phase: string, details: StartupPerformanceDetails = {}) => {
   if (!isStartupPerformanceEnabled() || !ALLOWED_PHASES.has(phase)) return;
 
-  const event = {
+  const event: StartupPerformanceEvent = {
     phase,
     at: Date.now(),
   };
