@@ -1,6 +1,6 @@
 import { isString } from '../shared/guards.js';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
-import type { AccountIdentity, ProviderDescriptor, TransportCredential } from '../source-control/provider-contract.js';
+import type { AccountIdentity, ProviderDescriptor, ConnectedAccount } from '../source-control/provider-contract.js';
 
 export interface ProvisioningProfile {
   id: string;
@@ -17,7 +17,7 @@ export interface ProvisioningProfileInput extends ProvisioningProfile {
 }
 export interface AccountProvisioningInput {
   account?: Partial<AccountIdentity> | null;
-  user?: Partial<TransportCredential['user']> | null;
+  user?: Partial<ConnectedAccount['user']> | null;
 }
 export interface GitIdentityProvisioningOptions {
   store: {

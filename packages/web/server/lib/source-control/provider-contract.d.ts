@@ -64,7 +64,7 @@ export interface ProviderDescriptor {
   urls: { thread: { hosts: readonly string[] | 'any'; pattern: RegExp } };
   trackedItems: { nestedOwners: boolean; defaultInstance: string | null; batchLimit: number };
   limits: { commentMaxLength: number; reviewerId: RegExp; labelsMax: number; reviewersMax: number };
-  identity: { noReplyEmail: ((user: { id?: number | undefined; login: string }) => string | null) | null };
+  identity: { noReplyEmail: ((user: { id?: number | string | undefined; login: string }) => string | null) | null };
   settings: ReadonlyArray<{ key: string; type: SettingsFieldKind; secret: boolean; scope: 'global' | 'instance' }>;
   instances: { legacyFlow: { instance: string; kind: 'github-com-device' } | null };
   presentation: {

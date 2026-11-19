@@ -375,14 +375,20 @@ integer-status check because an error's evidence is unchecked. It does not
 assume that an array check validated each member. User IDs retain the separate
 primitive-string and safe-integer checks before forwarding an account.
 
-### Why the binding routes remain JavaScript
+### Why binding inputs are typed as unchecked requests
 
-`routes.js` passes caught `error.status` directly to the response setter in
-`sendBindingError`, and its `resolveDirectoryQuery` uses a String tag check
-before passing the original value to the binding service's string directory
-parameter. A boxed or String-tagged value remains unchanged. The binding
-service declares its route inputs as validated intents, so these routes stay
-JavaScript until those inputs are typed as what arrives.
+The binding routes hand the binding service what arrives: `req.body ?? {}` and
+the first `directory` query value. The service's route-facing methods
+(`mutateProvider`, `configureTransportBinding`, `removeTransportBinding`,
+`resetRepositoryBinding`, `configureAuxiliaryBinding`, `resolveContext`, `get`)
+and the read and mutation context validators therefore take
+`BindingIntentRequest`, `ReadContextRequest` and `MutationContextRequest`:
+every field optional and unchecked. Their existing checks are spelled so the
+compiler narrows: `assertExactStrings` and `assertRequiredString`
+(`binding-input.ts`) throw the same `requiredString` and `<key> is invalid`
+errors the inline comparisons threw, and `isOneOf` replaces the
+`[...].includes(...)` membership tests. Declaring the requests as validated
+intents would claim what no route checks.
 
 ### Why the executor keeps a thrown code unchecked
 

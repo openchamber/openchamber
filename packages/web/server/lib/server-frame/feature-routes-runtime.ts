@@ -601,7 +601,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       managedKeyRoot: path.join(openchamberDataDir, 'git-ssh-private-keys'),
       fsImpl: fsPromises,
     });
-    const syncRepositoryTransport = async (directory: string, read: Awaited<ReturnType<ReturnType<typeof import('../source-control/binding-service.js').createBindingService>['get']>>) => {
+    const syncRepositoryTransport = async (directory: import('../source-control/binding-service-contracts.js').BindingIntentRequest['directory'], read: Awaited<ReturnType<ReturnType<typeof import('../source-control/binding-service.js').createBindingService>['get']>>) => {
       if (!isString(directory) || !directory.trim() || !gitRepositoryCredentialRuntime) return;
       const grants = (read?.binding?.remotes ?? []).filter((grant) => grant.readiness === 'ready' && grant.mode === 'managed' && grant.credentialId);
       let credentialHelper = null;
@@ -771,7 +771,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       credentialResolver: gitCredentialResolver,
     });
     gitRepositoryCredentialRuntime = createGitRepositoryCredentialRuntime({
-      readBinding: (directory) => walkthroughBindingService.get(directory),
+      readBinding: walkthroughBindingService.get,
       credentialResolver: gitCredentialResolver,
       dataDir: openchamberDataDir,
       fsPromises,
