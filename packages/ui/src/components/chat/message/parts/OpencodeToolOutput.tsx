@@ -5,7 +5,7 @@ import type { I18nKey } from '@/lib/i18n';
 import { useI18n } from '@/lib/i18n';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore } from '@/stores/useUIStore';
-import type { OpencodeToolResult, ScheduleView } from './opencodeToolResult';
+import type { AutomationView, OpencodeToolResult, ScheduleView } from './opencodeToolResult';
 import { RawToggleContext } from './toolResultContext';
 import { Actions, Field, List, ListRow, Section, WebLinkRow } from './ToolResultParts';
 
@@ -187,6 +187,93 @@ const SchedulesBody: React.FC<{ data: ResultOf<'schedule_list'> }> = ({ data }) 
     );
 };
 
+const TRIGGER_KEYS = {
+    at: 'chat.toolPart.opencode.schedule.at',
+    every: 'chat.toolPart.opencode.schedule.every',
+    cron: 'chat.toolPart.opencode.schedule.cron',
+    event: 'chat.toolPart.opencode.automation.event',
+} as const satisfies Record<AutomationView['trigger']['type'], I18nKey>;
+
+const useAutomationTrigger = () => {
+    const { t } = useI18n();
+    return (automation: AutomationView): string => {
+        const { trigger } = automation;
+        if (trigger.type === 'event') return t(TRIGGER_KEYS.event, { value: `${trigger.server} ${trigger.event}` });
+        const value = trigger.type === 'at' ? trigger.at.replace('T', ' ') : trigger.type === 'every' ? trigger.every : trigger.cron;
+        const phrase = t(TRIGGER_KEYS[trigger.type], { value });
+        return automation.tz ? `${phrase} (${automation.tz})` : phrase;
+    };
+};
+
+const automationSummary = (automation: AutomationView): string => (automation.action.type === 'prompt'
+    ? automation.action.prompt
+    : automation.action.code);
+
+const AutomationBody: React.FC<{ automation: AutomationView }> = ({ automation }) => {
+    const { t } = useI18n();
+    const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
+    const describeTrigger = useAutomationTrigger();
+    const format = (value: string | undefined) => (value
+        ? formatDateTimeForPreference(new Date(value), timeFormatPreference, { dateStyle: 'medium', timeStyle: 'short' })
+        : '');
+    const next = format(automation.nextDueAt);
+    const ends = format(automation.expires);
+    const { action } = automation;
+    return (
+        <>
+            <Field label={t('chat.toolPart.openchamber.field.when')}>{describeTrigger(automation)}</Field>
+            {next && automation.status === 'active' ? <Field label={t('chat.toolPart.opencode.field.nextRun')}>{next}</Field> : null}
+            {ends ? <Field label={t('chat.toolPart.opencode.field.ends')}>{ends}</Field> : null}
+            {automation.status !== 'active' ? (
+                <Field label={t('chat.toolPart.openchamber.field.state')}>
+                    {automation.status === 'paused' ? t('chat.toolPart.openchamber.schedule.paused') : t('chat.toolPart.opencode.schedule.done')}
+                </Field>
+            ) : null}
+            {action.type === 'prompt' && (action.to?.subagent || action.to?.session) ? (
+                <Field label={t('chat.toolPart.opencode.field.sendsTo')}>
+                    {action.to.subagent
+                        ? t('chat.toolPart.opencode.automation.subagent', { value: action.to.subagent })
+                        : <code className="typography-code break-all">{action.to.session}</code>}
+                </Field>
+            ) : null}
+            {action.type === 'prompt'
+                ? <div className="typography-meta whitespace-pre-wrap break-words text-foreground">{action.prompt}</div>
+                : (
+                    <Section label={t('chat.toolPart.opencode.automation.code')}>
+                        <pre className="typography-code whitespace-pre-wrap break-words text-foreground">{action.code}</pre>
+                    </Section>
+                )}
+            <Actions />
+        </>
+    );
+};
+
+const AutomationsBody: React.FC<{ data: ResultOf<'automation_list'> }> = ({ data }) => {
+    const { t } = useI18n();
+    const describeTrigger = useAutomationTrigger();
+    const { automations } = data;
+    return (
+        <>
+            <List count={automations.length}>
+                {automations.map((automation) => (
+                    <ListRow
+                        key={automation.id}
+                        primary={automation.name ?? automationSummary(automation).split('\n')[0]}
+                        secondary={[
+                            describeTrigger(automation),
+                            automation.action.type === 'code' ? t('chat.toolPart.opencode.automation.code') : undefined,
+                            automation.status === 'paused' ? t('chat.toolPart.openchamber.schedule.paused')
+                                : automation.status === 'done' ? t('chat.toolPart.opencode.schedule.done') : undefined,
+                        ].filter(Boolean).join(' · ')}
+                        title={automationSummary(automation)}
+                    />
+                ))}
+            </List>
+            <Actions />
+        </>
+    );
+};
+
 const ArtifactBody: React.FC<{ data: ResultOf<'artifact_create'> }> = ({ data }) => {
     const { url, title, provider } = data;
     return (
@@ -243,10 +330,15 @@ const OpencodeView: React.FC<{ result: OpencodeToolResult }> = ({ result }) => {
         case 'schedule_pause':
         case 'schedule_resume': return <ScheduleBody schedule={result.data} />;
         case 'schedule_list': return <SchedulesBody data={result.data} />;
+        case 'automation_create':
+        case 'automation_pause':
+        case 'automation_resume': return <AutomationBody automation={result.data} />;
+        case 'automation_list': return <AutomationsBody data={result.data} />;
         case 'artifact_create':
         case 'artifact_update': return <ArtifactBody data={result.data} />;
         case 'artifact_read': return <ArtifactContentBody data={result.data} />;
         case 'schedule_delete':
+        case 'automation_delete':
         case 'artifact_delete': return <Actions />;
     }
 };

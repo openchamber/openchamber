@@ -197,7 +197,7 @@ export const compactionUpdateSchema: z.ZodObject<{
 export type CompactionUpdate = z.infer<typeof compactionUpdateSchema>;
 /** The keys of an OpenCode config file a compaction update edits. */
 export interface OpenCodeCompactionConfig {
-  compaction?: { auto?: boolean; buffer?: string | number; keep?: { tokens?: number } };
+  compaction?: { auto?: boolean; background?: boolean; buffer?: string | number; keep?: { tokens?: number } };
   experimental?: { background_compaction?: boolean };
 }
 export function writeCompactionSettings(config: OpenCodeCompactionConfig, update: CompactionUpdate): boolean;

@@ -667,9 +667,10 @@ const assignOrDrop = (owner, key, record) => {
 
 function writeCompactionSettings(config, update) {
   const before = JSON.stringify([config.compaction, config.experimental]);
-  if (update.auto !== undefined || update.buffer !== undefined || update.keepTokens !== undefined) {
+  if (update.auto !== undefined || update.buffer !== undefined || update.keepTokens !== undefined || update.background !== undefined) {
     const compaction = nestedRecord(config, 'compaction');
     if (update.auto !== undefined) compaction.auto = update.auto;
+    if (update.background !== undefined) compaction.background = update.background;
     if (update.buffer !== undefined) setOrDelete(compaction, 'buffer', update.buffer);
     if (update.keepTokens !== undefined) {
       const keep = nestedRecord(compaction, 'keep');
@@ -678,6 +679,7 @@ function writeCompactionSettings(config, update) {
     }
     assignOrDrop(config, 'compaction', compaction);
   }
+  // OpenCode before 2.3.1 reads the switch from this flag, later ones from compaction.background; each ignores the other key.
   if (update.background !== undefined) {
     const experimental = nestedRecord(config, 'experimental');
     setOrDelete(experimental, 'background_compaction', update.background);

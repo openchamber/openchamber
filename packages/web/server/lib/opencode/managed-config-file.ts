@@ -50,6 +50,8 @@ const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser'];
 
 const BUILTIN_IMAGE_PLUGIN = '-opencode.tool.image-generate';
 
+const BUILTIN_AUTOMATION_PLUGIN = '-opencode.tool.automation';
+
 export const createManagedConfigRuntime = ({
   fsPromises,
   path,
@@ -109,7 +111,11 @@ export const createManagedConfigRuntime = ({
       directories.push(await limitFailoverRuntime.materializePlugin());
     }
     directories.push(await materializeSessionTitlePlugin({ fsPromises, path, instanceDir }));
-    const disabled = includeImage ? [...DISABLED_BUILTIN_PLUGINS, BUILTIN_IMAGE_PLUGIN] : DISABLED_BUILTIN_PLUGINS;
+    const disabled = [
+      ...DISABLED_BUILTIN_PLUGINS,
+      ...(includeImage ? [BUILTIN_IMAGE_PLUGIN] : []),
+      ...(agentToolRuntime && includeSchedule ? [BUILTIN_AUTOMATION_PLUGIN] : []),
+    ];
     const authoring = await materializeAuthoringSkill({ fsPromises, instanceDir, openchamberVersion });
     const skills = [authoring.skillsRoot, ...await listExtensionSkillDirectories()];
     const extensionPlugins = await listExtensionPluginDirectories();

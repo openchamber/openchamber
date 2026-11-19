@@ -1,4 +1,4 @@
-// external: https://github.com/anomalyco/opencode/blob/v2.3.0/packages/cli/vite.node.config.ts
+// external: https://github.com/anomalyco/opencode/blob/v2.3.2/packages/cli/vite.node.config.ts
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
