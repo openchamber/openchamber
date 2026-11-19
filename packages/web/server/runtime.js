@@ -365,6 +365,7 @@ const normalizeStringArray = (...args) => settingsNormalizationRuntime.normalize
 const sanitizeModelRefs = (...args) => settingsNormalizationRuntime.sanitizeModelRefs(...args);
 const sanitizeSkillCatalogs = (...args) => settingsNormalizationRuntime.sanitizeSkillCatalogs(...args);
 const sanitizeProjects = (...args) => settingsNormalizationRuntime.sanitizeProjects(...args);
+const sanitizeProjectList = (projects) => sanitizeProjects(projects) ?? [];
 
 const OPENCHAMBER_DEFAULT_CONFIG_ROOT = path.join(os.homedir(), '.config', 'openchamber');
 const OPENCHAMBER_USER_CONFIG_ROOT = process.env.OPENCHAMBER_DATA_DIR
@@ -419,7 +420,7 @@ const openCodeTrust = createOpenCodeTrust({
   storePath: path.join(OPENCHAMBER_DATA_DIR, 'opencode-trust.json'),
   listKnownDirectories: async () => {
     const settings = await readSettingsFromDiskMigrated();
-    return sanitizeProjects(settings?.projects || []).map((project) => project.path);
+    return (sanitizeProjects(settings?.projects || []) ?? []).map((project) => project.path);
   },
 });
 globalThis.fetch = guardOpenCodeFetch({
@@ -1603,7 +1604,7 @@ const environmentStore = createEnvironmentStore({
 });
 const listConfiguredProjects = async () => {
   const settings = await readSettingsFromDiskMigrated();
-  return sanitizeProjects(settings?.projects || []);
+  return sanitizeProjects(settings?.projects || []) ?? [];
 };
 const environmentRuntime = createEnvironmentRuntime({
   store: environmentStore,
@@ -1870,13 +1871,13 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   isGitRepository: (projectDirectory) => scheduledWorktreeBridge.isGitRepository(projectDirectory),
   readSessionDefaults: async (projectID) => {
     const settings = await readSettingsFromDiskMigrated();
-    const project = sanitizeProjects(settings?.projects || []).find((entry) => entry.id === projectID) ?? null;
+    const project = (sanitizeProjects(settings?.projects || []) ?? []).find((entry) => entry.id === projectID) ?? null;
     return resolveSessionDefaults({ settings, project });
   },
   resolveAutoSelection: (input) => routingRuntime.resolveAutoSelection(input),
   listProjects: async () => {
     const settings = await readSettingsFromDiskMigrated();
-    return sanitizeProjects(settings?.projects || []);
+    return sanitizeProjects(settings?.projects || []) ?? [];
   },
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -1928,7 +1929,7 @@ const emitSessionCreatedEvent = (event) => {
 const resolveMemoryProjectId = createMemoryProjectResolver({
   listProjectPaths: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return sanitizeProjects(settings?.projects || []).map((project) => project.path);
+    return (sanitizeProjects(settings?.projects || []) ?? []).map((project) => project.path);
   },
   resolvePrimaryWorktreeRoot,
   managedProjectRoots: [...new Set([path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR])],
@@ -1970,7 +1971,7 @@ const readModelCatalog = createModelCatalogReader({
 });
 const scheduledTaskService = createScheduledTaskService({
   readSettingsFromDiskMigrated,
-  sanitizeProjects,
+  sanitizeProjects: sanitizeProjectList,
   projectConfigRuntime,
   scheduledTasksRuntime,
   chatsScope: scheduledChatsScope,
@@ -1984,7 +1985,7 @@ const openChamberSessionService = createOpenChamberSessionService({
   }),
   chatsScope: scheduledChatsScope,
   readSettingsFromDiskMigrated,
-  sanitizeProjects,
+  sanitizeProjects: sanitizeProjectList,
   validateDirectoryPath,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -2131,7 +2132,7 @@ const openChamberControlService = createOpenChamberControlService({
   readPendingRequests: () => sessionRuntime.getPendingBlockingRequestsSnapshot(),
   isPermissionAutoAnswered: (sessionId, directory, permissionId) => permissionAutoAcceptRuntime.isPermissionAutoAnswered(sessionId, directory, permissionId),
   readSettingsFromDiskMigrated,
-  sanitizeProjects,
+  sanitizeProjects: sanitizeProjectList,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady,
@@ -2536,7 +2537,7 @@ async function main(options = {}) {
     hostEnvironment: { ...process.env, PATH: buildAugmentedPath() },
     listProjectDirectories: async () => {
       const settings = await readSettingsFromDiskMigrated();
-      return sanitizeProjects(settings?.projects || []).map((project) => project.path);
+      return (sanitizeProjects(settings?.projects || []) ?? []).map((project) => project.path);
     },
     readIdleStop: async () => readIdleStopSetting((await readSettingsFromDiskMigrated())?.isolatedSpacesIdleStop),
     saveIdleStop: (setting) => persistSettings({ isolatedSpacesIdleStop: setting }),
@@ -2915,7 +2916,7 @@ async function main(options = {}) {
     readSettingsFromDiskMigrated,
     persistSettings,
     persistResolvedSettings: (...args) => settingsRuntime.persistResolvedSettings(...args),
-    sanitizeProjects,
+    sanitizeProjects: sanitizeProjectList,
     sanitizeSkillCatalogs,
     isUnsafeSkillRelativePath,
     buildOpenCodeUrl,
