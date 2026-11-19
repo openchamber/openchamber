@@ -1,9 +1,10 @@
-import { isPlainObject } from '../shared/guards.js';
+import { isPlainObject, isString } from '../shared/object-guards.js';
 import crypto, { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { constants as fsConstants } from 'node:fs';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
+import type { CheckoutHydration, HydrationPart, WorktreeBootstrapState } from './service-contracts.js';
 
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 512;
@@ -20,7 +21,8 @@ const ERROR_CODES = new Set([
 const HYDRATION_STATUSES = new Set([
   'succeeded', 'authorization-required', 'invalid', 'client-missing', 'failed', 'cancelled', 'not-needed',
 ]);
-const SAFE_ERROR_MESSAGES = Object.freeze({
+type BootstrapFailureMessage = string | object;
+const SAFE_ERROR_MESSAGES: Readonly<Record<PropertyKey, string>> = Object.freeze({
   INVALID_REQUEST: 'Worktree checkout hydration configuration is invalid',
   NOT_FOUND: 'Worktree checkout target was not found',
   STALE_REPOSITORY: 'Worktree repository authority changed',
@@ -42,59 +44,73 @@ const SAFE_ERROR_MESSAGES = Object.freeze({
   BRANCH_NAME_CONFLICT: 'Git could not create the worktree branch: its name clashes with an existing branch (the same name, or one nested inside the other). Rename the branch and create the worktree again.',
 });
 
-export const worktreeBootstrapFailureMessage = (code) => SAFE_ERROR_MESSAGES[code] ?? null;
+function errorMessageFor<Code>(code: Code): BootstrapFailureMessage | undefined;
+function errorMessageFor(code: PropertyKey) { return SAFE_ERROR_MESSAGES[code]; }
 
-const exactKeys = (value, required, optional = []) => {
+export const worktreeBootstrapFailureMessage = <Code>(code: Code) => errorMessageFor(code) ?? null;
+
+function hasOwnMessage<Code>(code: Code): boolean;
+function hasOwnMessage(code: PropertyKey) { return Object.hasOwn(SAFE_ERROR_MESSAGES, code); }
+
+const hasCode = (value: unknown): value is { code?: unknown } => value !== null && value !== undefined;
+const errorCode = <Failure>(error: Failure) => hasCode(error) ? error.code : undefined;
+const memberOf = (values: ReadonlySet<string>, value: unknown): value is string => isString(value) && values.has(value);
+
+const exactKeys = <Value extends object>(value: Value, required: string[], optional: string[] = []) => {
   const keys = Object.keys(value);
   return required.every((key) => keys.includes(key))
     && keys.every((key) => required.includes(key) || optional.includes(key));
 };
-const isText = (value, max = 4096) => typeof value === 'string' && value.length > 0
+const isText = (value: unknown, max = 4096): value is string => isString(value) && value.length > 0
   && value.length <= max && value.trim() === value && !/[\0\r\n]/.test(value);
-const invalidStore = (cause) => Object.assign(new Error('Worktree bootstrap storage is invalid', { cause }), {
+const invalidStore = <Cause>(cause?: Cause) => Object.assign(new Error('Worktree bootstrap storage is invalid', { cause }), {
   code: 'WORKTREE_BOOTSTRAP_STORAGE_INVALID',
 });
 const capacityError = () => Object.assign(new Error('Worktree bootstrap storage capacity reached'), {
   code: 'WORKTREE_BOOTSTRAP_STORAGE_CAPACITY',
 });
-const directoryFingerprint = async (directory, fsImpl) => {
+const directoryFingerprint = async (directory: string, fsImpl: typeof fs) => {
   const absolutePath = path.resolve(directory);
   const realPath = await fsImpl.realpath(absolutePath).catch(() => absolutePath);
   const normalized = path.normalize(realPath);
   const identity = process.platform === 'win32' ? normalized.toLowerCase() : normalized;
   return crypto.createHash('sha256').update(identity).digest('base64url');
 };
-const clone = (value) => JSON.parse(JSON.stringify(value));
-const redactDisplayEndpoint = (value) => {
-  if (typeof value !== 'string' || value.includes('://')) return value;
+const cloneRecord = (value: StoredWorktreeBootstrapState): StoredWorktreeBootstrapState => JSON.parse(JSON.stringify(value));
+const isScrubbableRecord = (value: unknown): value is {
+  code?: unknown; message?: unknown; displayUrl?: unknown;
+} => isPlainObject(value);
+const redactDisplayEndpoint = <Value>(value: Value) => {
+  if (!isString(value) || value.includes('://')) return value;
   const match = value.match(/^(?:[^@/\s]+@)?([^:/\s]+):(.+)$/);
   return match ? `${match[1]}:${match[2]}` : value;
 };
-const scrubBootstrapState = (bootstrapState) => {
-  const value = clone(bootstrapState);
-  const visit = (candidate) => {
+const scrubBootstrapState = (bootstrapState: WorktreeBootstrapState) => {
+  const value: { status?: unknown; errorCode?: unknown; error?: unknown } = JSON.parse(JSON.stringify(bootstrapState));
+  const visit = <Candidate>(candidate: Candidate) => {
     if (Array.isArray(candidate)) {
       candidate.forEach(visit);
       return;
     }
-    if (!isPlainObject(candidate)) return;
-    if (typeof candidate.code === 'string' && Object.hasOwn(SAFE_ERROR_MESSAGES, candidate.code)
+    if (!isScrubbableRecord(candidate)) return;
+    if (isString(candidate.code) && Object.hasOwn(SAFE_ERROR_MESSAGES, candidate.code)
       && Object.hasOwn(candidate, 'message')) candidate.message = SAFE_ERROR_MESSAGES[candidate.code];
     if (Object.hasOwn(candidate, 'displayUrl')) candidate.displayUrl = redactDisplayEndpoint(candidate.displayUrl);
     Object.values(candidate).forEach(visit);
   };
   visit(value);
-  if (value.status === 'failed' && Object.hasOwn(SAFE_ERROR_MESSAGES, value.errorCode)) {
-    value.error = SAFE_ERROR_MESSAGES[value.errorCode];
+  if (value.status === 'failed' && hasOwnMessage(value.errorCode)) {
+    value.error = errorMessageFor(value.errorCode);
   }
   return value;
 };
-const isSafeDisplayEndpoint = (value) => {
+const isSafeDisplayEndpoint = (value: unknown): value is string => {
   if (!isText(value)) return false;
   if (!value.includes('://')) {
     const match = value.match(/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?:([^\s:\\]+)$/);
-    return Boolean(match && !/[?#]/.test(value) && !match[1].startsWith('-')
-      && match[1].split('/').every((part) => part && part !== '.' && part !== '..'));
+    const checkoutPath = match?.[1];
+    return Boolean(checkoutPath !== undefined && !/[?#]/.test(value) && !checkoutPath.startsWith('-')
+      && checkoutPath.split('/').every((part) => part && part !== '.' && part !== '..'));
   }
   try {
     const endpoint = new URL(value);
@@ -102,30 +118,30 @@ const isSafeDisplayEndpoint = (value) => {
     return ['https:', 'ssh:'].includes(endpoint.protocol)
       && !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash
       && Boolean(endpoint.hostname && endpoint.pathname && endpoint.pathname !== '/')
-      && !/[\0-\x20\x7f\\]/.test(pathname)
+      && /^[\x21-\x5b\x5d-\x7e\u0080-\uffff]*$/.test(pathname)
       && pathname.split('/').slice(1).every((part) => part && part !== '.' && part !== '..');
   } catch {
     return false;
   }
 };
-const isRelativeCheckoutPath = (value) => isText(value)
-  && !/[\0-\x1f\x7f]/.test(value)
+const isRelativeCheckoutPath = (value: unknown): value is string => isText(value)
+  && !/[^\x20-\x7e\u0080-\uffff]/.test(value)
   && value !== '..' && !value.startsWith('../') && !value.includes('/../')
   && !path.isAbsolute(value) && !/^[A-Za-z]:[\\/]/.test(value) && !value.includes('\\');
 
-const isPublicError = (value) => isPlainObject(value)
-  && exactKeys(value, ['code', 'message']) && ERROR_CODES.has(value.code) && isText(value.message);
-const isHydrationPart = (value) => isPlainObject(value)
+const isPublicError = (value: unknown): value is NonNullable<HydrationPart['error']> => isPlainObject(value)
+  && exactKeys(value, ['code', 'message']) && memberOf(ERROR_CODES, value.code) && isText(value.message);
+const isHydrationPart = (value: unknown): value is HydrationPart => isPlainObject(value)
   && exactKeys(value, ['path', 'status'], ['endpoint', 'error'])
   && isRelativeCheckoutPath(value.path)
-  && HYDRATION_STATUSES.has(value.status)
+  && memberOf(HYDRATION_STATUSES, value.status)
   && (value.endpoint === undefined || (isPlainObject(value.endpoint)
     && exactKeys(value.endpoint, ['displayUrl', 'fingerprint'])
     && isSafeDisplayEndpoint(value.endpoint.displayUrl) && isText(value.endpoint.fingerprint, 1024)))
-  && (['succeeded', 'not-needed'].includes(value.status)
+  && (['succeeded', 'not-needed'].some((status) => status === value.status)
     ? value.error === undefined
     : isPublicError(value.error));
-const expectedHydrationStatus = (parts) => {
+const expectedHydrationStatus = (parts: HydrationPart[]) => {
   const statuses = parts.map((entry) => entry.status);
   if (!statuses.length || statuses.every((status) => status === 'not-needed')) return 'not-needed';
   for (const status of ['cancelled', 'invalid', 'client-missing', 'authorization-required', 'failed']) {
@@ -133,26 +149,41 @@ const expectedHydrationStatus = (parts) => {
   }
   return 'succeeded';
 };
-const isHydration = (value) => isPlainObject(value)
+const isHydration = (value: unknown): value is CheckoutHydration => isPlainObject(value)
   && exactKeys(value, ['status', 'submodules', 'lfs'])
-  && HYDRATION_STATUSES.has(value.status)
+  && memberOf(HYDRATION_STATUSES, value.status)
   && Array.isArray(value.submodules) && value.submodules.length <= 256 && value.submodules.every(isHydrationPart)
   && Array.isArray(value.lfs) && value.lfs.length <= 256 && value.lfs.every(isHydrationPart)
   && expectedHydrationStatus([...value.submodules, ...value.lfs]) === value.status;
-const parseBootstrapState = (value) => {
+export interface StoredWorktreeBootstrapState extends WorktreeBootstrapState {
+  errorCode?: string;
+  hydration?: CheckoutHydration;
+}
+
+interface BootstrapFile {
+  version: 1;
+  records: Record<string, StoredWorktreeBootstrapState>;
+}
+
+const isSafeInteger = (value: unknown): value is number => Number.isSafeInteger(value);
+const isBootstrapState = (value: unknown): value is StoredWorktreeBootstrapState => {
   if (!isPlainObject(value) || !exactKeys(value, ['status', 'phase', 'error', 'updatedAt'], ['errorCode', 'hydration'])
-    || !STATUSES.has(value.status) || !PHASES.has(value.phase)
+    || !memberOf(STATUSES, value.status) || !memberOf(PHASES, value.phase)
     || value.error !== null && !isText(value.error)
-    || !Number.isSafeInteger(value.updatedAt) || value.updatedAt < 0
-    || value.errorCode !== undefined && !ERROR_CODES.has(value.errorCode)
+    || !isSafeInteger(value.updatedAt) || value.updatedAt < 0
+    || value.errorCode !== undefined && !memberOf(ERROR_CODES, value.errorCode)
     || value.hydration !== undefined && !isHydration(value.hydration)
     || value.status !== 'failed' && (value.error !== null || value.errorCode !== undefined || value.hydration !== undefined)
     || value.status === 'failed' && (value.error === null || value.errorCode === undefined)
     || value.status !== 'ready' && value.phase === 'setup-ready'
     || value.status === 'ready' && value.phase !== 'setup-ready') throw invalidStore();
+  return true;
+};
+const parseBootstrapState = <Value>(value: Value): StoredWorktreeBootstrapState => {
+  if (!isBootstrapState(value)) throw invalidStore();
   return value;
 };
-const parseState = (value, maxRecords) => {
+const isBootstrapFile = (value: unknown, maxRecords: number): value is BootstrapFile => {
   if (!isPlainObject(value) || !exactKeys(value, ['version', 'records'])
     || value.version !== VERSION || !isPlainObject(value.records)
     || Object.keys(value.records).length > maxRecords) throw invalidStore();
@@ -160,8 +191,20 @@ const parseState = (value, maxRecords) => {
     if (!/^[A-Za-z0-9_-]{43}$/.test(fingerprint)) throw invalidStore();
     parseBootstrapState(record);
   }
+  return true;
+};
+const parseState = <Value>(value: Value, maxRecords: number): BootstrapFile => {
+  if (!isBootstrapFile(value, maxRecords)) throw invalidStore();
   return value;
 };
+
+export interface WorktreeBootstrapStoreOptions {
+  filePath?: string;
+  fsImpl?: typeof fs;
+  maxRecords?: number;
+  maxBytes?: number;
+  lockWaitMs?: number;
+}
 
 export function createWorktreeBootstrapStore({
   filePath,
@@ -169,24 +212,24 @@ export function createWorktreeBootstrapStore({
   maxRecords = DEFAULT_MAX_RECORDS,
   maxBytes = DEFAULT_MAX_BYTES,
   lockWaitMs = 2_000,
-} = {}) {
-  if (!path.isAbsolute(filePath || '') || !Number.isSafeInteger(maxRecords) || maxRecords < 1
+}: WorktreeBootstrapStoreOptions = {}) {
+  if (!filePath || !path.isAbsolute(filePath) || !Number.isSafeInteger(maxRecords) || maxRecords < 1
     || !Number.isSafeInteger(maxBytes) || maxBytes < 1024) {
     throw new TypeError('Worktree bootstrap store options are invalid');
   }
   let writes = Promise.resolve();
-  const enqueue = (operation) => {
+  const enqueue = <Result>(operation: () => Promise<Result>) => {
     const next = writes.then(() => withSourceControlFileLock(`${filePath}.lock`, operation, { fsImpl, waitMs: lockWaitMs }));
     writes = next.then(() => undefined, () => undefined);
     return next;
   };
-  const readState = async () => {
+  const readState = async (): Promise<BootstrapFile> => {
     let handle;
     try {
       handle = await fsImpl.open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
     } catch (error) {
-      if (error?.code === 'ENOENT') return { version: VERSION, records: {} };
-      throw error?.code === 'ELOOP' ? invalidStore(error) : error;
+      if (errorCode(error) === 'ENOENT') return { version: VERSION, records: {} };
+      throw errorCode(error) === 'ELOOP' ? invalidStore(error) : error;
     }
     try {
       const stats = await handle.stat();
@@ -194,13 +237,13 @@ export function createWorktreeBootstrapStore({
         || (process.platform !== 'win32' && (stats.mode & 0o077) !== 0)) throw invalidStore();
       return parseState(JSON.parse(await handle.readFile('utf8')), maxRecords);
     } catch (error) {
-      if (error?.code === 'WORKTREE_BOOTSTRAP_STORAGE_INVALID') throw error;
+      if (errorCode(error) === 'WORKTREE_BOOTSTRAP_STORAGE_INVALID') throw error;
       throw invalidStore(error);
     } finally {
       await handle.close();
     }
   };
-  const writeState = async (state) => {
+  const writeState = async (state: BootstrapFile) => {
     const encoded = `${JSON.stringify(parseState(state, maxRecords), null, 2)}\n`;
     if (Buffer.byteLength(encoded) > maxBytes) throw capacityError();
     await fsImpl.mkdir(path.dirname(filePath), { recursive: true });
@@ -214,7 +257,7 @@ export function createWorktreeBootstrapStore({
       throw error;
     }
   };
-  const write = (directory, bootstrapState) => enqueue(async () => {
+  const write = (directory: string, bootstrapState: WorktreeBootstrapState) => enqueue(async () => {
     const fingerprint = await directoryFingerprint(directory, fsImpl);
     const record = parseBootstrapState(scrubBootstrapState(bootstrapState));
     const state = await readState();
@@ -227,14 +270,14 @@ export function createWorktreeBootstrapStore({
     }
     state.records[fingerprint] = record;
     await writeState(state);
-    return clone(record);
+    return cloneRecord(record);
   });
-  const read = (directory) => enqueue(async () => {
+  const read = (directory: string) => enqueue(async () => {
     const state = await readState();
     const record = state.records[await directoryFingerprint(directory, fsImpl)];
-    return record ? clone(record) : null;
+    return record ? cloneRecord(record) : null;
   });
-  const completeHydration = (directory) => enqueue(async () => {
+  const completeHydration = (directory: string) => enqueue(async () => {
     const state = await readState();
     const fingerprint = await directoryFingerprint(directory, fsImpl);
     const current = state.records[fingerprint];
@@ -245,9 +288,9 @@ export function createWorktreeBootstrapStore({
     });
     state.records[fingerprint] = record;
     await writeState(state);
-    return clone(record);
+    return cloneRecord(record);
   });
-  const remove = (directory, { ifMissingFailed = false } = {}) => enqueue(async () => {
+  const remove = (directory: string, { ifMissingFailed = false } = {}) => enqueue(async () => {
     const state = await readState();
     const fingerprint = await directoryFingerprint(directory, fsImpl);
     if (ifMissingFailed) {
@@ -257,7 +300,7 @@ export function createWorktreeBootstrapStore({
         await fsImpl.lstat(directory);
         return false;
       } catch (error) {
-        if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') throw error;
+        if (errorCode(error) !== 'ENOENT' && errorCode(error) !== 'ENOTDIR') throw error;
       }
     }
     if (!Object.hasOwn(state.records, fingerprint)) return ifMissingFailed;
