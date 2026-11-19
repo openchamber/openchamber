@@ -1,3 +1,5 @@
+import { fixtureCommand, javascriptCommand } from "./shell-command.mjs"
+
 /**
  * Scripted conversations for the fixture provider, keyed by the user's prompt.
  *
@@ -464,9 +466,296 @@ export const DESIGN_SESSIONS = [
 ]
 
 // The OpenAI protocol sends a message's content as a string or as a list of parts.
-const textOf = (content) => (Array.isArray(content) ? content.map((part) => part?.text ?? "").join("\n") : String(content ?? ""))
+export const fixtureMessageText = (content) => (Array.isArray(content) ? content.map((part) => part?.text ?? "").join("\n") : String(content ?? ""))
 
-const TURNS = DESIGN_SESSIONS.flatMap((session) => session.turns.map((turn, index) => ({ ...turn, id: `${session.key}_${index + 1}` })))
+// Turns behavior scenarios (scripts/verify) send that no design shot shows.
+// The workflow's agents answer slowly so a scenario sees the run while it works.
+const VERIFY_WORKFLOW_SCRIPT = [
+  "export const meta = { name: 'api-exports', description: 'Lists what each API file exports', phases: ['Read'] }",
+  "phase('Read')",
+  "return parallel(['src/api/retry.ts', 'src/api/client.ts'].map((file) => () => agent('List what ' + file + ' exports.', { label: file, model: 'perf/stream-100cps' })))",
+].join("\n")
+
+/**
+ * Turns the behavior scenarios (`scripts/verify`) play that no design shot
+ * shows. `OPERATOR_PROMPT` makes the agent start a worker session as part of
+ * its own work (`session.create` with `ownWork`) on a model that thinks for
+ * thirty seconds, so the worker is still running while the scenario looks.
+ */
+export const OPERATOR_PROMPT = "Start a worker session of your own for the parser fix."
+export const OPERATOR_WORKTREE_PROMPT = "Start a worker of your own in a new worktree for the lexer fix."
+export const OPERATOR_TAKEOVER_PROMPT = "Start a worker of your own in a new worktree that I may take over."
+export const OPERATOR_PHONE_PROMPT = "Start a worker of your own in a new worktree that I may take over on my phone."
+const operatorWorktreeCode = (title, worktree) => [
+  `return await tools.openchamber({ action: 'session.create', parameters: { title: '${title}', prompt: 'Fix it.', model: 'perf/think-30s', ownWork: true, worktree: '${worktree}' } })`,
+].join("\n")
+
+const operatorWorktreeTurn = (id, prompt, title, worktree) => ({
+  id,
+  prompt,
+  steps: [{ text: "Starting a worker in its own worktree.", calls: [{ name: "execute", arguments: { code: operatorWorktreeCode(title, worktree) } }] }],
+  answer: "The worker runs in its own worktree.\n",
+})
+
+/**
+ * `SUBAGENT_PROMPT` starts a subagent that waits until stopped, so its
+ * session stays running while a scenario opens its chat.
+ * `SUBAGENT_PERMISSION_PROMPT` starts a subagent that reads `notes.secret`,
+ * which the verify stand asks permission for, so the subagent's read-only
+ * session asks for a permission.
+ * `QUESTION_PROMPT` asks the user a question and answers after it.
+ * `verify_locales` changes more files than the turn footer shows as chips.
+ */
+export const SUBAGENT_PROMPT = "Hand the parser review to a subagent."
+export const SUBAGENT_PERMISSION_PROMPT = "Hand the secret notes to a subagent."
+const SECRET_NOTES_PROMPT = "Read the secret notes"
+export const QUESTION_PROMPT = "Ask me which retry policy to use."
+const subagentTurn = (id, prompt, task, model) => ({
+  id,
+  prompt,
+  steps: [{
+    text: "Handing it to a subagent.",
+    calls: [{ name: "subagent", arguments: { agent: "general", description: task, prompt: `${task}.`, model } }],
+  }],
+  answer: "The subagent is on it.\n",
+})
+
+const LOCALES = ["de", "fr", "pl", "uk", "ja"]
+
+const VERIFY_TURNS = [
+{
+  id: "verify_locales",
+  prompt: "Add a locale file for each language we ship.",
+  steps: [{
+    text: "Writing one file per locale:",
+    calls: LOCALES.map((locale) => ({ name: "write", arguments: { path: `src/locales/${locale}.json`, content: `${JSON.stringify({ locale, inbox: "Inbox" }, null, 2)}\n` } })),
+  }],
+  answer: `Added ${LOCALES.length} locale files under \`src/locales\`, each with the inbox title.\n`,
+},
+  subagentTurn("verify_subagent", SUBAGENT_PROMPT, "Review the parser", "perf/wait-for-stop"),
+  subagentTurn("verify_subagent_permission", SUBAGENT_PERMISSION_PROMPT, SECRET_NOTES_PROMPT, "perf/stream-20000cps"),
+{
+  id: "verify_secret_notes",
+  prompt: SECRET_NOTES_PROMPT,
+  steps: [{ text: "Reading them.", calls: [{ name: "read", arguments: { path: "notes.secret" } }] }],
+  answer: "The secret notes hold one line.\n",
+},
+{
+  id: "verify_question",
+  prompt: QUESTION_PROMPT,
+  steps: [{
+    text: "One thing to settle first.",
+    calls: [{
+      name: "question",
+      arguments: {
+        questions: [{
+          question: "Which retry policy should withRetry use?",
+          header: "Retry policy",
+          options: [
+            { label: "Exponential backoff", description: "Double the wait after each failure." },
+            { label: "Fixed delay", description: "Wait the same time before every retry." },
+          ],
+        }],
+      },
+    }],
+  }],
+  answer: "Going with the policy you picked.\n",
+}, {
+  id: "verify_workflow",
+  prompt: "Run the workflow we agreed on over the API files.",
+  steps: [{
+    text: "Starting the workflow we agreed on.",
+    calls: [{ name: "openchamber_workflow", arguments: { action: "workflow.run", parameters: { script: VERIFY_WORKFLOW_SCRIPT } } }],
+  }],
+  answer: "The workflow card is in the chat; its report comes back here when the run ends.\n",
+}, {
+  id: "operator_1",
+  prompt: OPERATOR_PROMPT,
+  steps: [{
+    text: "Starting a worker for it.",
+    calls: [{
+      name: "execute",
+      arguments: { code: "return await tools.openchamber({ action: 'session.create', parameters: { title: 'Parser worker', prompt: 'Fix the parser.', model: 'perf/think-30s', ownWork: true } })" },
+    }],
+  }],
+  answer: "The worker is running; its answer comes back here when it finishes.\n",
+},
+  operatorWorktreeTurn("operator_worktree_1", OPERATOR_WORKTREE_PROMPT, "Lexer worker", "lexer-fix"),
+  operatorWorktreeTurn("operator_takeover_1", OPERATOR_TAKEOVER_PROMPT, "Takeover worker", "takeover-fix"),
+  operatorWorktreeTurn("operator_phone_1", OPERATOR_PHONE_PROMPT, "Phone worker", "phone-fix"),
+  // Tool rows of the chat (scripts/verify/zones/chat.json, feature `tools`):
+  // one turn per kind of row, each with output a scenario can name.
+  {
+    id: "tools_shell",
+    prompt: "Print the verify banner in the shell.",
+    steps: [{ text: "Printing it.", calls: [{ name: "shell", arguments: { command: javascriptCommand("process.stdout.write('verify-banner-' + (6 * 7) + '\\nverify-second-' + (7 * 8) + '\\n')") } }] }],
+    answer: "The banner is printed.\n",
+  },
+  {
+    id: "tools_shell_long",
+    prompt: "Run the long verify watcher in the shell.",
+    steps: [{ text: "Starting the watcher.", calls: [{ name: "shell", arguments: { command: fixtureCommand({ output: "verify-watcher-12\n", hold: true }) } }] }],
+    answer: "The watcher ended.\n",
+  },
+  {
+    id: "tools_shell_background",
+    prompt: "Run the verify watcher in the background.",
+    steps: [{ text: "Starting it in the background.", calls: [{ name: "shell", arguments: { command: fixtureCommand({ output: "verify-background-25\n", hold: true }), background: true } }] }],
+    answer: "The watcher runs in the background.\n",
+  },
+  {
+    id: "tools_write",
+    prompt: "Write the verify notes file.",
+    steps: [{ text: "Writing it.", calls: [{ name: "write", arguments: { path: "notes/verify-notes.md", content: "# Verify notes\n\nfirst-note-line\nsecond-note-line\n" } }] }],
+    answer: "The notes file is written.\n",
+  },
+  {
+    id: "tools_todo",
+    prompt: "Plan the verify work as a task list.",
+    steps: [{
+      text: "Planning it.",
+      calls: [{
+        name: "todowrite",
+        arguments: { todos: [
+          { content: "Reproduce the verify failure", status: "completed" },
+          { content: "Patch the verify retry", status: "in_progress" },
+          { content: "Rerun the verify suite", status: "pending" },
+        ] },
+      }],
+    }],
+    answer: "The list is set.\n",
+  },
+  {
+    id: "tools_failure",
+    prompt: "Edit the verify marker that is not in retry.ts.",
+    steps: [{ text: "Editing it.", calls: [{ name: "edit", arguments: { path: "src/api/retry.ts", oldString: "verify-marker-not-present", newString: "verify-marker-replaced" } }] }],
+    answer: "The marker is not there.\n",
+  },
+  {
+    id: "tools_json",
+    prompt: "Return the verify owners as JSON.",
+    steps: [{ text: "Collecting them.", calls: [{ name: "execute", arguments: { code: "const owners = ['alpha', 'beta'].map((name, index) => ({ id: 'owner-' + name.toUpperCase(), revision: index + 3 })); return { owners, total: owners.length }" } }] }],
+    answer: "Two owners.\n",
+  },
+  {
+    id: "tools_subagent",
+    prompt: "Ask a subagent about the TypeScript bump.",
+    steps: [{
+      text: "Asking a subagent.",
+      calls: [{ name: "subagent", arguments: { agent: "general", description: "Verify TypeScript bump", prompt: "Bump TypeScript to 5.7 and fix whatever breaks." } }],
+    }],
+    answer: "The subagent answered.\n",
+  },
+  {
+    id: "tools_subagent_slow",
+    prompt: "Ask a slow subagent about the parser.",
+    steps: [{
+      text: "Asking a subagent that takes its time.",
+      calls: [{ name: "subagent", arguments: { agent: "general", description: "Verify slow parser", prompt: "Look at the parser.", model: "perf/think-30s" } }],
+    }],
+    answer: "The slow subagent is on it.\n",
+  },
+  {
+    // OpenCode offers `patch` instead of `edit` and `write` only to GPT models: send it to `perf/gpt-5-scripted`.
+    id: "tools_patch",
+    prompt: "Add the two verify patch notes.",
+    steps: [{
+      text: "Adding both in one patch.",
+      calls: [{ name: "patch", arguments: { patchText: "*** Begin Patch\n*** Add File: notes/patch-one.md\n+patch-one-line\n*** Add File: notes/patch-two.md\n+patch-two-line\n*** End Patch" } }],
+    }],
+    answer: "Both notes are added.\n",
+  },
+  {
+    id: "tools_script_calls",
+    prompt: "List the verify worktrees twice in one script.",
+    steps: [{ text: "Listing twice.", calls: [{ name: "execute", arguments: { code: "const first = await tools.opencode.worktree_list(); const second = await tools.opencode.worktree_list(); return { lists: [first, second].length }" } }] }],
+    answer: "Listed twice.\n",
+  },
+  {
+    id: "tools_script_long",
+    prompt: "Print the long verify report from a script.",
+    steps: [{ text: "Printing it.", calls: [{ name: "execute", arguments: { code: "return Array.from({ length: 6000 }, (_, index) => 'verify report line ' + index).join('\\n')" } }] }],
+    answer: "The report is long.\n",
+  },
+  {
+    id: "tools_openchamber_failure",
+    prompt: "Delete the verify note that does not exist.",
+    steps: [{ text: "Deleting it.", calls: [{ name: "execute", arguments: { code: "return await tools.openchamber_knowledge({ action: 'knowledge.delete', parameters: { kind: 'note', id: 'verify-missing-note' } })" } }] }],
+    answer: "There was no such note.\n",
+  },
+  {
+    // The subagent's report comes back to the parent as a new message.
+    id: "tools_subagent_report",
+    prompt: "Verify TypeScript bump",
+    answer: "Noted the subagent's report.\n",
+  },
+  {
+    id: "tools_question",
+    prompt: "Ask me which verify mode to use.",
+    steps: [{
+      text: "Asking.",
+      calls: [{
+        name: "question",
+        arguments: { questions: [{
+          question: "Which verify mode should run?",
+          header: "Verify mode",
+          options: [{ label: "Quick verify", description: "Only the changed zone" }, { label: "Full verify", description: "Every zone" }],
+        }] },
+      }],
+    }],
+    answer: "Running that mode.\n",
+  },
+  {
+    id: "tools_opencode_call",
+    prompt: "List the verify worktrees.",
+    steps: [{ text: "Listing them.", calls: [{ name: "execute", arguments: { code: "return await tools.opencode.worktree_list()" } }] }],
+    answer: "Those are the worktrees.\n",
+  },
+  {
+    id: "tools_openchamber_call",
+    prompt: "Save the verify note to the project knowledge.",
+    steps: [{ text: "Saving it.", calls: [{ name: "execute", arguments: { code: "return await tools.openchamber_knowledge({ action: 'knowledge.save', parameters: { kind: 'note', body: 'The verify runner answers from a fixture model.' } })" } }] }],
+    answer: "Saved.\n",
+  },
+  // A fetch waits on the user's permission (the verify stand asks before
+  // every fetch); a question waits on their answer.
+  {
+    id: "verify_permission",
+    prompt: "Fetch the release checklist from the wiki and follow it.",
+    steps: [{ text: "Fetching the checklist.", calls: [{ name: "webfetch", arguments: { url: "https://wiki.example.com/release-checklist", format: "text" } }] }],
+    answer: "Followed the checklist.\n",
+  },
+  {
+    id: "verify_branch_question",
+    prompt: "Ask me which branch to base the release on before you start.",
+    steps: [{
+      text: "Asking which branch to use.",
+      calls: [{
+        name: "question",
+        arguments: { questions: [{ question: "Which branch should the release start from?", header: "Branch", options: [{ label: "main", description: "The default branch" }, { label: "next", description: "The upcoming release" }] }] },
+      }],
+    }],
+    answer: "Starting the release from the branch you picked.\n",
+  },
+  // A page the agent shows waits on the user's answer.
+  {
+    id: "verify_waiting_page",
+    prompt: "Show me a page to pick the release day.",
+    steps: [{
+      text: "Showing the page.",
+      calls: [{
+        name: "openchamber_render",
+        arguments: { action: "render.page", parameters: { title: "Release day", awaitAnswer: true, html: "<p>Which day should the release go out?</p><button class=\"oc-button\" onclick=\"openchamber.submit({ day: 'friday' }, 'Friday')\">Friday</button>" } },
+      }],
+    }],
+    answer: "Releasing on the day you picked.\n",
+  },
+]
+
+const TURNS = [
+  ...DESIGN_SESSIONS.flatMap((session) => session.turns.map((turn, index) => ({ ...turn, id: `${session.key}_${index + 1}` }))),
+  ...VERIFY_TURNS,
+]
 
 /**
  * What the scripted conversation answers to this request, or null when the
@@ -476,7 +765,7 @@ const TURNS = DESIGN_SESSIONS.flatMap((session) => session.turns.map((turn, inde
 export const planScriptedResponse = (messages) => {
   const lastPrompt = messages.findLastIndex((message) => message?.role === "user")
   if (lastPrompt < 0) return null
-  const prompt = textOf(messages[lastPrompt].content)
+  const prompt = fixtureMessageText(messages[lastPrompt].content)
   const turn = TURNS.find((candidate) => prompt.includes(candidate.prompt))
   if (!turn) return null
   const toolResults = messages.slice(lastPrompt + 1).filter((message) => message?.role === "tool").length

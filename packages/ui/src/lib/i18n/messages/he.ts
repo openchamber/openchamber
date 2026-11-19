@@ -43,6 +43,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -205,6 +206,7 @@ export const dict = {
   'chat.chatInput.chatQuoteContextRemove': 'הסר ציטוטים מהצ\'אט',
   'chat.chatInput.contextPreview.edit': 'ערוך הערה',
   'chat.chatInput.contextPreview.remove': 'הסר',
+  'chat.chatInput.contextPreview.removeScreenshot': 'הסרת צילום המסך',
   'chat.message.context.browserAnnotation': 'סימון בדפדפן ({page})',
   'chat.message.context.prComment': 'הערה ב-PR של GitHub ({label})',
   'chat.message.context.mrComment': 'הערה בבקשת מיזוג של GitLab ({label})',
@@ -1552,7 +1554,7 @@ export const dict = {
   'contextPanel.browser.frameTitle': 'דפדפן',
   'contextPanel.browser.loadFailed': 'לא ניתן היה לטעון את הדף הזה',
   'contextPanel.browser.waitingForServer': 'ממתין לשרת הפיתוח',
-  'contextPanel.browser.waitingForServerHint': 'הוא עדיין לא מקבל חיבורים. הדף ייטען ברגע שיתחיל לקבל.',
+  'contextPanel.browser.waitingForServerHint': 'הוא עדיין לא מוכן. הדף ייטען ברגע שיהיה מוכן.',
   'contextPanel.browser.tunnelFailed': 'לא ניתן היה להגיע לשרת הפיתוח הזה',
   'contextPanel.browser.remoteLoopback.title': '{url} נמצא במחשב של OpenChamber',
   'contextPanel.browser.remoteLoopback.hint': 'כרטיסיית דפדפן לא יכולה לפתוח דפים שרצים שם. יש לפתוח זאת באפליקציית OpenChamber לשולחן העבודה או לנייד.',
@@ -2674,6 +2676,8 @@ export const dict = {
   'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} לא תומך בקלט מסוג {modalities} שנדרש עבור {files}. עדיין אפשר לשלוח את ההודעה, אבל ייתכן שהקבצים המצורפים האלה יתעלמו.',
   'chat.chatInput.toast.imagesSaving': 'שומר את {files}…',
   'chat.chatInput.toast.imagesSavedForTextModel': '{model} לא יכול לקרוא תמונות. {files} נשמר ב-{folder}.',
+  'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} לא יכול לקרוא תמונות. ההודעה תעביר לו נתיב קובץ במקום {files}.',
+  'chat.chatInput.toast.textModelImageSaveFailed': 'לא ניתן היה לשמור את {files} כקבצים עבור מודל שלא קורא תמונות. ההודעה לא נשלחה.',
   'chat.chatInput.toast.imageSaveFailed': 'לא ניתן לשמור את {files}. צורף במקום זאת.',
   'chat.chatInput.toast.imagesSaved': '{files} נשמר ב-{folder}.',
   'chat.chatInput.toast.imageCopySaveFailed': 'לא ניתן לשמור את {files}.',
@@ -3956,6 +3960,7 @@ export const dict = {
   ...sidebarWorkI18n.he,
   ...sidebarSectionsI18n.he,
   ...worktreeArchiveI18n.he,
+  ...operatorChildrenI18n.he,
   ...omniSearchI18n.he,
   ...overviewI18n.he,
   ...isolatedSpacesI18n.he,

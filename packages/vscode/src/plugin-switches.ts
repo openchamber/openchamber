@@ -18,21 +18,9 @@ export const setPluginSwitch = (directory: string, resource: string, enabled: bo
 );
 
 type PluginSwitchApplyOptions = {
-  /** Whether the user's environment owns `OPENCODE_CONFIG`; the managed file is ours only when it does not. */
   userOwnsConfig: boolean;
 };
 
-/**
- * Apply the switch denials to the environment the managed OpenCode child is
- * launched with. Without a user-owned `OPENCODE_CONFIG`, OpenChamber owns the
- * extra layer and OpenCode watches the file. When the user owns that variable,
- * the denials merge into `OPENCODE_CONFIG_CONTENT`, which the running child
- * only reads at launch.
- *
- * An unreadable store keeps the last state it read (`plugin-switches.js`), so
- * a broken file neither stops the launch nor turns switched-off plugins back
- * on. Throws when the denials cannot merge into `OPENCODE_CONFIG_CONTENT`.
- */
 export const applyPluginSwitchPolicies = (
   env: NodeJS.ProcessEnv,
   directory: string,

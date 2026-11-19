@@ -17,13 +17,7 @@ const countDescendants = (root: SessionNode): number => root.children.reduce(
   0,
 );
 
-/**
- * Export as Markdown for a session menu. A session with subsessions asks
- * first whether to include them; the dialog is the host's to render, outside
- * the menu, which unmounts when it closes.
- */
 export function useSessionMarkdownExport(): {
-  /** `knownTree`: the subsessions the surface already shows; the cache fills in the rest. */
   requestExport: (session: Session, directory: string | null, knownTree?: SessionNode | null) => void;
   dialog: React.ReactNode;
 } {
@@ -31,7 +25,6 @@ export function useSessionMarkdownExport(): {
   const loadExportRecords = useSessionMessageRecordsForExport();
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [includeSubtasks, setIncludeSubtasks] = React.useState(true);
-  // Kept after the dialog closes, so its closing animation shows the same text.
   const [target, setTarget] = React.useState<ExportTarget | null>(null);
 
   const collectChildExports = React.useCallback(async (

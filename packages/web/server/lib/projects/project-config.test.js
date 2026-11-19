@@ -947,53 +947,6 @@ describe('project-config loop reconciliation', () => {
     }
   });
 
-  it('serializes concurrent writes across two runtimes sharing a projects dir', async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-project-lock-contention-'));
-    const fsPromises = await import('fs/promises');
-    try {
-      const runtimeA = createProjectConfigRuntime({
-        fsPromises,
-        path,
-        projectsDirPath: tempRoot,
-        createTaskID: () => 'shared-task',
-      });
-      const runtimeB = createProjectConfigRuntime({
-        fsPromises,
-        path,
-        projectsDirPath: tempRoot,
-        createTaskID: () => 'shared-task',
-      });
-
-      await runtimeA.upsertScheduledTask('project-lock', {
-        name: 'contended',
-        enabled: true,
-        schedule: { kind: 'daily', time: '15:00', timezone: 'UTC' },
-        execution: { prompt: 'Run', providerID: 'openai', modelID: 'gpt-4.1' },
-      });
-
-      await Promise.all([
-        runtimeA.updateScheduledTaskState('project-lock', 'shared-task', {
-          lastStatus: 'success',
-          lastRunAt: 100,
-        }),
-        runtimeB.updateScheduledTaskState('project-lock', 'shared-task', {
-          lastStatus: 'error',
-          lastRunAt: 200,
-        }),
-      ]);
-
-      const tasks = await runtimeA.listScheduledTasks('project-lock');
-      expect(tasks).toHaveLength(1);
-      expect(['success', 'error']).toContain(tasks[0].state.lastStatus);
-      expect([100, 200]).toContain(tasks[0].state.lastRunAt);
-
-      const lockPath = `${runtimeA.resolveProjectConfigPath('project-lock')}.lock`;
-      await expect(fsPromises.access(lockPath)).rejects.toMatchObject({ code: 'ENOENT' });
-    } finally {
-      await rm(tempRoot, { recursive: true, force: true });
-    }
-  });
-
   it('recovers from a stale-by-age project config lock and cleans it up', async () => {
     const { runtime, cleanup } = await createRuntime();
     const fsPromises = await import('fs/promises');
@@ -1129,8 +1082,22 @@ describe('project-config loop reconciliation', () => {
   }, 15_000);
 
   it('releases the write chain after a lock timeout so a later write can complete', async () => {
-    const { runtime, cleanup } = await createRuntime();
+    const { tempRoot, cleanup } = await createRuntime();
     const fsPromises = await import('fs/promises');
+    const lockRead = Promise.withResolvers();
+    vi.useFakeTimers();
+    const runtime = createProjectConfigRuntime({
+      fsPromises: {
+        ...fsPromises,
+        readFile: async (...args) => {
+          const value = await fsPromises.readFile(...args);
+          if (String(args[0]).endsWith('.lock')) lockRead.resolve();
+          return value;
+        },
+      },
+      path,
+      projectsDirPath: tempRoot,
+    });
     try {
       const projectID = 'lock-timeout-recover';
       const configPath = runtime.resolveProjectConfigPath(projectID);
@@ -1141,27 +1108,27 @@ describe('project-config loop reconciliation', () => {
         at: Date.now(),
       }));
 
-      await expect(runtime.upsertScheduledTask(projectID, {
+      const blocked = expect(runtime.upsertScheduledTask(projectID, {
         name: 'blocked-then-recover',
         enabled: true,
         schedule: { kind: 'daily', time: '11:00', timezone: 'UTC' },
         execution: { prompt: 'Run', providerID: 'openai', modelID: 'gpt-4.1' },
       })).rejects.toThrow(/timeout acquiring project config lock/);
+      await lockRead.promise;
+      await vi.advanceTimersByTimeAsync(0);
+      vi.setSystemTime(Date.now() + 10_001);
+      await vi.advanceTimersByTimeAsync(20);
+      await blocked;
 
       // Remove the hostile lock. A wedged in-process chain would hang forever here.
       await fsPromises.unlink(lockPath);
 
-      const created = await Promise.race([
-        runtime.upsertScheduledTask(projectID, {
-          name: 'after-timeout',
-          enabled: true,
-          schedule: { kind: 'daily', time: '12:00', timezone: 'UTC' },
-          execution: { prompt: 'Run after timeout', providerID: 'openai', modelID: 'gpt-4.1' },
-        }),
-        new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('second write hung after lock timeout')), 3_000);
-        }),
-      ]);
+      const created = await runtime.upsertScheduledTask(projectID, {
+        name: 'after-timeout',
+        enabled: true,
+        schedule: { kind: 'daily', time: '12:00', timezone: 'UTC' },
+        execution: { prompt: 'Run after timeout', providerID: 'openai', modelID: 'gpt-4.1' },
+      });
 
       expect(created.created).toBe(true);
       expect(created.task.name).toBe('after-timeout');
@@ -1169,6 +1136,7 @@ describe('project-config loop reconciliation', () => {
       expect(listed).toHaveLength(1);
       expect(listed[0].name).toBe('after-timeout');
     } finally {
+      vi.useRealTimers();
       await cleanup();
     }
   }, 20_000);

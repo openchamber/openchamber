@@ -10,7 +10,6 @@ export const clearSettingsShortcutFocus = (webview: vscode.Webview): void => {
   void vscode.commands.executeCommand('setContext', 'openchamber.settingsShortcutTarget', '');
 };
 
-/** The host stamps the sender's kind; a late blur can release only its owner. */
 export const handleSettingsShortcutFocus = (
   message: { type: string; payload?: unknown },
   webview: vscode.Webview,

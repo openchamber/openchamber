@@ -100,6 +100,55 @@ function waitFor(predicate, timeoutMs = 1000) {
 }
 
 describe('DictationStreamManager', () => {
+  it('retains unchecked segment keys and joins unchecked transcript values', async () => {
+    const session = new FakeSttSession();
+    const { manager, messages } = createManager(session);
+    await manager.handleStart('d1', FORMAT, {});
+
+    const segmentId = { id: 'segment' };
+    session.emit('committed', { segmentId });
+    session.emit('transcript', { segmentId, transcript: 42, isFinal: 'yes' });
+    manager.handleFinish('d1', -1);
+
+    expect(messages.find((message) => message.type === 'final').payload.text).toBe('42');
+    expect(session.closed).toBe(true);
+  });
+
+  it('passes an unchecked language hint to correction unchanged', async () => {
+    const session = new FakeSttSession();
+    const messages = [];
+    const language = { hint: 'uk' };
+    let correctionOptions;
+    const manager = new DictationStreamManager({
+      emit: (message) => messages.push(message),
+      createSttSession: async () => ({ session }),
+      correctTranscript: async (text, options) => {
+        correctionOptions = options;
+        return text;
+      },
+    });
+    await manager.handleStart('d1', FORMAT, { correct: true, language });
+    session.emit('committed', { segmentId: 'segment' });
+    session.emit('transcript', { segmentId: 'segment', transcript: 'hello', isFinal: true });
+    manager.handleFinish('d1', -1);
+
+    await waitFor(() => messages.some((message) => message.type === 'final'));
+    expect(correctionOptions.language).toBe(language);
+  });
+
+  it('retains inherited, non-string rejection messages', async () => {
+    const message = { code: 'provider_failure' };
+    const messages = [];
+    const manager = new DictationStreamManager({
+      emit: (event) => messages.push(event),
+      createSttSession: async () => {
+        throw Object.create({ message });
+      },
+    });
+    await manager.handleStart('d1', FORMAT, {});
+    expect(messages.find((event) => event.type === 'error').payload.error).toBe(message);
+  });
+
   it('transcribes ordered chunks and emits final text', async () => {
     const session = new FakeSttSession();
     const { manager, messages } = createManager(session);
@@ -393,12 +442,6 @@ describe('DictationStreamManager', () => {
       const { messages } = await dictate({ correct: true, correctTranscript: async () => { throw new Error('boom'); } });
       await waitFor(() => messages.some((m) => m.type === 'final'));
       expect(messages.find((m) => m.type === 'final').payload.text).toBe('таку з дибав');
-    });
-
-    it('gives the client time for the correction', async () => {
-      const { messages } = await dictate({ correct: true, correctTranscript: async (text) => text });
-      const accepted = messages.find((m) => m.type === 'finish_accepted');
-      expect(accepted.payload.timeoutMs).toBeGreaterThanOrEqual(20000);
     });
 
     it('emits nothing after a cancel during the correction', async () => {

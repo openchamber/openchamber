@@ -14,7 +14,6 @@ export const createVSCodeSettingsAPI = (): SettingsAPI => ({
     return {
       settings: {
         ...payload,
-        // Override with VS Code settings
         lastDirectory: window.__VSCODE_CONFIG__?.workspaceFolder || payload.lastDirectory || '',
       },
       source: 'web',

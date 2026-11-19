@@ -13,6 +13,7 @@ This folder owns what conversation search looks like wherever it appears: the re
 - Only a failed message search has a status. `SearchStatusMark` is an error mark with the words in its tooltip; a phone, which has no tooltips, shows the failure words in a line under the field. A search under way or an index still filling shows nothing. With an author scope the failure words promise no title search, because none runs.
 - Archived conversations are always searched. A list shows them after the active ones under one Archived caption; a row carries no lifecycle tag of its own.
 - Opening a result never restores an archived conversation: the title opens it, the excerpt opens it at that message.
+- On a phone, the title and excerpt stay close so they read as one result, with separate touch targets at least 36px high.
 - Search context uses separate elements with a drawn divider where needed. It never joins visible text with character separators.
 - Branches and worktree folders render left to right. Other values resolve their own direction on the inner text span.
 - Title matches that hold every query word as typed come first, the most recently changed on top (`rankConversationMetadata`); titles matched only by scattered letters list only when no title holds the words, as the fallback for an abbreviation. Conversations found only by a message follow. The sidebar and Archive match the branch besides the title and leave project and folder names out (`branchOnly`), since they already show the project; the command palette still matches all of them.

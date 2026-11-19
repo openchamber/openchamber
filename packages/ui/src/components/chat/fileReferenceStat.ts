@@ -17,8 +17,6 @@ const getFileReferenceStatCacheMax = (): number => (
   isVSCodeRuntime() ? VSCODE_FILE_REFERENCE_STAT_CACHE_MAX : FILE_REFERENCE_STAT_CACHE_MAX
 );
 
-// NUL cannot occur in a real path, so a directory-qualified key cannot collide
-// with a differently scoped entry.
 const statCacheKey = (directory: string, normalizedPath: string): string => `${directory}\u0000${normalizedPath}`;
 
 export const fileReferenceExists = (resolvedPath: string, effectiveDirectory: string): Promise<boolean> => {
@@ -41,9 +39,6 @@ export const fileReferenceExists = (resolvedPath: string, effectiveDirectory: st
       void runtimeFetch(`/api/fs/stat?path=${encodeURIComponent(normalizedPath)}&optional=true`, {
         method: 'GET',
         cache: 'no-store',
-        // The stat route resolves the workspace from this header. Without it
-        // the server falls back to the browsed lastDirectory, which rejects
-        // session-local files with 400 whenever the two directories differ.
         headers: effectiveDirectory ? { 'x-opencode-directory': effectiveDirectory } : undefined,
       })
         .then(async (response) => {
@@ -83,11 +78,6 @@ export const fileReferenceExists = (resolvedPath: string, effectiveDirectory: st
 
 const fileStatSchema = z.object({ exists: z.boolean().optional() });
 
-/**
- * One answer for a person waiting on a tap. It stays out of the cache and the
- * queue above: the file may have appeared since the last tap, and a failed
- * request must not read as a missing file.
- */
 export const checkFileReference = async (resolvedPath: string, effectiveDirectory: string): Promise<'exists' | 'missing' | 'failed'> => {
   const params = new URLSearchParams({ path: normalizeFilePath(resolvedPath, { preserveWhitespace: true }), optional: 'true' });
   if (!isFilePathWithinDirectory(resolvedPath, effectiveDirectory)) params.set('allowOutsideWorkspace', 'true');
@@ -111,7 +101,6 @@ const fileNameLookupSchema = z.object({ paths: z.array(z.string()) });
 const FILE_NAME_LOOKUP_CACHE = new Map<string, Promise<string | null>>();
 const FILE_NAME_LOOKUP_CACHE_MAX = 200;
 
-/** Every workspace file called `name`; null when the request fails. */
 export const lookupFilesByName = (name: string, effectiveDirectory: string): Promise<string[] | null> => (
   runtimeFetch(`/api/fs/find-by-name?name=${encodeURIComponent(name)}`, {
     method: 'GET',
@@ -126,12 +115,6 @@ export const lookupFilesByName = (name: string, effectiveDirectory: string): Pro
     .catch(() => null)
 );
 
-/**
- * The one workspace file called `name`, for a reference an agent wrote
- * without its folder (`Renderer.tsx:42`). Answered from git's index in one
- * call per name; null when no file or several files carry the name, so an
- * ambiguous reference stays plain text instead of opening a guess.
- */
 export const findUniqueFileByName = (name: string, effectiveDirectory: string): Promise<string | null> => {
   if (!name || !effectiveDirectory || isVSCodeRuntime()) return Promise.resolve(null);
   const cacheKey = statCacheKey(effectiveDirectory, name);

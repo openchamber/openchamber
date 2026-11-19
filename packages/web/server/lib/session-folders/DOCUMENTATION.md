@@ -14,7 +14,7 @@ directory, or `__archived__:<project root>` for the archive's folders. Each
 folder has an id unique across the file, a name, an optional parent in the
 same scope, and the ids of the chats filed in it.
 
-`routes.js` owns the HTTP contract and the file; `folder-changes.js` owns the
+`routes.ts` owns the HTTP contract and the file; `folder-changes.ts` owns the
 change semantics. The client store (`packages/ui/src/stores/useSessionFoldersStore.ts`)
 owns the local cache, the queue of unsent changes and when to read again.
 
@@ -40,6 +40,7 @@ owns the local cache, the queue of unsent changes and when to read again.
   answers older than the one they show and skip the read for an announcement
   they already show.
 - A change that changes nothing writes nothing and announces nothing.
+- A failed change announcement leaves the completed write in place.
 - A change about a folder that is gone does nothing. A create whose parent is
   gone places the folder at the top level.
 - A chat is in at most one folder of a scope after `assign`.
@@ -52,6 +53,13 @@ owns the local cache, the queue of unsent changes and when to read again.
   still holds the folder cannot bring it back with its whole copy. A `create`
   with the same id clears the tombstone; only fixed ids (the archive's
   `archived:<scope>:<name>`) are ever created twice.
+- A stored snapshot written before tombstones existed, with no
+  `deletedFolderIds`, is valid and holds no deletions.
+- A change carries ids up to 32,768 characters because a scope key is a
+  directory path.
+- `import` places parents before their children. A copy with a parent cycle,
+  which only a corrupted file can hold, places its first folder at the top
+  level.
 - `import` keeps what the server already has: its folders keep id, name and
   place, and a chat it already files stays where it is. The only thing it
   removes is a folder the device itself deleted, sent as a tombstone.
@@ -66,6 +74,37 @@ owns the local cache, the queue of unsent changes and when to read again.
 
 ## Decisions
 
+### Why stored revisions remain unparsed until use
+
+The file shape guard accepts a missing or nonnumeric `updatedAt` for writes.
+`GET` and the incoming whole-copy `POST` separately require a positive finite
+number; a change uses zero for an invalid stored revision and keeps the original
+snapshot unchanged for a no-op. `StoredFolderSnapshot.updatedAt` therefore stays
+`unknown` until the existing revision check, while written snapshots carry a
+numeric revision. Folder parents and tombstones accept explicit `undefined` in
+the shape guards and the change schema; the injected callback and clock also
+accept it, as the route tests supply it to select their defaults.
+
+### Why the shared record guard has a local predicate
+
+`shared/guards.js` supplies the record check but exposes an inferred boolean
+return rather than a TypeScript predicate. The local predicate uses that check
+unchanged so file JSON and HTTP bodies narrow before use without converting the
+shared module. Folder changes use Zod's inferred discriminated union.
+
+### Why the pending import entry is checked
+
+The nonempty pending list always supplies an entry at the selected splice index.
+An explicit occupancy check records this invariant for strict indexed access.
+
+### Why dependencies stay injected
+
+The composition caller supplies filesystem promises, path operations and the
+data directory; the clock and announcement callback default to `Date.now` and a
+no-op. HTTP bodies and file JSON are parsed at the routes, filesystem failures
+remain failures except `ENOENT`, and temporary filenames retain the process id,
+clock and random suffix.
+
 ### Why changes and not whole copies
 
 Clients used to send their whole folder map and the server merged it per
@@ -75,6 +114,18 @@ missing scope could not be told from a deleted one. A change says what the
 user did ("move these chats into this folder"), so a client that is behind
 cannot undo anything it did not touch, and the server needs no merge rules
 for ordinary edits.
+
+### Why an older client's whole copy merges into the stored folders
+
+An older client sends its whole device map, and that map can predate the server's
+state: it may have been built before the client ever read the server, the tab has
+been open a long time, or its clock is wrong. A scope or folder missing from the
+copy is not a deletion, so the merge keeps the scopes the writer did not send,
+lets the incoming folder win per id, and keeps `updatedAt` monotonic. Two devices
+that auto-created the archive folder of one scope produce two ids with the same
+name, and their chats are unioned so they do not split across duplicates. A
+deletion travels as a tombstone, which removes that id from every scope even when
+a stale copy sends the folder again.
 
 ### Why a move carries where the chat was instead of an id the server remembers
 
@@ -101,11 +152,16 @@ already has is what the other devices show, so it wins; a local folder with
 the same name under the same parent in the same scope joins it instead of
 becoming a duplicate, any other local folder is added, and a chat only the
 device had filed goes into the matching folder. Nothing on either side is
-dropped except folders deleted elsewhere within the last 30 days.
+dropped except folders deleted elsewhere within the last 30 days. The client
+sends `import` and waits for the answer without applying it to its own copy, so
+the merge happens only here. A deletion the device sends also removes that folder
+from scopes the device no longer sent.
 
 ### Why collapsing a folder is not shared
 
 Which folders are open is how one screen is arranged; collapsing one on the
 phone must not close it on the desktop. The client keeps it per device and
 ignores `collapsedFolderIds` in the file, which only older clients still read
-and write.
+and write. A whole copy keeps the writer's state for the folders it sent and
+another device's entries only for folders the writer did not send, so expanding
+a folder is not undone by a copy that still has it collapsed.

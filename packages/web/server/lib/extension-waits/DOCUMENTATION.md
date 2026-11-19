@@ -20,12 +20,13 @@ Wiring: created in `server/index.js` after `../pr-watch`, handed to the
 control service as `extensionWaits` (`../openchamber-control/service.js`,
 actions `wait.list`, `wait.start`, `wait.stop`, always for the calling
 session), reconciled on every extension activation and deactivation
-(`onExtensionWaitsChanged` in `opencode/feature-routes-runtime.js`), stopped
-by `opencode/shutdown-runtime.js` in the same tick as guest admission closes.
+(`onExtensionWaitsChanged` in `server-frame/feature-routes-runtime.js`), stopped
+by `server-frame/shutdown-runtime.js` in the same tick as guest admission closes.
 
 The extension's service is reached through `../guests/service.js`
 (`proxyGuestServiceRequest`), with the guest proxy's own grant, pause and
-idle-stop rules.
+idle-stop rules. The proxy stops a service after ten minutes without a
+request, and each wait request carries that same idle stop.
 
 ## Invariants
 
@@ -35,6 +36,8 @@ idle-stop rules.
   service fails the agent's call with the reason, and nothing is stored. A
   timer is checked against its own params, then `minutes` must be a whole
   number from 1 to 1440; anything else is refused and nothing is stored.
+  The bare source name `timer` cannot collide with an extension's, whose
+  source always holds a slash.
 - Starting a timer reads no catalog, and no catalog change or failed
   catalog read ends a timer or postpones its check: a due check marks every
   due timer fired before it reads the catalog, and `reconcile` leaves timers
@@ -52,22 +55,34 @@ idle-stop rules.
   hangs forever. These end it with a wake whose `outcome` is `ended` and says
   why: a paused or removed extension, a withdrawn approval, a type the package
   no longer declares, a check entry for it that does not parse, and six hours
-  in which every check of it failed. `wait.stop`, `session.deleted` and an
+  in which every check of it failed. Six hours separates a service that is
+  down for a while from one that is broken. `wait.stop`, `session.deleted` and an
   archived session end it without one. A full store refuses `wait.start`
-  (409) and never evicts a wait.
+  (409) and never evicts a wait: an evicted wait would end without telling its
+  agent.
 - A check answer whose envelope does not parse is a failed check: no wait
   fires and no state moves, and the type is asked again after its interval
   doubled per consecutive failure, up to ten minutes. Inside a good envelope
   each entry is read on its own, so one malformed entry ends only its wait.
-  A catalog that cannot be read is never an empty catalog.
+  A catalog that cannot be read is never an empty catalog. One check timer
+  serves the earliest due wait, and a type has at most one check in flight: a
+  wait being checked is left out of the timer and reschedules when its answer
+  is in. A run marks the waits it will check before its first await, so a run
+  that a stop, a start or a wake schedules meanwhile cannot check them twice.
 - The extension's text sits inside an `<openchamber-wait source="…">`
   envelope that names the extension and says the words are its own; `<` and
   `>` are removed from the summary, the label and the title, and the SDK caps
   the summary at `WAIT_SUMMARY_MAX`.
-- Delivery follows `../pr-watch`: never into a running turn or while a
-  subagent runs, one wake at a time per session, the message id minted and
+- Delivery follows `../pr-watch`: never into a running turn, while running
+  subagents and workflow agents do not hold it (see pr-watch's decision), one wake at a time per session, the message id minted and
   persisted before the first attempt, OpenCode's 409 counts as delivered, 404
-  ends the wait, eight failed attempts give up.
+  ends the wait, eight failed attempts give up. A wake that comes due while an
+  attempt is in flight, or while the session's turn runs, is kept and tried at
+  that attempt's end or on the session's idle event. Attempts are spaced by
+  `QUIET_MS` (500 ms) because idle events arrive in bursts around a turn
+  boundary, and a wake just delivered must first show as a running turn. The
+  id is saved before the send because a second attempt would otherwise mint
+  another and OpenCode would admit the wake twice.
 
 ## Persistence
 
@@ -83,11 +98,14 @@ succeeds. Writes run one at a time.
 
 A start, a removal (stop, delivered wake, deleted or archived session) and a
 wake's message id count only once they are on disk: a write that fails undoes
-the change in memory and broadcasts the list as it was, so a failed start
-leaves no wait, a failed stop keeps the wait running, and a restart restores
-what the caller was told. A removal or message id that could not be saved
-during delivery is retried like a failed delivery, and no message goes out
-under an id that is not saved. A fired or ended check stays in memory when
+the change in memory and broadcasts the list as it was, with the revision
+raised again so a snapshot that showed the change is replaced. So a failed
+start leaves no wait, a failed stop keeps the wait running, and a restart
+restores what the caller was told. A removal or message id that could not be
+saved during delivery is retried like a failed delivery, and no message goes
+out under an id that is not saved. A removal that fails also reschedules the
+checks and a pending wake, since a check or wake that came due while the write
+was pending saw the waits gone. A fired or ended check stays in memory when
 its write fails; the next write catches the file up.
 
 At most 200 waits, 20 per session, refused with 409 and never evicted. A start
@@ -102,7 +120,8 @@ after a restart every due wait is checked on the next tick.
 `description` `<title> (<label>): <first line of the summary>` (the chat shows
 it as a notice row), and `metadata` `{ source: 'openchamber-wait', waitId,
 extension, type, title, label, outcome }`, `extension` being `null` for a
-timer. A timer's text is the host's own (`Timer (10 min) fired: 10 minutes
+timer, which also carries `minutes` so the chat names it in the user's
+language. A timer's text is the host's own (`Timer (10 min) fired: 10 minutes
 passed.`), not quoted as an extension's words.
 
 ## Routes and events
@@ -134,6 +153,27 @@ mobile clients show the composer row, the waiting session and the wake row
 through the server they are connected to.
 
 ## Decisions
+
+### Why in-memory arguments follow the schema output
+
+`WaitArgs` is the inferred output of the SDK's `waitArgsSchema`. An optional
+argument explicitly supplied as `undefined` stays an own property in memory.
+JSON serialization omits it from service requests and the stored file, whose
+unchanged `argsSchema` accepts only strings, numbers and booleans. The message
+helper uses the in-memory contract too. Claiming `GuestWaitArgs` at the parser
+would promise more than the schema checks.
+
+Arguments may arrive as JSON text from the agent. Parsing that text before
+the argument schema preserves the same validation for object and text inputs.
+
+### Why provider admission does not promise a service contribution
+
+`isWaitProvider` checks enablement, wait declarations and approval. It does not
+check `service`, so its narrowed type keeps that field optional, matching
+`GuestRecord`. The injected proxy request describes exactly what the runtime
+passes, including a potentially absent service; the service implementation owns
+that request's failure. The SDK wire argument types and the guest proxy's
+required service parameter remain unchanged.
 
 ### Why the host checks and the service answers
 

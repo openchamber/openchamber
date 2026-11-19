@@ -6,39 +6,20 @@ import { getBtwBoundaryMessageID, getBtwSessionID, wasPromotedBtwSession } from 
 import { useBtwStore } from '@/stores/useBtwStore';
 
 export type BtwPanelState = {
-  /** The session the composer is in was promoted out of `/btw`. */
   parentPromoted: boolean;
-  /** The active fork for this parent, or null when no panel should exist. */
   btwSessionId: string | null;
-  /** The fork's directory identity (may be canonicalized by the server). */
   btwDirectory: string | null;
-  /** Last message id inherited from the parent; the panel shows what's after it. */
   boundaryMessageID: string | null;
   collapsed: boolean;
   creating: boolean;
   pending: boolean;
 };
 
-/**
- * Whether the BTW panel takes the composer's floating dock. A collapsed panel
- * hands the composer back to the parent session, so the parent's pending
- * permission or question outranks its strip: otherwise the parent's turn
- * waits on a request nobody can see.
- */
 export const btwHoldsDock = (panel: BtwPanelState, parentHasRequest: boolean): boolean => {
   const shown = Boolean((panel.btwSessionId && panel.btwDirectory) || panel.creating || panel.pending);
   return shown && !(panel.collapsed && parentHasRequest);
 };
 
-/**
- * One value read from one live session, recomputed when the directory's
- * session list changes but published only when the value itself changes.
- *
- * The composer that owns this state must not re-render for every
- * `session.updated` of the session it sits in: during a turn that event
- * arrives with each status and timestamp change, and none of them moves a
- * btw link. `read` must return a primitive so equal values compare equal.
- */
 function useLiveSessionValue<T extends string | boolean | null>(
   sessionID: string | null | undefined,
   directory: string | undefined,
@@ -76,15 +57,6 @@ const readBoundaryMessageID = (session: Session | undefined): string | null => g
 const readServerDirectory = (session: Session | undefined): string | null =>
   (session as (Session & { directory?: string | null }) | undefined)?.directory ?? null;
 
-/**
- * Derive the `/btw` panel identity for one parent session from authoritative
- * session metadata (`openchamber.btwSessionID`), plus the transient UI state
- * kept in `useBtwStore`. The panel exists only while the parent's link AND the
- * fork itself are present in the live stores, so a fork deleted anywhere
- * (sidebar, another client) makes the panel disappear without extra tracking.
- *
- * The returned object keeps its identity until one of its fields changes.
- */
 export function useBtwPanelState(
   parentSessionId: string | null | undefined,
   directory: string | undefined,

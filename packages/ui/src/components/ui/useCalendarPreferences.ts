@@ -45,10 +45,6 @@ const rotateWeekdays = <T,>(items: T[], weekStartsOn: number): T[] => {
   return [...items.slice(weekStartsOn), ...items.slice(0, weekStartsOn)];
 };
 
-/**
- * The user's calendar: 12 or 24 hours and the first day of the week, from
- * Settings or else the locale, with the weekday names in that order.
- */
 export function useCalendarPreferences() {
   const { locale } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);

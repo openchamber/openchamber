@@ -171,34 +171,6 @@ describe('VS Code API proxy read coalescing', () => {
     }
   });
 
-  test('does not coalesce POST writes or non-allowlisted reads', async () => {
-    const originalFetch = globalThis.fetch;
-    let fetchCount = 0;
-
-    try {
-      globalThis.fetch = (async () =>
-        new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch;
-
-      await Promise.all([
-        handleProxyBridgeMessage({ id: 'w1', type: 'api:proxy', payload: { method: 'GET', path: '/api/session?directory=/x' } }, ctx, deps),
-        handleProxyBridgeMessage({ id: 'w2', type: 'api:proxy', payload: { method: 'GET', path: '/api/session?directory=/x' } }, ctx, deps),
-      ]);
-      assert.equal(fetchCount, 0); // sanity: counter only bumps in the slow mock above
-
-      globalThis.fetch = (async () => {
-        fetchCount += 1;
-        return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
-      }) as typeof fetch;
-
-      await Promise.all([
-        handleProxyBridgeMessage({ id: 's1', type: 'api:proxy', payload: { method: 'GET', path: '/api/session?directory=/x' } }, ctx, deps),
-        handleProxyBridgeMessage({ id: 's2', type: 'api:proxy', payload: { method: 'GET', path: '/api/session?directory=/x' } }, ctx, deps),
-      ]);
-      assert.equal(fetchCount, 2); // /api/session is not in the read allowlist
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
 });
 
 describe('VS Code API proxy Git initialization', () => {

@@ -161,9 +161,6 @@ test('file navigation respects disabling, stream settlement and selection-ending
       expect(open.mock.calls).toHaveLength(0);
     }
     await draw(true, true);
-    for (let i = 0; i < 50 && !host.querySelector('pre [data-openchamber-file-ref]'); i++) {
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
-    }
     const targets = host.querySelectorAll<HTMLElement>('a, code[data-openchamber-file-ref], pre [data-openchamber-file-ref]');
     expect(targets.length).toBe(3);
     for (const target of targets) {
@@ -191,8 +188,7 @@ test('on the phone a file link also opens the files drawer (#5486)', async () =>
   try {
     const content = React.createElement(Renderer.MarkdownContent, { content: '[View README.md](README.md)', directory: '/project', enableFileReferences: true, settled: true });
     await act(() => root.render(React.createElement(I18nProvider, null, React.createElement(DedicatedMobileAppProvider, { actions, children: content }))));
-    host.querySelector<HTMLElement>('a')?.click();
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await act(() => { host.querySelector<HTMLElement>('a')?.click(); });
     expect(open.mock.calls).toEqual([['/project', '/project/README.md']]);
     expect(filesOpened).toBe(1);
   } finally {

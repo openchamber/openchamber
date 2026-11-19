@@ -34,7 +34,6 @@ interface WorkingSummary {
     isStreaming: boolean;
     isCooldown: boolean;
     lifecyclePhase: MessageStreamPhase | null;
-    /** What the agent is doing, as a dictionary key; `formatAgentStatus` makes the text. */
     status: AgentStatus | null;
     isGenericStatus: boolean;
     isWaitingForPermission: boolean;
@@ -47,11 +46,6 @@ interface WorkingSummary {
     lastCompletionId: string | null;
     isComplete: boolean;
     retryInfo: { attempt?: number; next?: number; resetsAt?: number } | null;
-    /**
-     * The turn waits on work OpenCode can move to the background: a running
-     * shell command or a subagent it delegated to (`session.background`),
-     * including one running inside a Code Mode `execute` call.
-     */
     canBackground: boolean;
 }
 
@@ -104,11 +98,6 @@ const STATUS_SIGNATURE_SEPARATOR = '\u0000';
 
 type ToolBucket = 'read' | 'search' | 'edit' | 'command' | 'lookup' | 'delegate' | 'question' | 'skill';
 
-// Several tools share one phrase, so parallel calls of the same kind can be
-// counted together ("reading 3 files"). The timeline names the exact tool.
-// v2 tool names: `shell` replaced `bash`, `subagent` replaced `task`, and
-// `todoread`/`list`/`lsp` are gone. `todowrite` is back behind an experimental
-// flag and has no phrase: updating the list is not work to report.
 const TOOL_BUCKETS = new Map<string, ToolBucket>(Object.entries({
     read: 'read',
     'file-diff': 'read',
@@ -127,8 +116,6 @@ const TOOL_BUCKETS = new Map<string, ToolBucket>(Object.entries({
     skill: 'skill',
 } satisfies Record<string, ToolBucket>));
 
-// [one call, several calls]. The counted phrase takes the number of parallel
-// calls in the bucket. A search spans many files in one call, so it is not counted.
 const BUCKET_STATUS = {
     read: ['chat.agentStatus.read', 'chat.agentStatus.read.count'],
     search: ['chat.agentStatus.search', 'chat.agentStatus.search'],
@@ -140,7 +127,6 @@ const BUCKET_STATUS = {
     skill: ['chat.agentStatus.skill', 'chat.agentStatus.skill.count'],
 } satisfies Record<ToolBucket, readonly [I18nKey, I18nKey]>;
 
-// Shown while no part says what the turn does; one per turn, picked by its key.
 const WORKING_STATUS: readonly I18nKey[] = [
     'chat.agentStatus.working',
     'chat.agentStatus.generic.processing',
@@ -168,9 +154,6 @@ type ParsedStatusResult = {
     canBackground: boolean;
 };
 
-// OpenChamber's own tools each do several kinds of work behind one name, so
-// the status follows the call's `action`. The fallback covers the remaining
-// actions and any added later; the tool name never reaches the pill.
 type ToolActionStatus = { fallback: I18nKey; actions?: Record<string, I18nKey> };
 
 const OPENCHAMBER_STATUS = new Map(Object.entries<ToolActionStatus>({
@@ -233,17 +216,12 @@ const OPENCHAMBER_STATUS = new Map(Object.entries<ToolActionStatus>({
     openchamber_secret: { fallback: 'chat.agentStatus.secret', actions: { 'secret.run': 'chat.agentStatus.secretRun' } },
 }));
 
-/**
- * `running` tells a page that waits for the user's answer apart from one the
- * model is still writing: the call runs until the user picks.
- */
 const getOpenChamberStatus = (call: OpenChamberToolCall, running: boolean): AgentStatus => {
     if (call.awaitsAnswer && running) return status('chat.agentStatus.waitingAnswer');
     const known = OPENCHAMBER_STATUS.get(call.tool);
     return status((call.action ? known?.actions?.[call.action] : undefined) ?? known?.fallback ?? 'chat.agentStatus.working');
 };
 
-// The `opencode` namespace: OpenCode managing itself.
 const OPENCODE_NAMESPACE_STATUS = new Map(Object.entries<I18nKey>({
     session_rename: 'chat.agentStatus.sessions.rename',
     session_move: 'chat.agentStatus.sessions.move',
@@ -258,6 +236,11 @@ const OPENCODE_NAMESPACE_STATUS = new Map(Object.entries<I18nKey>({
     schedule_pause: 'chat.agentStatus.opencode.schedules',
     schedule_resume: 'chat.agentStatus.opencode.schedules',
     schedule_delete: 'chat.agentStatus.opencode.schedules',
+    automation_create: 'chat.agentStatus.opencode.automations',
+    automation_list: 'chat.agentStatus.opencode.automations',
+    automation_pause: 'chat.agentStatus.opencode.automations',
+    automation_resume: 'chat.agentStatus.opencode.automations',
+    automation_delete: 'chat.agentStatus.opencode.automations',
     artifact_create: 'chat.agentStatus.opencode.artifacts',
     artifact_read: 'chat.agentStatus.opencode.artifacts',
     artifact_update: 'chat.agentStatus.opencode.artifacts',
@@ -270,17 +253,11 @@ const usingTool = (name: string): AgentStatus => ({ key: 'chat.agentStatus.using
 
 const getToolStatus = (toolName: string, count = 1): AgentStatus => {
     const bucket = TOOL_BUCKETS.get(toolName);
-    // A plugin tool nobody described: its name, read as words.
     if (!bucket) return usingTool(toolName);
     const [one, many] = BUCKET_STATUS[bucket];
     return count > 1 && many !== one ? { key: many, count } : status(one);
 };
 
-/**
- * Tools that say what they do whether the model calls them directly or from a
- * Code Mode script: OpenChamber's own, the `opencode` namespace, and MCP
- * tools, which name the integration they come from.
- */
 const getNamedToolStatus = (
     toolName: string,
     input: JsonValue | undefined,
@@ -298,18 +275,6 @@ const getNamedToolStatus = (
     return server ? usingTool(server) : undefined;
 };
 
-/**
- * A running `execute` (Code Mode) script names the tool it is calling as soon
- * as its metadata lists one, so the pill tracks the script's real work instead
- * of sitting on a generic status for its whole run. Parallel commands are the
- * exception: one call's name cannot speak for several, so they count instead.
- */
-/**
- * A secret call keeps running after the user answered, while its command runs,
- * so it waits on the user only while the server announces its card as waiting
- * (`waitingCalls`, the session's waiting pages). Without that list a running
- * call counts as waiting.
- */
 const getRunningToolStatus = (part: ToolPart, toolName: string, count: number, mcpServers: readonly string[], waitingCalls?: ReadonlySet<string>): AgentStatus => {
     const state = part.state;
     const running = state?.status === 'running'
@@ -340,13 +305,6 @@ const getStableWorkingStatus = (key: string): AgentStatus => {
     return status(WORKING_STATUS[hashString(key) % WORKING_STATUS.length] ?? 'chat.agentStatus.working');
 };
 
-/**
- * The turn waits on a job OpenCode can move to the background: a shell command
- * or a subagent call that already runs. A pending call has not started yet (or
- * waits for a permission), and a background call settles at once, so neither
- * counts. A running Code Mode `execute` counts when a shell or subagent runs
- * inside it.
- */
 export const hasBackgroundableWork = (parts: readonly Part[]): boolean => parts.some((part) => {
     if (part.type !== 'tool' || part.state?.status !== 'running') return false;
     if (isShellTool(part.tool) || isSubagentTool(part.tool)) return true;
@@ -354,7 +312,6 @@ export const hasBackgroundableWork = (parts: readonly Part[]): boolean => parts.
     return executeHasBackgroundableWork(part.state.metadata);
 });
 
-/** `mcpServers`: the configured MCP server names, which name the integration an MCP tool comes from. */
 export const createParsedStatus = (parts: Part[], genericKey: string, mcpServers: readonly string[] = [], waitingCalls?: ReadonlySet<string>): ParsedStatusResult => {
     const runningToolCounts = countRunningToolCalls(parts);
     let activePartType: ParsedStatusResult['activePartType'] = undefined;
@@ -423,7 +380,6 @@ const encodeParsedStatus = (status: ParsedStatusResult): string => {
     return [
         status.activePartType ?? '',
         status.activeToolName ?? '',
-        // The signature decides re-renders: equal statuses encode the same.
         JSON.stringify([status.status.key, status.status.count ?? null, status.status.name ?? null, status.status.seed ?? null]),
         status.isGenericStatus ? '1' : '0',
         status.canBackground ? '1' : '0',
@@ -492,11 +448,6 @@ const getToolDisplayName = (part: ToolPart): string => {
     return typeof candidate.name === 'string' ? candidate.name : 'tool';
 };
 
-/**
- * Parallel calls are common (three reads, two shell commands), and the last
- * part alone hides the rest. Count every call that is still running or pending
- * by bucket so the phrase can say "reading 3 files" instead.
- */
 const countRunningToolCalls = (parts: readonly Part[]): Map<string, number> => {
     const counts = new Map<string, number>();
     for (const part of parts) {
@@ -510,7 +461,6 @@ const countRunningToolCalls = (parts: readonly Part[]): Map<string, number> => {
     return counts;
 };
 
-/** True when a user prompt follows `index`, i.e. a turn is queued or starting. */
 const hasNewerPrompt = (messages: Message[], index: number): boolean => {
     for (let cursor = messages.length - 1; cursor > index; cursor -= 1) {
         if (messages[cursor]?.role === 'user') return true;
@@ -518,29 +468,14 @@ const hasNewerPrompt = (messages: Message[], index: number): boolean => {
     return false;
 };
 
-/**
- * `sessionModel` is the session record's own model: in OpenCode v2 a send
- * switches the session before the prompt goes out, so it names what the next
- * turn runs on before any assistant record exists.
- */
 export const getActiveAssistantContext = (messages: Message[], sessionModel?: ModelRef | null): ActiveAssistantContext => {
     const sessionProviderId = sessionModel?.providerID.trim() ?? '';
     const sessionModelId = sessionModel?.id.trim() ?? '';
     const nextTurnModel = sessionProviderId && sessionModelId ? { providerId: sessionProviderId, modelId: sessionModelId } : null;
-    // OpenCode v2 records the provider and model on the assistant message
-    // itself, so the active model no longer has to be looked up on the user
-    // message that triggered the turn (which no longer links back to it).
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const message = messages[index];
         if (message?.role !== 'assistant') continue;
 
-        // A prompt newer than this answer starts a turn this answer's model
-        // says nothing about: a v2 user message carries no model, and the
-        // composer may have switched models since. The session record already
-        // holds the switched model (the send switches before it prompts), so it
-        // is the one shown; without it nothing is shown rather than the previous
-        // turn's. A turn still running keeps its model: the newer prompt is only
-        // queued behind it.
         if (message.time.completed !== undefined && hasNewerPrompt(messages, index)) {
             return { assistantId: message.id, model: nextTurnModel };
         }
@@ -562,13 +497,6 @@ const RateLimitBody = z.object({
     error: z.object({ resets_at: ResetsAt.optional() }).optional(),
 });
 
-/**
- * When a provider's rate limit lifts, from a `resets_at` field in the 429
- * body (top level or under `error`; an ISO date or epoch seconds/ms). OpenCode
- * caps a retry delay at 15 minutes, so a limit that lifts hours later shows
- * a retry that is bound to fail again; this time is the one that matters.
- * Only the body reaches the client: reset headers stay in OpenCode.
- */
 export function limitResetsAt(error: StructuredError | undefined): number | undefined {
     const raw = error?.response?.body;
     if (!raw?.includes('resets_at')) return undefined;
@@ -582,14 +510,10 @@ export function limitResetsAt(error: StructuredError | undefined): number | unde
     if (!body.success) return undefined;
     const at = body.data.error?.resets_at ?? body.data.resets_at;
     if (at === undefined) return undefined;
-    // Epoch seconds or milliseconds.
     return at < 1_000_000_000_000 ? at * 1000 : at;
 }
 
 export function useAssistantStatus(): AssistantStatusSnapshot {
-    // Inside the chat column, follow the session the timeline shows rather
-    // than the live selection, so the status chip changes together with the
-    // conversation instead of a commit ahead of it.
     const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
 
     const rawSessionMessages = useSessionMessages(
@@ -604,8 +528,6 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     );
     const lastAssistantId = activeAssistant.assistantId;
 
-    // An MCP tool's name starts with its server's name, and only the configured
-    // names can split it. Reading the config touches no running server.
     const mcpServerConfigs = useMcpConfigStore((state) => selectMcpServersForDirectory(state, currentSessionDirectory));
     const loadMcpConfigs = useMcpConfigStore((state) => state.loadMcpConfigs);
     React.useEffect(() => {
@@ -613,7 +535,6 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     }, [currentSessionDirectory, loadMcpConfigs]);
     const mcpServers = React.useMemo(() => mcpServerConfigs.map((server) => server.name), [mcpServerConfigs]);
 
-    // The calls whose page or secret card waits for the user, as one stable string.
     const waitingCallIds = useGlobalBlockingRequestsStore(React.useCallback(
         (state) => (currentSessionId ? state.bySession.get(currentSessionId)?.pages.map((page) => page.id).join('\n') ?? '' : ''),
         [currentSessionId],
@@ -629,8 +550,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     );
 
     const sessionPermissionRequests = useSessionPermissions(currentSessionId ?? '', currentSessionDirectory ?? undefined);
-    // Only a form that still holds the turn pauses the status: one whose tool
-    // call has ended leaves the turn running (#5391), as in useSessionActivity.
+    // external: #5391 a form whose tool call has ended leaves the turn running.
     const releasedForms = useRecoverableQuestionsStore((state) => state.releasedForms);
     const formHoldsTurn = useDirectorySync(
         React.useCallback((state) => (
@@ -660,8 +580,6 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         ? (currentSessionStatus as { type: 'retry'; next?: number }).next
         : undefined;
 
-    // OpenCode 2.x reports a scheduled retry on the assistant message it will
-    // retry, not as a session status; the next attempt's step start clears it.
     const assistantRetry = React.useMemo(() => {
         if (!lastAssistantId) return null;
         const message = rawSessionMessages.find((candidate) => candidate.id === lastAssistantId);

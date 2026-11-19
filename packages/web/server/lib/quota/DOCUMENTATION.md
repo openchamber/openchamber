@@ -3,14 +3,29 @@
 ## Purpose
 This module fetches quota and usage signals for supported providers in the web server runtime.
 
+## Invariants
+
+- Every managed credential normalizer has a validator under the same provider ID, so normalization cannot bypass validation before storage.
+- Credential writes restrict permissions only on directories they create. Existing directories retain administrator-set permissions and ACLs.
+- Legacy Go and Ollama browser cookies are deleted without reading them. Ollama cleanup runs before credential discovery, including when no API key is readable, so cookie-only installations also remove the obsolete secret. Cleanup failures warn while the ignored Ollama credential stays unused.
+- An unreadable extension catalog leaves the registered providers unchanged. A failed read cannot establish that every extension was removed.
+- Extension eligibility and the approved provider list are read again after credential discovery. Approval withdrawn or narrowed during that read must take effect before credentials reach the service.
+- Replacing an extension provider preserves its registry position. Reads already in flight complete through the registry's existing request coalescing.
+- Registry lookup accepts own keys only, so names such as `constructor` cannot resolve to prototype members.
+- A provider-specific configuration failure leaves other configured providers listable. Failure to read OpenCode credentials still fails the whole list.
+- Claude and Cline rolling windows carry durations because consumers rank limits by how soon they run out. Calendar-month limits and Claude extra-usage spend caps have no fixed rolling duration.
+- Decoded Codex CLI profile claims identify the displayed account only. The claims are unverified and grant no authority.
+- Codex usage requests reject redirects because the bearer credential belongs to the fixed usage origin.
+- Unreadable API-key file or environment references resolve to no credential. Sending the unresolved reference as a bearer token would misreport missing configuration as an authentication failure.
+
 Node server entrypoints apply `../network-defaults.js` before serving requests,
 including the daemon launched directly through `server/index.js`. Connection
 attempts get 5 seconds without changing address-family selection. The VS Code
 extension applies the same policy in its own process at activation.
 
 ## Entrypoints and structure
-- `packages/web/server/lib/quota/index.js`: public entrypoint imported by `packages/web/server/index.js`.
-- `packages/web/server/lib/quota/routes.js`: Express route registration for quota endpoints.
+- `packages/web/server/lib/quota/index.ts`: public entrypoint loaded by the runtime and feature-route composition through its `.js` specifier.
+- `packages/web/server/lib/quota/routes.ts`: Express route registration for quota endpoints.
 - `packages/web/server/lib/quota/providers/index.js`: provider registry, configured-provider list, and provider dispatcher.
 - `packages/web/server/lib/quota/providers/antigravity/`: Antigravity-specific auth, API, and transform modules.
 - `packages/web/server/lib/quota/providers/google/`: Google-specific auth, API, and transform modules.
@@ -71,7 +86,7 @@ the list loses its usage card with no error.
 - The `openchamber_usage` agent tool (`../openchamber-control/usage-read.js`), which calls the same `listConfiguredQuotaProviders` and `fetchQuotaForProvider` in-process, with the page's deadlines and fallback. It asks only `listUsagePageProviders()`: every registry entry except `github-copilot-addon`, which the page never reads, then the attached extensions. The UI's built-in list (`QUOTA_PROVIDERS` in `packages/ui/src/lib/quota/providers/index.ts`) and this one are kept equal by a test in `usage-read.test.js`, so a new provider is added to both, and a registry entry the page does not show joins `NOT_ON_USAGE_PAGE`.
 
 ## Internal-only provider module
-- `providers/openai.js` exists for logic parity/reuse but is intentionally not registered for dispatcher ID routing.
+- `providers/openai.ts` exists for logic parity/reuse but is intentionally not registered for dispatcher ID routing.
 
 ## Response contract
 All providers should return results via shared helpers to preserve API shape:
@@ -126,13 +141,84 @@ A refunded or cancelled Go subscription keeps `product: "go"` and sends `access:
 
 ### OpenCode Console budgets
 
-The OpenCode Go result also carries the Console budgets of the same sign-in, the monthly spend limits a Console workspace sets on its member, as `usage.consoleBudgets` (`console-budgets.js`, shared with the VS Code extension host). They come from the running OpenCode (`GET /api/experimental/usage/limits`, OpenCode 2.2, read in the default directory through `../opencode/auth.js`), which resolves the active `opencode` sign-in itself and answers `null` without one, so an API key shows no budgets. The read runs beside the Go read and is best-effort: any failure drops the budgets, never the meters. When the Go read fails and budgets came back, the result still counts as a sample with the Go error kept, so a Console workspace without Go sees its budgets and the reason there are no meters.
+The OpenCode Go result also carries the Console budgets of the same sign-in, the monthly spend limits a Console workspace sets on its member, as `usage.consoleBudgets` (`console-budgets.ts`, shared with the VS Code extension host). They come from the running OpenCode (`GET /api/experimental/usage/limits`, OpenCode 2.2, read in the default directory through `../opencode/auth.js`), which resolves the active `opencode` sign-in itself and answers `null` without one, so an API key shows no budgets. The read runs beside the Go read and is best-effort: any failure drops the budgets, never the meters.
 
 - **Only the usage page shows them.** They sit outside `usage.windows`, so the work status panel, which reads windows and models, never lists them.
 - **Order**: the budget with the least left comes first. `kind`, `sharing` and `perModel` carry what the Console names a budget by; the UI words them.
 - **Go meters stay ours.** The same route also reports the Go allowance, but only for a Console sign-in; the provider above also covers API keys and the credit balance, so it keeps reading the Console itself.
 
+### Invariants
+
+- A failed Go read for a subscribed workspace stays failed so the page retains its last meters. Budgets turn that failure into a sample only when the workspace has no Go subscription, leaving the Go error alongside the budgets.
+- A malformed budget is dropped independently, so it cannot hide other valid budgets.
+
 On the first OpenCode Go usage refresh after upgrading, OpenChamber deletes the obsolete `quota/opencode-go.json` credential file without reading its cookie value.
+
+### Why the budget decorator infers its return type
+
+Attaching budgets can replace null usage with an empty window map and turn a failed result into a configured success. Its return type includes those replacements; promising the input's exact generic type would preserve literal false flags or null usage that the returned object no longer has. The budget types live in the implementation, while Zod still parses each external budget independently.
+
+## TypeScript conversion boundaries
+
+The extension adapter is TypeScript. `extensionProviderId` returns a nullable ID
+that the adapter passes unchanged to `buildResult`. The formatter copies that ID
+without validation, so its result and input contracts carry the caller's ID type;
+their default remains string for built-in providers. Registration still validates
+the adapter's ID before storing it. Wire windows use the SDK schema's inferred
+type, and the adapter retains their optional structured `value` beside the
+formatter's derived fields.
+
+The registry and catalog reconciler are TypeScript. The registry validates an
+adapter's nullable ID before storing the original provider object. Catalog rows
+use `GuestRecord` from the catalog's owning module; the eligibility predicate
+establishes the service, quota contribution and capability grants using the
+existing adapter check. The registry stays independent of the adapter at runtime,
+so listing extensions does not load credentials or provider modules.
+
+The credential routes accept a provider only when it is an own key of the
+fixed-key `normalizers` object exported by `credentials/providers.ts`. Any other
+path segment, including names every object inherits such as `constructor` and
+`__proto__`, answers 404 before a normalizer, validator or the credential store
+is reached.
+
+### Why routes retain unchecked-input guards
+
+Express bodies stay unknown until checked. The credential JSON predicate checks
+the parsed body without cloning or changing its values, including numeric
+overflow accepted by JSON parsing. The gift-reset field predicate permits
+property reads on every non-nullish value, preserving JavaScript's primitive
+property access. Reset types still require membership in the provider's list.
+
+Thrown messages remain unchecked values, including inherited or non-string
+messages. Nullish thrown values still cause a TypeError when their message is
+read. Credential and gift-reset errors retain their existing Error-instance
+checks and fallback messages.
+
+### Why the adapter keeps catalog and thrown-value checks
+
+The catalog reader is injectable, so its capability-grant array check remains.
+Credential selection retains its own-key and truthiness tests to exclude
+prototype members and absent credentials. Thrown values may be primitives or
+objects with inherited `message` and `code` properties. The error-field predicate
+excludes only null and undefined, preserving optional property access and nullish
+fallbacks without promising string fields.
+
+`persistPath` names the extension store whose enabled flag the service proxy
+reads. `reconcile` refreshes the registered set when a call finds an ineligible
+guest.
+
+### Why reconciliation keeps the catalog and error checks
+
+The catalog array check remains unchanged at the injected reader boundary.
+Thrown values are unchecked. The optional-message predicate establishes only that
+property access is legal by excluding null and undefined. JavaScript also allows
+property access on primitives, including inherited messages, so an object-only
+guard would change that behavior. The optional message remains unknown, and a
+nullish message still falls back to the thrown value.
+
+Node tests that load the provider registry directly must preload
+`packages/web/scripts/register-server-sources.mjs`, since the registry imports
+converted helpers through `.js` specifiers without the server entrypoint.
 
 ## Mistral quota semantics
 
@@ -158,6 +244,10 @@ Zen has no request meters, so the Console exposes counters instead: per-model re
 - **Failure classes stay distinct**: not configured (no credential), rejected credential (401/403), and a malformed or failed response each return their own configured flag and message.
 - **Partial responses**: an unusable successful response drops only that range's window, and the 30-day model rows when the 30-day range is the one that failed. Other ranges still report. No usable window and no budget is a failed refresh. HTTP and network failures of the usage endpoints still fail the refresh; the budget read remains best-effort.
 - `providers/opencode-zen.js` owns the Console HTTP requests, boundary parsing and window construction for both web and VS Code. Runtime wrappers own credential discovery and result envelopes.
+
+### Invariants
+
+- A full Zen model page without pagination metadata is unusable because it may be the first of several pages. Treating it as complete would undercount the range.
 
 ### Why one shared Zen reader
 
@@ -251,7 +341,7 @@ Antigravity reports dual-layer quota for Google Cloud Code / Antigravity IDE acc
 - **Windows**: each model row carries its group's rolling 5-hour (`5h`) and 7-day weekly (`weekly`) limits across Gemini and 3P (Claude/GPT) model groups. The provider card itself exposes no top-level windows (`windows: {}`), matching the Google provider: one overview row could only reflect a single group and would mislead a user whose tighter limit lives in the other group.
 - **Bottleneck prioritization**: when a group's weekly limit is exhausted or more constrained than its 5-hour limit, the weekly window is prioritized first in the model's window map.
 - **Runtime parity**: `packages/web/server/lib/quota/providers/antigravity/` and `packages/vscode/src/quotaProviders.ts` (`fetchAntigravityQuota`) implement the same summary parsing, fallback chain, and bottleneck ordering — keep them in sync.
-- **Client identity**: both runtimes take their request headers from `providers/antigravity/client.js`. The `User-Agent` is `antigravity/<ANTIGRAVITY_CLIENT_VERSION> <os>/<arch>`, with the platform of the machine the request runs on. Google gates the "Gemini Models" group of the daily host's `retrieveUserQuotaSummary` by that version: `antigravity/1.11.5` got the Claude/GPT group alone, answered 200, and the Gemini rows disappeared without an error (#5138). Keep the constant at the version Antigravity's own updater lists (the `version:` line of its `latest-arm64-mac.yml` manifest, URL in the file). A summary that has groups but none for Gemini logs one server-side warning per process that names the constant. The Google provider keeps its own headers.
+- **Client identity**: both runtimes take their request headers from `providers/antigravity/client.js`. The `User-Agent` is `antigravity/<ANTIGRAVITY_CLIENT_VERSION> <os>/<arch>`, with the platform of the machine the request runs on. Google gates the "Gemini Models" group of the daily host's `retrieveUserQuotaSummary` by that version: `antigravity/1.11.5` got the Claude/GPT group alone, answered 200, and the Gemini rows disappeared without an error (#5138). Keep the constant at the version Antigravity's own updater lists, the `version:` line of its [updater manifest](https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest/latest-arm64-mac.yml). A summary that has groups but none for Gemini logs one server-side warning per process that names the constant. The Google provider keeps its own headers.
 
 ### Why a pinned client version and not one read from Antigravity's updater
 
@@ -267,6 +357,10 @@ In 2025/2026 MiniMax rebranded "Coding Plan" to "Token Plan" alongside the M3 mo
 - **model_remains array**: Now contains entries for multiple model categories (chat, speech, video, image). The provider selects the chat-model entry by matching `MiniMax-M*`, then `general`/`chat`/`text` by name, then any entry with a remaining percent.
 - **Window status**: The `current_interval_status` and `current_weekly_status` fields indicate whether a window is active. Status `3` means the window is not applicable for the current plan tier (e.g. legacy plans without weekly limits). The provider omits inactive windows.
 - **Business failures**: both endpoints answer HTTP 200 with a non-zero `base_resp.status_code` on failure. The card shows that failure, never the generic "no usable quota data": code `1004` ("cookie is missing, log in again") comes back for valid Subscription Keys because MiniMax shares usage only with a web login (#5839), so it reads "MiniMax doesn't share limits for this key"; other codes show `status_msg`. A business failure on the token plan endpoint still falls back to the legacy one. `providers/minimax-status.js` holds this mapping for Web/Electron and VS Code (`fetchMiniMaxQuota`).
+
+### Invariants
+
+- MiniMax `remains_time` is in milliseconds. Window duration conversion preserves that unit when timestamps are unavailable.
 
 ## ClinePass quota semantics
 
@@ -344,8 +438,8 @@ yields no window rather than a guessed percentage. A legacy plan reports
 `purchased.balance_usd` is a `purchased_credits` money row shown only while
 positive. `POST /api/me` gives the plan tier, read best-effort as `planLabel`; a
 failure drops the label, never the reading. `/api/usage` is usage analytics with
-no allowance, so it is not the quota source; the obsolete
-`quota/ollama-cloud.json` is deleted on the first readable-key refresh. Keep
+no allowance, so it is not the quota source; obsolete cookie cleanup follows
+the module invariants. Keep
 `providers/ollama-cloud.js` and `packages/vscode/src/quotaProviders.ts`
 (`fetchOllamaCloudQuota`) in sync.
 
@@ -476,3 +570,10 @@ The daily cap is optional. A null quota is omitted; a degraded quota remains
 visible with unknown percentages. Legacy `daily` / `monthly` request windows
 remain supported when current fields are absent. Keep the web provider and
 `fetchNanoGptQuota` in `packages/vscode/src/quotaProviders.ts` in sync.
+
+## NeuralWatt invariants
+
+- Display durations approximate a month as 30 days and a year as 365 days. These durations label progress bars and carry no billing authority.
+- Subscription kWh limits reset monthly even on annual plans. Their window duration remains null because the API supplies no window start from which to derive it.
+- Period spending reduces the credit wallet before the allowance cap applies, so the effective ceiling is the smaller of the allowance and remaining credits plus spending.
+- Allowance windows retain a percentage value and use the localized period title. A fixed value label would prevent the UI's used/remaining display setting from applying.

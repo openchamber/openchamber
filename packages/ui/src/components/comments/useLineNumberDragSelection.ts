@@ -8,17 +8,12 @@ type LineRange = {
 
 type LineNumbersConfig = NonNullable<Parameters<typeof lineNumbers>[0]>;
 
-// A drag closer than this to the editor's top or bottom edge, or past it,
-// scrolls the editor; the step grows with the distance, up to the cap. Inside
-// the editor it scrolls only once the range has grown, so a click that wobbles
-// on the first or last visible line stays a click.
 const AUTO_SCROLL_EDGE_PX = 8;
 const AUTO_SCROLL_MAX_STEP_PX = 24;
 
 interface UseLineNumberDragSelectionOptions {
   lineSelection: LineRange | null;
   setLineSelection: (range: LineRange | null) => void;
-  // Called after a click on the only selected line clears the selection.
   onClear: () => void;
   isMobile: boolean;
 }
@@ -26,7 +21,6 @@ interface UseLineNumberDragSelectionOptions {
 interface LineNumberDragSelection {
   isDragging: boolean;
   lineNumbersConfig: LineNumbersConfig;
-  // True while the click that ends a drag is being dispatched.
   isDragReleaseClick: () => boolean;
 }
 
@@ -51,15 +45,6 @@ const autoScrollStep = (view: EditorView, clientY: number, rangeGrew: boolean): 
   return 0;
 };
 
-/**
- * Selecting lines for a comment by pressing on a line number and dragging.
- *
- * The press comes from the line-number gutter; the drag is followed on the
- * window, so the range keeps following the pointer's height after it drifts
- * into the code or out of the editor, and the editor scrolls while the pointer
- * is held at its top or bottom edge. The returned config keeps its identity, so
- * the gutter is never rebuilt by a render.
- */
 export function useLineNumberDragSelection({
   lineSelection,
   setLineSelection,
@@ -105,7 +90,6 @@ export function useLineNumberDragSelection({
       setIsDragging(false);
     };
     function handleMove(event: MouseEvent) {
-      // Released where no mouseup reached the page.
       if ((event.buttons & 1) === 0) {
         stop();
         return;
@@ -116,9 +100,6 @@ export function useLineNumberDragSelection({
     }
     function handleUp() {
       stop();
-      // The click after a drag lands on what the pointer ended over, rarely the
-      // pressed line number; the views must not take it for a click outside.
-      // It is dispatched in the same task as this mouseup.
       releaseClickRef.current = true;
       window.setTimeout(() => {
         releaseClickRef.current = false;
@@ -153,7 +134,6 @@ export function useLineNumberDragSelection({
           return true;
         }
 
-        // Mobile: tap-to-extend selection
         if (mobile && selection && !event.shiftKey) {
           select({
             start: Math.min(selection.start, selection.end, lineNumber),

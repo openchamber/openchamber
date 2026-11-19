@@ -13,7 +13,6 @@ const text = z.union([z.string(), z.array(z.string())]).transform((value) => (Ar
 const output = z.object({
   output_type: z.string(),
   text: text.optional(),
-  // A value that is not text, such as a widget's JSON, has nothing to draw here.
   data: z.record(z.string(), text.catch('')).optional(),
   ename: z.string().optional(),
   evalue: z.string().optional(),
@@ -42,12 +41,10 @@ const OutputBlock: React.FC<{ value: Output }> = ({ value }) => {
   const image = data['image/png'] || data['image/jpeg'];
   if (image) return <img alt="" className="max-w-full bg-white" src={`data:${data['image/png'] ? 'image/png' : 'image/jpeg'};base64,${image.replace(/\s/g, '')}`} />;
   const html = data['text/html'];
-  // Output is the notebook's own HTML, so it stays in the frame office documents use.
   if (html) return <iframe title="output" sandbox="allow-scripts" srcDoc={officeFrameDocument(html)} className="h-64 w-full rounded bg-white" />;
   return <pre className="overflow-x-auto whitespace-pre-wrap font-mono typography-meta text-foreground">{stripAnsi(data['text/plain'] ?? '')}</pre>;
 };
 
-/** A Jupyter notebook as its cells and saved outputs. Nothing runs: this shows what the file holds. */
 export const NotebookArtifact: React.FC<{ content: string; sizeBytes: number | null }> = ({ content, sizeBytes }) => {
   const { t } = useI18n();
   const parsed = React.useMemo(() => {

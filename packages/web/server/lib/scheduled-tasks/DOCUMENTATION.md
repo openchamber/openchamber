@@ -5,10 +5,91 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 ## Scope
 
 - Per-project scheduled task persistence is owned by `packages/web/server/lib/projects/project-config.js`.
-- Markdown loop discovery/parsing is owned by `packages/web/server/lib/scheduled-tasks/loops.js`.
-- Runtime orchestration and execution is owned by `packages/web/server/lib/scheduled-tasks/runtime.js`.
+- Markdown loop discovery/parsing is owned by `packages/web/server/lib/scheduled-tasks/loops.ts`.
+- Runtime orchestration and execution is owned by `packages/web/server/lib/scheduled-tasks/runtime.ts`.
 - This module is OpenChamber feature logic; it is intentionally separate from OpenCode proxy/runtime internals.
-- The chats scope is owned by `packages/web/server/lib/scheduled-tasks/chats-scope.js`.
+- The chats scope is owned by `packages/web/server/lib/scheduled-tasks/chats-scope.ts`.
+
+## Invariants
+
+- Failed chat creation removes only an empty directory. Non-recursive removal
+  preserves any files that appear before cleanup.
+- A default variant belongs to the model selected from the same settings scope.
+  A project model never inherits the global model's variant.
+- Process identity reads return null when the process disappears, including
+  between the existence check and native inspection. An unreadable live identity
+  throws so cleanup cannot mistake an inspection failure for a dead owner.
+- New sessions carry the `scheduled` kind so unattended runs stay out of In work.
+- Session creation state is recorded before the running event so a client
+  refreshing from that event can already find the session.
+- Startup snapshots cleanup recovery records before project sync can dispatch
+  newly due tasks, keeping recovery separate from new runs.
+- Named-model validation accepts either the catalog's display `id` or upstream
+  `modelID` within the selected provider, matching session-route selection.
+
+## Decisions
+
+### Why target discovery caches directory membership and not each session
+
+Many candidate sessions share directories. Resolving ownership once per directory
+avoids hundreds of Git processes while keeping discovery and save validation on
+the same server-owned membership rule.
+
+### Why loop names are rejected and not clamped
+
+Storage clamps task names to 80 characters. Rejecting longer loop names keeps
+discovery identity keys equal to the stored task names.
+
+### Why loop approval excludes the enabled flag
+
+The approval fingerprint covers the name, schedule and execution that the user
+approves. The enabled flag is the value approval gates, so toggling it does not
+change the approved definition.
+
+### Why repository scope wins when the project is also the user folder
+
+A loop under the project's own `.agents/loops` remains repository content even
+when the same path is discovered in user scope. Keeping that classification
+preserves the local approval requirement.
+
+### Why isolation refuses runs before Git route registration
+
+The scheduler starts before Git routes register the worktree bridge. The initial
+bridge rejects isolation until registration supplies creation and removal, so an
+early isolated run cannot silently write into the checkout. Removal releases the
+run's OpenCode instance by worktree path, as ordinary worktree deletion does.
+
+### Why knowledge and permission enrollment failures allow dispatch
+
+Missing project background is a smaller loss than skipping the task, so knowledge
+sync is non-throwing. Permission auto-accept enrollment precedes dispatch to cover
+the first request; an enrollment failure leaves requests waiting for the user and
+allows the task to execute.
+
+### Why Auto selection waits for a session
+
+The Auto sentinel never reaches OpenCode as a model. The session starts with its
+default model, then Jev switches it to the prompt's selection using the session id
+so the routing decision appears on that session. Goal metadata records the chosen
+model. A missing routing dependency refuses an Auto run before session creation.
+
+### Why model checks reuse target validation and tolerate paused stale targets
+
+An enabled targeted save reuses its validated directory so the guard and catalog
+check read the session once. A paused task with an unresolved target stays
+editable; without a target directory, its catalog check stands down. Loop enabling
+checks the model before rewriting the file so rejection leaves the loop off.
+
+### Why an unchanged enable request leaves the loop file alone
+
+A loop file can be tracked in Git. A request matching the task's enabled state
+preserves both that file and its local approval without rewriting either.
+
+### Why browser capability and follow identity belong to the SSE connection
+
+A desktop shell and a browser tab can share one server while having different
+browser capabilities. Each connection records its own capability and identity so
+follow requests live exactly as long as the connection receiving their changes.
 
 ## Chats scope
 
@@ -108,7 +189,7 @@ dispatches still skip disabled tasks, and completion never re-arms a paused task
 ## Existing-session tasks
 
 `targetSessionId` sends to an existing session instead of creating one.
-`existing-session.js` validates changed or enabled targets on save, and all
+`existing-session.ts` validates changed or enabled targets on save, and all
 targets on admission and send. A paused task can keep a stale target. The
 target must be active and belong to the task project or its linked worktree.
 Another registered project owns its exact checkout. Chats targets must remain
@@ -117,7 +198,7 @@ return 409, including through Run now.
 
 `resolveExecutionDirectory` on the task service returns the project checkout
 or Chats root after scope ID normalization. For a target task it reuses
-`existing-session.js` target validation and returns the session's own directory.
+`existing-session.ts` target validation and returns the session's own directory.
 The task service uses this directory for named-model catalog checks, so a
 target in a linked worktree uses that worktree's configuration.
 
@@ -282,7 +363,7 @@ directory at the old path.
 ### Why owners include a process instance
 
 `ownerPID` is paired with `ownerInstance`, a native creation fingerprint from
-`process-instance.js`. Linux uses the boot UUID and `/proc/<pid>/stat` start
+`process-instance.ts`. Linux uses the boot UUID and `/proc/<pid>/stat` start
 ticks; macOS uses the boot-session UUID and the process creation time from `ps`
 in UTC; Windows uses the process's UTC creation ticks through hidden PowerShell.
 Native commands have a 2-second deadline. No heartbeat or periodic owner writes
@@ -296,21 +377,127 @@ Startup reads each distinct owner PID once. Only this process's immutable
 identity and boot identity are retained beyond that scan; other PIDs are read
 fresh before a removal claim.
 
+Linux start ticks are field 22 of `/proc/<pid>/stat`. The process name in
+parentheses can contain spaces and parentheses, so parsing starts after the
+last closing parenthesis before selecting the start-time field.
+
+### TypeScript boundaries
+
+`loops.ts` imports `parseMdFile`, `writeMdFile`, `getAncestors` and
+`findWorktreeRoot` from `../opencode/markdown-files.js` and
+`../opencode/config-files.js`. Those owners' declarations expose
+these helpers, with unvalidated YAML frontmatter and a parsed string body.
+The frontmatter guard preserves the original acceptance of any non-null object,
+including arrays, and leaves every field unknown until its individual check.
+Enabling a loop reads the file again after validation. That second read remains
+unchecked and its enumerable fields are spread as before, including scalar
+string indices if the file changes between reads. Nullish frontmatter contributes
+no properties.
+
+`existing-session.ts` consumes the normalized task and state-write contracts
+exported by `../projects/contracts.ts`. The project-config normalizers check
+schedule, execution and state fields before returning tasks. State patches
+remain unchecked until that normalizer reads each field, including a queue
+error's unvalidated `message`. Admission returns `message`, `status` and
+`statusCode` as unknown values. The error guard establishes only that property
+access is possible; inherited fields and non-string messages retain their
+original behavior. Nullish thrown values still fail on the required message
+read, and the admission slot is released.
+
+Target validation uses the successful string schema result without transforming
+it. Candidate discovery retains its array check and checks individual candidate
+fields; a candidate may be a primitive, an array or an object. The membership
+cache contains promises of directory ownership, not session records.
+
+`service.ts` checks the task container before project-config normalizes it.
+Model validation reads the raw execution fields with the same nullish fallback
+as optional chaining. Target validation accepts the raw session id and parses
+it with Zod. Cancellation compares the raw task id against stored string ids
+without coercion. Public operations still reject missing ids through the
+existing string parser.
+
+`ScheduledTaskRunResult.error` and `statusCode` remain unknown because
+existing-session admission forwards unchecked thrown fields. The control error
+lets `Error` coerce the message and stores the status unchanged. Guest service
+callbacks use the specific session actions' result contracts; general control
+execution can still return unchecked results from other actions.
+
+Status falls back to reading project configs when the injected runtime has no
+callable status reader. The worktree resolver normally reports the input
+directory when Git cannot resolve a checkout. A resolver that throws also
+falls through to the directory-not-found response.
+
+### Which thrown status values a route forwards
+
+`routes.ts` reads thrown fields through `controlErrorFields`, preserving inherited
+properties, primitive property reads and nullish fallbacks. A thrown `statusCode`
+is used only when it is an integer; anything else is answered as the route's
+generic failure, as it was when Express rejected the value.
+Task body object checks still accept arrays. Candidate and enabled reads retain
+primitive property access. SSE connection metadata is attached to the original
+response object, which remains the client set's identity until close or a failed
+heartbeat removes it.
+
+### Why the runtime uses the project owner's task contracts
+
+`ScheduledTaskStore`, `ScheduledTaskInput` and `ScheduledWorktreeCleanup` live
+in `../projects/contracts.ts`. Project-config normalizes stored tasks and
+parses cleanup records before returning them. Its lock wrapper still infers
+unchecked callback results; the injected contract records those actual
+normalized results without copying storage types into the scheduler.
+Cleanup records preserve the schema's optional owner instance and nullable
+branch. State writes retain their nullable task result.
+
+### Why public scheduling helpers retain input checks
+
+The exported schedule and title helpers also serve JavaScript callers with
+partial definitions. A missing timezone uses the server zone, and daily or
+weekly schedules may use the legacy single `time` field. Primitive string,
+object and array checks retain their existing acceptance and fallbacks.
+Only private, already typed time values, Luxon weekdays and injected function
+dependencies lose redundant `typeof` checks.
+
+### Why metadata fields remain unchecked
+
+The metadata store returns its loose schema result. Cleanup reads
+`openchamber.goal.status` through non-null property-access guards, including
+inherited fields and primitive property reads, without asserting a validated
+goal interface. Native errors use the control owner's unchecked field reader,
+which preserves inherited error properties and nullish fallback behavior.
+
+### Why command templates are narrowed at lookup
+
+The pinned client's command type omits `template`. Lookup reads an existing
+property, including an inherited property, and checks for a primitive string.
+A missing or non-string template retains the original prompt-objective fallback.
+The client still receives command arguments through its `name` and `text`
+fields. Goal introductions use `resume: false`, and goals persist through the
+OpenChamber metadata store. `createSessionGoal` already declares its raw
+input fields, including the budget and persistence callback, as unchecked.
+
+### Why the runtime has local dependency declarations
+
+`dependencies.d.ts` declares only the Luxon methods used here because the
+installed package supplies no declarations. It adds no dependency and replaces
+no server implementation. Empty catch bodies use a no-op expression so their
+existing ignored failures need no product-code comments. Cleanup failures
+retain the journal when absence cannot be confirmed.
+
 ## Files
 
-- `packages/web/server/lib/scheduled-tasks/runtime.js`
+- `packages/web/server/lib/scheduled-tasks/runtime.ts`
   - Next-run computation (daily/weekly/cron compatibility)
   - Timer scheduling and queueing
   - Concurrency controls
   - Session create + prompt_async execution
   - Emits OpenChamber task-run events
 
-- `packages/web/server/lib/scheduled-tasks/loops.js`
+- `packages/web/server/lib/scheduled-tasks/loops.ts`
   - Discovery of `.agents/loops/*.md` (project scope, ancestors up to the worktree root) and `~/.agents/loops/*.md` (user scope)
   - Frontmatter parsing into scheduled-task definitions
   - `syncProject` reconciles discovered loops with the persisted task list on every project sync (startup, task list load, task save/delete)
 
-- `packages/web/server/lib/scheduled-tasks/routes.js`
+- `packages/web/server/lib/scheduled-tasks/routes.ts`
   - Scheduled task CRUD endpoints
   - Listing tasks reconciles loop files first, so opening the Scheduled Tasks UI discovers file additions, edits, and removals without a server restart
   - Loop-file endpoints toggle `enabled` in frontmatter or delete the authoritative markdown file, then reconcile the project

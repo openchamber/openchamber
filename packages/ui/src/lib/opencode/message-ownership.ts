@@ -2,7 +2,6 @@ type AncestorMessageSource<T> = {
   readMessage: (sessionID: string) => Promise<T>
   readParentID: (sessionID: string) => Promise<string | undefined>
   isNotFound: (error: unknown) => boolean
-  /** False once the runtime the lookup started on is no longer current. */
   isCurrent: () => boolean
 }
 

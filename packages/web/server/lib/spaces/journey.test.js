@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 /** A journey on fresh stand-ins. `failAt` names a stand-in step that rejects. */
-const journeyWith = ({ readHostLogin = null, hostProviders = undefined, failAt = null, place = createMemoryPlace(), morePlaces = [], projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, holdReady = false, holdLoginRow = false, hostEnvironment = {}, hostLogin = null, dataDir = null, archiveChats = null, logger = quiet, resolveDirectory = undefined } = {}) => {
+const journeyWith = ({ readHostLogin = null, hostProviders = undefined, hostCatalog = undefined, failAt = null, place = createMemoryPlace(), morePlaces = [], projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, holdReady = false, holdLoginRow = false, hostEnvironment = {}, hostLogin = null, dataDir = null, archiveChats = null, logger = quiet, resolveDirectory = undefined } = {}) => {
   // With `holdCodeIn`, code in waits until the test lets it go, so a creation stays under way;
   // `holdCodeOut` does the same for the fetch of an apply.
   let releaseCodeIn = () => {};
@@ -84,7 +84,7 @@ const journeyWith = ({ readHostLogin = null, hostProviders = undefined, failAt =
   const loginRowHeld = new Promise((resolve) => { releaseLoginRow = resolve; });
   const spaceOpenCode = {
     // The host's custom provider definitions travel as a fourth element only when there are any, so the older expectations read as before.
-    writeProviderConfig: async (spaceId, grants, customProviders) => { calls.push(['writeProviderConfig', spaceId, grants, ...(customProviders?.size > 0 ? [customProviders] : [])]); fail('writeProviderConfig'); },
+    writeProviderConfig: async (spaceId, grants, customProviders, catalogProviders) => { calls.push(['writeProviderConfig', spaceId, grants, ...(customProviders?.size > 0 || catalogProviders?.size > 0 ? [customProviders] : []), ...(catalogProviders?.size > 0 ? [catalogProviders] : [])]); fail('writeProviderConfig'); },
     writeLogin: async (spaceId, provider, login) => { calls.push(['writeLogin', spaceId, provider, login]); if (holdLoginRow) await loginRowHeld; fail('writeLogin'); },
     removeLogin: async (spaceId, provider) => { calls.push(['removeLogin', spaceId, provider]); if (holdLoginRow) await loginRowHeld; fail('removeLogin'); },
   };
@@ -125,6 +125,7 @@ const journeyWith = ({ readHostLogin = null, hostProviders = undefined, failAt =
     readHostSecret: (name) => hostEnvironment[name],
     readHostLogin: readHostLogin ?? (async (provider) => (hostLogin && provider === 'openai' ? hostLogin : null)),
     hostProviders,
+    hostCatalog,
     folderExists: async () => true,
     resolveDirectory,
     readIdleStop: async () => idle.saved ?? { enabled: true, hours: 4 },
@@ -486,12 +487,14 @@ describe('the journey: start, stop, remove', () => {
   it('lists a space whose code never arrived as a failed creation, which Remove takes away', async () => {
     // A host that quit in the middle of bringing the code in leaves the containers running and
     // the record without a space path. The next host must not list that as a healthy space.
-    const { journey, records, place, id } = await ready();
+    const { journey, records, place, events, id } = await ready();
     records.update(id, { spacePath: null, base: null });
     expect((await journey.listSpaces())[0]).toMatchObject({ id, state: 'failed', step: 'failed', failure: { code: 'space_code_never_arrived', message: expect.stringContaining('closed before the code arrived'), details: null } });
     expect(await journey.removeSpace(id)).toMatchObject({ id, removed: true, refsRemoved: true, failures: [] });
     expect(await place.list()).toEqual([]);
     expect(records.read(id)).toEqual({ status: 'missing', record: null });
+    // Every client learns of the removal, whatever it last saw of the space.
+    expect(steps(events, id).at(-1)).toBe('removed');
   });
 
   it('removes the space, the refs in the user\'s repository and the record', async () => {
@@ -830,6 +833,21 @@ describe('the journey: grants', () => {
     // A later grant for the provider takes its failure off the list.
     await journey.grantAccess(id, { ...openai, secret: { kind: 'typed', value: 'sk-live-later' } });
     expect((await journey.listSpaces()).find((space) => space.id === id).accessFailures).toEqual([]);
+  });
+
+  it('refuses inherited environment members both when granting and when restoring access', async () => {
+    const hostEnvironment = {};
+    const { journey, calls, id } = await ready({ hostEnvironment });
+    const request = { ...openai, secret: { kind: 'env', name: 'constructor' } };
+    await expect(journey.grantAccess(id, request)).rejects.toMatchObject({ code: 'secret_source_missing' });
+    expect(calls).toEqual([]);
+    hostEnvironment.constructor = ENV_KEY;
+    await journey.grantAccess(id, request);
+    await journey.stopSpace(id);
+    delete hostEnvironment.constructor;
+    calls.splice(0);
+    expect(await journey.startSpace(id)).toMatchObject({ grantsRestored: [], needsAccess: ['openai'] });
+    expect(calls.filter(([name]) => name === 'addGrant')).toEqual([]);
   });
 
   it('refuses a creation whose access is not model access', async () => {
@@ -1342,6 +1360,80 @@ describe('the journey: a provider of the user\'s own', () => {
   it('lists the host\'s own providers for the dialogs and leaves the catalog\'s providers to their own rows', async () => {
     const { journey } = await ready({ hostProviders: hostProvidersOf({ 'ollama-local': OLLAMA, openai: LIGHTHOUSE, 'github-copilot': LIGHTHOUSE }) });
     expect(await journey.readHostCustomProviders(PROJECT)).toEqual({ providers: [{ id: 'ollama-local', name: 'Ollama (local)', hasKey: false }] });
+  });
+});
+
+describe('the journey: a provider of the host\'s catalog', () => {
+  const GO_MODELS = [{ id: 'deepseek-v4.1-flash', baseURL: 'https://opencode.ai/inference/go/openai/v1' }, { id: 'minimax-m3', baseURL: 'https://opencode.ai/inference/go/anthropic/v1' }];
+  const GO = { id: 'opencode-go', name: 'OpenCode Go', integration: 'opencode', baseURL: 'https://opencode.ai/inference/go/openai/v1', headers: { 'x-opencode-org-id': 'wrk_1' }, models: GO_MODELS, window: { upstream: 'https://opencode.ai/inference/go/', header: 'authorization' } };
+  const hostCatalogOf = (definitions, keys) => ({
+    read: async (providerId) => definitions[providerId] ?? null,
+    list: async () => Object.values(definitions).map((definition) => ({ id: definition.id, name: definition.name, supported: definition.window !== null, storedKey: keys.has(definition.integration) })),
+    readStoredKey: async (integration) => keys.get(integration) ?? null,
+  });
+  const ready = async (options) => {
+    const made = journeyWith(options);
+    const { id } = await made.journey.createSpace(REQUEST);
+    await until(() => steps(made.events, id).includes('ready'));
+    await until(() => made.records.read(id).record?.history !== 'pending');
+    made.calls.splice(0);
+    return { ...made, id };
+  };
+
+  it('gives a catalog provider by the key the host stores, through one window above every address of its models', async () => {
+    const keys = new Map([['opencode', 'sk-go']]);
+    const { journey, records, calls, id } = await ready({ hostCatalog: hostCatalogOf({ 'opencode-go': GO }, keys) });
+    const { grant } = await journey.grantAccess(id, { kind: 'model', provider: 'opencode-go', secret: { kind: 'stored' } });
+    expect(grant).toMatchObject({ kind: 'model', id: 'opencode-go', upstream: 'https://opencode.ai/inference/go/', header: 'authorization', source: { kind: 'stored', integration: 'opencode' } });
+    expect(calls).toEqual([
+      ['addGrant', id, { id: 'opencode-go', upstream: 'https://opencode.ai/inference/go/', header: 'authorization', secret: 'sk-go', headers: { 'x-opencode-org-id': 'wrk_1' } }],
+      ['writeProviderConfig', id, [expect.objectContaining({ id: 'opencode-go' })], new Map(), new Map([['opencode-go', { baseURL: GO.baseURL, models: GO_MODELS }]])],
+    ]);
+    // The record names where the key comes from, never the key.
+    expect(JSON.stringify(records.read(id).record)).not.toContain('sk-go');
+  });
+
+  it('says the stored key again after a start, read then, and leaves the grant needing access once the key is gone', async () => {
+    const keys = new Map([['opencode', 'sk-go']]);
+    const { journey, calls, gatekeeper, id } = await ready({ hostCatalog: hostCatalogOf({ 'opencode-go': GO }, keys) });
+    await journey.grantAccess(id, { kind: 'model', provider: 'opencode-go', secret: { kind: 'stored' } });
+    await journey.stopSpace(id);
+    gatekeeper.forget(id);
+    keys.set('opencode', 'sk-go-2');
+    calls.splice(0);
+    expect(await journey.startSpace(id)).toMatchObject({ grantsRestored: ['opencode-go'], needsAccess: [] });
+    expect(calls.filter(([name]) => name === 'addGrant')).toEqual([['addGrant', id, expect.objectContaining({ secret: 'sk-go-2' })]]);
+
+    await journey.stopSpace(id);
+    gatekeeper.forget(id);
+    keys.delete('opencode');
+    expect(await journey.startSpace(id)).toMatchObject({ grantsRestored: [], needsAccess: ['opencode-go'] });
+  });
+
+  it('refuses a stored key the host does not have, a provider the window cannot serve, and a catalog it cannot read', async () => {
+    const keys = new Map();
+    const { journey, records, id } = await ready({ hostCatalog: hostCatalogOf({ 'opencode-go': GO, mixed: { ...GO, id: 'mixed', window: null } }, keys) });
+    await expect(journey.grantAccess(id, { kind: 'model', provider: 'opencode-go', secret: { kind: 'stored' } })).rejects.toMatchObject({ code: 'stored_key_missing' });
+    await expect(journey.grantAccess(id, { kind: 'model', provider: 'mixed', secret: { kind: 'typed', value: 'sk' } })).rejects.toMatchObject({ code: 'provider_not_supported' });
+    await expect(journey.grantAccess(id, { kind: 'model', provider: 'anthropic', secret: { kind: 'typed', value: 'sk' } })).rejects.toMatchObject({ code: 'invalid_grant_request' });
+    expect(records.read(id).record.grants).toEqual([]);
+
+    const broken = await ready({ hostCatalog: { ...hostCatalogOf({}, keys), read: async () => { throw new Error('down'); } } });
+    // A catalog grant the host cannot read now fails a later grant's configuration out loud, never a silent success.
+    const flaky = { 'opencode-go': GO };
+    const held = await ready({ hostCatalog: hostCatalogOf(flaky, new Map([['opencode', 'sk-go']])), hostEnvironment: { ANTHROPIC_API_KEY: 'sk-ant' } });
+    await held.journey.grantAccess(held.id, { kind: 'model', provider: 'opencode-go', secret: { kind: 'stored' } });
+    delete flaky['opencode-go'];
+    await expect(held.journey.grantAccess(held.id, { kind: 'model', provider: 'anthropic', upstream: 'https://api.anthropic.com/v1', secret: { kind: 'env', name: 'ANTHROPIC_API_KEY' } })).rejects.toMatchObject({ code: 'host_catalog_unreadable' });
+    await expect(broken.journey.grantAccess(broken.id, { kind: 'model', provider: 'opencode-go', secret: { kind: 'typed', value: 'sk' } })).rejects.toMatchObject({ code: 'host_catalog_unreadable' });
+  });
+
+  it('lists the catalog for the dialogs, a provider known by name as served whatever the catalog says of its address', async () => {
+    const { journey } = await ready({ hostCatalog: hostCatalogOf({ 'opencode-go': GO, anthropic: { ...GO, id: 'anthropic', name: 'Anthropic', integration: 'anthropic', window: null } }, new Map([['opencode', 'sk-go']])) });
+    expect(await journey.readHostCatalogProviders(PROJECT)).toEqual({ providers: [
+      { id: 'opencode-go', name: 'OpenCode Go', supported: true, storedKey: true },
+      { id: 'anthropic', name: 'Anthropic', supported: true, storedKey: false },
+    ] });
   });
 });
 

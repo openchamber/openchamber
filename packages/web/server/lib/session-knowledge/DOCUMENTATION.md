@@ -17,9 +17,17 @@ their prompts on the server and never touch the browser. So every sender calls
 `session.metadata.openchamber.project_context_pins` owns the note and plan ids
 attached to that session. Pins never come from project-wide note or plan state.
 A new-session draft passes its pins into this metadata when its first message
-creates the session.
+creates the session. `setPin` writes a merge patch of that one list, so the
+session's other metadata is left alone, and the next send writes the changed pin
+set into the instruction entries.
 
 Directories beneath the managed `~/.config/openchamber/chats` root resolve to that root before project context and project memory are read. Every ordinary chat therefore shares one Chats knowledge owner instead of creating an unreachable context store for each dated session directory.
+
+## Why the JSON parser sits on each route
+
+No global JSON body parser is installed: the generic OpenCode proxy needs the
+request stream unread, so each route that takes a body attaches `express.json`
+itself.
 
 ## How it reaches the agent
 
@@ -51,6 +59,10 @@ review handoffs, review feedback and auto-review, omits the style and preserves
 the entry. A review session starts with no entry of its own, so its sends leave
 it that way too.
 
+The extension reader runs in process and starts nothing, because every send
+waits on it. When the catalog cannot be read the extensions entry is left out,
+so the session keeps the one it holds.
+
 OpenCode does the rest. The first values go into the session's system prompt;
 a value that changed or went away is announced to the agent at its next step as
 a system message, and an unchanged write tells it nothing. Compaction keeps the
@@ -65,6 +77,13 @@ message as one from the user: after an automatic compaction weaker models
 answered it instead of doing the work (#4877). Sessions from that time keep the
 old block in their transcript and hear the entries once more on their next
 message.
+
+## What the panel reads
+
+`collectSummary` counts the pinned notes and plans and names them, and never
+reads a plan body. The panel shows counts and names, and reading every pinned
+plan off disk to show a number would make opening the panel cost what sending a
+message costs.
 
 ## Failure behaviour
 
@@ -93,12 +112,20 @@ wrote one closing line had its whole answer folded into Activity.
 A source that will not load never blanks the rest: an unreadable memory store
 still writes the pinned notes. A memory scope that failed to load is left out
 rather than indexed as empty, which would teach the agent to store again what it
-already has.
+already has. A pinned plan whose markdown cannot be read stays in the block
+marked `(plan content unavailable)` rather than disappearing, so one broken
+attachment does not shrink the context silently. The summary route answers with
+empty counts when its read fails, so the panel shows nothing rather than an
+error.
 
 Each of the pinned and memory entries is cut at 8,000 characters, and says so.
 The memory index is fitted to that budget before it is cut: whole titles, newest
 first per scope, then a count of the older ones left out and a pointer to
-`memory.list`. A full project store's titles outgrow the budget on their own, and
+`memory.list`. Once a title does not fit, the older titles in that scope go with
+it, so a short old title never displaces a long newer one.
+`measureMemoryIndex` reports that budget, the characters the index uses and how
+many titles it leaves out, in the shape `../agent-memory/dreaming.js` reads.
+A full project store's titles outgrow the budget on their own, and
 cutting the rendered text dropped the newest entries mid-title. Titles carry no
 type tag for the same reason: it cost a sixth of the index and decided nothing.
 The response style keeps the full custom text allowed by settings, up to 50,000
@@ -175,10 +202,14 @@ depends on how the user works.
 
 ## When to draw a page
 
+### Invariants
+
+`ui-blocks-guidance.ts` is generated from `packages/ui/src/components/chat/uiBlocks/guidance.ts` by `bun run --cwd packages/ui ui-blocks:generate`. Changes to the guidance originate in that source so regeneration preserves them.
+
 A session whose agent has the managed `openchamber_render` tool (the setting is
 on and OpenChamber launched OpenCode, read through `isPageRenderingAvailable`)
 is told how to draw UI blocks inside its reply (`UI_BLOCKS_GUIDANCE`, generated
-from the UI's block catalog into `ui-blocks-guidance.js`, see
+from the UI's block catalog into `ui-blocks-guidance.ts`, see
 `packages/ui/src/components/chat/uiBlocks/DOCUMENTATION.md`) and when a page
 still beats them (`RENDER_PAGE_GUIDANCE`): how something looks, or a custom
 drawing the block components do not cover. Data is never a page, even when the
@@ -223,7 +254,10 @@ workflows, the setting on, and OpenChamber launched OpenCode, read through
 `isWorkflowAvailable`) is told when a task is big enough for one
 (`WORKFLOW_GUIDANCE`). A run costs many agents, so the agent starts one only
 when the user asks; when it sees a task with many similar independent pieces
-it says so and offers one. Small tasks never get one.
+it says so and offers one. Small tasks never get one. The text asks for a model
+per phase in the same message and starts the run once the user agrees to them:
+without a model named every agent runs on the session's own model, often the
+most expensive one, and dozens of those cost many times a cheap model.
 
 ## Where the tools are called
 
@@ -267,3 +301,17 @@ follow the switch alone, since the store is there either way.
 
 Pinned notes and plans are unaffected by the memory switch and remain scoped to
 the session that pinned them.
+
+## TypeScript boundaries
+
+The runtime's input and result contracts live in `contracts.ts`. Metadata fields
+remain untrusted until their containing objects and pin strings are checked.
+Missing metadata callbacks still reject reads and prevent pin writes; optional
+tool-availability callbacks retain their existing fallback values.
+
+`routes.ts` uses the existing Express factory through the declaration in
+`../shared/express.d.ts` and the application contract from
+`../shared/http-contracts.js`. Body and query validation remain with the route.
+String guards reject non-string and blank request values before trimming.
+Caught pin-write failures expose their message without assuming an Error
+instance or a string message.

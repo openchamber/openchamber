@@ -1,12 +1,15 @@
 #!/usr/bin/env node
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import process from "node:process"
 
 import { startBrowser } from "./browser.mjs"
+import { createSelector, diffMap, keepingChangedFiles, listChangedFiles, readMapAt, workingTreeFiles } from "./changed.mjs"
 import { DEFAULT_MODEL, attachKeptStand, startStand } from "./stand.mjs"
+import { acquireSlot } from "./slots.mjs"
 import { ACTION_NAMES, StepFailure, runStep } from "./steps.mjs"
+import { prioritizeWindowsProcess } from "./windows-priority.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, "../..")
@@ -20,6 +23,12 @@ Selection: a zone (composer), a feature (composer.send) or one scenario
 (composer.send.enter). Nothing selected runs every scenario.
 
 Options:
+  --changed         Select the scenarios whose sources the change touches:
+                    files changed since the branch left origin/main, with
+                    uncommitted and new ones. Prints why each file selects
+                    what it does, and the changed files no scenario covers
+  --base <ref>      With --changed: compare with <ref> instead; A..B takes
+                    the files changed between two commits only
   --list            Print the feature map for the selection and exit
   --repeat <n>      Run the selection n times in the same stand
   --out <dir>       Artifacts directory (default: tmp/verify/<time>)
@@ -30,10 +39,12 @@ Options:
   --help            Show this help`
 
 const parseArgs = (argv) => {
-  const options = { selection: [], list: false, repeat: 1, out: null, keep: false, attach: null, headed: false, chrome: null }
+  const options = { selection: [], changed: false, base: null, list: false, repeat: 1, out: null, keep: false, attach: null, headed: false, chrome: null }
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index]
     if (value === "--help") { console.log(HELP); process.exit(0) }
+    else if (value === "--changed") options.changed = true
+    else if (value === "--base") options.base = argv[++index]
     else if (value === "--list") options.list = true
     else if (value === "--repeat") options.repeat = Math.max(1, Number(argv[++index]))
     else if (value === "--out") options.out = resolve(argv[++index])
@@ -44,6 +55,8 @@ const parseArgs = (argv) => {
     else if (value.startsWith("--")) throw new Error(`Unknown option: ${value}`)
     else options.selection.push(value)
   }
+  if (options.changed && options.selection.length) throw new Error("--changed picks the scenarios itself; leave out the selection")
+  if (options.base && !options.changed) throw new Error("--base goes with --changed")
   return options
 }
 
@@ -54,7 +67,13 @@ const loadMap = () => {
   const scenarios = []
   const problems = []
   for (const zone of zones) {
+    for (const source of zone.sources) {
+      if (!existsSync(join(REPO_ROOT, source))) problems.push(`${zone.zone}: source ${source} does not exist`)
+    }
     for (const feature of zone.features) {
+      for (const source of feature.sources ?? []) {
+        if (!existsSync(join(REPO_ROOT, source))) problems.push(`${zone.zone}.${feature.id}: source ${source} does not exist`)
+      }
       for (const scenario of feature.scenarios) {
         const id = `${zone.zone}.${feature.id}.${scenario.id}`
         scenarios.push({ ...scenario, id, zone, feature })
@@ -78,6 +97,34 @@ const select = (scenarios, selection) => {
   return chosen
 }
 
+/** The scenarios the change touches, after printing which file led to which features and which no scenario covers. */
+const selectChanged = ({ zones, vocabulary }, scenarios, base) => {
+  const changed = listChangedFiles(REPO_ROOT, base)
+  const mapChanges = diffMap(readMapAt(REPO_ROOT, changed.from), changed.to ? readMapAt(REPO_ROOT, changed.to) : { zones, vocabulary })
+  const explained = createSelector(zones, keepingChangedFiles(workingTreeFiles(REPO_ROOT), changed.files)).explain(changed.files, mapChanges)
+  const ids = new Set(explained.flatMap((entry) => entry.features))
+  const chosen = scenarios.filter((scenario) => ids.has(`${scenario.zone.zone}.${scenario.feature.id}`))
+  const of = (reason) => explained.filter((entry) => entry.reason === reason)
+  console.log(`${changed.files.length} files changed against ${changed.label}`)
+  for (const entry of [...of("net"), ...of("shared"), ...of("scenarios"), ...of("vocabulary"), ...of("listed"), ...of("imported")]) {
+    const why = {
+      net: "the net's runner or fixtures: every scenario",
+      scenarios: entry.features.length ? `changed scenarios of ${entry.features.join(", ")}` : "no scenario changed",
+      vocabulary: entry.features.length ? `a changed selector used by ${entry.features.join(", ")}` : "no selector a scenario uses changed",
+      shared: `imported by the sources of ${entry.importers} of ${entry.total} features, more than half: every scenario`,
+      listed: `listed in the sources of ${entry.features.join(", ")}`,
+      imported: `imported by the sources of ${entry.features.join(", ")}`,
+    }[entry.reason]
+    console.log(`  ${entry.file}\n    ${why}`)
+  }
+  const uncovered = of("uncovered")
+  if (uncovered.length) console.log(`\nNo scenario covers ${uncovered.length} changed app files; the net does not check them:\n${uncovered.map((entry) => `  ${entry.file}`).join("\n")}`)
+  const notApp = of("not-app")
+  if (notApp.length) console.log(`\n${notApp.length} changed files are not app code (tests, docs, outside packages/): ${notApp.map((entry) => entry.file).join(", ")}`)
+  console.log(`\n${chosen.length} of ${scenarios.length} scenarios selected`)
+  return chosen
+}
+
 const printMap = (zones, chosen) => {
   const ids = new Set(chosen.map((scenario) => scenario.id))
   for (const zone of zones) {
@@ -85,7 +132,7 @@ const printMap = (zones, chosen) => {
     if (!features.length) continue
     console.log(`\n${zone.zone}: ${zone.name}\n  code: ${zone.sources.join(", ")}`)
     for (const feature of features) {
-      console.log(`\n  ${zone.zone}.${feature.id}: ${feature.name}\n    what:  ${feature.what}\n    reach: ${feature.reach}\n    proof: ${feature.proof}`)
+      console.log(`\n  ${zone.zone}.${feature.id}: ${feature.name}${feature.sources ? `\n    code:  ${feature.sources.join(", ")}` : ""}\n    what:  ${feature.what}\n    reach: ${feature.reach}\n    proof: ${feature.proof}`)
       for (const scenario of feature.scenarios) console.log(`    - ${scenario.id} [${scenario.kind}] ${scenario.title}`)
     }
   }
@@ -115,16 +162,27 @@ const warmUp = async ({ stand, browser, vocabulary }) => {
 
 const stamp = () => new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)
 
-const runScenario = async ({ scenario, stand, browser, vocabulary, outDir, round }) => {
+export const runScenario = async ({ scenario, stand, browser, vocabulary, outDir, round }) => {
   const dir = join(outDir, round > 1 ? `round-${round}` : "", scenario.id)
   mkdirSync(dir, { recursive: true })
-  await stand.reset()
+  const startedAt = Date.now()
+  const result = { id: scenario.id, title: scenario.title, ok: true, seconds: 0, failure: null, artifacts: [], sourceUpdates: [], pageErrors: [], dir: relative(REPO_ROOT, dir) }
+  try {
+    const reset = await stand.reset()
+    if (reset?.failure) throw new Error(reset.failure)
+  } catch (error) {
+    result.ok = false
+    result.failure = { step: null, do: "reset", on: null, message: error.message }
+    result.seconds = Math.round((Date.now() - startedAt) / 100) / 10
+    writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 2))
+    return result
+  }
   const page = await browser.newPage()
   await page.client.send("Page.addScriptToEvaluateOnNewDocument", { source: "try { localStorage.setItem('pwa-install-toast-dismissed', 'true') } catch {}" })
   await page.client.send("Browser.grantPermissions", { permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"], origin: stand.uiUrl, browserContextId: page.browserContextId }).catch(() => undefined)
-  const ctx = { page, stand, vocabulary, vars: { project: stand.project }, background: [], dir, shots: 0, artifacts: [], defaultModel: DEFAULT_MODEL }
-  const startedAt = Date.now()
-  const result = { id: scenario.id, title: scenario.title, ok: true, seconds: 0, failure: null, artifacts: ctx.artifacts, dir: relative(REPO_ROOT, dir) }
+  const downloadDir = join(dir, "downloads")
+  await page.allowDownloads(downloadDir)
+  const ctx = { page, stand, vocabulary, vars: { project: stand.project }, background: [], dir, downloadDir, shots: 0, artifacts: result.artifacts, defaultModel: DEFAULT_MODEL }
   for (const [index, step] of scenario.steps.entries()) {
     try {
       await runStep(step, ctx)
@@ -156,12 +214,17 @@ const runScenario = async ({ scenario, stand, browser, vocabulary, outDir, round
 }
 
 const main = async () => {
+  prioritizeWindowsProcess()
   const options = parseArgs(process.argv.slice(2))
   const { vocabulary, zones, scenarios } = loadMap()
-  const chosen = select(scenarios, options.selection)
+  const chosen = options.changed ? selectChanged({ zones, vocabulary }, scenarios, options.base) : select(scenarios, options.selection)
   if (options.list) {
     printMap(zones, chosen)
     console.log(`\n${chosen.length} scenarios`)
+    return 0
+  }
+  if (chosen.length === 0) {
+    console.log("[verify] nothing to run")
     return 0
   }
   const outDir = options.out ?? join(REPO_ROOT, "tmp/verify", stamp())
@@ -171,21 +234,38 @@ const main = async () => {
   let browser = null
   let browserStarting = null
   let stopStand = async () => undefined
-  const stopAll = async () => {
-    const running = browser ?? await browserStarting?.catch(() => null)
-    browser = null
-    browserStarting = null
-    await running?.stop()
-    await stopStand()
+  let stopping = null
+  const stopAll = () => {
+    stopping ??= (async () => {
+      try {
+        const running = browser ?? await browserStarting?.catch(() => null)
+        browser = null
+        browserStarting = null
+        await running?.stop()
+      } finally {
+        await stopStand()
+      }
+    })().finally(() => { stopping = null })
+    return stopping
   }
   let starting = null
+  let exiting = false
   for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]]) {
-    process.once(signal, () => {
-      void stopAll().then(() => starting?.catch(() => undefined)).then(() => process.exit(code))
+    process.on(signal, () => {
+      if (exiting) return
+      exiting = true
+      void (async () => {
+        try { await stopAll() } finally {
+          await starting?.catch(() => undefined)
+          await stopAll()
+        }
+      })().then(() => process.exit(code), (error) => { console.error(`[verify] cleanup failed: ${error.message}`); process.exit(2) })
     })
   }
   const results = []
+  let releaseSlot = () => undefined
   try {
+    if (!options.attach) releaseSlot = await acquireSlot({ log })
     starting = options.attach
       ? attachKeptStand(JSON.parse(readFileSync(options.attach, "utf8")))
       : startStand({ log, logsDir: join(outDir, "logs"), onStop: (stop) => { stopStand = stop } })
@@ -193,7 +273,7 @@ const main = async () => {
     const standFile = join(outDir, "stand.json")
     if (!options.attach) writeFileSync(standFile, JSON.stringify(stand.describe(), null, 2))
     log(`stand ready after ${Math.round((Date.now() - startedAt) / 1000)}s; ${chosen.length} scenarios × ${options.repeat}; warming up`)
-    browserStarting = startBrowser({ chrome: options.chrome, headed: options.headed })
+    browserStarting = startBrowser({ chrome: options.chrome, headed: options.headed, onSpawn: stand.trackProcess })
     browser = await browserStarting
     await stand.reset()
     await warmUp({ stand, browser, vocabulary })
@@ -205,7 +285,8 @@ const main = async () => {
         results.push(result)
         const line = `${result.ok ? "PASS" : "FAIL"} ${scenario.id} (${result.seconds}s)`
         const changed = result.sourceUpdates.length ? `\n     the source changed during this scenario: ${result.sourceUpdates.join(", ")}` : ""
-        console.log(result.ok ? line : `${line}\n     ${result.failure.step ? `step ${result.failure.step} ` : ""}${result.failure.do}${result.failure.on ? ` ${result.failure.on}` : ""}: ${result.failure.message}\n     ${result.dir}/${result.artifacts.at(-1)}${changed}`)
+        const artifact = result.artifacts.length ? `\n     ${result.dir}/${result.artifacts.at(-1)}` : ""
+        console.log(result.ok ? line : `${line}\n     ${result.failure.step ? `step ${result.failure.step} ` : ""}${result.failure.do}${result.failure.on ? ` ${result.failure.on}` : ""}: ${result.failure.message}${artifact}${changed}`)
       }
     }
     await browser.stop()
@@ -220,12 +301,14 @@ const main = async () => {
       await new Promise(() => undefined)
     }
   } finally {
-    await stopAll()
+    try { await stopAll() } finally { releaseSlot() }
   }
   return results.some((result) => !result.ok) ? 1 : 0
 }
 
-main().then((code) => { process.exitCode = code }, (error) => {
-  console.error(`[verify] ${error.message}`)
-  process.exitCode = 2
-})
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().then((code) => { process.exitCode = code }, (error) => {
+    console.error(`[verify] ${error.message}`)
+    process.exitCode = 2
+  })
+}

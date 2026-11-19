@@ -1,12 +1,3 @@
-/**
- * The parts a user message shows.
- *
- * Two things happen here. Linked issues and pull requests render as link
- * attachments rather than context cards, so their context parts are mapped to
- * the display-only file part `FileAttachment` understands. And a file part that
- * merely repeats the range an inline comment already quotes is dropped, so the
- * message does not show the same lines twice.
- */
 
 import type { FilePart, Part, TextPart } from '@/lib/opencode/model';
 import { readContextPart, type ContextPartPayload } from '@/lib/messages/contextParts';
@@ -14,7 +5,6 @@ import { formatChangeRequestLabel } from '@/lib/source-control/providers/termino
 import type { SourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
 import { repositoryIssueLinkMime, trackerItemLinkMime } from '@/lib/messages/attachmentPreview';
 
-// An issue part written before providers other than GitHub existed names none: it is GitHub's.
 const LEGACY_ISSUE_PROVIDER = 'github';
 
 const redundantCommentFileUrls = (parts: Part[]): Set<string> => {
@@ -48,21 +38,12 @@ const redundantCommentFileUrls = (parts: Part[]): Set<string> => {
     return redundant;
 };
 
-/** A linked item a message's text can draw as an inline chip where its link stands. */
 export type InlineLinkedItem = Extract<ContextPartPayload, { kind: 'repository-issue' | 'repository-discussion' | 'change-request' | 'tracker-item' }>;
 
-// The item behind each display part, for the text's inline chips; held aside
-// so the part keeps the plain file shape the attachment row reads.
 const linkedItems = new WeakMap<Part, InlineLinkedItem>();
 
-/** The issue, change request or tracker item a display part stands for; null for any other part. */
 export const linkedItemOfDisplayPart = (part: Part): InlineLinkedItem | null => linkedItems.get(part) ?? null;
 
-/**
- * The display-only file part a linked issue or pull request renders as. It
- * keeps the identity of the context part it replaces, and never goes back to
- * the server.
- */
 const linkAttachmentPart = (part: TextPart, descriptorOf: SourceControlDescriptorOf): FilePart | null => {
     const payload = readContextPart(part);
     if (!payload) return null;
@@ -81,7 +62,6 @@ const displayPartOf = (part: TextPart, payload: ContextPartPayload, descriptorOf
             return {
                 ...identity,
                 type: 'file',
-                // The type names the provider so the chip shows its mark.
                 mime: repositoryIssueLinkMime(payload.provider ?? LEGACY_ISSUE_PROVIDER),
                 filename: `Issue #${payload.number}: ${payload.title}`,
                 url: payload.url,
@@ -90,7 +70,6 @@ const displayPartOf = (part: TextPart, payload: ContextPartPayload, descriptorOf
             return {
                 ...identity,
                 type: 'file',
-                // Drawn like an issue chip, with the provider's mark.
                 mime: repositoryIssueLinkMime(payload.provider),
                 filename: `Discussion #${payload.number}: ${payload.title}`,
                 url: payload.url,
@@ -107,7 +86,6 @@ const displayPartOf = (part: TextPart, payload: ContextPartPayload, descriptorOf
             return {
                 ...identity,
                 type: 'file',
-                // The type names the tracker so the chip shows its mark.
                 mime: trackerItemLinkMime(payload.provider),
                 filename: `${payload.identifier}: ${payload.title}`,
                 url: payload.url,
@@ -117,7 +95,6 @@ const displayPartOf = (part: TextPart, payload: ContextPartPayload, descriptorOf
                 ...identity,
                 type: 'file',
                 mime: 'application/vnd.openchamber.guest-issue-link',
-                // A link's chip has no title of its own (`contributes.links`): its identifier once.
                 filename: payload.title === payload.id ? payload.id : `${payload.id}: ${payload.title}`,
                 url: payload.url,
             };
@@ -134,12 +111,6 @@ const displayPartOf = (part: TextPart, payload: ContextPartPayload, descriptorOf
     }
 };
 
-/**
- * `descriptorOf` names a change request's provider (`!12` for a merge request).
- * React callers pass `useSourceControlDescriptorOf()` and keep it in their memo
- * inputs, so a label first drawn before the provider list arrived is redrawn
- * when it does.
- */
 export const normalizeUserDisplayParts = (parts: Part[], descriptorOf: SourceControlDescriptorOf): Part[] => {
     const redundantFileUrls = redundantCommentFileUrls(parts);
     return parts

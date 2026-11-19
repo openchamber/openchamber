@@ -22,10 +22,6 @@ function addSearchAliases<T extends CommandAutocompleteSearchItem>(winner: T, du
   return unchanged ? winner : { ...winner, searchAliases: aliases };
 }
 
-/**
- * Precedence is built-in command, then custom/plugin command. Identity matches
- * session.command's case-sensitive lookup.
- */
 export function mergeCommandAutocompleteItems<T extends CommandAutocompleteSearchItem>(
   builtIns: T[],
   commands: T[],

@@ -1,11 +1,10 @@
 import React from 'react';
-import type { IntegrationInfo } from '@opencode/client';
+import type { Integration as IntegrationInfo } from '@/lib/opencode/model';
 import { ProviderOAuthMethods } from '@/components/sections/providers/ProviderOAuthMethods';
 import { findIntegrationForProvider, getSignInMethods } from '@/components/sections/providers/providerAuth';
 import { loadIntegrationCatalog, peekIntegrationCatalog } from '@/lib/opencode/integration-catalog';
 import { useI18n } from '@/lib/i18n';
 
-/** The integration the opencode-claude plugin registers for Claude Code. */
 const CLAUDE_CODE_INTEGRATION_ID = 'claude-code';
 const SIGN_IN_COMMAND = 'claude auth login';
 
@@ -19,17 +18,9 @@ const lookupFrom = (integrations: readonly IntegrationInfo[]): Lookup => ({
 });
 
 interface ClaudeCodeSignInProps {
-  /** Runs once Claude Code holds a login again, so the caller can re-read usage. */
   onSignedIn: () => void | Promise<void>;
 }
 
-/**
- * Claude usage reads the login Claude Code itself keeps, so the fix for a
- * missing one is signing Claude Code in again. With the opencode-claude plugin
- * installed this is the plugin's own sign-in, the same one Providers shows;
- * without it, or when the list cannot be read, the user gets the terminal
- * command, which works either way.
- */
 export const ClaudeCodeSignIn: React.FC<ClaudeCodeSignInProps> = ({ onSignedIn }) => {
   const { t } = useI18n();
   const [lookup, setLookup] = React.useState<Lookup>(() => {

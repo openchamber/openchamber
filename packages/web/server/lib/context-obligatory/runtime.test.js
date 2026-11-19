@@ -199,4 +199,49 @@ describe('context obligatory runtime', () => {
     expect(synthetic[0].text).toContain('Keep this rule');
     expect(synthetic[0].text).toContain('Old answer');
   });
+
+  it('skips malformed pins and text parts without losing valid context', async () => {
+    const { synthetic, fetchMock } = fakeOpenCode();
+    const upstream = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      if (new URL(input).pathname.endsWith('/message/msg_a')) {
+        return json({ data: { content: [null, 1, {}, { type: 'text', text: 123 }, { type: 'text', text: ' Old answer ' }] } });
+      }
+      return upstream(input, init);
+    });
+    const metadata = pinnedMetadata();
+    metadata.openchamber.context_obligatory_messages.push(
+      null, {}, { id: 1, createdAt: 3, role: 'user' },
+      { id: 'bad_time', createdAt: '3', role: 'user' },
+      { id: 'bad_role', createdAt: 3, role: 'system' },
+    );
+    const { runtime } = makeRuntime({ readSessionMetadata: async () => metadata, persistContextCursor: vi.fn(async () => undefined) });
+
+    await runtime.processPayload(compactionEvent(), '/repo');
+
+    expect(synthetic).toHaveLength(1);
+    expect(synthetic[0].text).toContain('Old answer');
+    expect(synthetic[0].text).toContain('Keep this rule');
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('bad_'))).toBe(false);
+  });
+
+  it('preserves a truthy compaction id without promising a string', async () => {
+    const { synthetic, fetchMock } = fakeOpenCode();
+    const upstream = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      if (new URL(input).pathname.endsWith('/message')) {
+        return json({ data: [{ id: 42, type: 'compaction', status: 'completed' }], cursor: {} });
+      }
+      return upstream(input, init);
+    });
+    const persistContextCursor = vi.fn(async () => undefined);
+    const { runtime } = makeRuntime({ readSessionMetadata: async () => pinnedMetadata(), persistContextCursor });
+
+    await runtime.processPayload(compactionEvent(), '/repo');
+
+    expect(synthetic).toHaveLength(1);
+    expect(persistContextCursor).toHaveBeenCalledWith('ses_1', '/repo', {
+      openchamber: { context_obligatory_last_compaction_message_id: 42 },
+    });
+  });
 });

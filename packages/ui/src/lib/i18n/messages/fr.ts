@@ -43,6 +43,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -233,6 +234,7 @@ export const dict = {
   ...sidebarWorkI18n.fr,
   ...sidebarSectionsI18n.fr,
   ...worktreeArchiveI18n.fr,
+  ...operatorChildrenI18n.fr,
   ...omniSearchI18n.fr,
   ...overviewI18n.fr,
   ...isolatedSpacesI18n.fr,
@@ -283,6 +285,7 @@ export const dict = {
   'chat.chatInput.chatQuoteContextRemove': 'Supprimer les citations du chat',
   'chat.chatInput.contextPreview.edit': 'Modifier le commentaire',
   'chat.chatInput.contextPreview.remove': 'Supprimer',
+  'chat.chatInput.contextPreview.removeScreenshot': 'Retirer la capture',
   'chat.message.context.browserAnnotation': 'Annotation du navigateur ({page})',
   'chat.message.context.prComment': 'Commentaire de PR GitHub ({label})',
   'chat.message.context.mrComment': 'Commentaire de MR GitLab ({label})',
@@ -2467,6 +2470,8 @@ export const dict = {
   'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} ne prend pas en charge l’entrée {modalities} requise par {files}. Vous pouvez tout de même envoyer le message, mais ces pièces jointes risquent d’être ignorées.',
   'chat.chatInput.toast.imagesSaving': 'Enregistrement de {files}…',
   'chat.chatInput.toast.imagesSavedForTextModel': '{model} ne peut pas lire les images. {files} enregistré dans {folder}.',
+  'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} ne lit pas les images. Le message lui donnera un chemin de fichier pour {files}.',
+  'chat.chatInput.toast.textModelImageSaveFailed': 'Impossible d’enregistrer {files} comme fichier pour un modèle qui ne lit pas les images. Le message n’a pas été envoyé.',
   'chat.chatInput.toast.imageSaveFailed': 'Impossible d’enregistrer {files}. Joint à la place.',
   'chat.chatInput.toast.imagesSaved': '{files} enregistré dans {folder}.',
   'chat.chatInput.toast.imageCopySaveFailed': 'Impossible d’enregistrer {files}.',
@@ -3507,7 +3512,7 @@ export const dict = {
   'contextPanel.browser.frameTitle': 'Navigateur',
   'contextPanel.browser.loadFailed': 'Impossible de charger cette page',
   'contextPanel.browser.waitingForServer': 'En attente du serveur de développement',
-  'contextPanel.browser.waitingForServerHint': 'Il n’accepte pas encore de connexions. La page se chargera dès que ce sera le cas.',
+  'contextPanel.browser.waitingForServerHint': 'Il n’est pas encore prêt. La page se chargera dès qu’il le sera.',
   'contextPanel.browser.tunnelFailed': 'Ce serveur de dev n’a pas pu être atteint',
   'contextPanel.browser.remoteLoopback.title': '{url} est sur la machine d’OpenChamber',
   'contextPanel.browser.remoteLoopback.hint': 'Un onglet de navigateur ne peut pas ouvrir les pages qui y tournent. Ouvrez-la dans l’app OpenChamber de bureau ou mobile.',

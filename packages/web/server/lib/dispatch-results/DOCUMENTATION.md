@@ -16,25 +16,57 @@ terminal has no session to deliver into.
 
 ## Files
 
-- `runtime.js` — `createDispatchResultsRuntime(...)`: pending entries,
+- `runtime.ts` — `createDispatchResultsRuntime(...)`: pending entries,
   persistence, the delivery loop, event handling; plus the pure
-  `readDispatchOutcome` and `buildDispatchResultMessage`. Workflow runs
+  `readDispatchOutcome` and `buildDispatchResultMessage`. The runtime returns
+  `pending()` (entries oldest first) and `flush()` (the queued write) for tests
+  and diagnostics. Workflow runs
   (`../workflows`) reuse `readDispatchOutcome` to tell when an agent's turn
   ended, and `createMessageId` and `escapeAttribute` for their report.
   Auto-review (`../auto-review`) reads each step's end with
   `readDispatchOutcome(..., { withText: true })`, which takes the text from
   the newest reply of the turn that has any, and mints its ids with
   `createMessageId`.
-- `runtime.test.js` — delivery, waiting on running sessions and subagents,
+- `runtime.test.js` — delivery, waiting on running sessions, not waiting on
+  their children,
   archived and deleted parents, a deleted dispatched session, idempotent
   retries, one result for several sends into one run, unknown versus idle,
   restart, a corrupt file.
 
 Wiring: created in `server/index.js` after the message queue, handed to the
 control service as `dispatchResults`, stopped by
-`opencode/shutdown-runtime.js`. The control service registers an entry after a
+`server-frame/shutdown-runtime.js`. The control service registers an entry after a
 dispatch whose prompt landed (`promptDispatched: true`); the calling session
 comes from the agent tool (`contextSessionId`).
+
+## Invariants
+
+- Raw JSON from the results file, from OpenCode and from hub events is parsed
+  only through the boundary schemas at the top of `runtime.ts`; the rest of the
+  module branches on what those schemas return.
+- Public entry, registration, outcome, message and dependency types belong to
+  `runtime.ts`. Entry types derive from the persistence schema, including its
+  optional and nullable fields. Relative imports retain `.js` specifiers.
+
+### Why requests receive a response schema
+
+Each HTTP read parses its response before returning it to the delivery loop.
+Synthetic delivery ignores the response body, so its schema accepts any value
+and discards it; HTTP failures still determine retry and acknowledgement.
+
+### Why exception properties use guards
+
+File reads, JSON parsing and injected requests can throw arbitrary values.
+The guards preserve property reads on objects and functions, including inherited
+properties, and retain the existing nullish fallback when a message is absent.
+
+### Why hub events are checked before processing
+
+The unconverted hub can translate unrelated events. Its callback narrows payloads
+through the dispatch event schemas before passing them to the typed handler.
+The public `processPayload` entry also retains validation for JavaScript callers.
+The activity probe's unconverted signature infers `signal` as required despite
+its optional runtime behavior; passing `undefined` preserves the existing timeout.
 
 ## Entry and persistence
 
@@ -57,13 +89,14 @@ Timers, retry counts and the in-flight guard are memory only: after a restart
 Event-driven like `../message-queue`: `session.status` idle for a watched
 session arms a 500 ms quiet timer, busy clears it, a hub reconnect and startup
 re-arm everything. `register` arms once too, because a short turn can end
-before its entry exists. The tick then asks OpenCode, and unknown is never
-"over":
+before its entry exists. An idle event that lands while a tick is reading
+re-arms that session: the tick may have seen the session busy a moment earlier,
+and the event would otherwise be lost. The tick then asks OpenCode, and unknown
+is never "over": a failed status read, a message page that does not parse, and
+a malformed record all leave the entry waiting.
 
 1. `/api/session/active` lists it → running; its next idle event re-arms.
-2. A subagent of it runs → not over: the session runs again on the subagent's
-   result. Rechecked after 5 s (`../opencode/session-activity.js`).
-3. The newest page of its records (`order: desc`, 50): OpenCode appends an
+2. The newest page of its records (`order: desc`, 50): OpenCode appends an
    `idle` record with `outcome` (`succeeded`, `failed`, `interrupted`) when a
    run ends. The dispatch route reads the newest one before the prompt goes
    out (`afterIdleId`, null when the session has none); a newer idle record
@@ -75,9 +108,25 @@ before its entry exists. The tick then asks OpenCode, and unknown is never
    its event, then events take over. A `session.send` into a session that is
    already running can end on that running turn when OpenCode steers the
    prompt into it; that turn's answer then includes the prompt's work.
-4. The session itself answers 404 → it was deleted; reported as stopped.
+3. The session itself answers 404 → it was deleted; reported as stopped.
 
 A failed read retries with backoff (2 s doubling to 60 s).
+
+### Why the tick waits for a quiet period
+
+Idle events arrive in bursts around a turn boundary. A tick on each event asks
+OpenCode several times about the same boundary, and the first tick can still see
+the session busy. One 500 ms quiet timer per session collapses the burst into a
+single confirmation.
+
+### Why an idle session's answer goes out while its children still run
+
+Subagents in OpenCode 2 run in the background, as do workflow agents and
+sessions started with `ownWork`: the session answers and goes idle while they
+work, and their results arrive later as messages that start a new turn.
+Waiting on them, as `hasWorkingChildren` does for goals and notifications,
+kept a question to an orchestrating session from coming back for hours while
+its workflow ran, though the session had answered in 36 seconds.
 
 ## Delivery
 
@@ -100,9 +149,15 @@ A failed read retries with backoff (2 s doubling to 60 s).
   *Why a background message waits behind a page*).
 - `resume: false` for an archived parent: the answer is recorded, nothing
   runs behind the user's back. A failed archive lookup counts as not archived
-  and wakes the parent: the agent asked for this result.
+  and wakes the parent: the agent asked for this result. The lookup is awaited
+  before that decision; `isSessionArchived` returns a Promise, and a Promise
+  read as a value is truthy, which would record every answer without waking
+  anyone.
 - `id`: minted in OpenCode's `msg_` format at the first attempt and persisted
-  before it; when that write fails the attempt waits for the next retry. OpenCode refuses a second admission of the same id (409), so a
+  before it; when that write fails the minted ids are dropped from memory and
+  the attempt waits for the next retry, because an unsaved id would be minted
+  again after a crash and the same run could arrive twice. OpenCode refuses a
+  second admission of the same id (409), so a
   retry after a crash or a lost response cannot deliver twice; 409 counts as
   delivered. 404 means the parent is gone and the entry is dropped. A deleted
   parent's entries also go on its `session.deleted` event.
@@ -127,6 +182,13 @@ put the same answer into the parent's context once per prompt (eight times in
 Its id may already have landed with an earlier run whose response was lost.
 Grouping a newer entry under that id would make OpenCode answer 409 for the
 newer run, and its result would be dropped as delivered.
+
+### Why a group's text can come from any entry in it
+
+An entry stored without `afterIdleId` compares `time.created` with
+`dispatchedAt`, so its turn can miss a reply that began before its send while
+another entry of the same run holds it. The delivery uses the outcome in the
+group that has text, and the newest outcome otherwise.
 
 ## Runtime parity
 

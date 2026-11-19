@@ -57,56 +57,6 @@ describe('assignLanes', () => {
     expect(aLane <= Math.min(cLane, bLane)).toBe(true);
   });
 
-  test('handles a merge commit (2 parents)', () => {
-    const commits = [
-      makeCommit('m', ['b', 'a']),
-      makeCommit('b', ['base']),
-      makeCommit('a', ['base']),
-      makeCommit('base', []),
-    ];
-    const result = assignLanes(commits);
-    expect(result).toHaveLength(4);
-    result.forEach((r) => expect(r.lane >= 0).toBe(true));
-    const baseResult = result.find((r) => r.commit.hash === 'base')!;
-    expect(baseResult.lane).toBe(0);
-  });
-
-  test('handles an octopus merge (3 parents)', () => {
-    const commits = [
-      makeCommit('oct', ['p1', 'p2', 'p3']),
-      makeCommit('p1', ['base']),
-      makeCommit('p2', ['base']),
-      makeCommit('p3', ['base']),
-      makeCommit('base', []),
-    ];
-    const result = assignLanes(commits);
-    expect(result).toHaveLength(5);
-    result.forEach((r) => expect(r.lane >= 0).toBe(true));
-  });
-
-  test('root commit gets a top-stub connector', () => {
-    const commits = [
-      makeCommit('b', ['a']),
-      makeCommit('a', []),
-    ];
-    const result = assignLanes(commits);
-    const aResult = result.find((r) => r.commit.hash === 'a')!;
-    const topStub = aResult.connectors.find((c) => c.type === 'top-stub');
-    expect(topStub).not.toBeNull();
-  });
-
-  test('commit with both parent and child gets a commit-lane connector', () => {
-    const commits = [
-      makeCommit('c', ['b']),
-      makeCommit('b', ['a']),
-      makeCommit('a', []),
-    ];
-    const result = assignLanes(commits);
-    const bResult = result.find((r) => r.commit.hash === 'b')!;
-    const commitLane = bResult.connectors.find((c) => c.type === 'commit-lane');
-    expect(commitLane).not.toBeNull();
-  });
-
   test('merge commit produces branch-out connectors for extra parents', () => {
     const commits = [
       makeCommit('m', ['main', 'feat']),

@@ -68,7 +68,7 @@ describe('createDevServerWatchCommand', () => {
     })).toThrow(/Invalid OPENCHAMBER_PORT/);
   });
 
-  it('preserves the nodemon watcher command outside Windows', () => {
+  it('watches JavaScript and TypeScript server changes outside Windows', () => {
     const command = createDevServerWatchCommand({
       platform: 'linux',
       env: { OPENCHAMBER_PORT: '4200' },
@@ -82,7 +82,7 @@ describe('createDevServerWatchCommand', () => {
       '--watch',
       'server',
       '--ext',
-      'js',
+      'js,ts',
       '--exec',
       'bun server/index.js --port 4200',
     ]);

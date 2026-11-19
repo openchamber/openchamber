@@ -2,6 +2,55 @@
 
 The transcript is a LegendList (`@legendapp/list`) owned by `useChatTimelineScroll`. These files hold the scroll logic that list does not do on its own: anchoring, end-keeping, restore and the mobile keyboard glide.
 
+## Invariants
+
+- Reading-position memory is scoped to runtime, directory and session. A
+  session left at its live end has no remembered anchor and reopens at the end;
+  missing geometry during detach preserves an existing anchor.
+- Restore anchors name a message and its row slice as well as an offset.
+  Pixel offsets alone become invalid as history windows and row measurements
+  change. Restore reasserts alignment until measurements stabilize within its
+  frame limit, because one write can be invalidated by the next measurement.
+- Anchor capture compares mounted messages by their visible positions because
+  pooled DOM order can differ from timeline order. A sticky header touching the
+  top edge reports its pinned position rather than its turn's true start, so
+  it cannot supply that start. Remembered selection offsets are clamped when
+  streamed text shrinks under an endpoint.
+- Zero-height row measurements count as one pixel so existing rows cannot look
+  like an empty transcript. End detection uses a narrow band so a reader well
+  above the end remains free to read.
+- An upward wheel consumed by a nested scroller leaves the timeline's follow
+  state alone. Modified keys remain shortcuts. A middle-button press outside a
+  nested scroller releases follow because platform autoscroll can move the
+  transcript without further wheel events.
+- The navigator's active turn is the owner of the last row above the reading
+  line at half the viewport. This monotonic boundary avoids visibility-ratio
+  flips inside long turns; its pinned zone matches the transcript's bottom
+  spacer so the final prompt becomes active even if it cannot cross the line.
+- A native glide gets a short start allowance because it can begin moving a
+  frame or two after issuance. Spring writes read back the browser's rounded,
+  clamped position so those differences cannot look like an outside scroll;
+  spring timing keeps successive landed blocks in one continuing motion.
+
+## Decisions
+
+### Why retired scroll content clears in a microtask and not a frame
+
+A scroll event target can retain an old timeline until Chromium renders again,
+and a suspended webview may not render another frame. Cleanup waits for React
+detach and Markdown cache capture in a microtask, then clears only a detached
+node that is no longer current, because ref reattachment and Strict Mode can
+reuse it during the commit.
+
+### Why keyboard glide targets wait for geometry
+
+The next frame observes the keyboard strip, composer slot and tail spacer after
+their geometry lands. Showing follows the current end and retargets growth
+within the time left; hiding keeps geometry until settlement and subtracts the
+strip and composer shrink from its destination, so the final clamp adds no jump.
+Transform motion and sticky-header handover remain governed by
+[the composer's mobile choreography](../../composer/DOCUMENTATION.md#webkit-rules-for-the-keyboard-choreography).
+
 ## Keeping the end
 
 - **A row that shrinks as the chat widens is measured in the same frame.** LegendList on the web applies a smaller row height a frame late, to ride out transient shrinks; for text re-wrapping at a new width that left the rows below and the pinned end a frame behind on every frame of a resize, and a pinned reader's text jumped up and back by 70 to 200 px each frame while the chat widened. Our patch (`bun-patches/@legendapp%2Flist@3.7.2.patch`, `processContainerLayout`) applies a shrink at once when the row's width changed; carry it over when bumping the library. The end is still taken from the measured bottom of the last real row (`resolveRealContentEndOffset` in `timelineScrollAnchoring.ts`), not from `scrollHeight`, which can trail the rows.
@@ -40,7 +89,7 @@ The transcript is a LegendList (`@legendapp/list`) owned by `useChatTimelineScro
   - A piece starts only at a paragraph or a heading. Its top margin is then the whole gap the answer had there (no block's bottom margin is larger), so the first block of a later piece keeps it (`[data-answer-continues]` in index.css) and the rows stack to within a pixel of the whole answer. A text with footnotes or link definitions stays whole: they resolve across the document. A text still streaming stays one row and is cut once it finishes; the first row keeps its key, so it keeps its React tree.
   - The rows of a message share its record: the first draws what comes before the cut and the message's header, the last its footer, error and actions (`MessageSliceContext`, read by `MessageBody` and `ChatMessage`). Copying and the image export take the message's text from the record, not from the DOM. Navigation and restore find a message by its first row (`[data-message-id]:not([data-message-slice])`); an anchor taken in a later row names that row (`MessageViewportAnchor.slice`).
   - The rows of one answer read as one text. The list puts its rows in DOM order in the layout pass that hands a container a different row (`sortContainerElements`, moving only the rows out of place and keeping focus), so a selection the reader makes crosses rows in reading order. The selection menu of the row a selection starts in takes one that ends in a later row of the same message (`ownsSelection` in `TextSelectionMenu.tsx`); copying serializes each row's part as Markdown and joins them (`data-answer-part`, `getMarkdownSelectionText`). A quote counts in the message's stream: the text of its mounted rows joined in reading order (`findChatQuoteRoots`), as one root's was before the answer was cut, so quotes taken before then still resolve; a quote crossing rows is painted with a Range per row. Revealing a quote in a row not mounted steps down through the message's rows (`data-message-continues`), after asking the navigation hold on its first row to let go (`openchamber:navigation-release`).
-  - Every row of the live tail reads the tail's entry with the newest parts from one store (`LiveTailSource` in `MessageList.tsx`), computed once per publish, so a streamed part re-renders the tail's rows and nothing else. The rows themselves are built from the timeline's record, and a row reads whether its turn is folded from the row (`underFold`), so the rows of a live turn agree on it while the record lags the stream.
+  - Every row of the live tail reads the tail's entry with the newest parts from one store (`LiveTailSource` in `timeline/LiveTailSource.tsx`), computed once per publish, so a streamed part re-renders the tail's rows and nothing else. The rows themselves are built from the timeline's record, and a row reads whether its turn is folded from the row (`underFold`), so the rows of a live turn agree on it while the record lags the stream.
   - The sticky prompt is the list's own sticky row (`stickyHeaderIndices`): the list keeps it on top until the next sticky row reaches the top. A turn's prompt leaves with its turn instead, as it did inside one turn row: once the turn's last row scrolls under it, the scroll handler pushes it up by as much (`pushStickyHeader`, a `transform` on the row's container, measured from the DOM because the list's positions and its scroll offset do not count from the same origin).
 - **A selection keeps its rows.** While a selection in the transcript lasts, every row from the one holding its anchor to the one holding its focus stays mounted (`useSelectionRowHold` in `selectionRowHold.ts`, the list's `alwaysRender`), the way `MarkdownWindow` holds the blocks a selection spans in a file preview. Two things broke a selection whose start scrolled off on Android, and the fix needs both:
   - Chrome on Android places the end that stays put again from its spot on screen each time a handle drag starts. In a page that scrolls as a whole that spot holds the same text; in the transcript, an inner scroller, it lies outside the list once that end is scrolled out, and the anchor landed at the top of the page (the list header): the highlight and the native copy grew to everything mounted above. Either end can be the one that stays put, so dragging the start handle up lost the end the same way. The hook remembers the ends in rows of the last selection anchored in one. When the anchor leaves the rows while the focus stays in one, it puts back the remembered end farthest from the focus, the one the reader is not dragging, if the screen no longer shows it at its spot: scrolled out, or under the composer or the selection panel (`setBaseAndExtent`). Chrome takes the anchor from the DOM for the rest of the drag, so this happens once per drag. The first step of such a drag can put the anchor in the list header and the focus in the selection panel, outside the list; only a selection with both ends outside the list ends the hold. Measured in Chrome and the app on an Android 15 emulator: without it, the anchor jumped on the first drag after the start left the screen; with it, the selection grew through three rows of one answer and into the next message, in either direction and with the start handle dragged after the end one.
@@ -153,7 +202,7 @@ its original target until alignment completes or the reader intervenes.
 
 ## Row identity
 
-- **A row keeps its React tree when it becomes or stops being the live tail.** Every row renders through `TimelineRow` in `MessageList.tsx`; only the tail's rows read the streaming parts. The tail moves on every send and on a revert. When the tail had its own component type, the moving row remounted, its state reset for one commit (a long user message lost its "Show more" link, 28 px), and LegendList measured that commit in its layout effect. The `ResizeObserver` never corrects such a size, because the short height was never painted, so the row below sat that much too high until a later re-measure: 40-80 ms after a send, and from the revert until 200 ms into the next send. Anything that remounts or resets state inside a mounted row has the same effect.
+- **A row keeps its React tree when it becomes or stops being the live tail.** Every row renders through `TimelineRow` in `timeline/TimelineRow.tsx`; only the tail's rows read the streaming parts. The tail moves on every send and on a revert. When the tail had its own component type, the moving row remounted, its state reset for one commit (a long user message lost its "Show more" link, 28 px), and LegendList measured that commit in its layout effect. The `ResizeObserver` never corrects such a size, because the short height was never painted, so the row below sat that much too high until a later re-measure: 40-80 ms after a send, and from the revert until 200 ms into the next send. Anything that remounts or resets state inside a mounted row has the same effect.
 - **The gap under an answer belongs to the turn, not to the answer.** The 8 px between an answer and the row after it is the bottom padding of the turn's last row (`gapBelow` in `timelineRows.ts`), on every turn except one a hidden prompt continues, from the moment the turn is sent. It used to be the bottom padding of the answer's last step, and the last step changes while a turn runs: Claude opens a step's text block empty and the first paragraph is held until it ends (`lib/streamTextCommit.ts`), so a new step row added 8 px with nothing on screen and the follow lifted the sent message; dropping it on such a row instead shrank the transcript by 8 px whenever a step after tool calls began, moving the whole chat down. Giving the gap only once a next row exists made the settled turn above a new prompt grow, and the list measured that a frame late: the sent message dropped 8 px for a frame. So the live turn carries it too, at the content's end, and so does a turn that got no answer. Lists without turns (the BTW panel) keep it under the answer.
 
 ## Measuring

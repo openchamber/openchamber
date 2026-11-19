@@ -44,6 +44,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -206,6 +207,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.chatQuoteContextRemove': 'إزالة اقتباسات المحادثة',
   'chat.chatInput.contextPreview.edit': 'تعديل التعليق',
   'chat.chatInput.contextPreview.remove': 'إزالة',
+  'chat.chatInput.contextPreview.removeScreenshot': 'إزالة لقطة الشاشة',
   'chat.message.context.browserAnnotation': 'تعليق توضيحي من المتصفح ({page})',
   'chat.message.context.prComment': 'تعليق على GitHub PR ({label})',
   'chat.message.context.mrComment': 'تعليق على طلب دمج GitLab ({label})',
@@ -1553,7 +1555,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': 'المتصفح',
   'contextPanel.browser.loadFailed': 'تعذّر تحميل هذه الصفحة',
   'contextPanel.browser.waitingForServer': 'في انتظار خادم التطوير',
-  'contextPanel.browser.waitingForServerHint': 'لا يقبل الاتصالات بعد. ستُحمَّل هذه الصفحة فور أن يبدأ بقبولها.',
+  'contextPanel.browser.waitingForServerHint': 'لم يجهز بعد. ستُحمَّل هذه الصفحة فور أن يجهز.',
   'contextPanel.browser.tunnelFailed': 'تعذّر الوصول إلى خادم التطوير هذا',
   'contextPanel.browser.remoteLoopback.title': '{url} موجود على جهاز OpenChamber',
   'contextPanel.browser.remoteLoopback.hint': 'لا يمكن لعلامة تبويب في المتصفح فتح الصفحات التي تعمل هناك. افتحها في تطبيق OpenChamber لسطح المكتب أو للهاتف.',
@@ -2675,6 +2677,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.unsupportedAttachmentModalities': 'لا يدعم {model} إدخال {modalities} المطلوب لـ {files}. لا يزال بإمكانك إرسال الرسالة، لكن قد يتم تجاهل هذه المرفقات.',
   'chat.chatInput.toast.imagesSaving': 'جارٍ حفظ {files}…',
   'chat.chatInput.toast.imagesSavedForTextModel': 'لا يستطيع {model} قراءة الصور. تم حفظ {files} في {folder}.',
+  'chat.chatInput.toast.imagesSentAsPathsForTextModel': 'لا يستطيع {model} قراءة الصور. ستمرّر الرسالة مسار ملف بدلًا من {files}.',
+  'chat.chatInput.toast.textModelImageSaveFailed': 'تعذّر حفظ {files} كملفات لنموذج لا يقرأ الصور. لم تُرسل الرسالة.',
   'chat.chatInput.toast.imageSaveFailed': 'تعذّر حفظ {files}. أُرفق بدلًا من ذلك.',
   'chat.chatInput.toast.imagesSaved': 'تم حفظ {files} في {folder}.',
   'chat.chatInput.toast.imageCopySaveFailed': 'تعذّر حفظ {files}.',
@@ -3957,6 +3961,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.ar,
   ...sidebarSectionsI18n.ar,
   ...worktreeArchiveI18n.ar,
+  ...operatorChildrenI18n.ar,
   ...omniSearchI18n.ar,
   ...overviewI18n.ar,
   ...isolatedSpacesI18n.ar,

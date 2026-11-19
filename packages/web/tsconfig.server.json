@@ -1,0 +1,42 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowJs": true,
+    "checkJs": false,
+    "noCheck": true,
+    "declaration": true,
+    "sourceMap": true,
+    "inlineSources": true,
+    "erasableSyntaxOnly": true,
+    "rootDir": ".",
+    "outDir": "build",
+    "skipLibCheck": true,
+    "preserveSymlinks": true,
+    "types": ["node"]
+  },
+  "include": [
+    "server/**/*.ts",
+    "bin/**/*.ts",
+    "bin/cli.js",
+    "server/index.js",
+    "server/lib/dictation/local/worker-process.js",
+    "server/lib/git/credential-helper.js",
+    "server/lib/git/repository-credential-helper.js",
+    "server/lib/git/ssh-wrapper.js"
+  ],
+  "exclude": [
+    "**/*.d.ts",
+    "**/*.test.*",
+    "**/*.spec.*",
+    "**/*.test-support.*",
+    "**/*.fixture.*",
+    "**/test-support/**",
+    "**/*-live-support.*",
+    "server/built-in-extensions/**",
+    "build",
+    "node_modules"
+  ]
+}

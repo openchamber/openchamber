@@ -34,7 +34,7 @@ describe('applyOutboundProxyFromEnv', () => {
 
   it('sends fetch through the proxy and keeps loopback direct in a real Node process', () => {
     const moduleUrl = new URL('./outbound-proxy.js', import.meta.url).href;
-    const result = spawnSync('node', ['--input-type=module', '--eval', `
+    const result = spawnSync('node', ['--import', new URL('../../scripts/register-server-sources.mjs', import.meta.url).href, '--input-type=module', '--eval', `
       import http from 'node:http';
       import assert from 'node:assert/strict';
       const seen = [];

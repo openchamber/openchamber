@@ -43,6 +43,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -233,6 +234,7 @@ export const dict = {
   ...sidebarWorkI18n.de,
   ...sidebarSectionsI18n.de,
   ...worktreeArchiveI18n.de,
+  ...operatorChildrenI18n.de,
   ...omniSearchI18n.de,
   ...overviewI18n.de,
   ...isolatedSpacesI18n.de,
@@ -1379,7 +1381,7 @@ export const dict = {
   'contextPanel.browser.frameTitle': 'Browser',
   'contextPanel.browser.loadFailed': 'Diese Seite konnte nicht geladen werden',
   'contextPanel.browser.waitingForServer': 'Warte auf den Dev-Server',
-  'contextPanel.browser.waitingForServerHint': 'Er nimmt noch keine Verbindungen an. Die Seite lädt, sobald er es tut.',
+  'contextPanel.browser.waitingForServerHint': 'Er ist noch nicht bereit. Die Seite lädt, sobald er es ist.',
   'contextPanel.browser.tunnelFailed': 'Dieser Dev-Server war nicht erreichbar',
   'contextPanel.browser.remoteLoopback.title': '{url} läuft auf dem OpenChamber-Rechner',
   'contextPanel.browser.remoteLoopback.hint': 'Ein Browser-Tab kann dort laufende Seiten nicht öffnen. Öffne sie in der OpenChamber-Desktop- oder Mobil-App.',
@@ -3356,6 +3358,7 @@ export const dict = {
   'chat.chatInput.chatQuoteContextRemove': 'Chat-Zitate entfernen',
   'chat.chatInput.contextPreview.edit': 'Kommentar bearbeiten',
   'chat.chatInput.contextPreview.remove': 'Entfernen',
+  'chat.chatInput.contextPreview.removeScreenshot': 'Screenshot entfernen',
   'chat.message.context.browserAnnotation': 'Browser-Anmerkung ({page})',
   'chat.message.context.prComment': 'GitHub-PR-Kommentar ({label})',
   'chat.message.context.mrComment': 'GitLab-MR-Kommentar ({label})',
@@ -3618,6 +3621,8 @@ export const dict = {
   'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} unterstützt den von {files} benötigten Eingabetyp {modalities} nicht. Du kannst die Nachricht trotzdem senden, aber diese Anhänge werden möglicherweise ignoriert.',
   'chat.chatInput.toast.imagesSaving': '{files} wird gespeichert…',
   'chat.chatInput.toast.imagesSavedForTextModel': '{model} kann keine Bilder lesen. {files} in {folder} gespeichert.',
+  'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} kann keine Bilder lesen. Die Nachricht gibt ihm für {files} einen Dateipfad.',
+  'chat.chatInput.toast.textModelImageSaveFailed': '{files} konnte nicht als Datei für ein Modell ohne Bildeingabe gespeichert werden. Die Nachricht wurde nicht gesendet.',
   'chat.chatInput.toast.imageSaveFailed': '{files} konnte nicht gespeichert werden. Stattdessen angehängt.',
   'chat.chatInput.toast.imagesSaved': '{files} in {folder} gespeichert.',
   'chat.chatInput.toast.imageCopySaveFailed': '{files} konnte nicht gespeichert werden.',

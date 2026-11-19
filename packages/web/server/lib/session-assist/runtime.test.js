@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSessionAssistRuntime } from './runtime.js';
 import { createSessionLineage } from '../session-lineage.js';
 
@@ -16,8 +16,14 @@ import { createSessionLineage } from '../session-lineage.js';
  */
 
 const runtimes = [];
+const QUIET_MS = 1;
 
 const makeRuntime = (overrides = {}) => {
+  const completions = new Map();
+  const completionFor = (sessionId = 'ses_1') => {
+    if (!completions.has(sessionId)) completions.set(sessionId, Promise.withResolvers());
+    return completions.get(sessionId);
+  };
   const buildOpenCodeUrl = vi.fn(() => 'http://127.0.0.1:1/');
   const getOpenCodeAuthHeaders = vi.fn(() => ({}));
   const getSmallModelService = vi.fn(async () => {
@@ -28,11 +34,15 @@ const makeRuntime = (overrides = {}) => {
     getOpenCodeAuthHeaders,
     getSmallModelService,
     getTargets: () => ({ recap: true, suggestion: true }),
-    quietMs: 1,
+    quietMs: QUIET_MS,
     ...overrides,
+    onPendingChange: (change) => {
+      overrides.onPendingChange?.(change);
+      if (!change.pending) completionFor(change.sessionId).resolve();
+    },
   });
   runtimes.push(runtime);
-  return { runtime, buildOpenCodeUrl, getOpenCodeAuthHeaders, getSmallModelService };
+  return { runtime, buildOpenCodeUrl, getOpenCodeAuthHeaders, getSmallModelService, finished: (sessionId) => completionFor(sessionId).promise };
 };
 
 const idle = (sessionId = 'ses_1') => ({
@@ -40,8 +50,11 @@ const idle = (sessionId = 'ses_1') => ({
   properties: { sessionID: sessionId, status: { type: 'idle' } },
 });
 
+beforeEach(() => vi.useFakeTimers());
+
 afterEach(() => {
   while (runtimes.length > 0) runtimes.pop().stop();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -51,7 +64,7 @@ describe('session assist runtime', () => {
     const { runtime, buildOpenCodeUrl, getSmallModelService } = makeRuntime();
 
     runtime.processPayload(idle());
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.advanceTimersByTimeAsync(QUIET_MS);
 
     expect(buildOpenCodeUrl).not.toHaveBeenCalled();
     expect(getSmallModelService).not.toHaveBeenCalled();
@@ -92,7 +105,7 @@ describe('session assist runtime', () => {
       return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
     });
     vi.stubGlobal('fetch', fetchMock);
-    const { runtime } = makeRuntime({
+    const { runtime, finished } = makeRuntime({
       persistSessionAssist,
       getSmallModelService,
       buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
@@ -100,7 +113,8 @@ describe('session assist runtime', () => {
     });
 
     runtime.processPayload(idle());
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    await vi.advanceTimersByTimeAsync(QUIET_MS);
+    await finished();
 
     // The session record was read (that is where the parent/revert checks
     // live), then the archive check stopped everything else.
@@ -135,7 +149,7 @@ describe('session assist runtime', () => {
       return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
     });
     vi.stubGlobal('fetch', fetchMock);
-    const { runtime } = makeRuntime({
+    const { runtime, finished } = makeRuntime({
       persistSessionAssist,
       buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
       isSessionArchived: async () => false,
@@ -146,9 +160,8 @@ describe('session assist runtime', () => {
     });
 
     runtime.processPayload(idle());
-    for (let i = 0; i < 20 && persistSessionAssist.mock.calls.length === 0; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    await vi.advanceTimersByTimeAsync(QUIET_MS);
+    await finished();
 
     expect(persistSessionAssist).toHaveBeenCalledTimes(1);
     expect(persistSessionAssist.mock.calls[0][2]).toMatchObject({ recap: 'Did the thing.', suggestion: 'Verify it.', forMessageID: 'msg_a' });
@@ -159,7 +172,6 @@ describe('session assist runtime', () => {
     const busy = { type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } };
     runtime.processPayload(busy);
     runtime.processPayload(busy);
-    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(persistSessionAssist).toHaveBeenCalledTimes(2);
     expect(persistSessionAssist.mock.calls[1][2]).toBeNull();
     vi.unstubAllGlobals();
@@ -181,17 +193,12 @@ describe('session assist runtime', () => {
       else throw new Error(`unexpected ${url.pathname}`);
       return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
     }));
-    const settle = async (changes) => {
-      for (let i = 0; i < 40 && !changes.some((change) => change.pending === false); i += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-    };
     const run = (overrides) => {
       vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(console, 'warn').mockImplementation(() => {});
       const changes = [];
       const persistSessionAssist = vi.fn(async () => undefined);
-      const { runtime } = makeRuntime({
+      const { runtime, finished } = makeRuntime({
         persistSessionAssist,
         buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
         onPendingChange: (change) => changes.push(change),
@@ -201,17 +208,18 @@ describe('session assist runtime', () => {
         }),
         ...overrides,
       });
-      return { runtime, changes, persistSessionAssist };
+      return { runtime, changes, persistSessionAssist, finished };
     };
     afterEach(() => vi.unstubAllGlobals());
 
     it('announces the wait at the turn end and its end once the assist is written', async () => {
       serveSession();
-      const { runtime, changes, persistSessionAssist } = run();
+      const { runtime, changes, persistSessionAssist, finished } = run();
 
       runtime.processPayload(idle(), '/chat');
       expect(changes).toEqual([{ sessionId: 'ses_1', directory: '/chat', pending: true }]);
-      await settle(changes);
+      await vi.advanceTimersByTimeAsync(QUIET_MS);
+      await finished();
 
       expect(persistSessionAssist).toHaveBeenCalledTimes(1);
       expect(changes).toEqual([
@@ -224,23 +232,23 @@ describe('session assist runtime', () => {
       const { runtime, changes } = run({ getTargets: () => ({ recap: false, suggestion: false }) });
 
       runtime.processPayload(idle(), '/chat');
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await vi.advanceTimersByTimeAsync(QUIET_MS);
 
       expect(changes).toEqual([]);
     });
 
     it('ends the wait when the turn-end check rules both fields out', async () => {
-      const { runtime, changes } = run({ evaluateTurn: async () => ({ recap: false, suggestion: false }) });
+      const { runtime, changes, finished } = run({ evaluateTurn: async () => ({ recap: false, suggestion: false }) });
 
       runtime.processPayload(idle(), '/chat');
-      await settle(changes);
+      await finished();
 
       expect(changes.map((change) => change.pending)).toEqual([true, false]);
     });
 
     it('ends the wait when generation fails', async () => {
       serveSession();
-      const { runtime, changes, persistSessionAssist } = run({
+      const { runtime, changes, persistSessionAssist, finished } = run({
         getSmallModelService: async () => ({
           describeSmallModel: async () => ({ inputCharBudget: 20_000 }),
           generateSmallModelText: async () => { throw new Error('provider down'); },
@@ -248,7 +256,8 @@ describe('session assist runtime', () => {
       });
 
       runtime.processPayload(idle(), '/chat');
-      await settle(changes);
+      await vi.advanceTimersByTimeAsync(QUIET_MS);
+      await finished();
 
       expect(persistSessionAssist).not.toHaveBeenCalled();
       expect(changes.map((change) => change.pending)).toEqual([true, false]);
@@ -293,7 +302,7 @@ describe('session assist runtime', () => {
       finalCheckStarted();
       return new Promise((answer) => { finishFinalCheck = () => answer(false); });
     });
-    const { runtime } = makeRuntime({
+    const { runtime, finished } = makeRuntime({
       persistSessionAssist,
       buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
       isSessionArchived,
@@ -304,10 +313,11 @@ describe('session assist runtime', () => {
     });
 
     runtime.processPayload(idle());
+    await vi.advanceTimersByTimeAsync(QUIET_MS);
     await finalCheckReached;
     runtime.processPayload({ type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } });
     finishFinalCheck();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await finished();
 
     expect(isSessionArchived).toHaveBeenCalledTimes(2);
     expect(persistSessionAssist).not.toHaveBeenCalled();
@@ -337,17 +347,15 @@ describe('session assist runtime', () => {
     }));
     const describeSmallModel = vi.fn(async () => ({ inputCharBudget: 20_000, ...described }));
     const generateSmallModelText = vi.fn(async () => ({ text: '{"recap":"Did the thing.","suggestion":""}' }));
-    const { runtime } = makeRuntime({
+    const { runtime, finished } = makeRuntime({
       persistSessionAssist,
       buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
       getSmallModelService: async () => ({ describeSmallModel, generateSmallModelText }),
     });
 
     runtime.processPayload(idle());
-    for (let i = 0; i < 20 && (describeSmallModel.mock.calls.length === 0 || persistSessionAssist.mock.calls.length < generations); i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await vi.advanceTimersByTimeAsync(QUIET_MS);
+    await finished();
 
     expect(describeSmallModel).toHaveBeenCalledTimes(1);
     expect(generateSmallModelText).toHaveBeenCalledTimes(generations);
@@ -375,7 +383,7 @@ describe('session assist runtime', () => {
     // hosted vendor, so the endpoint looks local to `isLocalModelEndpoint`.
     const describeSmallModel = vi.fn(async () => ({ inputCharBudget: 20_000, providerID: 'cpa', modelID: 'm', source: 'session-model', localEndpoint: true }));
     const generateSmallModelText = vi.fn(async () => ({ text: '{"recap":"Did the thing.","suggestion":""}' }));
-    const { runtime } = makeRuntime({
+    const { runtime, finished } = makeRuntime({
       persistSessionAssist,
       buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
       getSmallModelService: async () => ({ describeSmallModel, generateSmallModelText }),
@@ -383,10 +391,8 @@ describe('session assist runtime', () => {
 
     runtime.processPayload(idle('ses_1'));
     runtime.processPayload(idle('ses_2'));
-    for (let i = 0; i < 30 && describeSmallModel.mock.calls.length < 2; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.advanceTimersByTimeAsync(QUIET_MS);
+    await Promise.all([finished('ses_1'), finished('ses_2')]);
 
     expect(describeSmallModel).toHaveBeenCalledTimes(2);
     expect(generateSmallModelText).not.toHaveBeenCalled();
@@ -403,10 +409,10 @@ describe('session assist runtime', () => {
       throw new Error('the small model must not be woken');
     });
     const evaluateTurn = vi.fn(async () => ({ recap: false, suggestion: false }));
-    const { runtime, buildOpenCodeUrl } = makeRuntime({ persistSessionAssist, getSmallModelService, evaluateTurn });
+    const { runtime, buildOpenCodeUrl, finished } = makeRuntime({ persistSessionAssist, getSmallModelService, evaluateTurn });
 
     runtime.processPayload(idle());
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await finished();
 
     expect(evaluateTurn).toHaveBeenCalledWith({ sessionId: 'ses_1', directory: '', assist: { recap: true, suggestion: true } });
     expect(buildOpenCodeUrl).not.toHaveBeenCalled();
@@ -420,7 +426,7 @@ describe('session assist runtime', () => {
     const { runtime, buildOpenCodeUrl } = makeRuntime({ persistSessionAssist: vi.fn(async () => undefined), evaluateTurn, lineage });
 
     runtime.processPayload(idle());
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await vi.advanceTimersByTimeAsync(QUIET_MS);
 
     expect(evaluateTurn).not.toHaveBeenCalled();
     expect(buildOpenCodeUrl).not.toHaveBeenCalled();
@@ -429,14 +435,18 @@ describe('session assist runtime', () => {
   it('drops a gate answer that arrives after the next turn started', async () => {
     const persistSessionAssist = vi.fn(async () => undefined);
     let answer;
-    const evaluateTurn = vi.fn(() => new Promise((resolve) => { answer = resolve; }));
+    const gateStarted = Promise.withResolvers();
+    const evaluateTurn = vi.fn(() => new Promise((resolve) => {
+      answer = resolve;
+      gateStarted.resolve();
+    }));
     const { runtime, buildOpenCodeUrl } = makeRuntime({ persistSessionAssist, evaluateTurn });
 
     runtime.processPayload(idle());
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await gateStarted.promise;
     runtime.processPayload({ type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } });
     answer({ recap: true, suggestion: true });
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await vi.advanceTimersByTimeAsync(QUIET_MS);
 
     expect(buildOpenCodeUrl).not.toHaveBeenCalled();
   });
@@ -447,18 +457,19 @@ describe('session assist runtime', () => {
       throw new Error('stop here: the transport is what this test observes');
     });
     const buildOpenCodeUrl = vi.fn(() => 'http://127.0.0.1:1/');
-    const { runtime } = makeRuntime({ persistSessionAssist, getSmallModelService, buildOpenCodeUrl });
+    const { runtime, finished } = makeRuntime({ persistSessionAssist, getSmallModelService, buildOpenCodeUrl });
 
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     runtime.processPayload(idle());
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await vi.advanceTimersByTimeAsync(QUIET_MS);
+    await finished();
 
     // The idle timer fired and the generation path ran, which is what the gate
     // above suppresses.
     expect(buildOpenCodeUrl).toHaveBeenCalled();
   });
 
-  it('logs the status, code, and message of a generation failure instead of a bare string', async () => {
+  it('logs the status, code and message of a generation failure', async () => {
     const persistSessionAssist = vi.fn(async () => undefined);
     const records = [
       { id: 'msg_idle', type: 'idle', outcome: 'succeeded' },
@@ -475,8 +486,11 @@ describe('session assist runtime', () => {
     }));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    const failure = Object.assign(new Error('location is not ready'), { statusCode: 503, code: 'cold-start' });
-    const { runtime } = makeRuntime({
+    const failure = Object.assign(new Error('location is not ready'), {
+      statusCode: 503,
+      code: 'cold-start',
+    });
+    const { runtime, finished } = makeRuntime({
       persistSessionAssist,
       buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
       getSmallModelService: async () => ({
@@ -486,9 +500,8 @@ describe('session assist runtime', () => {
     });
 
     runtime.processPayload(idle());
-    for (let i = 0; i < 30 && warn.mock.calls.length === 0; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    await vi.advanceTimersByTimeAsync(QUIET_MS);
+    await finished();
 
     const logged = warn.mock.calls.map((args) => args.join(' ')).find((line) => line.includes('generation failed'));
     expect(logged).toContain('status 503');
@@ -518,7 +531,7 @@ describe('session assist runtime', () => {
     }));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    const { runtime } = makeRuntime({
+    const { runtime, finished } = makeRuntime({
       persistSessionAssist,
       buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
       getSmallModelService: async () => ({
@@ -530,9 +543,8 @@ describe('session assist runtime', () => {
     });
 
     runtime.processPayload(idle());
-    for (let i = 0; i < 30 && warn.mock.calls.length === 0; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    await vi.advanceTimersByTimeAsync(QUIET_MS);
+    await finished();
 
     const logged = warn.mock.calls.map((args) => args.join(' ')).find((line) => line.includes('generation failed'));
     expect(logged).toContain('provider rejected the key');

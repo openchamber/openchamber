@@ -16,6 +16,13 @@ describe('normalizeEndpointPath', () => {
     expect(normalizeEndpointPath('/speech/to_text')).toEqual({ value: '/speech/to_text' });
   });
 
+  it.each([...Array.from({ length: 32 }, (_, code) => code), 127])('rejects raw and encoded control character %i', (code) => {
+    const character = String.fromCharCode(code);
+    const encoded = `%${code.toString(16).padStart(2, '0')}`;
+    expect(normalizeEndpointPath(`/audio${character}speech`).error).toBeTruthy();
+    expect(normalizeEndpointPath(`/audio${encoded}speech`).error).toBeTruthy();
+  });
+
   it.each([
     ['an absolute URL', 'https://example.com/audio/speech'],
     ['a protocol relative URL', '//example.com/audio/speech'],
@@ -93,5 +100,23 @@ describe('createEndpointPathFetch', () => {
     await scopedFetch('http://127.0.0.1:8080/v1/models', { method: 'GET' });
 
     expect(calls[0].url).toBe('http://127.0.0.1:8080/v1/models');
+  });
+
+  it('leaves a Request and its body untouched', async () => {
+    let received;
+    const input = new Request('http://localhost:8080/v1/audio/speech', { method: 'POST', body: 'speech' });
+    const scopedFetch = createEndpointPathFetch({
+      endpointPath: '/custom/speech',
+      defaultPath: '/audio/speech',
+      baseFetch: async (request) => {
+        received = request;
+        return new Response('ok');
+      },
+    });
+
+    await scopedFetch(input);
+
+    expect(received).toBe(input);
+    expect(await received.text()).toBe('speech');
   });
 });

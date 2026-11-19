@@ -3,17 +3,8 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { toDataUrl } from '@/lib/guests/relay-document';
 
-/**
- * Object URLs for small images an OpenChamber route serves (project icons,
- * uploaded provider logos). Fetched through `runtimeFetch`, so they carry the
- * runtime's auth and work over the relay; keyed by runtime, path and query, so
- * a versioned query (`v=<updatedAt>`) is fetched once per runtime.
- */
 const CACHE_LIMIT = 200;
 
-// A blob: URL carries the app's origin, so an SVG opened in its own tab would
-// run its scripts with the user's session, past the route's sandbox CSP. Only
-// raster types get one; anything else becomes a data: URL, whose origin is opaque.
 const RASTER_IMAGE = /^image\/(?:png|jpeg|webp|gif)\b/;
 
 type CacheEntry = {
@@ -70,11 +61,9 @@ const loadObjectUrl = (key: string, path: string, query: string): Promise<string
 
 export type RuntimeObjectUrl = {
   url: string | null;
-  /** The last fetch for this path and query failed; `url` stays null until they change. */
   failed: boolean;
 };
 
-/** The object URL for `path?query`, or nothing while `path` is null. */
 export const useRuntimeObjectUrl = (path: string | null, query: string): RuntimeObjectUrl => {
   const key = path ? cacheKey(path, query) : null;
   const [state, setState] = React.useState<RuntimeObjectUrl>(() => ({
@@ -83,7 +72,6 @@ export const useRuntimeObjectUrl = (path: string | null, query: string): Runtime
   }));
 
   React.useEffect(() => {
-    // Keeps the same state object when nothing changes, so a mount renders once.
     const settle = (url: string | null, failed: boolean) => setState((previous) => (
       previous.url === url && previous.failed === failed ? previous : { url, failed }
     ));

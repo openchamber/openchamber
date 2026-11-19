@@ -5,8 +5,9 @@
 #
 # Recipe parity with the AppImage build:
 #   1. build:web-assets    -> done by openchamberCore (packages/web build)
-#   2. prepare:opencode-cli -> opencodeCli: the OpenCode CLI built from
-#                             upstream's flake at the pinned tag
+#   2. prepare:opencode-server -> replaced by opencodeCli on the launcher's
+#                             PATH: the OpenCode CLI built from upstream's
+#                             flake at the pinned tag (see runtimePath)
 #   3. bundle:main         -> bun ./scripts/bundle-main.mjs
 #   4. rebuild:native      -> node-pty rebuilt against the Electron headers
 #   5. electron-builder    -> replaced by a plain Electron tree at
@@ -50,9 +51,13 @@
 }:
 
 let
-  # The desktop prefers its bundled OpenCode CLI over PATH, so nixpkgs
-  # opencode is deliberately not injected here (it is a different major).
+  # The release desktop bundles OpenCode's server (packages/electron/opencode-server);
+  # this build ships none, so the backend runs the CLI built from the pinned
+  # upstream tag: from PATH through the launcher, and on macOS also through
+  # LSEnvironment in Info.plist for Finder launches (see installPhase).
+  # nixpkgs' own opencode is a different major and stays out.
   runtimePath = lib.makeBinPath [
+    opencodeCli
     git
     openssh
     nodejs
@@ -66,12 +71,6 @@ let
     gnutar
     bzip2
   ];
-
-  # Must match the tag the opencode flake input is pinned to in flake.nix;
-  # asserted against the staged binary below.
-  opencodeCliVersion =
-    (builtins.fromJSON (builtins.readFile "${self}/packages/electron/package.json"))
-    .opencodeCli.version;
 
   desktopItem = makeDesktopItem {
     name = "openchamber";
@@ -161,6 +160,9 @@ stdenv.mkDerivation {
         CFBundleURLTypes=[dict(CFBundleURLName="OpenChamber", CFBundleURLSchemes=["openchamber"])],
         NSLocalNetworkUsageDescription=package["build"]["mac"]["extendInfo"]["NSLocalNetworkUsageDescription"],
         NSAppleEventsUsageDescription=package["build"]["mac"]["extendInfo"]["NSAppleEventsUsageDescription"],
+        # Finder and openchamber:// links start this executable directly, past the
+        # wrapper's PATH, so name the pinned CLI here too. Settings still win.
+        LSEnvironment=dict(OPENCODE_BINARY="${opencodeCli}/bin/opencode"),
     )
     with open(path, "wb") as handle:
         plistlib.dump(info, handle)
@@ -202,25 +204,6 @@ stdenv.mkDerivation {
     cp -a "${self}/packages/electron/resources/icons/icon.png" \
       "${self}/packages/electron/resources/icons/app-icon.png" \
       "${self}/packages/electron/resources/icons/tray" "$resources/icons/"
-    mkdir -p "$resources/opencode-cli"
-    cp "${opencodeCli}/bin/opencode" "$resources/opencode-cli/opencode"
-    chmod 0755 "$resources/opencode-cli/opencode"
-
-    # Pin invariant: the bundled CLI must be the version
-    # packages/electron/package.json asks for (upstream's flake appends the
-    # git rev, hence the substring match). The CLI needs a writable HOME
-    # even for --version.
-    stagedVersion="$(
-      HOME="$(mktemp -d)" OPENCODE_DISABLE_MODELS_FETCH=1 "$resources/opencode-cli/opencode" --version 2>/dev/null
-    )"
-    case "$stagedVersion" in
-      *"v${opencodeCliVersion}"*) ;;
-      *)
-        echo "opencode CLI version mismatch: staged '$stagedVersion', want ${opencodeCliVersion}"
-        exit 1
-        ;;
-    esac
-
     mkdir -p "$out/bin"
     platformFlags=()
     ${lib.optionalString stdenv.hostPlatform.isLinux ''

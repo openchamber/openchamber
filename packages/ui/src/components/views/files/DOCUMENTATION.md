@@ -1,5 +1,27 @@
 # File tree loading and visibility
 
+## Ownership
+
+This module owns shared file-tree behavior, file-editor handoffs and artifact
+previews. `FilesView` and the sidebar and mobile containers own their layout;
+runtime APIs own filesystem access, and `lib/codemirror` owns text-editor aids.
+
+## Invariants
+
+- Folder disclosure releases pinned rows even when loading fails or no rows
+  appear. Closing ghosts retain their final clipped state until removal, so
+  they cannot flash back after the animation ends.
+- Content-search callers debounce the query before passing it to the hook.
+  Search-result paths retain left-to-right marks inside the RTL folder label,
+  so a leading dot stays beside its name.
+- File paths retain trailing whitespace when resolving Git baselines because
+  that whitespace can belong to the filename. Change batches preserve the
+  caller's root spelling, including Windows drive-letter case.
+- Folder badges count files by Git status letter. Diff-style `+` and `-`
+  labels would imply counts of changed lines.
+
+## Directory snapshots
+
 `FilesView` and `SidebarFilesTree` keep directory snapshots in component state.
 `DirectoryRequests` owns shared in-flight reads and supersession. Repeated
 same-path callers await the same request; an explicit mutation refresh can
@@ -233,7 +255,7 @@ throwaway `FontFace` family removed when the tab closes), `TableArtifact`
 (CSV/TSV through `delimitedText.ts`, capped rows stated in the meta line),
 `OfficeArtifact` (docx, xlsx, pptx, odt, ods, odp, read-only, see below),
 and `BinaryArtifact` (name, type, size, download, and the desktop's open in
-the default app; never a decode attempt). `FilesView.renderArtifactPreview`
+the default app; never a decode attempt). `view/useArtifactPreview`
 is the single switch both the docked and the fullscreen viewer use.
 
 A file that cannot be shown fills the pane with `ContentState`
@@ -269,6 +291,24 @@ with `preview`): on desktop one preview tab follows the steps while the tab
 the user started from stays; on the phone the Files surface shows the
 neighbour in place and Back still leads to the folder being browsed. A folder
 that cannot be read shows no arrows.
+
+### Why images remount by source and not reset in an effect
+
+A data-URL SVG can report its dimensions before React flushes a reset effect;
+the effect would then erase the dimensions just loaded. A source-keyed viewer
+keeps measurements and zoom with their image, and retrying the same URL remounts
+the image element so the browser requests it again.
+
+### Image gesture invariants
+
+- Zoom flushes its render before another wheel or pinch event measures the
+  image, so the next anchor uses current geometry. Wheel deltas are capped
+  because one mouse-wheel notch is much larger than a trackpad pinch delta.
+- Touch pinches suppress simultaneous iOS gesture events. Safari trackpad
+  gestures still work when no finger touches the screen, so a pinch zooms once.
+- The decoding image stays mounted but invisible so it can load and report its
+  dimensions. The outer viewer stays measurable after failure so keyboard
+  visibility checks continue to work.
 
 The arrow keys are heard on the document: while the focus is in the panel
 that holds the viewer, and not in a text field or a control that moves with
@@ -349,14 +389,14 @@ fonts, JPEG 2000 images) may lose that text or image.
 ### Why table, data and office previews load on first use
 
 `TableArtifact`, `DataFileArtifact` and `OfficeArtifact` are `React.lazy` in
-`FilesView`, each under its own error boundary keyed by the file, and the
+`view/LazyFileArtifacts`, each under its own error boundary keyed by the file, and the
 export reads `delimitedText.ts` with a dynamic import. Imported statically,
 their modules sat in a chunk `FilesView` loaded with itself, so a single
 missing file (Windows Defender quarantined that chunk in 2.7.0, #6630) failed
 the whole `FilesView` import and the app-wide boundary replaced the window
 with "Something went wrong". Now such a failure shows "Preview unavailable" in
 that file's pane, and the tree, the text editor and other previews keep
-working. `FilesView` uses plain `React.lazy` here, not `lazyWithChunkRecovery`:
+working. The artifacts use plain `React.lazy` here, not `lazyWithChunkRecovery`:
 that helper reloads the window, which drops the user's place and cannot bring
 back a quarantined file. `React.lazy` keeps a failed import, so these previews
 stay unavailable until the window reloads; on the web that includes a tab left
@@ -500,6 +540,81 @@ The parser produces immutable row arrays, which the trace keeps directly. Creati
 
 HTML clamps `colspan` to 1,000. Splitting a larger virtual gap keeps the drawn cells at their logical columns, with the same widths as the column definitions. One large spanning cell would shift those cells toward the start and leave the far end of a wide table blank.
 
+### Why grid widths are measured and not left to automatic layout
+
+Only visible rows are mounted, so automatic layout would resize columns while
+scrolling. Fixed layout uses an explicit table width to bound long values;
+wide virtual tables use the virtualizer's pixel total because a `calc()` with
+every column can exceed CSS limits and collapse the table to its drawn cells.
+
+### Table editing invariants
+
+- Virtual column measurements convert `ch` and `rem` to pixels and invalidate
+  cached sizes when those units or column widths change. Otherwise gaps and
+  drawn columns disagree about their positions.
+- Selection changes acknowledge outside edits. A new change under an existing
+  selection stays marked until the selection moves; filtering clears the
+  selection and structural edits clear row-indexed state because those indexes
+  refer to a different view afterward.
+- A comment bubble follows visible selected cells and waits through a
+  double-click into editing. An open comment field remains available when its
+  cells scroll away, so typing is not discarded.
+- A capped CSV has no spare editable row because that row would overwrite a
+  record omitted from the preview. An empty loading draft does not replace the
+  change-trace baseline.
+
+### Why workbook operations share a queue and not independent promises
+
+Edits, undo and retries run in order, and the workbook closes only after the
+queue drains, so an outstanding write cannot use a closed session. Changes
+between renders use the latest view and draft; rejected writes reload the
+authoritative sheet because the optimistic typed values are already visible.
+
+### Workbook round-trip invariants
+
+- Logical row and column counts end at the last cell with data, including gaps.
+  Readers keep these counts independently of capped ODS repeat expansion and grid
+  rows. Empty ODS padding does not extend them, and successful edits adopt the
+  counts from the read-back document.
+- Undo restores stored cell values directly. Re-parsing their display text
+  could turn a text value such as `00123` into a number.
+- SpreadsheetML parts normalize namespace prefixes on open, so reading and
+  patching share one element spelling. Writes remove the optional dimension
+  hint because a new cell can lie outside its stored bounds.
+- Shared formulas expand into independent formulas before an affected edit or
+  move. Their other cells borrow formula text and relative offsets that the
+  change would otherwise invalidate.
+- Formula inputs preserve text with an apostrophe. Calculation keeps full
+  numeric precision without function-specific currency or date styling.
+  ODF result text retains the previous decimal and percent presentation.
+- A rejected formula batch discards its partially changed engine before the
+  next edit. Read-back proof preserves every untouched cell while accepting an
+  absent cached result for a formula computed only in memory.
+
+### Why delimited text is scanned and not split into lines
+
+Quoted fields can span lines, and streaming across the source avoids a second
+large array of lines. Rows beyond the cap are counted without being retained,
+so the preview can report the full size within its memory bound.
+
+### Why workbook dimensions are separate from cells
+
+ODS repeats can describe more populated rows and columns than the preview
+materializes. The readers count their full extents while retaining the existing
+caps; deriving totals from retained cells loses the omitted part. XLSX uses
+populated cell coordinates because its optional dimension hint can be stale.
+
+### Delimited-text invariants
+
+- Parsing and byte-offset edits agree about blank records. A final newline
+  ends the last record; a lone empty field is quoted when written so it
+  survives as a row instead of disappearing as a blank line.
+- Column edits apply from the end of the source, so changing one field leaves
+  the earlier recorded byte offsets valid.
+- The logical column total includes omitted records. The materialized width
+  covers retained records only, so a wide omitted row cannot multiply padding
+  allocations across every visible editable row.
+
 ### Data files, archives, notebooks
 
 Each opens as a copy in memory, and nothing it does reaches the disk.
@@ -514,6 +629,27 @@ Each opens as a copy in memory, and nothing it does reaches the disk.
   click, up to `MAX_ENTRY_BYTES`.
 - `NotebookArtifact` shows cells and saved outputs and runs nothing. HTML output
   is the notebook's own content, so it stays in `officeFrameDocument`.
+
+### Data and preview invariants
+
+- SQLite reads retain big integers because converting an identifier past
+  `2^53` to a JavaScript number would round it.
+- PDF parsing and password errors identify an unreadable document. Transport
+  and token failures remain read failures, so a valid file still offers Retry.
+- A preview font uses a throwaway family scoped to its lifetime, so unrelated
+  UI text cannot accidentally select the document's font.
+
+### Why Bun archive operations use synchronous compression
+
+Bun's browser-style Blob workers do not reliably run fflate's asynchronous
+path. Archive reads and workbook packing use synchronous operations there;
+other runtimes retain the asynchronous path.
+
+### Why document parsing has a local transport fallback
+
+Bun's test runtime has no worker bundler, and the VS Code webview cannot load
+the document worker from its origin. Both use the same document host locally,
+while browser runtimes keep parsing off the app's thread.
 
 ### Export
 
@@ -568,6 +704,16 @@ asks for its grant with `allowOutsideWorkspace`, and the server scopes it to
 the page's folder. VS Code renders `srcDoc` in the same sandbox. The server
 side (read root, CORS, CSP) is described in
 `packages/web/server/lib/fs/DOCUMENTATION.md`.
+
+### Frame invariants
+
+- The host opens only allowed document links after checking the message's
+  source frame. The opaque-origin frame receives its parent's origin from the
+  host because it cannot read it; originless hosts require the wildcard target
+  while retaining the receiver's sender check.
+- Embedded document styles escape closing style tags because those rules are
+  untrusted text. The office iframe retains `color-scheme: normal` so its
+  transparent background stays transparent under a dark app theme.
 
 Adopting new content through `applyLoadedTextContent` bumps the file revision,
 which asks for a new grant and reloads the frame, so a page changed on disk
@@ -800,6 +946,14 @@ save adopts content without a remount so the viewport is not reset. Exactly
 one instance is mounted, in the docked chain or in the fullscreen overlay;
 entering or leaving fullscreen moves unsaved edits through the text draft, as
 the source toggle does, and the other slot remounts from it.
+
+### Canvas handoff invariants
+
+- A guest snapshot matches the editor's declared text or binary content kind.
+  Accepting the other kind would write the document through the wrong save path.
+- Office diffs compare content only, so layout-only changes are absent. Older
+  servers can omit the original document versions; the document diff requires
+  the version markers before treating payloads as whole files.
 
 `isDirty` (draft differs from file) is not proof of a user edit. The context
 panel keeps one FilesView that follows the selected path, so during a file

@@ -1,19 +1,11 @@
-/**
- * CSV/TSV parsing for the table preview.
- *
- * RFC 4180 rules: a field wrapped in double quotes may hold the delimiter,
- * newlines and doubled quotes. The parser is streaming over one string so a
- * large export never builds an intermediate array of lines, and it stops
- * filling rows past the cap while still counting them, so the preview can say
- * "100,000 of 480,210 rows" without holding all of them.
- */
+// external: https://www.rfc-editor.org/rfc/rfc4180#section-2 Quoted fields accept delimiters, newlines and doubled quotes.
 
 type DelimitedTable = {
   header: string[];
   rows: string[][];
-  /** Every data row in the file, including the ones not kept. */
   totalRows: number;
   columnCount: number;
+  dataColumnCount: number;
   truncated: boolean;
 };
 
@@ -30,6 +22,7 @@ export const parseDelimitedText = (
 ): DelimitedTable => {
   const records: string[][] = [];
   let totalRecords = 0;
+  let dataColumnCount = 0;
   let field = '';
   let record: string[] = [];
   let quoted = false;
@@ -38,10 +31,9 @@ export const parseDelimitedText = (
   const pushRecord = () => {
     record.push(field);
     field = '';
-    // A trailing newline is not an empty record; a single empty field is only
-    // a record when something else on that line said so.
     const isBlank = record.length === 1 && record[0] === '' && !recordHasContent;
     if (!isBlank) {
+      dataColumnCount = Math.max(dataColumnCount, record.length);
       if (totalRecords === 0 || records.length <= rowCap) {
         records.push(record);
       }
@@ -96,6 +88,7 @@ export const parseDelimitedText = (
     rows,
     totalRows,
     columnCount,
+    dataColumnCount,
     truncated: rows.length < totalRows,
   };
 };
@@ -104,11 +97,6 @@ const fieldText = (value: string, delimiter: string): string => (
   value.includes(delimiter) || /["\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
 );
 
-/**
- * The file's text with one field replaced and every other byte kept, quoting
- * and line endings included. `record` counts the way the parser does, the
- * heading being 0; a record or a column past the end is added.
- */
 export const setDelimitedField = (content: string, delimiter: ',' | '\t', record: number, column: number, value: string): string => {
   const start = content.charCodeAt(0) === 0xfeff ? 1 : 0;
   let recordIndex = 0;
@@ -116,7 +104,6 @@ export const setDelimitedField = (content: string, delimiter: ',' | '\t', record
   let fieldStart = start;
   let quoted = false;
   let recordHasContent = false;
-  // An empty record would read as a blank line and fall out of the table.
   const fieldOf = (lone: boolean) => (value === '' && lone ? '""' : fieldText(value, delimiter));
   const replace = (end: number) => {
     const lone = fieldIndex === 0 && (end === content.length || content[end] === '\n' || content[end] === '\r');
@@ -170,7 +157,6 @@ export const setDelimitedField = (content: string, delimiter: ',' | '\t', record
 
 type FieldSpan = { start: number; end: number };
 
-/** Where each record and field sits in the text, blank lines skipped the way the parser skips them. */
 const recordSpans = (content: string, delimiter: string): Array<{ start: number; end: number; fields: FieldSpan[] }> => {
   const records: Array<{ start: number; end: number; fields: FieldSpan[] }> = [];
   const first = content.charCodeAt(0) === 0xfeff ? 1 : 0;
@@ -213,7 +199,6 @@ const recordSpans = (content: string, delimiter: string): Array<{ start: number;
   return records;
 };
 
-/** A row of empty fields before `record`, or `record` gone; every other byte stays. */
 export const shiftDelimitedRow = (content: string, delimiter: ',' | '\t', record: number, delta: 1 | -1): string => {
   const records = recordSpans(content, delimiter);
   const target = records[record];
@@ -224,11 +209,9 @@ export const shiftDelimitedRow = (content: string, delimiter: ',' | '\t', record
   return `${content.slice(0, target.start)}${width === 1 ? '""' : delimiter.repeat(width - 1)}${ending}${content.slice(target.start)}`;
 };
 
-/** A column of empty fields before `column`, or `column` gone. */
 export const shiftDelimitedColumn = (content: string, delimiter: ',' | '\t', column: number, delta: 1 | -1): string => {
   const records = recordSpans(content, delimiter);
   let result = content;
-  // From the end, so earlier offsets stay true.
   for (const { fields } of [...records].reverse()) {
     const field = fields[column];
     if (delta === 1) {

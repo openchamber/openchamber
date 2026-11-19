@@ -43,6 +43,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -172,6 +173,7 @@ export const dict = {
   ...sidebarWorkI18n.tr,
   ...sidebarSectionsI18n.tr,
   ...worktreeArchiveI18n.tr,
+  ...operatorChildrenI18n.tr,
   ...omniSearchI18n.tr,
   ...overviewI18n.tr,
   ...isolatedSpacesI18n.tr,
@@ -1511,7 +1513,7 @@ export const dict = {
   'contextPanel.browser.frameTitle': 'Tarayıcı',
   'contextPanel.browser.loadFailed': 'Bu sayfa yüklenemedi',
   'contextPanel.browser.waitingForServer': 'Dev server bekleniyor',
-  'contextPanel.browser.waitingForServerHint': 'Sunucu henüz bağlantı kabul etmiyor. Kabul ettiği anda bu sayfa yüklenecek.',
+  'contextPanel.browser.waitingForServerHint': 'Sunucu henüz hazır değil. Hazır olduğu anda bu sayfa yüklenecek.',
   'contextPanel.browser.tunnelFailed': 'Bu dev server\'a ulaşılamadı',
   'contextPanel.browser.remoteLoopback.title': '{url} OpenChamber makinesinde çalışıyor',
   'contextPanel.browser.remoteLoopback.hint': 'Tarayıcı sekmesi orada çalışan sayfaları açamaz. OpenChamber masaüstü veya mobil uygulamasında açın.',
@@ -2605,6 +2607,8 @@ export const dict = {
   'chat.chatInput.toast.unsupportedAttachmentModalities': '{model}, {files} için gereken {modalities} girişini desteklemiyor. Mesajı yine de gönderebilirsiniz ancak bu ekler yok sayılabilir.',
   'chat.chatInput.toast.imagesSaving': '{files} kaydediliyor…',
   'chat.chatInput.toast.imagesSavedForTextModel': '{model} görselleri okuyamıyor. {files}, {folder} klasörüne kaydedildi.',
+  'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} görsel okuyamıyor. Mesaj, {files} için ona bir dosya yolu verecek.',
+  'chat.chatInput.toast.textModelImageSaveFailed': '{files}, görsel okuyamayan bir model için dosya olarak kaydedilemedi. Mesaj gönderilmedi.',
   'chat.chatInput.toast.imageSaveFailed': '{files} kaydedilemedi. Bunun yerine eklendi.',
   'chat.chatInput.toast.imagesSaved': '{files}, {folder} klasörüne kaydedildi.',
   'chat.chatInput.toast.imageCopySaveFailed': '{files} kaydedilemedi.',
@@ -3614,6 +3618,7 @@ export const dict = {
   'chat.chatInput.chatQuoteContextRemove': 'Sohbet alıntılarını kaldır',
   'chat.chatInput.contextPreview.edit': 'Yorumu düzenle',
   'chat.chatInput.contextPreview.remove': 'Kaldır',
+  'chat.chatInput.contextPreview.removeScreenshot': 'Ekran görüntüsünü kaldır',
   'chat.message.context.browserAnnotation': 'Tarayıcı ek notu ({page})',
   'chat.message.context.prComment': 'GitHub PR yorumu ({label})',
   'chat.message.context.mrComment': 'GitLab MR yorumu ({label})',

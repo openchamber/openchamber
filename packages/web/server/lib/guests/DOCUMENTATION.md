@@ -65,7 +65,33 @@ A missing folder is omitted from the list. Other guests stay. The renderer reads
 
 A sandboxed frame has an opaque origin, so its own requests (scripts, styles, `fetch`) are cross-site and carry no `SameSite=Lax` cookie. Behind a sign-in proxy (Authentik, oauth2-proxy) that made the proxy redirect every script to its login page; the CSP refused the redirect and the panel stayed empty (#5326). Two fixes were rejected. Adding the proxy's origin to `script-src` cannot work, since the redirect target is a login page and not a script, and it would let code from elsewhere into an approved extension. Telling operators to exempt `/api/guests/` from the proxy opens installs, tokens and file operations to anyone when OpenChamber has no password of its own. `/api/guest-files/<grant>/` holds nothing but one extension's package files and takes only its grant, so a proxy can skip exactly that prefix (`packages/docs/content/docs/reverse-proxy.mdx`). The grant sits in the path, as the HTML preview's does, so relative URLs keep it and nothing in the page's URL is a session credential. The query-token route stays for clients and servers that predate grants, and for relay frames, which read files with the runtime's own credential.
 
+### Why optional OAuth fields are omitted by the encoder
+
+The form encoder owns omission so every exchange and refresh caller follows the same rule. Converting `undefined` to text sends a credential value the caller never supplied, and makes form requests disagree with the JSON fallback.
+
 ## Invariants
+
+- The OAuth form encoder shared with extension trackers omits fields whose value is `undefined`, matching JSON encoding. Defined empty strings remain present. Guest client credentials normalize a missing secret to an empty string before exchange and refresh; tracker clients retain an absent secret. Both flows always supply the PKCE verifier and redirect URI for code exchange. Scope is added to authorization URLs only when the declared scope list is non-empty.
+- ZIP inflation is capped at each entry's declared size before checking the output length. A tiny compressed stream must not allocate beyond the archive budget before it can be refused.
+- File operations check the grant for the raw path's scope before resolving paths. An unapproved extension performs no disk probe, including `realpath`.
+- A filesystem pattern ending in `/**` includes the directory itself, so a guest can list the root it is approved to access.
+- Instance storage rechecks authorization under the same lock as removal. A request waiting behind an uninstall cannot recreate the removed namespace.
+- Stored grants tolerate capability names this build does not know and filter them on read. A renamed or removed capability must not hide unrelated installed extensions by invalidating the store.
+- A broken package still reserves its installed id. An already-installed package stays listed when its required host version increases; host-version validation gates installation.
+- Approval scope includes unattended execution, schedules, mentions and session reply access. Keys for absent service features stay absent to preserve existing approvals. A `transcript` grant authorizes content only for the declared, approved use: session-event content and direct reply reads check their own declarations.
+- Status exposes a secret setting only through `secretsSet`; only the service reads its value. Settings saves retain secrets under the store lock because the card never receives their stored values. Undeclared values stay private even when a package update stops declaring a previously secret field.
+- JSON body and response budgets allow for escaped text and envelope overhead. One character can occupy 6 bytes as a JSON escape, so a character limit alone does not define the wire budget.
+- Service-host rate limits bound token spending by prompt loops and traffic to every connected client, including idle phones on the relay. Status changes trigger catalog reads and marks trigger mark reads, so both have their own budgets.
+- An unreadable catalog leaves service-lifetime and session-event reconciliation unchanged. It supplies no evidence that the installed set is empty. Scheduled runs are at most once, including a run the service fails to accept.
+- A surface viewer id acts as its lease when a page asks about control, so it stays unguessable. Clipboard reads belong to the controller. Resize follows the controller while one exists and the last request while nobody controls the surface.
+- Surface delivery keeps a monotonic host sequence even when a service repeats or regresses its sequence, so the frame pump cannot spin on the same `after`. Input retains the service's original sequence because only the service can identify the displayed view. Clipboard reads follow the copy chord in the session queue.
+- Update swaps stop the service before renaming its package because open service files block the rename on Windows.
+- Install replacement compares canonical paths as well as their supplied spellings. A symlink such as macOS `/tmp` must not make the same installed package look like another folder claiming its id.
+- ZIP redirect targets can be signed download URLs without a `.zip` suffix. Every hop still passes the HTTPS and public-address checks.
+- The extension authoring skill uses the running app's exact SDK version, while a Canary engine floor uses its core `X.Y.Z` version because the engine floor accepts only that form.
+- OAuth callbacks require the issued state even while an exchange is pending. Accepting a stateless callback during that window lets an unrelated visited link attach someone else's account.
+- Socket override lookups retain their string check even after the store is typed. An extension can name a socket `constructor`, and an absent own override then reads the inherited Object constructor. It must still fall through to the platform candidates.
+- Stored capability scopes use the persistence schema's inferred type. Its event names, link actions and identifier names are strings, including values a newer host wrote; they are compared with the current manifest without claiming the SDK's narrower vocabulary. Storage identities retain the schema's loose value type until a consumer establishes more.
 
 - Built-in packages come from the app-owned registry bound by `registerBuiltInGuests` at server startup. Source/build/packaging rules are in `packages/extensions/DOCUMENTATION.md`. They receive only their declared grants automatically; ordinary runtime and enabled checks still apply. `openchamber-builtin-` IDs are reserved from user installs, including replacement. DELETE, Git update and grant-edit routes refuse built-ins. Disable preserves account/storage data and stops their services.
 - Every valid installed or built-in guest has a random opaque `storageId` in the extensions store. Fully approved catalog rows expose it for the renderer's device-local storage namespace, alongside the renderer's own runtime partition. Replace and Git update preserve it, while replacement still clears the server's instance-scoped storage. A successful DELETE removes it, so a later install receives a new identity. Catalog omissions do not remove it: unavailable path installs can return later. Offline browser profiles can retain inaccessible old device bytes until site-data removal; the renderer's 16 MiB serialized-preference cap bounds that retention, excluding browser metadata overhead.
@@ -94,11 +120,37 @@ A sandboxed frame has an opaque origin, so its own requests (scripts, styles, `f
 - `links.js` (`toPublicLinks`) puts `contributes.links` on the catalog row compiled: the literal identifier keys, and the link templates as anchored patterns from the tracker's compiler (`../trackers/extension-descriptor.js`), so the UI never compiles package text. A template the compiler refuses drops that row's `links` with a warning and keeps the row. The grant scope adds `links: { action, keys, origin, identifier, urls }`, compared in `effectiveGrants` for `links`: a version that claims other keys, another origin or other templates, or acts differently on a click, needs approval again. `persist.js` keeps the key when it reads stored scopes. Recognition and the click are the UI's (`packages/sdk/DOCUMENTATION.md`, *Links in messages*).
 - `mentions.js` answers the composer's `@` menu. A search fans out to every active extension that declared `mentions`, each bounded by `MENTIONS_SEARCH_TIMEOUT_MS`, and a failure is an empty section. A pick that cannot be read is 502, which the composer shows, and no chip appears.
 - The callback listener (`host-callback.js`) is how a host-spawned service calls OpenChamber back: a Node HTTP server on `127.0.0.1:0`, started on first use, unref'd, separate from the Express app, so the relay, tunnels, UI auth and a LAN bind never reach it. Routes are `POST` with a JSON body (at most about 6 MB) and `Authorization: Bearer <capability>`; a request with an `Origin` header (a browser) is refused. A route is `{ refusal, serve }`: `refusal(bearer)` runs before any body is read, so a bearer the route does not know is turned away without buffering anything, and a body past the cap stops being read at the cap; both answers cut the connection once sent. Its routes are `/source-control/outbound`, `/notifications/outbound` and `/tracker/outbound`, each served by its own `../source-control/outbound-handles.js` instance, and `SERVICE_HOST_PATH`. Every service gets `OPENCHAMBER_HOST_CALLBACK_URL` (`startGuestService`); the address opens nothing, since each route asks for a bearer of its own.
+
+## Decisions
+
+### Why file JSON retains its original shape
+
+The instructions and plugin-manifest readers describe JSON values without imposing a new schema on legacy files. Their existing object, array and string checks decide what is usable. Instruction writes preserve object-spread behavior for primitive and array entries; reads still skip non-object entries and keep only non-empty strings.
+
+### Why OAuth targets keep optional endpoints
+
+The auth-store schema checks an API origin and optional OAuth URLs. Reading that file does not establish that a token URL exists. OAuth exchanges access the URL only after the stored target has matched the current OAuth integration; the local accessor checks that invariant without strengthening the store's return type. Auth patches retain dynamic assignment and deletion before the existing store schema validates the write.
+
+### Why route inputs keep boundary checks
+
+OAuth callback messages retain the caller's value until HTML rendering.
+The renderer applies `String` before escaping, including non-string messages
+from tracker user errors.
+
+Request headers, query values, JSON bodies and caught errors remain unchecked until their existing string, object or schema checks establish usable values. The file-write refinement only checks presence after its schema has established an optional string. A mention resolver's service is established at the route before calling the typed service consumer; a missing service retains the previous TypeError and 502 response. Plugin-presence checks precede approval checks as before.
+
+Storage operations accept the storage request schema's inferred type, including explicit `undefined` on optional scope. Auth helpers accept a missing dictionary entry, and request, update and service options retain explicitly supplied `undefined`. Card-link settings retain their own-property and string checks before returning a string dictionary. Asset token parsing shares the recursive HTTP query contract and preserves its existing first-value stringification.
+
+The generation dependency describes the validated guest input and the returned text. The JavaScript small-model implementation accepts omitted model, variant, response schema, signal and timeout, although inference from its destructured parameter marks them required. Guest routes supply only their supported generation fields.
+
+### Why HTTPS options include the TCP option type
+
+Pinned ZIP downloads disable address-family fallback so Node uses only the checked address. Node's HTTPS request declaration omits `autoSelectFamily`, while its TCP connection declaration owns that option. The request object retains both native contracts. Git network operations retain the existing retry with a supported SSL backend when the configured backend is unavailable.
 - A service that provides `source-control` is driven by the host like a browser provider (`../source-control/extension-provider.js`), with a 10-minute idle stop. Its grant scope (`grant-scope.js`) adds `service.sourceControl: { defaultInstances, custom }`, compared in `effectiveGrants`: a version that adds the role, drops it, or changes the instances it reaches needs approval again. The key is absent for every other service on both sides, so their stored approvals are unaffected. `persist.js` keeps the key when it reads stored scopes.
 - A service that provides `notifications` is driven by the host as well (`../notifications/extension-channels.js`): the catalog decides which are channels, the accounts live in `../notifications/channel-accounts.js`, and every call carries a handle from `../source-control/outbound-handles.js` served on `/notifications/outbound`. Its grant scope adds `service.notifications: { kind, origin? }` (where the account lives), compared in `effectiveGrants`: a version that adds the role or moves the fixed origin needs approval again; `persist.js` keeps the key. `startGuestService` sets `OPENCHAMBER_HOST_CALLBACK_URL` for this role as for `source-control`.
-- A service that provides `tracker` is driven by the host as well (`../trackers/extension-tracker.js`, attached to the tracker registry by `../trackers/extension-trackers.js`): the catalog decides which extensions are trackers, the accounts and their credentials live in `../trackers/extension-accounts.js`, the browser sign-in runs in `../trackers/extension-oauth.js` with the same PKCE flow and token exchange as a guest integration's (`oauth.js` exports them), and every call carries a handle served on `/tracker/outbound`. Its grant scope adds `service.tracker: { instances, oauth, urls }` (where the accounts live, the OAuth endpoints, the link templates), compared in `effectiveGrants`: a version that adds the role, moves its server or endpoints or claims other links needs approval again; `persist.js` keeps the key. The role's own OAuth callback, `GET /api/tracker/ext-<id>/oauth/callback`, passes UI auth like the guest callback (`opencode/core-routes.js`) and accepts only a `state` this process issued.
+- A service that provides `tracker` is driven by the host as well (`../trackers/extension-tracker.js`, attached to the tracker registry by `../trackers/extension-trackers.js`): the catalog decides which extensions are trackers, the accounts and their credentials live in `../trackers/extension-accounts.js`, the browser sign-in runs in `../trackers/extension-oauth.js` with the same PKCE flow and token exchange as a guest integration's (`oauth.js` exports them), and every call carries a handle served on `/tracker/outbound`. Its grant scope adds `service.tracker: { instances, oauth, urls }` (where the accounts live, the OAuth endpoints, the link templates), compared in `effectiveGrants`: a version that adds the role, moves its server or endpoints or claims other links needs approval again; `persist.js` keeps the key. The role's own OAuth callback, `GET /api/tracker/ext-<id>/oauth/callback`, passes UI auth like the guest callback (`server-frame/core-routes.js`) and accepts only a `state` this process issued.
 - A service that provides `quota` is driven by the host as well (`../quota/extension-quota.js`, attached to the quota registry by `../quota/extension-quotas.js`): the catalog decides which extensions report usage, and every call hands the service the credentials OpenCode holds for the providers the manifest lists, read through `../opencode/auth.js`, and nothing else of the store. Its grant scope adds `service.quota: { providers }`, compared in `effectiveGrants`: a version that adds the role or changes the list needs approval again; `persist.js` keeps the key. The service reaches its provider's API itself.
-- A service with `provides: ["opencode"]` requests both `service` and `opencode` approval. Its process receives `OPENCHAMBER_OPENCODE_URL` for a separate loopback read-only connection and authenticates with its existing service token. [The provider module](./opencode-provider/DOCUMENTATION.md) owns transport, the list of allowed reads, authorization, connection selection and revocation. `service.js` only registers and revokes the process lease; `../opencode/feature-routes-runtime.js` supplies the catalog and selected connection.
+- A service with `provides: ["opencode"]` requests both `service` and `opencode` approval. Its process receives `OPENCHAMBER_OPENCODE_URL` for a separate loopback read-only connection and authenticates with its existing service token. [The provider module](./opencode-provider/DOCUMENTATION.md) owns transport, the list of allowed reads, authorization, connection selection and revocation. `service.js` only registers and revokes the process lease; `../server-frame/feature-routes-runtime.js` supplies the catalog and selected connection.
 - A service whose package declares `contributes.sessionEvents` is driven by the host too (`session-events.js`, below). Its grant scope adds `service.sessionEvents: { events, content }`, compared in `effectiveGrants` for `service` and, for `transcript`, required to have `content: true` as well: a version that adds an event type or starts asking for content needs approval again and receives nothing meanwhile. `persist.js` keeps the key; without it the schema would strip a stored subscription on every read and the card would ask again after each restart (`persist.test.js` pins the round trip).
 - A package that declares `contributes.waits` adds the top-level scope key `wake`: the sorted list of its wait ids, compared as a list in `effectiveGrants` for `wake`. A version that adds a wait type needs approval again, and until then `../extension-waits` neither starts nor keeps its waits. `persist.js` keeps the key, as for session events.
 - `serviceRequest` never leaves that guest's loopback port. Auth to the service is `Authorization: Bearer` with a host-minted token. The service env is an allowlist (PATH, HOME, temp, locale, Windows system variables) plus `OPENCHAMBER_SERVICE_*`, `OPENCHAMBER_HOST_CALLBACK_URL` and, for an approved `opencode` service, `OPENCHAMBER_OPENCODE_URL`; host secrets are not inherited. There is no sandbox: an allowed service has the user's full access, and the grant card says so. Ready is `GET /health` → 200. Parallel first requests share one spawn; they must not kill each other mid-start. Host quit stops every service; after a host crash, the next host start does (see Crash recovery). Disabling a guest stops its service without clearing OAuth or grants.
@@ -106,6 +158,38 @@ A sandboxed frame has an opaque origin, so its own requests (scripts, styles, `f
 - Update swap (`updates.js` `updateGuest`): the new clone lands in `{dataDir}/extensions/.tmp-<id>-<random>` and is inspected exactly like an install before anything else moves. Only then: stop the guest's service, rename current → `.old-<id>`, rename temp → final, delete `.old-<id>`. Any failure before the swap deletes the temp dir and leaves the install untouched; a failed second rename moves `.old-<id>` back. The store row is not rewritten (same path, same id), the catalog cache and that guest's update cache entry are dropped.
 - Update checks (`updates.js` `checkGuestUpdate`) never overlap for one installed copy: a second caller gets the running check's result, so two `git fetch --depth 1` runs cannot fight over `.git/shallow.lock`. Inside that guard a `shallow.lock` older than 60 s is removed before fetching, because nothing of ours is running. `runGit` ends a timed-out command with SIGTERM and only sends SIGKILL after 3 s, so git can remove its own locks. A `fetch-failed` result is not written to the update cache.
 - The OAuth callback skips UI auth. Everything else under `/api/guests` stays behind the usual session.
+
+### Why the catalog uses a short cache and not a fresh scan per asset
+
+Loading a panel requests several assets through `findInstalledGuest`; each uncached lookup rereads every package's manifest and HTML. A per-store cache absorbs that burst, and its TTL bounds how long an on-disk edit can remain unseen.
+
+### Why shared styles follow authored HTML and not its head tags
+
+Appending avoids matching tag-like text inside untrusted scripts, comments and templates. The SDK kit styles follow the bundle's own copy and take precedence, while sizes stay with the bundle.
+
+### Why instructions persist and not come from a running service
+
+The send path reads extension instructions before every message, including while the service is stopped. Persisting them lets the send proceed without starting or waiting for that process.
+
+### Why approval covers the whole requested set and not a subset
+
+A partial grant leaves an extension half-working, and an unrequested grant authorizes nothing the package declares. Approval therefore accepts the complete requested set or withdraws it with an empty set.
+
+### Why the surface pump starts with a viewer and not before attachment
+
+The frame pump checks the viewer count before its first await. Attaching the first viewer before starting the pump keeps that initial check from ending the pump immediately.
+
+### Why frame grants expire after inactivity and not after mounting
+
+A panel can stay open for hours before loading a lazy chunk or another package file. Each use extends the grant so an active panel retains access to its own files.
+
+### Why the process registry uses asynchronous per-process files and not one shared store
+
+Web and desktop can share a data directory while running together, so each host writes and deletes only its own process records. Registry access stays asynchronous because the server's event loop also carries desktop UI traffic.
+
+### Why marks retain the callback schema's inferred types
+
+The callback schema accepts explicit `undefined` for an optional mark URL or target branch. The marks store keeps that parsed shape, including absent fields, without claiming the SDK's narrower authored-object types. Panel event data also retains the callback schema's inferred type and is forwarded without interpreting its contents.
 
 ## Session events
 
@@ -141,6 +225,18 @@ The idle that follows a form or a page the agent shows arrives while the user st
 ### Why preparation reserves arrival order before reading
 
 Record and metadata reads can finish in a different order. Each announcement reserves its output position before those reads. The oldest preparation can hold at most `SESSION_EVENT_PENDING_MAX` later preparations; admission rejects newer announcements before any reads and warns once until the queue drains. Dropped announcements still update ask/settle tracking synchronously. Stop clears prepared bodies, aborts record reads and prevents unfinished preparations from starting follow-up reads. An idle captures its turn's terminal claim on arrival, so a later busy event starts an independent claim and an older read cannot suppress the next turn. The parent cache retains the directory too, expires after 60 seconds and is invalidated by session updates or deletion.
+
+### Why event inputs retain JSON types
+
+Session events read translated payloads, OpenCode HTTP JSON and stored session metadata. These inputs retain recursive JSON types until the existing string, array, integer or object checks establish each consumed field. Property reads include inherited members and boxed primitives, matching optional property access; a present property alone establishes no usable string or list. An object-valued session response can be an array, so the lineage reader accepts arrays and applies its existing parent-id guard and metadata schema. A missing session id on a lifecycle announcement remains null, including its string conversion in the record URL.
+
+The catalog supplies parsed guest records and effective grants. Subscriber checks establish the event declaration and grants, without claiming that they also checked a service declaration. The injected proxy receives the catalog's service value unchanged. Metadata read failures remain null, and catalog read failures preserve reconciliation state. The assistant reply reader already returns a string, while the optional metadata reader is a typed function or null.
+
+### Why surface messages use the schema's inferred types
+
+Viewer JSON, resize answers and clipboard answers retain the SDK schemas' inferred types, including explicit undefined on optional input fields. Frame headers keep their existing MIME, positive-integer and byte-budget checks; dimensions are not subjected to the viewer schema's maximum. A malformed answer still follows the existing error or ignored-resize path. Failed sends and closes leave cleanup to the socket close handler. Control notices are advisory, and a failed resize leaves the next frame responsible for reporting the size.
+
+`surface-buffer.d.ts` adds the existing `Buffer.from` acceptance of the shared WebSocket raw-data union. Node accepts an ArrayBuffer, a Buffer and an array of Buffers, coercing each array entry to a byte; its published overloads do not accept that union. The declaration keeps the original conversion unchanged. Bun's Uint8Array text frames use that same conversion. Surface authentication and origin checks retain the security and UI-auth owners' types.
 
 ## Package changes
 
@@ -208,6 +304,11 @@ file a host left between writing a record and renaming it
 (`<pid>.json.tmp-<writer pid>-<hex>`) is removed once its writer pid is dead.
 Tests call `beginGuestServiceHost()` without a directory, which records nothing
 and reaps nothing.
+
+A failed registry write leaves the spawned service running without crash recovery
+for that process. An `EPERM` signal probe counts as a live process. Linux parent-pid
+parsing starts after the last `)` because the process name can contain spaces and
+parentheses.
 
 Orphans are rare on Windows: libuv puts every spawned child in a job object that
 is killed with the host, even on a hard kill, so the Windows branch of the

@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
+import type { RuntimeAPIs } from '@/lib/api/types';
+import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { directoryEnvironment } from './test-support/directoryEnvironment';
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -7,7 +11,6 @@ type Deferred<T> = {
 };
 
 const searchRequests: Array<Deferred<Array<{ path: string }>>> = [];
-let runtimeKey = 'runtime-a';
 let runtimeSearch: (() => Promise<Array<{ path: string; preview: string[] }>>) | undefined;
 const runtimeSearchCalls: Array<{ signal?: AbortSignal }> = [];
 
@@ -21,35 +24,45 @@ const createDeferred = <T>(): Deferred<T> => {
   return { promise, resolve, reject };
 };
 
-const searchFilesMock = mock(() => {
+const environment = directoryEnvironment();
+environment.respond(async (url) => {
+  if (url.pathname !== '/api/fs/find') throw new Error(`Unexpected request: ${url}`);
   const request = createDeferred<Array<{ path: string }>>();
   searchRequests.push(request);
-  return request.promise;
+  const files = await request.promise;
+  return Response.json({ data: files.map((file) => ({ path: file.path.replace(/^\/project\//, '') })) });
 });
-
-mock.module('@/lib/opencode/client', () => ({
-  opencodeClient: {
-    searchFiles: searchFilesMock,
-  },
-}));
-mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => runtimeKey }));
-mock.module('@/contexts/runtimeAPIRegistry', () => ({
-  getRegisteredRuntimeAPIs: () => {
-    const search = runtimeSearch;
-    return search ? { files: { search: (payload: { signal?: AbortSignal }) => {
+const setRuntime = (runtimeKey: string) => switchRuntimeEndpoint({ apiBaseUrl: `https://${runtimeKey}.test`, runtimeKey });
+const unavailableCapability = (name: string | symbol): never => {
+  throw new Error(`Unexpected native capability: ${String(name)}`);
+};
+const nativeAPIs: RuntimeAPIs = {
+  get runtime(): never { return unavailableCapability('runtime'); },
+  get terminal(): never { return unavailableCapability('terminal'); },
+  get git(): never { return unavailableCapability('git'); },
+  get settings(): never { return unavailableCapability('settings'); },
+  get permissions(): never { return unavailableCapability('permissions'); },
+  get notifications(): never { return unavailableCapability('notifications'); },
+  get sourceControl(): never { return unavailableCapability('sourceControl'); },
+  files: {
+    listDirectory: () => unavailableCapability('listDirectory'),
+    createDirectory: () => unavailableCapability('createDirectory'),
+    search: (payload: { signal?: AbortSignal }) => {
       runtimeSearchCalls.push(payload);
-      return search();
-    } } } : undefined;
+      return runtimeSearch?.() ?? Promise.resolve([]);
+    },
   },
-}));
+};
+afterAll(() => registerRuntimeAPIs(null));
 
 const { useFileSearchStore } = await import('./useFileSearchStore');
 
 describe('useFileSearchStore', () => {
   beforeEach(() => {
     searchRequests.length = 0;
-    runtimeKey = 'runtime-a';
+    setRuntime('runtime-a');
     runtimeSearch = undefined;
+    registerRuntimeAPIs(nativeAPIs);
     runtimeSearchCalls.length = 0;
     useFileSearchStore.setState({
       cache: {},
@@ -64,7 +77,8 @@ describe('useFileSearchStore', () => {
       { path: '/project/build/ignored.ts', preview: ['build/ignored.ts'] },
     ]);
     const pending = useFileSearchStore.getState().searchFiles('/project', 'ts', 3, { respectGitignore: false });
-    const indexed = { path: '/project/ordinary.ts', name: 'ordinary.ts', relativePath: 'ordinary.ts' };
+    const indexed = { path: '/project/ordinary.ts', name: 'ordinary.ts', relativePath: 'ordinary.ts', extension: 'ts' };
+    await environment.settle();
     searchRequests[0].resolve([indexed]);
 
     expect(await pending).toEqual([
@@ -80,13 +94,15 @@ describe('useFileSearchStore', () => {
   test('keeps toggle caches separate and leaves directory searches on OpenCode', async () => {
     runtimeSearch = mock(async () => [{ path: '/project/.hidden.ts', preview: ['.hidden.ts'] }]);
     const hidden = useFileSearchStore.getState().searchFiles('/project', 'hidden', 60, { includeHidden: true });
+    await environment.settle();
     searchRequests[0].resolve([]);
     expect(await hidden).toHaveLength(1);
 
     expect(await useFileSearchStore.getState().searchFiles('/project', 'hidden')).toEqual([]);
     const directories = useFileSearchStore.getState().searchFiles('/project', 'hidden', 60, { includeHidden: true, type: 'directory' });
+    await environment.settle();
     searchRequests[1].resolve([{ path: '/project/folder' }]);
-    expect(await directories).toEqual([{ path: '/project/folder' }]);
+    expect(await directories).toMatchObject([{ path: '/project/folder' }]);
     expect(runtimeSearchCalls).toHaveLength(1);
   });
 
@@ -95,11 +111,12 @@ describe('useFileSearchStore', () => {
     runtimeSearch = mock(() => runtimeAnswer.promise);
     const full = useFileSearchStore.getState().searchFiles('/project', 'x', 60, { includeHidden: true });
     const plain = useFileSearchStore.getState().searchFiles('/project', 'x', 60);
+    await environment.settle();
     expect(searchRequests).toHaveLength(1);
 
     const indexed = [{ path: '/project/x.ts' }];
     searchRequests[0].resolve(indexed);
-    expect(await plain).toEqual(indexed);
+    expect(await plain).toMatchObject(indexed);
 
     runtimeAnswer.resolve([{ path: '/project/.x.ts', preview: ['.x.ts'] }]);
     expect((await full).map((file) => file.path)).toEqual(['/project/x.ts', '/project/.x.ts']);
@@ -112,8 +129,9 @@ describe('useFileSearchStore', () => {
       runtimeSearch = mock(async () => { throw error; });
       const pending = useFileSearchStore.getState().searchFiles('/project', 'x', 60, { includeHidden: true });
       const indexed = [{ path: '/project/x.ts' }];
+      await environment.settle();
       searchRequests[0].resolve(indexed);
-      expect(await pending).toEqual(indexed);
+      expect(await pending).toMatchObject(indexed);
       expect(warning.mock.calls).toEqual([['Supplemental file search failed; keeping indexed results:', error]]);
       // Only the plain search's own answer is kept; the partial one is not.
       expect(Object.keys(useFileSearchStore.getState().cache)).toHaveLength(1);
@@ -154,6 +172,7 @@ describe('useFileSearchStore', () => {
         expect(runtimeSearchCalls).toHaveLength(2);
         expect(walkSignal(1)?.aborted).toBe(false);
 
+        await environment.settle();
         searchRequests[0].resolve([{ path: '/project/x.ts' }]);
         await first;
         expect(warning).not.toHaveBeenCalled();
@@ -192,8 +211,9 @@ describe('useFileSearchStore', () => {
   test('still rejects indexed failures without caching supplemental hits', async () => {
     runtimeSearch = mock(async () => [{ path: '/project/.x.ts', preview: ['.x.ts'] }]);
     const pending = useFileSearchStore.getState().searchFiles('/project', 'x', 60, { includeHidden: true });
+    await environment.settle();
     searchRequests[0].reject(new Error('index failed'));
-    await expect(pending).rejects.toThrow('index failed');
+    await expect(pending).rejects.toThrow('transport failure');
     expect(useFileSearchStore.getState().cache).toEqual({});
     expect(useFileSearchStore.getState().inFlight).toEqual({});
   });
@@ -205,6 +225,7 @@ describe('useFileSearchStore', () => {
     useFileSearchStore.getState().invalidateDirectory('/project');
     expect(Object.keys(useFileSearchStore.getState().inFlight)).toHaveLength(0);
 
+    await environment.settle();
     searchRequests[0].resolve([{ path: 'stale.ts' }]);
     await searchPromise;
 
@@ -221,6 +242,7 @@ describe('useFileSearchStore', () => {
       updateCount += 1;
     });
 
+    await environment.settle();
     searchRequests[0].resolve([{ path: 'stale.ts' }]);
     await searchPromise;
     unsubscribe();
@@ -232,7 +254,7 @@ describe('useFileSearchStore', () => {
     const stalePromise = useFileSearchStore.getState().searchFiles('/project', 'foo');
     useFileSearchStore.getState().invalidateDirectory('/project');
     const freshPromise = useFileSearchStore.getState().searchFiles('/project', 'foo');
-
+    await environment.settle();
     searchRequests[0].resolve([{ path: 'stale.ts' }]);
     await stalePromise;
 
@@ -243,34 +265,38 @@ describe('useFileSearchStore', () => {
 
     const cacheEntries = Object.values(useFileSearchStore.getState().cache);
     expect(cacheEntries).toHaveLength(1);
-    expect(cacheEntries[0]?.files).toEqual([{ path: 'fresh.ts' }]);
+    expect(cacheEntries[0]?.files).toMatchObject([{ path: '/project/fresh.ts' }]);
   });
 
   test('keeps directory and query separators from colliding in cache keys', async () => {
     const firstPromise = useFileSearchStore.getState().searchFiles('/project::nested', 'foo');
+    await environment.settle();
     searchRequests[0].resolve([{ path: 'first.ts' }]);
     await firstPromise;
 
     const secondPromise = useFileSearchStore.getState().searchFiles('/project', 'nested::foo');
+    await environment.settle();
     expect(searchRequests).toHaveLength(2);
 
     searchRequests[1].resolve([{ path: 'second.ts' }]);
-    expect(await secondPromise).toEqual([{ path: 'second.ts' }]);
+    expect(await secondPromise).toMatchObject([{ path: '/project/second.ts' }]);
   });
 
   test('isolates cache and in-flight ownership by runtime', async () => {
     const firstPromise = useFileSearchStore.getState().searchFiles('/project', 'foo');
-    runtimeKey = 'runtime-b';
+    await environment.settle();
+    setRuntime('runtime-b');
     const secondPromise = useFileSearchStore.getState().searchFiles('/project', 'foo');
+    await environment.settle();
     expect(searchRequests).toHaveLength(2);
 
     searchRequests[1].resolve([{ path: 'runtime-b.ts' }]);
-    expect(await secondPromise).toEqual([{ path: 'runtime-b.ts' }]);
+    expect(await secondPromise).toMatchObject([{ path: '/project/runtime-b.ts' }]);
     searchRequests[0].resolve([{ path: 'runtime-a.ts' }]);
     await firstPromise;
 
-    runtimeKey = 'runtime-b';
-    expect(await useFileSearchStore.getState().searchFiles('/project', 'foo')).toEqual([{ path: 'runtime-b.ts' }]);
+    setRuntime('runtime-b');
+    expect(await useFileSearchStore.getState().searchFiles('/project', 'foo')).toMatchObject([{ path: '/project/runtime-b.ts' }]);
     expect(searchRequests).toHaveLength(2);
   });
 });

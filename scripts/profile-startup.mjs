@@ -74,7 +74,7 @@ Options:
   --runs <n>               Measured launches per build (default: 5)
   --warmup <n>             Discarded launches per build before measuring (default: 1)
   --opencode cold|warm     cold: the app starts its own OpenCode on every launch
-                           (default). warm: one OpenCode from the bundled CLI is
+                           (default). warm: one OpenCode from the bundled server is
                            started before the runs and every launch attaches to it.
   --home <dir>             Isolated home directory (default: <tmp>/openchamber-bench-startup)
   --fresh                  Wipe the isolated home before every launch (first launch
@@ -169,7 +169,16 @@ const defaultApp = () => {
   return join(repoRoot, "packages/electron/dist/win-unpacked/OpenChamber.exe")
 }
 
-// The executable to spawn and the bundled OpenCode CLI, per platform layout.
+// How a build runs its bundled OpenCode: the server script on the app's own executable, or, in builds
+// from before it, the OpenCode CLI binary. Either answers `--version` and `serve`.
+const bundledOpenCode = (executable, resources) => {
+  const server = join(resources, "opencode-server", "serve.mjs")
+  if (existsSync(server)) return { command: executable, args: [server], env: { ELECTRON_RUN_AS_NODE: "1" }, path: server }
+  const cli = join(resources, "opencode-cli", process.platform === "win32" ? "opencode.exe" : "opencode")
+  return { command: cli, args: [], env: {}, path: cli }
+}
+
+// The executable to spawn and its bundled OpenCode, per platform layout.
 const resolveBuild = (appPath, label) => {
   const app = resolve(appPath)
   if (!existsSync(app)) throw new Error(`Packaged app not found: ${app}. Run bun run electron:build or pass --app.`)
@@ -177,10 +186,9 @@ const resolveBuild = (appPath, label) => {
     const macos = join(app, "Contents", "MacOS")
     const executable = existsSync(macos) ? readdirSync(macos).map((name) => join(macos, name)).find((candidate) => existsSync(candidate)) : null
     if (!executable) throw new Error(`No executable inside ${app}`)
-    return { label, app, executable, opencodeCli: join(app, "Contents", "Resources", "opencode-cli", "opencode") }
+    return { label, app, executable, opencode: bundledOpenCode(executable, join(app, "Contents", "Resources")) }
   }
-  const resources = join(app, "..", "resources")
-  return { label, app, executable: app, opencodeCli: join(resources, "opencode-cli", process.platform === "win32" ? "opencode.exe" : "opencode") }
+  return { label, app, executable: app, opencode: bundledOpenCode(app, join(app, "..", "resources")) }
 }
 
 // Where the app writes inside the isolated home. Settings follow
@@ -705,17 +713,18 @@ const launchWebOnce = async ({ run, options, chrome, profileDir }) => {
   }
 }
 
-// One OpenCode from the bundled CLI, shared by every launch of a warm run. The
-// compared builds must bundle the same CLI or the measurement would attach
+// One OpenCode from the bundled server, shared by every launch of a warm run. The
+// compared builds must bundle the same OpenCode or the measurement would attach
 // each build to a different OpenCode.
 const startWarmOpenCode = async (builds, env, port) => {
   const identities = builds.map((build) => {
-    if (!existsSync(build.opencodeCli)) throw new Error(`Bundled OpenCode CLI not found: ${build.opencodeCli}`)
-    const version = spawnSync(build.opencodeCli, ["--version"], { encoding: "utf8", env })
+    if (!existsSync(build.opencode.path)) throw new Error(`Bundled OpenCode not found: ${build.opencode.path}`)
+    const version = spawnSync(build.opencode.command, [...build.opencode.args, "--version"], { encoding: "utf8", env: { ...env, ...build.opencode.env } })
     return (version.stdout || "").trim()
   })
   if (new Set(identities).size > 1) throw new Error(`The compared builds bundle different OpenCode versions: ${identities.join(" vs ")}`)
-  const child = spawn(builds[0].opencodeCli, ["serve", "--port", String(port), "--hostname", "127.0.0.1"], { env, stdio: "ignore", detached: true })
+  const { command, args, env: launchEnv } = builds[0].opencode
+  const child = spawn(command, [...args, "serve", "--port", String(port), "--hostname", "127.0.0.1"], { env: { ...env, ...launchEnv }, stdio: "ignore", detached: true })
   child.unref()
   const deadline = Date.now() + 60_000
   while (Date.now() < deadline) {

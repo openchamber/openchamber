@@ -6,7 +6,6 @@ import { useI18n } from '@/lib/i18n';
 import { DEFAULT_PIN_LIST, SIDEBAR_PIN_LISTS_MAX } from '@/lib/sidebarSections';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
-/** The phone's Pin to: Pinned, the user's pin lists, a new list, and Unpin while pinned. */
 export const MobilePinToSheet: React.FC = () => {
   const { t } = useI18n();
   const request = useSidebarSectionsUiStore((state) => state.pinToRequest);

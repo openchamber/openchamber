@@ -44,6 +44,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -234,6 +235,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.pl,
   ...sidebarSectionsI18n.pl,
   ...worktreeArchiveI18n.pl,
+  ...operatorChildrenI18n.pl,
   ...omniSearchI18n.pl,
   ...overviewI18n.pl,
   ...isolatedSpacesI18n.pl,
@@ -284,6 +286,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.chatQuoteContextRemove': 'Usuń cytaty z czatu',
   'chat.chatInput.contextPreview.edit': 'Edytuj komentarz',
   'chat.chatInput.contextPreview.remove': 'Usuń',
+  'chat.chatInput.contextPreview.removeScreenshot': 'Usuń zrzut ekranu',
   'chat.message.context.browserAnnotation': 'Adnotacja przeglądarki ({page})',
   'chat.message.context.prComment': 'Komentarz PR GitHub ({label})',
   'chat.message.context.mrComment': 'Komentarz MR GitLab ({label})',
@@ -1538,6 +1541,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.unsupportedAttachmentModalities': 'Model {model} nie obsługuje danych wejściowych {modalities} wymaganych przez {files}. Nadal możesz wysłać wiadomość, ale te załączniki mogą zostać zignorowane.',
   'chat.chatInput.toast.imagesSaving': 'Zapisywanie {files}…',
   'chat.chatInput.toast.imagesSavedForTextModel': '{model} nie odczytuje obrazów. Zapisano {files} w {folder}.',
+  'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} nie odczytuje obrazów. Wiadomość przekaże mu ścieżkę pliku dla {files}.',
+  'chat.chatInput.toast.textModelImageSaveFailed': 'Nie udało się zapisać {files} jako plików dla modelu, który nie odczytuje obrazów. Wiadomość nie została wysłana.',
   'chat.chatInput.toast.imageSaveFailed': 'Nie udało się zapisać {files}. Dołączono zamiast tego.',
   'chat.chatInput.toast.imagesSaved': 'Zapisano {files} w {folder}.',
   'chat.chatInput.toast.imageCopySaveFailed': 'Nie udało się zapisać {files}.',
@@ -1987,7 +1992,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': 'Przeglądarka',
   'contextPanel.browser.loadFailed': 'Nie udało się wczytać tej strony',
   'contextPanel.browser.waitingForServer': 'Czekanie na serwer deweloperski',
-  'contextPanel.browser.waitingForServerHint': 'Jeszcze nie przyjmuje połączeń. Strona wczyta się, gdy tylko zacznie.',
+  'contextPanel.browser.waitingForServerHint': 'Jeszcze nie jest gotowy. Strona wczyta się, gdy tylko będzie.',
   'contextPanel.browser.tunnelFailed': 'Nie udało się połączyć z tym serwerem deweloperskim',
   'contextPanel.browser.remoteLoopback.title': '{url} działa na komputerze z OpenChamber',
   'contextPanel.browser.remoteLoopback.hint': 'Karta przeglądarki nie otworzy stron, które tam działają. Otwórz ją w aplikacji OpenChamber na komputer lub telefon.',

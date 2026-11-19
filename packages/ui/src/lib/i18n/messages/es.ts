@@ -44,6 +44,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -244,6 +245,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.es,
   ...sidebarSectionsI18n.es,
   ...worktreeArchiveI18n.es,
+  ...operatorChildrenI18n.es,
   ...omniSearchI18n.es,
   ...overviewI18n.es,
   ...isolatedSpacesI18n.es,
@@ -294,6 +296,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.chatQuoteContextRemove': 'Quitar citas del chat',
   'chat.chatInput.contextPreview.edit': 'Editar comentario',
   'chat.chatInput.contextPreview.remove': 'Quitar',
+  'chat.chatInput.contextPreview.removeScreenshot': 'Quitar captura',
   'chat.message.context.browserAnnotation': 'Anotación del navegador ({page})',
   'chat.message.context.prComment': 'Comentario de PR de GitHub ({label})',
   'chat.message.context.mrComment': 'Comentario de MR de GitLab ({label})',
@@ -1624,7 +1627,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.frameTitle": "Navegador",
   "contextPanel.browser.loadFailed": "No se pudo cargar esta página",
   "contextPanel.browser.waitingForServer": "Esperando al servidor de desarrollo",
-  "contextPanel.browser.waitingForServerHint": "Todavía no acepta conexiones. La página se cargará en cuanto lo haga.",
+  "contextPanel.browser.waitingForServerHint": "Todavía no está listo. La página se cargará en cuanto lo esté.",
   "contextPanel.browser.tunnelFailed": "No se pudo alcanzar este servidor de desarrollo",
   "contextPanel.browser.remoteLoopback.title": "{url} está en la máquina de OpenChamber",
   "contextPanel.browser.remoteLoopback.hint": "Una pestaña del navegador no puede abrir páginas que se ejecutan allí. Ábrela en la app de OpenChamber para escritorio o móvil.",
@@ -2729,6 +2732,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.toast.unsupportedAttachmentModalities": "{model} no admite la entrada de {modalities} necesaria para {files}. Aún puedes enviar el mensaje, pero estos adjuntos podrían ignorarse.",
   "chat.chatInput.toast.imagesSaving": "Guardando {files}…",
   "chat.chatInput.toast.imagesSavedForTextModel": "{model} no puede leer imágenes. {files} se guardó en {folder}.",
+  "chat.chatInput.toast.imagesSentAsPathsForTextModel": "{model} no puede leer imágenes. El mensaje le dará una ruta de archivo para {files}.",
+  "chat.chatInput.toast.textModelImageSaveFailed": "No se pudo guardar {files} como archivo para un modelo que no lee imágenes. El mensaje no se envió.",
   "chat.chatInput.toast.imageSaveFailed": "No se pudo guardar {files}. Se adjuntó en su lugar.",
   "chat.chatInput.toast.imagesSaved": "{files} guardado en {folder}.",
   "chat.chatInput.toast.imageCopySaveFailed": "No se pudo guardar {files}.",

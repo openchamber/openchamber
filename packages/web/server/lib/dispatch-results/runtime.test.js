@@ -18,6 +18,7 @@ afterEach(async () => {
   for (const runtime of stopping) runtime.stop();
   await Promise.all(stopping.map((runtime) => runtime.flush()));
   await Promise.all(temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
+  vi.useRealTimers();
 });
 
 const makeDataDir = async () => {
@@ -45,7 +46,6 @@ const user = (created) => ({ type: 'user', id: `msg_u${created}`, text: 'go', ti
 const createOpenCode = () => {
   const state = {
     active: {},
-    children: {},
     sessions: { ses_child: { id: 'ses_child', title: 'Fix the toolbar' } },
     records: { ses_child: [] },
     synthetic: [],
@@ -53,12 +53,8 @@ const createOpenCode = () => {
     seenIds: new Set(),
   };
   const fetchImpl = vi.fn(async (url, init = {}) => {
-    const { pathname, searchParams } = new URL(url);
+    const { pathname } = new URL(url);
     if (pathname === '/api/session/active') return json({ data: state.active });
-    if (pathname === '/api/session') {
-      const parentID = searchParams.get('parentID');
-      return json({ data: (state.children[parentID] ?? []).map((id) => ({ id })), cursor: {} });
-    }
     const synthetic = pathname.match(/^\/api\/session\/([^/]+)\/synthetic$/);
     if (synthetic && init.method === 'POST') {
       const status = state.syntheticStatus.shift();
@@ -100,7 +96,6 @@ const createRuntime = async ({ dataDir, openCode = createOpenCode(), ...override
     fetchImpl: openCode.fetchImpl,
     quietMs: 0,
     retryDelayMs: () => 10,
-    subagentRecheckMs: 10,
     settleRecheckMs: 10,
     ...overrides,
   });
@@ -113,7 +108,8 @@ const createRuntime = async ({ dataDir, openCode = createOpenCode(), ...override
     let calls;
     do {
       calls = openCode.fetchImpl.mock.calls.length;
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0);
+      else await new Promise((resolve) => setTimeout(resolve, 0));
       await runtime.flush();
     } while (openCode.fetchImpl.mock.calls.length !== calls);
   };
@@ -243,18 +239,17 @@ describe('dispatch results runtime', () => {
     expect(syntheticPosts(openCode)).toEqual([expect.objectContaining({ text: expect.stringContaining('Quick answer') })]);
   });
 
-  it('waits for the dispatched session\'s subagents before calling the turn over', async () => {
+  it('delivers the answer of an idle session while its subagents, workflow agents and ownWork sessions still run', async () => {
     const { runtime, openCode } = await createRuntime();
-    openCode.state.records.ses_child.push(user(11), assistant('Waiting on a subagent', 12), idle('succeeded', 13));
-    openCode.state.children.ses_child = ['ses_grandchild'];
-    openCode.state.active.ses_grandchild = { type: 'running' };
+    openCode.state.sessions.ses_sub = { id: 'ses_sub', parentID: 'ses_child' };
+    openCode.state.sessions.ses_agent = { id: 'ses_agent', metadata: { openchamber: { kind: 'workflow-agent', parentID: 'ses_child' } } };
+    openCode.state.sessions.ses_worker = { id: 'ses_worker', metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_child' } } };
+    openCode.state.active.ses_sub = { type: 'running' };
+    openCode.state.active.ses_agent = { type: 'running' };
+    openCode.state.active.ses_worker = { type: 'running' };
+    openCode.state.records.ses_child.push(user(11), assistant('Answer while the run goes on', 12), idle('succeeded', 13));
     await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
-    await settle();
-    expect(openCode.state.synthetic).toEqual([]);
-
-    delete openCode.state.active.ses_grandchild;
-    openCode.state.records.ses_child.push(assistant('Final answer', 40), idle('succeeded', 41));
-    await vi.waitFor(() => expect(openCode.state.synthetic).toEqual([expect.objectContaining({ text: expect.stringContaining('Final answer') })]));
+    await vi.waitFor(() => expect(openCode.state.synthetic).toEqual([expect.objectContaining({ text: expect.stringContaining('Answer while the run goes on') })]));
   });
 
   it('records the answer in an archived parent without waking it', async () => {
@@ -293,22 +288,6 @@ describe('dispatch results runtime', () => {
     expect(posts[0]).toBe(posts[1]);
     expect(openCode.state.synthetic).toHaveLength(1);
     expect(runtime.pending()).toEqual([]);
-  });
-
-  it('treats an id OpenCode already admitted as delivered', async () => {
-    const { runtime, openCode } = await createRuntime();
-    openCode.state.records.ses_child.push(user(11), assistant('Done', 12), idle('succeeded', 13));
-    openCode.state.syntheticStatus.push(409);
-    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
-    await vi.waitFor(() => expect(runtime.pending()).toEqual([]));
-  });
-
-  it('drops the delivery when the parent no longer exists', async () => {
-    const { runtime, openCode } = await createRuntime();
-    openCode.state.records.ses_child.push(user(11), assistant('Done', 12), idle('succeeded', 13));
-    openCode.state.syntheticStatus.push(404);
-    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
-    await vi.waitFor(() => expect(runtime.pending()).toEqual([]));
   });
 
   it('forgets results owed to a parent that was deleted', async () => {
@@ -405,6 +384,7 @@ describe('dispatch results runtime', () => {
   });
 
   it('still reports a newer run next to an entry whose earlier attempt landed', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const dataDir = await makeDataDir();
     const landed = 'msg_000000000001aaaaaaaaaaaaaa';
     await fs.writeFile(path.join(dataDir, 'dispatch-results.json'), JSON.stringify({

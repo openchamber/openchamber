@@ -41,7 +41,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -69,7 +68,7 @@ import type { WorktreeMetadata } from '@/types/worktree';
 import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
 import { MobileProjectEditSurface } from './MobileProjectEditSurface';
 import { MobileProjectIcon } from './MobileProjectIcon';
-import { getSessionDirectory } from './mobileSessionFields';
+import { selectHasChats } from './mobileSessionFields';
 import { getProjectLabel, normalizePath } from './mobilePaths';
 import { MobileSessionList } from './mobileSidebar/MobileSessionList';
 import { MobileSidebarActionsProvider, useMobileSidebarRowsStore, type MobileSidebarActions } from './mobileSidebar/mobileSidebarState';
@@ -80,32 +79,20 @@ import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS } from '@/components/ui
 type MobileSessionsSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** 'drawer' (default) renders a full-width left drawer over the app;
-      'sidebar' renders the same content inline for the iPad persistent
-      sidebar, kept mounted while it is hidden, with `open` saying whether
-      it is shown. */
   variant?: 'drawer' | 'sidebar';
-  /** App-level footer bar (desktop-sidebar-style): current instance on the
-      left, settings (and, on hosted web, a pending update) on the right. */
   footer?: {
-    /** Connected instance label — Capacitor only; null hides the left slot. */
     instanceLabel: string | null;
     onOpenInstances?: () => void;
     onOpenSettings: () => void;
     onOpenScheduled: () => void;
     onOpenArchive: () => void;
     onOpenUsage: () => void;
-    /** The overview of what waits, runs and looks done; absent while the feature is not in this build. */
     onOpenOverview?: () => void;
-    /** The issues and PRs board. */
     onOpenSourceBoard: () => void;
-    /** Present only while a server update is available (hosted web). */
     onOpenUpdate?: () => void;
   };
 };
 
-// Same orders, same labels as the desktop sidebar's sort menu — the setting
-// itself is shared, so the two surfaces must offer the same choices.
 const PROJECT_SORT_OPTIONS = [
   ['manual', 'sessions.sidebar.header.projectSort.manual'],
   ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
@@ -119,10 +106,8 @@ const GROUPING_OPTIONS = [
   ['time', 'sessions.sidebar.header.listGrouping.time'],
 ] as const;
 
-/** Menu rows tall enough for a thumb. */
 const MOBILE_MENU_ITEM_CLASS = 'min-h-10 items-center justify-between';
 
-/** Mounts only with the open menu, so the sheet does not watch every session for it. */
 function MobileMarkAllReadItem(): React.ReactNode {
   const { t } = useI18n();
   const hasUnread = useHasUnreadSession();
@@ -148,7 +133,6 @@ type ReorderProject = {
 const IDLE_SEARCH_STATUS: ContentSearchStatus = { kind: 'idle' };
 const renderList = (props: SessionProjectListProps): React.ReactNode => <MobileSessionList {...props} />;
 
-/** One draggable project in Reorder projects. */
 const SortableProjectRow: React.FC<{ project: ReorderProject }> = ({ project }) => {
   const { t } = useI18n();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: project.id });
@@ -176,13 +160,6 @@ const SortableProjectRow: React.FC<{ project: ReorderProject }> = ({ project }) 
   );
 };
 
-/**
- * The phone's sessions drawer, and the iPad's sidebar. The list is the
- * desktop's (`SessionSidebar` with the phone's rows, see
- * `mobileSidebar/MobileSessionList.tsx`); this sheet holds what surrounds it:
- * the header with the display menu and New chat, the search field, Reorder
- * projects, the footer and the dialogs the rows open.
- */
 export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, onOpenChange, variant = 'drawer', footer }) => {
   const { t } = useI18n();
   const listActive = useActiveAfterSlideStarts(open);
@@ -212,11 +189,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const customSections = React.useMemo(() => savedSections.filter((entry) => entry.kind === 'custom'), [savedSections]);
   const hiddenSections = useSessionDisplayStore((state) => state.hiddenSections);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  const hasChats = useGlobalSessionsStore((state) => state.activeSessions.some((session) => isChatDirectoryPath(getSessionDirectory(session))));
+  const hasChats = useGlobalSessionsStore(selectHasChats);
   const [searchText, setSearchTextState] = React.useState('');
   const [searchScope, setSearchScope] = React.useState<SearchScope>('everything');
   const [searchStatus, setSearchStatus] = React.useState<ContentSearchStatus>(IDLE_SEARCH_STATUS);
-  // A cleared search drops its scope too: the next one starts wide.
   const setSearchText = React.useCallback((text: string) => {
     setSearchTextState(text);
     if (text === '') setSearchScope('everything');
@@ -230,14 +206,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const [worktreeDialogProjectId, setWorktreeDialogProjectId] = React.useState<string | null>(null);
   const [editingOrder, setEditingOrder] = React.useState(false);
   const [openId, setOpenId] = React.useState(0);
-  // The iPad's sidebar keeps its search behind a header button, as the
-  // desktop's does; the phone's drawer shows the field at once.
   const [searchOpen, setSearchOpen] = React.useState(false);
   const searchShown = variant === 'drawer' || searchOpen;
   const searchInputRef = React.useRef<HTMLInputElement | null>(null);
   const toggleSearch = () => {
-    // Closing the field clears its query: no list stays filtered by text
-    // nobody can see.
     if (searchOpen) clearSearchText();
     setSearchOpen(!searchOpen);
   };
@@ -260,21 +232,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       return;
     }
     setOpenId((id) => id + 1);
-    // The mobile shell has no global poller, so the list is read here: its
-    // head on most openings, the complete snapshot once it is ten minutes old
-    // (`refreshGlobalSessionsWhenShown`). This is also where the host seed
-    // runs, as the poller runs it after each load elsewhere: a
-    // question or permission already waiting at startup is otherwise missing
-    // from the cross-directory index the rows read. The seed resolves
-    // directories from the list just loaded, so it runs after it.
     void refreshGlobalSessionsWhenShown(GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS, liveSessions).then(() => seedGlobalSessionStatusFromHost());
-    // intentionally only on open transition — session events keep the list current after that
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [listActive]);
 
-  // Events sent while the stream was down are lost, so a list on screen when
-  // it comes back (the iPad's sidebar, a drawer left open in the background)
-  // reads again, as opening it does.
   const connectionPhase = useConfigStore((state) => state.connectionPhase);
   const previousConnectionPhaseRef = React.useRef(connectionPhase);
   React.useEffect(() => {
@@ -282,7 +243,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     previousConnectionPhaseRef.current = connectionPhase;
     if (!reconnected || !listActive) return;
     void refreshGlobalSessionsWhenShown(GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS, liveSessions).then(() => seedGlobalSessionStatusFromHost());
-    // only on the reconnect edge
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionPhase]);
 
@@ -290,9 +250,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const sidebarActions = React.useMemo<MobileSidebarActions>(() => ({
     close,
     openProjectEdit: setEditingProjectId,
-    // The dialog takes the project as a prop and the created worktree's draft
-    // names it: the active project stays, so the chat behind the drawer does
-    // not switch to that project's last session while the dialog is open.
     openNewWorktree: (projectId) => {
       setWorktreeDialogProjectId(projectId);
       setNewWorktreeDialogOpen(true);
@@ -302,7 +259,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   }), [close, openId]);
   const phoneList = React.useMemo(() => ({ searchQuery: searchShown ? searchText : '', searchScope, clearSearch: clearSearchText, onSearchStatusChange: setSearchStatus, renderList }), [clearSearchText, searchScope, searchShown, searchText]);
 
-  // Projects with the label the rows show, in the order Reorder projects drags.
   const labelledProjects = React.useMemo(() => projects.map((project) => ({
     ...project,
     label: project.label?.trim() || getProjectLabel(project.path),
@@ -314,19 +270,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const editingProject = labelledProjects.find((project) => project.id === editingProjectId) ?? null;
   const worktreeDialogProject = labelledProjects.find((project) => project.id === worktreeDialogProjectId) ?? null;
 
-  // The order and the view are shared settings of this surface, persisted as
-  // the desktop does, so the choice follows the user to their other phones.
   const handleProjectSortChange = (order: ProjectSortOrder) => {
     setProjectSortOrder(order);
     void updateDesktopSettings({ sidebarProjectSortOrder: order });
-    // Dragging projects rewrites the manual order; it means nothing while the
-    // list is sorted by something else.
     if (order !== 'manual') setEditingOrder(false);
   };
   const handleGroupingChange = (next: 'project' | 'time') => {
     setSidebarGrouping(next);
     void updateDesktopSettings({ sidebarGrouping: next });
-    // Project order means nothing without project headers.
     if (next === 'time') setEditingOrder(false);
   };
   const toggleSetting = (current: boolean, set: (next: boolean) => void, persist: (next: boolean) => void) => () => {
@@ -334,7 +285,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     persist(!current);
   };
 
-  /** One choice or switch in the display menu, checked when it is in effect. */
   const renderMenuChoice = (key: string, labelKey: I18nKey, checked: boolean, onSelect: () => void): React.ReactNode => (
     <DropdownMenuItem key={key} onClick={onSelect} className={MOBILE_MENU_ITEM_CLASS}>
       <span>{t(labelKey)}</span>
@@ -349,21 +299,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const handleReorderDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    // The store's own list is the manual order the drag rewrites.
     const fromIndex = projects.findIndex((project) => project.id === active.id);
     const toIndex = projects.findIndex((project) => project.id === over.id);
     if (fromIndex < 0 || toIndex < 0) return;
     reorderProjects(fromIndex, toIndex);
   };
 
-  // Drag order IS the manual order: offering it under another sort would let
-  // the user rearrange a list that is about to be re-sorted anyway.
   const canEditOrder = !searchText && projects.length > 1 && projectSortOrder === 'manual' && grouping === 'project';
 
-  // Sorting lives in the header next to reordering — the two answer the same
-  // question about the list. Reachable with a single project too: the menu
-  // also holds the view, which matters long before a second project exists.
-  // While reordering runs, the menu's button gives way to Done.
   const displayMenu = !editingOrder && projects.length > 0 ? (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -381,7 +324,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuLabel>{t('sessions.sidebar.header.listGrouping.label')}</DropdownMenuLabel>
         {GROUPING_OPTIONS.map(([option, labelKey]) => renderMenuChoice(option, labelKey, grouping === option, () => handleGroupingChange(option)))}
-        {/* Project order only means something while projects are groups. */}
         {grouping === 'project' ? (
           <>
             <DropdownMenuSeparator />
@@ -396,14 +338,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         {sessionWorkEnabled ? renderMenuChoice('work', 'sessions.sidebar.header.displayMode.showWork', showWorkSection, toggleSetting(showWorkSection, setShowWorkSection, (next) => {
           void updateDesktopSettings({ sidebarShowWorkSection: next });
         })) : null}
-        {/* The user's own sections, made on the desktop or the web; the phone only shows or hides them. */}
         {customSections.map((section) => (
           <DropdownMenuItem key={`section:${section.id}`} onClick={() => setSidebarSectionHidden(section.id, !hiddenSections.includes(section.id))} className={MOBILE_MENU_ITEM_CLASS}>
             <span className="min-w-0 truncate" dir="auto">{section.name}</span>
             {!hiddenSections.includes(section.id) ? <Icon name="check" className="size-4 text-primary" /> : null}
           </DropdownMenuItem>
         ))}
-        {/* A pinned work stays in its project unless asked; one in In work leaves it unless asked. */}
         {showPinnedSection ? renderMenuChoice('pinned-in-place', 'sessions.sidebar.header.displayMode.keepPinnedInPlace', keepPinnedInPlace, toggleSetting(keepPinnedInPlace, setKeepPinnedInPlace, (next) => {
           void updateDesktopSettings({ sidebarKeepPinnedInPlace: next });
         })) : null}
@@ -476,8 +416,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     </Button>
   ) : null;
 
-  // The pages the list opens, last among the list's own controls, as the
-  // desktop header's More menu.
   const pageItem = (icon: IconName, label: string, onClick: () => void) => (
     <DropdownMenuItem onClick={onClick} className={MOBILE_MENU_ITEM_CLASS}>
       <span className="flex items-center gap-2">
@@ -507,7 +445,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         {pageItem('calendar-schedule', t('sessions.sidebar.header.actions.scheduledTasks'), footer.onOpenScheduled)}
         {pageItem('archive', t('sessions.sidebar.nav.archive'), footer.onOpenArchive)}
         {pageItem('bar-chart', t('usageStats.openAction'), footer.onOpenUsage)}
-        {/* Extension pages that opted into the phone; the shell shows the open one full screen. */}
         {guestPages.map((guest) => (
           <DropdownMenuItem key={guest.id} onClick={() => useUIStore.getState().setOpenGuestPage(guest.id)} className={MOBILE_MENU_ITEM_CLASS}>
             <span className="flex min-w-0 items-center gap-2">
@@ -524,9 +461,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     </DropdownMenu>
   ) : null;
 
-  // The new-session button keeps the outer right edge whatever else is showing:
-  // it is the one action people reach for without looking, so it must not slide
-  // around as the icons beside it come and go.
   const trailingActions = (
     <>
       {addProjectButton}
@@ -539,13 +473,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   const empty = projects.length === 0 && !hasChats;
 
-  // flex-1 + min-h-0 rather than h-full: both hosts put a fixed-height header
-  // above this, so a 100% height overflows by exactly that header — and the
-  // clipped overflow swallowed the footer.
   const surfaceContent = (
       <div className="flex min-h-0 flex-1 flex-col">
-        {/* The list scrolls under the search field: the list is virtualized
-            in its own scroller, which the field cannot join. */}
         {!editingOrder && !empty && searchShown ? (
           <div className={cn('shrink-0 px-2 pb-1', variant === 'sidebar' ? 'pt-2' : 'pt-1')}>
             <SessionSearchInput
@@ -562,7 +491,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 <SearchInMenu mobile scope={searchScope} onChange={setSearchScope} />
               </> : undefined}
             />
-            {/* A phone has no tooltips, so a failed message search says so in words. */}
             {searchText !== '' && searchFailure ? <p role="status" className="px-2.5 pt-1 typography-micro text-muted-foreground">{searchFailure}</p> : null}
           </div>
         ) : null}
@@ -598,22 +526,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             </div>
           </ScrollableOverlay>
         ) : null}
-        {/* Mounted while reordering too, so the list comes back as it was. */}
         <div className={cn('flex min-h-0 flex-1 flex-col', (editingOrder || empty) && 'hidden')}>
           <MobileSidebarActionsProvider value={sidebarActions}>
             <SessionSidebar mobileVariant isVisible={listActive} phone={phoneList} />
           </MobileSidebarActionsProvider>
         </div>
 
-        {/* App-level footer, as the desktop sidebar's: the connected
-            instance (Capacitor) on the left, a pending web update and
-            Settings on the right. The pages the list opens are in the
-            header's More menu. */}
         {footer ? (
           <div
-            // At the bottom of the phone's drawer it rides the keyboard. The
-            // iPad's sidebar keeps its height under the raised keyboard
-            // (mobile.css), so its footer stays where it is.
             data-keyboard-rider={variant === 'drawer' ? '' : undefined}
             className="oc-sessions-footer flex shrink-0 items-center justify-between gap-2 border-t border-edge bg-background px-3 pt-1.5"
             style={{ paddingBottom: 'calc(0.375rem + var(--oc-safe-area-bottom, 0px))' }}
@@ -706,8 +626,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   if (variant === 'sidebar') {
     return (
       <div className="flex h-full min-h-0 flex-col">
-        {/* No title: the list below says what this is, and the actions need
-            the width. Search opens from the leading button, as on the desktop. */}
         <div className={cn(MOBILE_HEADER_CLASS, 'border-b border-edge')}>
           {!editingOrder && !empty ? (
             <Button
@@ -734,9 +652,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     <MobileSessionsDrawerContainer
       open={open}
       onClose={close}
-      // The mirror of the swipe that opened the drawer closes it again —
-      // except while a row has its actions out: then the same swipe is the
-      // user putting those away, so it only clears them.
       onSwipeClose={() => {
         const rows = useMobileSidebarRowsStore.getState();
         if (rows.revealedKey) {
@@ -766,19 +681,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
 const DRAWER_ROOT_ID = 'mobile-surface-root';
 const DRAWER_ENTER_DELAY_MS = 16;
-// Slightly long, decelerating slide — matches the workspace drawer so both
-// sides feel like the same piece of chrome.
 const DRAWER_ENTER_DURATION_MS = 320;
 const DRAWER_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
-/**
- * `open`, turning true only once the drawer's slide is under way. Waking the
- * list (its polling, ordering and the refresh on open) rebuilds every row,
- * and done in the tap's own frame it held the slide back by about 65 ms on
- * an iPhone. The slide is a transform the compositor runs, so the same work
- * a few frames later neither delays nor stutters it; the list shows its
- * last state until then. Closing turns it off at once.
- */
 const useActiveAfterSlideStarts = (open: boolean): boolean => {
   const [active, setActive] = React.useState(open);
   React.useEffect(() => {
@@ -787,8 +692,6 @@ const useActiveAfterSlideStarts = (open: boolean): boolean => {
       return;
     }
     let frame = 0;
-    // After the container's enter delay, plus a frame for the transition to
-    // reach the compositor.
     const timer = window.setTimeout(() => {
       frame = window.requestAnimationFrame(() => {
         frame = window.requestAnimationFrame(() => setActive(true));
@@ -802,20 +705,9 @@ const useActiveAfterSlideStarts = (open: boolean): boolean => {
   return active;
 };
 
-/** Full-width left drawer for the phone sessions list: covers the whole app
-    and slides in from the left edge. Closes via the header X, a right-edge
-    swipe back toward the left (the mirror of the gesture that opened it),
-    Escape, or the Android back button (handled by MobileShell).
-
-    Stays MOUNTED while closed (parked off-screen, hidden): the sessions
-    sheet's project/worktree state stays warm, so reopening shows the tree
-    instantly instead of refetching from scratch — and the close slide can
-    actually play instead of the drawer vanishing on unmount. */
 const MobileSessionsDrawerContainer: React.FC<{
   open: boolean;
   onClose: () => void;
-  /** What the closing edge swipe does; the drawer's owner may want it to undo
-      a lighter state first. Falls back to `onClose`. */
   onSwipeClose?: () => void;
   ariaLabel: string;
   children: React.ReactNode;
@@ -824,7 +716,6 @@ const MobileSessionsDrawerContainer: React.FC<{
   const rootRef = React.useRef<HTMLElement | null>(null);
   const drawerRef = React.useRef<HTMLElement>(null);
   const [entered, setEntered] = React.useState(false);
-  // Kept visible through the exit slide; flipped to hidden once it finishes.
   const [visible, setVisible] = React.useState(open);
   const onCloseRef = React.useRef(onClose);
   React.useEffect(() => {
@@ -835,9 +726,6 @@ const MobileSessionsDrawerContainer: React.FC<{
     onSwipeCloseRef.current = onSwipeClose;
   }, [onSwipeClose]);
 
-  // Swipe from the drawer's end edge back toward its start = close, the
-  // reverse of the start-edge swipe that opened it from the chat. Rows inside
-  // reveal their actions in the opposite direction, so the two never fight.
   const closeFromEdge = () => (onSwipeCloseRef.current ?? onCloseRef.current)();
   useEdgeSwipe(drawerRef, {
     enabled: open,
@@ -891,8 +779,6 @@ const MobileSessionsDrawerContainer: React.FC<{
       className="oc-keyboard-inset-surface oc-side-safe-area fixed inset-0 z-50 flex flex-col bg-background text-foreground"
       style={{
         paddingTop: 'var(--oc-safe-area-top, 0px)',
-        // Settled state drops the transform entirely so the drawer isn't kept
-        // on a compositing layer (iOS clips those to the safe-area viewport).
         transform: entered ? 'none' : direction === 'rtl' ? 'translateX(100%)' : 'translateX(-100%)',
         transition: `transform ${DRAWER_ENTER_DURATION_MS}ms ${DRAWER_EASING}`,
         visibility: visible ? 'visible' : 'hidden',

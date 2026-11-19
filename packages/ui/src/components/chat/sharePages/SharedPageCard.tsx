@@ -35,30 +35,17 @@ type SharedPage = { html: string; ui?: string; title: string; share: RenderedPag
 
 type Translate = ReturnType<typeof useI18n>['t'];
 
-/**
- * A page the agent shared with other people (`openchamber_render` with
- * `share`), drawn in place of the call: what it asks, and one row per
- * recipient with where their link stands. The links, PINs and answers live on
- * the server, never in the call, so the card reads them from there and is
- * current after a reload and on every device. "Open" shows the page from the
- * server's own copy, never through the relay, so the author's look is not
- * counted as the recipient's opening.
- */
 export function SharedPageCard({ part, page, plainPage }: {
   part: ToolPart;
   page: SharedPage;
-  /** The page drawn as an ordinary render, for when sharing is turned off. */
   plainPage: React.ReactNode;
 }) {
   const { t } = useI18n();
   const title = page.title || t('chat.htmlRender.untitled');
-  // VS Code runs without the OpenChamber server that keeps the links.
   const available = !isVSCodeRuntime();
   const state = useSharePageGroup(part.sessionID, part.callID, available);
   const group = state.group;
 
-  // Enterprise mode without an allowed relay: no links, PINs
-  // or preview, only the page the agent drew and why it went nowhere.
   if (state.turnedOff) {
     return (
       <>
@@ -113,7 +100,6 @@ export function SharedPageCard({ part, page, plainPage }: {
   );
 }
 
-/** For a `ui` page the questions its fields ask; for an `html` page the agent's one-line summary. */
 function SharedPageSummary({ page, summary }: { page: SharedPage; summary: string | null }) {
   const questions = useSharePageQuestions(page.ui);
   if (page.ui) {
@@ -121,7 +107,6 @@ function SharedPageSummary({ page, summary }: { page: SharedPage; summary: strin
     return (
       <ul className="mt-1.5 flex flex-col gap-0.5 text-[0.8125rem] text-foreground">
         {questions.map((question, index) => (
-          // A dot of its own, not a list marker: a marker follows the item's own direction, so a question in another script lost it.
           <li key={index} className="flex min-w-0 gap-2">
             <span aria-hidden className="text-muted-foreground">•</span>
             <span dir="auto" className="min-w-0 oc-ui-start-align">{question}</span>
@@ -133,7 +118,6 @@ function SharedPageSummary({ page, summary }: { page: SharedPage; summary: strin
   return summary ? <p dir="auto" className="mt-1 text-sm text-muted-foreground">{summary}</p> : null;
 }
 
-/** The page's questions, once the UI block parser has loaded; null before. */
 function useSharePageQuestions(source: string | undefined): string[] | null {
   const [questions, setQuestions] = React.useState<{ source: string; list: string[] } | null>(null);
   React.useEffect(() => {
@@ -147,20 +131,12 @@ function useSharePageQuestions(source: string | undefined): string[] | null {
   return questions && questions.source === source ? questions.list : null;
 }
 
-/** The page's own text for a recipient's agent: the `ui` program, or the agent's HTML before theming, with the summary. */
 const sharePageSource = (page: SharedPage): SharePageSource => (page.ui
   ? { format: 'ui', text: page.ui, summary: page.share.summary ?? null }
   : { format: 'html', text: page.html, summary: page.share.summary ?? null });
 
-// One upload per call at a time from this client, however many cards draw it.
 const uploads = new Map<string, Promise<SharePageGroup>>();
 
-/**
- * Hands the server the page for every recipient without a link yet. `html` is
- * null once the server holds the document: it reuses its copy, so every
- * recipient gets the same page. A 409 means another client got there first
- * (or the share expired meanwhile); the group read then says which.
- */
 function uploadDocument(part: ToolPart, page: SharedPage, html: string | null): Promise<SharePageGroup> {
   const key = `${part.sessionID}\n${part.callID}`;
   let upload = uploads.get(key);
@@ -178,21 +154,11 @@ function uploadDocument(part: ToolPart, page: SharedPage, html: string | null): 
   return upload;
 }
 
-/**
- * The page's local images as data URLs, then the upload; `children` gets the
- * call once both are ready. Mounted only while a document has to go up, so a
- * card at rest reads no images.
- */
 function WithPageHtml({ part, page, children }: { part: ToolPart; page: SharedPage; children: (html: string) => React.ReactNode }) {
   const html = useRenderPageHtml(part, page.ui ? '' : page.html);
   return html === null ? null : <>{children(html)}</>;
 }
 
-/**
- * Builds the page every recipient gets and hands it to the server, which
- * encrypts and uploads it per recipient. The server waits for this after the
- * call; a failure says so and offers another try.
- */
 function DocumentUpload({ part, page, onUploaded, onTurnedOff }: {
   part: ToolPart;
   page: SharedPage;
@@ -256,10 +222,6 @@ const formatMoment = (at: number, now: number) => {
   return { time, sameDay };
 };
 
-/**
- * "in 2 days", "in 5 hours", or null once past. Days round to the nearest one: a link made a
- * minute ago that lives four days must not read "in 3 days".
- */
 const formatTimeLeft = (expiresAt: number, now: number): string | null => {
   const left = expiresAt - now;
   if (left <= 0) return null;
@@ -270,7 +232,6 @@ const formatTimeLeft = (expiresAt: number, now: number): string | null => {
   return format.format(Math.max(1, Math.floor(left / 60_000)), 'minute');
 };
 
-// Time left reads in whole minutes at the finest, so a minute's tick keeps it true.
 function useMinuteClock(): number {
   const [now, setNow] = React.useState(() => Date.now());
   React.useEffect(() => {
@@ -411,7 +372,6 @@ function RecipientRow({ part, page, group, recipient, onGroup, reload, onTurnedO
   );
 }
 
-/** A copy button that answers the click with a check in place of its icon for a moment. */
 function CopyButton({ icon, label, value }: { icon: IconName; label: string; value: string }) {
   const { t } = useI18n();
   const [copied, setCopied] = React.useState(false);
@@ -433,12 +393,6 @@ function CopyButton({ icon, label, value }: { icon: IconName; label: string; val
   );
 }
 
-/**
- * "Open": the page as the recipients get it, from the copy the server keeps,
- * in the app's sandboxed frame. It runs the page's real script, so the frame
- * plays the viewer's part: it says whether the page takes an answer and turns
- * a Send down, since an answer only counts from a recipient's link.
- */
 function PreviewButton({ part, title, group, onTurnedOff }: { part: ToolPart; title: string; group: SharePageGroup; onTurnedOff: () => void }) {
   const { t, locale } = useI18n();
   const [html, setHtml] = React.useState<string | null>(null);
@@ -486,10 +440,9 @@ function SharePreviewFrame({ html, title, wantsAnswer, locale, refusal }: {
   refusal: string;
 }) {
   const frameRef = React.useRef<HTMLIFrameElement>(null);
-  // The page picks light or dark from its frame's color scheme, as it does from the reader's system.
   const { currentTheme } = useThemeSystem();
   const reply = React.useCallback((message: ViewerMessage) => {
-    // An opaque-origin page accepts messages only addressed to any origin.
+    // external: https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage Opaque-origin frames require "*" as the target origin.
     frameRef.current?.contentWindow?.postMessage(message, '*');
   }, []);
   React.useEffect(() => {
