@@ -72,7 +72,7 @@ async function getPidFilePath(port: number) {
   return path.join(getRunDir(), `openchamber-${port}.pid`);
 }
 
-async function getInstanceFilePath(port: number) {
+async function getInstanceFilePath(port: number | undefined) {
   return path.join(getRunDir(), `openchamber-${port}.json`);
 }
 

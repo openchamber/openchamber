@@ -35,7 +35,7 @@ Command modules implement user-facing commands and preserve output contracts acr
   - In `--quiet`, a generated password is result data: it is part of the one-line output as `<port> pass:<password>`, the same token form `status --quiet` uses. A configured password is never echoed. In foreground `--quiet` mode the server's stdout/stderr go to the log file so runtime output cannot pollute that line, and CLI output writes through a saved reference to the real stream. Human mode leaves stdout/stderr inherited and closes the log fd.
   - A server started from another OpenChamber's shell does not record `OPENCODE_BINARY` as injected, so a startup service enabled from that terminal keeps the same OpenCode binary.
 
-- `commands-lifecycle.js`
+- `commands-lifecycle.ts`
   - Implements `openchamber stop` and `openchamber restart`.
   - Owns lifecycle stop/restart semantics, desktop-managed port rejection, unmanaged instance shutdown attempts, PID/instance cleanup, and restart reuse of stored instance options.
   - `restart` of a foreground instance stops it and records success. A process manager (systemd, Docker) starts it again; calling `serve()` here would race the manager with a second copy.
@@ -72,7 +72,7 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Implements `openchamber startup`.
   - Handles startup subcommand dispatch and presentation around the lower-level startup service helpers.
 
-- `commands-connect-url.js`
+- `commands-connect-url.ts`
   - Implements `openchamber connect-url`.
   - Finds or starts a local instance and prints the browser/connect URL according to the selected output mode.
   - Emits a **pairing v2** link (`openchamber://connect?v=2&p=<base64url>`): it creates a one-time pairing session in the shared store (`client-pairing-sessions.json`) and encodes the pairing id + secret + transport candidates. The client redeems the secret over whichever candidate connects first (`/api/client-auth/pairing/redeem`). No standalone token is embedded — the QR itself is the single-use credential.
@@ -137,7 +137,7 @@ These modules hold reusable, non-presentational logic for commands.
   - Identity cannot be determined on Windows or when `/proc` and `ps` are unreadable; there the check falls back to liveness, so those platforms get no false negatives.
   - The identity match looks for the `openchamber` path segment, not a generic `cli.js`: the npm package and the source checkout both contain it for the foreground and daemon entrypoints, while a recycled `npm-cli.js` or `agentmemory` does not.
 
-- `cli-lifecycle.js`
+- `cli-lifecycle.ts`
   - Instance discovery, live health probing, attachability checks, provider discovery, and status aggregation used by lifecycle/status/tunnel commands.
   - A live pid file is only the right instance when the recorded port also answers as OpenChamber. Command-line identity alone can match a recycled pid from another OpenChamber process on a different port. Probe all plausible hosts; when identity is matched or unknown but the port still cannot be confirmed, keep the registry files and report the instance as not running.
 
@@ -154,7 +154,7 @@ These modules hold reusable, non-presentational logic for commands.
 - `cli-shell.ts`
   - Quotes replay arguments for PowerShell on Windows and POSIX shells elsewhere. Session recovery and tunnel replay commands share this formatter.
 
-- `cli-api-target.js`
+- `cli-api-target.ts`
   - Resolves the target OpenChamber runtime for control-plane commands, preferring desktop unless a port is explicit.
 
 - `cli-goal.ts`
@@ -360,41 +360,43 @@ streams also accept a callback in the second argument or an explicit undefined
 encoding. `node-streams.d.ts` describes these native calls without changing the
 stream redirection wrappers.
 
-### Why the API target helper remains JavaScript
+### Why target discovery checks injected callbacks and results
 
-The web Knip project currently includes `bin/**/*.js` but omits TypeScript
-implementations. `cli-api-target.js` keeps a visible importer of
-`discoverDesktopInstance` after the other consumers move to TypeScript.
-Converting that helper requires the coordinator's shared Knip configuration
-change; otherwise the unchanged gate reports the live discovery export as unused.
+Callers can inject discovery callbacks from JavaScript. The helper still
+checks whether each override is callable, whether lifecycle discovery
+returned an array, and whether each candidate is a bare port or a record.
+The existing finite and positive checks still decide which lifecycle ports
+qualify.
 
-### Why lifecycle discovery and commands retain JavaScript
+### Why lifecycle port probes pass saved hosts through
 
 `discoverUnconfirmedRegistryInstanceOnPort` forwards a truthy saved `host`
 directly to `isPortAvailable`, which passes it to Node's `net.Server.listen`.
-Instance JSON validates syntax only, so that host can be a number, array or
-object. The native helper accepts a string host; a type-only widening cannot
-make other values valid. Restart forwards the same unchecked saved host into
-stop, whose unmanaged shutdown path also calls `isPortAvailable`. Converting
-these paths requires a decision about invalid saved hosts at that boundary.
+Instance files validate JSON syntax only. Node rejects truthy non-string hosts
+in its DNS lookup, while Bun can coerce them or emit a listen error. The local
+declaration describes that call so the CLI preserves the result from the
+runtime. HTTP host resolution still checks for text and falls back as before.
 
-### Why connect-url retains JavaScript
+Restart uses the command receiver's callbacks only when the receiver is an
+object and the properties are functions. These checks preserve detached calls
+and injected JavaScript callers. Stop preserves thrown message formatting:
+truthy messages are interpolated, and a missing message leaves out the detail.
 
-The CLI settings reader preserves scalar and array JSON roots.
-`RelaySettingsAccess` requires a loose object from both readers, while the CLI
-supplies `Promise<JsonValue>` and `Promise<object>`. The key store spreads the
-migrated read and directly indexes the strict read. Widening those declarations
-alone leaves those operations untyped; a correction also needs runtime field
-views in the relay key store.
+### Why connect-url preserves the settings reader's JSON roots
+
+The migrated reader preserves scalar and array JSON roots. The key store
+spreads that value and reads only optional legacy key fields from the strict
+reader. The CLI still checks URL text and the relay flag before use. QR
+generation uses the installed package's `small` rendering option.
 
 ### Why tunnel commands retain JavaScript
 
 `isValidTunnelDoctorResponse` establishes provider-check and mode arrays, but
-does not check the fields of their entries. Provider labels and details remain
-unchecked when passed to the typed terminal output helpers. Claiming the
-server's stricter doctor result type at this validator would promise checks it
-does not perform. The response boundary and terminal declarations need to agree
-before this command can move without changing its acceptance rules.
+does not check provider-check labels or details. A failed check can pass its
+raw label to `logStatus` without a detail. In that branch Clack splits the
+label as text or reads it as an array; for example, a number throws. Treating
+the label as a string would claim validation that never happened. Coercing
+or rejecting the value in the command would change the existing failure path.
 
 ### Why browser port and environment checks remain
 

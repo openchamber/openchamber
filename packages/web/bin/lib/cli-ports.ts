@@ -2,8 +2,9 @@ import net from 'net';
 import { DEFAULT_PORT } from './cli-args.js';
 import { fetchSystemInfoFromPort } from './cli-http.js';
 import type { CliNotice } from './cli-process.js';
+import type { JsonValue } from '../../server/lib/shared/json-values.js';
 
-async function isPortAvailable(port: number | undefined, host?: string) {
+async function isPortAvailable(port: number | undefined, host?: JsonValue) {
   if (port === undefined || !Number.isFinite(port) || port <= 0) {
     return false;
   }

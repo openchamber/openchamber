@@ -8,6 +8,7 @@ import {
   isUnsafeUnauthenticatedLanAllowed,
 } from '../../server/lib/security/bind-host.js';
 import { injectedEnvKeys } from '../../server/lib/injected-env.js';
+import type { JsonValue } from '../../server/lib/shared/json-values.js';
 
 const UNSAFE_BROWSER_PORTS = new Set([
   0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69,
@@ -31,7 +32,7 @@ function isUnsafeBrowserPort(port: number | undefined) {
   return isNetworkNumber(port) && UNSAFE_BROWSER_PORTS.has(Math.trunc(port));
 }
 
-function resolveConfiguredBindHost(hostOverride?: string) {
+function resolveConfiguredBindHost(hostOverride?: JsonValue) {
   const configuredHost = injectedEnvKeys(process.env).has('OPENCHAMBER_HOST')
     ? undefined
     : process.env.OPENCHAMBER_HOST;
@@ -47,7 +48,7 @@ function resolveServeHost(hostOverride?: string) {
   return resolveConfiguredBindHost(hostOverride);
 }
 
-function resolveApiHost(hostOverride?: string) {
+function resolveApiHost(hostOverride?: JsonValue) {
   const configured = resolveConfiguredBindHost(hostOverride);
 
   if (!configured) {
@@ -73,7 +74,7 @@ function formatHostForUrl(host: string | undefined) {
   return host.includes(':') ? `[${host}]` : host;
 }
 
-function buildLocalUrl(port: number | undefined, endpoint = '', hostOverride?: string) {
+function buildLocalUrl(port: number | undefined, endpoint = '', hostOverride?: JsonValue) {
   const host = formatHostForUrl(resolveApiHost(hostOverride));
   const pathPart = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   return `http://${host}:${port}${pathPart}`;

@@ -1,4 +1,6 @@
-import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
+import type { CliOptions } from './cli-args.js';
+import type { createServeCommand } from './commands-serve.js';
+import type { JsonValue } from '../../server/lib/shared/json-values.js';
 import { requestServerShutdown } from './cli-http.js';
 import { isPortAvailable } from './cli-ports.js';
 import {
@@ -7,6 +9,7 @@ import {
 } from './cli-lifecycle.js';
 import {
   readInstanceOptions,
+  hasInstanceFields,
   removePidFile,
   removeInstanceFile,
   isProcessRunning,
@@ -24,10 +27,44 @@ import {
   logStatus,
 } from '../cli-output.js';
 
-async function stopCommand(options) {
+type StopOptions = Pick<Partial<CliOptions>, 'port' | 'explicitPort' | 'json' | 'quiet'> & {
+  host?: JsonValue | undefined;
+  suppressQuietOutput?: boolean;
+};
+type RestartOptions = StopOptions & Pick<Partial<CliOptions>, 'explicitUiPassword' | 'uiPassword' | 'apiOnly'>;
+type StopResult = { port: number | undefined; stopped: boolean; reason?: string; runtime?: string; pid?: number | null };
+type RestartResult = { fromPort: number; toPort: number | undefined; launchMode: 'foreground' | 'daemon'; ok: true };
+type ServeCommand = ReturnType<typeof createServeCommand>;
+type RestartContext = { stop?: typeof stopCommand; serve?: ServeCommand };
+export interface LifecycleCommandDependencies {
+  serveCommand: ServeCommand;
+}
+
+function isFinitePid(value: unknown): value is number {
+  return Number.isFinite(value);
+}
+
+function isRestartContext(value: unknown): value is RestartContext {
+  return Boolean(value && typeof value === 'object');
+}
+
+function isLifecycleCallback<Callback>(value: Callback | undefined): value is Callback {
+  return typeof value === 'function';
+}
+
+function assertLifecycleFailure(error: unknown): asserts error is { message?: unknown } {
+  if (error === null || error === undefined) {
+    if ('Bun' in globalThis) {
+      throw new TypeError(`${error} is not an object (evaluating 'error.message')`);
+    }
+    throw new TypeError(`Cannot read properties of ${error} (reading 'message')`);
+  }
+}
+
+async function stopCommand(options: StopOptions) {
     const showOutput = shouldRenderHumanOutput(options);
     const suppressQuietOutput = options?.suppressQuietOutput === true;
-    const jsonResults = [];
+    const jsonResults: StopResult[] = [];
     const printQuietStopResults = () => {
       if (suppressQuietOutput) return;
       if (!isQuietMode(options) || isJsonMode(options)) return;
@@ -44,7 +81,7 @@ async function stopCommand(options) {
         }
       }
     };
-    const finish = (text) => {
+    const finish = (text: string) => {
       if (!showOutput) return;
       clackOutro(text);
     };
@@ -55,6 +92,7 @@ async function stopCommand(options) {
 
     let runningInstances = await discoverLifecycleInstances(options);
     if (options.explicitPort) {
+      const requestedPort = options.port;
       if (runningInstances.length === 0) {
         const unconfirmedInstance = await discoverUnconfirmedRegistryInstanceOnPort(options.port, options);
         if (unconfirmedInstance) {
@@ -76,6 +114,7 @@ async function stopCommand(options) {
       }
 
       const explicitInstance = runningInstances[0];
+      if (!explicitInstance) throw new TypeError('Missing explicit instance');
       if (explicitInstance.runtime === 'desktop') {
         jsonResults.push({ port: options.port, runtime: 'desktop', stopped: false, reason: 'desktop-managed' });
         if (isJsonMode(options)) {
@@ -95,9 +134,9 @@ async function stopCommand(options) {
           logStatus('info', `found unmanaged OpenChamber instance on port ${options.port}`, 'attempting shutdown');
         }
         unmanagedStopSpin?.start(`Stopping unmanaged OpenChamber on port ${options.port}...`);
-        const requested = await requestServerShutdown(options.port, options.host);
+        const requested = await requestServerShutdown(requestedPort, options.host);
 
-        if (Number.isFinite(explicitInstance.pid) && isProcessRunning(explicitInstance.pid)) {
+        if (isFinitePid(explicitInstance.pid) && isProcessRunning(explicitInstance.pid)) {
           await stopInstanceProcess(explicitInstance.pid, {
             shutdownWaitMs: requested ? SERVER_SHUTDOWN_GRACE_MS : 0,
             gracefulTimeoutMs: 2500,
@@ -237,8 +276,11 @@ async function stopCommand(options) {
         stopSpin?.error(`Failed to stop OpenChamber on port ${instance.port}`);
         jsonResults.push({ port: instance.port, pid: instance.pid, stopped: false, reason: error instanceof Error ? error.message : String(error) });
         if (showOutput) {
-          logStatus('error', `error stopping port ${instance.port}`, error.message);
+          assertLifecycleFailure(error);
+          const detail = error.message;
+          logStatus('error', `error stopping port ${instance.port}`, detail ? `${detail}` : undefined);
         } else if (!isJsonMode(options) && !isQuietMode(options)) {
+          assertLifecycleFailure(error);
           console.error(`Error stopping port ${instance.port}: ${error.message}`);
         }
       }
@@ -259,22 +301,22 @@ async function stopCommand(options) {
     printQuietStopResults();
 }
 
-async function restartCommand(options, serveCommand) {
-    const commandContext = this && typeof this === 'object' ? this : {};
-    const runStop = typeof commandContext.stop === 'function'
+async function restartCommand(this: RestartContext, options: RestartOptions, serveCommand: ServeCommand) {
+    const commandContext: RestartContext = isRestartContext(this) ? this : {};
+    const runStop = isLifecycleCallback(commandContext.stop)
       ? commandContext.stop.bind(commandContext)
       : stopCommand;
-    const runServe = typeof commandContext.serve === 'function'
+    const runServe = isLifecycleCallback(commandContext.serve)
       ? commandContext.serve.bind(commandContext)
       : serveCommand;
     const showOutput = shouldRenderHumanOutput(options);
-    const restarted = [];
+    const restarted: RestartResult[] = [];
 
     if (showOutput) {
       clackIntro('OpenChamber Restart');
     }
 
-    let runningInstances = await discoverLifecycleInstances(options);
+    const runningInstances = await discoverLifecycleInstances(options);
     if (runningInstances.length === 0) {
       if (isJsonMode(options)) {
         printJson({ restartedCount: 0, results: restarted });
@@ -309,9 +351,10 @@ async function restartCommand(options, serveCommand) {
         return;
       }
 
-      const storedOptions = instance.instanceFilePath
+      const storedInput = instance.instanceFilePath
         ? (readInstanceOptions(instance.instanceFilePath) || { port: instance.port })
         : { port: instance.port };
+      const storedOptions = hasInstanceFields(storedInput) ? storedInput : {};
       const instanceHost = storedOptions.host || instance.host || options.host;
       const launchMode = instance.launchMode || 'daemon';
       const isForeground = launchMode === 'foreground';
@@ -381,10 +424,10 @@ async function restartCommand(options, serveCommand) {
     }
 }
 
-function createLifecycleCommands({ serveCommand }) {
+function createLifecycleCommands({ serveCommand }: LifecycleCommandDependencies) {
   return {
     stop: stopCommand,
-    restart(options) {
+    restart(this: RestartContext, options: RestartOptions) {
       return restartCommand.call(this, options, serveCommand);
     },
   };

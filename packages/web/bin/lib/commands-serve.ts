@@ -25,10 +25,11 @@ import type { CliOptions } from './cli-args.js';
 import type { CliNotice } from './cli-process.js';
 import { isString } from '../../server/lib/shared/object-guards.js';
 
-export interface ServeOptions extends Partial<Omit<CliOptions, 'port' | 'host' | 'uiPassword'>> {
+export interface ServeOptions extends Partial<Omit<CliOptions, 'port' | 'host' | 'uiPassword' | 'apiOnly'>> {
   port?: unknown;
   host?: unknown;
   uiPassword?: unknown;
+  apiOnly?: boolean | undefined;
   suppressUnsafePortWarning?: boolean;
   suppressUiPasswordWarning?: boolean;
   suppressStartupSummary?: boolean;
