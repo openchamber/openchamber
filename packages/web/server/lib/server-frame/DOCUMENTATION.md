@@ -50,7 +50,7 @@ integer, so omitting the null port preserves its source selection.
 - `core-routes.ts`: status, auth, access and settings utility routes.
 - `server-utils-runtime.ts`: OpenCode proxy wiring, readiness, path and snapshot helpers.
 - `static-routes-runtime.ts`: static assets, SPA fallback and manifest route wiring.
-- `packages/web/server/lib/server-frame/feature-routes-runtime.js`: feature route composition runtime for dynamic import-backed config/skill/provider route registration. Source-control provider registration is delegated to `lib/source-control/routes.js`. One exact persisted-credential resolver, including optional revision pinning, is shared by transport binding, clone planning, contributor transfer, execution, and safe HTTPS binding-read presentation. The managed SSH inventory supplies the matching verified-fingerprint projection without exposing its key record or path. Server composition supplies one durable worktree-bootstrap store to both Git and OpenChamber-session routes; the runtime exposes a lazy bound-checkout hydration adapter so session-created worktrees use the same local inspection and exact parent authority rules as Git-route worktrees.
+- `packages/web/server/lib/server-frame/feature-routes-runtime.ts`: feature route composition runtime for dynamic import-backed config/skill/provider route registration. Source-control provider registration is delegated to `lib/source-control/routes.js`. One exact persisted-credential resolver, including optional revision pinning, is shared by transport binding, clone planning, contributor transfer, execution, and safe HTTPS binding-read presentation. The managed SSH inventory supplies the matching verified-fingerprint projection without exposing its key record or path. Server composition supplies one durable worktree-bootstrap store to both Git and OpenChamber-session routes; the runtime exposes a lazy bound-checkout hydration adapter so session-created worktrees use the same local inspection and exact parent authority rules as Git-route worktrees.
 - `startup-pipeline-runtime.ts`: startup orchestration for terminal, proxy, static routes and listener.
 - `server-startup-runtime.ts`: listener startup, tunnel startup and process handlers.
 - `shutdown-runtime.ts`: graceful teardown. It stops [chat-directory cleanup](../chat-directories/DOCUMENTATION.md) before the watcher and OpenCode so pending checks cannot start a removal during teardown.
@@ -128,7 +128,7 @@ integer, so omitting the null port preserves its source selection.
 - Returned API:
   - `registerStaticRoutes(app)`
 
-## Public exports (feature-routes-runtime.js)
+## Public exports (feature-routes-runtime.ts)
 - `createFeatureRoutesRuntime(dependencies)`: creates runtime for main feature route registration orchestration.
 - Returned API:
   - `registerRoutes(app, routeDependencies)`

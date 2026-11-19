@@ -59,7 +59,7 @@ import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.
 import { registerMarkdownImageGrantRoutes } from '../markdown-image-grants/routes.js';
 import { registerSkillRoutes } from '../opencode/skill-routes.js';
 import { registerPluginRoutes } from '../opencode/plugin-routes.js';
-import { getNpmInfo, clearCache as clearNpmCache } from '../npm/npm-registry.js';
+import { getNpmInfo } from '../npm/npm-registry.js';
 import { parseNpmSpec, parsePathSpec, isExactSemver } from '../opencode/plugin-spec.js';
 import { registerOpenCodeRoutes } from '../opencode/routes.js';
 import { getProviderSources, removeProviderConfig, upsertProviderConfig } from '../opencode/providers.js';
@@ -110,8 +110,102 @@ import { readEffectiveGitTransportRevision } from '../git/transport-config.js';
 import { completeWorktreeCheckoutHydration, configureRepositoryTransport, deleteBranch as deleteBranchService, isGitRepository as isGitRepositoryService, removeWorktree as removeWorktreeService, resolvePrimaryWorktreeRoot, resolveWorktreeTopLevel } from '../git/service.js';
 import { createPrivateRepositoryIdentityResolver, resolveRepositoryId } from '../source-control/repository-identity.js';
 import { createSourceControlAuditStore } from '../source-control/audit-storage.js';
+import type { Application } from '../shared/http-contracts.js';
+import type { WalkthroughRouteService, PullRequestOptions } from '../walkthrough/routes.js';
+import type { createTrackerRegistry } from '../trackers/registry.js';
+import type { createTrackerSessionStatus } from '../trackers/session-status.js';
+import type { createNotificationEmitterRuntime } from '../notifications/emitter-runtime.js';
+import type { SseWriter } from '../notifications/contracts.js';
+import type { GlobalMessageStreamHub } from '../event-stream/global-hub.js';
+import type { createSettingsRuntime } from '../settings/settings-runtime.js';
+import type { createSettingsHelpers } from '../settings/settings-helpers.js';
+import type { createProjectDirectoryRuntime } from '../projects/project-directory-runtime.js';
+import type { createOpenCodeNetworkRuntime } from '../opencode/network-runtime.js';
+import type { createExtensionNotificationChannels } from '../notifications/extension-channels.js';
+import type { createWorktreeBootstrapStore } from '../git/worktree-bootstrap-storage.js';
+import type { HydrationRequirement, ProviderAccount, TransportAuthority } from '../git/network-plan-contracts.js';
+import { isString } from '../shared/object-guards.js';
+import type { createMergeFollowRuntime } from '../github/merge-follow.js';
 
-export const createFeatureRoutesRuntime = (dependencies) => {
+type PluginRouteOptions = Parameters<typeof registerPluginRoutes>[1];
+type FeatureRuntimeDependencies = Required<Pick<PluginRouteOptions, 'pluginSwitchStore' | 'isPluginSwitchAvailable' | 'refreshPluginSwitches'>> & {
+  clientReloadDelayMs: number;
+  trackers: ReturnType<typeof createTrackerRegistry>;
+  trackerSessionStatus: Pick<ReturnType<typeof createTrackerSessionStatus>, 'forget'> | null;
+};
+
+type FsOptions = Parameters<typeof registerFsRoutes>[1];
+type IconOptions = Parameters<typeof registerProjectIconRoutes>[1];
+type SessionOptions = Parameters<typeof registerOpenChamberSessionRoutes>[1];
+type GuestOptions = Parameters<typeof registerGuestRoutes>[1];
+type SettingsRuntime = ReturnType<typeof createSettingsRuntime>;
+interface ChangeRequestWorktreeInput<Source> {
+  mode: 'existing';
+  branchName: string;
+  worktreeName: string;
+  changeRequestSource: Source;
+  startCommand?: string;
+  createCommand?: string;
+}
+type ScheduledTaskOptions = Parameters<typeof registerScheduledTaskRoutes>[1];
+type EventClient = ReturnType<ScheduledTaskOptions['getOpenChamberEventClients']> extends Set<infer Client> ? Client & SseWriter & { openchamberConnectionId?: string } : never;
+type RouteDependencies =
+  & Pick<FsOptions, 'os' | 'path' | 'fsPromises' | 'spawn' | 'normalizeDirectoryPath' | 'buildAugmentedPath' | 'resolveGitBinaryForSpawn' | 'openchamberUserConfigRoot'>
+  & Required<Pick<FsOptions, 'managedChatsRoot'>>
+  & Pick<IconOptions, 'createFsSearchRuntime' | 'openchamberDataDir'>
+  & Required<Pick<SessionOptions, 'validateDirectoryPath' | 'waitForOpenCodeReady' | 'emitSessionCreatedEvent'>>
+  & Required<Pick<GuestOptions, 'onGuestDeactivated' | 'surfaceViewerHeaders' | 'openchamberVersion'>>
+  & Pick<SettingsRuntime, 'readSettingsFromDisk' | 'readSettingsFromDiskMigrated' | 'persistSettings' | 'persistResolvedSettings'>
+  & Pick<ReturnType<typeof createProjectDirectoryRuntime>, 'resolveProjectDirectory' | 'resolveOptionalProjectDirectory'>
+  & Pick<Parameters<typeof registerSettingsUtilityRoutes>[1], 'readCustomThemesFromDisk' | 'saveImportedTheme' | 'deleteImportedTheme' | 'refreshOpenCodeAfterConfigChange'>
+  & Pick<Parameters<typeof registerOpenCodeRoutes>[1], 'crypto' | 'getOpenCodeResolutionSnapshot' | 'getOpenCodeUpgradeCapability' | 'upgradeOpenCodeCli' | 'getOpenCodeCompatibility' | 'installOpenCodeV2'>
+  & Pick<ScheduledTaskOptions, 'projectConfigRuntime' | 'scheduledTasksRuntime' | 'sanitizeProjects'>
+  & Required<Pick<ScheduledTaskOptions, 'scheduledTaskService'>>
+  & Pick<Parameters<typeof registerSkillRoutes>[1], 'sanitizeSkillCatalogs' | 'isUnsafeSkillRelativePath' | 'getOpenCodePort'>
+  & {
+    fs: typeof import('node:fs');
+    formatSettingsResponse: ReturnType<typeof createSettingsHelpers>['formatSettingsResponse'];
+    buildOpenCodeUrl: ReturnType<typeof createOpenCodeNetworkRuntime>['buildOpenCodeUrl'];
+    getOpenCodeAuthHeaders: () => Record<string, string>;
+    messageSearchRuntime: Parameters<typeof registerMessageSearchRoutes>[1]['messageSearchRuntime'];
+    sessionWarmingRuntime: Parameters<typeof registerSessionWarmingRoutes>[1]['sessionWarmingRuntime'];
+    sessionTodosRuntime: Parameters<typeof registerSessionTodosRoutes>[1]['sessionTodosRuntime'];
+    onExtensionSessionEventsChanged?: () => void | Promise<void>;
+    onExtensionWaitsChanged?: () => void | Promise<void>;
+    extensionNotificationChannels?: ReturnType<typeof createExtensionNotificationChannels> | null;
+    getOpenCodePluginDelivery?: NonNullable<NonNullable<GuestOptions['opencodePlugins']>['delivery']>;
+    builtInExtensionsDir?: string | undefined;
+    customThemesDir?: string | null;
+    getOwnPorts: Parameters<typeof registerDevServerRoutes>[1]['getOwnPorts'];
+    getActivePort?: () => number | null;
+    getActiveHost?: () => string | null;
+    devServerScanner: Parameters<typeof registerDevServerRoutes>[1]['scanner'];
+    environmentStore: Parameters<typeof registerEnvironmentRoutes>[1]['store'];
+    environmentRuntime: NonNullable<FsOptions['environmentRuntime']>;
+    listConfiguredProjects: Parameters<typeof registerEnvironmentRoutes>[1]['listProjects'];
+    projectContextRuntime: Parameters<typeof registerProjectContextRoutes>[1]['projectContextRuntime'];
+    agentMemoryRuntime: Parameters<typeof registerAgentMemoryRoutes>[1]['agentMemoryRuntime'];
+    isAgentMemoryEnabled: NonNullable<Parameters<typeof registerAgentMemoryRoutes>[1]['isAgentMemoryEnabled']>;
+    sessionKnowledgeRuntime: Parameters<typeof registerSessionKnowledgeRoutes>[1]['sessionKnowledgeRuntime'];
+    openChamberSessionService: NonNullable<SessionOptions['sessionService']>;
+    openChamberControlService: Parameters<typeof registerOpenChamberControlRoutes>[1]['controlService'];
+    getOpenChamberEventClients: () => Set<EventClient>;
+    writeSseEvent: ReturnType<typeof createNotificationEmitterRuntime>['writeSseEvent'];
+    permissionAutoAcceptRuntime: Parameters<typeof registerPermissionAutoAcceptRoutes>[1];
+    worktreeBootstrapStore: ReturnType<typeof createWorktreeBootstrapStore>;
+    scheduledWorktreeBridge: Parameters<typeof fillScheduledWorktreeBridge>[0];
+    messageQueueRuntime: Parameters<typeof registerMessageQueueRoutes>[1];
+    autoReviewRuntime: Parameters<typeof registerAutoReviewRoutes>[1];
+    prWatchRuntime?: Parameters<typeof registerPrWatchRoutes>[1] | null;
+    extensionWaitsRuntime?: Parameters<typeof registerExtensionWaitsRoutes>[1] | null;
+    laterPagesRuntime?: Parameters<typeof registerOpenChamberControlRoutes>[1]['laterPages'];
+    mergeFollowRuntime?: ReturnType<typeof createMergeFollowRuntime> | null;
+    routingRuntime: Parameters<typeof registerRoutingRoutes>[1];
+    globalEventHub: GlobalMessageStreamHub | null;
+    workflowRuntime?: Parameters<typeof registerWorkflowRoutes>[1] | null;
+  };
+
+export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependencies) => {
   const {
     clientReloadDelayMs,
     trackers,
@@ -124,9 +218,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     id: `server_${crypto.randomUUID()}`,
     platform: process.env.OPENCHAMBER_RUNTIME === 'desktop' ? 'desktop' : 'web',
   });
-  let themeFolderWatch = null;
-  let stopGuestPackageWatch = () => {};
-  let quotaProviders = null;
+  let themeFolderWatch: ReturnType<typeof createThemeFolderWatch> | null = null;
+  let stopGuestPackageWatch: () => void = () => {};
+  let quotaProviders: typeof import('../quota/index.js') | null = null;
   const getQuotaProviders = async () => {
     if (!quotaProviders) {
       quotaProviders = await import('../quota/index.js');
@@ -134,7 +228,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     return quotaProviders;
   };
 
-  let smallModelService = null;
+  let smallModelService: typeof import('../small-model/index.js') | null = null;
   const getSmallModelService = async () => {
     if (!smallModelService) {
       smallModelService = await import('../small-model/index.js');
@@ -142,12 +236,12 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     return smallModelService;
   };
 
-  let walkthroughService = null;
-  let walkthroughBindingService = null;
-  let magicPrompts = null;
-  let gitRepositoryCredentialRuntime = null;
-  let networkOperations = null;
-  let gitWorktreeCreation = null;
+  let walkthroughService: WalkthroughRouteService | null = null;
+  let walkthroughBindingService: ReturnType<typeof registerSourceControlRoutes> | null = null;
+  let magicPrompts: ReturnType<typeof registerMagicPromptRoutes> | null = null;
+  let gitRepositoryCredentialRuntime: ReturnType<typeof createGitRepositoryCredentialRuntime> | null = null;
+  let networkOperations: ReturnType<typeof createNetworkOperations> | null = null;
+  let gitWorktreeCreation: ReturnType<typeof registerGitRoutes> | null = null;
   const getWalkthroughService = async () => {
     if (!walkthroughService) {
       const [service, pullRequest] = await Promise.all([
@@ -159,7 +253,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         readWalkthroughInstructions: async (directory) => (
           magicPrompts ? (await magicPrompts.overridesForDirectory(directory))['walkthrough.instructions'] ?? '' : ''
         ),
-        getPullRequestDiff: (directory, number, readContext, { allowEmpty, sourceRepo, revision } = {}) => pullRequest.getPullRequestDiff(
+        getPullRequestDiff: (directory, number, readContext, { allowEmpty, sourceRepo, revision }: Partial<PullRequestOptions> = {}) => pullRequest.getPullRequestDiff(
           directory,
           number,
           readContext,
@@ -176,7 +270,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     return walkthroughService;
   };
 
-  const hydrateBoundCheckout = async ({ directory, parentDirectory, parentRemoteName }) => {
+  const hydrateBoundCheckout = async ({ directory, parentDirectory, parentRemoteName }: { directory: string; parentDirectory: string; parentRemoteName: string }) => {
     if (!(networkOperations?.hydrateBoundCheckout instanceof Function)
       || !(walkthroughBindingService?.get instanceof Function)) {
       throw Object.assign(new Error('Worktree checkout hydration is unavailable'), {
@@ -196,7 +290,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     });
   };
 
-  const createChangeRequestWorktree = async ({ directory, number, name, branchName, startCommand, createCommand }) => {
+  const createChangeRequestWorktree = async ({ directory, number, name, branchName, startCommand, createCommand }: {
+    directory: string; number: number; name?: string; branchName?: string; startCommand?: string; createCommand?: string;
+  }) => {
     if (!(gitWorktreeCreation?.createWorktree instanceof Function)
       || !(walkthroughBindingService?.resolveChangeRequestWorktreeSource instanceof Function)) {
       throw Object.assign(new Error('Worktrees from pull requests are unavailable'), {
@@ -205,7 +301,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     }
     const { headBranch, sourceRequest } = await walkthroughBindingService.resolveChangeRequestWorktreeSource({ directory, number });
     const branch = branchName || headBranch;
-    const input = {
+    const input: ChangeRequestWorktreeInput<typeof sourceRequest> = {
       mode: 'existing',
       branchName: branch,
       worktreeName: name || branch,
@@ -216,7 +312,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     return gitWorktreeCreation.createWorktree(directory, input);
   };
 
-  const registerRoutes = async (app, routeDependencies) => {
+  const registerRoutes = async (app: Application, routeDependencies: RouteDependencies) => {
     const {
       messageSearchRuntime,
       sessionWarmingRuntime,
@@ -314,7 +410,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     registerOpenCodeRoutes(app, {
       crypto,
-      clientReloadDelayMs,
       getOpenCodeResolutionSnapshot,
       getOpenCodeUpgradeCapability,
       upgradeOpenCodeCli,
@@ -327,7 +422,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getProviderSources,
       removeProviderConfig,
       upsertProviderConfig,
-      refreshOpenCodeAfterConfigChange,
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
     });
@@ -373,6 +467,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getOpenCodeAuthHeaders,
       waitForOpenCodeReady,
       emitSessionCreatedEvent,
+      worktreeBootstrapStore,
+      hydrateWorktreeCheckout: hydrateBoundCheckout,
       sessionService: openChamberSessionService,
     });
 
@@ -391,8 +487,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerConfigEntityRoutes(app, {
       resolveProjectDirectory,
       resolveOptionalProjectDirectory,
-      refreshOpenCodeAfterConfigChange,
-      clientReloadDelayMs,
       getAgentSources,
       getAgentConfig,
       getAgentPermissions,
@@ -421,8 +515,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     registerPluginRoutes(app, {
       resolveOptionalProjectDirectory,
-      refreshOpenCodeAfterConfigChange,
-      clientReloadDelayMs,
       listPluginEntries,
       getPluginEntry,
       createPluginEntry,
@@ -477,11 +569,11 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       configRoot: openchamberDataDir,
       hostServices: {
         github: {
-          readContributorProvenance: (directory) => contributorProvenance.read(directory),
+          readContributorProvenance: (directory: string) => contributorProvenance.read(directory),
         },
       },
     });
-    const resolveSourceControlAccount = ({ provider, instance, accountId, credentialRevision }) => sourceControlProviders
+    const resolveSourceControlAccount = ({ provider, instance, accountId, credentialRevision }: ProviderAccount & { credentialRevision?: number }) => sourceControlProviders
       .readTransportCredential({ provider, instance, credentialId: accountId, credentialRevision });
     const resolveTransportRepository = createPrivateRepositoryIdentityResolver({
       getTransportRevision: (directory) => readEffectiveGitTransportRevision(directory, { gitBinary }),
@@ -509,8 +601,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       managedKeyRoot: path.join(openchamberDataDir, 'git-ssh-private-keys'),
       fsImpl: fsPromises,
     });
-    const syncRepositoryTransport = async (directory, read) => {
-      if (typeof directory !== 'string' || !directory.trim() || !gitRepositoryCredentialRuntime) return;
+    const syncRepositoryTransport = async (directory: string, read: Awaited<ReturnType<ReturnType<typeof import('../source-control/binding-service.js').createBindingService>['get']>>) => {
+      if (!isString(directory) || !directory.trim() || !gitRepositoryCredentialRuntime) return;
       const grants = (read?.binding?.remotes ?? []).filter((grant) => grant.readiness === 'ready' && grant.mode === 'managed' && grant.credentialId);
       let credentialHelper = null;
       let sshCommand = null;
@@ -525,17 +617,17 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       }
       await configureRepositoryTransport(directory, { credentialHelper, sshCommand });
     };
-    let trackedItemsService = null;
+    let trackedItemsService: ReturnType<typeof createTrackedItemsService> | null = null;
     const providerReadCache = createProviderReadCache({
       sourceControlProviderIds: sourceControlProviders.list().map((descriptor) => descriptor.id),
       trackerIds: () => trackers.list(),
       onChange: (provider) => trackedItemsService?.refreshProvider(provider),
       onItemRefresh: (provider, item) => trackedItemsService?.refreshItem(provider, item),
     });
-    app.use(providerReadCache.middleware);
+    app.use((req, res, next) => { providerReadCache.middleware(req, res, next); });
     walkthroughBindingService = registerSourceControlRoutes(app, {
-      onMutationSucceeded: (mutation) => mergeFollowRuntime?.onMutationSucceeded(mutation),
-      onMutationStarting: (mutation) => mergeFollowRuntime?.onMutationStarting(mutation) ?? null,
+      onMutationSucceeded: (mutation: Parameters<NonNullable<RouteDependencies['mergeFollowRuntime']>['onMutationSucceeded']>[0]) => mergeFollowRuntime?.onMutationSucceeded(mutation),
+      onMutationStarting: (mutation: Parameters<NonNullable<RouteDependencies['mergeFollowRuntime']>['onMutationStarting']>[0]) => mergeFollowRuntime?.onMutationStarting(mutation) ?? null,
       onRepositoryTransportChanged: syncRepositoryTransport,
       validateManagedSshCredential: managedSshInventory.assertAvailable,
       readManagedSshCredentialPresentation: managedSshInventory.presentation,
@@ -545,7 +637,11 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       runtimeIdentity: gitRuntimeIdentity,
       providers: sourceControlProviders,
       readTransportAccount: resolveSourceControlAccount,
-      resolveCheckoutAuxiliary: async ({ directory, parentEndpoint, parentRemoteName, kind, path: checkoutPath }) => {
+      resolveCheckoutAuxiliary: async ({ directory, parentEndpoint, parentRemoteName, kind, path: checkoutPath }: Pick<HydrationRequirement, 'kind' | 'path'> & {
+        directory: string;
+        parentEndpoint: TransportAuthority['endpoint'];
+        parentRemoteName: string;
+      }) => {
         if (!(networkOperations?.inspectCheckoutHydration instanceof Function)) return null;
         const inspection = await networkOperations.inspectCheckoutHydration({
           directory, parentEndpoint, parentRemoteName,
@@ -557,7 +653,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getWalkthroughService,
       validateReadContext: walkthroughBindingService.validateReadContext,
     });
-    const findEventClient = (connectionId) => {
+    const findEventClient = (connectionId: string) => {
       for (const client of getOpenChamberEventClients()) {
         if (client.openchamberConnectionId === connectionId) return client;
       }
@@ -581,8 +677,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       },
     });
     const TURN_SETTLE_MS = 3000;
-    const settlingDirectories = new Map();
-    const announceTurnFinished = (directory) => {
+    const settlingDirectories = new Map<string, ReturnType<typeof setTimeout>>();
+    const announceTurnFinished = (directory: string) => {
       if (settlingDirectories.has(directory)) return;
       settlingDirectories.set(directory, setTimeout(() => {
         settlingDirectories.delete(directory);
@@ -609,7 +705,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerTrackedItemsRoutes(app, { service: trackedItemsService });
     prWatchRuntime?.attach({ trackedItems: trackedItemsService, readers: trackedItemReaders });
     void mergeFollowRuntime?.attach(trackedItemsService).catch((error) => console.warn('[merge-follow] attach failed:', error.message));
-    const resolveGitIdentity = async (identityId) => {
+    const resolveGitIdentity = async (identityId: string) => {
       if (identityId === 'global') {
         const identity = await getGlobalIdentity();
         return identity?.userName && identity?.userEmail ? { userName: identity.userName, userEmail: identity.userEmail } : null;
@@ -617,7 +713,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       const identity = getProfile(identityId);
       return identity?.userName && identity?.userEmail ? identity : null;
     };
-    const validateGitIdentity = async (identityId) => {
+    const validateGitIdentity = async (identityId: string) => {
       const profile = await resolveGitIdentity(identityId);
       if (!profile) throw new Error('Git identity profile is unavailable');
       return profile;
@@ -709,7 +805,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       trustedDirectoriesConfig: createTrustedDirectoriesConfig({ gitBinary }),
     });
     await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: routeDependencies.builtInExtensionsDir });
-    const announceChange = (type) => {
+    const announceChange = (type: string) => {
       const clients = getOpenChamberEventClients();
       for (const client of clients) {
         try {

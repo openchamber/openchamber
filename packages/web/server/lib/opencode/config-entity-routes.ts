@@ -3,6 +3,7 @@ import { buildAppliedResponse } from './config-mutation-response.js';
 import { isString } from '../shared/object-guards.js';
 import type { Application, Request, Response } from '../shared/http-contracts.js';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
+import type { OpenCodeConfigLayer } from './config-files.js';
 import type { createProjectDirectoryRuntime } from '../projects/project-directory-runtime.js';
 import type * as agents from './agents.js';
 import type * as commands from './commands.js';
@@ -15,13 +16,20 @@ export interface ConfigEntityRouteDependencies<Snippet> extends Pick<ReturnType<
   Pick<typeof mcp, 'listMcpConfigs' | 'getMcpConfig' | 'createMcpConfig' | 'updateMcpConfig' | 'deleteMcpConfig'> {
   listSnippets: (directory: string | null) => Snippet[];
   getSnippet: (name: string, directory: string | null) => Snippet | null;
-  createSnippet: (name: string, config: Request['body'], directory: string | null, scope: Request['body']) => Snippet | null;
-  updateSnippet: (name: string, updates: Request['body'], directory: string | null) => Snippet | null;
+  createSnippet: (name: string, config: SnippetBody, directory: string | null, scope: string) => Snippet | null;
+  updateSnippet: (name: string, updates: SnippetBody, directory: string | null) => Snippet | null;
   deleteSnippet: (name: string, directory: string | null) => void;
-  expandSnippets: (text: Request['body'], directory: string | null) => string;
+  expandSnippets: (text: string, directory: string | null) => string;
   previewSnippet: (content: string, directory: string | null) => string;
 }
 
+interface SnippetBody {
+  name?: JsonValue;
+  scope?: string;
+  content?: string | null;
+  aliases?: JsonValue[];
+  description?: string;
+}
 const hasBodyFields = (value: unknown): value is Record<string, unknown> => value != null;
 const bodyFields = <Value>(value: Value) => hasBodyFields(value) ? value : undefined;
 const agentScope = <Value>(value: Value): agents.AgentScope | undefined =>
@@ -256,7 +264,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
     }
   });
 
-  app.get('/api/config/mcp/:name', async (req, res) => {
+  app.get<unknown, { name: string }>('/api/config/mcp/:name', async (req, res) => {
     try {
       const name = req.params.name;
       const { directory, error } = await resolveOptionalProjectDirectory(req);
@@ -274,7 +282,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
     }
   });
 
-  app.post('/api/config/mcp/:name', async (req: Request<Request['body'], { name: string }>, res) => {
+  app.post<OpenCodeConfigLayer | undefined, { name: string }>('/api/config/mcp/:name', async (req, res) => {
     try {
       const name = req.params.name;
       const { scope, ...config } = requiredBodyFields(req.body || {});
@@ -284,14 +292,14 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
       }
       console.log(`[API:POST /api/config/mcp] Creating MCP server: ${name}`);
 
-      await completeMcpMutation(res, 'create', name, () => createMcpConfig(name, config, directory, scope));
+      await completeMcpMutation(res, 'create', name, () => createMcpConfig(name, config, directory, agentScope(scope)));
     } catch (error) {
       console.error('[API:POST /api/config/mcp/:name] Failed:', error);
       res.status(500).json({ error: errorFields(error).message || 'Failed to create MCP server' });
     }
   });
 
-  app.patch('/api/config/mcp/:name', async (req: Request<Request['body'], { name: string }>, res) => {
+  app.patch<OpenCodeConfigLayer | null | undefined, { name: string }>('/api/config/mcp/:name', async (req, res) => {
     try {
       const name = req.params.name;
       const updates = req.body;
@@ -327,7 +335,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
     }
   });
 
-  app.get('/api/config/commands/:name', async (req, res) => {
+  app.get<unknown, { name: string }>('/api/config/commands/:name', async (req, res) => {
     try {
       const commandName = req.params.name;
       const { directory, error } = await resolveProjectDirectory(req);
@@ -352,7 +360,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
     }
   });
 
-  app.get('/api/config/commands/:name/config', async (req, res) => {
+  app.get<unknown, { name: string }>('/api/config/commands/:name/config', async (req, res) => {
     try {
       const commandName = req.params.name;
       const { directory, error } = await resolveProjectDirectory(req);
@@ -394,7 +402,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
     }
   });
 
-  app.post('/api/config/commands/:name', async (req, res) => {
+  app.post<JsonObject | undefined, { name: string }>('/api/config/commands/:name', async (req, res) => {
     try {
       const commandName = req.params.name;
       const { scope, ...config } = requiredBodyFields(req.body);
@@ -407,7 +415,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
       console.log('[Server] Config received:', JSON.stringify(config, null, 2));
       console.log('[Server] Scope:', scope, 'Working directory:', directory);
 
-      const created = createCommand(commandName, config, directory, scope);
+      const created = createCommand(commandName, config, directory, agentScope(scope));
       res.json(buildAppliedResponse(
         `Command ${commandName} created successfully.`,
         created,
@@ -418,7 +426,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
     }
   });
 
-  app.patch('/api/config/commands/:name', async (req, res) => {
+  app.patch<JsonObject | null | undefined, { name: string }>('/api/config/commands/:name', async (req, res) => {
     try {
       const commandName = req.params.name;
       const updates = req.body;
@@ -446,7 +454,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
     }
   });
 
-  app.delete('/api/config/commands/:name', async (req, res) => {
+  app.delete<unknown, { name: string }>('/api/config/commands/:name', async (req, res) => {
     try {
       const commandName = req.params.name;
       const { directory, error } = await resolveProjectDirectory(req);
@@ -477,7 +485,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
     }
   });
 
-  app.post('/api/config/snippets/expand', async (req, res) => {
+  app.post<{ content?: JsonValue; text?: string } | undefined>('/api/config/snippets/expand', async (req, res) => {
     try {
       const { directory, error } = await resolveOptionalProjectDirectory(req);
       if (error) {
@@ -512,7 +520,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
     }
   });
 
-  app.post('/api/config/snippets/:name', async (req: Request<Request['body'], { name: string }>, res) => {
+  app.post<SnippetBody | undefined, { name: string }>('/api/config/snippets/:name', async (req, res) => {
     try {
       const name = req.params.name;
       const { directory, error } = await resolveOptionalProjectDirectory(req);
@@ -533,7 +541,7 @@ export const registerConfigEntityRoutes = <Snippet>(app: Application, dependenci
     }
   });
 
-  app.patch('/api/config/snippets/:name', async (req: Request<Request['body'], { name: string }>, res) => {
+  app.patch<SnippetBody | undefined, { name: string }>('/api/config/snippets/:name', async (req, res) => {
     try {
       const name = req.params.name;
       const { directory, error } = await resolveOptionalProjectDirectory(req);

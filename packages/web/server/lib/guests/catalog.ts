@@ -20,7 +20,7 @@ import { hasErrorMessage, isString } from './input-guards.js';
 
 const builtInsByStore = new Map<string, Awaited<ReturnType<typeof readBuiltInRegistry>>>();
 
-export const registerBuiltInGuests = async ({ persistPath, root }: { persistPath: string; root?: string }) => {
+export const registerBuiltInGuests = async ({ persistPath, root }: { persistPath: string; root?: string | undefined }) => {
   const registry = await readBuiltInRegistry(root);
   builtInsByStore.set(persistPath, registry);
   invalidateGuestCatalog(persistPath);

@@ -19,7 +19,7 @@ export function openCodeCredentialSource(connection: {
   getOpenCodeAuthHeaders: () => Record<string, string>;
   getLaunchEnvironment?: () => Record<string, string | undefined> | null;
   getDefaultDirectory?: () => string | null;
-}): CredentialSource;
+}): CredentialSource & Required<Pick<CredentialSource, 'create' | 'remove'>>;
 export function projectEnvironmentKeys(integrations: IntegrationInfo[], environment: Record<string, string | undefined>): Record<string, string>;
 export function projectCredentialEntries(entries: CredentialEntry[]): LegacyAuthFile;
 export function readOpenCodeCredentials(): Promise<LegacyAuthFile>;

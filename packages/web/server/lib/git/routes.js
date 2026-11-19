@@ -55,7 +55,7 @@ const worktreeTitleBodySchema = z.object({ title: z.string(), by: z.enum(['user'
 const worktreePinBodySchema = z.object({ pinned: z.boolean(), list: z.string().nullable().optional() });
 
 const userAction = (handler) => (req, res, next) => runAsUserAction(() => handler(req, res, next));
-
+/** @param {import('../shared/http-contracts.js').Application} app @param {import('./route-dependencies.js').GitRouteDependencies} [dependencies] */
 export function registerGitRoutes(app, {
   networkOperations, managedSshInventory, getSourceControlBinding, contributorProvenance, resolveChangeRequestSource,
   backfillIdentities,

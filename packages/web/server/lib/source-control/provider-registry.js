@@ -27,6 +27,17 @@ export function createAccountEvents() {
   });
 }
 
+/**
+ * @param {object} [options]
+ * @param {ReturnType<typeof import('./auth-storage.js').createSourceControlAuthStore>} [options.authStore]
+ * @param {ReturnType<typeof import('../settings/settings-runtime.js').createSettingsRuntime>['readSettingsFromDisk']} [options.readSettings]
+ * @param {string} [options.configRoot]
+ * @param {typeof fetch} [options.fetch]
+ * @param {{ github?: import('../github/provider.js').GitHubRoutesOptions }} [options.hostServices]
+ * @param {typeof sourceControlProviderDescriptors} [options.descriptors]
+ * @param {typeof BUILT_IN_LOADERS} [options.loaders]
+ * @param {Pick<import('./extension-provider.js').ExtensionProviderOptions, 'handles' | 'persistPath' | 'currentGuest' | 'reconcile'> | null} [options.extensionServices]
+ */
 export function createSourceControlProviders({
   authStore,
   readSettings = async () => ({}),

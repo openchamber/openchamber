@@ -35,10 +35,7 @@ type SessionFoldersResponse =
   | { error: string }
   | { success: true };
 
-interface RouteResponse {
-  status: (code: number) => RouteResponse;
-  json: (payload: SessionFoldersResponse) => RouteResponse;
-}
+type RouteResponse = import('../shared/http-contracts.js').Response<SessionFoldersResponse>;
 
 type RouteHandler = (req: { body: unknown }, res: RouteResponse) => Promise<RouteResponse>;
 
