@@ -77,7 +77,7 @@ export const MobileSessionRow: React.FC<{
   const showUnread = !isStreaming && isUnread && (!active || markedUnread);
   const hasActivityDuration = useHasSessionTurnDuration(session.id, isStreaming);
   const showActivityDuration = (isStreaming || showUnread) && hasActivityDuration;
-  const hasChildren = node.children.length > 0;
+  const hasChildren = row.expanded !== undefined;
   const expanded = row.expanded === true;
   const familyIds = React.useMemo(
     () => (hasChildren && !expanded ? [session.id, ...collectDescendantIds(node)] : [session.id]),
