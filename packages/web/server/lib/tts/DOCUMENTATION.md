@@ -5,7 +5,7 @@ This module provides server-side Text-to-Speech services using OpenAI's TTS API.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/tts/index.ts`: Public entrypoint loaded lazily by the speech routes. Relative imports keep `.js` specifiers.
-- `packages/web/server/lib/tts/routes.js`: Express route registration for `/api/voice/*`, `/api/tts/*`, and `/api/stt/*` endpoints. `/api/tts/speak` takes an optional JSON `endpointPath`; `/api/stt/transcribe` takes an optional `X-Endpoint-Path` header. Both answer 400 for an invalid path before contacting the upstream server.
+- `packages/web/server/lib/tts/routes.ts`: Express route registration for `/api/voice/*`, `/api/tts/*`, and `/api/stt/*` endpoints. `/api/tts/speak` takes an optional JSON `endpointPath`; `/api/stt/transcribe` takes an optional `X-Endpoint-Path` header. Both answer 400 for an invalid path before contacting the upstream server.
 - `packages/web/server/lib/tts/capability-runtime.ts`: runtime helper for probing local macOS `say` TTS voice capability.
 - `packages/web/server/lib/tts/service.ts`: TTS service implementation with OpenAI integration.
 - `packages/web/server/lib/text/summarization.js`: Shared text summarization stub and sanitization utilities. It performs no external Zen calls.
@@ -125,9 +125,28 @@ The server-side TTS approach bypasses mobile Safari's audio context restrictions
 
 ## Decisions
 
-### Why the summary route remains JavaScript
+### Why request fields that are the wrong type count as absent
 
-`routes.js` forwards unchecked JSON `threshold` and `maxLength` values to `../text/summarization.ts`. Its `SummarizeTextOptions.threshold` and `.maxLength` require numbers, while existing requests can supply strings or null and rely on JavaScript coercion. Widening those fields alone cannot type the implementation: `summarizeText` compares `text.length <= threshold`, and `distillNoteFallback` passes `maxLength` to `Math.min`. Both need coercion or narrowing in their owner before they can consume unknown inputs under the strict checker. Explicit coercion would change runtime code outside this folder. The error fallback also forwards unchecked text to `sanitizeForTTS` and `sanitizeForNote`; their existing string guards would permit widening those sanitizer parameters, but that correction alone does not resolve the numeric boundary. Declaring the request fields as numbers or strings would promise validation the route never performs.
+`routes.ts` parses each request body and the transcription headers with a Zod
+schema at the route. A field of the wrong type is treated as missing and takes
+the route's default, the way the say route already treated a voice that was
+not text. Before, the speech route forwarded any JSON `voice`, `model`, `speed`
+and `instructions` to the upstream request, and the summary route passed
+`threshold` and `maxLength` on to coercions that disagreed with each other (a
+string threshold compared as a number, a string limit was ignored in
+notification mode and used by `Math.min` in note mode). Refusing such requests
+with 400 was weighed and rejected: no client in this repository sends them,
+and the lenient default keeps every request that worked before working.
+`URL` and endpoint-path values stay unknown here, because their normalizers
+own those checks.
+
+### Why the say route runs `say` without a shell
+
+`/api/tts/say/speak` runs `say` with `execFile` and an argument list. It used
+to build one shell command from the request's voice and rate inside double
+quotes and a bare word, so a voice holding a quote or a rate holding `;` ran
+another command; the text's quote escaping also left literal backslashes in
+what was spoken. A test on macOS sends both and checks that no command ran.
 
 ### Why speech keeps legacy credential handling
 

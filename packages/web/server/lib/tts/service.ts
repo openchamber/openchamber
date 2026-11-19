@@ -19,7 +19,7 @@ export interface SpeechOptions {
   voice?: SpeechCreateParams['voice'];
   model?: SpeechCreateParams['model'];
   speed?: number;
-  instructions?: string;
+  instructions?: string | undefined;
   apiKey?: string | undefined;
   baseURL?: string | undefined;
   endpointPath?: string | undefined;
