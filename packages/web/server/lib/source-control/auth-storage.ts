@@ -91,7 +91,7 @@ export interface OriginAccountInput {
   expiresIn?: number | undefined;
 }
 export interface GitHubAccountInput {
-  accessToken: string;
+  accessToken: AuthJson;
   user: AuthUserInput;
   source: 'oauth' | 'pat';
   scope?: string | undefined;

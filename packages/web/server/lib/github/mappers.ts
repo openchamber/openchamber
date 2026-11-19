@@ -18,7 +18,7 @@ interface Identity { provider: string; instance: string }
 interface UserInput {
   id?: number | string; login: string; avatarUrl?: unknown; avatar_url?: unknown; name?: unknown; email?: unknown;
 }
-interface User extends Identity { id: string; username: string; avatarUrl?: string; name?: string; email?: string }
+export interface User extends Identity { id: string; username: string; avatarUrl?: string; name?: string; email?: string }
 interface ProjectInput {
   owner: string; repo: string; url?: unknown; cloneUrl?: unknown; sshUrl?: unknown; defaultBranch?: unknown;
   defaultBranchSha?: unknown; remoteName?: unknown;
