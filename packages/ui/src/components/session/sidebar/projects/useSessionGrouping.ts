@@ -15,7 +15,8 @@ import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { getWorktreeFirstSeenAt } from './worktreeFirstSeen';
 import { buildProjectWorktreeIndex, findPrefixWorktreeEntry } from '../worktreeIndex';
 import type { SpaceMark } from '@/lib/spaces/spaces-store';
-import { resolveSessionNestingParentId } from '@/lib/sessionWorkLineage';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { isSubagentSession, resolveSessionNestingParentId } from '@/lib/sessionWorkLineage';
 
 type Args = {
   homeDirectory: string | null;
@@ -47,6 +48,7 @@ const haveSameSessionScopes = (left: SessionScopeOwners, right: SessionScopeOwne
 
 export const useSessionGrouping = (args: Args) => {
   const { t } = useI18n();
+  const showSubagentSessions = useSessionDisplayStore((state) => state.showSubagentSessions);
   const gitBranchesRef = React.useRef(args.gitBranches);
   gitBranchesRef.current = args.gitBranches;
   const sessionOrderRanksRef = React.useRef(args.sessionOrderRanks);
@@ -120,6 +122,7 @@ export const useSessionGrouping = (args: Args) => {
 
       const rootCandidates = sortedProjectSessions.filter((session) => {
         if (isArchivedSession(session)) return !session.parentID;
+        if (!showSubagentSessions && isSubagentSession(session)) return false;
         return !nestedSessionIdsRef.current.has(session.id);
       });
 
@@ -289,7 +292,7 @@ export const useSessionGrouping = (args: Args) => {
 
       return groups;
     },
-    [args.homeDirectory, args.worktreeMetadata, args.isVSCode, sessionOwners, args.spacesByProject, args.runKeyBySessionId, t],
+    [args.homeDirectory, args.worktreeMetadata, args.isVSCode, sessionOwners, args.spacesByProject, args.runKeyBySessionId, showSubagentSessions, t],
   );
 
   const getGroupingSessions = React.useCallback((projectSessions: readonly Session[]): Session[] => {

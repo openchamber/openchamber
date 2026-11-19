@@ -2792,6 +2792,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.customFontPlaceholder': '字体名称，用逗号分隔，例如 Cascadia Mono, Microsoft YaHei',
   'settings.openchamber.visual.field.customFontAria': '自定义字体列表',
   'settings.openchamber.visual.field.customFontHint': '用逗号分隔备用字体。整个列表最多 100 个字符。',
+  'settings.openchamber.defaults.field.showSubagents': '显示子代理会话',
+  'settings.openchamber.defaults.field.showSubagentsInfo': '在派生它的会话下列出代理创建的会话。关闭后，父会话仍保留它们的状态、耗时和待处理的请求，徽标也能直接打开那个正在等待你的会话。',
   'settings.openchamber.defaults.field.showChats': '在侧边栏中显示聊天',
   'settings.openchamber.visual.field.fileEditorVimMappings': 'Vim 键映射',
   'settings.openchamber.visual.field.fileEditorVimMappingsInfo': '每行一个映射，写法与 vimrc 相同。编辑器处于 Vim 模式时始终生效。支持 map、noremap 及其 n、i、v、x、o 形式。',

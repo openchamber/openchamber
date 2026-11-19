@@ -130,7 +130,7 @@ export type SessionSidebarRowModelArgs = {
   draftsByGroupKey?: ReadonlyMap<string, readonly SessionDraft[]>;
   movedSessionIds?: ReadonlySet<string>;
   movedGroupKeys?: ReadonlySet<string>;
-  detailedZoneRows?: boolean;
+  detailedZoneRows?: boolean; showSubagentSessions?: boolean;
   foldersMap: SessionFoldersMap;
   contentSearchResults?: readonly ConversationResult[];
   revealedSearchSections?: ReadonlySet<SearchResultSection>;
@@ -538,7 +538,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         ? null
         : getAuthoritativeSessionFolderOwnerKey(current.node.session, sessionOwner) ?? ownerKey);
       const expanded = args.expandedParents.has(expandedKey(rowContext, options.archived, current.node.session.id));
-      const children = listedChildren(current.node);
+      const children = listedChildren(current.node, args.showSubagentSessions ?? true);
       push({
         kind: 'session',
         key: rowKey,

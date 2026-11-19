@@ -605,6 +605,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.minimal': 'מינימלי',
   'sessions.sidebar.header.displayMode.showWork': 'הצג את קטע בעבודה',
   'sessions.sidebar.header.displayMode.showPinned': 'הצג את קטע המוצמדות',
+  'sessions.sidebar.header.displayMode.showSubagents': 'הצג הפעלות של סוכני משנה',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'שורות מפורטות',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'שם worktree לפי הענף',
   'sessions.sidebar.activity.pinnedTitle': 'מוצמדות',

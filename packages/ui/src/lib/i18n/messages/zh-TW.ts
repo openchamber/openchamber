@@ -712,6 +712,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': '精簡',
   'sessions.sidebar.header.displayMode.showWork': '顯示進行中部分',
   'sessions.sidebar.header.displayMode.showPinned': '顯示已釘選部分',
+  'sessions.sidebar.header.displayMode.showSubagents': '顯示子代理工作階段',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '詳細列',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': '依分支命名 worktree',
   'sessions.sidebar.activity.pinnedTitle': '已釘選',
