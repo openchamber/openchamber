@@ -884,10 +884,12 @@ export const registerSkillRoutes = (app, dependencies) => {
       }
 
       // `scope` and `source` together narrow the delete to that one copy.
+      const scopeProvided = Object.hasOwn(req.query, 'scope');
+      const sourceProvided = Object.hasOwn(req.query, 'source');
       const scope = asNonEmptyString(req.query.scope);
       const source = asNonEmptyString(req.query.source);
       let location;
-      if (scope || source) {
+      if (scopeProvided || sourceProvided) {
         if (!['user', 'project'].includes(scope) || !['opencode', 'claude', 'agents'].includes(source)) {
           return res.status(400).json({ error: 'scope must be user or project and source opencode, claude or agents' });
         }
