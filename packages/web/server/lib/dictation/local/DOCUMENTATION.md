@@ -31,11 +31,20 @@ The raw addon exports `createOfflineRecognizer` and `createOfflineTts`; it
 does not expose the wrapper's `OfflineRecognizer` and `OfflineTts` classes.
 
 The recognizer constructs `OfflineRecognizer` without a guard and lets the
-runtime report a non-constructor. TTS checks only that `OfflineTts` is a
-function before using `new` and `generate`. A declaration for the wrapper
-alone cannot make those calls valid for both loader paths. Missing catalog file
-roles also reach `path.join` unchanged, so its invalid-argument failure is
-part of the existing behavior.
+runtime report a non-constructor. TTS retains the function check which
+distinguishes the pinned wrapper's class from the raw addon's missing export.
+Kokoro requires a speaker bank and can name additional catalog file roles for
+lexicons. VITS, including Piper, accepts an optional espeak-ng data directory.
+Missing file roles from untyped callers still reach `path.join`.
+
+### Why TTS copies the generated samples
+
+Electron's V8 memory cage rejects external-backed native typed arrays, so
+generation requests `enableExternalBuffer: false`. The engine accepts both
+native `Float32Array` and plain array output and copies into a `Float32Array`
+before encoding PCM16LE. Playback uses a positive numeric rate from the audio
+or engine, then falls back to 24 kHz. The speaker and speed checks still
+validate worker inputs at use time.
 
 ### Why the worker runtime and client remain JavaScript
 
