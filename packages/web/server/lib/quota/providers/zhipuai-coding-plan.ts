@@ -19,7 +19,7 @@ export const providerId = 'zhipuai-coding-plan';
 export const providerName = 'Zhipu AI Coding Plan';
 const aliases = ['zhipuai-coding-plan', 'zhipuai', 'zhipu'] as const;
 
-interface EnvelopeFields {
+export interface EnvelopeFields {
   code?: unknown;
   success?: unknown;
   msg?: unknown;
@@ -33,14 +33,14 @@ interface CodingPlanLimitFields extends TokenWindowLimit {
   nextResetTime?: unknown;
 }
 
-const hasPayloadFields = (value: unknown): value is EnvelopeFields & { data?: unknown } => value != null;
-const hasDataFields = (value: unknown): value is { limits?: unknown; level?: unknown } => value != null;
+export const hasPayloadFields = (value: unknown): value is EnvelopeFields & { data?: unknown } => value != null;
+export const hasDataFields = (value: unknown): value is { limits?: unknown; level?: unknown } => value != null;
 const hasLimitFields = (value: unknown): value is CodingPlanLimitFields => value != null;
-const isLimitArray = (value: unknown): value is unknown[] => Array.isArray(value);
-const isNumber = (value: unknown): value is number => typeof value === 'number';
-const isCreditLimit = (value: unknown): value is CodingPlanLimitFields =>
+export const isLimitArray = (value: unknown): value is unknown[] => Array.isArray(value);
+export const isNumber = (value: unknown): value is number => typeof value === 'number';
+export const isCreditLimit = (value: unknown): value is CodingPlanLimitFields =>
   hasLimitFields(value) && (value.type === 'TOKENS_LIMIT' || value.type === 'CREDIT_LIMIT');
-const isTimeLimit = (value: unknown): value is CodingPlanLimitFields =>
+export const isTimeLimit = (value: unknown): value is CodingPlanLimitFields =>
   hasLimitFields(value) && value.type === 'TIME_LIMIT';
 const hasAuthFields = (value: unknown): value is { key?: unknown; token?: unknown } => value != null;
 const hasProviderAliases = (value: unknown): value is Partial<Record<typeof aliases[number], unknown>> => value != null;
@@ -52,7 +52,7 @@ const formatCreditAmount = (value: number) => {
   return `${Math.round(value / 100) / 10}k`;
 };
 
-const formatCreditValueLabel = (limit: CodingPlanLimitFields) => {
+export const formatCreditValueLabel = (limit: CodingPlanLimitFields) => {
   const used = toNumber(limit?.currentValue);
   const total = toNumber(limit?.usage);
   if (used === null || total === null) return null;

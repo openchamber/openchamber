@@ -126,25 +126,26 @@ inherited names remain unsupported. Mistral retains dictionary fallback and
 truthiness checks. DeepInfra interprets a negative Stripe balance as spendable
 funds and a positive balance as money owed, as documented by its account API.
 
-### Why the remaining unchecked operations need their JavaScript semantics
+### Why coding plan readers keep coercion and gift resets stay optional
 
-`parseZaiResetExpire` lets the regular expression coerce an expiry value, then
-calls its unchecked `replace` method. An array containing a date can pass the
-first step and fail at the method call. Adding a string check would change how
-the optional gift-reset read fails.
+The expiry pattern still tests the string form of the supplied value. A date
+inside an array can match the pattern, but it cannot supply a text expiry.
+This aborts the entire optional gift-reset read, keeping the quota windows
+without attaching partial gift-reset metadata.
 
-Kimi's legacy windows pass unchecked duration fields to `durationToSeconds`.
-Zhipu's windows pass unchecked unit and count fields to `resolveWindowSeconds`.
-Those helpers multiply the supplied values using JavaScript coercion. Their
-current numeric declarations do not establish a numeric HTTP field; broadening
-the parameter declarations alone cannot type the unchecked multiplication.
+Kimi's legacy durations retain the original truthiness check and numeric
+coercion. A numeric string can supply the duration; a nonnumeric truthy value
+can produce `NaN`. Only the recognized time-unit strings select a multiplier.
+The coding-plan unit lookup retains inherited keys and coerces counts only when
+the lookup returns a truthy value. The resulting duration can be `NaN`.
+Zhipu reads the merged OpenCode config without a working directory, so no
+project layer participates. The provider's `options.apiKey` remains unchecked
+until the shared resolver reads it.
+
+### Why the internal OpenAI reader remains JavaScript
 
 The internal OpenAI reader copies unchecked percentages and window durations to
 the formatter and multiplies unchecked reset timestamps. Validating or coercing
 these values differently would change its existing output or failure behavior.
 Its result cannot honestly promise the numeric quota contract without those
 checks.
-
-The config declaration exposes `readConfig` because it already returns
-`readConfigLayers(...).mergedConfig`. Both readers accept an omitted working
-directory, which excludes the project config layer.
