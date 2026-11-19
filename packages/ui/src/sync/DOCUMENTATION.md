@@ -2082,6 +2082,8 @@ uses `useSessionStartTimes`, which changes only when a session is added or
 removed. A list that must ignore sessions another source already holds reads
 `useLiveSessionsExcluding(ids)` instead of filtering `useAllLiveSessions()`.
 
+Scoped permissions and forms skip the subtree walk entirely while no session has a pending request.
+
 ## Store splitting pattern
 
 ### Why split

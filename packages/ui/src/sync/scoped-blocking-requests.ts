@@ -34,13 +34,20 @@ export const areRequestArraysReferentiallyEqual = <T extends BlockingRequest>(le
   return true
 }
 
+const hasAnyRequest = <T>(requestsBySession: Record<string, T[] | undefined>): boolean => {
+  for (const sessionID in requestsBySession) {
+    if (requestsBySession[sessionID]?.length) return true
+  }
+  return false
+}
+
 export const collectScopedBlockingRequests = <T extends BlockingRequest>(
   sessions: Session[],
   requestsBySession: Record<string, T[] | undefined>,
   sessionID: string | null,
   empty: T[],
 ): T[] => {
-  if (!sessionID) return empty
+  if (!sessionID || !hasAnyRequest(requestsBySession)) return empty
 
   const scopedIds = computeSubtreeIds(sessions, sessionID)
   if (scopedIds.size === 0) return empty
