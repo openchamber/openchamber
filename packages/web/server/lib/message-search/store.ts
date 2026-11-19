@@ -1,3 +1,32 @@
+import type { SQLInputValue, SQLOutputValue } from 'node:sqlite';
+import { isString } from '../shared/object-guards.js';
+import type { SearchOptions, SessionSearchOptions } from './contracts.js';
+import type { SqliteConnection } from './sqlite.js';
+
+type ForwardedSearchOptions<T> = Omit<{ [Key in keyof T]: T[Key] | undefined }, 'query' | 'limit'> & { match: string; limit: number };
+type StoreSearchOptions = ForwardedSearchOptions<SearchOptions>;
+type StoreSessionSearchOptions = ForwardedSearchOptions<SessionSearchOptions> & { withTotals?: boolean };
+interface SessionUpdate {
+  id: string;
+  directory: string;
+  title?: string | null;
+  createdAt?: number | null | undefined;
+  archivedAt?: number | null | undefined;
+  lifecycleKnown?: boolean;
+}
+export interface IndexedMessage {
+  id: string;
+  messageId?: string;
+  sessionId: string;
+  role: NonNullable<SearchOptions['role']>;
+  createdAt: number;
+  text: string;
+}
+export interface SessionSearchTotals {
+  sessions: number;
+  byDirectory: Record<string, number | string>;
+}
+
 const MESSAGE_SEARCH_SCHEMA_VERSION = '4';
 
 export const MATCH_START = '';
@@ -58,14 +87,14 @@ const DROP = `
   DROP TABLE IF EXISTS meta;
 `;
 
-const characterLength = (value) => Array.from(value).length;
+const characterLength = (value: string) => Array.from(value).length;
 
-export const toSearchTerms = (query) => String(query ?? '')
+export const toSearchTerms = (query: string) => String(query ?? '')
   .trim()
   .split(/\s+/)
   .filter((term) => characterLength(term) >= MIN_TERM_LENGTH);
 
-export const toMatchExpression = (query) => {
+export const toMatchExpression = (query: string) => {
   const terms = toSearchTerms(query);
   if (terms.length === 0) return null;
   return terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(' AND ');
@@ -73,10 +102,13 @@ export const toMatchExpression = (query) => {
 
 const SNIPPET_RADIUS = 90;
 
-export const buildSnippet = (text, terms, radius = SNIPPET_RADIUS) => {
+export const buildSnippet = (text: SQLOutputValue | undefined, terms: readonly string[], radius = SNIPPET_RADIUS) => {
+  if (!isString(text)) {
+    throw new TypeError(text == null ? `Cannot read properties of ${text} (reading 'toLowerCase')` : 'text.toLowerCase is not a function');
+  }
   const lower = text.toLowerCase();
   if (lower.length !== text.length) return text.slice(0, radius * 2);
-  const ranges = [];
+  const ranges: [number, number][] = [];
   for (const term of terms) {
     const needle = term.toLowerCase();
     for (let at = lower.indexOf(needle); at >= 0; at = lower.indexOf(needle, at + needle.length)) {
@@ -85,7 +117,7 @@ export const buildSnippet = (text, terms, radius = SNIPPET_RADIUS) => {
   }
   if (ranges.length === 0) return text.slice(0, radius * 2);
   ranges.sort((left, right) => left[0] - right[0]);
-  const merged = [];
+  const merged: [number, number][] = [];
   for (const range of ranges) {
     const previous = merged[merged.length - 1];
     if (previous && range[0] <= previous[1]) previous[1] = Math.max(previous[1], range[1]);
@@ -94,6 +126,7 @@ export const buildSnippet = (text, terms, radius = SNIPPET_RADIUS) => {
   const longest = terms.reduce((best, term) => (term.length > best.length ? term : best), '').toLowerCase();
   const anchorAt = lower.indexOf(longest);
   const anchor = merged.find(([from, to]) => from <= anchorAt && anchorAt < to) ?? merged[0];
+  if (anchor === undefined) throw new TypeError("Cannot read properties of undefined (reading '0')");
   let start = Math.max(0, anchor[0] - radius);
   let end = Math.min(text.length, anchor[1] + radius);
   if (start > 0) {
@@ -115,7 +148,27 @@ export const buildSnippet = (text, terms, radius = SNIPPET_RADIUS) => {
   return out.replace(/\s+/g, ' ');
 };
 
-export const openMessageSearchStore = (connection) => {
+function isBigInt(value: SQLOutputValue | undefined): value is bigint {
+  return typeof value === 'bigint';
+}
+
+function isNumber(value: number | string): value is number {
+  return typeof value === 'number';
+}
+
+function sessionIdAtOrAfter(value: SQLOutputValue | undefined, cursor: string) {
+  if (isString(value) || value instanceof Uint8Array) return String(value) >= cursor;
+  if (isBigInt(value)) {
+    try {
+      return value >= BigInt(cursor);
+    } catch {
+      return false;
+    }
+  }
+  return Number(value) >= Number(cursor);
+}
+
+export const openMessageSearchStore = (connection: SqliteConnection) => {
   const version = (() => {
     try {
       return connection.get('SELECT value FROM meta WHERE key = ?', ['schema'])?.value ?? null;
@@ -142,7 +195,7 @@ export const openMessageSearchStore = (connection) => {
     connection.exec(SCHEMA);
   }
 
-  const readSession = (sessionId) => connection.get(
+  const readSession = (sessionId: string) => connection.get(
     'SELECT id, directory, title, revert_id, user_cursor, assistant_cursor, user_anchor, assistant_anchor, synced_updated_at, archived_at, lifecycle_known FROM sessions WHERE id = ?',
     [sessionId],
   );
@@ -150,7 +203,7 @@ export const openMessageSearchStore = (connection) => {
   return {
     readSession,
 
-    upsertSession: ({ id, directory, title, createdAt, archivedAt, lifecycleKnown = false }) => {
+    upsertSession: ({ id, directory, title, createdAt, archivedAt, lifecycleKnown = false }: SessionUpdate) => {
       connection.run(
         `INSERT INTO sessions (id, directory, title, created_at, archived_at, lifecycle_known) VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET directory = excluded.directory, title = excluded.title,
@@ -160,19 +213,19 @@ export const openMessageSearchStore = (connection) => {
       );
     },
 
-    setArchiveState: (sessionId, archivedAt) => {
+    setArchiveState: (sessionId: string, archivedAt: SQLOutputValue | undefined) => {
       connection.run('UPDATE sessions SET archived_at = ?, lifecycle_known = 1 WHERE id = ?', [archivedAt ?? null, sessionId]);
     },
 
-    renameSession: (sessionId, title) => {
+    renameSession: (sessionId: string, title: string) => {
       connection.run('UPDATE sessions SET title = ? WHERE id = ?', [title, sessionId]);
     },
 
-    moveSession: (sessionId, directory) => {
+    moveSession: (sessionId: string, directory: string) => {
       connection.run('UPDATE sessions SET directory = ? WHERE id = ?', [directory, sessionId]);
     },
 
-    resetSession: (sessionId, revertId) => {
+    resetSession: (sessionId: string, revertId: string | null) => {
       connection.transaction(() => {
         connection.run('DELETE FROM messages WHERE session_id = ?', [sessionId]);
         connection.run(
@@ -182,14 +235,14 @@ export const openMessageSearchStore = (connection) => {
       });
     },
 
-    deleteSession: (sessionId) => {
+    deleteSession: (sessionId: SQLOutputValue) => {
       connection.transaction(() => {
         connection.run('DELETE FROM messages WHERE session_id = ?', [sessionId]);
         connection.run('DELETE FROM sessions WHERE id = ?', [sessionId]);
       });
     },
 
-    putMessages: (rows) => {
+    putMessages: (rows: readonly IndexedMessage[]) => {
       if (rows.length === 0) return;
       connection.transaction(() => {
         for (const row of rows) {
@@ -202,22 +255,22 @@ export const openMessageSearchStore = (connection) => {
       });
     },
 
-    setCursor: (sessionId, role, cursor, anchorId) => {
+    setCursor: (sessionId: string, role: 'user' | 'assistant', cursor: string, anchorId: string) => {
       const prefix = role === 'user' ? 'user' : 'assistant';
       connection.run(`UPDATE sessions SET ${prefix}_cursor = ?, ${prefix}_anchor = ? WHERE id = ?`, [cursor, anchorId, sessionId]);
     },
 
-    markSynced: (sessionId, updatedAt) => {
+    markSynced: (sessionId: string, updatedAt: number | null) => {
       connection.run('UPDATE sessions SET synced_updated_at = ? WHERE id = ?', [updatedAt, sessionId]);
     },
 
-    readMeta: (key) => connection.get('SELECT value FROM meta WHERE key = ?', [key])?.value ?? null,
+    readMeta: (key: string) => connection.get('SELECT value FROM meta WHERE key = ?', [key])?.value ?? null,
 
-    writeMeta: (key, value) => {
+    writeMeta: (key: string, value: string) => {
       connection.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [key, value]);
     },
 
-    deleteRole: (role) => {
+    deleteRole: (role: NonNullable<SearchOptions['role']>) => {
       connection.run('DELETE FROM messages WHERE role = ?', [role]);
     },
 
@@ -235,9 +288,9 @@ export const openMessageSearchStore = (connection) => {
 
     markLifecycleComplete: () => connection.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('lifecycle_complete', '1')"),
 
-    search: ({ match, sessionId = null, directories = [], role = null, includeReasoning = true, lifecycle = 'all', before = null, limit, order = 'desc' }) => {
+    search: ({ match, sessionId = null, directories = [], role = null, includeReasoning = true, lifecycle = 'all', before = null, limit, order = 'desc' }: StoreSearchOptions) => {
       const where = ['messages_fts MATCH ?'];
-      const params = [match];
+      const params: SQLInputValue[] = [match];
       if (sessionId) {
         where.push('m.session_id = ?');
         params.push(sessionId);
@@ -274,7 +327,7 @@ export const openMessageSearchStore = (connection) => {
       );
     },
 
-    searchSessions: ({ match, directories = [], role = null, includeReasoning = true, lifecycle = 'all', before = null, limit, exclude = [], withTotals = false }) => {
+    searchSessions: ({ match, directories = [], role = null, includeReasoning = true, lifecycle = 'all', before = null, limit, exclude = [], withTotals = false }: StoreSessionSearchOptions) => {
       const filters = [];
       const filterParams = [];
       if (directories.length > 0) {
@@ -295,20 +348,21 @@ export const openMessageSearchStore = (connection) => {
         WHERE m.seq IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)${filterSql}
         ORDER BY m.created_at DESC, m.session_id DESC, m.id DESC`;
       const pageHits = [];
-      const representedSessions = new Set();
+      const representedSessions = new Set<SQLOutputValue>();
       for (const row of connection.iterate(orderedMatches, [match, ...filterParams])) {
+        if (row.sessionId === undefined) throw new TypeError('Missing sessionId column in search index');
         if (representedSessions.has(row.sessionId)) continue;
         representedSessions.add(row.sessionId);
         const isAfterCursor = before && (
-          row.createdAt > before.createdAt
-          || (row.createdAt === before.createdAt && row.sessionId >= before.sessionId)
+          (isBigInt(row.createdAt) ? row.createdAt > before.createdAt : Number(row.createdAt) > before.createdAt)
+          || (row.createdAt === before.createdAt && sessionIdAtOrAfter(row.sessionId, before.sessionId))
         );
         if (isAfterCursor) continue;
-        pageHits.push(row);
+        pageHits.push({ row, sessionId: row.sessionId });
         if (pageHits.length === limit) break;
       }
       const pageIds = pageHits.map((hit) => hit.sessionId);
-      const counts = new Map();
+      const counts = new Map<SQLOutputValue | undefined, SQLOutputValue | undefined>();
       if (pageIds.length > 0) {
         const messageFilters = [];
         const messageFilterParams = [];
@@ -328,11 +382,11 @@ export const openMessageSearchStore = (connection) => {
         );
         for (const row of rows) counts.set(row.sessionId, row.matchCount);
       }
-      const hits = pageHits.map((hit) => ({ ...hit, matchCount: counts.get(hit.sessionId) ?? 0 }));
-      let totals = null;
+      const hits = pageHits.map(({ row, sessionId }) => ({ ...row, sessionId, matchCount: counts.get(sessionId) ?? 0 }));
+      let totals: SessionSearchTotals | null = null;
       if (withTotals) {
         const totalsFilters = ['messages_fts MATCH ?'];
-        const totalsParams = [match];
+        const totalsParams: SQLInputValue[] = [match];
         if (role) {
           totalsFilters.push('m.role = ?');
           totalsParams.push(role);
@@ -346,19 +400,20 @@ export const openMessageSearchStore = (connection) => {
         if (lifecycle === 'active') totalsFilters.push('s.lifecycle_known = 1 AND s.archived_at IS NULL');
         if (lifecycle === 'archived') totalsFilters.push('s.lifecycle_known = 1 AND s.archived_at IS NOT NULL');
         const sessionJoin = needsSessionFilter ? ' JOIN sessions s ON s.id = m.session_id' : '';
-        const matchedSessionIds = new Set();
+        const matchedSessionIds = new Set<SQLOutputValue>();
         let rowCount = 0;
         for (const row of connection.iterate(
           `SELECT m.session_id AS sessionId FROM messages_fts JOIN messages m ON m.seq = messages_fts.rowid${sessionJoin}
            WHERE ${totalsFilters.join(' AND ')} LIMIT ?`,
           [...totalsParams, GROUPED_TOTALS_ROW_CAP],
         )) {
+          if (row.sessionId === undefined) throw new TypeError('Missing sessionId column in search index');
           rowCount += 1;
           matchedSessionIds.add(row.sessionId);
         }
         if (rowCount < GROUPED_TOTALS_ROW_CAP) {
           for (const sessionId of exclude) matchedSessionIds.delete(sessionId);
-          const byDirectory = {};
+          const byDirectory: SessionSearchTotals['byDirectory'] = {};
           const matchedIds = [...matchedSessionIds];
           for (let offset = 0; offset < matchedIds.length; offset += 500) {
             const chunk = matchedIds.slice(offset, offset + 500);
@@ -366,7 +421,11 @@ export const openMessageSearchStore = (connection) => {
               `SELECT directory FROM sessions WHERE id IN (${chunk.map(() => '?').join(', ')})`,
               chunk,
             );
-            for (const row of sessionRows) byDirectory[row.directory] = (byDirectory[row.directory] ?? 0) + 1;
+            for (const row of sessionRows) {
+              const directory = String(row.directory);
+              const count = byDirectory[directory] ?? 0;
+              byDirectory[directory] = isNumber(count) ? count + 1 : String(count) + 1;
+            }
           }
           totals = { sessions: matchedSessionIds.size, byDirectory };
         }
