@@ -4,8 +4,12 @@ import { OpenCode } from '@opencode/client';
 import { z } from 'zod';
 
 import { createMessageSearchIndexer } from './indexer.js';
+import type { IndexerClient, IndexerOptions } from './indexer.js';
 import { loadSqliteOpener } from './sqlite.js';
+import type { SqliteOpener } from './sqlite.js';
 import { buildSnippet, openMessageSearchStore, toMatchExpression, toSearchTerms } from './store.js';
+import type { GlobalMessageStreamHub } from '../event-stream/global-hub.js';
+import type { SearchOptions, SessionSearchOptions } from './contracts.js';
 
 const INDEX_FILE = 'message-search.sqlite';
 const REASONING_META_KEY = 'reasoning';
@@ -14,6 +18,17 @@ const MAX_LIMIT = 200;
 
 const envelopeSchema = z.object({ directory: z.string().nullish() });
 const payloadDirectorySchema = z.object({ properties: z.object({ directory: z.string() }) });
+
+interface MessageSearchRuntimeOptions extends Pick<IndexerOptions, 'getArchivedSessions' | 'applyOwnedArchiveState' | 'logger'> {
+  dataDir: string;
+  buildOpenCodeUrl: (path: string, prefixOverride: string) => string;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+  globalEventHub: Pick<GlobalMessageStreamHub, 'subscribeEvent' | 'subscribeStatus'> & Partial<Pick<GlobalMessageStreamHub, 'isConnected'>>;
+  readSettings: () => Promise<{ enabled: boolean; reasoning: boolean }>;
+}
+
+const hasMessage = (error: unknown): error is { message: unknown } =>
+  error != null && 'message' in Object(error);
 
 export const createMessageSearchRuntime = ({
   dataDir,
@@ -24,29 +39,29 @@ export const createMessageSearchRuntime = ({
   applyOwnedArchiveState = (session) => session,
   readSettings,
   logger = console,
-}) => {
+}: MessageSearchRuntimeOptions) => {
   const indexPath = path.join(dataDir, INDEX_FILE);
   const open = loadSqliteOpener();
   let enabled = false;
   let reasoning = false;
-  let engine = null;
+  let engine: ReturnType<typeof startEngine> | null = null;
   let failed = false;
   let transition = Promise.resolve();
-  const enqueue = (work) => {
+  const enqueue = (work: () => Promise<void>) => {
     const run = transition.then(work);
     transition = run.catch((error) => {
-      logger.warn?.('[message-search]', error?.message ?? error);
+      logger.warn?.('[message-search]', (hasMessage(error) ? error.message : undefined) ?? error);
     });
     return run;
   };
 
-  const createClient = (directory) => {
+  const createClient = (directory: string): IndexerClient => {
     const headers = { ...getOpenCodeAuthHeaders() };
     if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
     return OpenCode.make({ baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''), headers });
   };
 
-  const reconcileReasoning = (store) => {
+  const reconcileReasoning = (store: ReturnType<typeof openMessageSearchStore>) => {
     const indexed = store.readMeta(REASONING_META_KEY) === '1';
     if (reasoning && !indexed) {
       store.rereadAssistantRecords();
@@ -60,7 +75,7 @@ export const createMessageSearchRuntime = ({
     return false;
   };
 
-  const startEngine = () => {
+  const startEngine = (open: SqliteOpener) => {
     const store = openMessageSearchStore(open(indexPath));
     reconcileReasoning(store);
     const indexer = createMessageSearchIndexer({ store, createClient, includeReasoning: () => reasoning, getArchivedSessions, applyOwnedArchiveState, logger });
@@ -93,11 +108,11 @@ export const createMessageSearchRuntime = ({
   const apply = async () => {
     if (enabled && !engine && open) {
       try {
-        engine = startEngine();
+        engine = startEngine(open);
         failed = false;
       } catch (error) {
         failed = true;
-        logger.warn?.('[message-search] index unavailable:', error?.message ?? error);
+        logger.warn?.('[message-search] index unavailable:', (hasMessage(error) ? error.message : undefined) ?? error);
       }
     } else if (!enabled && engine) {
       const running = engine;
@@ -127,12 +142,12 @@ export const createMessageSearchRuntime = ({
   return {
     supported: Boolean(open),
 
-    setEnabled: (next) => enqueue(async () => {
+    setEnabled: (next: boolean) => enqueue(async () => {
       enabled = next === true;
       await apply();
     }),
 
-    setReasoningEnabled: (next) => enqueue(async () => {
+    setReasoningEnabled: (next: boolean) => enqueue(async () => {
       reasoning = next === true;
       if (engine && reconcileReasoning(engine.store) && globalEventHub.isConnected?.()) engine.indexer.onConnected();
     }),
@@ -149,10 +164,10 @@ export const createMessageSearchRuntime = ({
       await apply();
     }),
 
-    search: ({ query, sessionId, directories, role, includeReasoning, lifecycle = 'all', before, limit, order }) => {
+    search: ({ query, sessionId, directories, role, includeReasoning, lifecycle = 'all', before, limit, order }: SearchOptions) => {
       if (!engine) return null;
       const match = toMatchExpression(query);
-      if (!match) return { status: 'query-too-short', hits: [] };
+      if (!match) return { status: 'query-too-short' as const, hits: [] };
       const size = Math.min(Math.max(1, limit), MAX_LIMIT);
       const hits = engine.store.search({
         match,
@@ -169,7 +184,7 @@ export const createMessageSearchRuntime = ({
       const page = hits.slice(0, size);
       const last = page[page.length - 1];
       return {
-        status: 'ok',
+        status: 'ok' as const,
         hits: page.map((hit) => ({
           id: hit.id,
           sessionId: hit.sessionId,
@@ -185,10 +200,10 @@ export const createMessageSearchRuntime = ({
       };
     },
 
-    searchSessions: ({ query, directories, role, includeReasoning, lifecycle = 'all', before, limit, exclude = [] }) => {
+    searchSessions: ({ query, directories, role, includeReasoning, lifecycle = 'all', before, limit, exclude = [] }: SessionSearchOptions) => {
       if (!engine) return null;
       const match = toMatchExpression(query);
-      if (!match) return { status: 'query-too-short', hits: [] };
+      if (!match) return { status: 'query-too-short' as const, hits: [] };
       const size = Math.min(Math.max(1, limit), 100);
       const result = engine.store.searchSessions({ match, directories, role, includeReasoning: reasoning && includeReasoning !== false, lifecycle, before, limit: size + 1, exclude, withTotals: !before });
       const terms = toSearchTerms(query);

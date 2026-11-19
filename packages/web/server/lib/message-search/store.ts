@@ -382,7 +382,7 @@ export const openMessageSearchStore = (connection: SqliteConnection) => {
         );
         for (const row of rows) counts.set(row.sessionId, row.matchCount);
       }
-      const hits = pageHits.map(({ row, sessionId }) => ({ ...row, sessionId, matchCount: counts.get(sessionId) ?? 0 }));
+      const hits = pageHits.map(({ row, sessionId }): typeof row & { sessionId: SQLOutputValue; matchCount: SQLOutputValue } => ({ ...row, sessionId, matchCount: counts.get(sessionId) ?? 0 }));
       let totals: SessionSearchTotals | null = null;
       if (withTotals) {
         const totalsFilters = ['messages_fts MATCH ?'];

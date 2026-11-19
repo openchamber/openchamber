@@ -75,7 +75,7 @@ export interface IndexerClient {
     list: OpenCodeClient['session']['list'];
     message: { get(input: Omit<SessionMessageGetInput, 'messageID'> & { messageID: StoredIdentifier }): ReturnType<OpenCodeClient['session']['message']['get']> };
   };
-  message: { list(input: Omit<MessageListInput, 'cursor'> & { cursor?: StoredIdentifier }): ReturnType<OpenCodeClient['message']['list']> };
+  message: { list(input: Omit<MessageListInput, 'cursor'> & { cursor?: StoredIdentifier | undefined }): ReturnType<OpenCodeClient['message']['list']> };
 }
 
 export interface IndexerOptions {
