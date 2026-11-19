@@ -130,6 +130,16 @@ const standWorktrees = ({ root, project }) => {
   return linked
 }
 
+const OPENCODE_FOLDER = ".opencode"
+
+const emptyOpenCodeFolder = (project) => {
+  const folder = join(project, OPENCODE_FOLDER)
+  // A link a scenario left here would send the cleanup outside the stand.
+  if (lstatSync(folder, { throwIfNoEntry: false })?.isDirectory() === false) rmSync(folder, { force: true })
+  mkdirSync(folder, { recursive: true })
+  for (const entry of readdirSync(folder)) rmSync(join(folder, entry), { recursive: true, force: true })
+}
+
 export const resetWorktrees = ({ root, project, initialCommit, initialBranch = "main", initialGitConfig }) => {
   const linked = standWorktrees({ root, project })
   if (initialGitConfig !== undefined) writeFileSync(join(project, ".git/config"), initialGitConfig)
@@ -138,7 +148,8 @@ export const resetWorktrees = ({ root, project, initialCommit, initialBranch = "
   if (existsSync(join(project, ".git/rebase-merge")) || existsSync(join(project, ".git/rebase-apply"))) gitIn(project, ["rebase", "--abort"])
   // Hard reset clears an unfinished merge and its unmerged index before checkout.
   gitIn(project, ["reset", "-q", "--hard", baseline])
-  gitIn(project, ["clean", "-ffdqx"])
+  gitIn(project, ["clean", "-ffdqx", "-e", `/${OPENCODE_FOLDER}`])
+  emptyOpenCodeFolder(project)
   gitIn(project, ["checkout", "-q", "-B", initialBranch, baseline])
   // Every branch other than the initial one was made by a scenario. Keeping
   // it changes the next worktree's branch name even after its folder is gone.
@@ -173,6 +184,7 @@ const writeProject = (project) => {
   writeFileSync(join(project, ".git/info/exclude"), "perf-read/\n")
   gitIn(project, ["add", "-A"])
   gitIn(project, ["commit", "-q", "-m", "Initial import of the support inbox"])
+  emptyOpenCodeFolder(project)
 }
 
 const writeSettings = (dataDir, home, project) => {

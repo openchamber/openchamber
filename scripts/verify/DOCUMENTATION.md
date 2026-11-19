@@ -21,6 +21,7 @@ bun run verify -- --changed --base A..B --list   # what the commits between A an
 bun run verify                                   # every scenario
 bun run verify -- composer files.edit            # a zone, a feature, or one scenario id
 bun run verify -- --list composer                # the feature map, no run
+bun run verify -- --shard 2/4                     # the second of four equal parts, for several machines
 bun run verify -- diff --keep                    # keep the stand up after the run
 bun run verify -- diff --attach tmp/verify/<run>/stand.json   # reuse a kept stand
 ```
@@ -264,6 +265,10 @@ Some choices made in the app live on the server, not in the browser: Don't ask a
 Deleting sessions leaves their worktrees behind. A repeat then creates a suffixed branch, while a selector for the original branch opens an empty old worktree's menu. Removing the stand's linked worktrees and non-main branches gives every scenario the same topology and names.
 
 The reset cleans the index and tree and checks out the starting branch before deleting scenario branches. A failed scenario can leave its branch checked out, so deleting branches first would stop the run. The starting commit and repository configuration come from stand creation, since resetting to `HEAD` preserves scenario commits and configuration edits.
+
+### Why the reset keeps the project's `.opencode` folder
+
+OpenCode watches a project's `.opencode` folder for agents, commands and skills. When the folder is removed and made again within moments, OpenCode 2.3.2 keeps its old list and stops noticing later changes: 24 of 25 such rounds on a stand never showed the new command, and none of 30 did when only the folder's contents were removed. A reset that cleaned the folder away, followed by a scenario writing a command into it, made `commands.edit.write-failure` fail about once in a full run, always after another scenario that had used the folder. The fixture project has the folder from the start, and the reset empties it without removing it. A reset that fails and rebuilds the whole fixture still replaces the folder, so scenarios after such a failure can miss what they write there until the stand restarts.
 
 ### Why a failed reset rebuilds the fixture
 
