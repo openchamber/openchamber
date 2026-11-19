@@ -1,3 +1,28 @@
+import type { ControlOptions, SessionActionResult, TextMessage } from './service.js';
+
+export type PublicSessionStatus = { type: 'idle' | 'waiting' | 'busy' };
+
+export interface SessionStatusResult extends Pick<SessionActionResult, 'sessionId' | 'directory'> {
+  sessionStatus: PublicSessionStatus;
+}
+
+export interface SessionMessagesResult extends SessionStatusResult {
+  role: string;
+  messages: TextMessage[];
+}
+
+interface SessionReadResults {
+  'session.messages': SessionMessagesResult;
+  'session.status': SessionStatusResult;
+}
+
+export type SessionReadAction = keyof SessionReadResults;
+
+export interface SessionControlExecute {
+  (action: 'session.create' | 'session.send', input?: ControlInput, contextDirectory?: ControlInput['directory'], options?: ControlOptions): Promise<SessionActionResult>;
+  <Action extends SessionReadAction>(action: Action, input?: ControlInput, contextDirectory?: ControlInput['directory'], options?: ControlOptions): Promise<SessionReadResults[Action]>;
+}
+
 export interface ControlInput {
   name?: unknown;
   title?: unknown;

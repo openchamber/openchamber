@@ -13,7 +13,7 @@ import { readProcessInstance as readProcessInstanceDefault } from './process-ins
 import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
 import { controlErrorFields } from '../openchamber-control/error.js';
 import type { ExistingSessionDependencies, ExistingSessionTaskRunEvent } from './existing-session.js';
-import type { ScheduledTask, ScheduledTaskStore, ScheduledWorktreeCleanup, ScheduledTaskStateResult } from '../projects/contracts.js';
+import type { ScheduledTask, ScheduledTaskInput, ScheduledTaskStore, ScheduledWorktreeCleanup, ScheduledTaskStateResult } from '../projects/contracts.js';
 import type { ScheduledWorktree, ScheduledWorktreeBridge, RemoveScheduledWorktreeInput } from './worktree-bridge.js';
 import type { resolveSessionDefaults } from './session-defaults.js';
 import type { createRoutingRuntime } from '../routing/runtime.js';
@@ -1554,6 +1554,6 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
       if (!existingSessionTasks) throw new TypeError("Cannot read properties of null (reading 'result')");
       return existingSessionTasks.result(...args);
     },
-    cancelWaitingPrompt: (projectID: string, taskID: string) => existingSessionTasks?.cancel(projectID, taskID),
+    cancelWaitingPrompt: (projectID: string, taskID: ScheduledTaskInput['id']) => existingSessionTasks?.cancel(projectID, taskID),
   };
 };

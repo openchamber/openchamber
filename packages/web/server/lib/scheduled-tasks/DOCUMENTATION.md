@@ -381,7 +381,7 @@ Linux start ticks are field 22 of `/proc/<pid>/stat`. The process name in
 parentheses can contain spaces and parentheses, so parsing starts after the
 last closing parenthesis before selecting the start-time field.
 
-### Why some implementations remain JavaScript
+### TypeScript boundaries
 
 `loops.ts` imports `parseMdFile`, `writeMdFile`, `getAncestors` and
 `findWorktreeRoot` from `../opencode/markdown-files.js` and
@@ -409,21 +409,23 @@ it. Candidate discovery retains its array check and checks individual candidate
 fields; a candidate may be a primitive, an array or an object. The membership
 cache contains promises of directory ownership, not session records.
 
-`service.js` inspects raw task payloads before project-config normalizes them.
+`service.ts` checks the task container before project-config normalizes it.
+Model validation reads the raw execution fields with the same nullish fallback
+as optional chaining. Target validation accepts the raw session id and parses
+it with Zod. Cancellation compares the raw task id against stored string ids
+without coercion. Public operations still reject missing ids through the
+existing string parser.
+
 `ScheduledTaskRunResult.error` and `statusCode` remain unknown because
-existing-session admission forwards unchecked thrown fields.
-`OpenChamberControlError` declares a string message and numeric status even
-though its runtime delegates message coercion to Error and stores the status
-unchanged. Target validation parses its input with Zod, while its declared
-parameter currently accepts only a string or undefined. Cancellation compares
-task ids without parsing them, while its declarations accept only strings.
-Typing the service also removes an inferred unchecked result from
-`createOpenChamberControlService.execute`. Its result then remains unknown
-at `guests/service-host-api.ts` reads of `messages` and `sessionStatus`.
-That caller needs an action-specific result contract or validation before
-those reads; narrowing its declared result without either would conceal the
-unchecked boundary. Control actions also pass nullable task ids to service
-operations, whose existing string parsing must continue to reject missing ids.
+existing-session admission forwards unchecked thrown fields. The control error
+lets `Error` coerce the message and stores the status unchanged. Guest service
+callbacks use the specific session actions' result contracts; general control
+execution can still return unchecked results from other actions.
+
+Status falls back to reading project configs when the injected runtime has no
+callable status reader. The worktree resolver normally reports the input
+directory when Git cannot resolve a checkout. A resolver that throws also
+falls through to the directory-not-found response.
 
 ### Which thrown status values a route forwards
 

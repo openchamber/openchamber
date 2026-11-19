@@ -26,7 +26,7 @@ export interface Request<Body = unknown, Params = Record<string, string>, Search
 }
 
 export interface Response<Body = unknown> extends ServerResponse {
-  status(code: number): this;
+  status<Code>(code: Code): this;
   json(body: Body): this;
   send(body?: Body): this;
   sendStatus(code: number): this;

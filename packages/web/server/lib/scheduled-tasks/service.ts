@@ -1,15 +1,69 @@
-import { asNonEmptyString } from '../shared/guards.js';
+import { asNonEmptyString, isBoolean, isString } from '../shared/guards.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { discoverLoopFiles, loopFingerprint, parseLoopDefinition, setLoopFileEnabled } from './loops.js';
+import type { resolvePrimaryWorktreeRoot as resolveGitWorktreeRoot } from '../git/service.js';
+import type { ScheduledTask, ScheduledTaskInput, ScheduledTaskStore, SessionProject } from '../projects/contracts.js';
+import type { createProjectConfigRuntime } from '../projects/project-config.js';
+import type { createChatsScope } from './chats-scope.js';
+import type { createScheduledTasksRuntime, ScheduledTaskRunResult } from './runtime.js';
 
-const samePath = (a, b) => a && b && path.resolve(a) === path.resolve(b);
+interface ScheduledTaskSettings {
+  projects?: unknown;
+}
 
-const isRepositoryLoop = (projectPath, loopFile) => discoverLoopFiles(projectPath)
+type Scheduler = ReturnType<typeof createScheduledTasksRuntime>;
+type ProjectConfig = ReturnType<typeof createProjectConfigRuntime>;
+
+export interface ScheduledTaskServiceDependencies {
+  readSettingsFromDiskMigrated: () => Promise<ScheduledTaskSettings | null>;
+  sanitizeProjects: (projects: ScheduledTaskSettings['projects']) => SessionProject[];
+  projectConfigRuntime: Pick<ScheduledTaskStore, 'listScheduledTasks' | 'upsertScheduledTask'> & Pick<ProjectConfig, 'deleteScheduledTask' | 'setLoopApproval'>;
+  scheduledTasksRuntime: Pick<Scheduler, 'syncProject' | 'validateTarget' | 'cancelWaitingPrompt' | 'runNow'> & Partial<Pick<Scheduler, 'getStatus'>>;
+  chatsScope?: ReturnType<typeof createChatsScope> | null;
+  resolvePrimaryWorktreeRoot?: typeof resolveGitWorktreeRoot | null;
+  readModelCatalog?: ((directory: string) => Promise<(ModelCatalogEntry | null | undefined)[]>) | null;
+}
+
+interface ModelCatalogEntry {
+  providerID?: unknown;
+  id?: unknown;
+  modelID?: unknown;
+}
+
+export interface ScheduledTaskRunResponse {
+  task: ScheduledTaskRunResult['task'];
+  sessionId: ScheduledTaskRunResult['sessionID'];
+  persistError?: string;
+  directory?: string;
+}
+
+interface ProjectSelector {
+  projectId?: SessionProject['id'] | undefined;
+  directory?: SessionProject['path'] | undefined;
+}
+
+interface NamedExecution {
+  providerID?: unknown;
+  modelID?: unknown;
+  useDefaults?: unknown;
+}
+
+const isTaskInput = (value: unknown): value is ScheduledTaskInput => Boolean(value) && typeof value === 'object';
+const hasReadableExecution = (value: unknown): value is NamedExecution => value !== null && value !== undefined;
+const readExecutionField = (value: ScheduledTaskInput['execution'], key: keyof NamedExecution) => (
+  hasReadableExecution(value) ? value[key] : undefined
+);
+const hasStatusReader = (value: Scheduler['getStatus'] | undefined): value is Scheduler['getStatus'] => typeof value === 'function';
+const hasLoopFile = (task: ScheduledTask): task is ScheduledTask & { loopFile: string } => Boolean(task.loopFile);
+
+const samePath = (a: string, b: string) => a && b && path.resolve(a) === path.resolve(b);
+
+const isRepositoryLoop = (projectPath: string, loopFile: string) => discoverLoopFiles(projectPath)
   .some((entry) => entry.scope === 'project' && entry.filePath === loopFile);
 
-export const createScheduledTaskService = (dependencies) => {
+export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDependencies) => {
   const {
     readSettingsFromDiskMigrated,
     sanitizeProjects,
@@ -25,7 +79,7 @@ export const createScheduledTaskService = (dependencies) => {
     return sanitizeProjects(settings?.projects || []);
   };
 
-  const findProjectByID = async (projectID) => {
+  const findProjectByID = async (projectID: string | null) => {
     const requested = asNonEmptyString(projectID);
     if (!requested) throw new OpenChamberControlError('projectId is required', 400);
     const normalized = chatsScope ? chatsScope.toStorageID(requested) : requested;
@@ -36,7 +90,7 @@ export const createScheduledTaskService = (dependencies) => {
     throw new OpenChamberControlError('Project not found', 404);
   };
 
-  const resolveProjectID = async ({ projectId, directory } = {}) => {
+  const resolveProjectID = async ({ projectId, directory }: ProjectSelector = {}) => {
     const requestedProjectID = asNonEmptyString(projectId);
     const requestedDirectory = asNonEmptyString(directory);
     if (requestedProjectID && requestedDirectory) {
@@ -59,16 +113,13 @@ export const createScheduledTaskService = (dependencies) => {
           if (owner) return owner.id;
         }
       } catch {
-        // A throwing resolver call: fall through to the unchanged 404.
-        // resolvePrimaryWorktreeRoot itself reports the directory for a
-        // non-checkout or unavailable git, and the samePath guard above
-        // skips those, so only an unexpected throw reaches this catch.
+        void 0;
       }
     }
     throw new OpenChamberControlError(`Project not found for directory: ${resolvedDirectory}`, 404);
   };
 
-  const resolveExecutionDirectory = async (projectID, targetSessionId, { tolerateMissingTarget = false } = {}) => {
+  const resolveExecutionDirectory = async (projectID: string | null, targetSessionId: ScheduledTaskInput['targetSessionId'], { tolerateMissingTarget = false } = {}) => {
     const project = await findProjectByID(projectID);
     if (targetSessionId) {
       try {
@@ -81,11 +132,11 @@ export const createScheduledTaskService = (dependencies) => {
     return project.path;
   };
 
-  const assertNamedModelKnown = async (projectID, task, previous, resolvedDirectory) => {
-    const providerID = asNonEmptyString(task?.execution?.providerID);
-    const modelID = asNonEmptyString(task?.execution?.modelID);
+  const assertNamedModelKnown = async (projectID: string, task: Pick<ScheduledTaskInput, 'execution' | 'targetSessionId'>, previous?: ScheduledTask | null, resolvedDirectory?: string) => {
+    const providerID = asNonEmptyString(readExecutionField(task?.execution, 'providerID'));
+    const modelID = asNonEmptyString(readExecutionField(task?.execution, 'modelID'));
     if (!providerID || !modelID) return;
-    if (task?.execution?.useDefaults === true) return;
+    if (readExecutionField(task?.execution, 'useDefaults') === true) return;
     const stored = previous?.execution;
     const unchanged = stored?.providerID === providerID && stored?.modelID === modelID;
     if (unchanged && stored?.useDefaults !== true) return;
@@ -103,25 +154,25 @@ export const createScheduledTaskService = (dependencies) => {
     }
   };
 
-  const list = async (projectID) => {
+  const list = async (projectID: string | null) => {
     const { id } = await findProjectByID(projectID);
     return scheduledTasksRuntime.syncProject(id);
   };
 
-  const findLoopTask = async (projectID, taskID) => {
+  const findLoopTask = async (projectID: string | null, taskID: string | null) => {
     const { id } = await findProjectByID(projectID);
     const normalizedTaskID = asNonEmptyString(taskID);
     if (!normalizedTaskID) throw new OpenChamberControlError('taskId is required', 400);
     const tasks = await scheduledTasksRuntime.syncProject(id);
     const task = tasks.find((entry) => entry?.id === normalizedTaskID) || null;
     if (!task) throw new OpenChamberControlError('Task not found', 404);
-    if (!task.loopFile) throw new OpenChamberControlError('Task is not managed by a loop file', 400);
+    if (!hasLoopFile(task)) throw new OpenChamberControlError('Task is not managed by a loop file', 400);
     if (!fs.existsSync(task.loopFile)) throw new OpenChamberControlError('Loop file not found', 404);
     return { id, task };
   };
 
-  const setLoopEnabled = async (projectID, taskID, enabled) => {
-    if (typeof enabled !== 'boolean') {
+  const setLoopEnabled = async (projectID: string | null, taskID: string | null, enabled: ScheduledTaskInput['enabled']) => {
+    if (!isBoolean(enabled)) {
       throw new OpenChamberControlError('enabled must be a boolean', 400);
     }
     const { id, task } = await findLoopTask(projectID, taskID);
@@ -141,7 +192,7 @@ export const createScheduledTaskService = (dependencies) => {
     return tasks.find((entry) => entry.id === taskID) || null;
   };
 
-  const removeLoopFile = async (projectID, taskID) => {
+  const removeLoopFile = async (projectID: string | null, taskID: string | null) => {
     const { id, task } = await findLoopTask(projectID, taskID);
     try {
       fs.unlinkSync(task.loopFile);
@@ -152,9 +203,9 @@ export const createScheduledTaskService = (dependencies) => {
     return scheduledTasksRuntime.syncProject(id);
   };
 
-  const upsert = async (projectID, taskInput) => {
+  const upsert = async (projectID: string | null, taskInput: ScheduledTaskInput | null | undefined) => {
     const { id } = await findProjectByID(projectID);
-    if (!taskInput || typeof taskInput !== 'object') {
+    if (!isTaskInput(taskInput)) {
       throw new OpenChamberControlError('task payload is required', 400);
     }
     let upserted;
@@ -183,7 +234,7 @@ export const createScheduledTaskService = (dependencies) => {
     };
   };
 
-  const remove = async (projectID, taskID) => {
+  const remove = async (projectID: string | null, taskID: string | null) => {
     const { id } = await findProjectByID(projectID);
     const normalizedTaskID = asNonEmptyString(taskID);
     if (!normalizedTaskID) throw new OpenChamberControlError('taskId is required', 400);
@@ -202,7 +253,7 @@ export const createScheduledTaskService = (dependencies) => {
     return projectConfigRuntime.listScheduledTasks(id);
   };
 
-  const run = async (projectID, taskID) => {
+  const run = async (projectID: string | null, taskID: string | null) => {
     const { id } = await findProjectByID(projectID);
     const normalizedTaskID = asNonEmptyString(taskID);
     if (!normalizedTaskID) throw new OpenChamberControlError('taskId is required', 400);
@@ -214,18 +265,16 @@ export const createScheduledTaskService = (dependencies) => {
     if (!result.ok) {
       throw new OpenChamberControlError(result.error || 'Task run failed', result.statusCode || 500, { task: result.task });
     }
-    const response = {
+    const response: ScheduledTaskRunResponse = {
       task: result.task,
       sessionId: result.sessionID,
-      ...(typeof result.persistError === 'string' && result.persistError.trim()
-        ? { persistError: result.persistError.trim() }
-        : {}),
     };
+    if (isString(result.persistError) && result.persistError.trim()) response.persistError = result.persistError.trim();
     if (result.directory) response.directory = result.directory;
     return response;
   };
 
-  const setEnabled = async (projectID, taskID, enabled) => {
+  const setEnabled = async (projectID: string | null, taskID: string | null, enabled: boolean) => {
     const project = await findProjectByID(projectID);
     const tasks = await scheduledTasksRuntime.syncProject(project.id);
     const task = tasks.find((entry) => entry?.id === taskID);
@@ -242,7 +291,7 @@ export const createScheduledTaskService = (dependencies) => {
   };
 
   const status = async () => {
-    if (typeof scheduledTasksRuntime.getStatus === 'function') {
+    if (hasStatusReader(scheduledTasksRuntime.getStatus)) {
       return scheduledTasksRuntime.getStatus();
     }
     const projects = await listProjects();
@@ -256,6 +305,7 @@ export const createScheduledTaskService = (dependencies) => {
           if (task?.state?.lastStatus === 'running') runningCount += 1;
         }
       } catch {
+        void 0;
       }
     }
     return {

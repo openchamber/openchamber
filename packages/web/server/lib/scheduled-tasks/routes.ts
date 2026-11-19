@@ -5,21 +5,15 @@ import type { ControlErrorFields } from '../openchamber-control/error.js';
 import type { Application, Request, Response } from '../shared/http-contracts.js';
 import type { createScheduledTasksRuntime } from './runtime.js';
 import type { createProjectConfigRuntime } from '../projects/project-config.js';
-import type { SessionProject } from '../projects/contracts.js';
+import type { ScheduledTaskServiceDependencies } from './service.js';
 import type { createNotificationEmitterRuntime } from '../notifications/emitter-runtime.js';
-
-export interface ScheduledTaskSettings {
-  projects?: unknown;
-}
 
 export interface ScheduledTaskEventClient extends Response {
   openchamberBrowserCapable?: boolean;
   openchamberConnectionId?: string;
 }
 
-export interface ScheduledTaskRouteDependencies {
-  readSettingsFromDiskMigrated: () => Promise<ScheduledTaskSettings | null>;
-  sanitizeProjects: (projects: ScheduledTaskSettings['projects']) => SessionProject[];
+export interface ScheduledTaskRouteDependencies extends ScheduledTaskServiceDependencies {
   projectConfigRuntime: ReturnType<typeof createProjectConfigRuntime>;
   scheduledTasksRuntime: ReturnType<typeof createScheduledTasksRuntime>;
   getOpenChamberEventClients: () => Set<ScheduledTaskEventClient>;
