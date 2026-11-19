@@ -2082,7 +2082,7 @@ uses `useSessionStartTimes`, which changes only when a session is added or
 removed. A list that must ignore sessions another source already holds reads
 `useLiveSessionsExcluding(ids)` instead of filtering `useAllLiveSessions()`.
 
-A published session list is never edited, so indexes over it are built once per list and shared through a `WeakMap`: the parent-to-children index in `scoped-blocking-requests.ts` backs `computeSubtreeIds` and `readChildSessions` (the running-subagent rows read a parent's children there instead of scanning the list on every flush). Scoped permissions and forms skip the subtree walk entirely while no session has a pending request.
+A published session list is never edited, so indexes over it are built once per list and shared through a `WeakMap`: the parent-to-children index in `scoped-blocking-requests.ts` backs `computeSubtreeIds` and `readChildSessions` (the running-subagent rows read a parent's children there instead of scanning the list on every flush). Scoped permissions and forms skip the subtree walk entirely while no session has a pending request. `useRecoveredQuestions` derives inside one selector and keeps its previous array while the result is equal, so the form dock and the transcript beside a streaming reply do not re-render on each `part` change.
 
 ## Store splitting pattern
 
