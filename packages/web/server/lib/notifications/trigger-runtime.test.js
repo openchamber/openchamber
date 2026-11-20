@@ -895,17 +895,20 @@ describe('clearing a pushed notification once its cause is handled', () => {
     expect(clearApnsNotifications.mock.calls[0][0].tags.sort()).toEqual([entryOf('permission-ses_1'), entryOf('question-ses_1')]);
   });
 
-  it('clears nested child notifications after restart and leaves unrelated and unreadable sessions alone', async () => {
+  it('clears nested native and metadata-linked child notifications after restart without touching unrelated sessions', async () => {
     const entry = (id, nid) => [`question-${id}`, { sessionId: id, cause: id, native: true, nid }];
     const write = vi.fn(async () => {});
     const openPushTagsStore = {
-      read: async () => ({ open: [entry('ses_1', '11'), entry('ses_nested', '12'), entry('ses_other', '13'), entry('ses_missing', '14')] }),
+      read: async () => ({
+        open: [entry('ses_1', '11'), entry('ses_nested', '12'), entry('ses_operator', '15'), entry('ses_other', '13'), entry('ses_missing', '14')],
+      }),
       write,
     };
     const { runtime, clearApnsNotifications } = makeClearRuntime({ openPushTagsStore });
     const records = {
-      ses_1: { id: 'ses_1', parentID: 'ses_parent' },
+      ses_1: { id: 'ses_1', metadata: { openchamber: { kind: 'workflow-agent', parentID: 'ses_parent' } } },
       ses_nested: { id: 'ses_nested', parentID: 'ses_1' },
+      ses_operator: { id: 'ses_operator', metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_nested' } } },
       ses_other: { id: 'ses_other' },
     };
     const fetchRecord = vi.fn(async (url) => {
@@ -916,11 +919,11 @@ describe('clearing a pushed notification once its cause is handled', () => {
     await runtime.clearSessionPushNotifications('ses_parent', { turnStart: true });
     expect(fetchRecord).not.toHaveBeenCalled();
     await runtime.clearSessionPushNotifications('ses_parent', { viewed: true });
-    expect(clearApnsNotifications.mock.calls[0][0].tags).toEqual(['question-ses_1@11', 'question-ses_nested@12']);
+    expect(clearApnsNotifications.mock.calls[0][0].tags).toEqual(['question-ses_1@11', 'question-ses_nested@12', 'question-ses_operator@15']);
     expect(write).toHaveBeenLastCalledWith(expect.objectContaining({
       open: [entry('ses_other', '13'), entry('ses_missing', '14')].map(([tag, claim]) => [tag, { ...claim, skipTurnStart: false }]),
     }));
-    expect(fetchRecord).toHaveBeenCalledTimes(4);
+    expect(fetchRecord).toHaveBeenCalledTimes(5);
   });
 
   it('uses the space session records to clear a subagent push', async () => {

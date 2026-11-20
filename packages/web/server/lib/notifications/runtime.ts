@@ -514,7 +514,7 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
         if (!pendingParent) {
           const childId: string = current;
           pendingParent = fetchSessionRecord(childId, undefined, spaceId, signal)
-            .then((child) => child && child.id === childId && isString(child.parentID) ? child.parentID : null);
+            .then((child) => child && child.id === childId ? sessionParentId(child) : null);
           parents.set(current, pendingParent);
         }
         current = await pendingParent;

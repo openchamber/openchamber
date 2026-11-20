@@ -79,7 +79,7 @@ A pushed notification is removed from the phones and browsers once its cause is 
 
 A `share-` tag survives the turn its own answer woke (`skipTurnStart`, see `notifyShareAnswer`). Pull request notifications have no cause the server can see handled, and stay until dismissed.
 
-Opening a parent also clears the open tags of its OpenCode subagents, including nested subagents. Sending a message or starting a turn still clears only that session.
+Opening a parent also clears the open tags of its descendants, including nested OpenCode subagents, workflow agents and operator children. Sending a message or starting a turn still clears only that session.
 
 `push-tags.ts` owns the open tags and the 20 most recently cleared ones. It serializes writes to `push-open-tags.json` so a notification can still be cleared after a restart. One tag can show several requests in turn, so a reply clears the tag only when it answers the request the tag shows now. A web-only replacement keeps the prior phone delivery ID until that banner is cleared or replaced. Clearing a phone banner also updates the badge count. The APNs runtime sends batches of at most 20 clearing entries.
 
