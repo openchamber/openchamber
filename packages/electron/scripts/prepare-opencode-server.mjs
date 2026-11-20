@@ -1,4 +1,4 @@
-// external: https://github.com/anomalyco/opencode/blob/v2.3.0/packages/cli/vite.node.config.ts
+// external: https://github.com/anomalyco/opencode/blob/v2.3.2/packages/cli/vite.node.config.ts
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,7 +36,7 @@ const optionalVersion = (parentDir, name) => {
   return version;
 };
 
-// external: https://github.com/anomalyco/opencode/blob/v2.3.0/packages/cli/src/node/target.ts
+// external: https://github.com/anomalyco/opencode/blob/v2.3.2/packages/cli/src/node/target.ts
 const nativeTargets = (platform, arch) => {
   const linux = platform === 'linux';
   const win = platform === 'win32';
@@ -91,7 +91,7 @@ const copy = (from, to, executable = false) => {
   if (executable && process.platform !== 'win32') fs.chmodSync(to, 0o755);
 };
 
-// external: https://github.com/anomalyco/opencode/blob/v2.3.0/packages/cli/vite.node.config.ts
+// external: https://github.com/anomalyco/opencode/blob/v2.3.2/packages/cli/vite.node.config.ts
 const claudeAgentSdkPlugin = (sdkEntry) => ({
   name: 'claude-agent-sdk',
   setup(build) {

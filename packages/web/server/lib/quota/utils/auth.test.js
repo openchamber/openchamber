@@ -37,7 +37,8 @@ describe('resolveConfigApiKey', () => {
     expect(resolveConfigApiKey(' plain-key ', options)).toBe('plain-key');
   });
 
-  it('retains the existing missing-os failure when homeDir is omitted', () => {
-    expect(() => resolveConfigApiKey('plain-key')).toThrow('os is not defined');
+  it('resolves a key when the caller omits the directories, as provider config reads do', () => {
+    expect(resolveConfigApiKey(' plain-key ')).toBe('plain-key');
+    expect(resolveConfigApiKey('{env:ZHIPU_KEY}', { env: options.env })).toBe('env-token');
   });
 });

@@ -4,6 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
+import { isString } from './input-guards.js';
 
 const CLONE_TIMEOUT_MS = 60_000;
 export type PublicAddress = { address: string; family: 4 | 6 };
@@ -234,7 +235,8 @@ export const prepareGuestGitNetwork = async (source: string, { gitIdentityId, lo
     const { getProfile } = await import('../git/identity-storage.js');
     const profile = getProfile(gitIdentityId);
     if (!profile) return null;
-    if (profile.sshKey) sshCommand = `ssh -i ${quoteSshPath(profile.sshKey)} -o IdentitiesOnly=yes`;
+    const { sshKey } = profile;
+    if (isString(sshKey) && sshKey) sshCommand = `ssh -i ${quoteSshPath(sshKey)} -o IdentitiesOnly=yes`;
   }
   const ssh = parseSshGitUrl(source);
   if (ssh) {

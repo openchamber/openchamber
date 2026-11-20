@@ -22,7 +22,7 @@ export interface OpenChamberRouteDependencies {
   readSettingsFromDiskMigrated: ReturnType<typeof import('../settings/settings-runtime.js').createSettingsRuntime>['readSettingsFromDiskMigrated'];
   fetchFreeZenModels: ReturnType<typeof createNotificationTemplateRuntime>['fetchFreeZenModels'];
   getCachedZenModels: ReturnType<typeof createNotificationTemplateRuntime>['getCachedZenModels'];
-  desktopUpdater?: DesktopUpdater | null;
+  desktopUpdater?: DesktopUpdater | null | undefined;
   getOpenCodeCompatibility: () => Promise<{ version: string | null }>;
 }
 

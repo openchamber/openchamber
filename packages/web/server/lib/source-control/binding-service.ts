@@ -1,4 +1,7 @@
 import { isPlainObject } from '../shared/guards.js';
+import {
+  assertExactStrings, assertRequiredString, bindingInputError, isOneOf, mutationContextError, readContextError, requiredString,
+} from './binding-input.js';
 import { isSourceControlString as isString, isSourceControlInteger as isSafeInteger } from './input-guards.js';
 import { normalizeSourceControlProviderInstance } from './provider-instance.js';
 import { isExtensionProviderId, isProviderId, isProviderUsername } from './provider-id.js';
@@ -12,18 +15,13 @@ import { allowsTopLevelProjects, splitProjectPath } from './project-path.js';
 import { parseSshUrl } from './ssh-url.js';
 import type { BindingDraft } from './binding-contract.js';
 import type { SourceControlRepositoryEndpoint, SourceControlRepositoryRemote, SourceControlManagedCredentialPresentation } from './binding-types.js';
-import type { AccountIdentity, ProviderReadContext } from './provider-contract.js';
+import type { AccountIdentity, ReadContextRequest } from './provider-contract.js';
 import type {
   BindingServiceOptions, RepositoryIdentity, RepositoryResolver, BindingRead, BindingIntent,
   TransportContextInput, AuxiliaryContextInput, TransportAuthority, AuxiliaryAuthority,
-  CloneBindingInput, MutationContextInput, BindingMutationTarget, PresentedBinding,
-  ProviderBindingInput, RemoteBindingInput, AuxiliaryBindingInput,
+  CloneBindingInput, BindingMutationTarget, PresentedBinding, BindingIntentRequest, MutationContextBody, AccountIdentityRequest,
+  RemoteBindingInput, AuxiliaryBindingInput,
 } from './binding-service-contracts.js';
-
-const bindingInputError = (message: string) => {
-  const error = Object.assign(new Error(message), { code: 'INVALID_SOURCE_CONTROL_BINDING', status: 400 });
-  return error;
-};
 
 const safePresentationText = (value: unknown, maximum = 512): value is string => isString(value) && value.length > 0
   && value.length <= maximum && value.trim() === value && !/[\0\r\n]/.test(value);
@@ -34,12 +32,7 @@ const hasExactKeys = <Value extends object>(value: Value, required: string[], op
     && keys.every((key) => required.includes(key) || optional.includes(key));
 };
 
-const requiredString = (value: string | null | undefined, name: string, makeError = bindingInputError) => {
-  if (!isString(value) || !value.trim()) throw makeError(`${name} is required`);
-  return value.trim();
-};
-
-const requiredIdentityString = (value: string | null | undefined, name: string, provider: string, makeError = bindingInputError) => {
+const requiredIdentityString = <Value>(value: Value, name: string, provider: string, makeError = bindingInputError) => {
   if (!isExtensionProviderId(provider)) return requiredString(value, name, makeError);
   if (!isString(value) || !value.length) throw makeError(`${name} is required`);
   return value;
@@ -90,9 +83,9 @@ interface ProviderParsingOptions {
   sshUrls?: Map<string, string | null>;
 }
 type ProviderBinding = BindingDraft['providers'][number];
-async function parseProviders(value: [ProviderBindingInput], repositoryRemotes: SourceControlRepositoryRemote[], options?: ProviderParsingOptions): Promise<[ProviderBinding]>;
-async function parseProviders(value: ProviderBindingInput[], repositoryRemotes: SourceControlRepositoryRemote[], options?: ProviderParsingOptions): Promise<ProviderBinding[]>;
-async function parseProviders(value: ProviderBindingInput[], repositoryRemotes: SourceControlRepositoryRemote[],
+async function parseProviders(value: [unknown], repositoryRemotes: SourceControlRepositoryRemote[], options?: ProviderParsingOptions): Promise<[ProviderBinding]>;
+async function parseProviders(value: readonly unknown[], repositoryRemotes: SourceControlRepositoryRemote[], options?: ProviderParsingOptions): Promise<ProviderBinding[]>;
+async function parseProviders(value: readonly unknown[], repositoryRemotes: SourceControlRepositoryRemote[],
   { reachesInstance = sshHostReaches, sshUrls = new Map() }: ProviderParsingOptions = {}) {
   if (!Array.isArray(value)) throw bindingInputError('providers must be an array');
   const availableRemotes = new Set(repositoryRemotes.map((remote) => remote.name));
@@ -301,7 +294,7 @@ const publicContext = (context: RepositoryIdentity) => {
   };
 };
 
-const normalizeProviderInstance = (provider: string, instance: string | null | undefined, makeError = bindingInputError) => {
+const normalizeProviderInstance = <Instance>(provider: string, instance: Instance, makeError = bindingInputError) => {
   const value = requiredString(instance, 'instance', makeError);
   try {
     return normalizeSourceControlProviderInstance(provider, value);
@@ -310,7 +303,7 @@ const normalizeProviderInstance = (provider: string, instance: string | null | u
   }
 };
 
-const providerInstanceKey = (provider: string, instance: string, makeError = bindingInputError) => (
+const providerInstanceKey = <Instance>(provider: string, instance: Instance, makeError = bindingInputError) => (
   sourceControlProviderDescriptors.has(provider)
     ? normalizeProviderInstance(provider, instance, makeError)
     : requiredString(instance, 'instance', makeError)
@@ -331,17 +324,6 @@ export const hostOf = (value: string | null | undefined) => {
   }
 };
 
-const readContextError = (code: string, message: string, status: number) => {
-  const error = Object.assign(new Error(message), { code, status });
-  return error;
-};
-
-const mutationContextError = (message: string) => readContextError(
-  'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT',
-  message,
-  400,
-);
-
 const staleBindingError = (message: string, current: BindingRead) => {
   const error = readContextError('SOURCE_CONTROL_BINDING_STALE', message, 409);
   return Object.assign(error, { current });
@@ -353,7 +335,7 @@ const transportContextError = (message: string) => readContextError(
   400,
 );
 
-const parseTarget = (value: BindingMutationTarget, provider: string) => {
+const parseTarget = <Value>(value: Value, provider: string) => {
   if (!isPlainObject(value)
     || !hasExactKeys(value, ['project'], ['number', 'head', 'base', 'headSha'])
     || !isPlainObject(value.project)
@@ -368,7 +350,7 @@ const parseTarget = (value: BindingMutationTarget, provider: string) => {
     },
   };
   if (value.number !== undefined) {
-    if (!Number.isSafeInteger(value.number) || value.number < 1) throw mutationContextError('target number is invalid');
+    if (!isSafeInteger(value.number) || value.number < 1) throw mutationContextError('target number is invalid');
     target.number = value.number;
   }
   for (const key of ['head', 'base', 'headSha'] as const) {
@@ -388,7 +370,7 @@ export function createBindingService({
   sshHostReaches: reachesInstance = sshHostReaches,
   readProviderSshUrl,
 }: BindingServiceOptions) {
-  const resolveWith = async (directory: string, resolver: RepositoryResolver) => {
+  const resolveWith = async <Directory>(directory: Directory, resolver: RepositoryResolver) => {
     const normalizedDirectory = requiredString(directory, 'directory');
     const context = await resolver(normalizedDirectory);
     if (!context.supported) {
@@ -399,8 +381,8 @@ export function createBindingService({
     }
     return context;
   };
-  const resolve = (directory: string) => resolveWith(directory, resolveRepository);
-  const readSshUrls = async (pairs: Array<readonly [string, string]>) => {
+  const resolve = <Directory>(directory: Directory) => resolveWith(directory, resolveRepository);
+  const readSshUrls = async (pairs: Array<readonly [unknown, unknown]>) => {
     const urls = new Map<string, string | null>();
     if (!(readProviderSshUrl instanceof Function)) return urls;
     for (const [provider, instance] of pairs) {
@@ -413,10 +395,12 @@ export function createBindingService({
     }
     return urls;
   };
-  const sshUrlsFor = async (providers: Array<{ provider: string; instance: string }>) => (Array.isArray(providers) ? readSshUrls(providers.map((entry): [string, string] => {
-    let instance;
-    try { instance = normalizeProviderInstance(entry.provider, entry.instance); }
-    catch { instance = entry.instance; }
+  const sshUrlsFor = async (providers: ReadonlyArray<{ provider: unknown; instance: unknown }>) => (Array.isArray(providers) ? readSshUrls(providers.map((entry): [unknown, unknown] => {
+    let instance = entry.instance;
+    if (isString(entry.provider)) {
+      try { instance = normalizeProviderInstance(entry.provider, entry.instance); }
+      catch { instance = entry.instance; }
+    }
     return [entry.provider, instance];
   })) : new Map());
   const endpointMatchesSshUrl = (displayUrl: string, sshUrl: string | null) => {
@@ -506,7 +490,7 @@ export function createBindingService({
       }),
     } };
   };
-  const validateAuthority = async (input: ProviderReadContext, makeContextError: typeof bindingInputError, makeRequiredFieldError = makeContextError) => {
+  const validateAuthority = async (input: ReadContextRequest | MutationContextBody, makeContextError: typeof bindingInputError, makeRequiredFieldError = makeContextError) => {
     if (!isPlainObject(input)) throw makeContextError('Source control read context is required');
     const directory = requiredString(input.directory, 'directory', makeRequiredFieldError);
     const repositoryId = requiredString(input.repositoryId, 'repositoryId', makeRequiredFieldError);
@@ -517,7 +501,7 @@ export function createBindingService({
     const accountId = requiredIdentityString(input.accountId, 'accountId', provider, makeRequiredFieldError);
     const primaryRemote = requiredString(input.primaryRemote, 'primaryRemote', makeRequiredFieldError);
     const bindingRevision = input.bindingRevision;
-    if (!Number.isInteger(bindingRevision) || bindingRevision < 0) throw makeContextError('bindingRevision is required');
+    if (!isInteger(bindingRevision) || bindingRevision < 0) throw makeContextError('bindingRevision is required');
 
     const context = await resolve(directory);
     if (context.repositoryId !== repositoryId) {
@@ -560,7 +544,7 @@ export function createBindingService({
     return { directory, repositoryId, provider, instance, accountId, bindingRevision, primaryRemote };
   };
   const invalidReadInput = (message: string) => readContextError('INVALID_SOURCE_CONTROL_READ_CONTEXT', message, 400);
-  const parseProviderTarget = (target: BindingIntent['target']) => {
+  const parseProviderTarget = <Target>(target: Target) => {
     if (!isPlainObject(target) || !hasExactKeys(target, ['provider', 'instance', 'accountId', 'primaryRemote'])) {
       throw bindingInputError('Provider binding target is invalid');
     }
@@ -683,12 +667,12 @@ export function createBindingService({
   };
 
   return {
-    resolveContext: async (directory: string) => publicContext(await resolve(directory)),
+    resolveContext: async <Directory>(directory: Directory) => publicContext(await resolve(directory)),
     listRemoteGrants: () => store.listRemoteGrants(),
-    get: async (directory: string) => presentRead(await readCurrent(await resolve(directory))),
+    get: async <Directory>(directory: Directory) => presentRead(await readCurrent(await resolve(directory))),
     present: presentRead,
-    validateReadContext: (input: ProviderReadContext) => validateAuthority(input, invalidReadInput, bindingInputError),
-    validateMutationContext: async (input: MutationContextInput) => {
+    validateReadContext: (input: ReadContextRequest) => validateAuthority(input, invalidReadInput, bindingInputError),
+    validateMutationContext: async (input: MutationContextBody) => {
       const context = await validateAuthority(input, mutationContextError);
       const repository = await resolve(context.directory);
       const current = await readCurrent(repository);
@@ -697,8 +681,8 @@ export function createBindingService({
       }
       return {
         ...context,
-        idempotencyKey: requiredString(input.idempotencyKey, 'idempotencyKey', mutationContextError),
-        target: parseTarget(input.target, context.provider),
+        idempotencyKey: requiredString(isPlainObject(input) ? input.idempotencyKey : undefined, 'idempotencyKey', mutationContextError),
+        target: parseTarget(isPlainObject(input) ? input.target : undefined, context.provider),
       };
     },
     validateGitTransportContext,
@@ -742,10 +726,10 @@ export function createBindingService({
         state: bindingSummary({ providers, remotes: [selected], auxiliary }),
       });
     },
-    configureTransportBinding: async (input: Pick<BindingIntent, 'directory' | 'expectedRepositoryId' | 'expectedRevision' | 'expectedConfigRevision' | 'expectedFetchFingerprint' | 'expectedPushFingerprint' | 'remote' | 'transport' | 'unverifiedConfirmed' | 'credentialAccount' | 'sshCredentialId'>) => {
+    configureTransportBinding: async (input: BindingIntentRequest) => {
       const keys = ['directory', 'expectedRepositoryId', 'expectedRevision', 'expectedConfigRevision',
         'expectedFetchFingerprint', 'expectedPushFingerprint', 'remote', 'transport'];
-      if (!isPlainObject(input) || !['system', 'https', 'ssh', 'anonymous'].includes(input.transport)
+      if (!isPlainObject(input) || !isOneOf(['system', 'https', 'ssh', 'anonymous'] as const, input.transport)
         || !hasExactKeys(input, [...keys, ...(input.transport === 'system' ? ['unverifiedConfirmed']
           : input.transport === 'https' ? ['credentialAccount'] : input.transport === 'ssh' ? ['sshCredentialId'] : [])])) {
         throw bindingInputError('Git transport binding intent is invalid');
@@ -753,10 +737,8 @@ export function createBindingService({
       if (input.transport === 'system' && input.unverifiedConfirmed !== true) {
         throw bindingInputError('Explicit confirmation of unverified System Git is required');
       }
-      for (const key of ['expectedRepositoryId', 'expectedConfigRevision', 'expectedFetchFingerprint', 'expectedPushFingerprint', 'remote'] as const) {
-        if (requiredString(input[key], key) !== input[key]) throw bindingInputError(`${key} is invalid`);
-      }
-      if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) {
+      assertExactStrings(input, ['expectedRepositoryId', 'expectedConfigRevision', 'expectedFetchFingerprint', 'expectedPushFingerprint', 'remote'] as const);
+      if (!isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) {
         throw bindingInputError('expectedRevision is required');
       }
       const context = await resolveWith(input.directory, resolveTransportRepository);
@@ -785,7 +767,7 @@ export function createBindingService({
       if (input.transport === 'https') {
         const account = input.credentialAccount;
         if (!isPlainObject(account) || !hasExactKeys(account, ['provider', 'instance', 'accountId'])
-          || !sourceControlProviderDescriptors.has(account.provider)) throw bindingInputError('Credential account is invalid');
+          || !isString(account.provider) || !sourceControlProviderDescriptors.has(account.provider)) throw bindingInputError('Credential account is invalid');
         const reference = {
           provider: account.provider,
           instance: normalizeProviderInstance(account.provider, account.instance),
@@ -845,16 +827,14 @@ export function createBindingService({
       });
       return { repository: publicContext(context), ...record, binding: resolveBindingReadiness(record.binding, context) };
     },
-    removeTransportBinding: async (input: Pick<BindingIntent, 'directory' | 'expectedRepositoryId' | 'expectedRevision' | 'expectedConfigRevision' | 'expectedFetchFingerprint' | 'expectedPushFingerprint' | 'remote'>) => {
+    removeTransportBinding: async (input: BindingIntentRequest) => {
       const keys = ['directory', 'expectedRepositoryId', 'expectedRevision', 'expectedConfigRevision',
         'expectedFetchFingerprint', 'expectedPushFingerprint', 'remote'];
       if (!isPlainObject(input) || !hasExactKeys(input, keys)) {
         throw bindingInputError('Git transport binding removal intent is invalid');
       }
-      for (const key of ['expectedRepositoryId', 'expectedConfigRevision', 'expectedFetchFingerprint', 'expectedPushFingerprint', 'remote'] as const) {
-        if (requiredString(input[key], key) !== input[key]) throw bindingInputError(`${key} is invalid`);
-      }
-      if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) {
+      assertExactStrings(input, ['expectedRepositoryId', 'expectedConfigRevision', 'expectedFetchFingerprint', 'expectedPushFingerprint', 'remote'] as const);
+      if (!isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) {
         throw bindingInputError('expectedRevision is required');
       }
       const context = await resolveWith(input.directory, resolveTransportRepository);
@@ -885,7 +865,7 @@ export function createBindingService({
       });
       return { repository: publicContext(context), ...record, binding: resolveBindingReadiness(record.binding, context) };
     },
-    configureAuxiliaryBinding: async (input: Pick<BindingIntent, 'operation' | 'directory' | 'expectedRepositoryId' | 'expectedRevision' | 'expectedConfigRevision' | 'parentRemote' | 'expectedParentFingerprint' | 'kind' | 'path' | 'expectedEndpointFingerprint' | 'transport' | 'unverifiedConfirmed' | 'credentialAccount' | 'sshCredentialId'>) => {
+    configureAuxiliaryBinding: async (input: BindingIntentRequest) => {
       const commonKeys = [
         'operation', 'directory', 'expectedRepositoryId', 'expectedRevision', 'expectedConfigRevision',
         'parentRemote', 'expectedParentFingerprint', 'kind', 'path', 'expectedEndpointFingerprint',
@@ -895,20 +875,18 @@ export function createBindingService({
           : input.transport === 'https' ? ['transport', 'credentialAccount']
             : input.transport === 'ssh' ? ['transport', 'sshCredentialId'] : ['transport']
         : [];
-      if (!isPlainObject(input) || !['configure', 'remove'].includes(input.operation)
-        || input.operation === 'configure' && !['system', 'https', 'ssh', 'anonymous'].includes(input.transport)
+      if (!isPlainObject(input) || !isOneOf(['configure', 'remove'] as const, input.operation)
+        || input.operation === 'configure' && !isOneOf(['system', 'https', 'ssh', 'anonymous'] as const, input.transport)
         || !hasExactKeys(input, commonKeys, extraKeys)
-        || !['submodule', 'lfs'].includes(input.kind)
+        || !isOneOf(['submodule', 'lfs'] as const, input.kind)
         || !(resolveCheckoutAuxiliary instanceof Function)) {
         throw bindingInputError('Git auxiliary binding intent is invalid');
       }
-      if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) {
+      if (!isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) {
         throw bindingInputError('expectedRevision is required');
       }
-      for (const key of ['expectedRepositoryId', 'expectedConfigRevision', 'parentRemote',
-        'expectedParentFingerprint', 'expectedEndpointFingerprint'] as const) {
-        if (requiredString(input[key], key) !== input[key]) throw bindingInputError(`${key} is invalid`);
-      }
+      assertExactStrings(input, ['expectedRepositoryId', 'expectedConfigRevision', 'parentRemote',
+        'expectedParentFingerprint', 'expectedEndpointFingerprint'] as const);
       const checkoutPath = requiredString(input.path, 'path');
       if (checkoutPath !== input.path || checkoutPath.length > 4096 || new RegExp(String.raw`[\0-\x1f\x7f]`).test(checkoutPath)
         || checkoutPath.startsWith('/') || /^[A-Za-z]:[\\/]/.test(checkoutPath)
@@ -917,6 +895,7 @@ export function createBindingService({
       if (input.operation === 'configure' && input.transport === 'system' && input.unverifiedConfirmed !== true) {
         throw bindingInputError('Explicit confirmation of unverified System Git is required');
       }
+      assertRequiredString(input.directory, 'directory');
       const context = await resolveWith(input.directory, resolveTransportRepository);
       const current = await readCurrent(context);
       const conflict = (authority = current) => staleBindingError('Repository auxiliary authority changed. Reload before editing.', authority);
@@ -932,11 +911,12 @@ export function createBindingService({
         remote: input.parentRemote,
         endpointKind: 'fetch',
       });
+      const { directory, parentRemote, kind } = input;
       const discover = () => resolveCheckoutAuxiliary({
-        directory: input.directory,
+        directory,
         parentEndpoint: parentAuthority.endpoint,
-        parentRemoteName: input.parentRemote,
-        kind: input.kind,
+        parentRemoteName: parentRemote,
+        kind,
         path: checkoutPath,
       });
       const discovered = await discover();
@@ -968,7 +948,7 @@ export function createBindingService({
           if (!['https', 'http'].includes(endpointProtocol)) throw bindingInputError('Managed HTTPS credentials require an HTTPS endpoint');
           const account = input.credentialAccount;
           if (!isPlainObject(account) || !hasExactKeys(account, ['provider', 'instance', 'accountId'])
-            || !sourceControlProviderDescriptors.has(account.provider)) throw bindingInputError('Credential account is invalid');
+            || !isString(account.provider) || !sourceControlProviderDescriptors.has(account.provider)) throw bindingInputError('Credential account is invalid');
           const reference = {
             provider: account.provider,
             instance: normalizeProviderInstance(account.provider, account.instance),
@@ -1024,8 +1004,8 @@ export function createBindingService({
       });
       return { repository: publicContext(context), ...record, binding: resolveBindingReadiness(record.binding, context) };
     },
-    mutateProvider: async (input: Pick<BindingIntent, 'directory' | 'expectedRepositoryId' | 'expectedRevision' | 'operation' | 'target' | 'provider'>) => {
-      if (!isPlainObject(input) || !['add', 'replace', 'remove'].includes(input.operation)
+    mutateProvider: async (input: BindingIntentRequest) => {
+      if (!isPlainObject(input) || !isOneOf(['add', 'replace', 'remove'] as const, input.operation)
         || !hasExactKeys(input, ['directory', 'expectedRepositoryId', 'expectedRevision', 'operation',
           ...(input.operation === 'add' ? [] : ['target']),
           ...(input.operation === 'remove' ? [] : ['provider'])])) {
@@ -1033,7 +1013,7 @@ export function createBindingService({
       }
       const expectedRepositoryId = requiredString(input.expectedRepositoryId, 'expectedRepositoryId');
       if (expectedRepositoryId !== input.expectedRepositoryId) throw bindingInputError('expectedRepositoryId is invalid');
-      if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) {
+      if (!isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) {
         throw bindingInputError('expectedRevision is required');
       }
       const context = await resolve(input.directory);
@@ -1124,12 +1104,12 @@ export function createBindingService({
       });
       return { repository: publicContext(context), ...record };
     },
-    resetRepositoryBinding: async (input: Pick<BindingIntent, 'directory' | 'expectedRepositoryId' | 'expectedRevision' | 'expectedConfigRevision' | 'confirmed'>) => {
+    resetRepositoryBinding: async (input: BindingIntentRequest) => {
       if (!isPlainObject(input) || !hasExactKeys(input, [
         'directory', 'expectedRepositoryId', 'expectedRevision', 'expectedConfigRevision', 'confirmed',
       ]) || input.confirmed !== true) throw bindingInputError('Explicit confirmation is required to reset a source control binding');
       const { directory, expectedRepositoryId, expectedRevision, expectedConfigRevision } = input;
-      if (!Number.isInteger(expectedRevision) || expectedRevision < 0) throw bindingInputError('expectedRevision is required');
+      if (!isInteger(expectedRevision) || expectedRevision < 0) throw bindingInputError('expectedRevision is required');
       const context = await resolve(directory);
       const current = await readCurrent(context);
       const conflict = () => staleBindingError('Repository binding authority changed. Reload before resetting it.', current);
@@ -1156,7 +1136,7 @@ export function createBindingService({
         providerUserId: requiredIdentityString(identity.providerUserId, 'providerUserId', provider),
       });
     },
-    accountUnavailable: async (identity: AccountIdentity) => {
+    accountUnavailable: async (identity: AccountIdentityRequest) => {
       if (!isPlainObject(identity)) throw bindingInputError('account identity is required');
       const provider = requiredString(identity.provider, 'provider');
       if (!isProviderId(provider)) throw bindingInputError('provider is unsupported');

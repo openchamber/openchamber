@@ -1,16 +1,14 @@
 import { z } from 'zod';
 import { sessionIdSchema } from './runtime.js';
 import type { createSessionTodosRuntime } from './runtime.js';
+import type { Response } from '../shared/http-contracts.js';
 
 const querySchema = z.object({ directory: z.string().trim().min(1) });
 
 type SessionTodosRuntime = ReturnType<typeof createSessionTodosRuntime>;
 type SessionTodosResponse = Awaited<ReturnType<SessionTodosRuntime['read']>> | { error: string };
 
-interface RouteResponse {
-  status: (code: number) => RouteResponse;
-  json: (payload: SessionTodosResponse) => RouteResponse;
-}
+type RouteResponse = Response<SessionTodosResponse>;
 
 interface SessionTodosApp {
   get: (path: string, handler: (

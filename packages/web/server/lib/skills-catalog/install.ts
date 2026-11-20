@@ -7,6 +7,7 @@ import { parseSkillRepoSource } from './source.js';
 import { removeDirectory, removeStaleCatalogFolders } from './remove-directory.js';
 import { OPENCODE_CONFIG_DIR } from '../opencode/config-files.js';
 import type { CatalogGitOptions, GitResult } from './git.js';
+import type { JsonObject, JsonValue } from '../shared/json-values.js';
 
 interface CatalogCloneOptions extends Pick<CatalogGitOptions, 'identity' | 'credentialResolver'> {
   cloneUrl: string;
@@ -17,16 +18,16 @@ interface CatalogCloneOptions extends Pick<CatalogGitOptions, 'identity' | 'cred
 type CatalogCloneResult = { ok: true } | { ok: false; error: GitResult };
 
 export interface SkillsInstallOptions extends Pick<CatalogGitOptions, 'identity' | 'credentialResolver'> {
-  source?: string | null;
-  subpath?: string | null | undefined;
+  source?: JsonValue | undefined;
+  subpath?: JsonValue | undefined;
   defaultSubpath?: string;
-  scope?: string;
-  targetSource?: string;
+  scope?: JsonValue | undefined;
+  targetSource?: JsonValue | undefined;
   workingDirectory?: string | null;
   userSkillDir?: string | null;
-  selections?: { skillDir?: string | null }[] | null;
-  conflictPolicy?: string;
-  conflictDecisions?: Record<string, string> | null;
+  selections?: { skillDir?: JsonValue }[] | null | undefined;
+  conflictPolicy?: JsonValue | undefined;
+  conflictDecisions?: JsonObject | null | undefined;
 }
 
 export interface SkillInstallConflict {

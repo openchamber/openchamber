@@ -26,7 +26,7 @@ export interface Request<Body = unknown, Params = Record<string, string>, Search
 }
 
 export interface Response<Body = unknown> extends ServerResponse {
-  status(code: number): this;
+  status<Code>(code: Code): this;
   json(body: Body): this;
   send(body?: Body): this;
   sendStatus(code: number): this;
@@ -35,6 +35,7 @@ export interface Response<Body = unknown> extends ServerResponse {
   header(name: string, value: string | readonly string[]): this;
   get(name: string): OutgoingHttpHeader | undefined;
   type(contentType: string): this;
+  format(handlers: Record<string, RequestHandler>): this;
   redirect(url: string): void;
   redirect(status: number, url: string): void;
   sendFile(filePath: string, options?: SendFileOptions, callback?: (error: Error | undefined) => void): void;
@@ -67,16 +68,16 @@ export type ErrorRequestHandler = (
 
 export interface Router {
   (request: IncomingMessage, response: ServerResponse, next?: NextFunction): void;
-  get<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp, ...handlers: RequestHandler<Body, Params, Search>[]): this;
+  get<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp | string[], ...handlers: RequestHandler<Body, Params, Search>[]): this;
   post<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp | string[], ...handlers: RequestHandler<Body, Params, Search>[]): this;
   put<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp, ...handlers: RequestHandler<Body, Params, Search>[]): this;
   patch<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp, ...handlers: RequestHandler<Body, Params, Search>[]): this;
-  delete<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp, ...handlers: RequestHandler<Body, Params, Search>[]): this;
+  delete<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp | string[], ...handlers: RequestHandler<Body, Params, Search>[]): this;
   options<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp, ...handlers: RequestHandler<Body, Params, Search>[]): this;
   head<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp, ...handlers: RequestHandler<Body, Params, Search>[]): this;
   all<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp, ...handlers: RequestHandler<Body, Params, Search>[]): this;
   use(...handlers: RequestHandler[]): this;
-  use(route: string | RegExp, ...handlers: RequestHandler[]): this;
+  use<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp | string[], ...handlers: RequestHandler<Body, Params, Search>[]): this;
   use(...handlers: ErrorRequestHandler[]): this;
   use(route: string | RegExp, ...handlers: ErrorRequestHandler[]): this;
 }
@@ -100,10 +101,14 @@ export interface JsonOptions {
 
 export interface ExpressFactory {
   (): Application;
-  json(options?: JsonOptions): RequestHandler;
+  json(options?: JsonOptions): (request: IncomingMessage & { body?: unknown }, response: ServerResponse, next: (error?: Error) => void) => void;
   raw(options?: JsonOptions): RequestHandler;
   text(options?: JsonOptions & { defaultCharset?: string }): RequestHandler;
   urlencoded(options?: JsonOptions & { extended?: boolean; parameterLimit?: number }): RequestHandler;
   Router(options?: { caseSensitive?: boolean; mergeParams?: boolean; strict?: boolean }): Router;
-  static(root: string, options?: SendFileOptions & { index?: string | string[] | false; fallthrough?: boolean }): RequestHandler;
+  static(root: string, options?: SendFileOptions & {
+    index?: string | string[] | false;
+    fallthrough?: boolean;
+    setHeaders?: (response: ServerResponse, filePath: string, stat: import('node:fs').Stats) => void;
+  }): RequestHandler;
 }

@@ -10,13 +10,13 @@ import { buildTurnEndRequest, decideAssist, decideReviewReady, decideWrapUp } fr
 import { clearSuggestionPatch, offerReviewPatch, openPatch, readWork, suggestDonePatch } from './state.js';
 import { createWorkMembership } from './membership.js';
 import { sessionParentId } from '../session-lineage.js';
-import type { SessionMetadata } from '@opencode/client';
 import type { createSessionLineage } from '../session-lineage.js';
 import type { SessionActivityProbe, RunningSessionJob } from '../opencode/session-activity.js';
 import type { ClassifierEndpoint } from '../routing/classifier.js';
 import type { createJevClient } from '../routing/jev.js';
 import type { AssistTargets } from '../session-assist/contracts.js';
 import type { WorkMetadataPatch } from './state.js';
+import type { SessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
 
 type Client = ReturnType<typeof OpenCode.make>;
 type Session = Awaited<ReturnType<Client['session']['get']>> & { directory?: string };
@@ -63,7 +63,7 @@ interface HintRequest {
 }
 
 export interface WorkEvent {
-  properties?: { directory?: string };
+  properties?: { directory?: string | undefined };
 }
 
 export interface TurnEndInput {

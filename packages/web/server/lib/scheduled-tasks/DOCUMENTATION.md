@@ -381,7 +381,7 @@ Linux start ticks are field 22 of `/proc/<pid>/stat`. The process name in
 parentheses can contain spaces and parentheses, so parsing starts after the
 last closing parenthesis before selecting the start-time field.
 
-### Why some implementations remain JavaScript
+### TypeScript boundaries
 
 `loops.ts` imports `parseMdFile`, `writeMdFile`, `getAncestors` and
 `findWorktreeRoot` from `../opencode/markdown-files.js` and
@@ -409,23 +409,34 @@ it. Candidate discovery retains its array check and checks individual candidate
 fields; a candidate may be a primitive, an array or an object. The membership
 cache contains promises of directory ownership, not session records.
 
-`service.js` inspects raw task payloads before project-config normalizes them.
+`service.ts` checks the task container before project-config normalizes it.
+Model validation reads the raw execution fields with the same nullish fallback
+as optional chaining. Target validation accepts the raw session id and parses
+it with Zod. Cancellation compares the raw task id against stored string ids
+without coercion. Public operations still reject missing ids through the
+existing string parser.
+
 `ScheduledTaskRunResult.error` and `statusCode` remain unknown because
-existing-session admission forwards unchecked thrown fields.
-`OpenChamberControlError` accepts only a string message and numeric status.
-Widening that class's stored status exposes the same mismatch in
-`Response.status(number)` across control, session, share-page and workflow
-routes. Those routes require a runtime narrowing to consume an unchecked
-status through the existing HTTP contract. A type-only conversion cannot add
-that narrowing or declare the forwarded value validated. `routes.js` has the
-same boundary directly and still depends on the JavaScript service.
-Typing the service also removes an inferred unchecked result from
-`createOpenChamberControlService.execute`. Its result then remains unknown
-at `guests/service-host-api.ts` reads of `messages` and `sessionStatus`.
-That caller needs an action-specific result contract or validation before
-those reads; narrowing its declared result without either would conceal the
-unchecked boundary. Control actions also pass nullable task ids to service
-operations, whose existing string parsing must continue to reject missing ids.
+existing-session admission forwards unchecked thrown fields. The control error
+lets `Error` coerce the message and stores the status unchanged. Guest service
+callbacks use the specific session actions' result contracts; general control
+execution can still return unchecked results from other actions.
+
+Status falls back to reading project configs when the injected runtime has no
+callable status reader. The worktree resolver normally reports the input
+directory when Git cannot resolve a checkout. A resolver that throws also
+falls through to the directory-not-found response.
+
+### Which thrown status values a route forwards
+
+`routes.ts` reads thrown fields through `controlErrorFields`, preserving inherited
+properties, primitive property reads and nullish fallbacks. A thrown `statusCode`
+is used only when it is an integer; anything else is answered as the route's
+generic failure, as it was when Express rejected the value.
+Task body object checks still accept arrays. Candidate and enabled reads retain
+primitive property access. SSE connection metadata is attached to the original
+response object, which remains the client set's identity until close or a failed
+heartbeat removes it.
 
 ### Why the runtime uses the project owner's task contracts
 
@@ -486,7 +497,7 @@ retain the journal when absence cannot be confirmed.
   - Frontmatter parsing into scheduled-task definitions
   - `syncProject` reconciles discovered loops with the persisted task list on every project sync (startup, task list load, task save/delete)
 
-- `packages/web/server/lib/scheduled-tasks/routes.js`
+- `packages/web/server/lib/scheduled-tasks/routes.ts`
   - Scheduled task CRUD endpoints
   - Listing tasks reconciles loop files first, so opening the Scheduled Tasks UI discovers file additions, edits, and removals without a server restart
   - Loop-file endpoints toggle `enabled` in frontmatter or delete the authoritative markdown file, then reconcile the project

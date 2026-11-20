@@ -37,6 +37,10 @@ Bootstrap disposal, stream reconnect and the watchdog share recovery state for t
 
 Directory session arrays are replaced on change and aggregate readers leave the shared result untouched, so all hooks can reuse the same aggregation for identical array inputs. Field comparisons first check object identity and compare metadata by reference, because metadata writes can leave `time.updated` unchanged and joined-string signatures allocate for every live session.
 
+### Why the live aggregate moves replaced records and not re-sorts every list
+
+OpenCode reports usage after every agent step, and each report replaces one record in place in one directory's list. Re-sorting thousands of sessions for that was the largest single cost of an event flush with four agents streaming. When every changed list keeps its ids at the same positions, the ids and the order they first appear in are unchanged, so `aggregateLiveSessions` takes each replaced record out and puts its winner back by binary search, ordering ties by first appearance exactly as the stable sort did. A list that gained, lost or reordered ids, or more than 64 replaced records, rebuilds the whole aggregate.
+
 ### Why eviction waits for render pins and not the count limit alone
 
 Rows obtain their stores during render and pin them after commit. One coalesced eviction microtask and a recent-access grace let those pins settle; enforcing the count immediately can repeatedly dispose a store that is still rendering and restart its bootstrap.
@@ -1746,7 +1750,7 @@ Keep this in sync with `handleDirectoryEvent` in `sync-context.tsx`:
 
 | Event type | Fields to clone |
 |---|---|
-| `session.created/patched/deleted` | `session`, `permission`, `form`, `part`, `sessionEventRevision`, `sessionDeletedRevision` (an archive patch also clears caches) |
+| `session.created/patched/deleted` | `session`, `sessionEventRevision`, `sessionDeletedRevision`; an archive patch or a delete clears the session's caches, and the reducer copies the `message`, `part`, `session_status`, `permission` and `form` maps it deletes from. A usage patch arrives after every agent step, so cloning those maps up front handed their subscribers new maps that held nothing new |
 | `session.status/idle/error` | `session_status` |
 | `message.updated` | `message` |
 | `message.patched` | `message` |
@@ -2078,6 +2082,18 @@ changes on every streamed step, so a reader that needs when sessions started
 uses `useSessionStartTimes`, which changes only when a session is added or
 removed. A list that must ignore sessions another source already holds reads
 `useLiveSessionsExcluding(ids)` instead of filtering `useAllLiveSessions()`.
+
+A published session list is never edited, so indexes over it are built once
+per list and shared through a `WeakMap`: the parent-to-children index in
+`scoped-blocking-requests.ts` backs `computeSubtreeIds` and `readChildSessions`
+(the running-subagent rows read a parent's children there instead of scanning
+the list on every flush). Scoped permissions and forms skip the subtree walk
+entirely while no session has a pending request. `useRecoveredQuestions`
+derives inside one selector and keeps its previous array while the result is
+equal, so the form dock and the transcript beside a streaming reply do not
+re-render on each `part` change. `useSessionStartTimes` compares the new list
+with the last one position by position before building a map, since a streamed
+step keeps every id where it was.
 
 ## Store splitting pattern
 

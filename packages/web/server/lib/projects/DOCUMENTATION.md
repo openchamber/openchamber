@@ -156,7 +156,7 @@ would lose an intervening append. A malformed registry fails without repair.
 
 ## Invariants
 
-- `project-id`, `project-setup`, `worktree-setup`, `session-directory`, `routes`, and `project-directory-runtime` have TypeScript
+- `project-id`, `project-config`, `project-setup`, `worktree-setup`, `session-directory`, `routes`, and `project-directory-runtime` have TypeScript
   implementations and retain their `.js` import specifiers. Setup contracts live
   in `contracts.ts`. Raw shared documents have arbitrary, unvalidated values;
   only the sanitized setup view carries the executable setup contract.
@@ -206,32 +206,24 @@ retain their original message-property behavior, including inherited properties,
 primitive values and the TypeError raised when a dependency throws null or
 undefined.
 
-### Why the project config runtime remains JavaScript
+### Why the shared file exposes JSON values
 
-`project-config.js` imports Luxon without installed declarations; a local
-dependency declaration can cover that boundary. The unresolved consumer is
-`SharedProjectFileOwner` in `../magic-prompts/runtime.ts`: its
-`readSharedProjectFile` result and `updateSharedProjectEntry` callback require
-JSON values, while `parseSharedProjectConfig` establishes only
-`SharedProjectDocument`, whose entries remain unknown.
+Parsing the file establishes JSON values, and the object check establishes the
+top-level document. Setup normalization validates only the keys it owns.
+Magic Prompts receives the original JSON entries and checks its own key before
+using it. The shared setup writer keeps the other keys through a repair.
 
-Both `SharedProjectFileOwner` members reject the schema-derived contract with
-TS2322. Correcting their declarations to accept unchecked values also requires
-correcting `parseProjectOverrides` and its object guard: the parser already
-checks every entry at runtime, but its declared input accepts only JSON values.
-The resulting unchecked callback input and output violate
-`anti-slop/no-unknown-parameters` and `anti-slop/no-unknown-returns`.
-`parseProjectOverrides(value: unknown)` independently violates the parameter
-rule. A raw dictionary declaration violates
-`anti-slop/no-unsafe-dictionary-type`; changing `hasOwn` to accept `object`
-violates `anti-slop/no-object-parameters`.
+### Why task normalization keeps input checks
 
-Type-only corrections, exported types, a small helper conversion, and dependency
-augmentations cannot move this existing parser to an allowed parsing boundary.
-Completion requires restructuring the parser/callback in `magic-prompts` or
-changing lint policy. The shared parser's result stays schema-derived, and
-unchecked values stay explicit rather than hidden behind aliases. Luxon's
-missing declarations are a separate, locally declarable dependency boundary.
+Scheduled-task fields come from disk and request bodies. Object checks still
+admit arrays where the JavaScript only checked for a non-null object. Time,
+weekday and status checks preserve the stored formats. The lock and cleanup
+code retain their error-property checks, including inherited properties. A task
+state update preserves `lastScheduledFor`, the slot claim shared by server
+instances.
+
+`dependencies.d.ts` extends the server's Luxon declaration with the ISO date
+parser and IANA zone validator used by this runtime.
 
 ### Why directory resolution keeps external checks
 

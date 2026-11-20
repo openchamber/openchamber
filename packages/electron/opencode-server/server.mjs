@@ -1,4 +1,4 @@
-// external: https://github.com/anomalyco/opencode/blob/v2.3.0/packages/cli/src/server-process.ts
+// external: https://github.com/anomalyco/opencode/blob/v2.3.2/packages/cli/src/server-process.ts
 import './plugin-runtime.mjs';
 
 import { randomBytes } from 'node:crypto';
@@ -78,6 +78,9 @@ const serve = Effect.fnUntraced(function* (options) {
       claude: !(truthy(process.env.OPENCODE_DISABLE_CLAUDE_CODE) || truthy(process.env.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS)),
       file: process.env.OPENCODE_CONFIG,
       content: process.env.OPENCODE_CONFIG_CONTENT,
+    },
+    instructions: {
+      claude: !(truthy(process.env.OPENCODE_DISABLE_CLAUDE_CODE) || truthy(process.env.OPENCODE_DISABLE_CLAUDE_CODE_PROMPT)),
     },
     windows: { gitbash: process.env.OPENCODE_GIT_BASH_PATH },
     fs: {

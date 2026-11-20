@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { formatCompactNumber } from '@/lib/numberFormat';
 import { opencodeClient } from '@/lib/opencode/client';
+import { fetchOpenCodeCompatibility } from '@/lib/opencode/compatibility';
 import type { Config } from '@/lib/opencode/model';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -22,11 +23,23 @@ type CompactionBuffer = string | number;
 
 type CompactionValues = { auto: boolean; buffer: CompactionBuffer | null; keepTokens: number | null; background: boolean };
 
-const readCompaction = (config: Config): CompactionValues => ({
+// OpenCode 2.3.1 moved background compaction from an experimental flag, off by default, to compaction.background, on by default.
+const readsLegacyBackgroundFlag = (version: string | null | undefined): boolean => {
+  const [major, minor, patch] = (version ?? '').split(/[-+]/, 1)[0].split('.').map(Number);
+  if (![major, minor, patch].every(Number.isFinite)) return false;
+  return major < 2 || (major === 2 && (minor < 3 || (minor === 3 && patch < 1)));
+};
+
+const legacyBackgroundFlag = (config: Config): boolean => {
+  const flags: object = config.experimental ?? {};
+  return 'background_compaction' in flags && flags.background_compaction === true;
+};
+
+const readCompaction = (config: Config, readsLegacyFlag: boolean): CompactionValues => ({
   auto: config.compaction?.auto !== false,
   buffer: config.compaction?.buffer ?? null,
   keepTokens: config.compaction?.keep?.tokens ?? null,
-  background: config.experimental?.background_compaction === true,
+  background: readsLegacyFlag ? legacyBackgroundFlag(config) : config.compaction?.background !== false,
 });
 
 const TokenCountSelect: React.FC<{
@@ -109,10 +122,11 @@ export const CompactionSettings: React.FC = () => {
 
   React.useEffect(() => {
     let cancelled = false;
-    opencodeClient.getConfig(null).then(
-      (config) => {
+    const version = fetchOpenCodeCompatibility().then((compatibility) => compatibility.version, () => null);
+    Promise.all([opencodeClient.getConfig(null), version]).then(
+      ([config, openCodeVersion]) => {
         if (cancelled || writes.current > 0) return;
-        saved.current = readCompaction(config);
+        saved.current = readCompaction(config, readsLegacyBackgroundFlag(openCodeVersion));
         setValues(saved.current);
       },
       (error) => console.warn('[compaction] failed to read config', error),
@@ -194,7 +208,7 @@ export const CompactionSettings: React.FC = () => {
         </SettingsFieldRow>
         <SettingsCheckboxRow
           settingsItem="sessions.background-compaction"
-          checked={values?.background ?? false}
+          checked={values?.background ?? true}
           disabled={loading || autoOff}
           onChange={(background) => void save('background', background)}
           label={t('settings.openchamber.defaults.compaction.background')}

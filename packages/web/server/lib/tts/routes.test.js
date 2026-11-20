@@ -159,10 +159,10 @@ describe('tts routes', () => {
     });
   });
 
-  it('keeps coercing unchecked summary limits from HTTP JSON', async () => {
+  it('uses the default summary limits for limits that are not numbers', async () => {
     const response = await request(createApp())
       .post('/api/text/summarize')
-      .send({ text: 'A short sentence.', threshold: '100', maxLength: null });
+      .send({ text: 'A short sentence.', threshold: '5', maxLength: null });
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
@@ -170,6 +170,24 @@ describe('tts routes', () => {
       summarized: false,
       reason: 'Text under threshold',
     });
+
+    const numeric = await request(createApp())
+      .post('/api/text/summarize')
+      .send({ text: 'A short sentence.', threshold: 5 });
+    expect(numeric.body.reason).toBe('Model summarization provider unavailable');
+
+    const note = await request(createApp())
+      .post('/api/text/summarize')
+      .send({ text: 'A short sentence.', maxLength: null, mode: 'note' });
+    expect(note.body.summary).not.toBe('');
+  });
+
+  it.runIf(process.platform === 'darwin')('never hands the say voice or rate to a shell', async () => {
+    const marker = path.join(os.tmpdir(), `openchamber-say-injection-${process.pid}-${Date.now()}`);
+    const app = createApp(Promise.resolve({ available: true, voices: [] }));
+    await request(app).post('/api/tts/say/speak').send({ text: 'Hi', voice: `Samantha" ; touch ${marker} ; echo "` });
+    await request(app).post('/api/tts/say/speak').send({ text: 'Hi', rate: `200 ; touch ${marker}` });
+    expect(fs.existsSync(marker)).toBe(false);
   });
 
   it('rejects a custom speech endpoint path that is a URL', async () => {

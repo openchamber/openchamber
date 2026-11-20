@@ -1,1 +1,1 @@
-export { isString, isPlainObject } from '../shared/guards.js';
+export { isString, isPlainObject, isPresent } from '../shared/guards.js';

@@ -27,7 +27,7 @@ type SessionAccount = ReturnType<GitHubResourceOptions['accountOf']>;
 export interface GitHubProviderOptions {
   descriptor?: ProviderDescriptor;
   authStore?: ReturnType<typeof createSourceControlAuthStore>;
-  events?: Omit<AccountEvents, 'invalidated'> & {
+  events?: Pick<AccountEvents, 'connected' | 'removed'> & {
     invalidated(identity: { provider: string; instance: unknown; accountId: unknown }): Promise<void>;
   };
   fetch?: typeof fetch | undefined;

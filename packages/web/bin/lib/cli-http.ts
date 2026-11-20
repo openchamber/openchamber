@@ -1,7 +1,8 @@
 import { buildLocalUrl } from './cli-network.js';
 import { readDesktopLocalClientTokenFromSettings, readDesktopLocalPortFromSettings } from './cli-paths.js';
-import { getInstanceFilePath, readInstanceOptions } from './cli-process.js';
+import { getInstanceFilePath, readInstanceOptions, hasInstanceFields } from './cli-process.js';
 import type { CliOptions } from './cli-args.js';
+import type { JsonValue } from '../../server/lib/shared/json-values.js';
 
 export interface JsonRequestOptions extends Pick<Partial<CliOptions>, 'explicitUiPassword' | 'uiPassword'> {
   timeoutMs?: number;
@@ -77,7 +78,7 @@ async function resolveUiPasswordForPort(port: number, options: JsonRequestOption
     return options.uiPassword;
   }
   const instanceOptions = readInstanceOptions(await getInstanceFilePath(port));
-  if (isHttpText(instanceOptions?.uiPassword) && instanceOptions.uiPassword.trim().length > 0) {
+  if (hasInstanceFields(instanceOptions) && isHttpText(instanceOptions.uiPassword) && instanceOptions.uiPassword.trim().length > 0) {
     return instanceOptions.uiPassword;
   }
   return options.uiPassword !== undefined && options.uiPassword.trim().length > 0
@@ -124,8 +125,8 @@ function getDesktopLocalAuthHeader(port: number, requestHeaders: JsonRequestHead
   return token ? `Bearer ${token}` : null;
 }
 
-async function requestServerShutdown(port: number, hostOverride?: string) {
-  if (!Number.isFinite(port) || port <= 0) return false;
+async function requestServerShutdown(port: number | undefined, hostOverride?: JsonValue) {
+  if (!isFiniteHttpNumber(port) || port <= 0) return false;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1500);
   try {
@@ -262,7 +263,7 @@ async function fetchTunnelProvidersFromPort(port: number, fetchImpl = globalThis
   }
 }
 
-async function fetchSystemInfoFromPort(port: number, fetchImpl = globalThis.fetch, hostOverride?: string) {
+async function fetchSystemInfoFromPort(port: number, fetchImpl = globalThis.fetch, hostOverride?: JsonValue) {
   if (!Number.isFinite(port) || port <= 0) {
     return null;
   }

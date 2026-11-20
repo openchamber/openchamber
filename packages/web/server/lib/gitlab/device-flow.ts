@@ -41,6 +41,12 @@ export interface GitLabOAuthRenewal {
   expiresIn?: number;
 }
 
+type GitLabDeviceExchange =
+  | { status: 'authorization_pending' }
+  | { status: 'slow_down' }
+  | { status: 'error'; error: unknown; message: unknown }
+  | ({ status: 'connected'; accessToken: string; scope: string } & GitLabOAuthRenewal);
+
 interface FetchFailure { message?: unknown }
 const hasFailureMessage = (value: unknown): value is FetchFailure => value != null;
 const hasOAuthFields = (value: unknown): value is GitLabOAuthPayload => value != null;
@@ -140,7 +146,7 @@ export async function startGitLabDeviceFlow({ origin, clientId, fetch: fetchImpl
   return payload;
 }
 
-export async function exchangeGitLabDeviceCode({ origin, clientId, deviceCode, fetch: fetchImpl = fetch, timeoutMs = 10_000 }: GitLabOAuthOptions & { deviceCode: string }) {
+export async function exchangeGitLabDeviceCode({ origin, clientId, deviceCode, fetch: fetchImpl = fetch, timeoutMs = 10_000 }: GitLabOAuthOptions & { deviceCode: string }): Promise<GitLabDeviceExchange> {
   const response = await fetchWithTimeout(fetchImpl, `${origin}/oauth/token`, {
     method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
     body: form({ client_id: clientId, device_code: deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' }),

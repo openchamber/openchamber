@@ -2,7 +2,7 @@
 
 ## Ownership
 
-`runtime.js` owns terminal identity, PTY processes, launch mode, session purpose, ordered output, bounded scrollback, WebSocket attachments, and lifecycle routes. `shutdown.ts` owns bounded runtime-wide process cleanup. `shells.ts` discovers executable shell families, resolves the persisted shell ID, and builds the per-shell argv for interactive versus command launches. Clients own tab arrangement. Interactive terminals use stable IDs; project actions keep a stable UI tab and allocate a fresh terminal ID for each command execution. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
+`runtime.ts` owns terminal identity, PTY processes, launch mode, session purpose, ordered output, bounded scrollback, WebSocket attachments, and lifecycle routes. `shutdown.ts` owns bounded runtime-wide process cleanup. `shells.ts` discovers executable shell families, resolves the persisted shell ID, and builds the per-shell argv for interactive versus command launches. Clients own tab arrangement. Interactive terminals use stable IDs; project actions keep a stable UI tab and allocate a fresh terminal ID for each command execution. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
 
 ## Protocol
 
@@ -50,32 +50,27 @@ The runtime also exposes `listTerminals({ directory })` and `readTerminal(sessio
 
 ## TypeScript boundaries
 
-`runtime.js` still forwards unchecked create-request `cwd` values to the injected
-`node:path.resolve` before `validateCwd` runs. Invalid values therefore produce
-Node's `ERR_INVALID_ARG_TYPE`, whose message and code are returned by the create
-route. The outside declaration is `node:path.resolve(...paths: string[]): string`;
-preserving that native validation with an unchecked input would require an
-outside boundary accepting `unknown` and returning `string` or throwing the
-original native error. Declaring the request's `cwd` as `string` would promise a
-check the route has not made. An earlier directory validator would change the
-HTTP error, and widening the Node declaration or bypassing it through a cast
-would hide the boundary. The runtime remains JavaScript until this boundary is
-resolved.
+Create passes unchecked `cwd` to the injected `node:path.resolve` before
+validating the directory. The terminal's platform declarations expose the
+single-argument native validation call. Node returns a resolved string for a
+string argument and throws `ERR_INVALID_ARG_TYPE` for other values. The create
+route returns that native message and code. Restart still validates the
+directory first.
 
 The helpers own their exported shell, replay-parser, appearance, shutdown and
 frame contracts. Relative import specifiers keep `.js`. The `ws` constructors,
 frames and events use `../shared/websocket-contracts.js` through the shared
-package declaration. The Node-only server check still has no declaration for
-`globalThis.Bun`.
+package declaration. The terminal's platform declarations also expose the
+optional Bun version global for the Node-only server check.
 
-Shell preferences and appearance colours reach the helpers through unconverted
-HTTP handlers. Their string guards retain the existing rejection rules. A
-missing colour stays optional; the runtime also deliberately supplies explicit
-`undefined` colours, so the appearance contract accepts both. The shell resolver
-keeps PATH and platform fallbacks when `/etc/shells` cannot be read.
+Shell preferences and appearance colours arrive unchecked from HTTP. The shell
+resolver checks the preference and keeps its PATH and platform fallbacks when
+`/etc/shells` cannot be read. Create and restart retain the raw colours. The
+theme parser checks each colour before use, and the appearance route updates a
+colour only when its input is a string.
 
 The frame reader accepts every non-null JSON object, including arrays. It does
-not establish a v3 message shape; `runtime.js` checks the version, kind, session
+not establish a v3 message shape; `runtime.ts` checks the version, kind, session
 id and input after decoding. URL and text-message string guards remain at their
 HTTP and WebSocket boundaries. ArrayBuffer and Uint8Array inputs call separate
 `Buffer.from` overloads with the same runtime semantics: ArrayBuffer storage is

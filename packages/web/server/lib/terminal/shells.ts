@@ -6,8 +6,8 @@ export type TerminalShellPreference = 'auto' | TerminalShellId;
 export type TerminalLaunchMode = 'interactive' | 'command';
 
 export interface TerminalShellLaunchOptions {
-  mode?: TerminalLaunchMode;
-  command?: string | null;
+  mode?: TerminalLaunchMode | undefined;
+  command?: string | null | undefined;
   loginShell?: boolean;
   platform?: NodeJS.Platform;
 }

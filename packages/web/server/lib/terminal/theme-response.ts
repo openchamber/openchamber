@@ -2,9 +2,9 @@ export type TerminalThemeMode = 'light' | 'dark';
 
 export interface TerminalThemeAppearance {
   themeMode: TerminalThemeMode;
-  foreground?: string | undefined;
-  background?: string | undefined;
-  modeEnabled?: boolean;
+  foreground?: unknown;
+  background?: unknown;
+  modeEnabled?: boolean | undefined;
 }
 
 export interface TerminalThemeResponses {
@@ -34,7 +34,7 @@ const CONTROL_SEQUENCES = [
 
 const isColorText = (value: unknown): value is string => typeof value === 'string';
 
-const parseColor = (value: string | undefined) => {
+const parseColor = (value: TerminalThemeAppearance['foreground']) => {
   if (!isColorText(value)) return null;
   const hex = value.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)?.[1];
   if (hex) {
@@ -45,7 +45,7 @@ const parseColor = (value: string | undefined) => {
   return rgb ? rgb.slice(1, 4).map((part) => Math.min(255, Number(part))) : null;
 };
 
-const colorReport = (code: number, color: string | undefined) => {
+const colorReport = (code: number, color: TerminalThemeAppearance['foreground']) => {
   const rgb = parseColor(color);
   if (!rgb) return null;
   const channels = rgb.map((channel) => channel.toString(16).padStart(2, '0').repeat(2));

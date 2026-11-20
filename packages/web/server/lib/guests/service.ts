@@ -66,7 +66,7 @@ export type GuestServiceRequest = {
   guestId: string;
   guestName?: string | undefined;
   packageRoot: string;
-  service: ServiceContribution;
+  service: ServiceContribution | undefined;
   granted: string[] | undefined;
   persistPath: string;
   method: string;
@@ -598,6 +598,7 @@ export const openGuestServiceRequest = async ({
   }
 
   const socketOverrides = store.serviceSocketOverrides?.[guestId] ?? {};
+  if (!service) throw new TypeError("Cannot read properties of undefined (reading 'permissions')");
   const socketBindings = service.permissions?.sockets ?? [];
 
   let runtime = runtimes.get(guestId);

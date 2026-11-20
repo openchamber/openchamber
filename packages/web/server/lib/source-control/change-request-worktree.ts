@@ -11,7 +11,7 @@ export type ChangeRequestHead = Awaited<ReturnType<NonNullable<ProviderImplement
 export interface ChangeRequestWorktreeOptions {
   readBinding(directory: string): Promise<BindingRead>;
   providers: {
-    list(): ProviderDescriptor[];
+    list(): readonly ProviderDescriptor[];
     implementation(id: string): Promise<{ auth: Pick<ProviderImplementation['auth'], 'ownsHost' | 'listInstances' | 'listSshHosts'> } | null>;
   };
   readCurrentAccountId(identity: ProviderIdentity): Promise<string | null>;

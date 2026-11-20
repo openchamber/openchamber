@@ -400,21 +400,21 @@ completion is awaited before the goal is returned. Small-model generation owns
 the string contract for distilled text and accepts the existing `sessionID` and
 omitted options.
 
-### Why the loop remains JavaScript
+### Why the loop checks fields at their point of use
 
-`runtime.js:getErrorName` calls `error?.name?.trim?.()` without checking the name
-or the method's result. A callable `trim` can return an arbitrary value; declaring
-a string result would promise more than the code checks. A predicate exposing
-`trim?: () => unknown` is rejected by
-`tools/oxlint/anti-slop/rules/no-unknown-returns.ts:noUnknownReturnsRule`.
-A temporary conversion probe reproduces that diagnostic. The same probe rejects
-an unknown error-parser parameter through `noUnknownParametersRule` and its
-non-predicate `typeof` checks through `noRuntimeTypeofRule`.
+OpenCode responses and events supply JSON; the metadata store supplies a loose
+object whose nested values still need checking. Invalid goal counters use the
+existing defaults. Message completion comparisons still coerce wire values as
+JavaScript numeric comparisons do, while token counts require finite numbers.
+OpenCode sends message pages newest first; the loop projects and reverses them
+before accounting. The event bridge translates `session.execution.interrupted` to a
+`session.idle` event with `aborted: true` before the loop sees it.
 
-Changing a server owner's declared type, exporting a type, converting a small
-helper or augmenting a dependency cannot change these lint-policy boundaries.
-The loop stays whole in JavaScript to preserve the optional call, its unchecked
-return and its existing failures without casts or a replacement contract.
+An assistant's structured error starts with `name` from OpenCode's `type`;
+an explicit wire `name` can override it. A missing `trim` gives an empty name,
+a present non-callable `trim` fails the tick, and a callable `trim` runs with
+the original receiver. Its result stays unchecked until the loop compares it
+with known error names or turns it into a reason string.
 
 ### Why objective routes use the shared HTTP contract
 

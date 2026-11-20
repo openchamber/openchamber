@@ -368,9 +368,6 @@ export function handleEvent(
     case "session.patched":
     case "session.deleted":
       cloneField("session", (value) => [...value])
-      cloneField("permission", (value) => ({ ...value }))
-      cloneField("form", (value) => ({ ...value }))
-      cloneField("part", (value) => ({ ...value }))
       cloneField("sessionEventRevision", (value) => ({ ...(value ?? {}) }))
       cloneField("sessionDeletedRevision", (value) => ({ ...(value ?? {}) }))
       break

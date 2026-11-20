@@ -121,7 +121,7 @@ export interface OpenCodeLifecycleDependencies {
   normalizeApiPrefix: (prefix: string) => string;
   applyOpencodeBinaryFromSettings: (options?: { strict: boolean }) => Promise<string | null | void>;
   ensureOpencodeCliEnv: () => string | null | undefined;
-  ensureLocalOpenCodeServerPassword: (options: { rotateManaged: boolean }) => Promise<string>;
+  ensureLocalOpenCodeServerPassword: (options: { rotateManaged: boolean }) => Promise<string | null>;
   resolveManagedOpenCodeLaunchSpec: (binary: string | null | undefined) => ManagedOpenCodeLaunchSpec;
   setOpenCodePort: (port: number) => void;
   setDetectedOpenCodeApiPrefix: (prefix: string) => void;
@@ -473,7 +473,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
 
     if (process.platform === 'win32') {
       await stopOpenCodeByClosingStdin(child, {
-        forceKillTree: (treePid: number) => {
+        forceKillTree: (treePid: number | undefined) => {
           try {
             spawnSync('taskkill', ['/pid', String(treePid), '/f', '/t'], {
               stdio: 'ignore',
@@ -907,8 +907,8 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
       {
         ...managedOpenCodeEnv,
         PATH: inheritedEnv.PATH,
-        OPENCODE_PASSWORD: openCodePassword,
-        OPENCODE_SERVER_PASSWORD: openCodePassword,
+        OPENCODE_PASSWORD: openCodePassword ?? undefined,
+        OPENCODE_SERVER_PASSWORD: openCodePassword ?? undefined,
       },
     ))));
     managedProcessEnv = processEnv;

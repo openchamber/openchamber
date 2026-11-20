@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { createJevClient } from '../routing/jev.js';
+import type { createJevClient, JevRequest } from '../routing/jev.js';
 
 type JevAnswers = Awaited<ReturnType<ReturnType<typeof createJevClient>['ask']>>['answers'];
 
@@ -78,7 +78,7 @@ export const buildJevAuditRequest = ({ objective, answer }: AuditInput) => ({
     id,
     { type: 'noul', instructions: [CONTEXT, question], criteria },
   ])),
-});
+}) satisfies JevRequest;
 
 const noulAnswer = z.object({ noul: z.number() });
 

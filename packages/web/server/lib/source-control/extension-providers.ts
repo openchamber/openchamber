@@ -3,7 +3,6 @@ import { isGuestApproved, requestedGuestCapabilities, serviceProvides } from '@o
 import { buildExtensionDescriptor } from './extension-descriptor.js';
 import { extensionProviderId } from './provider-id.js';
 import type { GuestRecord } from '../guests/contracts.js';
-import type { ProviderDescriptor } from './provider-contract.js';
 import type { createSourceControlAuthStore } from './auth-storage.js';
 
 export type SourceControlProviderGuest = GuestRecord & {
@@ -12,7 +11,7 @@ export type SourceControlProviderGuest = GuestRecord & {
 };
 export interface ExtensionProvidersOptions {
   listGuests(): Promise<GuestRecord[]>;
-  register(input: { descriptor: ProviderDescriptor; guest: SourceControlProviderGuest }): void;
+  register(input: { descriptor: ReturnType<typeof buildExtensionDescriptor>; guest: SourceControlProviderGuest }): void;
   unregister(id: string): void;
   dropSection: ReturnType<typeof createSourceControlAuthStore>['dropSection'];
   emitChanged(): void;
@@ -37,7 +36,7 @@ export const isSourceControlProviderGuest = (guest: GuestRecord | null | undefin
 };
 
 export function createExtensionProviders({ listGuests, register, unregister, dropSection, emitChanged }: ExtensionProvidersOptions) {
-  const registered = new Map<string, { descriptorKey: string; key: string; descriptor: ProviderDescriptor }>();
+  const registered = new Map<string, { descriptorKey: string; key: string; descriptor: ReturnType<typeof buildExtensionDescriptor> }>();
   let queue = Promise.resolve();
 
   const run = async () => {

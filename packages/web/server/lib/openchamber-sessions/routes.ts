@@ -113,7 +113,7 @@ export interface SessionServiceDependencies {
   broadcastGlobalUiEvent?: (event: { type: string; properties: { sessionID: string; archivedAt?: number | null; metadata?: SessionMetadata | undefined } }) => void;
   onSessionArchived?: ((sessionID: string, archivedAt: number | null) => void) | null;
   createSessionGoal?: typeof createSessionGoal;
-  sessionKnowledgeRuntime?: { sync: (sessionID: string, directory: string, responseStyle?: string) => Promise<void> } | null;
+  sessionKnowledgeRuntime?: { sync: (sessionID: string, directory: string, responseStyle?: string) => Promise<boolean | void> } | null;
   worktreeBootstrapStore: BootstrapStore;
   hydrateWorktreeCheckout: FeatureRoutesRuntime['hydrateBoundCheckout'];
   createChangeRequestWorktree?: ((input: { directory: string; number: number; name?: string; branchName?: string; startCommand?: string; createCommand?: string }) => Promise<SessionMoveWorktree>) | null;

@@ -69,6 +69,7 @@ The animated logo already indicates startup activity, so normal connection state
 - Background Git and setup commands receive EOF on stdin because no user can answer their prompts. Payload-derived remote values stay positional after `--` so a leading hyphen cannot become a Git option.
 - OpenCode owns sandbox registration when a location boots. The extension never writes OpenCode storage JSON to register a worktree. Run snapshots use private refs so Git keeps them reachable without displaying them as branches or tags.
 - Batch staging retries unmatched paths individually because queued optimistic mutations can already have staged a deleted file, and one unmatched path would fail the whole batch. Stash apply first restores the index split and falls back to plain apply when that split cannot be reinstated.
+- Stash file counts use `stash show --include-untracked --name-only`, matching the server. The flag includes the third parent's untracked files without another Git process per stash.
 - Log base resolution prefers a local ref and falls back to `origin/<ref>` only when the local ref is missing. A newly initialized branch without commits has empty history. Remote URL parsing accepts CRLF and ignores suffix decorations after the URL-kind marker, preserves the first URL, and uses Git's name-as-URL fallback when no fetch URL exists.
 
 ### Process, session and quota state

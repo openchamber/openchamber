@@ -17,7 +17,7 @@ function insideGlobalSessionsSelector(node: ESTree.Node): boolean {
   return false;
 }
 
-/** Flag a scan of the whole session list inside a useGlobalSessionsStore selector. */
+/** Flag a scan of the whole session list inside a useGlobalSessionsStore selector, by method or by loop. */
 export const noSessionListScanInSelectorsRule = defineRule({
   meta: {
     type: "problem",
@@ -35,6 +35,10 @@ export const noSessionListScanInSelectorsRule = defineRule({
         if (!SCANS.has(propertyName(node) ?? "")) return;
         if (!SESSION_LISTS.has(propertyName(node.object) ?? "")) return;
         if (insideGlobalSessionsSelector(node)) context.report({ node, messageId: "scan" });
+      },
+      ForOfStatement(node) {
+        if (!SESSION_LISTS.has(propertyName(node.right) ?? "")) return;
+        if (insideGlobalSessionsSelector(node)) context.report({ node: node.right, messageId: "scan" });
       },
     };
   },

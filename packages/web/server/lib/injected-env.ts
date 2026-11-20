@@ -1,7 +1,7 @@
 import type { JsonValue } from './shared/json-values.js';
 export const INJECTED_ENV_KEY = 'OPENCHAMBER_INJECTED_ENV';
 
-export function injectedEnvKeys(env: NodeJS.ProcessEnv) {
+export function injectedEnvKeys(env: NodeJS.ProcessEnv): Set<string> {
   const record = env[INJECTED_ENV_KEY] ?? '';
   if (record.length === 0) return new Set();
   const keys = new Set(record.split(',').filter((key) => key.length > 0));

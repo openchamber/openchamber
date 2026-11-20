@@ -86,7 +86,7 @@ const writeEntries = (entries: InstalledSourceEntry[]) => {
   fs.renameSync(tmp, target);
 };
 
-export const isInstalledFromSource = (provenanceByName: Map<string, InstalledSourceEntry[]>, skillName: string, sourceId: string, skillDir: string) => {
+export const isInstalledFromSource = <Directory>(provenanceByName: Map<string, InstalledSourceEntry[]>, skillName: string, sourceId: string, skillDir: Directory) => {
   const provenance = provenanceByName.get(skillName);
   return !provenance || provenance.length === 0
     || provenance.some((entry) => entry.sourceId === sourceId && entry.skillDir === skillDir);
