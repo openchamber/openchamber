@@ -86,9 +86,13 @@ absent `endpointPath` keeps the OpenAI `/v1/audio/transcriptions` path.
 
 ## Segmentation
 
-A dictation is one segment unless it runs long. Past `segmentMinSeconds`
-(15 s) the manager cuts inside the first pause it finds, so cuts land between
-words; `segmentMaxSeconds` (25 s) is a hard cap for speech with no pause in it.
+A dictation is one segment unless it runs long. For local models the manager
+cuts at the first pause after 15 s, or at 25 s without a pause. For the
+OpenAI-compatible provider those bounds are 60 s and 120 s, so its transcription
+has more context. At 16 kHz PCM16, 120 s is under 4 MB of WAV audio, below
+OpenAI's 25 MB upload limit. Other compatible servers may have lower limits.
+The finalization deadline includes audio already committed but still awaiting a
+transcript, as well as the uncommitted tail.
 
 Pauses are found inside each ~1 s client chunk, not at chunk boundaries: the
 chunk is scored in 50 ms RMS frames; a frame is quiet when it is close to the
