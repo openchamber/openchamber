@@ -450,6 +450,26 @@ one session the user may want to open.
   it; closing the dialog cancels the Done. Archive on Done keeps its own guard
   after that: a worker still running in the worktree keeps it.
 
+### Leads
+
+A lead (`metadata.openchamber.lead`, `lib/sessionLead.ts`, server side in
+`packages/web/server/lib/session-lead/`) is a session the user marked to run
+a direction through its own workers. Its one mark is an outlined flag
+(`lead-flag`) in the one-line row's chevron slot, the way the worktree icon
+sits in a group header: the title starts where every row's title starts, and
+with workers under it the flag gives way to the chevron on hover or focus
+(`SessionLeadSlot`); on touch the flag stays and a tap on it still toggles.
+Two-line rows show the flag with the row's marks, the phone beside the title.
+The row's states are any session's: no count of workers. A lead starts from
+New lead (a draft with its own welcome heading): in the project menu, and in
+the menu of the project's "+" (right click on desktop, long press on the
+phone; a plain click or tap still opens an ordinary draft), and the `new_lead`
+shortcut (⇧⌥⌘L) and palette command, which on an open draft switch it between
+session and lead and keep what was typed. The session menu
+makes an existing session a lead and turns it back. VS Code
+has neither start, because its agent has no `openchamber` tool, but shows
+existing leads.
+
 ### Why a running worker asks before Done and not after
 
 Archive on Done reads whether the worktree is busy only after the work left

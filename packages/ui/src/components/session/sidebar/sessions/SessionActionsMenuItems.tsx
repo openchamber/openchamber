@@ -18,6 +18,8 @@ import { useMultiRunMemberIds } from '@/lib/multirun/useMultiRuns';
 import type { Session } from '@/lib/opencode/model';
 import { getSessionPinList } from '@/lib/sessionPins';
 import { isOperatorChildSession } from '@/lib/sessionOperatorChild';
+import { isLeadSession } from '@/lib/sessionLead';
+import { setSessionLead } from '@/sync/session-lead';
 import { takeOverSession } from '@/sync/session-take-over';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { DEFAULT_PIN_LIST } from '@/lib/sidebarSections';
@@ -136,6 +138,12 @@ export function SessionActionsMenuItems({
 
   const takeOver = () => {
     void takeOverSession(session.id, directory).catch(() => toast.error(t('sessions.sidebar.session.takeOver.failed')));
+  };
+
+  const isLead = isLeadSession(session);
+  const canLead = !isVSCode && !archived && !isSubtaskSession && !isOperatorChildSession(session);
+  const toggleLead = () => {
+    void setSessionLead(session.id, directory, !isLead).catch(() => toast.error(t('sessions.sidebar.session.lead.failed')));
   };
 
   const copySessionId = () => {
@@ -501,6 +509,14 @@ export function SessionActionsMenuItems({
           <Item onClick={takeOver} className="[&>svg]:me-1" data-session-take-over={session.id}>
             <Icon name="user" className="me-1 h-4 w-4" />
             {t('sessions.sidebar.session.menu.takeOver')}
+          </Item>
+        </SessionMenuItemHint>
+      ) : null}
+      {canLead ? (
+        <SessionMenuItemHint hint={isLead ? t('sessions.sidebar.session.menuHint.stopLead') : t('sessions.sidebar.session.menuHint.makeLead')}>
+          <Item onClick={toggleLead} className="[&>svg]:me-1">
+            <Icon name="lead-flag" className="me-1 h-4 w-4" />
+            {isLead ? t('sessions.sidebar.session.menu.stopLead') : t('sessions.sidebar.session.menu.makeLead')}
           </Item>
         </SessionMenuItemHint>
       ) : null}

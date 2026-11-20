@@ -43,6 +43,8 @@ source:
 | `openchamber.checkout` | the directory and branch the session works on |
 | `openchamber.response-style` | the user's current response style |
 | `openchamber.extensions` | what active extensions add: their UI block components and their instructions (`../guests/agent-context.js`) |
+| `openchamber.lead` | for a lead only: how a lead works (`../session-lead/`) |
+| `openchamber.lead-brief` | for a lead only: its brief, also written right after `lead.brief` saves it |
 
 `sync` writes all of them right before a message goes out: the UI awaits it
 before the prompt request, the queue, scheduled tasks and dispatched sessions

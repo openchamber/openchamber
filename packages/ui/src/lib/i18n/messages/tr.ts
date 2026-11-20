@@ -44,6 +44,7 @@ import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { operatorChildrenI18n } from './operator-children.i18n';
+import { leadI18n } from './lead.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -177,6 +178,7 @@ export const dict = {
   ...sidebarSectionsI18n.tr,
   ...worktreeArchiveI18n.tr,
   ...operatorChildrenI18n.tr,
+  ...leadI18n.tr,
   ...omniSearchI18n.tr,
   ...overviewI18n.tr,
   ...isolatedSpacesI18n.tr,

@@ -63,6 +63,14 @@ constructor retains its existing `Object.assign` behavior.
   empty or null on update to clear the stored branch. Anything else is a 400
   before upsert, because the CLI HTTP route forwards raw JSON and a wrong type
   would turn isolation off or erase the branch.
+- `session-listing.js` owns `session.list` and `session.archive`. `mine`
+  lists only the sessions the calling session created with `ownWork`
+  (`metadata.openchamber.kind === 'operator-child'` with its id as
+  `parentID`), across every project unless scoped, each with its status; a
+  call without a calling session is a `400`. `session.archive` archives only
+  such a session of the caller (`403` for any other), so an agent cleans up
+  its own finished work and never the user's sessions. `lead.brief` and
+  `lead.digest` go to `../session-lead/` (`leadActions`).
 - `project-knowledge.js` runs the `knowledge.*` actions of the
   `openchamber_knowledge` agent tool (`list`, `save`, `delete`, `show`;
   `kind` names note, todo or plan) against

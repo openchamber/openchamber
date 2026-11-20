@@ -1011,6 +1011,28 @@ describe('OpenChamber control service', () => {
       expect(client.session.list).toHaveBeenCalledTimes(1);
     });
 
+    it('lists the sessions the caller created with ownWork, with their status, and archives only those', async () => {
+      const archive = vi.fn(async () => ({ archived: [], failedIds: [] }));
+      const { service, client } = createService();
+      const child = (id, parentID) => session(id, { metadata: { openchamber: { kind: 'operator-child', parentID } } });
+      const records = [child('mine', 'ses_lead'), child('theirs', 'ses_other'), session('plain'), session('sub', { parentID: 'ses_lead' })];
+      client.session.active.mockResolvedValue({ mine: { type: 'running' } });
+      client.session.list.mockResolvedValue({ data: records });
+      client.session.get.mockImplementation(async ({ sessionID }) => records.find((record) => record.id === sessionID));
+
+      const result = await service.execute('session.list', { mine: true }, '/repo', { contextSessionId: 'ses_lead' });
+      expect(result.sessions.map(({ id, status }) => [id, status.type])).toEqual([['mine', 'busy']]);
+      await expect(service.execute('session.list', { mine: true }, '/repo')).rejects.toMatchObject({ statusCode: 400 });
+
+      const { service: archiving, client: archiveClient } = createService({ sessionService: { archive } });
+      archiveClient.session.get.mockImplementation(async ({ sessionID }) => records.find((record) => record.id === sessionID));
+      await expect(archiving.execute('session.archive', { sessionId: 'theirs' }, '/repo', { contextSessionId: 'ses_lead' })).rejects.toMatchObject({ statusCode: 403 });
+      await expect(archiving.execute('session.archive', { sessionId: 'plain' }, '/repo', { contextSessionId: 'ses_lead' })).rejects.toMatchObject({ statusCode: 403 });
+      expect(archive).not.toHaveBeenCalled();
+      expect(await archiving.execute('session.archive', { sessionId: 'mine' }, '/repo', { contextSessionId: 'ses_lead' })).toEqual({ sessionId: 'mine', archived: true });
+      expect(archive).toHaveBeenCalledWith({ ids: ['mine'] });
+    });
+
     it('never answers busy with an empty list it could not read', async () => {
       const { service, client } = createService();
       client.session.active.mockRejectedValue(new Error('unavailable'));

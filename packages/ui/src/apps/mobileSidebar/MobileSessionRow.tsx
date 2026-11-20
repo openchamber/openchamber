@@ -26,6 +26,8 @@ import { useI18n } from '@/lib/i18n';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { isDoneSuggested } from '@/lib/sessionWorkMetadata';
 import { isOperatorChildSession } from '@/lib/sessionOperatorChild';
+import { isLeadSession } from '@/lib/sessionLead';
+import { setSessionLead } from '@/sync/session-lead';
 import { takeOverSession } from '@/sync/session-take-over';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { collectSessionWorkInWork } from '@/components/session/sidebar/works/sidebarWorks';
@@ -168,6 +170,10 @@ export const MobileSessionRow: React.FC<{
   const pinMarker = pinned && !inPinnedZone
     ? <Icon name="pushpin" className="size-3 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.status.pinned')} />
     : null;
+  const isLead = isLeadSession(session);
+  const leadMarker = isLead
+    ? <Icon name="lead-flag" className="size-3 shrink-0 text-muted-foreground" role="img" aria-hidden={false} aria-label={t('sessions.sidebar.session.leadMark')} />
+    : null;
   const doneHint = showDoneHint
     ? <Icon name="check" className="size-3.5 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.work.doneSuggested')} />
     : null;
@@ -208,6 +214,7 @@ export const MobileSessionRow: React.FC<{
             {titleText}
             {doneHint}
             {hasSecondLine ? null : marks}
+            {leadMarker}
             {pinMarker}
             {liveState}
             {timeSlot}
@@ -249,6 +256,7 @@ export const MobileSessionRow: React.FC<{
           {refMark(false)}
           {marks}
           <MobileSessionPendingBadges {...pendingRequests} />
+          {leadMarker}
           {pinMarker}
           {liveState}
           {timeSlot}
@@ -274,6 +282,12 @@ export const MobileSessionRow: React.FC<{
         <ContextMenuItem onClick={work.onToggle}>
           <Icon name={work.inWork ? 'check' : 'eye'} className="me-1 size-4" />
           {work.inWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
+        </ContextMenuItem>
+      ) : null}
+      {topLevel && !isOperatorChildSession(session) ? (
+        <ContextMenuItem onClick={() => { void setSessionLead(session.id, directory || null, !isLead).catch(() => toast.error(t('sessions.sidebar.session.lead.failed'))); }}>
+          <Icon name="lead-flag" className="me-1 size-4" />
+          {isLead ? t('sessions.sidebar.session.menu.stopLead') : t('sessions.sidebar.session.menu.makeLead')}
         </ContextMenuItem>
       ) : null}
       {isOperatorChildSession(session) ? (

@@ -45,6 +45,7 @@ import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { operatorChildrenI18n } from './operator-children.i18n';
+import { leadI18n } from './lead.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -249,6 +250,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarSectionsI18n.uk,
   ...worktreeArchiveI18n.uk,
   ...operatorChildrenI18n.uk,
+  ...leadI18n.uk,
   ...omniSearchI18n.uk,
   ...overviewI18n.uk,
   ...isolatedSpacesI18n.uk,

@@ -252,6 +252,7 @@ export const SETTINGS_REGISTRY = {
   agentKnowledgeToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentKnowledgeToolEnabled', (v) => useUIStore.getState().setAgentKnowledgeToolEnabled(v)) }),
   agentWorkflowToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWorkflowToolEnabled', (v) => useUIStore.getState().setAgentWorkflowToolEnabled(v)) }),
   agentWorkflowAutoApprove: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWorkflowAutoApprove', setUi('agentWorkflowAutoApprove')) }),
+  agentWorkflowAutoApproveLeads: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWorkflowAutoApproveLeads', setUi('agentWorkflowAutoApproveLeads')) }),
   isolatedSpacesEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('isolatedSpacesEnabled', (v) => useUIStore.getState().setIsolatedSpacesEnabled(v)) }),
   isolatedSpacesIdleStop: field({
     scope: 'instance',

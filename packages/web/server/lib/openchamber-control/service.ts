@@ -16,11 +16,11 @@ import { runWaitAction } from './waits.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
 import { createWorkMembership } from '../session-work/membership.js';
-import { isListedAsChild, listedSession } from './listed-session.js';
+import { createSessionListing, positiveInteger } from './session-listing.js';
 import { isPinnedMetadata, userStatePatch } from '../session-work/state.js';
 import { z } from 'zod';
 import { resolveUploadFiles, UploadRefusedError } from '../browser-control/uploads.js';
-import type { SessionInfo, ModelInfo, SessionListInput, PermissionReplyInput, SessionFormCancelInput, FormInfo } from '@opencode/client';
+import type { SessionInfo, ModelInfo, PermissionReplyInput, SessionFormCancelInput, FormInfo } from '@opencode/client';
 import type { ControlClient } from './opencode-client.js';
 import type { FormValues } from './form-answer.js';
 import type { PageAnswerInput } from './render-page.js';
@@ -39,10 +39,11 @@ import type { WaitActionRequest } from './waits.js';
 import type { createDispatchResultsRuntime } from '../dispatch-results/runtime.js';
 import type { createBrowserControlRouter } from '../browser-control/provider.js';
 import type { createUploadStore } from '../browser-control/uploads.js';
-import type { ListedSession, ListedSessionRecord } from './listed-session.js';
+import type { ListedSessionRecord } from './listed-session.js';
 import type { BrowserControlParameters } from '../browser-control/broker.js';
 import type { createAgentMemoryActions } from '../agent-memory/actions.js';
 import type { createWorkflowRuntime } from '../workflows/runtime.js';
+import type { createLeadActions } from '../session-lead/actions.js';
 
 interface ControlSettings {
   projects?: unknown;
@@ -103,6 +104,7 @@ export interface ControlDependencies {
   extensionWaits?: WaitActionRequest['extensionWaits'] | null;
   laterPages?: ReturnType<typeof createLaterPages> | null;
   workflowRuntime?: Pick<ReturnType<typeof createWorkflowRuntime>, 'executeAction'> | null;
+  leadActions?: Pick<ReturnType<typeof createLeadActions>, 'execute'> | null;
   sharePages?: Parameters<typeof createRenderPageAction>[0]['sharePages'];
   archiveStore?: { entry: (sessionID: string) => Promise<number | null | undefined> } | null;
   isOpenCodeDirectoryTrusted?: ((directory: string) => Promise<boolean>) | null;
@@ -212,14 +214,6 @@ const SCHEDULE_TASK_ID_ACTIONS = new Set([
   'schedule.toggle',
 ]);
 
-const positiveInteger = <Fallback extends number | null>(value: ControlInput['limit'], fallback: Fallback, field: string) => {
-  if (value === undefined || value === null) return fallback;
-  const number = Number(value);
-  if (!Number.isSafeInteger(number) || number < 1) {
-    throw new OpenChamberControlError(`${field} must be a positive integer`, 400);
-  }
-  return number;
-};
 
 const normalizeWaitTimeoutMs = (value: ControlInput['timeout']) => {
   const seconds = value === undefined || value === null ? DEFAULT_WAIT_TIMEOUT_SECONDS : Number(value);
@@ -483,6 +477,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     extensionWaits = null,
     laterPages = null,
     workflowRuntime = null,
+    leadActions = null,
     sharePages = null,
     archiveStore = null,
     isOpenCodeDirectoryTrusted = null,
@@ -536,6 +531,10 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     getSession: async (sessionID) => {
       const client = await getClient();
       return client.session.get({ sessionID }).catch(() => null);
+    },
+    renameSession: async (sessionID, title) => {
+      const client = await getClient((await resolveSessionDirectory(sessionID)) ?? '');
+      await client.session.update({ sessionID, title });
     },
     createError: (message, status) => new OpenChamberControlError(message, status),
   }) : null;
@@ -720,76 +719,19 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     return settings?.sessionWorkEnabled !== false;
   };
 
-  const FILTERED_PAGE_SIZE = 200;
-
-  const listSessions = async (input: ControlInput, contextDirectory: ControlInput['directory']) => {
-    assertSingleScope(input);
-    const inWork = input.inWork === true;
-    const busy = input.busy === true;
-    const terms = (asNonEmptyString(input.query) ?? '').toLowerCase().split(/\s+/).filter(Boolean);
-    const scoped = Boolean(asNonEmptyString(input.projectId) || asNonEmptyString(input.directory));
-    const everywhere = (inWork || busy) && !scoped;
-    const directory = everywhere ? null : await resolveReadDirectory(input, contextDirectory);
-    const limit = positiveInteger(input.limit, inWork || busy ? null : 10, 'limit');
-    const workEnabled = await isSessionWorkEnabled();
-    if (inWork && !workEnabled) throw new OpenChamberControlError('In work is turned off in Settings', 409);
-
-    const client = await getClient(directory ?? '');
-    const wantStatus = busy || input.withStatus === true;
-    const statuses = wantStatus ? await activeSessions(client).catch(() => null) : null;
-    if (busy && !statuses) throw new OpenChamberControlError('Could not read which sessions are running', 503);
-    const runningCount = busy ? Object.keys(statuses ?? {}).length : 0;
-
-    const collected: ListedSession[] = [];
-    const full = () => limit !== null && collected.length >= limit;
-    const seenCursors = new Set();
-    const seenSessionIds = new Set();
-    let runningSeen = 0;
-    let cursor;
-    while (!(busy && runningSeen >= runningCount)) {
-      const listInput: Mutable<SessionListInput> = {};
-      if (directory) listInput.directory = directory;
-      if (input.children !== true) listInput.parentID = null;
-      if (inWork || busy || terms.length > 0) listInput.limit = FILTERED_PAGE_SIZE;
-      if (cursor) listInput.cursor = cursor;
-      const response = await client.session.list(listInput);
-      const page = await Promise.all((Array.isArray(response?.data) ? response.data : []).map(withArchiveEntry));
-      for (const record of page) {
-        const id = asNonEmptyString(record?.id);
-        if (isHiddenSession(id, record)) continue;
-        if (input.children !== true && isListedAsChild(record)) continue;
-        if (id) {
-          if (seenSessionIds.has(id)) continue;
-          seenSessionIds.add(id);
-        }
-        const running = Boolean(id && statuses?.[id]);
-        if (running) runningSeen += 1;
-        if (input.all !== true && record?.time?.archived) continue;
-        if (busy && !running) continue;
-        if (terms.length > 0) {
-          const title = (asNonEmptyString(record?.title) ?? '').toLowerCase();
-          if (!terms.every((term) => title.includes(term))) continue;
-        }
-        const session = listedSession(record, workEnabled ? workMembership : null);
-        if (inWork && !session.inWork) continue;
-        collected.push(session);
-        if (full()) break;
-      }
-      if (full()) break;
-      const next = asNonEmptyString(response?.cursor?.next);
-      if (!next || page.length === 0 || seenCursors.has(next)) break;
-      seenCursors.add(next);
-      cursor = next;
-    }
-
-    const sessions = wantStatus
-      ? await Promise.all(collected.map(async (session) => ({
-        ...session,
-        status: statuses ? await asPublicStatus(statuses, session.id) : { type: 'unknown' },
-      })))
-      : collected;
-    return { sessions, limit, directory, archived: input.all === true ? 'included' : 'excluded' };
-  };
+  const { listSessions, archiveOwnSession } = createSessionListing({
+    assertSingleScope,
+    resolveReadDirectory,
+    isSessionWorkEnabled,
+    getClient,
+    activeSessions,
+    asPublicStatus,
+    withArchiveEntry,
+    isHiddenSession,
+    workMembership,
+    assertSessionExists,
+    sessionService,
+  });
 
   const setWorkState = async (input: ControlInput, contextSessionId: string | undefined, state: 'open' | 'done') => {
     if (!updateSessionMetadata) throw new OpenChamberControlError('Changing In work is not available on this server', 503);
@@ -1485,7 +1427,12 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
       if (action === 'session.markDone' || action === 'session.track') {
         return setWorkState(input, options.contextSessionId, action === 'session.track' ? 'open' : 'done');
       }
-      if (action === 'session.list') return listSessions(input, contextDirectory);
+      if (action === 'session.list') return listSessions(input, contextDirectory, options.contextSessionId);
+      if (action === 'session.archive') return archiveOwnSession(input, options.contextSessionId);
+      if (action === 'lead.brief' || action === 'lead.digest') {
+        if (!leadActions) throw new OpenChamberControlError('Leads are not available on this server', 503);
+        return leadActions.execute(action, input, asNonEmptyString(options.contextSessionId));
+      }
       if (action.startsWith('session.')) {
         const sessionID = asNonEmptyString(input.sessionId);
         if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);

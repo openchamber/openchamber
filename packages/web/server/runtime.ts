@@ -106,7 +106,9 @@ import { isSpaceDirectory } from './lib/spaces/dispatcher.js';
 import { createTrackerRegistry } from './lib/trackers/registry.js';
 import { createTrackerSessionStatus } from './lib/trackers/session-status.js';
 import { sourceControlProviderDescriptors } from './lib/source-control/provider-descriptors.js';
-import { createSessionKnowledgeRuntime, measureMemoryIndex } from './lib/session-knowledge/runtime.js';
+import { measureMemoryIndex } from './lib/session-knowledge/runtime.js';
+import { createManagedSessionKnowledgeRuntime } from './lib/session-knowledge/managed-runtime.js';
+import { createSessionLeadServer } from './lib/session-lead/server.js';
 import { createMemoryDreaming } from './lib/agent-memory/dreaming.js';
 import { isAutoModel, JEV_BACKGROUND_TIMEOUT_MS } from './lib/routing/defaults.js';
 import { createMessageSearchRuntime } from './lib/message-search/runtime.js';
@@ -224,7 +226,6 @@ import { createOpenChamberControlService } from './lib/openchamber-control/servi
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
-import { linkedWorktreeOf } from './lib/openchamber-sessions/work-naming.js';
 import { createFileOpenRequester } from './lib/openchamber-control/file-open.js';
 import { createSavedSecrets, createSecretFiles } from './lib/openchamber-control/secret-request.js';
 import { applyConnectAttemptTimeout } from './lib/network-defaults.js';
@@ -1183,49 +1184,36 @@ const guestAgentContext = createGuestAgentContext({
   instructions: guestInstructions,
 });
 
-const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
+const sessionLead = createSessionLeadServer({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  readSessionMetadata: (sessionID, options) => readStoredSessionMetadata(sessionID, options),
+  updateMetadata: (sessionID, decide, directory) => updateSessionMetadataWith(sessionID, decide, { directory }),
+  resolveSessionDirectory: (sessionID) => openChamberControlService.resolveSessionDirectory(sessionID),
+  syncBriefEntry: (sessionID, directory, brief) => sessionKnowledgeRuntime.syncLeadBrief(sessionID, directory, brief),
+  executeControl: (...args) => openChamberControlService.execute(...args),
+  readWorkflowSettings: () => readWorkflowSettings(),
+  createError: (message, status) => new OpenChamberControlError(message, status),
+  buildOpenCodeUrl: (route, directory) => buildOpenCodeUrl(route, directory),
+  getOpenCodeAuthHeaders: () => getOpenCodeAuthHeaders(),
+  isSessionWarm: (sessionID, cacheLifetimeMs) => sessionWarmingRuntime.isSessionWarm(sessionID, cacheLifetimeMs),
+});
+
+const sessionKnowledgeRuntime = createManagedSessionKnowledgeRuntime({
+  isToolHost: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
+  readSettings: () => readSettingsFromDiskMigrated(),
   readExtensionInstructions: guestAgentContext.instructionText,
+  readLeadBrief: sessionLead.readBrief,
   projectContextRuntime,
   agentMemoryRuntime,
   resolveProjectId: (directory) => resolveMemoryProjectId(directory),
   isAgentMemoryEnabled,
-  isMemoryToolAvailable: async () => {
-    if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
-    return isAgentMemoryEnabled();
-  },
-  isSessionLinkingAvailable: async () => {
-    if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return settings?.agentControlToolEnabled !== false;
-  },
+  isWorkflowToolEnabled: () => isWorkflowToolEnabled(),
   readCheckoutBranch: getCheckedOutBranch,
-  isWorkNamingAvailable: async (directory) => {
-    if (/^\/spaces\/[0-9a-f]{12}(?:\/|$)/.test(directory)) return true;
-    return linkedWorktreeOf(directory, await getWorktrees(directory)) !== null;
-  },
+  listWorktrees: getWorktrees,
   readPlaceholderBranch: readRenameableGeneratedBranch,
-  isPageRenderingAvailable: async () => {
-    if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return settings?.agentRenderToolEnabled !== false;
-  },
-  isSecretRequestAvailable: async () => {
-    if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return settings?.agentSecretToolEnabled !== false;
-  },
-  isWorkflowAvailable: async () => {
-    if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
-    return isWorkflowToolEnabled();
-  },
   readSessionMetadata: readStoredSessionMetadata,
   persistSessionMetadata: (sessionID, directory, patch) => persistSessionMetadataPatch(sessionID, patch, { directory }),
-  instructionEntries: {
-    put: (sessionID, directory, key, value) => openCodeSessionClient(directory)
-      .experimental.session.instructions.entry.put({ sessionID, key, value }),
-    remove: (sessionID, directory, key) => openCodeSessionClient(directory)
-      .experimental.session.instructions.entry.remove({ sessionID, key }),
-  },
+  openCodeSessionClient,
 });
 
 const contextObligatoryRuntime = createContextObligatoryRuntime({
@@ -1410,7 +1398,7 @@ const workflowRuntime = createWorkflowRuntime({
   postSynthetic: workflowAgentSessions.postSynthetic,
   broadcast: (event) => broadcastOpenChamberUiEvent(event),
   isEnabled: isWorkflowToolEnabled,
-  startsWithoutApproval: async () => (await readWorkflowSettings())?.agentWorkflowAutoApprove === true,
+  startsWithoutApproval: (sessionID) => sessionLead.startsWorkflowWithoutApproval(sessionID),
   fsPromises,
   path,
 });
@@ -1539,6 +1527,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
     sessionGoalRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     contextObligatoryRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     sessionWarmingRuntime.processPayload(payload);
+    sessionLead.processPayload(payload, directory || payload.properties?.directory || '');
     trackerSessionStatus.processPayload(payload, { spaceId: event?.spaceId ?? null });
     extensionSessionEvents.processPayload(payload, directory || payload.properties?.directory || '');
   }
@@ -1734,7 +1723,10 @@ const bootstrapRuntime = createBootstrapRuntime({
   registerTtsRoutes,
   registerNotificationRoutes,
   registerOpenChamberRoutes,
-  registerAgentToolRoutes: (app, options) => options.agentToolRuntime.registerRoutes(app, options.express),
+  registerAgentToolRoutes: (app, options) => {
+    options.agentToolRuntime.registerRoutes(app, options.express);
+    sessionLead.registerRoutes(app, options.express, options.agentToolRuntime.authorizeRequest);
+  },
   express,
 });
 const tunnelWiringRuntime = createTunnelWiringRuntime({
@@ -2284,6 +2276,7 @@ const openChamberControlService = createOpenChamberControlService({
   extensionWaits: extensionWaitsRuntime,
   laterPages: process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE ? null : laterPagesRuntime,
   workflowRuntime,
+  leadActions: sessionLead.actions,
   sharePages: sharePagesRuntime,
   archiveStore: openChamberSessionService.archiveStore,
   loadQuota: () => import('./lib/quota/index.js'),

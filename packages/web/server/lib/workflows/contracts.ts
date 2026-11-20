@@ -105,7 +105,7 @@ export interface WorkflowRuntimeOptions {
   broadcast?: (event: { type: 'openchamber:workflow-run'; properties: { run: ReturnType<typeof summarizeRun> } }
     | { type: 'openchamber:workflow-run-removed'; properties: { runId: string; parentSessionId: string } }) => void;
   isEnabled?: () => Promise<boolean>;
-  startsWithoutApproval?: () => Promise<boolean>;
+  startsWithoutApproval?: (sessionId: string) => Promise<boolean>;
   fsPromises: Pick<typeof fs, 'readFile' | 'access' | 'mkdir' | 'writeFile' | 'readdir'>;
   path: Pick<typeof pathModule, 'join' | 'relative' | 'dirname'>;
   now?: () => number;

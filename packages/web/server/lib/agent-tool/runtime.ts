@@ -31,6 +31,7 @@ import {
   OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS,
   OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
   WORKFLOW_ANSWER_TOOL,
+  CONTROL_ONLY_PARAMETER_PROPERTIES,
 } from '../openchamber-control/actions.js';
 import { MAX_AGENTS_PER_RUN, MAX_CONCURRENT_AGENTS } from '../workflows/runtime.js';
 import {
@@ -50,6 +51,7 @@ import { SECRET_REQUEST_CLOSED_IN_CHAT_NOTE } from '../openchamber-control/secre
 import { secretRunCommand, secretRunCommandLine } from '../openchamber-control/secret-run.js';
 import { SECRET_PARAMETER_PROPERTIES, SECRET_TOOL_DESCRIPTION } from './secret-tool.js';
 import { createCallbackAddress } from './callback-address.js';
+import { LEAD_COMPACTION_HOOK } from '../session-lead/agent-tool-plugin.js';
 import { controlErrorFields } from '../openchamber-control/error.js';
 import type { ControlInput } from '../openchamber-control/contracts.js';
 import type { ControlOptions, createOpenChamberControlService } from '../openchamber-control/service.js';
@@ -290,11 +292,7 @@ const CONTROL_PARAMETER_PROPERTIES = {
       && !SCHEDULE_ONLY_PARAMETER_NAMES.includes(name)
     )),
   ),
-  url: { type: 'string', description: 'session.unlink: the address of the link to remove' },
-  identifier: { type: 'string', description: 'session.unlink: the identifier of the link to remove, when no url' },
-  source: { type: 'string', description: 'wait.start: "timer", "pr", or <extension>/<wait> as wait.list names it' },
-  args: { type: 'object', description: 'wait.start: the arguments the source\'s params list, such as { "minutes": 10 } or { "url": "https://github.com/o/r/pull/1" }' },
-  waitId: { type: 'string', description: 'wait.stop: the wait to stop; without it every wait of this session' },
+  ...CONTROL_ONLY_PARAMETER_PROPERTIES,
 };
 const SCHEDULE_PARAMETER_PROPERTIES = {
   ...pickParameters(SCHEDULE_PARAMETER_NAMES),
@@ -930,7 +928,7 @@ ${entries.join('')}    })${includeRender || includeSecret ? `
     if (ctx.event?.subscribe) {
       followUserPrompts(ctx.event.subscribe({ types: ["session.inbox.delivery.changed", "session.inbox.delivered", "session.inbox.cancelled", "session.deleted"] }))
         .catch((error) => console.warn("[openchamber-agent-tool] stopped following the user's prompts:", error?.message ?? error))
-    }` : ''}
+    }` : ''}${includeControl ? LEAD_COMPACTION_HOOK : ''}
   },
 }
 `;

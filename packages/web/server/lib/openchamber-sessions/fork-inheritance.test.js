@@ -43,8 +43,8 @@ describe('sourceOwnedLinksPatch', () => {
   });
 
   it('removes the btw and review links but keeps the goal', () => {
-    expect(sourceOwnedLinksPatch({ openchamber: { goal: goal(false), btwSessionID: 'b', reviewSessionID: 'r' } }))
-      .toEqual({ btwSessionID: null, reviewSessionID: null });
+    expect(sourceOwnedLinksPatch({ openchamber: { goal: goal(false), btwSessionID: 'b', reviewSessionID: 'r', lead: { at: 1, digest: { now: ['x'] } } } }))
+      .toEqual({ btwSessionID: null, reviewSessionID: null, lead: null });
   });
 
   it('removes the btw marker of a btw source, keeps a review marker', () => {

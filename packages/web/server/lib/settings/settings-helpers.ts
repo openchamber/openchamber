@@ -172,7 +172,7 @@ const fileEditorKeymapSchema = z.string().trim().pipe(z.enum(['default', 'vim'])
 
 const AGENT_TOOL_BOOLEAN_KEYS = [
   'agentControlToolEnabled', 'agentScheduleToolEnabled', 'agentMemoryToolEnabled', 'agentMemoryDreamingEnabled',
-  'agentKnowledgeToolEnabled', 'agentWorkflowToolEnabled', 'agentWorkflowAutoApprove', 'agentNotifyToolEnabled',
+  'agentKnowledgeToolEnabled', 'agentWorkflowToolEnabled', 'agentWorkflowAutoApprove', 'agentWorkflowAutoApproveLeads', 'agentNotifyToolEnabled',
   'agentRenderToolEnabled', 'agentImageToolEnabled', 'agentSecretToolEnabled', 'agentUsageToolEnabled', 'agentTerminalToolEnabled',
 ] as const;
 

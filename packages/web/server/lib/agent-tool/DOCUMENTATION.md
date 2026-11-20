@@ -282,7 +282,13 @@ metadata and failure handling identical, which is what the caller depends on.
    authenticated HTTP adapter, so Goal Mode ordering, CLI wait behavior,
    result delivery, partial-failure reporting, and scheduled-task contracts
    have one owner.
-6. Each action definition owns a short presentation title and a separate
+6. While the `openchamber` tool is on, the plugin also hooks OpenCode's
+   `compaction` and asks `POST /api/openchamber/agent-tool/lead-compaction`
+   (same address and token, route in `../session-lead/server.js`) whether this
+   compaction is a lead's sleep compaction. A summary in the answer becomes the
+   compaction's result and OpenCode makes no model call; no summary, or any
+   failure to ask, leaves the compaction to the model.
+7. Each action definition owns a short presentation title and a separate
    agent-facing description. The generated schema uses the description to state
    required inputs or one non-obvious behavior, while completed calls use the
    short title in native tool metadata.

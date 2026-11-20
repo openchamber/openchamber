@@ -10,10 +10,13 @@ import type {
   MemoryIndexMeasurement,
   MemoryTitle,
   SessionKnowledgeDependencies,
+  SessionMetadata,
   SessionPins,
 } from './contracts.js';
 import { hasMessage, isNonEmptyString, isOpenChamberMetadata, isSessionMetadata, isStoredPins } from './guards.js';
 import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
+import { LEAD_GUIDANCE, leadBriefEntry } from '../session-lead/guidance.js';
+import { readLead } from '../session-lead/metadata.js';
 
 const PINS_METADATA_KEY = 'project_context_pins';
 
@@ -24,6 +27,8 @@ export const KNOWLEDGE_ENTRY_KEYS = {
   guidance: 'openchamber.guidance',
   responseStyle: 'openchamber.response-style',
   extensions: 'openchamber.extensions',
+  lead: 'openchamber.lead',
+  leadBrief: 'openchamber.lead-brief',
 } as const;
 
 const KNOWLEDGE_MAX_LENGTH = 8000;
@@ -215,7 +220,7 @@ const buildGuidance = ({ linking, naming, rendering, secrets, workflows }: Guida
   ].filter(Boolean).join('\n\n');
 };
 
-export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, naming = false, rendering = false, secrets = false, workflows = false, checkout = null, responseStyleInstruction, extensions }: KnowledgeInput) => {
+export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, naming = false, rendering = false, secrets = false, workflows = false, checkout = null, responseStyleInstruction, extensions, lead }: KnowledgeInput) => {
   const entries: KnowledgeEntries = {
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
@@ -227,6 +232,13 @@ export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, n
   if (extensions !== undefined) entries[KNOWLEDGE_ENTRY_KEYS.extensions] = truncate(extensions);
   if (!linking) entries[KNOWLEDGE_ENTRY_KEYS.checkout] = '';
   else if (checkout) entries[KNOWLEDGE_ENTRY_KEYS.checkout] = describeCheckout(checkout);
+  if (!linking || lead === null) {
+    entries[KNOWLEDGE_ENTRY_KEYS.lead] = '';
+    entries[KNOWLEDGE_ENTRY_KEYS.leadBrief] = '';
+  } else if (lead) {
+    entries[KNOWLEDGE_ENTRY_KEYS.lead] = LEAD_GUIDANCE;
+    if (lead.brief !== undefined) entries[KNOWLEDGE_ENTRY_KEYS.leadBrief] = leadBriefEntry(lead.brief);
+  }
   return entries;
 };
 
@@ -245,6 +257,7 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
     isSecretRequestAvailable = async () => false,
     isWorkflowAvailable = async () => false,
     readExtensionInstructions = async () => '',
+    readLeadBrief = null,
     readSessionMetadata = null,
     persistSessionMetadata = null,
     instructionEntries = null,
@@ -393,6 +406,7 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
         ...await collect(directory, readPins(session)),
         responseStyleInstruction,
         extensions: await readExtensionInstructions(directory).catch(() => null) ?? undefined,
+        lead: await readLeadContext(sessionId, session),
       });
       const writes = await Promise.allSettled(Object.entries(entries).map(([key, text]) => (text
         ? instructionEntries.put(sessionId, directory, key, text)
@@ -404,6 +418,19 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
       console.warn('[session-knowledge] sync failed:', (hasMessage(error) ? error.message : undefined) || error);
       return false;
     }
+  };
+
+  const readLeadContext = async (sessionId: string, session: { metadata: SessionMetadata | undefined } | null): Promise<KnowledgeInput['lead'] | undefined> => {
+    if (!session) return undefined;
+    if (!readLead(session.metadata)) return null;
+    if (!readLeadBrief) return { brief: undefined };
+    return { brief: await readLeadBrief(sessionId).catch(() => undefined) };
+  };
+
+  const syncLeadBrief = async (sessionId: string, directory: string, brief: string) => {
+    if (!instructionEntries) return false;
+    await instructionEntries.put(sessionId, directory, KNOWLEDGE_ENTRY_KEYS.leadBrief, leadBriefEntry(brief));
+    return true;
   };
 
   const syncTails = new Map<string, Promise<boolean>>();
@@ -437,6 +464,7 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
     collectSummary,
     collectSummaryForSession,
     sync,
+    syncLeadBrief,
     readPins,
     setPin,
   };

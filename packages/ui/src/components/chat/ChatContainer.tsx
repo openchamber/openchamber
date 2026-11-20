@@ -24,6 +24,7 @@ import { ChatViewport } from './column/ChatViewport';
 import { ComposerSlot } from './column/ComposerSlot';
 import { HoistedUiPageSelection } from './column/HoistedUiPageSelection';
 import { ReturnToParentButton } from './column/ReturnToParentButton';
+import { LeadDigestRow } from './column/LeadDigestRow';
 import { resolveSessionPlaceholder } from './column/sessionPlaceholder';
 import { useAutoOpenDraft, useChatColumnSelection } from './column/useChatColumnSelection';
 import { useChatColumnScope } from './column/useChatColumnScope';
@@ -391,6 +392,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                         openSession={columnActions.openSession}
                         registerParentSessionBack={registerParentSessionBack}
                     />
+                    {!pinned && !draftOpen ? <LeadDigestRow key={currentSessionId ?? ''} sessionId={currentSessionId} directory={effectiveSessionDirectory} /> : null}
                     {sessionSurface}
                     {chatSearch.open && currentSessionId && messageSearchEnabled ? (
                         <div className="pointer-events-none absolute inset-e-3 top-2 z-20">

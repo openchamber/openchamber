@@ -22,6 +22,12 @@ export function useDraftHeading(projectLabel: string | null): string {
   const copy = useEasterEggCopy();
   const visit = useDraftVisit((state) => state.visit);
   const moment = useDraftVisit((state) => state.moment);
+  const lead = useSessionUIStore((state) => state.newSessionDraft.lead === true);
+  if (lead) {
+    return projectLabel
+      ? t('chat.emptyState.leadDraftTitleWithProject', { project: projectLabel })
+      : t('chat.emptyState.leadDraftTitle');
+  }
   if (!projectLabel) return t('chat.emptyState.draftTitle');
   const line = copy ? draftTitleLine(copy, moment, SEED + visit) : null;
   return line

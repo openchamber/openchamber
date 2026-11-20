@@ -14,7 +14,9 @@ The tool is off until the user turns it on (`agentWorkflowToolEnabled`, Settings
 → General → OpenChamber Tools). Off means no `openchamber_workflow` tool and no
 session guidance, and the runtime refuses every action that proposes, runs or
 saves one. Under it, `agentWorkflowAutoApprove` (off by default) lets
-`workflow.run` start a run at once. The app hides the Workflows panel, its rail entry and work-status
+`workflow.run` start a run at once, and `agentWorkflowAutoApproveLeads` does
+the same only for a run a lead proposes (`../session-lead/`); Settings shows
+the pair as one choice: no, for leads, always. The app hides the Workflows panel, its rail entry and work-status
 section, reads no runs, and a past run's card says workflows are off
 (`packages/ui/src/lib/workflows/availability.ts`).
 
@@ -77,7 +79,8 @@ workflow in `../session-knowledge/runtime.js` (`WORKFLOW_GUIDANCE`).
 
 1. `workflow.run` parses the script (or reads a saved one by name), stores a
    run in `awaiting-approval` and answers at once with its id. Nothing runs.
-   With `agentWorkflowAutoApprove` on, the run is admitted as if approved
+   With `agentWorkflowAutoApprove` on, or `agentWorkflowAutoApproveLeads` on
+   and the proposing session a lead, the run is admitted as if approved
    instead: its first save is already `running`, its first log line says it
    started without approval, and the answer says so. A failed first save
    publishes no run.
@@ -107,8 +110,9 @@ session proposed. `workflow.save` writes a script to
 ## Invariants
 
 - No run starts for the first time without the user's approval: their click
-  through the route, or `agentWorkflowAutoApprove`, which the server reads
-  from the settings file on every `workflow.run`. The agent tool has no approve
+  through the route, or `agentWorkflowAutoApprove` (or, for a lead's run,
+  `agentWorkflowAutoApproveLeads`), which the server reads from the settings
+  file and the proposing session's metadata on every `workflow.run`. The agent tool has no approve
   action and no input that skips approval, so no client can start a run
   without one of the two. `workflow.resume` restarts a
   `failed` or `stopped` run without asking again: it is the plan the user

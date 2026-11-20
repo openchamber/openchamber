@@ -10,6 +10,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isSessionPinned } from '@/lib/sessionPins';
+import { isLeadSession } from '@/lib/sessionLead';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { getCurrentSessionAssist } from '@/lib/sessionAssistMetadata';
 import { openGuestSurface } from '@/lib/guests/open-surface';
@@ -26,7 +27,7 @@ import { isPinnedZoneRowKey, sessionExpansionKey } from '../sessionSidebarRowMod
 import { formatSessionCompactDateLabel, formatSessionDateLabel } from '../utils';
 import { DirectoryActionIndicator } from './DirectoryActionIndicator';
 import { GuestRowMarks } from './GuestRowMarks';
-import { SessionLeadToggle, SessionTreeChevron } from './SessionRowChevrons';
+import { SessionLeadSlot, SessionLeadToggle, SessionTreeChevron } from './SessionRowChevrons';
 import { SessionRowActions } from './SessionRowActions';
 import { SessionRowPrBadge } from './SessionRowPrBadge';
 import { SessionRowRename } from './SessionRowRename';
@@ -256,7 +257,12 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     ? <SessionLeadToggle expanded={isExpanded} alwaysShowActions={alwaysShowActions} onToggle={toggleSubsessions} />
     : null;
   const leadIconClassName = alwaysShowActions ? 'opacity-0' : 'group-hover:opacity-0 group-has-[:focus-visible]:opacity-0';
-  const treeSlot = isTwoLineRow ? null : treeChevron ?? <span aria-hidden className="h-3.5 w-3.5 flex-shrink-0" />;
+  const isLead = isLeadSession(session);
+  const treeSlot = isTwoLineRow
+    ? null
+    : isLead
+      ? <SessionLeadSlot chevron={treeChevron} alwaysShowActions={alwaysShowActions} />
+      : treeChevron ?? <span aria-hidden className="h-3.5 w-3.5 flex-shrink-0" />;
 
   const streamingIndicator = isZombie
     ? <Icon name="error-warning" className="h-4 w-4 text-status-warning" />
@@ -314,7 +320,10 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       prBadge={timelinePrBadge}
       zombieIndicator={isTimelineRow ? streamingIndicator : null}
       goal={goalMark}
-      marks={guestMarks.length > 0 ? <GuestRowMarks marks={guestMarks} onOpen={openGuestMark} /> : null}
+      marks={guestMarks.length > 0 || (isTwoLineRow && isLead) ? <>
+        {isTwoLineRow && isLead ? <SessionLeadSlot chevron={null} alwaysShowActions={alwaysShowActions} /> : null}
+        {guestMarks.length > 0 ? <GuestRowMarks marks={guestMarks} onOpen={openGuestMark} /> : null}
+      </> : null}
       badges={rowBadges}
       doneHint={showDoneHint ? <DoneHintMark /> : null}
       metaPaddingClass={isTimelineRow && alwaysShowActions

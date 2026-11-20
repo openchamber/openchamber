@@ -150,7 +150,7 @@ export const createWorkflowRuntime = ({
   postSynthetic,
   broadcast = () => {},
   isEnabled = async () => true,
-  startsWithoutApproval = async () => false,
+  startsWithoutApproval = async (_sessionId: string) => false,
   fsPromises,
   path,
   now = Date.now,
@@ -819,7 +819,7 @@ export const createWorkflowRuntime = ({
     const scope = { sessionId, directory };
     switch (action) {
       case 'workflow.check': return check(input, scope);
-      case 'workflow.run': return propose(input, scope, { approved: await startsWithoutApproval() });
+      case 'workflow.run': return propose(input, scope, { approved: await startsWithoutApproval(sessionId) });
       case 'workflow.status': return status(input, scope);
       case 'workflow.result': return result(input, scope);
       case 'workflow.stop': return stop(input, scope);

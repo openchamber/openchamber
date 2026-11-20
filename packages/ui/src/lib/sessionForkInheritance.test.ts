@@ -66,10 +66,10 @@ describe('withoutSourceOwnedLinks', () => {
     expect(result).toEqual({ openchamber: { goal: { ...goal(false), status: 'paused', statusReason: 'paused in fork' } } });
   });
 
-  test('keeps the goal and drops the source btw and review links', () => {
+  test('keeps the goal and drops the source btw and review links and its lead mark', () => {
     const metadata: Metadata = {
       other: 1,
-      openchamber: { goal: goal(false), btwSessionID: 'ses_btw', reviewSessionID: 'ses_review' },
+      openchamber: { goal: goal(false), btwSessionID: 'ses_btw', reviewSessionID: 'ses_review', lead: { at: 1, digest: { now: ['x'], updatedAt: 1 } } },
     };
     expect(withoutSourceOwnedLinks(metadata)).toEqual({ other: 1, openchamber: { goal: goal(false) } });
   });

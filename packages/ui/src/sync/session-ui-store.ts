@@ -1,6 +1,7 @@
 
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { readEffortRevision, rememberEffort } from "@/lib/modelEfforts"
+import { draftSessionMetadata } from "./draft-session-metadata"
 import { create } from "zustand"
 import { type Metadata, type Part, type Session, type TextPart } from "@/lib/opencode/model"
 import type { AttachedFile, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
@@ -356,6 +357,7 @@ export type NewSessionDraftState = {
   target: NewSessionDraftTarget
   preparedChatDirectory?: string | null
   workDraftId?: string
+  lead?: boolean
 }
 
 export type SetCurrentSessionOptions = {
@@ -937,13 +939,6 @@ const draftSessionCreateSelection = (selection: DraftSessionSelection): SessionC
   agent: trimAgent(selection.agent),
 })
 
-const draftSessionMetadata = (draft: NewSessionDraftState): Metadata | undefined => {
-  const draftPins = draft.projectContextPins ?? { notes: [], plans: [] }
-  return draftPins.notes.length > 0 || draftPins.plans.length > 0
-    ? { openchamber: { project_context_pins: draftPins } }
-    : undefined
-}
-
 const resolveDraftTargetDirectory = async (draft: NewSessionDraftState): Promise<string | null> => {
   const store = useSessionUIStore.getState()
   let directory = draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? null
@@ -1508,6 +1503,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       syntheticParts: options?.syntheticParts,
       targetFolderId: options?.targetFolderId,
       projectContextPins: options?.projectContextPins,
+      lead: options?.lead === true ? true : undefined,
     }
 
     set({

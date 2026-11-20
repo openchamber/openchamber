@@ -3,6 +3,7 @@ import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
+import { ContextMenuItem } from '@/components/ui/context-menu';
 import { ACTIVITY_TITLE_KEY, isBuiltinActivityKey } from '@/components/session/sidebar/sessionSidebarActivityLabels';
 import type { SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
@@ -16,6 +17,7 @@ import { MobileSwipeActionsRow, ROW_ACTION_SLOT_WIDTH } from '../MobileSessionSw
 import type { MobileTreeGeometry } from './mobileSidebarGeometry';
 import { useMobileRowSwipe, useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
 import { MobileSwipeAction } from './mobileRowParts';
+import { MobileRowMenu } from './MobileRowMenu';
 
 const SECTION_HEADER_CLASS = 'flex min-h-10 min-w-0 flex-1 items-center gap-1.5 ps-2 pe-3 py-1.5 text-start transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring';
 
@@ -88,8 +90,9 @@ export const MobileProjectHeader: React.FC<{
   active: boolean;
   onToggle: () => void;
   onNewSession: () => void;
+  onNewLead: () => void;
   onRemove: () => void;
-}> = ({ row, label, isRepo, active, onToggle, onNewSession, onRemove }) => {
+}> = ({ row, label, isRepo, active, onToggle, onNewSession, onNewLead, onRemove }) => {
   const { t } = useI18n();
   const actions = useMobileSidebarActions();
   const project = row.section.project;
@@ -143,7 +146,18 @@ export const MobileProjectHeader: React.FC<{
           <span className="block min-w-0 flex-1 truncate ps-1 typography-ui-label font-medium text-foreground">{label}</span>
         </button>
         {isRepo ? <HeaderIconButton icon="git-branch" label={t('sessions.sidebar.project.actions.newWorktree')} onClick={() => actions.openNewWorktree(project.id)} /> : null}
-        <HeaderIconButton icon="add" label={t('mobile.sessions.newSessionInProjectAria', { label })} onClick={onNewSession} />
+        <MobileRowMenu menu={<>
+          <ContextMenuItem onClick={onNewSession}>
+            <Icon name="add" className="me-1 size-4" />
+            {t('sessions.sidebar.project.actions.newSession')}
+          </ContextMenuItem>
+          <ContextMenuItem onClick={onNewLead}>
+            <Icon name="lead-flag" className="me-1 size-4" />
+            {t('sessions.sidebar.project.actions.newLead')}
+          </ContextMenuItem>
+        </>}>
+          <HeaderIconButton icon="add" label={t('mobile.sessions.newSessionInProjectAria', { label })} onClick={onNewSession} />
+        </MobileRowMenu>
       </div>
     </MobileSwipeActionsRow>
   );

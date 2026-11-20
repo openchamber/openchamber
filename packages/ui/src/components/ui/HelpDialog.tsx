@@ -135,6 +135,12 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
+          id: 'new_lead',
+          descriptionKey: "helpDialog.item.createNewLead",
+          icon: "lead-flag",
+          keys: '',
+        },
+        {
           id: 'open_draft_project_picker',
           icon: 'folder',
           keys: '',
