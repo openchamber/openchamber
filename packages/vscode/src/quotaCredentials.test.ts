@@ -10,14 +10,17 @@ import { fileURLToPath } from 'node:url';
 // runner's runtime resolves homedir from the environment it starts with, so
 // each case runs the real import in a child process whose HOME is the fake
 // home. The child also stubs the darwin platform gate before calling it.
-import { normalizeCredential, validateCredential, OPEN_DESIGN_API_BASE_URL, OPEN_DESIGN_SESSION_EXPIRED_ERROR } from './quotaCredentials';
+import { normalizeCredential, readCredential, validateCredential, OPEN_DESIGN_API_BASE_URL, OPEN_DESIGN_SESSION_EXPIRED_ERROR } from './quotaCredentials';
 
 const modulePath = fileURLToPath(new URL('./quotaCredentials.ts', import.meta.url));
 
 const directories: string[] = [];
+const previousDataDirectory = process.env.OPENCHAMBER_DATA_DIR;
 
 afterEach(() => {
   for (const directory of directories.splice(0)) fs.rmSync(directory, { recursive: true, force: true });
+  if (previousDataDirectory === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+  else process.env.OPENCHAMBER_DATA_DIR = previousDataDirectory;
 });
 
 const runImport = (sqliteScript: string, timeoutMs: number) => {
@@ -69,6 +72,35 @@ test('Cursor credential import returns the stored tokens when sqlite3 answers pr
 
   assert.ok(output.startsWith('OK '), `expected the import to succeed, got: ${output}`);
   assert.deepEqual(JSON.parse(output.slice(3)), { accessToken: 'access-token', refreshToken: 'refresh-token' });
+});
+
+test('readCredential returns null for an over-cap file and refuses a FIFO promptly', (context) => {
+  const dataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-vscode-quota-credential-'));
+  directories.push(dataDirectory);
+  process.env.OPENCHAMBER_DATA_DIR = dataDirectory;
+  const quotaDirectory = path.join(dataDirectory, 'quota');
+  fs.mkdirSync(quotaDirectory);
+  const credentialPath = path.join(quotaDirectory, 'cursor.json');
+  const previousWarn = console.warn;
+  console.warn = () => undefined;
+  try {
+    fs.writeFileSync(credentialPath, JSON.stringify({ accessToken: 'small-test-token' }));
+    assert.deepEqual(readCredential('cursor'), { accessToken: 'small-test-token', refreshToken: '' });
+    fs.writeFileSync(credentialPath, 'x'.repeat(64 * 1024 + 1));
+    assert.equal(readCredential('cursor'), null);
+
+    if (process.platform === 'win32') {
+      context.skip('mkfifo is unavailable on Windows');
+      return;
+    }
+    fs.unlinkSync(credentialPath);
+    execFileSync('mkfifo', [credentialPath]);
+    const startedAt = Date.now();
+    assert.equal(readCredential('cursor'), null);
+    assert.ok(Date.now() - startedAt < 5_000, 'FIFO refusal should return promptly');
+  } finally {
+    console.warn = previousWarn;
+  }
 });
 
 test('normalizeCredential: opendesign wraps a bare session token and requires a workspace id', () => {
