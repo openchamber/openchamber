@@ -42,6 +42,7 @@ test("recording keeps a feature's own requests and, once, the ones most features
       { id: "chat.send.enter", ok: true, requests: ["GET /api/config/settings"] },
       { id: "git.stage.one", ok: true, requests: ["GET /api/config/settings", "POST /api/git/stage"] },
       { id: "git.stage.all", ok: true, requests: [] },
+      { id: "git.stage.all", ok: false, requests: ["POST /api/git/unstage"] },
       { id: "gone.feature.one", ok: true, requests: ["GET /api/fs/read"] },
     ],
     scenariosOf,

@@ -22,6 +22,7 @@ bun run verify -- --changed --base A..B --list   # what the commits between A an
 bun run verify                                   # every scenario
 bun run verify -- composer files.edit            # a zone, a feature, or one scenario id
 bun run verify -- --list composer                # the feature map, no run
+bun run verify -- --retry-failed                 # play a failed scenario once more; a pass then is reported as flaky
 bun run verify -- --shard 2/4                     # the second of four equal parts, for several machines
 bun run verify -- diff --keep                    # keep the stand up after the run
 bun run verify -- diff --attach tmp/verify/<run>/stand.json   # reuse a kept stand
@@ -70,6 +71,10 @@ The output names the feature each file led to, and lists the changed app files n
 The selection code is `changed.mjs`, tested without a stand in `changed.test.mjs`.
 
 `requests.json` holds, for each feature, the requests its scenarios made to the server, as `METHOD route`, and under `*` the requests more than half the features make (what every page reads when it loads). Every run writes the requests a scenario's page made into its `result.json`, and `node scripts/verify/requests.mjs <artifact folders>` turns the results of a full run (all its parts) into the file. A feature is recorded anew only when all its scenarios passed in those results; otherwise it keeps what it had and adds what was seen. A new route or a moved handler is picked up by the next recording; until then a server file serving only that route is printed as uncovered.
+
+### Where it runs by itself
+
+Pull requests play `--changed` against their base in four parts (`behavior-net` in `.github/workflows/oc-review.yml`), with `--retry-failed`. The check is not required. `.github/workflows/behavior-net.yml` plays the whole net every night on the default branch in six parts, and from those results rewrites `requests.json`; when the file differs it opens a pull request from `ci/net-requests`.
 
 ## The feature map
 
@@ -163,7 +168,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 - Nothing touches the user's data: the stand runs from a fresh folder under `/private/tmp` on macOS or the OS temp directory elsewhere with its own `HOME`, `XDG_*` and `OPENCHAMBER_DATA_DIR`, and its processes get only `PATH`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `LANG` and `TERM` from the shell. Windows also keeps `SystemRoot`, `ComSpec`, `PATHEXT`, `TEMP` and `TMP`, and redirects `USERPROFILE`, `APPDATA` and `LOCALAPPDATA` into the stand. No provider key, token or app variable reaches it or `stand.json`. It refuses to start, and `--attach` refuses to run, when the server lists sessions of the checkout itself. Ports are free ones picked per run.
 - A `settings` step refuses a key that is not a profile setting (`scope: "profile"` in `settings-registry.json`), since the reset drops only those.
 - The reset deletes only sessions under the stand's folder; a server holding any other session is not this stand, and the reset refuses before deleting anything.
-- Every scenario starts from the same state: all sessions deleted, linked worktrees removed, unfinished rebases and merges cleared, the project's starting branch and commit restored with a clean index and tree, scenario branches and stashes removed, the repository configuration restored, the server's settings put back as they were when the stand started and the user's profile settings (Settings > Chat and the like) dropped back to the stand's, the sidebar's folders removed, a fresh browser context. A scenario's result does not depend on which ran before it, so one that changes a setting needs no step to change it back. Worktree cleanup refuses any linked directory outside the stand before removing anything. A failed Git reset rebuilds the fixture and records the reason as a failed scenario; later scenarios still run. Other reset failures also become scenario results.
+- Every scenario starts from the same state: all sessions deleted, linked worktrees removed, unfinished rebases and merges cleared, the project's starting branch and commit restored with a clean index and tree, saved drafts removed, scenario branches and stashes removed, the repository configuration restored, the server's settings put back as they were when the stand started and the user's profile settings (Settings > Chat and the like) dropped back to the stand's, the sidebar's folders removed, a fresh browser context. A scenario's result does not depend on which ran before it, so one that changes a setting needs no step to change it back. Worktree cleanup refuses any linked directory outside the stand before removing anything. A failed Git reset rebuilds the fixture and records the reason as a failed scenario; later scenarios still run. Other reset failures also become scenario results.
 - The model is the fixture provider, so answers are the same every run. `offline/no-answer` is a provider whose server refuses connections. No scenario calls a real model.
 - Tools run without asking, except a read of a `*.secret` file and a web fetch: those ask, so a scenario can raise a permission request by having the agent read such a file, or hold a session on the user with a scripted fetch.
 - A stopped run leaves nothing: the API, Vite, OpenCode, PTY daemons, fixture, Chrome and its helpers are tracked through OS process identities and the stand's isolated directories. Cleanup continues after a wrapper or group leader exits, escalates remaining processes, and removes the stand folder, Chrome profile and port-specific Vite cache only after the tree is gone. Failure in browser cleanup still runs stand cleanup. Startup errors and both runner signals take the same path.
@@ -338,6 +343,10 @@ The method is part of a recorded request because reading the settings is somethi
 A `settings` step saves through the runner, outside the page, so it records its own request (`PUT@step`): the page saves settings on every load, and without the mark the few features that check a saved setting would be lost among all of them.
 
 What this does not see: requests a scenario makes through the CLI (they reach the same session routes the page uses), requests the server passes on to OpenCode, and a module handed to a route file as a plain callback with no type import, such as the settings store given to the settings routes. A file like that is selected through whatever else loads it, and a feature that depends on it lists it in its `sources`. A route renamed or removed inside a file that stays selects by the file's remaining routes only; a deleted file selects everything. A file is given every path it names, also one it only lists (the realtime proxy's allowed targets), which can select more than it serves and never less.
+
+### Why the checks in CI retry a failed scenario and a local run does not
+
+Five full runs on CI runners gave two rare failures, a different scenario each time, none of which failed when played again. A pull request check that is red once in a few runs for reasons outside the change teaches people to ignore it. So CI plays a failed scenario once more and names it as flaky when it then passes; the run's log and `summary.json` list them, which is where a scenario that needs a better wait shows up. A local run stays strict: the person at the keyboard can look at the failure, and a flaky scenario found there is fixed, not retried.
 
 ### Why uncovered files are printed and not ignored
 

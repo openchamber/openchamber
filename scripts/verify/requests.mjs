@@ -44,7 +44,9 @@ export const recordRequests = ({ results, scenariosOf, patterns, previous = {} }
   }
   for (const result of results) {
     const feature = featureOf.get(result.id)
-    if (!feature) continue
+    // A failed attempt of a scenario that passed when played again asked for
+    // what only its failure needed.
+    if (!feature || (!result.ok && passed.has(result.id))) continue
     const requests = byFeature.get(feature) ?? byFeature.set(feature, new Set()).get(feature)
     for (const request of result.requests ?? []) {
       const [method, path] = request.split(" ")

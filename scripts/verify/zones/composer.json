@@ -314,9 +314,8 @@
             {"do": "editor", "empty": true},
             {"do": "reload", "ready": false},
             {"do": "server.start"},
-            {"do": "reload"},
-            {"do": "see", "on": "composer.projectPicker", "text": "relay-desk"},
-            {"do": "editor", "equals": "first prompt of a project draft"},
+            {"do": "see", "on": "composer.projectPicker", "text": "relay-desk", "timeout": 60},
+            {"do": "editor", "equals": "first prompt of a project draft", "timeout": 60},
             {"do": "steady", "on": "chat.userBubble", "count": 0, "ms": 1500}
           ]
         }

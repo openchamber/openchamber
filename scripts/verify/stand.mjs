@@ -140,6 +140,22 @@ const emptyOpenCodeFolder = (project) => {
   for (const entry of readdirSync(folder)) rmSync(join(folder, entry), { recursive: true, force: true })
 }
 
+/**
+ * Saved drafts stay in the sidebar of every later scenario. They go through
+ * the server, whose queue also holds a save the last page sent as it closed;
+ * removing the file under it would let that save bring the drafts back.
+ */
+export const deleteSavedDrafts = async (apiUrl) => {
+  const listed = await fetch(`${apiUrl}/api/session-drafts`)
+  if (!listed.ok) throw new Error(`Reading the stand's saved drafts answered ${listed.status}`)
+  const { drafts } = await listed.json()
+  if (!Array.isArray(drafts)) throw new Error("The stand's saved drafts are invalid")
+  for (const draft of drafts) {
+    const response = await fetch(`${apiUrl}/api/session-drafts/${encodeURIComponent(draft.id)}`, { method: "DELETE" })
+    if (!response.ok && response.status !== 404) throw new Error(`Deleting saved draft ${draft.id} answered ${response.status}`)
+  }
+}
+
 export const resetWorktrees = ({ root, project, initialCommit, initialBranch = "main", initialGitConfig }) => {
   const linked = standWorktrees({ root, project })
   if (initialGitConfig !== undefined) writeFileSync(join(project, ".git/config"), initialGitConfig)
@@ -481,6 +497,7 @@ const attachStand = (info) => {
     // Sidebar folders, which the server keeps for every window. The Detailed
     // rows switch a scenario may leave on is a profile setting, dropped below.
     rmSync(join(info.data, "sessions-directories.json"), { force: true })
+    await deleteSavedDrafts(info.apiUrl)
     await resetProfile(info.data, info.apiUrl)
     return { failure }
   }

@@ -31,6 +31,8 @@ Options:
                     the files changed between two commits only
   --list            Print the feature map for the selection and exit
   --repeat <n>      Run the selection n times in the same stand
+  --retry-failed    Play a failed scenario once more; one that then passes is
+                    reported as flaky and does not fail the run
   --shard <k>/<n>   Run the k-th of n equal parts of the selection, so n
                     machines play it between them
   --out <dir>       Artifacts directory (default: tmp/verify/<time>)
@@ -41,7 +43,7 @@ Options:
   --help            Show this help`
 
 const parseArgs = (argv) => {
-  const options = { selection: [], changed: false, base: null, list: false, repeat: 1, shard: null, out: null, keep: false, attach: null, headed: false, chrome: null }
+  const options = { selection: [], changed: false, base: null, list: false, repeat: 1, retryFailed: false, shard: null, out: null, keep: false, attach: null, headed: false, chrome: null }
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index]
     if (value === "--help") { console.log(HELP); process.exit(0) }
@@ -49,6 +51,7 @@ const parseArgs = (argv) => {
     else if (value === "--base") options.base = argv[++index]
     else if (value === "--list") options.list = true
     else if (value === "--repeat") options.repeat = Math.max(1, Number(argv[++index]))
+    else if (value === "--retry-failed") options.retryFailed = true
     else if (value === "--shard") options.shard = argv[++index]
     else if (value === "--out") options.out = resolve(argv[++index])
     else if (value === "--keep") options.keep = true
@@ -228,6 +231,20 @@ export const runScenario = async ({ scenario, stand, browser, vocabulary, outDir
   return result
 }
 
+const describeFailure = (failure) => `${failure.step ? `step ${failure.step} ` : ""}${failure.do}${failure.on ? ` ${failure.on}` : ""}: ${failure.message}`
+
+/**
+ * One scenario's result from `play(outDir)`. With `retryFailed` a failed
+ * scenario is played once more into `retry/`; when that passes, the result is
+ * the passing one with the first failure kept as `flaky`.
+ */
+export const playOrRetry = async (play, outDir, retryFailed) => {
+  const first = await play(outDir)
+  if (first.ok || !retryFailed) return first
+  const again = await play(join(outDir, "retry"))
+  return again.ok ? { ...again, flaky: { ...first.failure, dir: first.dir, artifacts: first.artifacts } } : first
+}
+
 const main = async () => {
   prioritizeWindowsProcess()
   const options = parseArgs(process.argv.slice(2))
@@ -297,13 +314,14 @@ const main = async () => {
     log(`warmed up after ${Math.round((Date.now() - startedAt) / 1000)}s`)
     for (let round = 1; round <= options.repeat; round += 1) {
       for (const scenario of chosen) {
-        const result = await runScenario({ scenario, stand, browser, vocabulary, outDir, round: options.repeat > 1 ? round : 1 })
+        const result = await playOrRetry((dir) => runScenario({ scenario, stand, browser, vocabulary, outDir: dir, round: options.repeat > 1 ? round : 1 }), outDir, options.retryFailed)
+        if (result.flaky) console.log(`FLAKY ${scenario.id}: failed, then passed when played again\n     ${describeFailure(result.flaky)}${result.flaky.artifacts.length ? `\n     ${result.flaky.dir}/${result.flaky.artifacts.at(-1)}` : ""}`)
         result.round = round
         results.push(result)
         const line = `${result.ok ? "PASS" : "FAIL"} ${scenario.id} (${result.seconds}s)`
         const changed = result.sourceUpdates.length ? `\n     the source changed during this scenario: ${result.sourceUpdates.join(", ")}` : ""
         const artifact = result.artifacts.length ? `\n     ${result.dir}/${result.artifacts.at(-1)}` : ""
-        console.log(result.ok ? line : `${line}\n     ${result.failure.step ? `step ${result.failure.step} ` : ""}${result.failure.do}${result.failure.on ? ` ${result.failure.on}` : ""}: ${result.failure.message}${artifact}${changed}`)
+        console.log(result.ok ? line : `${line}\n     ${describeFailure(result.failure)}${artifact}${changed}`)
       }
     }
     await browser.stop()
@@ -311,8 +329,9 @@ const main = async () => {
     browserStarting = null
     const failedCount = results.filter((result) => !result.ok).length
     const totalSeconds = Math.round((Date.now() - startedAt) / 1000)
-    writeFileSync(join(outDir, "summary.json"), JSON.stringify({ passed: results.length - failedCount, failed: failedCount, seconds: totalSeconds, results }, null, 2))
-    log(`${results.length - failedCount} passed, ${failedCount} failed in ${totalSeconds}s; artifacts in ${relative(REPO_ROOT, outDir)}`)
+    const flaky = results.filter((result) => result.flaky).map((result) => result.id)
+    writeFileSync(join(outDir, "summary.json"), JSON.stringify({ passed: results.length - failedCount, failed: failedCount, flaky, seconds: totalSeconds, results }, null, 2))
+    log(`${results.length - failedCount} passed${flaky.length ? ` (${flaky.length} flaky: ${flaky.join(", ")})` : ""}, ${failedCount} failed in ${totalSeconds}s; artifacts in ${relative(REPO_ROOT, outDir)}`)
     if (options.keep && !options.attach) {
       log(`the stand keeps running at ${stand.uiUrl}; run more with --attach ${relative(REPO_ROOT, standFile)}; Ctrl-C stops it`)
       await new Promise(() => undefined)
