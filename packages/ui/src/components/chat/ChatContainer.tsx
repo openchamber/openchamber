@@ -1,8 +1,10 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
+import type { Session } from '@/lib/opencode/model';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSyncStore } from '@/sync/global-sync-store';
+import { useSessionSelector } from '@/sync/sync-context';
 import ChatEmptyState from './ChatEmptyState';
 import { type MessageListHandle } from './MessageList';
 import { useScrollShadow } from '@/components/ui/useScrollShadow';
@@ -46,6 +48,8 @@ type ChatContainerProps = {
     readOnly?: boolean;
     pinnedSession?: { sessionId: string; directory: string | null };
 };
+
+const selectSessionLastIdleAt = (session: Session | undefined): number | null => session?.time.idle ?? null;
 
 export const ChatContainer: React.FC<ChatContainerProps> = ({
     active = true,
@@ -109,6 +113,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         sessionMessages,
         sync,
     });
+    const lastIdleAt = useSessionSelector(currentSessionId, effectiveSessionDirectory, selectSessionLastIdleAt);
     useColumnAutoReadAloud({
         pinned,
         currentSessionKey,
@@ -118,7 +123,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         sessionMessages,
         olderCompletedReplyIds: sessionMessageLoadState.olderCompletedReplyIds,
     });
-    const retryOverlay = useRetryOverlay(currentSessionId, sessionStatusForCurrent);
+    const retryOverlay = useRetryOverlay(currentSessionId, sessionStatusForCurrent, lastIdleAt);
 
     const { isMobile } = useDeviceInfo();
     const isVSCode = isVSCodeRuntime();

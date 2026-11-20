@@ -37,6 +37,14 @@ height estimates.
   lookup skips trailing compaction, synthetic, skill and shell records and
   uses assistant completion, because intermediate summary text is not proof
   that the turn finishes.
+- A busy/retry status or explicit retry notice suppresses only the latest
+  same-session assistant error with OpenCode `retry` evidence when its completed
+  time, or retry time when completion is absent, is newer than that session's
+  last idle time. A missing idle marker means no settled boundary is known, so
+  active retry evidence is accepted. Busy alone adds no fallback; only explicit
+  retry notices retain fallback or synthetic notices. The display copy retains
+  its parts and leaves the stored error alone; previous and unmatched errors
+  remain terminal.
 - A turn containing only subagent calls or session notices keeps those rows
   visible without an Activity fold. Pages, proposed workflow runs and earlier
   text containing a UI block remain visible in chronological order; the final
@@ -71,6 +79,16 @@ waits for a finished answer because changed-file details appear only there.
 The file list and available line counts come from the turn's own edit, write
 and patch calls. Pills open the snapshot-based session turn diff, which can
 also describe write results and delegated edits absent from those call patches.
+
+### Why retry suppression checks the current assistant and idle time
+
+A retry status can overlap the failed assistant message's saved error, and a
+stopped message can retain retry metadata. The latest same-session message's
+completion or retry time and the session idle marker share OpenCode's event
+clock. The message time must follow the authoritative idle time; without an idle
+marker, active retry evidence has no settled boundary to compare against.
+Clearing only the display copy's error preserves sync state, partial content and
+terminal notices for unmatched messages.
 
 ### Why a whole-call patch replaces per-file counts
 
