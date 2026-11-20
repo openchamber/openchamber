@@ -44,8 +44,9 @@ turn projection and scroll-follow policy.
   neighbouring visible turns continuous. Linked-item display parts preserve
   their context identity and stay client-only; their backing data stays outside
   the ordinary file shape. Provider descriptor changes refresh chip labels.
-- Message comparison includes tool output, synthetic shell-action state and
-  compaction summaries, so streamed state changes reach memoized rows.
+- Message comparison includes assistant error identity, tool output, synthetic
+  shell-action state and compaction summaries, so error-only and streamed changes
+  reach memoized rows.
 - Image preview measurements belong to their URL. An effect-based reset can
   race the load event of a cached image and leave the viewer incorrectly sized.
 - A quote popover's shadow belongs to the outer box that hugs its card. Keeping

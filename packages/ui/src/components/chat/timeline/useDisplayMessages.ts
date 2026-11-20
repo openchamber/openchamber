@@ -44,13 +44,11 @@ export const useDisplayMessages = (
     }), [messages, runningSubagentRuns]);
 
     const displayMessages = React.useMemo(() => streamPerfMeasure('ui.message_list.retry_overlay_ms', () => {
-        return applyRetryOverlay(baseDisplayMessages, {
-            sessionId: retryOverlay?.sessionId ?? null,
-            message: retryOverlay?.message ?? 'Quota limit reached. Retrying automatically.',
-            confirmedAt: retryOverlay?.confirmedAt,
-            fallbackTimestamp: retryOverlay?.fallbackTimestamp ?? 0,
-        });
-    }), [baseDisplayMessages, retryOverlay]);
+        return applyRetryOverlay(
+            baseDisplayMessages,
+            retryOverlay?.sessionId === sessionKey ? retryOverlay : null,
+        );
+    }), [baseDisplayMessages, retryOverlay, sessionKey]);
 
     return { baseDisplayMessages, displayMessages };
 };
