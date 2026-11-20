@@ -142,6 +142,16 @@ test('a write row draws one diff: the reported one, not the input preview', asyn
         });
         expect(longDiagnostic.inputPreview).toHaveLength(1);
 
+        // A hunk header past the visible cutoff does not count either.
+        const lateHunk = await render({
+            status: 'completed',
+            input,
+            metadata: { diff: [...Array.from({ length: 2_100 }, (_, index) => `diagnostic line ${index}`), '@@ -1,1 +1,1 @@', '-a', '+b'].join('\n') },
+            output: 'Wrote src/notes.md',
+            time: { start: 1, end: 2 },
+        });
+        expect(lateHunk.inputPreview).toHaveLength(1);
+
         // While the call runs there is no result yet, so the preview is all there is.
         const running = await render({ status: 'running', input, time: { start: 1 } });
         expect(running.inputPreview).toHaveLength(1);

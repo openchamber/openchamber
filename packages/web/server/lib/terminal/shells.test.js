@@ -86,6 +86,21 @@ describe('terminal shell resolver', () => {
     expect(probes).toBe(0);
   });
 
+  it('probes the package-specific Store alias inside WindowsApps too', async () => {
+    const alias = 'C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps\\Microsoft.PowerShell_8wekyb3d8bbwe\\pwsh.exe';
+    const resolver = createTerminalShellResolver({
+      platform: 'win32', env: { OPENCHAMBER_TERMINAL_SHELL: alias },
+      path: { delimiter: ';', join: (...parts) => parts.join('\\') },
+      fs: { statSync: () => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); } },
+      buildAugmentedPath: () => 'C:\\Tools',
+      searchPathFor: () => null,
+      isExecutable: () => false,
+      probePowerShell: async (file) => file === alias,
+    });
+
+    await expect(resolver.resolve('pwsh')).resolves.toEqual({ id: 'pwsh', executables: [alias] });
+  });
+
   it('keeps a bare pwsh that is executable as given when PATH has no match', async () => {
     const resolver = createTerminalShellResolver({
       platform: 'win32', env: { OPENCHAMBER_TERMINAL_SHELL: 'pwsh' },

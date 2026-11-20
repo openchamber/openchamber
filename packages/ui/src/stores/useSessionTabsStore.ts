@@ -16,7 +16,7 @@ interface SessionTabsStore {
   closeTab: (sessionId: string) => void;
   closeOtherTabs: (sessionId: string) => void;
   reorderTabs: (activeId: string, overId: string) => void;
-  removeTabs: (sessionIds: readonly string[]) => void;
+  removeTabs: (sessionIds: readonly string[], runtimeKey?: string) => void;
   followSessionMove: (sessionId: string, scope: string, scopePrefix: string, seed: () => readonly string[] | null) => void;
   enterScope: (scope: string, seed: () => readonly string[]) => void;
 }
@@ -124,19 +124,20 @@ export const useSessionTabsStore = create<SessionTabsStore>()(
           set({ tabIds: next, previewTabId: nextPreview });
         },
 
-        removeTabs: (sessionIds) => {
+        removeTabs: (sessionIds, runtimeKey) => {
           if (sessionIds.length === 0) return;
+          const inRuntime = (scope: string) => runtimeKey === undefined || scope === GLOBAL_SESSION_TAB_SCOPE || scope.startsWith(`${runtimeKey}|`);
           const gone = new Set(sessionIds);
           const without = (tabSet: SessionTabSet): SessionTabSet | null => {
             const next = tabSet.tabIds.filter((id) => !gone.has(id));
             if (next.length === tabSet.tabIds.length) return null;
             return { tabIds: next, previewTabId: tabSet.previewTabId && gone.has(tabSet.previewTabId) ? null : tabSet.previewTabId };
           };
-          const { tabIds, previewTabId, sets } = get();
-          const shown = without({ tabIds, previewTabId });
+          const { scope: shownScope, tabIds, previewTabId, sets } = get();
+          const shown = inRuntime(shownScope) ? without({ tabIds, previewTabId }) : null;
           let nextSets: Record<string, SessionTabSet> | null = null;
           for (const [scope, tabSet] of Object.entries(sets)) {
-            const next = without(tabSet);
+            const next = inRuntime(scope) ? without(tabSet) : null;
             if (!next) continue;
             nextSets ??= { ...sets };
             nextSets[scope] = next;

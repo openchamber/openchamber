@@ -133,7 +133,7 @@ fonts such as KaTeX, usually without another request on Save. The screen face
 never waits for that read, so startup and terminal refits keep their timing.
 Without the embedded copy, longer fallback glyphs can wrap inside a code chip
 measured with the original font. A failed read is not kept: the image still
-saves without that face, and the next Save reads it again.
+saves without that face, and the next Save reads it again. A face still loading when Save starts is waited for, up to 2 seconds, so the PNG embeds the face the layout was measured with.
 The VS Code webview retains its existing font policy and skips the CDN prefetch.
 
 ### Why plan dialogs mount lazily and not on every streaming message

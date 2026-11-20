@@ -54,6 +54,16 @@ test('loads screen fonts without waiting for the export copy, and exports the lo
     expect(css.match(/font-family:"Iosevka";font-weight:(400|600);/g)).toHaveLength(2);
     expect(css.match(/data:font\/woff2;base64,Zm9udCBieXRlcw==/g)).toHaveLength(3);
     expect(css).not.toContain('Cascadia Code');
+
+    // A face still loading when Save starts is waited for, so the PNG uses the face the layout measured.
+    let finishLoad: () => void = () => {};
+    const slowFace = new Promise<void>((resolve) => { finishLoad = resolve; });
+    Object.assign(globalThis, { FontFace: class { async load() { await slowFace; return this; } } });
+    const loading = loadMonoFont('jetbrains-mono');
+    const exporting = loadedAppFontCSS(['"JetBrains Mono", monospace']);
+    finishLoad();
+    await loading;
+    expect(await exporting).toContain('font-family:"JetBrains Mono"');
   } finally {
     fetchFont.mockRestore();
     Object.assign(globalThis, { document, FontFace, FileReader, Response, Blob });

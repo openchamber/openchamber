@@ -21,7 +21,7 @@ export const cleanupPersistedSessionState = (identity: {
   }
   useSessionFoldersStore.getState().removeSessionEverywhere(identity.runtimeKey, identity.sessionId);
   useSessionMultiSelectStore.getState().removeMany([identity.sessionId]);
-  useSessionTabsStore.getState().removeTabs([identity.sessionId]);
+  useSessionTabsStore.getState().removeTabs([identity.sessionId], identity.runtimeKey);
   useInlineCommentDraftStore.getState().clearSessionDrafts(identity.runtimeKey, identity.directory, identity.sessionId);
   const inputHistoryIdentity = createInputHistoryIdentity(identity.runtimeKey, identity.directory, identity.sessionId);
   if (inputHistoryIdentity) useInputHistoryStore.getState().clearSession(inputHistoryIdentity);

@@ -85,7 +85,7 @@ keeps the original empty-string sentinel and bounded mutable fragments.
 
 ### Why PowerShell aliases need a launch probe
 
-Windows Store execution aliases can reject `stat` with `EACCES` while remaining launchable. Shell discovery probes those PowerShell candidates, and only ones inside a `WindowsApps` directory, with a bounded, profile-free command in PATH order; other executables keep the normal file check. Auto resolves fallback shells as the PTY needs them, so a PowerShell probe cannot delay an earlier usable shell. Explicit selection only probes candidates for that shell. A bare `pwsh` with no PATH match still falls back to the plain executable check.
+Windows Store execution aliases can reject `stat` with `EACCES` while remaining launchable. Shell discovery probes those PowerShell candidates, and only ones inside a `WindowsApps` directory or one of its package folders, with a bounded, profile-free command in PATH order; other executables keep the normal file check. Auto resolves fallback shells as the PTY needs them, so a PowerShell probe cannot delay an earlier usable shell. Explicit selection only probes candidates for that shell. A bare `pwsh` with no PATH match still falls back to the plain executable check.
 
 ### Why events and not polling
 

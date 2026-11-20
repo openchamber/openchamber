@@ -443,7 +443,10 @@ sense while every opened session got a tab. With the preview tab only a send, a
 double-click, a drag or a new session pins one, so the set grows only as the
 user works. A set holds ids only, and the strip scrolls when its tabs overflow.
 Deletion cleanup (`sync/session-deletion-cleanup.ts`) drops a deleted
-session's id from every set, so ids that can never render again do not pile up.
+session's id from the global set and from every set of the server it was
+deleted on, so ids that can never render again do not pile up. Sets of other
+servers keep it: an imported session keeps its id, so the same id on another
+server is a different, live session.
 An archived session keeps its id, so restoring it brings its tab back.
 
 ### Session / project coordination stores

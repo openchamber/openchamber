@@ -1,10 +1,12 @@
 import { CODE_FONT_OPTION_MAP, UI_FONT_OPTION_MAP, type FontFaceSource, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { isVSCodeRuntime } from './desktop';
 import { fetchBypassingRuntimeBridge } from './runtime-fetch';
+import { waitAtMost } from './timing/waitAtMost';
 import { withAbortDeadline } from './timing/withAbortDeadline';
 
 const loadedFaces = new Map<string, { family: string; file: FaceFile }>();
 const embedCSSByFace = new Map<string, Promise<string>>();
+const PENDING_FACE_WAIT_MS = 2_000;
 const pendingFaces = new Map<string, Promise<void>>();
 
 interface FaceFile {
@@ -120,6 +122,10 @@ export const loadedAppFontCSS = async (stacks: readonly string[]): Promise<strin
   const families = new Set(stacks.flatMap((stack) =>
     stack.split(',').map((name) => name.trim().replace(/^(['"])(.*)\1$/, '$2').toLowerCase()),
   ));
+  const loading = [...pendingFaces.values()];
+  if (loading.length > 0) {
+    await waitAtMost(PENDING_FACE_WAIT_MS, Promise.all(loading));
+  }
   const matched = Array.from(loadedFaces.entries()).filter(([, { family }]) => families.has(family.toLowerCase()));
   const css = await Promise.all(matched.map(([key, { family, file }]) => embedCSSFor(key, family, file)));
   return css.filter(Boolean).join('\n');
