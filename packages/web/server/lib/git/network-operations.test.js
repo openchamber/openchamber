@@ -3184,7 +3184,10 @@ process.exit(safe ? 0 : 1);
       endpoint: { protocol: 'https', host: 'media.example.net', port: 443, path: 'owner/repository.git/info/lfs' },
     }));
     expect(setupValue.credentialBroker.issue).toHaveBeenCalledWith(expect.objectContaining({
-      endpointAliases: [{ protocol: 'https', host: 'media.example.net', port: 443, path: 'owner/repository.git' }],
+      endpointAliases: [
+        { protocol: 'https', host: 'media.example.net', port: 443, path: 'owner/repository.git' },
+        { protocol: 'https', host: 'media.example.net', port: 443, path: 'owner/repository' },
+      ],
     }));
     const lfsFetch = setupValue.calls.find((call) => call.args.includes('lfs') && call.args.includes('fetch'));
     expect(lfsFetch.args).toEqual(expect.arrayContaining([`lfs.url=${lfsEndpoint}`, 'origin', 'HEAD']));

@@ -151,7 +151,8 @@ export function gitLfsCredentialEndpointAliases<Endpoint>(endpoint: Endpoint) {
   if (!normalized.path.endsWith(GIT_LFS_ENDPOINT_SUFFIX)) return Object.freeze([]);
   const repositoryPath = normalized.path.slice(0, -GIT_LFS_ENDPOINT_SUFFIX.length);
   if (!repositoryPath) return Object.freeze([]);
-  return Object.freeze([Object.freeze({ ...normalized, path: repositoryPath })]);
+  const remotePaths = /[^/]\.git$/.test(repositoryPath) ? [repositoryPath, repositoryPath.slice(0, -'.git'.length)] : [repositoryPath];
+  return Object.freeze(remotePaths.map((path) => Object.freeze({ ...normalized, path })));
 }
 
 export function normalizeGitRemoteEndpoint<RemoteUrl>(remoteUrl: RemoteUrl) {
