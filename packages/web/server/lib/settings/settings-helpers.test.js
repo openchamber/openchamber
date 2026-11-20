@@ -997,7 +997,7 @@ describe('settings registry gate', () => {
     gitChangesViewMode: 'tree', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
     fileEditorKeymap: 'vim', fileEditorVimMappings: 'inoremap jk <Esc>', autoSaveEnabled: true, fileEditorWrapLines: false, confirmFileTreeMove: false, layoutAnimations: false, openLinksInBrowserPanel: true, liveBrowserTabLimit: 8, agentBrowserSharesLogins: true, openTrackerLinksOnBoard: true, fileTreeSide: 'left', autoCreateWorktree: true, sessionTabsEnabled: true, sessionTabsPerWorkspace: true,
     allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, mobileReturnKeySends: true,
-    largeTextPasteBehavior: 'attach', savePastedImagesAsFiles: true, followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
+    largeTextPasteBehavior: 'attach', documentAttachBehavior: 'save', savePastedImagesAsFiles: true, followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
     draftStarters: [{ type: 'command', name: 'plan-feature' }], draftStartersVisible: true, draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
     fontSize: 100, chatFontSize: 100, terminalFontSize: 14, editorFontSize: 14, uiFont: 'inter', monoFont: 'jetbrains-mono', customUiFont: 'Maple Mono NF CN', customMonoFont: 'Maple Mono', uiFontWeight: 'balanced', padding: 100, cornerRadius: 8,
     shortcutOverrides: { 'chat.send': 'mod+enter' },
@@ -1115,6 +1115,25 @@ describe('settings registry gate', () => {
       fileEditorWrapLines: false,
     });
     expect(helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: 'maybe', fileEditorKeymap: 'emacs' })).toEqual({});
+  });
+
+  it('keeps every office document choice and drops an unknown one', () => {
+    const helpers = createTestHelpersWithRealSanitizers();
+    for (const mode of ['ask', 'save', 'convert']) {
+      const accepted = helpers.sanitizeSettingsUpdate({ documentAttachBehavior: mode });
+      expect(accepted).toEqual({ documentAttachBehavior: mode });
+      expect(helpers.formatSettingsResponse(helpers.mergePersistedSettings({}, accepted))).toMatchObject({ documentAttachBehavior: mode });
+    }
+    expect(helpers.sanitizeSettingsUpdate({ documentAttachBehavior: 'attach' })).toEqual({});
+  });
+
+  it('trims a mode choice and drops one that is not text', () => {
+    const helpers = createTestHelpersWithRealSanitizers();
+    expect(helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: ' inline ', documentAttachBehavior: ' save ', fileEditorKeymap: ' vim ' }))
+      .toEqual({ largeTextPasteBehavior: 'inline', documentAttachBehavior: 'save', fileEditorKeymap: 'vim' });
+    for (const value of [1, null, ['save'], { mode: 'save' }]) {
+      expect(helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: value, documentAttachBehavior: value, fileEditorKeymap: value })).toEqual({});
+    }
   });
 });
 

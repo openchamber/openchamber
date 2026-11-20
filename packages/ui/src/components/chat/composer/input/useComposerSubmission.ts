@@ -20,6 +20,7 @@ import type { useComposerDraftText } from './useComposerDraftText';
 import type { useComposerDraftHistory } from './useComposerDraftHistory';
 import type { useComposerColumn } from './useComposerColumn';
 import type { useComposerAttachmentWork } from './useComposerAttachmentWork';
+import type { useComposerLargePasteState } from './useComposerLargePasteState';
 import type { ComposerSendHandlers } from './composerSendHandlers';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { isServerOwnedMessageQueue, type QueuedMessage } from '@/stores/messageQueueStore';
@@ -67,6 +68,7 @@ import { createComposerSubmitErrorMessage } from './createComposerSubmitErrorMes
 type Dependencies = {
     i18n: Pick<ReturnType<typeof useI18n>, 't'>;
     attachmentWork: Pick<ReturnType<typeof useComposerAttachmentWork>, 'waitForPendingAttachments'>;
+    largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteOffer'>;
     draftText: Pick<ReturnType<typeof useComposerDraftText>, 'confirmedMentionsRef' | 'setMessage' | 'currentChatDraftIdentityRef' | 'composerText'>;
     historySearchState: Pick<ReturnType<typeof useComposerHistorySearchState>, 'setPromptHistorySearch'>;
     editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
@@ -93,13 +95,14 @@ type Dependencies = {
 };
 
 export function useComposerSubmission({
-    i18n, attachmentWork, draftText, historySearchState, editorState, column, sending, inlineContext,
+    i18n, attachmentWork, largePasteState, draftText, historySearchState, editorState, column, sending, inlineContext,
     sendHandlers, sendAvailability, sessionScope, parallelRun, sessionLifecycle, queueState, selection,
     language, preferences, expansion, permissionSettings, runtime, draftHistory, queueActions, props,
     mentionAttachments, referenceDrafts,
 }: Dependencies) {
     const { t } = i18n;
     const { waitForPendingAttachments } = attachmentWork;
+    const { largeTextPasteOffer } = largePasteState;
     const { confirmedMentionsRef, setMessage, currentChatDraftIdentityRef, composerText } = draftText;
     const { setPromptHistorySearch } = historySearchState;
     const { composerRef } = editorState;
@@ -142,6 +145,7 @@ export function useComposerSubmission({
     const getSubmitErrorMessage = createComposerSubmitErrorMessage(t);
     const handleSubmit = async (options?: SubmitOptions) => {
         if (isMobileCommentOpen()) return;
+        if (largeTextPasteOffer && !options?.queuedOnly) return;
         if (await waitForPendingAttachments()) {
             void handleSubmitRef.current(options);
             return;

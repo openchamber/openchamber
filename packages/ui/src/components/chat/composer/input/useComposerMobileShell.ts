@@ -5,6 +5,7 @@ import type { useComposerHistorySearchState } from './useComposerHistorySearchSt
 import type { useComposerExpansion } from './useComposerExpansion';
 import type { useComposerEditorState } from './useComposerEditorState';
 import type { useComposerDropState } from './useComposerDropState';
+import type { useComposerLargePasteState } from './useComposerLargePasteState';
 import { useMobileComposerShell } from '../../composer/state/useMobileComposerShell';
 
 type Dependencies = {
@@ -15,11 +16,13 @@ type Dependencies = {
     mobilePanels: Pick<ReturnType<typeof useComposerMobilePanels>, 'mobileControlsPanel' | 'mobileAttachMenuOpen' | 'mobileDraftPicker'>;
     historySearchState: Pick<ReturnType<typeof useComposerHistorySearchState>, 'promptHistorySearch' | 'historyFocusPending'>;
     dropState: Pick<ReturnType<typeof useComposerDropState>, 'isDragging'>;
+    largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteOffer'>;
 };
 
 export function useComposerMobileShell({
-    preferences, expansion, referencePickerState, editorState, mobilePanels, historySearchState, dropState,
+    preferences, expansion, referencePickerState, editorState, mobilePanels, historySearchState, dropState, largePasteState,
 }: Dependencies) {
+    const { largeTextPasteOffer } = largePasteState;
     const { isMobile, hasHardwareKeyboard, isTabletLayout, roomyForOnePanel } = preferences;
     const { setExpandedInput } = expansion;
     const { referencePicker } = referencePickerState;
@@ -42,6 +45,7 @@ export function useComposerMobileShell({
             referencePickerOpen: referencePicker !== null,
             promptHistorySearchOpen: promptHistorySearch !== null || historyFocusPending,
             isDragging,
+            choicePending: largeTextPasteOffer !== null,
         },
     });
 

@@ -96,7 +96,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const referencePickerState = useComposerReferencePickerState();
     const mobileShell = useComposerMobileShell({
         preferences, expansion, referencePickerState, editorState, mobilePanels, historySearchState,
-        dropState,
+        dropState, largePasteState,
     });
     const referenceDrafts = useComposerReferenceDrafts({ draftText, sessionScope });
     const queueState = useComposerQueueState({ sessionScope });
@@ -119,8 +119,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         mobilePanels, referencePickerState, language, sessionScope, referenceDrafts,
     });
     const sending = useComposerSending({
-        inlineContext, attachmentWork, i18n, draftText, editorState, sendAvailability, sessionScope,
-        queueState, language, selection, mentionAttachments, props, referenceDrafts, preferences,
+        inlineContext, attachmentWork, largePasteState, i18n, draftText, editorState, sendAvailability,
+        sessionScope, queueState, language, selection, mentionAttachments, props, referenceDrafts, preferences,
         historySearchState, column, parallelRun, sessionLifecycle, expansion, permissionSettings,
         runtime, draftHistory,
     });
@@ -139,6 +139,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     });
     const fileIntake = useComposerFileIntake({
         editorState, draftText, i18n, attachmentWork, editorActions, selection, sessionScope,
+        largePasteState, mobileShell,
     });
     const paste = useComposerPaste({
         sessionScope, language, editorState, draftText, largePasteState, attachmentWork, i18n,

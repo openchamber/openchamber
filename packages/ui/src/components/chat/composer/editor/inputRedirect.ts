@@ -21,7 +21,7 @@ const INTERACTIVE_SELECTOR = [
 const FLOATING_LAYER_SELECTOR = [
     '[role="dialog"]', '[role="alertdialog"]', '[role="menu"]',
     '[data-slot="select-content"][data-open]', '[data-settings-view="true"]',
-    '[data-btw-composer="true"]',
+    '[data-btw-composer="true"]', '[data-composer-choice="true"]',
 ].join(',');
 
 const MIDDLE_CLICK_PASTE_WINDOW_MS = 1000;

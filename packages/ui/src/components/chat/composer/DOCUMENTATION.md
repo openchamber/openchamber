@@ -765,7 +765,7 @@ comment in the prompt and shows it all the same, and editing it moves it out.
 | `parallel/` | "Run in parallel": the launch state of a new-session draft (prompt variants, models per variant, worktrees, setup, auto-fusion) and the strip that renders it above the editor |
 | `text.ts` | How inserted text meets the text already there |
 | `largeTextPaste.ts` | Detect large plain-text pastes, own the double-paste gesture, and build virtual `.txt` files |
-| `largeTextPasteOffer.ts` | Large-paste choice offer id begin/resolve (supersede + double-apply guards) |
+| `largeTextPasteOffer.ts` | Offer id begin/resolve for the choice above the composer, large paste or office documents (supersede + double-apply guards) |
 
 `ChatInput.handlePaste` owns paste orchestration: URL-over-selection markdown
 links, clipboard files, and large plain-text pastes. Pasted and dropped files
@@ -784,7 +784,7 @@ caret). There are no thumbnails above the input.
 
 - The draft's files are a pool; a send, a queued message and a parallel
   launch take the ones their text cites (`attachmentsCitedIn`, `[name]` or the
-  `[name](path)` link of an image saved as a file), plus the screenshots of
+  `[name](path)` link of an image or office document saved as a file), plus the screenshots of
   the browser annotations going with it. Deleting a chip drops its file, and
   undo, which only rewrites the text, brings it back. A send waits for files
   still being read.
@@ -892,6 +892,57 @@ editor focus, expanding the collapsed pill if needed. Hosted mobile focuses
 inside the tap; Capacitor uses the shell's existing next-frame keyboard timing
 when the pill expands. A newer large paste replaces an unanswered choice, and a
 draft, mode or runtime change drops it, so it never lands in another draft.
+Office documents (docx, pptx, xlsx, odt, odp, ods) that arrive through
+`attachFilesWithCitation` (an OS drop, a clipboard file, the attach menu, VS
+Code's picker) follow the profile setting `documentAttachBehavior` (`ask` /
+`save` / `convert`, default `ask`). The other files of the same batch attach at
+once as before. `convert` sends the documents down the ordinary attachment
+path, where the store extracts their text (`sync/DOCUMENTATION.md`). `save`
+(shown as "Attach as is") writes the original bytes with
+`opencodeClient.writeOpenCodeTempFiles`, as a saved image is written, and
+links each as `[name](absolute path)`, with `<` and `>` in the name replaced by
+`_` so the link's `<path>` destination still parses. A converted file or
+image never reuses a name already in such a link, whatever the image setting,
+so a link's label cannot cite an unrelated attachment. A file that could not be read or written
+is named in an error toast, gets no link and is not converted, and the rest of
+the batch keeps its links. A document over the 20 MB send limit
+(`MAX_ATTACHMENT_BYTES`) is refused by name before anything is read, and the
+writer reads each file right before its own write, so a batch holds one
+document in memory at a time. No model check applies: the link replaces the
+extraction for every model. The draft and the runtime instance
+(`captureRuntimeInstance`, so switching away and back still counts as a
+change) are captured when the files arrive; the writer stops before its next request once the runtime
+changed, and a draft or runtime that changed before the write answered gets
+no link. `ask` posts one choice for the batch's documents in the large-paste
+slot (`kind: 'documents'`) with "Attach as is" first. The choice keeps its two
+actions: `attach` keeps the content whole (Attach as is) and `inline` is the
+fallback (Convert to text). Keys, focus, blur and the draft, mode and runtime
+scope are the large paste's, with Convert as the fallback where a large paste
+pastes inline. While a choice of either kind is unanswered, Send and Queue do
+nothing and the draft stays: on touch the choice never takes focus, so a tap
+on Send would otherwise go out without the documents or the pasted text.
+A choice for files picked from a phone's collapsed pill expands the composer,
+where the choice shows, and holds the mobile shell expanded until it is
+answered, so a tap outside the editor cannot hide it behind the pill. A path-only drop (a Files panel row, a VS Code
+explorer URI) still becomes an `@` mention and never reaches the setting.
+
+### Why office documents ask in the large-paste slot and not a choice of their own
+
+The maintainer asked for the document choice to look and behave exactly like
+the large-paste one. Sharing the offer state gives it the same component,
+keyboard, focus and scope guards with no second copy, and keeps one choice
+above the composer at a time: a newer offer of either kind replaces an
+unanswered one, whose files are dropped as an unanswered large paste is.
+
+### Why the choice counts as a floating layer for the window-focus refocus
+
+Files picked through a dialog (VS Code's open dialog, a native file chooser)
+arrive after the window gets its focus back, so the document choice mounts
+just as `useKeyboardShortcuts` runs the window-focus refocus. Without the
+choice on `inputRedirect`'s floating-layer list, that refocus moved focus to
+the editor two frames later, and the choice took the move for an answer and
+converted the files. Listing it keeps the answer with the user; a click or
+focus moved elsewhere still answers Convert, as for a large paste.
 
 ## The prompt language
 
@@ -1833,8 +1884,9 @@ one app-wide composer state is split per column:
   composer is the pinned chat's when the user last clicked or focused into
   that column and it is still on screen, the main chat's otherwise. Input
   stays where it is when its target takes text or is a button, link, tab,
-  list or menu item, while a dialog, menu, open select, settings or the BTW
-  composer is on screen, during IME composition, and while text is selected, because typing
+  list or menu item, while a dialog, menu, open select, settings, the BTW
+  composer or the choice above the composer (large paste, office documents)
+  is on screen, during IME composition, and while text is selected, because typing
   over a selection starts a comment on it. The window-focus refocus skips a
   focused field, terminal, editor or embedded page and keeps a selection.
   `useKeyboardShortcuts` calls it after the shortcut dispatcher, so a
