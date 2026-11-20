@@ -901,7 +901,7 @@ export async function searchGitHubReferencesAcross<Group extends AcrossGroup>({ 
     : searches.map(() => ({ cursor: null, offset: 0, done: false, total: 0 }));
   const pages = await mapReferencesAcross(searches, async ({ group, repos }, index): Promise<AcrossPage> => {
     const position = retainedEntry(positions, index);
-    if (position.done) return { done: true, items: [], total: position.total };
+    if (position.done || (lookup && !parseReferenceLookup(text, [], kind, group.host))) return { done: true, items: [], total: position.total };
     try {
       const page = await searchGitHubReferences({ octokit: group.octokit, repos, kind, state, people, text, labels, cursor: position.cursor }, group.host);
       if (page.hasMore && !page.cursor) throw new Error('GitHub returned an invalid search cursor');

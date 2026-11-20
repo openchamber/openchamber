@@ -226,6 +226,12 @@ describe('searchGitHubReferencesAcross', () => {
     await searchGitHubReferencesAcross({ ...options, groups: [{ ...enterprise[0], octokit: searchOnly }], text: 'https://www.github.com/acme/repo41/pull/7' });
     expect(searched.length).toBeGreaterThan(0);
     expect(searched.every((call) => typeof call.q === 'string')).toBe(true);
+    searched.length = 0;
+    calls.length = 0;
+    const mixed = [enterprise[0], { accountId: 'p', octokit: searchOnly, host: 'github.com', repos: entries }];
+    const pasted = await searchGitHubReferencesAcross({ ...options, groups: mixed, text: 'https://ghe.example.com/acme/repo41/pull/7' });
+    expect(pasted.items).toHaveLength(1);
+    expect(searched).toHaveLength(0);
   });
 
   it('keeps every page newest first, holding back what a quieter search read until the busier one passes it', async () => {

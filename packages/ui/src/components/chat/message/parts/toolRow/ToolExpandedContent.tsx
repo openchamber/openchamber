@@ -60,6 +60,8 @@ interface ToolExpandedContentProps {
     headerActionsSlot: HTMLElement | null;
 }
 
+const OVERSIZED_PATCH_HUNK = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/m;
+
 export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     part,
     state,
@@ -508,7 +510,7 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
         || (isShellTool(part.tool) && hasVisibleOutput);
     const guestReplacesResult = Boolean(presentation?.output && presentation.output !== 'auto' && hasStringOutput && outputString.trim());
     const resultDrawsReportedPatch = isFileChangeTool(part.tool)
-        && diffEntries.some((entry) => entry.renderMode === 'diff' || isToolDiffPreviewOversized(entry.patch));
+        && diffEntries.some((entry) => entry.renderMode === 'diff' || (isToolDiffPreviewOversized(entry.patch) && OVERSIZED_PATCH_HUNK.test(entry.patch)));
     const hidesWriteInputPreview = isWriteLikeTool && shouldRenderResult && !guestReplacesResult && resultDrawsReportedPatch;
 
     return (

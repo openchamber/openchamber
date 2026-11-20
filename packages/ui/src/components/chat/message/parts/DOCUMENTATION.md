@@ -715,9 +715,10 @@ entry. The preview hides only when the result branch actually draws that
 patch: an extension's output rule that replaces the result, or metadata whose
 diff text is no usable patch (the plain-text fallback entry), keeps the
 preview, while a valid patch shown as plain text because of its size still
-counts. Gating the result-diff branch back to edit and patch reopens the
+counts when it carries a hunk header; a long diagnostic in the diff field does
+not. Gating the result-diff branch back to edit and patch reopens the
 duplicate; `ToolPart.write-row-diff.test.tsx` pins the completed, running,
-native and unusable-patch cases.
+native, unusable-patch and long-diagnostic cases.
 
 ### Message parts
 

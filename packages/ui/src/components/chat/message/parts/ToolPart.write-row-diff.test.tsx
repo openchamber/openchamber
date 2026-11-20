@@ -132,6 +132,16 @@ test('a write row draws one diff: the reported one, not the input preview', asyn
         });
         expect(unusable.inputPreview).toHaveLength(1);
 
+        // A long diagnostic is no patch, however long: the preview stays.
+        const longDiagnostic = await render({
+            status: 'completed',
+            input,
+            metadata: { diff: Array.from({ length: 2_100 }, (_, index) => `diagnostic line ${index}`).join('\n') },
+            output: 'Wrote src/notes.md',
+            time: { start: 1, end: 2 },
+        });
+        expect(longDiagnostic.inputPreview).toHaveLength(1);
+
         // While the call runs there is no result yet, so the preview is all there is.
         const running = await render({ status: 'running', input, time: { start: 1 } });
         expect(running.inputPreview).toHaveLength(1);
