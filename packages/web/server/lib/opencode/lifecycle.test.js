@@ -1270,6 +1270,7 @@ describe('OpenCode lifecycle', () => {
     expect(options.env.SHELL_ONLY).toBe('yes');
     expect(options.env.OPENCODE_PASSWORD).toBe('password');
     expect(options.env.OPENCODE_SERVER_PASSWORD).toBe('password');
+    expect(options.env.OPENCODE_CLIENT).toBe('openchamber');
     expect(server.exitCode).toBeNull();
     expect(server.signalCode).toBeNull();
 

@@ -6,7 +6,7 @@ import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-e
 import { assignInjectedEnv } from '../injected-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 import { hasChildProcessExited, stopOpenCodeByClosingStdin, waitForChildProcessClose } from './managed-process-stop.js';
-import { applyProviderEnvAliases } from './provider-env-aliases.js';
+import { prepareManagedOpenCodeEnv } from './managed-opencode-env.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { recordStartupPerformance } from '../diagnostics/startup-performance.js';
 import { topUpV1Migration } from './v1-migration-topup.js';
@@ -902,7 +902,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
       console.warn('[OpenCode] V1 session migration top-up failed:', error instanceof Error ? error.message : error);
     }
 
-    const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases(assignInjectedEnv(
+    const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(prepareManagedOpenCodeEnv(assignInjectedEnv(
       { ...inheritedEnv },
       {
         ...managedOpenCodeEnv,

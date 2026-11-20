@@ -14,7 +14,7 @@ import { Observability } from '@opencode/util/observability';
 import { AppProcess } from '@opencode/util/process';
 
 const OPENCODE_CHANNEL = 'latest';
-const OPENCODE_ARTIFACT = 'openchamber-desktop';
+const OPENCODE_ARTIFACT = 'openchamber';
 
 const truthy = (value) => value === '1' || value?.toLowerCase() === 'true';
 
