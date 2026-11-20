@@ -678,21 +678,21 @@ export const createApnsRuntime = (deps: ApnsDependencies) => {
 
   const clearApnsNotifications = async ({ tags, badge }: ApnsClearRequest = {}) => {
     const clearTags = (Array.isArray(tags) ? tags : [])
-      .filter((tag) => tag && tag.length <= MAX_CLEAR_ENTRY_LENGTH)
-      .slice(0, MAX_CLEAR_TAGS);
+      .filter((tag) => tag && tag.length <= MAX_CLEAR_ENTRY_LENGTH);
     if (clearTags.length === 0) return;
     const devices = await readDeliverableDevices();
     if (devices.length === 0) return;
     const tokensByEnvironment = groupByEnvironment(devices);
-    const request = { tags: clearTags, badge };
-
     const relay = resolveRelayConfig();
-    if (relay) {
-      await Promise.all([...tokensByEnvironment].map(([environment, deviceTokens]) =>
-        clearViaRelay(deviceTokens, request, relay, relay.environment ?? environment)));
-      return;
+    for (let offset = 0; offset < clearTags.length; offset += MAX_CLEAR_TAGS) {
+      const request = { tags: clearTags.slice(offset, offset + MAX_CLEAR_TAGS), badge };
+      if (relay) {
+        await Promise.all([...tokensByEnvironment].map(([environment, deviceTokens]) =>
+          clearViaRelay(deviceTokens, request, relay, relay.environment ?? environment)));
+      } else {
+        await sendViaDirectApns(tokensByEnvironment, { body: buildClearBody(request), pushType: 'background' });
+      }
     }
-    await sendViaDirectApns(tokensByEnvironment, { body: buildClearBody(request), pushType: 'background' });
   };
 
   const sealedPayloadFor = (payload: ApnsPayload, content: PushContent, pushKey: string) => ({
