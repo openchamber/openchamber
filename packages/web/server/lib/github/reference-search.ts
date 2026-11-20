@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { SourceControlJson } from '@openchamber/sdk';
 import { checkContextSchema, isGraphqlRateLimitError, parseSummaryRefs, summarizeCheckContexts, toDiscussionState } from './pr-summaries.js';
 import { graphqlAliasesSchema, hasProperty, retainedEntry, referenceDirectory, livePage, referenceNodeAt } from './contracts.js';
+import { parseReferenceLookup, repoKey } from './reference-links.js';
 import type { Octokit, PullRequestQuery, GitHubEnvelope, SummaryRef, AcrossContext, ReferenceRepo, Reference, DetailLineComment, DetailEntry, StatusDictionary, SearchInput, AcrossGroup, AcrossPosition, CommentPermissions, EditableText, ReferenceDetail, LookupVariables, AcrossPage, AcrossSearchInput } from './contracts.js';
 
 const REFERENCE_PAGE_SIZE = 30;
@@ -491,7 +492,6 @@ const referenceNodeSchema = z.discriminatedUnion('__typename', [issueNodeSchema,
 const REVIEW_DECISIONS = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes_requested', REVIEW_REQUIRED: 'review_required' };
 const PULL_STATES = { OPEN: 'open', CLOSED: 'closed', MERGED: 'merged' };
 
-const repoKey = (owner: string, repo: string) => `${owner.toLowerCase()}/${repo.toLowerCase()}`;
 
 const categoryEmoji = (html: string | null | undefined) => {
   const text = String(html ?? '').replace(/<[^>]*>/g, '').trim();
@@ -752,27 +752,6 @@ const searchPageSchema = z.object({
 const searchResultSchema = z.object({ search: searchPageSchema.extend({ issueCount: z.number().int() }) });
 const discussionSearchResultSchema = z.object({ search: searchPageSchema.extend({ discussionCount: z.number().int() }) });
 
-export function parseReferenceLookup(text: string, repos: ReferenceRepo[], kind = 'issue') {
-  const trimmed = text.trim();
-  const family = kind === 'discussion' ? 'discussion' : 'item';
-  const hash = trimmed.match(/^#?(\d+)$/);
-  if (hash) {
-    return { number: Number(hash[1]), repos, family };
-  }
-  const url = trimmed.match(/^(?:https?:\/\/)?github\.com\/([^/\s]+)\/([^/\s]+)\/(issues|pull|discussions)\/(\d+)(?:[/?#]\S*)?$/i);
-  if (url && (url[3]?.toLowerCase() === 'discussions') === (family === 'discussion')) {
-    const target = repos.filter((entry) => repoKey(entry.owner, entry.repo) === repoKey(url[1] ?? '', url[2] ?? ''));
-    return { number: Number(url[4]), repos: target, family };
-  }
-  return null;
-}
-
-export function parseReferenceLink(text: string, host: string) {
-  const url = text.trim().match(/^https?:\/\/(?:www\.)?([^/\s]+)\/([^/\s]+)\/([^/\s]+)\/(?:issues|pull|discussions)\/(\d+)(?:[/?#]\S*)?$/i);
-  if (!url || url[1]?.toLowerCase() !== String(host).toLowerCase()) return null;
-  return { owner: url[2], repo: url[3], number: Number(url[4]) };
-}
-
 const USER_LABEL_QUALIFIERS = /(?:^|\s)labels?:("(?:[^"\\]|\\.)*"|\S+)/gi;
 const USER_PEOPLE_QUALIFIERS = /(?:^|\s)(?:assignee|author|mentions|review-requested|reviewed-by):\S+/i;
 
@@ -840,8 +819,8 @@ async function runPartialQuery(octokit: Octokit, query: string, variables: Recor
   }
 }
 
-export async function searchGitHubReferences({ octokit, repos, kind, state, people, text, labels = [], cursor }: SearchInput) {
-  const lookup = parseReferenceLookup(text, repos, kind);
+export async function searchGitHubReferences({ octokit, repos, kind, state, people, text, labels = [], cursor }: SearchInput, host?: string) {
+  const lookup = parseReferenceLookup(text, repos, kind, host);
   if (lookup) {
     if (lookup.repos.length === 0) {
       return { items: [], cursor: null, hasMore: false, total: 0 };
@@ -910,7 +889,7 @@ export async function searchGitHubReferencesAcross<Group extends AcrossGroup>({ 
     }
     return chunks;
   });
-  const lookup = parseReferenceLookup(text, [], kind);
+  const lookup = groups.some((group) => parseReferenceLookup(text, [], kind, group.host));
   if (lookup && cursor) throw invalidAcrossCursor();
   const scope = createHash('sha256').update(JSON.stringify({
     kind, state, people, labels, text,
@@ -924,7 +903,7 @@ export async function searchGitHubReferencesAcross<Group extends AcrossGroup>({ 
     const position = retainedEntry(positions, index);
     if (position.done) return { done: true, items: [], total: position.total };
     try {
-      const page = await searchGitHubReferences({ octokit: group.octokit, repos, kind, state, people, text, labels, cursor: position.cursor });
+      const page = await searchGitHubReferences({ octokit: group.octokit, repos, kind, state, people, text, labels, cursor: position.cursor }, group.host);
       if (page.hasMore && !page.cursor) throw new Error('GitHub returned an invalid search cursor');
       const items = page.items.slice(position.offset).map((item) => ({ ...item,
         directory: referenceDirectory(repos, item, repoKey),
