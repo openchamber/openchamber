@@ -9,10 +9,16 @@ import { useI18nStore } from '@/lib/i18n/store';
 import { dict as ukDict } from '@/lib/i18n/messages/uk';
 import { buildSettingsSearchResults } from '@/lib/settings/search';
 
-import { Select, SelectItem } from '@/components/ui/select';
+type VoiceSettingsModule = typeof import('./VoiceSettings');
+type CompatibleVoiceFieldModule = typeof import('./CompatibleVoiceField');
 
-import { CompatibleVoiceField } from './CompatibleVoiceField';
-import { VoiceSettings } from './VoiceSettings';
+let VoiceSettings: VoiceSettingsModule['VoiceSettings'];
+let CompatibleVoiceField: CompatibleVoiceFieldModule['CompatibleVoiceField'];
+
+const loadComponentsAfterDom = async () => {
+  ({ VoiceSettings } = await import('./VoiceSettings'));
+  ({ CompatibleVoiceField } = await import('./CompatibleVoiceField'));
+};
 
 describe('VoiceSettings endpoint paths', () => {
   let windowInstance: Window;
@@ -22,9 +28,9 @@ describe('VoiceSettings endpoint paths', () => {
   let initialConfig: ReturnType<typeof useConfigStore.getState>;
   let initialI18n: ReturnType<typeof useI18nStore.getState>;
 
-  const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node', 'ResizeObserver', 'localStorage', 'sessionStorage', 'IS_REACT_ACT_ENVIRONMENT', 'fetch'];
+  const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node', 'ResizeObserver', 'localStorage', 'sessionStorage', 'IS_REACT_ACT_ENVIRONMENT', 'fetch', 'requestAnimationFrame', 'cancelAnimationFrame', 'MutationObserver'];
 
-  beforeEach(() => {
+  beforeEach(async () => {
     windowInstance = new Window();
     initialConfig = useConfigStore.getState();
     initialI18n = useI18nStore.getState();
@@ -39,11 +45,15 @@ describe('VoiceSettings endpoint paths', () => {
       localStorage: windowInstance.localStorage,
       sessionStorage: windowInstance.sessionStorage,
       IS_REACT_ACT_ENVIRONMENT: true,
+      requestAnimationFrame: windowInstance.requestAnimationFrame.bind(windowInstance),
+      cancelAnimationFrame: windowInstance.cancelAnimationFrame.bind(windowInstance),
+      MutationObserver: windowInstance.MutationObserver,
       fetch: async () => ({ ok: false, status: 503, json: async () => ({}), text: async () => '' }),
     });
     host = document.createElement('div');
     document.body.append(host);
     root = createRoot(host);
+    await loadComponentsAfterDom();
   });
 
   afterEach(async () => {
@@ -130,7 +140,7 @@ describe('VoiceSettings custom server voice list', () => {
   let voiceRequests: number;
 
   const SERVER_URL = 'http://localhost:8880/v1';
-  const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node', 'ResizeObserver', 'localStorage', 'sessionStorage', 'IS_REACT_ACT_ENVIRONMENT', 'fetch'];
+  const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node', 'ResizeObserver', 'localStorage', 'sessionStorage', 'IS_REACT_ACT_ENVIRONMENT', 'fetch', 'requestAnimationFrame', 'cancelAnimationFrame', 'MutationObserver', 'MouseEvent', 'PointerEvent', 'KeyboardEvent', 'getComputedStyle'];
 
   const listed = (voices: string[]) => () => Promise.resolve(Response.json({ voices }));
   const failed = (code: string) => () => Promise.resolve(Response.json({ code }, { status: 502 }));
@@ -140,7 +150,7 @@ describe('VoiceSettings custom server voice list', () => {
     return { answer: () => answer, release: (response: Response) => release(response) };
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     windowInstance = new Window();
     initialConfig = useConfigStore.getState();
     voiceRequests = 0;
@@ -157,6 +167,13 @@ describe('VoiceSettings custom server voice list', () => {
       localStorage: windowInstance.localStorage,
       sessionStorage: windowInstance.sessionStorage,
       IS_REACT_ACT_ENVIRONMENT: true,
+      requestAnimationFrame: windowInstance.requestAnimationFrame.bind(windowInstance),
+      cancelAnimationFrame: windowInstance.cancelAnimationFrame.bind(windowInstance),
+      MutationObserver: windowInstance.MutationObserver,
+      MouseEvent: windowInstance.MouseEvent,
+      PointerEvent: windowInstance.PointerEvent,
+      KeyboardEvent: windowInstance.KeyboardEvent,
+      getComputedStyle: windowInstance.getComputedStyle.bind(windowInstance),
       fetch: async (input: Request | string) => {
         const url = input instanceof Request ? input.url : String(input);
         if (url.includes('/api/tts/voices')) {
@@ -176,6 +193,7 @@ describe('VoiceSettings custom server voice list', () => {
     host = document.createElement('div');
     document.body.append(host);
     root = createRoot(host);
+    await loadComponentsAfterDom();
   });
 
   afterEach(async () => {
@@ -197,6 +215,21 @@ describe('VoiceSettings custom server voice list', () => {
   };
   const voiceTrigger = () => host.querySelector('[data-slot="select-trigger"][aria-label="Voice"]');
   const voiceInput = () => host.querySelector<HTMLInputElement>('input[placeholder="af_sky"]');
+  const press = async (target: Element | null | undefined) => {
+    if (!target) throw new Error('Nothing to press');
+    for (const type of ['pointerover', 'pointerenter', 'pointermove', 'mousemove', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      const init = { bubbles: true, cancelable: true, button: 0 };
+      await act(async () => {
+        target.dispatchEvent(type.startsWith('pointer') ? new PointerEvent(type, { ...init, pointerType: 'mouse' }) : new MouseEvent(type, init));
+      });
+    }
+  };
+  const retryButton = () => Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Retry');
+  const renderField = ({ committedUrl = SERVER_URL, keyRevision = 0 }: { committedUrl?: string; keyRevision?: number } = {}) => act(async () => root.render(
+    <I18nProvider>
+      <CompatibleVoiceField committedUrl={committedUrl} keyRevision={keyRevision}>{null}</CompatibleVoiceField>
+    </I18nProvider>,
+  ));
 
   test('offers the voices the server lists, and drops them as soon as the server address changes', async () => {
     voicesAnswer = listed(['af_bella', 'af_sky']);
@@ -257,11 +290,7 @@ describe('VoiceSettings custom server voice list', () => {
 
   test('reads the list only for an address the user has finished typing', async () => {
     voicesAnswer = listed(['af_bella', 'af_sky']);
-    const Probe = ({ committedUrl }: { committedUrl: string }) => {
-      CompatibleVoiceField({ committedUrl, keyRevision: 0, children: null });
-      return null;
-    };
-    await act(async () => root.render(<I18nProvider><Probe committedUrl={SERVER_URL} /></I18nProvider>));
+    await renderField();
     await settle(() => voiceRequests === 1);
 
     await act(async () => { useConfigStore.getState().setOpenaiCompatibleUrl('https://tts.example.co'); });
@@ -269,9 +298,10 @@ describe('VoiceSettings custom server voice list', () => {
     expect(voiceRequests).toBe(1);
 
     await act(async () => { useConfigStore.getState().setOpenaiCompatibleUrl('https://tts.example.com/v1'); });
-    await act(async () => root.render(<I18nProvider><Probe committedUrl="https://tts.example.com/v1" /></I18nProvider>));
+    await renderField({ committedUrl: 'https://tts.example.com/v1' });
     await settle(() => voiceRequests === 2);
     expect(voiceRequests).toBe(2);
+    expect(voiceTrigger()).not.toBeNull();
   });
 
   test('the page reads the list when the address field is left, not while it is edited', async () => {
@@ -323,64 +353,77 @@ describe('VoiceSettings custom server voice list', () => {
     expect(voiceRequests).toBe(2);
   });
 
+  test('names a redirect or an oversized list, without a Retry that would fail again', async () => {
+    for (const [code, text] of [
+      ['redirected', 'The server redirected the request to another address. Enter that address instead.'],
+      ['list_too_large', "The server's voice list is larger than 1 MB, so it can't be shown. Type the voice name instead."],
+    ]) {
+      const address = `http://localhost:8880/${code}`;
+      voicesAnswer = failed(code);
+      await act(async () => { useConfigStore.getState().setOpenaiCompatibleUrl(address); });
+      await renderField({ committedUrl: address });
+      await settle(() => host.textContent?.includes(text) === true);
+
+      expect(host.textContent).toContain(text);
+      expect(retryButton()).toBeUndefined();
+      expect(voiceInput()?.value).toBe('af_sky');
+    }
+  });
+
+  test('Enter in an empty API key field keeps the focus there', async () => {
+    await renderPage();
+    const keyField = host.querySelector<HTMLInputElement>('input[type="password"][aria-label="API key"]');
+    if (!keyField) throw new Error('Missing API key field');
+    await act(async () => { keyField.focus(); });
+    await act(async () => {
+      keyField.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+
+    expect(document.activeElement).toBe(keyField);
+  });
+
   test('a saved key reads the list again and keeps the shown answer until the new one arrives', async () => {
     voicesAnswer = failed('rejected_key');
-    let view: React.ReactNode = null;
-    const Probe = ({ keyRevision }: { keyRevision: number }) => {
-      view = CompatibleVoiceField({ committedUrl: SERVER_URL, keyRevision, children: null });
-      return null;
-    };
-    const shows = (text: string) => {
-      const description = React.isValidElement<{ description?: React.ReactNode }>(view) ? view.props.description : null;
-      return descendants(description).some((node) => node.props.children === text);
-    };
-    await act(async () => root.render(<I18nProvider><Probe keyRevision={0} /></I18nProvider>));
-    await settle(() => shows('Retry'));
-    expect(shows('Retry')).toBe(true);
+    await renderField();
+    await settle(() => retryButton() !== undefined);
+    expect(retryButton()).toBeDefined();
     expect(voiceRequests).toBe(1);
 
     const pending = held();
     voicesAnswer = pending.answer;
-    await act(async () => root.render(<I18nProvider><Probe keyRevision={1} /></I18nProvider>));
+    await renderField({ keyRevision: 1 });
     expect(voiceRequests).toBe(2);
-    expect(shows('Retry')).toBe(true);
+    expect(retryButton()).toBeDefined();
 
     pending.release(Response.json({ voices: ['af_bella', 'af_sky'] }));
-    await settle(() => descendants(view).some((node) => node.type === Select));
-    expect(shows('Retry')).toBe(false);
+    await settle(() => voiceTrigger() !== null);
+    expect(voiceTrigger()?.textContent).toBe('af_sky');
+    expect(retryButton()).toBeUndefined();
   });
 
   test('an older read that answers after a newer one is dropped', async () => {
     const older = held();
     voicesAnswer = older.answer;
-    let view: React.ReactNode = null;
-    const Probe = ({ keyRevision }: { keyRevision: number }) => {
-      view = CompatibleVoiceField({ committedUrl: SERVER_URL, keyRevision, children: null });
-      return null;
-    };
-    await act(async () => root.render(<I18nProvider><Probe keyRevision={0} /></I18nProvider>));
+    await renderField();
     voicesAnswer = listed(['af_bella', 'af_sky']);
-    await act(async () => root.render(<I18nProvider><Probe keyRevision={1} /></I18nProvider>));
-    await settle(() => descendants(view).some((node) => node.type === Select));
+    await renderField({ keyRevision: 1 });
+    await settle(() => voiceTrigger() !== null);
 
     older.release(Response.json({ code: 'rejected_key' }, { status: 502 }));
     for (let round = 0; round < 5; round += 1) await act(async () => {});
 
     expect(voiceRequests).toBe(2);
-    expect(descendants(view).some((node) => node.type === Select)).toBe(true);
+    expect(voiceTrigger()).not.toBeNull();
+    expect(retryButton()).toBeUndefined();
   });
 
   test('a key saved while the address is being edited sends nothing to the old address', async () => {
     voicesAnswer = listed(['af_bella', 'af_sky']);
-    const Probe = ({ keyRevision }: { keyRevision: number }) => {
-      CompatibleVoiceField({ committedUrl: SERVER_URL, keyRevision, children: null });
-      return null;
-    };
-    await act(async () => root.render(<I18nProvider><Probe keyRevision={0} /></I18nProvider>));
+    await renderField();
     await settle(() => voiceRequests === 1);
 
     await act(async () => { useConfigStore.getState().setOpenaiCompatibleUrl('http://localhost:8881/v'); });
-    await act(async () => root.render(<I18nProvider><Probe keyRevision={1} /></I18nProvider>));
+    await renderField({ keyRevision: 1 });
     for (let round = 0; round < 5; round += 1) await act(async () => {});
 
     expect(voiceRequests).toBe(1);
@@ -405,28 +448,17 @@ describe('VoiceSettings custom server voice list', () => {
 
   test('picking Custom… keeps the saved voice and opens the field', async () => {
     voicesAnswer = listed(['af_bella', 'af_sky']);
-    let view: React.ReactNode = null;
-    const Probe = () => {
-      view = CompatibleVoiceField({ committedUrl: SERVER_URL, keyRevision: 0, children: null });
-      return null;
-    };
-    await act(async () => root.render(<I18nProvider><Probe /></I18nProvider>));
-    const select = () => descendants(view).find((node) => node.type === Select);
-    await settle(() => select() !== undefined);
+    await renderField();
+    await settle(() => voiceTrigger() !== null);
 
-    const customItem = descendants(view).find((node) => node.type === SelectItem && node.props.children === 'Custom…');
-    const picker = select();
-    if (!React.isValidElement<{ onValueChange: (value: string) => void }>(picker)) throw new Error('Missing voice picker');
-    if (!React.isValidElement<{ value: string }>(customItem)) throw new Error('Missing Custom… item');
-    await act(async () => { picker.props.onValueChange(customItem.props.value); });
+    await press(voiceTrigger());
+    const customItem = () => Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find((option) => option.textContent === 'Custom…');
+    await settle(() => customItem() !== undefined);
+    await press(customItem());
+    await settle(() => voiceInput() !== null);
 
     expect(useConfigStore.getState().openaiCompatibleVoice).toBe('af_sky');
-    expect(descendants(view).some((node) => node.type === 'input')).toBe(true);
+    expect(voiceTrigger()?.textContent).toBe('Custom…');
+    expect(voiceInput()?.value).toBe('af_sky');
   });
 });
-
-const descendants = (node: React.ReactNode): React.ReactElement<{ children?: React.ReactNode }>[] => {
-  if (Array.isArray(node)) return node.flatMap(descendants);
-  if (!React.isValidElement<{ children?: React.ReactNode }>(node)) return [];
-  return [node, ...descendants(node.props.children)];
-};

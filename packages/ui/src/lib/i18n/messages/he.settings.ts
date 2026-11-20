@@ -2294,6 +2294,8 @@ export const settingsDict = {
   'settings.voice.page.field.voiceCustom': 'מותאם אישית…',
   'settings.voice.page.field.voiceCustomInput': 'מזהה קול מותאם אישית',
   'settings.voice.page.voiceList.failed': 'לא ניתן לטעון את הקולות של השרת.',
+  'settings.voice.page.voiceList.redirected': 'השרת הפנה את הבקשה לכתובת אחרת. יש להזין את הכתובת הזו במקום.',
+  'settings.voice.page.voiceList.tooLarge': 'רשימת הקולות של השרת גדולה מ-1 MB ולכן אי אפשר להציג אותה. יש להקליד את שם הקול במקום.',
   'settings.voice.page.voiceList.unreachable': 'לא ניתן להתחבר לשרת הדיבור.',
   'settings.voice.page.voiceList.keyRejected': 'השרת לא קיבל את הבקשה. ייתכן שהוא צריך מפתח API, או מפתח אחר.',
   'settings.voice.page.voiceList.remoteDisabled': 'שרת OpenChamber הזה משתמש רק בשרתי דיבור שנמצאים במחשב שלו. כדי לאפשר מארחים אחרים, יש להגדיר OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true במקום שבו הוא רץ.',

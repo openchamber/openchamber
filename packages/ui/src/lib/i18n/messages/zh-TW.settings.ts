@@ -2151,6 +2151,8 @@ export const settingsDict = {
   'settings.voice.page.field.voiceCustom': '自訂…',
   'settings.voice.page.field.voiceCustomInput': '自訂聲音 ID',
   'settings.voice.page.voiceList.failed': '無法載入伺服器的聲音清單。',
+  'settings.voice.page.voiceList.redirected': '伺服器將請求重新導向到另一個位址。請改為輸入該位址。',
+  'settings.voice.page.voiceList.tooLarge': '伺服器的聲音清單超過 1 MB，因此無法顯示。請改為輸入聲音名稱。',
   'settings.voice.page.voiceList.unreachable': '無法連線到語音伺服器。',
   'settings.voice.page.voiceList.keyRejected': '伺服器沒有接受請求。可能需要 API 金鑰，或需要另一把金鑰。',
   'settings.voice.page.voiceList.remoteDisabled': '此 OpenChamber 伺服器只使用同一台機器上的語音伺服器。若要允許其他主機，請在它執行的地方設定 OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true。',

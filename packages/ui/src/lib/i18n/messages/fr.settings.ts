@@ -2176,6 +2176,8 @@ export const settingsDict = {
   'settings.voice.page.field.voiceCustom': 'Personnalisée…',
   'settings.voice.page.field.voiceCustomInput': 'Identifiant de voix personnalisé',
   'settings.voice.page.voiceList.failed': 'Impossible de charger les voix du serveur.',
+  'settings.voice.page.voiceList.redirected': 'Le serveur a redirigé la requête vers une autre adresse. Saisissez plutôt cette adresse.',
+  'settings.voice.page.voiceList.tooLarge': 'La liste des voix du serveur dépasse 1 Mo, elle ne peut donc pas être affichée. Saisissez plutôt le nom de la voix.',
   'settings.voice.page.voiceList.unreachable': 'Impossible de joindre le serveur vocal.',
   'settings.voice.page.voiceList.keyRejected': 'Le serveur n\'a pas accepté la requête. Il lui faut peut-être une clé API, ou une autre.',
   'settings.voice.page.voiceList.remoteDisabled': 'Ce serveur OpenChamber n\'utilise que des serveurs vocaux situés sur sa propre machine. Pour autoriser d\'autres hôtes, définissez OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true là où il tourne.',

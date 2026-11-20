@@ -2243,6 +2243,8 @@ export const settingsDict = {
   'settings.voice.page.field.voiceCustom': 'Eigene…',
   'settings.voice.page.field.voiceCustomInput': 'Eigene Stimmen-ID',
   'settings.voice.page.voiceList.failed': 'Die Stimmen des Servers konnten nicht geladen werden.',
+  'settings.voice.page.voiceList.redirected': 'Der Server hat die Anfrage an eine andere Adresse umgeleitet. Geben Sie stattdessen diese Adresse ein.',
+  'settings.voice.page.voiceList.tooLarge': 'Die Stimmenliste des Servers ist größer als 1 MB und kann nicht angezeigt werden. Geben Sie stattdessen den Namen der Stimme ein.',
   'settings.voice.page.voiceList.unreachable': 'Der Sprachserver ist nicht erreichbar.',
   'settings.voice.page.voiceList.keyRejected': 'Der Server hat die Anfrage nicht angenommen. Vielleicht braucht er einen API-Schlüssel oder einen anderen.',
   'settings.voice.page.voiceList.remoteDisabled': 'Dieser OpenChamber-Server nutzt nur Sprachserver auf seinem eigenen Rechner. Um andere Hosts zu erlauben, setzen Sie OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true dort, wo er läuft.',

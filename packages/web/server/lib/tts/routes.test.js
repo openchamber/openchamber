@@ -381,7 +381,7 @@ describe('tts voices route', () => {
     const response = await askVoices({ baseURL: upstream.baseURL });
 
     expect(response.status).toBe(502);
-    expect(response.body).toEqual({ code: 'upstream_error' });
+    expect(response.body).toEqual({ code: 'redirected' });
     expect(target.seen).toHaveLength(0);
   });
 
@@ -445,7 +445,7 @@ describe('tts voices route', () => {
     const response = await askVoices({ baseURL: upstream.baseURL });
 
     expect(response.status).toBe(502);
-    expect(response.body).toEqual({ code: 'upstream_error' });
+    expect(response.body).toEqual({ code: 'list_too_large' });
   });
 
   it('refuses hosts the speech check refuses, before any request leaves', async () => {

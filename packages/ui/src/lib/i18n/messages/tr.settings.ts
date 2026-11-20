@@ -2158,6 +2158,8 @@ export const settingsDict = {
   'settings.voice.page.field.voiceCustom': 'Özel…',
   'settings.voice.page.field.voiceCustomInput': 'Özel ses kimliği',
   'settings.voice.page.voiceList.failed': 'Sunucunun sesleri yüklenemedi.',
+  'settings.voice.page.voiceList.redirected': 'Sunucu isteği başka bir adrese yönlendirdi. Bunun yerine o adresi girin.',
+  'settings.voice.page.voiceList.tooLarge': 'Sunucunun ses listesi 1 MB\'tan büyük olduğu için gösterilemiyor. Bunun yerine sesin adını yazın.',
   'settings.voice.page.voiceList.unreachable': 'Konuşma sunucusuna ulaşılamadı.',
   'settings.voice.page.voiceList.keyRejected': 'Sunucu isteği kabul etmedi. Bir API anahtarı ya da farklı bir anahtar gerekebilir.',
   'settings.voice.page.voiceList.remoteDisabled': 'Bu OpenChamber sunucusu yalnızca kendi makinesindeki konuşma sunucularını kullanır. Başka ana makinelere izin vermek için çalıştığı yerde OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true ayarlayın.',

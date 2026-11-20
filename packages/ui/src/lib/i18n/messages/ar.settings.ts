@@ -2294,6 +2294,8 @@ export const settingsDict = {
   'settings.voice.page.field.voiceCustom': 'مخصص…',
   'settings.voice.page.field.voiceCustomInput': 'معرّف صوت مخصص',
   'settings.voice.page.voiceList.failed': 'تعذّر تحميل أصوات الخادم.',
+  'settings.voice.page.voiceList.redirected': 'أعاد الخادم توجيه الطلب إلى عنوان آخر. أدخل ذلك العنوان بدلًا منه.',
+  'settings.voice.page.voiceList.tooLarge': 'قائمة أصوات الخادم أكبر من 1 ميغابايت، لذا لا يمكن عرضها. اكتب اسم الصوت بدلًا من ذلك.',
   'settings.voice.page.voiceList.unreachable': 'تعذّر الوصول إلى خادم الكلام.',
   'settings.voice.page.voiceList.keyRejected': 'لم يقبل الخادم الطلب. ربما يحتاج إلى مفتاح API أو إلى مفتاح آخر.',
   'settings.voice.page.voiceList.remoteDisabled': 'لا يستخدم خادم OpenChamber هذا إلا خوادم الكلام الموجودة على جهازه. للسماح بأجهزة أخرى، عيّن OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true حيث يعمل.',

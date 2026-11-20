@@ -26,6 +26,8 @@ const VOICE_LIST_FAILURE_LINE = {
     enterprise_mode: null,
     rejected_key: { text: 'settings.voice.page.voiceList.keyRejected', retry: true },
     unreachable: { text: 'settings.voice.page.voiceList.unreachable', retry: true },
+    redirected: { text: 'settings.voice.page.voiceList.redirected', retry: false },
+    list_too_large: { text: 'settings.voice.page.voiceList.tooLarge', retry: false },
     upstream_error: { text: 'settings.voice.page.voiceList.failed', retry: true },
 } satisfies Record<VoiceListFailure, { text: I18nKey; retry: boolean } | null>;
 

@@ -2273,6 +2273,8 @@ export const settingsDict = {
   'settings.voice.page.field.voiceCustom': '自定义…',
   'settings.voice.page.field.voiceCustomInput': '自定义声音 ID',
   'settings.voice.page.voiceList.failed': '无法加载服务器的声音列表。',
+  'settings.voice.page.voiceList.redirected': '服务器将请求重定向到了另一个地址。请改为输入该地址。',
+  'settings.voice.page.voiceList.tooLarge': '服务器的声音列表超过 1 MB，因此无法显示。请改为输入声音名称。',
   'settings.voice.page.voiceList.unreachable': '无法连接到语音服务器。',
   'settings.voice.page.voiceList.keyRejected': '服务器没有接受请求。可能需要 API 密钥，或需要另一个密钥。',
   'settings.voice.page.voiceList.remoteDisabled': '此 OpenChamber 服务器只使用同一台机器上的语音服务器。要允许其他主机，请在它运行的地方设置 OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true。',

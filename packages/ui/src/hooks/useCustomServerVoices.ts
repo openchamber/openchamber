@@ -5,7 +5,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useConfigStore } from '@/stores/useConfigStore';
 
-const VOICE_LIST_FAILURES = ['invalid_base_url', 'remote_disabled', 'enterprise_mode', 'rejected_key', 'unreachable', 'upstream_error'] as const;
+const VOICE_LIST_FAILURES = ['invalid_base_url', 'remote_disabled', 'enterprise_mode', 'rejected_key', 'unreachable', 'redirected', 'list_too_large', 'upstream_error'] as const;
 export type VoiceListFailure = (typeof VOICE_LIST_FAILURES)[number];
 
 type CustomServerVoiceList =

@@ -2605,6 +2605,8 @@ export const settingsDict = {
   'settings.voice.page.field.voiceCustom': 'Własny…',
   'settings.voice.page.field.voiceCustomInput': 'Własny identyfikator głosu',
   'settings.voice.page.voiceList.failed': 'Nie udało się wczytać głosów serwera.',
+  'settings.voice.page.voiceList.redirected': 'Serwer przekierował żądanie pod inny adres. Wpisz zamiast tego ten adres.',
+  'settings.voice.page.voiceList.tooLarge': 'Lista głosów serwera ma ponad 1 MB, więc nie można jej pokazać. Wpisz zamiast tego nazwę głosu.',
   'settings.voice.page.voiceList.unreachable': 'Nie udało się połączyć z serwerem mowy.',
   'settings.voice.page.voiceList.keyRejected': 'Serwer nie przyjął żądania. Może potrzebować klucza API albo innego klucza.',
   'settings.voice.page.voiceList.remoteDisabled': 'Ten serwer OpenChamber używa tylko serwerów mowy na tym samym komputerze. Aby zezwolić na inne hosty, ustaw OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true tam, gdzie działa.',

@@ -127,7 +127,7 @@ The server-side TTS approach bypasses mobile Safari's audio context restrictions
 - The voice-list request never follows a redirect: the base-URL check approved only the configured host, and the request carries the stored key.
 - The voice-list request authenticates as speech does: the stored `openaiCompatible` key, or `Bearer not-required` without one (`service.js` gives the SDK that placeholder), so a loaded list and a working preview see the same auth. It takes no key from the request body.
 - The voice list is bounded: 5 seconds for the whole exchange, 1 MiB of body, the first 1000 unique ids. Only parsed ids leave the route, never upstream text.
-- An upstream 404, 405 or 501, or a 2xx in no known form, means the server has no list (`voices: []`). Every other failure answers a `code`: `invalid_base_url` and `remote_disabled` (400), `enterprise_mode` (403), `rejected_key`, `unreachable` and `upstream_error` (502). A body that is not JSON gets 415 before anything else is read. The route never answers 401.
+- An upstream 404, 405 or 501, or a 2xx in no known form, means the server has no list (`voices: []`). Every other failure answers a `code`: `invalid_base_url` and `remote_disabled` (400), `enterprise_mode` (403), `rejected_key`, `unreachable`, `redirected`, `list_too_large` and `upstream_error` (502). `redirected` and `list_too_large` name a cause the user fixes by changing the address or typing the voice, so the field shows no Retry for them. A body that is not JSON gets 415 before anything else is read. The route never answers 401.
 - `normalizeCustomOpenAIBaseURL` errors carry a `code` (`invalid_base_url`, `enterprise_mode`, `remote_disabled`) beside the message.
 
 ## Decisions

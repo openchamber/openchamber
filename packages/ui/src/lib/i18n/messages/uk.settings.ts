@@ -2273,6 +2273,8 @@ export const settingsDict = {
   "settings.voice.page.field.voiceCustom": "Власний…",
   "settings.voice.page.field.voiceCustomInput": "Власний ідентифікатор голосу",
   "settings.voice.page.voiceList.failed": "Не вдалося завантажити голоси сервера.",
+  "settings.voice.page.voiceList.redirected": "Сервер переспрямував запит на іншу адресу. Введіть натомість цю адресу.",
+  "settings.voice.page.voiceList.tooLarge": "Список голосів сервера більший за 1 МБ, тому його не можна показати. Введіть натомість назву голосу.",
   "settings.voice.page.voiceList.unreachable": "Не вдалося зв'язатися із сервером мовлення.",
   "settings.voice.page.voiceList.keyRejected": "Сервер не прийняв запит. Можливо, йому потрібен ключ API або інший ключ.",
   "settings.voice.page.voiceList.remoteDisabled": "Цей сервер OpenChamber використовує лише сервери мовлення на власному комп'ютері. Щоб дозволити інші хости, задайте OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true там, де він працює.",

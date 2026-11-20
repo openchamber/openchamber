@@ -2273,6 +2273,8 @@ export const settingsDict = {
   'settings.voice.page.field.voiceCustom': '사용자 지정…',
   'settings.voice.page.field.voiceCustomInput': '사용자 지정 음성 ID',
   'settings.voice.page.voiceList.failed': '서버의 음성 목록을 불러오지 못했습니다.',
+  'settings.voice.page.voiceList.redirected': '서버가 요청을 다른 주소로 리디렉션했습니다. 대신 그 주소를 입력하세요.',
+  'settings.voice.page.voiceList.tooLarge': '서버의 음성 목록이 1MB보다 커서 표시할 수 없습니다. 대신 음성 이름을 입력하세요.',
   'settings.voice.page.voiceList.unreachable': '음성 서버에 연결하지 못했습니다.',
   'settings.voice.page.voiceList.keyRejected': '서버가 요청을 받아들이지 않았습니다. API 키가 필요하거나 다른 키가 필요할 수 있습니다.',
   'settings.voice.page.voiceList.remoteDisabled': '이 OpenChamber 서버는 같은 컴퓨터에 있는 음성 서버만 사용합니다. 다른 호스트를 허용하려면 서버가 실행되는 곳에서 OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true를 설정하세요.',

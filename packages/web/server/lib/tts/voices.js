@@ -56,7 +56,7 @@ export const listCustomServerVoices = async (baseURL, apiKey, timeoutMs = VOICE_
   } catch {
     return { code: 'unreachable' };
   }
-  if (response.status >= 300 && response.status < 400) return answerWithoutBody(response, { code: 'upstream_error' });
+  if (response.status >= 300 && response.status < 400) return answerWithoutBody(response, { code: 'redirected' });
   if (response.status === 401 || response.status === 403) return answerWithoutBody(response, { code: 'rejected_key' });
   if (NO_LIST_STATUSES.has(response.status)) return answerWithoutBody(response, { voices: [] });
   if (!response.ok) return answerWithoutBody(response, { code: 'upstream_error' });
@@ -66,6 +66,6 @@ export const listCustomServerVoices = async (baseURL, apiKey, timeoutMs = VOICE_
   } catch {
     return { code: 'unreachable' };
   }
-  if (body.tooLarge) return { code: 'upstream_error' };
+  if (body.tooLarge) return { code: 'list_too_large' };
   return { voices: parseVoiceList(body.text) };
 };

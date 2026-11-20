@@ -2306,6 +2306,8 @@ export const settingsDict = {
   'settings.voice.page.field.voiceCustom': 'カスタム…',
   'settings.voice.page.field.voiceCustomInput': 'カスタム音声 ID',
   'settings.voice.page.voiceList.failed': 'サーバーの音声を読み込めませんでした。',
+  'settings.voice.page.voiceList.redirected': 'サーバーがリクエストを別のアドレスにリダイレクトしました。代わりにそのアドレスを入力してください。',
+  'settings.voice.page.voiceList.tooLarge': 'サーバーの音声リストが 1 MB を超えているため表示できません。代わりに音声名を入力してください。',
   'settings.voice.page.voiceList.unreachable': '音声サーバーに接続できませんでした。',
   'settings.voice.page.voiceList.keyRejected': 'サーバーがリクエストを受け付けませんでした。API キーが必要か、別のキーが必要な可能性があります。',
   'settings.voice.page.voiceList.remoteDisabled': 'この OpenChamber サーバーは、同じマシン上の音声サーバーだけを使います。ほかのホストを許可するには、サーバーを実行している環境で OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true を設定してください。',

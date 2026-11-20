@@ -2296,6 +2296,8 @@ export const settingsDict = {
   'settings.voice.page.field.voiceCustom': 'Aangepast…',
   'settings.voice.page.field.voiceCustomInput': 'Aangepaste stem-ID',
   'settings.voice.page.voiceList.failed': 'De stemmen van de server konden niet worden geladen.',
+  'settings.voice.page.voiceList.redirected': 'De server heeft het verzoek naar een ander adres omgeleid. Voer in plaats daarvan dat adres in.',
+  'settings.voice.page.voiceList.tooLarge': 'De stemmenlijst van de server is groter dan 1 MB en kan niet worden getoond. Typ in plaats daarvan de naam van de stem.',
   'settings.voice.page.voiceList.unreachable': 'De spraakserver is niet bereikbaar.',
   'settings.voice.page.voiceList.keyRejected': 'De server accepteerde het verzoek niet. Misschien is er een API-sleutel nodig, of een andere.',
   'settings.voice.page.voiceList.remoteDisabled': 'Deze OpenChamber-server gebruikt alleen spraakservers op zijn eigen machine. Stel OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true in waar hij draait om andere hosts toe te staan.',
