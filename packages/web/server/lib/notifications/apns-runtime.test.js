@@ -507,6 +507,22 @@ describe('clearing handled notifications from the phones', () => {
     warn.mockRestore();
   });
 
+  it('clears more tags than the relay accepts per request', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    const runtime = createApnsRuntime(makeDeps());
+    await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+    const tags = Array.from({ length: 21 }, (_, index) => `question-ses_${index}@${index + 1}`);
+
+    await runtime.clearApnsNotifications({ tags, badge: 1 });
+
+    const requests = fetchMock.mock.calls.filter(isClear).map(([, init]) => JSON.parse(init.body));
+    expect(requests.map((request) => request.tags.length)).toEqual([20, 1]);
+    expect(requests.flatMap((request) => request.tags)).toEqual(tags);
+    expect(requests.map((request) => request.badge)).toEqual([1, 1]);
+  });
+
   it('sends a background push without an alert in direct mode', async () => {
     process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
     const requests = [];

@@ -6,8 +6,9 @@ import { sessionParentId } from '../session-lineage.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { genericNotificationTitle, truncateNotificationText } from './message.js';
 import { pullRequestNotificationTitle } from './pull-request-locales.js';
-import { hasErrorMessage, isJsonObject, isNumber, isString } from './inputs.js';
+import { hasErrorMessage, isJsonObject, isString } from './inputs.js';
 import type { JsonValue, NotificationPayload, StoredSessionMetadata } from './contracts.js';
+import { createPushTags, keepNewest, OPEN_PUSH_TAGS_LIMIT, type PushClaim, type PushTagsStore } from './push-tags.js';
 import type { createNotificationTemplateRuntime, NotificationTemplateEvent, NotificationTemplateInfo } from './template-runtime.js';
 import type { createNotificationEmitterRuntime } from './emitter-runtime.js';
 import type { createApnsRuntime } from './apns-runtime.js';
@@ -37,19 +38,6 @@ type Timer = ReturnType<typeof setTimeout>;
 
 interface PermissionPrefixes {
   [action: string]: string | { toString(): string } | undefined;
-}
-
-interface PushClaim {
-  sessionId: JsonValue;
-  cause: JsonValue;
-  native: boolean;
-  nid: JsonValue;
-  skipTurnStart?: boolean;
-}
-
-interface PushTagsState {
-  open: [JsonValue, PushClaim][];
-  cleared: [JsonValue, JsonValue][];
 }
 
 interface TriggerPushPayload {
@@ -160,11 +148,14 @@ export interface NotificationTriggerDependencies extends Pick<TemplateRuntime,
   sendPushToAllUiSessions?: (payload: TriggerPushPayload, options: PushOptions) => PromiseLike<void> | void;
   sendApnsToAllUiSessions?: ReturnType<typeof createApnsRuntime>['sendApnsToAllUiSessions'];
   clearApnsNotifications?: ReturnType<typeof createApnsRuntime>['clearApnsNotifications'] | null;
-  openPushTagsStore?: { read: () => Promise<JsonValue>; write: (state: PushTagsState) => Promise<void> } | null;
+  openPushTagsStore?: PushTagsStore | null;
   isAnyInteractiveClientVisible?: () => boolean;
   isAnyUiVisible?: () => boolean;
   readSessionMetadata?: ((sessionId: string) => Promise<StoredSessionMetadata | undefined>) | null;
-  spaceFetchFor?: (spaceId: string) => TriggerSource['fetchImpl'] | null;
+  getSpacesHost?: () => {
+    openCodeFetchFor: (spaceId: string) => TriggerSource['fetchImpl'];
+    index: { claimedBy: (sessionId: string) => string | null };
+  } | null;
   isInAutoReview?: (sessionId: string, turnEndedAt: number) => boolean;
   deliverToExtensionChannels?: ((delivery: ExtensionNotificationDelivery) => PromiseLike<void> | void) | null;
   getIsSessionAutoAccepting?: AutoAcceptResolver;
@@ -185,14 +176,6 @@ const templateOf = (entry: JsonField) => {
   const message = jsonField(entry, 'message');
   if (jsonField(title, 'trim') != null || jsonField(message, 'trim') != null) throw new TypeError('candidate?.trim is not a function');
   return { title: isString(title) ? title : '', message: isString(message) ? message : '' };
-};
-
-const savedTagPair = (value: JsonValue) => {
-  if (isJsonArray(value) || isString(value)) return value;
-  const description = value === null ? 'object null'
-    : isNumber(value) ? `number ${value}`
-      : value === true || value === false ? `boolean ${value}` : 'object';
-  throw new TypeError(`${description} is not iterable (cannot read property Symbol(Symbol.iterator))`);
 };
 
 const LOCATION_SCOPED_FORM_SESSION_ID = 'global';
@@ -226,7 +209,7 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     readSessionMetadata = null,
-    spaceFetchFor = () => null,
+    getSpacesHost = () => null,
     isInAutoReview = () => false,
     deliverToExtensionChannels = null,
   } = deps;
@@ -237,7 +220,7 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
     ? {
         buildOpenCodeUrl: (fetchPath) => `http://space${fetchPath}`,
         getOpenCodeAuthHeaders: () => ({}),
-        fetchImpl: spaceFetchFor(spaceId) ?? unreachableSpaceFetch,
+        fetchImpl: getSpacesHost()?.openCodeFetchFor(spaceId) ?? unreachableSpaceFetch,
         isSpace: true,
       }
     : hostSource);
@@ -255,135 +238,11 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
     getIsSessionAutoAccepting = resolver;
   };
 
-  const pendingPushTags = new Set<string>();
-  const clearPendingPushBadge = () => {
-    pendingPushTags.clear();
-  };
-  const trackPushAndCountBadge = (tag: string) => {
-    if (tag.length > 0) {
-      pendingPushTags.add(tag);
-    }
-    return pendingPushTags.size;
-  };
-
-  const OPEN_PUSH_TAGS_LIMIT = 500;
-  const RECENTLY_CLEARED_TAGS_LIMIT = 20;
-  const openPushTags = new Map<JsonValue, PushClaim>();
-  const recentlyClearedTags = new Map<JsonValue, JsonValue>();
-  const claimedOver = new WeakMap<PushClaim, PushClaim | null>();
+  const pushTags = createPushTags(openPushTagsStore, clearApnsNotifications);
+  const {
+    claimTag: claimPushTag, release: releaseClaim, clearTag: clearPushTag, clearPendingBadge: clearPendingPushBadge, isCurrent: isClaimCurrent,
+  } = pushTags;
   const sessionClearedAt = new Map<string, number>();
-  let lastNotificationId = 0;
-
-  const nextNotificationId = () => {
-    lastNotificationId = Math.max(Date.now(), lastNotificationId + 1);
-    return String(lastNotificationId);
-  };
-  const keepNewest = <Key, Value>(map: Map<Key, Value>, limit: number) => {
-    while (map.size > limit) {
-      const oldest = map.keys().next();
-      if (!oldest.done) map.delete(oldest.value);
-    }
-  };
-
-  let persistQueued = false;
-  let persistChain = Promise.resolve();
-  const persistOpenPushTags = () => {
-    if (!openPushTagsStore || persistQueued) return;
-    persistQueued = true;
-    persistChain = persistChain.then(async () => {
-      persistQueued = false;
-      try {
-        await openPushTagsStore.write({ open: [...openPushTags], cleared: [...recentlyClearedTags] });
-      } catch (error) {
-        console.warn('[Push] failed to save open notification tags:', errorMessage(error) ?? error);
-      }
-    });
-  };
-
-  const restoredOpenPushTags = openPushTagsStore
-    ? Promise.resolve()
-      .then(() => openPushTagsStore.read())
-      .then((saved) => {
-        const savedOpen = jsonField(saved, 'open');
-        const restoredOpen: PushTagsState['open'] = [];
-        for (const value of isJsonArray(savedOpen) ? savedOpen : []) {
-          const [tag, entry] = savedTagPair(value);
-          const sessionId = jsonField(entry, 'sessionId');
-          if (tag && sessionId && !openPushTags.has(tag)) restoredOpen.push([tag, {
-            sessionId,
-            cause: jsonField(entry, 'cause') ?? null,
-            native: jsonField(entry, 'native') === true,
-            nid: jsonField(entry, 'nid') ?? null,
-            skipTurnStart: jsonField(entry, 'skipTurnStart') === true,
-          }]);
-        }
-        const merged = new Map([...restoredOpen, ...openPushTags]);
-        openPushTags.clear();
-        for (const [tag, entry] of merged) openPushTags.set(tag, entry);
-        keepNewest(openPushTags, OPEN_PUSH_TAGS_LIMIT);
-
-        const savedCleared = jsonField(saved, 'cleared');
-        const cleared: PushTagsState['cleared'] = [];
-        for (const value of isJsonArray(savedCleared) ? savedCleared : []) {
-          const [tag, entry] = savedTagPair(value);
-          if (tag && entry && !recentlyClearedTags.has(tag) && !openPushTags.has(tag)) cleared.push([tag, entry]);
-        }
-        const mergedCleared = new Map([...cleared, ...recentlyClearedTags]);
-        recentlyClearedTags.clear();
-        for (const [tag, entry] of mergedCleared) recentlyClearedTags.set(tag, entry);
-        keepNewest(recentlyClearedTags, RECENTLY_CLEARED_TAGS_LIMIT);
-      })
-      .catch((error) => {
-        console.warn('[Push] failed to read open notification tags:', error?.message ?? error);
-      })
-    : Promise.resolve();
-
-  const claimPushTag = async (tag: string, { sessionId, cause = null }: { sessionId: string; cause?: JsonValue }) => {
-    await restoredOpenPushTags;
-    const previous = openPushTags.get(tag) ?? null;
-    const claim: PushClaim = { sessionId, cause, native: previous?.native === true, nid: previous?.nid ?? null };
-    openPushTags.delete(tag);
-    openPushTags.set(tag, claim);
-    keepNewest(openPushTags, OPEN_PUSH_TAGS_LIMIT);
-    claimedOver.set(claim, previous);
-    return claim;
-  };
-  const isClaimCurrent = (tag: string, claim: PushClaim) => openPushTags.get(tag) === claim;
-  const releaseClaim = (tag: string, claim: PushClaim) => {
-    if (!isClaimCurrent(tag, claim)) return;
-    const previous = claimedOver.get(claim);
-    openPushTags.delete(tag);
-    if (previous) openPushTags.set(tag, previous);
-  };
-
-  const clearPushTags = (tags: JsonValue[]) => {
-    if (tags.length === 0) return;
-    const nativeEntries = [];
-    for (const tag of tags) {
-      const open = openPushTags.get(tag);
-      openPushTags.delete(tag);
-      if (isString(tag)) pendingPushTags.delete(tag);
-      if (!open?.nid) continue;
-      const entry = `${tag}@${open.nid}`;
-      if (open.native) nativeEntries.push(entry);
-      recentlyClearedTags.delete(tag);
-      recentlyClearedTags.set(tag, entry);
-    }
-    keepNewest(recentlyClearedTags, RECENTLY_CLEARED_TAGS_LIMIT);
-    persistOpenPushTags();
-    if (nativeEntries.length === 0 || !clearApnsNotifications) return;
-    Promise.resolve(clearApnsNotifications({ tags: nativeEntries, badge: pendingPushTags.size })).catch((error) => {
-        console.warn('[APNs] clearing failed:', errorMessage(error) ?? error);
-    });
-  };
-
-  const clearPushTag = async (tag: string, cause: JsonValue = null) => {
-    await restoredOpenPushTags;
-    const open = openPushTags.get(tag);
-    if (!open) return;
-    if (cause !== null && open.cause !== null && open.cause !== cause) return;
-    clearPushTags([tag]);
-  };
 
   let shareAnswerBatch: ShareAnswerBatch | null = null;
 
@@ -403,24 +262,25 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
     shareAnswerBatch = null;
   };
 
-  const clearSessionPushNotifications = async (sessionId: string, { turnStart = false } = {}) => {
+  const clearSessionPushNotifications = async (sessionId: string, { turnStart = false, viewed = false } = {}) => {
     if (!sessionId) return;
     sessionClearedAt.delete(sessionId);
     sessionClearedAt.set(sessionId, Date.now());
     keepNewest(sessionClearedAt, OPEN_PUSH_TAGS_LIMIT);
     dropPendingShareAnswers(sessionId, turnStart);
-    await restoredOpenPushTags;
+    await pushTags.restored;
     const tags = [];
-    for (const [tag, open] of openPushTags) {
+    for (const [tag, open] of pushTags.open) {
       if (open.sessionId !== sessionId) continue;
       if (turnStart && open.skipTurnStart) {
         open.skipTurnStart = false;
-        persistOpenPushTags();
+        pushTags.persist();
         continue;
       }
       tags.push(tag);
     }
-    clearPushTags(tags);
+    pushTags.clear(tags);
+    if (viewed) await clearDescendantPushNotifications(sessionId);
   };
 
   const genericTitleOf = (payload: TriggerPushPayload) => genericNotificationTitle(payload.data.type);
@@ -436,7 +296,7 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
       sealed: phoneBody && !isEnterpriseMode()
         ? { title: knownSessionName || genericTitleOf(payload), body: phoneBody }
         : undefined,
-      badge: trackPushAndCountBadge(payload.tag),
+      badge: pushTags.countBadge(payload.tag),
       tag: payload?.tag,
       data: {
         sessionId: data.sessionId,
@@ -469,14 +329,9 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
     const tag = pushPayload.tag ?? '';
     if (claim && !isClaimCurrent(tag, claim)) return Promise.resolve();
     const interactiveVisible = isAnyInteractiveClientVisible?.() === true;
-    recentlyClearedTags.delete(tag);
-    const clear = [...recentlyClearedTags.values()];
+    const clear = pushTags.clearEntriesForPush(tag, !interactiveVisible);
     const payload = clear.length > 0 ? { ...pushPayload, clear } : pushPayload;
-    if (claim) {
-      claim.nid = nextNotificationId();
-      if (!interactiveVisible) claim.native = true;
-      persistOpenPushTags();
-    }
+    if (claim) pushTags.recordDelivery(claim, !interactiveVisible);
     return Promise.all([
       Promise.resolve(sendPushToAllUiSessions?.(toWebPushPayload(claim ? { ...payload, data: { ...payload.data, nid: claim.nid } } : payload), options)).catch((error) => {
         console.warn('[Push] web-push fanout failed:', errorMessage(error) ?? error);
@@ -614,7 +469,7 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
     setCachedSessionParentId(sessionId, directory, spaceId, parentID);
   };
 
-  const fetchSessionRecord = async (sessionId: string, directory: string | undefined, spaceId: string | null) => {
+  const fetchSessionRecord = async (sessionId: string, directory: string | undefined, spaceId: string | null, signal = AbortSignal.timeout(2000)) => {
     try {
       const source = sourceFor(spaceId);
       const base = source.buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}`, '');
@@ -625,7 +480,7 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
           Accept: 'application/json',
           ...source.getOpenCodeAuthHeaders(),
         },
-        signal: AbortSignal.timeout(2000),
+        signal,
       });
       if (!response.ok) return null;
       const session: JsonField = unwrapOpenCodeResponse(await response.json().catch(() => null));
@@ -633,6 +488,47 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
     } catch {
       return null;
     }
+  };
+
+  const clearDescendantPushNotifications = async (sessionId: string) => {
+    const spaceIndex = getSpacesHost()?.index;
+    const spaceId = spaceIndex?.claimedBy(sessionId) ?? null;
+    const claims = new Map<JsonValue, PushClaim>();
+    for (const [tag, claim] of pushTags.open) {
+      if (claim.sessionId !== sessionId && (claim.nid || claim.nativeNid)
+        && (claim.spaceId ?? spaceIndex?.claimedBy(claim.sessionId) ?? null) === spaceId) {
+        claims.set(tag, { ...claim });
+      }
+    }
+    if (claims.size === 0) return;
+
+    const signal = AbortSignal.timeout(2000);
+    const parents = new Map<string, Promise<string | null>>();
+    const isDescendant = async (id: string) => {
+      const seen = new Set<string>();
+      let current: string | null = id;
+      while (current && !seen.has(current) && !signal.aborted) {
+        if (current === sessionId) return true;
+        seen.add(current);
+        let pendingParent = parents.get(current);
+        if (!pendingParent) {
+          const childId: string = current;
+          pendingParent = fetchSessionRecord(childId, undefined, spaceId, signal)
+            .then((child) => child && child.id === childId ? sessionParentId(child) : null);
+          parents.set(current, pendingParent);
+        }
+        current = await pendingParent;
+      }
+      return false;
+    };
+    const candidates = [...new Set([...claims.values()].map(({ sessionId: id }) => id))];
+    const descendants = new Set<string>();
+    for (let offset = 0; offset < candidates.length && !signal.aborted; offset += 8) {
+      await Promise.all(candidates.slice(offset, offset + 8).map(async (id) => {
+        if (await isDescendant(id)) descendants.add(id);
+      }));
+    }
+    pushTags.clear([...claims].filter(([, claim]) => descendants.has(claim.sessionId)).map(([tag]) => tag), claims);
   };
 
   const fetchSessionParentId = async (sessionId: string, directory: string | undefined, spaceId: string | null = null) => {
@@ -860,7 +756,7 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
         lastReadyNotificationAt.set(sessionId, now);
 
         const readyTag = `ready-${sessionId}`;
-        const claim = await claimPushTag(readyTag, { sessionId });
+        const claim = await claimPushTag(readyTag, { sessionId, spaceId });
         if ((sessionClearedAt.get(sessionId) ?? 0) >= (payload.properties?.turnEndedAt ?? now)) {
           releaseClaim(readyTag, claim);
           return;
@@ -962,7 +858,7 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
         }
 
         const errorTag = `error-${sessionId}`;
-        const claim = await claimPushTag(errorTag, { sessionId });
+        const claim = await claimPushTag(errorTag, { sessionId, spaceId });
         if ((sessionClearedAt.get(sessionId) ?? 0) >= (payload.properties?.turnEndedAt ?? now)) {
           releaseClaim(errorTag, claim);
           return;
@@ -1051,7 +947,7 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
       const timer = setTimeout(async () => {
         pushQuestionDebounceTimers.delete(sessionId);
         const questionTag = `question-${sessionId}`;
-        const claim = await claimPushTag(questionTag, { sessionId, cause: ask.id });
+        const claim = await claimPushTag(questionTag, { sessionId, cause: ask.id, spaceId });
         if ((sessionClearedAt.get(sessionId) ?? 0) >= askedAt) {
           releaseClaim(questionTag, claim);
           return;
@@ -1187,7 +1083,7 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
       const timer = setTimeout(async () => {
         pushPermissionDebounceTimers.delete(sessionId);
         const permissionTag = `permission-${sessionId}`;
-        const claim = await claimPushTag(permissionTag, { sessionId, cause: requestKey });
+        const claim = await claimPushTag(permissionTag, { sessionId, cause: requestKey, spaceId });
         if (isHandledSince()) {
           releaseClaim(permissionTag, claim);
           return;

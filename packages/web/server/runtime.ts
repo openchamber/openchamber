@@ -1093,7 +1093,7 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   readSessionMetadata: readStoredSessionMetadata,
-  spaceFetchFor: (spaceId) => spacesHost?.openCodeFetchFor(spaceId) ?? null,
+  getSpacesHost: () => spacesHost,
   isInAutoReview: (sessionId, turnEndedAt) => autoReviewRuntime.speaksFor(sessionId, turnEndedAt),
   deliverToExtensionChannels: (delivery) => extensionNotificationChannels.deliver(delivery),
 });
@@ -2801,7 +2801,7 @@ async function main(options: WebUiServerOptions = {}) {
     removeApnsToken,
     updateUiVisibility,
     clearPendingPushBadge: () => clearPendingPushBadge(),
-    clearSessionPushNotifications: (sessionId) => notificationTriggerRuntime.clearSessionPushNotifications(sessionId),
+    clearSessionPushNotifications: notificationTriggerRuntime.clearSessionPushNotifications,
     isUiVisible,
     getUiNotificationClients: () => uiNotificationClients,
     writeSseEvent,

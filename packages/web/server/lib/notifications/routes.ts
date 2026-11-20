@@ -38,7 +38,7 @@ interface NotificationRouteDependencies extends Pick<PushRuntime,
   addOrUpdateApnsToken?: (token: string, deviceToken: string, userAgent: string | undefined, platform: string, environment: string, pushKey: JsonValue | undefined) => Promise<void>;
   removeApnsToken?: (token: string, deviceToken: string) => Promise<void>;
   clearPendingPushBadge?: () => void;
-  clearSessionPushNotifications?: (sessionId: string) => Promise<void>;
+  clearSessionPushNotifications?: (sessionId: string, options?: { viewed?: boolean }) => Promise<void>;
   getUiNotificationClients: () => Set<NotificationResponse>;
   writeSseEvent: (res: SseWriter, payload: { type: string; properties: { uiToken: string } }) => void;
   getPendingBlockingRequestsSnapshot?: SessionRuntime['getPendingBlockingRequestsSnapshot'];
@@ -393,7 +393,7 @@ export const registerNotificationRoutes = (app: {
   app.post('/api/sessions/:id/view', (req, res) => {
     const sessionId = req.params.id;
     if (clearPendingPushBadge) clearPendingPushBadge();
-    void clearSessionPushNotifications?.(sessionId);
+    void clearSessionPushNotifications?.(sessionId, { viewed: true });
 
     return res.json({
       success: true,
