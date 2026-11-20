@@ -2059,15 +2059,21 @@ process.exit(safe ? 0 : 1);
     expect(fetch.options.cwd).toBe(path.join(root, 'vendor', 'alpha'));
     expect(step('clone')).toBeLessThan(step('fetch'));
     expect(step('fetch')).toBeLessThan(step('checkout'));
-    expect(setupValue.credentialResolver.resolve).toHaveBeenCalledTimes(1);
+    const { issue } = setupValue.credentialBroker;
+    expect(setupValue.credentialResolver.resolve).toHaveBeenCalledTimes(2);
+    expect(issue).toHaveBeenCalledTimes(2);
+    const [cloneLease, fetchLease] = issue.mock.results.map((outcome) => outcome.value);
+    expect(cloneLease.revoke.mock.invocationCallOrder[0]).toBeLessThan(issue.mock.invocationCallOrder[1]);
+    expect(fetchLease.revoke).toHaveBeenCalledTimes(1);
   });
 
   it('checks out a gitlink commit the fresh clone contains without another transfer', async () => {
-    const { result, step } = await gitlinkCloneFixture(true);
+    const { result, setupValue, step } = await gitlinkCloneFixture(true);
 
     expect(result).toMatchObject({ status: 'succeeded', submodules: [{ path: 'vendor/alpha', status: 'succeeded' }] });
     expect(step('clone')).not.toBe(-1);
     expect(step('fetch')).toBe(-1);
+    expect(setupValue.credentialBroker.issue).toHaveBeenCalledTimes(1);
   });
 
   it('quarantines and removes an operation-created child after clone failure', async () => {

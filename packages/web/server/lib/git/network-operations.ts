@@ -1518,6 +1518,7 @@ export function createNetworkOperations({
             let keepChild = childExists;
             let childIdentity: string | undefined;
             let childBirthtimeHolds = false;
+            let leasedContext: LeasedTransportContext | undefined = transfer.context;
             try {
               if (!childExists) {
                 await ensureSubmoduleParentDirectories(directory, module.path, controls, deadline);
@@ -1530,17 +1531,22 @@ export function createNetworkOperations({
                   childIdentity = directoryIdentity(await fsImpl.lstat(childDirectory), childBirthtimeHolds);
                 });
               }
-              const childContext = { ...transfer.context, env: { ...transfer.context.env, GIT_LFS_SKIP_SMUDGE: '1' } };
               await auxiliaryTransfer(transfer, hydrationPlan, controls, [
                 'clone', '--no-checkout', '--no-tags', '--', endpoint.endpoint, childDirectory,
-              ], childContext, deadline);
+              ], { ...transfer.context, env: { ...transfer.context.env, GIT_LFS_SKIP_SMUDGE: '1' } }, deadline);
               await controls.markStepCompleted('transferred');
               const gitlinkObject = await localGit(childDirectory, ['cat-file', '--batch-check'], controls, deadline,
                 { input: Buffer.from(`${module.gitlink}\n`) });
               if (gitlinkObject === `${module.gitlink} missing\n`) {
-                await auxiliaryTransfer(transfer, hydrationPlan, controls, [
+                leasedContext = undefined;
+                if (await safeRevoke(transfer.context, hydrationPlan.operationId)) rethrow(operationError('UNKNOWN', 'Submodule credential cleanup failed', 500));
+                const fetchTransfer = await auxiliaryTransport(
+                  childPlan(directory), 'submodule', endpoint.endpoint, controls, deadline, foundAfterPlanning,
+                );
+                leasedContext = fetchTransfer.context;
+                await auxiliaryTransfer(fetchTransfer, hydrationPlan, controls, [
                   'fetch', '--no-tags', '--', endpoint.endpoint, module.gitlink,
-                ], childContext, deadline, { cwd: childDirectory });
+                ], fetchTransfer.context, deadline, { cwd: childDirectory });
               }
               await localGit(childDirectory, ['checkout', '--force', '--detach', module.gitlink], controls, deadline, { disableLfsFilters: true });
               childHead = (await localGit(childDirectory, ['rev-parse', '--verify', 'HEAD'], controls, deadline)).trim().toLowerCase();
@@ -1549,7 +1555,7 @@ export function createNetworkOperations({
               }
               keepChild = true;
             } finally {
-              const cleanupFailed = await safeRevoke(transfer.context, hydrationPlan.operationId);
+              const cleanupFailed = await safeRevoke(leasedContext, hydrationPlan.operationId);
               if (!keepChild && childIdentity) {
                 const cleanup = await quarantineAndClean(childDirectory, hydrationPlan.operationId, async (moved) => {
                   const stats = await fsImpl.lstat(moved);

@@ -810,7 +810,7 @@ Git builds submodules from the gitlinks in the tree, so `git submodule` ignores 
 
 #### Why a gitlink commit no branch contains is fetched by ID and not by cloning tags
 
-The child clone brings branches only. A project can pin a submodule to a commit that only a tag contains, or to one that no ref contains and the host still serves by ID. Either one failed every worktree setup in that repository (#7310). Cloning tags would cover only the first. The executor fetches the missing commit by ID, as `git submodule update` does when its clone lacks the commit, which covers both and transfers only what that commit needs.
+The child clone brings branches only. A project can pin a submodule to a commit that only a tag contains, or to one that no ref contains and the host still serves by ID. Either one failed every worktree setup in that repository (#7310). Cloning tags would cover only the first. The executor fetches the missing commit by ID, as `git submodule update` does when its clone lacks the commit, which covers both and transfers only what that commit needs. The fetch takes a credential lease of its own after the clone's is revoked, because the broker serves a managed credential to one Git process.
 
 ### Managed LFS publication
 
