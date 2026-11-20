@@ -250,6 +250,54 @@ constructor retains its existing `Object.assign` behavior.
   remembered. Remembered values live in memory only, per session and env
   name, for 10 minutes from submission; use does not extend them, a restart
   drops them, and `secret.forget` drops the session's.
+  A value can also be saved for the project the session's directory belongs
+  to, its worktrees included, or for all projects (`createSavedSecrets`,
+  kept as the project's `secrets` or the `user` layer's `secrets` in
+  `../environment/store.js`); the project's value wins over the one for all
+  projects. Each field on the card picks one: this run only, this chat for
+  10 minutes (`remember`), this project (`save`, offered only inside a
+  configured project: `canSave`) or all projects (`saveGlobally`, offered
+  whenever the store can be read: `canSaveGlobally`), and only for fields it
+  asked the user to type; a field in both save lists goes to the project. A
+  saved value never runs on its own: a call that
+  uses one waits on the card, which lists it as `saved` with no field (the
+  ones saved for all projects also in `savedGlobally`), and the user's Run
+  confirms it. The answer names the saved values the card
+  showed (`saved`) or gives a typed value for them, and one that does
+  neither for any of them is refused with 409, so a card that never showed a
+  saved value cannot run it. `fields` lists the saved names too, which a
+  current card skips: an app older than saved secrets draws only `fields`,
+  so it asks the user to type every value again instead of waiting on a card
+  it cannot draw, and a typed value runs in place of the saved one, which
+  stays saved. Nothing runs unconfirmed.
+  `POST /api/openchamber/secret/forget-saved` removes one from where it was
+  saved while the card waits and turns it into an asked field; the field leaves
+  `savedValues` before the store is written, so a Run in that window asks for
+  it, and forgetting a field already asked answers the current card. It
+  removes the value only while the store still holds the one the card
+  showed (`removeSecrets` checks inside the queued write): a replacement
+  saved from another chat or Settings meanwhile answers 409 and stays, and
+  the field stays asked, so the card never offers the stale value again. The
+  result lists the saved env names in `saved`, and a value the store could
+  not take in `notSaved`; the command runs either way.
+  `secret.forget` with `saved: true` waits on a card that lists the names
+  saved for the session's project and for all projects, each once (one in
+  both places in `savedInBoth`), in the same `pending` slot with no field to
+  type, marked `kind: 'forget'` so a row Forget on it is refused (400); the user's confirmation is an answer that names them all (the same
+  409 check), and only those names leave the store, from both places in one
+  write, and only while each still holds the value the card listed: a
+  replacement saved meanwhile fails the call with 409 and nothing is removed,
+  and a write that fails leaves both places as they were. Keep is a decline. With
+  nothing saved it answers at once, and without a session directory it fails
+  instead of reporting nothing saved. A saved value is read when the call
+  starts and again after the user's click: one forgotten or changed while the
+  card waited (another card, Settings) does not run, and the call reports
+  `not-started` with a note to call again. Inside an isolated space the
+  server runs without saved secrets (`savedSecrets: null` in `runtime.ts`):
+  its store is the container's, which the host's Settings never list, so
+  the card offers only this run and this chat, `secret.forget` with
+  `saved: true` has nothing to forget, and the space's environment store
+  refuses a `secrets` change from any route (`savesSecrets: false`).
 - `routes.js` is the authenticated CLI HTTP adapter. It forwards one action,
   preserves service status and partial-result details, and propagates request
   cancellation. It also carries the chat's answer to a waiting page.
@@ -919,6 +967,49 @@ memory is one more place it lives. The agent asking for reuse would decide
 that for the user, and a one-time code would be kept on the agent's word. The
 card offers the choice per field instead, off by default; the agent only learns
 which env names are remembered from the result.
+
+### Why a saved value waits for a click and a remembered one does not
+
+A remembered value lives 10 minutes in one chat, the time to fix and rerun a
+script the user just watched. A saved value outlives the chat and reaches
+every session in the project, and OpenCode's shell permission alone can pass
+on an allow rule the user set long before. If a saved value ran on its own, a
+prompt-injected agent in any later session could send it out through
+`secret.run` without the user seeing a thing, so each run that uses one shows
+the card, and the user's click on Run is the approval. Saving it in the project's environment store reuses
+that file's guarantees (mode 0600, values never answered by a route) and its
+project lookup, so a worktree finds what the primary checkout saved. The store
+keeps it apart from the variables, which Git, the terminal and project actions
+receive. A value for all projects is one click away for an agent in any
+project, a cloned repository the user does not know among them, so the card
+says where each saved value comes from, and the user chooses that scope per
+field, never by default.
+
+### What the click does not protect
+
+The click guards the `secret.run` path only, and two others stay open to an
+agent whose shell runs as the user. The value sits in plaintext in
+`environment.json`, which the user's own processes can read, as they can the
+project's variables. And the agent's shell inherits
+`OPENCHAMBER_AGENT_TOOL_URL` and `OPENCHAMBER_AGENT_TOOL_TOKEN`: it can start
+its own `secret.run`, which draws no card in the chat, and on a server without
+a UI password answer that call over HTTP. Saved secrets accept both, as a
+known limit. An OS keychain was considered and closes neither on its own:
+DPAPI and Credential Manager on Windows, and an unlocked Secret Service
+collection on Linux, hand any process of the same user the value without a
+prompt; on macOS a keychain item prompts other apps, but "Always Allow" lifts
+that for good, and a prompt on every read needs native Security framework
+code (`SecAccessControl` with user presence) in the signed desktop app, which
+the web server, the VS Code extension and a headless server do not have.
+
+### Why secret.forget asks before it drops saved values
+
+The tool tells the agent to call `secret.forget` when the work is done. Had it
+also dropped the saved values, every finished task would erase what the user
+chose to keep. It touches them only with `saved: true`, and even then the user
+confirms on a card: the tool's description is a prompt, and an agent that
+misreads it, or a prompt-injected one, must not erase values the user cannot
+recover.
 
 ### Why the card reads its fields from the server and not from the call
 
