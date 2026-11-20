@@ -413,9 +413,13 @@ the chats get their own, keyed by instance and folder
 another browser keeps its own sets (tabs are what one window looks at;
 drafts and pins, which are data, live on the server). The shown set is
 `tabIds`/`previewTabId`, so every action works on what the strip shows;
-`enterScope` swaps it with the stored one. A worktree or space shown for the
-first time opens with the sessions the user started there as pinned tabs, no
-subagents; a project root opens with none, since it can hold hundreds. The
+`enterScope` swaps it with the stored one. Pinning more tabs never closes one.
+A pinned tab leaves its set when the user closes it, when `removeTabs` drops
+its session, when the session moves to another folder, when another lane of
+its run takes the shared slot, or with its whole set when that set ages out of
+the 40 kept scopes. A worktree or space shown for the first time opens with the
+10 most recent sessions the user started there as pinned tabs, no subagents; a
+project root opens with none, since it can hold hundreds. The
 strip enters a new scope only once the global session list has loaded, so a
 seed is never taken from a partial list and stored empty for good. At most 40
 other scopes are kept, the least recently shown dropped first. `removeTabs`
@@ -430,6 +434,17 @@ kept showing its tab, because the strip renders any tab whose session exists.
 The global set is left alone, since it is the other setting's. Version 1 moved the version-0 single
 set into the global scope. How the strip itself looks and behaves is in
 `components/layout/DOCUMENTATION.md`.
+
+### Why pinned tabs have no limit
+
+A cap that closes the leftmost pinned tab to make room for a new one closes,
+without a word, the long-running session the user keeps coming back to. It made
+sense while every opened session got a tab. With the preview tab only a send, a
+double-click, a drag or a new session pins one, so the set grows only as the
+user works. A set holds ids only, and the strip scrolls when its tabs overflow.
+Deletion cleanup (`sync/session-deletion-cleanup.ts`) drops a deleted
+session's id from every set, so ids that can never render again do not pile up.
+An archived session keeps its id, so restoring it brings its tab back.
 
 ### Session / project coordination stores
 
@@ -1357,7 +1372,7 @@ After meaningful Git/PR store changes, verify manually:
 - Server drafts serialize writes per draft and retain failed-save local text as newer than the server. Final removal prevents pending saves from resurrecting sent or discarded drafts. Loads started before writes cannot overwrite them; failed deletion restores a still-server-owned draft. Stored attachments travel by id and load bytes when another device opens the draft.
 - Folder snapshot reads bypass the browser request cache so a hanging write cannot block them. Batches preserve changes queued after dispatch, and a failing write retains its own backoff. Malformed pending entries drop individually; malformed tombstones remove nothing.
 - Session pins derive from server-shared metadata with optimistic clicks and unmigrated local pins overlaid. Unknown session ids stay in tab sets until absence is authoritative because a partial list cannot destroy the user's working set. Closing a tab never deletes its session.
-- Pin intent can precede creation of its tab and remains transient. Moving a tab or sending pins a preview. Multi-run members reuse their shared tab slot without changing its preview state, and opening the newest pinned tab never evicts that new tab.
+- Pin intent can precede creation of its tab and remains transient. Moving a tab or sending pins a preview. Multi-run members reuse their shared tab slot without changing its preview state. Apart from that slot, opening, pinning, dragging or moving a tab never closes another pinned tab.
 - Multi-run lanes receive standing project context like ordinary sends. A lane's goal starts before its prompt; goal failure leaves it unstarted, and prompt failure stops that goal because a goal without a turn never settles and blocks auto-fusion. A failed unpopulated checkout is removed with its branch.
 - A folded work has no selectable child rows, so range selection cannot include its hidden sessions. A selected session shown in another scope toggles the same session off.
 - Snippet registry authority expires with its directory's load cache because files can change outside this client. Only a complete fresh list can rule out expansion locally. Post-mutation reads bypass pre-mutation requests, and retired callers receive the replacement list. Rename and move update list and editor selection together.
