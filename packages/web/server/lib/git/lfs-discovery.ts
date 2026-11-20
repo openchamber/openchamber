@@ -343,6 +343,11 @@ const httpsCandidate = (value: string, gitRemoteUrl: string) => {
   return candidate;
 };
 
+const httpsRemoteLfsEndpoint = (repositoryUrl: string) => {
+  const base = repositoryUrl.replace(/\/$/, '');
+  return `${base}${base.endsWith('.git') ? '' : '.git'}/info/lfs`;
+};
+
 const sshRemoteHttpsEndpoint = (gitRemote: ReturnType<typeof normalizeDiscoveryEndpoint>) => {
   const decodedPath = gitRemote.path.startsWith('/') ? gitRemote.path : `/${gitRemote.path}`;
   const repositoryPath = decodedPath.split('/').map((part) => part ? encodeURIComponent(part) : part).join('/');
@@ -363,9 +368,8 @@ export function resolveLfsPushConfig({ lfsConfigOutput, effectiveConfigOutput, g
   const configured = value('lfs.pushurl') || value('lfs.url')
     || effective.get(`remote.${gitRemoteName.toLowerCase()}.lfspushurl`) || value(remoteUrlKey);
   const remote = normalizeDiscoveryEndpoint(gitRemoteUrl, { ownRemote: true });
-  const base = remote.endpoint.replace(/\/$/, '');
   const endpoint = configured ? httpsCandidate(configured, gitRemoteUrl)
-    : remote.kind === 'https' ? httpsCandidate(`${base}${base.endsWith('.git') ? '' : '.git'}/info/lfs`, gitRemoteUrl) : null;
+    : remote.kind === 'https' ? httpsCandidate(httpsRemoteLfsEndpoint(remote.endpoint), gitRemoteUrl) : null;
   const storagePath = effective.get('lfs.storage') ?? null;
   if (storagePath !== null && (!storagePath || CONTROL_PATTERN.test(storagePath))) throw lfsError('LFS storage path is invalid');
   return { endpoint, storagePath };
@@ -453,7 +457,7 @@ export function discoverLfs({
     endpoint = Object.freeze({
       status: 'resolved',
       source: 'git-remote',
-      candidate: httpsCandidate(`${gitRemote.endpoint}/info/lfs`, gitRemoteUrl),
+      candidate: httpsCandidate(httpsRemoteLfsEndpoint(gitRemote.endpoint), gitRemoteUrl),
     });
   } else if (needed) {
     endpoint = Object.freeze({
