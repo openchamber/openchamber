@@ -97,14 +97,13 @@ describe('BtwPanel', () => {
     test('draws no session notice row inside a reply', async () => {
         const store = getSyncChildStores().getChild(directory);
         if (!store) throw new Error('Expected mounted directory store');
-        const notice = {
+        const notice: SyntheticMessage = {
             id: 'msg_3', sessionID, role: 'synthetic', time: { created: 3 }, text: 'OpenCode restarted', description: 'Plugin notice',
-        } as SyntheticMessage;
-        const reply = {
-            id: 'msg_4', sessionID, role: 'assistant', parentID: user.id, time: { created: 4, completed: 5 }, finish: 'stop',
-            modelID: 'model', providerID: 'provider', mode: 'build', agent: 'build', path: { cwd: directory, root: directory },
-            cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-        } as unknown as AssistantMessage;
+        };
+        const reply: AssistantMessage = {
+            id: 'msg_4', sessionID, role: 'assistant', time: { created: 4, completed: 5 }, finish: 'stop',
+            agent: 'build', providerID: 'provider', modelID: 'model',
+        };
         await act(async () => store.setState({
             session: [session],
             message: { [sessionID]: [quote, user, notice, reply] },
