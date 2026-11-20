@@ -1278,6 +1278,13 @@ rest it is as quiet as the button was.
   for subdirectory sessions, whose own directory rarely has a Git status entry.
 - Worktree prefix lookup runs for each session on sidebar rebuilds and avoids
   allocating entry pairs or concatenated path prefixes in that loop.
+- Any change to any session record rebuilds the whole structure, so a turn's
+  start and end rebuild it several times, each on every session. What a rebuild
+  asks of each session and depends on nothing else keeps its answer between
+  rebuilds: a session's linked changes and issues per record and URL matcher
+  (`lib/linkedIssues.ts`), a folder's chats root per set of roots
+  (`lib/chatDirectories.ts`). At 4x CPU throttle with 4,000 sessions this took
+  the longest task of a turn from 178 to 160 ms.
 - Root-branch resolution keys its cache by project path and input branch and
   coalesces initial status bursts. The same input stays cached for 5 minutes;
   another project's settled branch cannot trigger a quadratic resolution cascade.
