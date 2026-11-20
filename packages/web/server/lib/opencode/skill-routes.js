@@ -884,8 +884,19 @@ export const registerSkillRoutes = (app, dependencies) => {
       }
 
       // `scope` and `source` together narrow the delete to that one copy.
-      const scope = asNonEmptyString(req.query.scope);
-      const source = asNonEmptyString(req.query.source);
+      // Repeated query params (and other non-string values) arrive as arrays.
+      // Treat them as malformed instead of silently coercing to `null`, which
+      // would otherwise widen an ambiguous request into an unscoped delete.
+      const rawScope = req.query.scope;
+      const rawSource = req.query.source;
+      if (rawScope !== undefined && typeof rawScope !== 'string') {
+        return res.status(400).json({ error: 'scope must be user or project and source opencode, claude or agents' });
+      }
+      if (rawSource !== undefined && typeof rawSource !== 'string') {
+        return res.status(400).json({ error: 'scope must be user or project and source opencode, claude or agents' });
+      }
+      const scope = asNonEmptyString(rawScope);
+      const source = asNonEmptyString(rawSource);
       let location;
       if (scope || source) {
         if (!['user', 'project'].includes(scope) || !['opencode', 'claude', 'agents'].includes(source)) {
