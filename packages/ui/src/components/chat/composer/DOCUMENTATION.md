@@ -2127,7 +2127,8 @@ composer (see "Enter preference"): its Send action attaches.
 While the comment is open, the selection menu keeps the quoted range painted
 through its existing highlight overlay (rAF on scroll/resize, no polling); the
 Range lives in that menu component only and is released when the comment
-ends or the message unmounts.
+ends or the message unmounts. A desktop inline comment moves to the next menu
+of the same message instead (see the message module's invariants).
 
 Voice: the comment shell mounts its own `ComposerDictation` whose insert
 callbacks target the comment draft (insert-and-send attaches; it never sends).
