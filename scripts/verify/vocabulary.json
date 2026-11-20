@@ -1,4 +1,9 @@
 {
+  "chat.decisionButton": {"selector": ".oc-box button", "means": "An option or Change action in a reply decision card."},
+  "chat.decisionTitle": {"selector": ".oc-ui-block-title", "means": "The question title of a reply decision card."},
+  "chat.foldedDecisionRow": {"selector": ".oc-box > div:has(> .oc-ui-block-title + svg)", "means": "The row holding a folded decision's title, answer and controls."},
+  "chat.decisionStatus": {"selector": "[data-oc-ui-block] [aria-live]", "means": "The selection count or delivery status under a reply block."},
+  "chat.sendDecisions": {"selector": "[data-oc-ui-block] [aria-live] button", "means": "The button that sends the currently chosen decisions."},
   "sidebar.row": {"selector": "[data-session-row=\"{session}\"]", "means": "A session's row in the left sidebar."},
   "sidebar.activeRow": {"selector": "[data-session-row=\"{session}\"][aria-current=\"page\"]", "means": "The sidebar row of the session the chat shows, highlighted."},
   "sidebar.rowInScope": {"selector": "[data-session-row=\"{session}\"][data-session-scope=\"{scope}\"]", "means": "A session row under a sidebar section: activity:work is In work."},

@@ -753,6 +753,22 @@ const VERIFY_TURNS = [
 ]
 
 const TURNS = [
+  {
+    id: "verify_reply_decisions_received",
+    prompt: "The user answered the UI block in your previous reply:",
+    answer: "Decision choices received.\n",
+  },
+  {
+    id: "verify_reply_decisions",
+    prompt: "Show the verification decision cards.",
+    answer: [
+      '```openui-lang',
+      'root = Stack([policy, date])',
+      'policy = Card("Q1: Which document takes precedence when the rules conflict?", [Text("Choose the policy to use for conflicting rules."), Button("Use version 1.1 for conflicts", "primary"), Button("Keep the old rules")])',
+      'date = Card("Q2: When does attendance resume?", [Button("On the return date"), Button("On the following day")])',
+      '```',
+    ].join('\n'),
+  },
   ...DESIGN_SESSIONS.flatMap((session) => session.turns.map((turn, index) => ({ ...turn, id: `${session.key}_${index + 1}` }))),
   ...VERIFY_TURNS,
 ]

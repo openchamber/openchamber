@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { describeUiBlockAnswer, describeUiBlockReplyAnswer, pageAnswerNamesButton, pageAnswerSummary, uiBlockKey } from './answer';
+import { describeUiBlockAnswer, describeUiBlockReplyAnswer, pageAnswerNamesButton, pageAnswerSummary, stableReplyInputId, uiBlockKey } from './answer';
 
 describe('describeUiBlockAnswer', () => {
   const fields = [
@@ -77,5 +77,37 @@ describe('uiBlockKey', () => {
   test('is stable for a source and differs between sources', () => {
     expect(uiBlockKey('root = Stack([])')).toBe(uiBlockKey('root = Stack([])'));
     expect(uiBlockKey('root = Stack([])')).not.toBe(uiBlockKey('root = Stack([x])'));
+  });
+});
+
+describe('stableReplyInputId', () => {
+  const tabStorage = () => {
+    const items = new Map<string, string>();
+    return {
+      getItem: (key: string) => items.get(key) ?? null,
+      setItem: (key: string, value: string) => { items.set(key, value); },
+    };
+  };
+
+  test('a retry after a reload sends the input ID OpenCode may already have admitted', () => {
+    const storage = tabStorage();
+    let next = 0;
+    const create = () => `msg_${++next}`;
+    const first = stableReplyInputId('block', storage, new Map(), create);
+    const afterReload = stableReplyInputId('block', storage, new Map(), create);
+    expect(afterReload).toBe(first);
+    expect(stableReplyInputId('other block', storage, new Map(), create)).not.toBe(first);
+  });
+
+  test('without usable storage the ID still holds for the page', () => {
+    const memory = new Map<string, string>();
+    const broken = {
+      getItem: () => { throw new Error('blocked'); },
+      setItem: () => { throw new Error('blocked'); },
+    };
+    let next = 0;
+    const create = () => `msg_${++next}`;
+    const first = stableReplyInputId('block', broken, memory, create);
+    expect(stableReplyInputId('block', broken, memory, create)).toBe(first);
   });
 });
