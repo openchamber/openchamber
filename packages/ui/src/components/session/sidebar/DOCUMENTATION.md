@@ -41,9 +41,12 @@ changed, and shows the matching excerpt under the title.
 The search covers the global active and archived cache, which does not
 bootstrap directories or load transcripts. `resolveSidebarSearchScope` admits a
 conversation by its directory: any known directory, and any folder under a
-project or one of its worktrees. VS Code keeps to its workspace directories and
-sends them with the content request; with none known the hook stays disabled,
-so an empty directory list cannot become a request for every directory.
+project or one of its worktrees. Known directory keys and candidate paths use
+the same path normalization, including raw Windows managed-chat directories.
+VS Code keeps to its exact workspace directories for metadata search, and
+`useConversationSearch` marks message search unsupported there before any
+request; with no directory known the hook stays disabled, so an empty directory
+list cannot become a request for every directory.
 The search text and its scope are plain state of the sidebar (and of the
 phone's sheet for its own field); nothing is stored. Excerpts and other message
 matches open through `openSessionLink`, so opening an archived match does not
@@ -113,6 +116,16 @@ Search admits a chat by its folder, and a folder is known as a chat only after
 the server names the chats root, which can arrive after the session list. The
 admitted directories depend on that root, so chats join a search when it lands
 instead of staying out until the session list next changes.
+
+### Why known directory keys are normalized inside the scope
+
+Callers hand the scope directories as they got them; a managed chat's folder
+comes as OpenCode reports it, with backslashes on Windows. The scope normalizes
+those keys itself, once per scope, rather than each caller. The normalization
+is a local admission check: it decides which conversations the sidebar search
+shows, and no request carries the normalized keys. A Windows chat missing from
+search results is filtered here.
+
 - `list/useSidebarGroupStatus.ts` subscribes to project and standalone Chats
   directories together. Chats uses the same `activity:chats` identity for status
   and row projection, including a Chats-only sidebar. An unresolved global list
