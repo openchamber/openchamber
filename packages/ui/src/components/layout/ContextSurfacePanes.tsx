@@ -515,7 +515,7 @@ export const ContextSurfacePanes: React.FC = () => {
           ) : hasOpenEditorFile || !contextEditorTreeVisible ? (
             <div className={cn('h-full min-w-0 flex-1', hasOpenEditorFile && !showsEditor && 'hidden')}>
               {hasOpenEditorFile ? (
-                <React.Suspense fallback={null}><FilesView mode="editor-only" visible={!contentHidden(fileZone.zone) && isFileTabActive && showsEditor} onCloseFile={handleCloseEditorFile} /></React.Suspense>
+                <React.Suspense fallback={null}><FilesView visible={!contentHidden(fileZone.zone) && isFileTabActive && showsEditor} onCloseFile={handleCloseEditorFile} /></React.Suspense>
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
                   <Icon name="file-code" className="h-12 w-12 text-muted-foreground/50" />

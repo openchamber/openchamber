@@ -513,8 +513,8 @@ re-renders every row.
 
 The Files editor's row (`renderFileToolbar`, an `ActionToolbar`) has the actions
 the open file's type allows, the same in every mode. The row itself keeps save
-state, the mode toggle (and HTML annotation), find, comment on the file and
-full screen; go to line, symbols, line wrap, read aloud, the file's own actions
+state, the mode toggle (and HTML annotation), find and comment on the file;
+go to line, symbols, line wrap, read aloud, the file's own actions
 (open in app, copy contents, copy path, download) and auto-save live in "More
 actions". With every action on the row it ran to a dozen icons, most of them
 rarely used (maintainer, 2026-10-28). A tool the current mode cannot run opens
@@ -725,7 +725,7 @@ unsaved, so an empty editor never stays stuck open.
 Files view takes the same comment from its toolbar, as a `file` draft beside
 its line comments. Its editor and cards sit between the toolbar and the
 scroller, so they stay on screen at any scroll; the CodeMirror line widgets
-filter those drafts out, and the fullscreen overlay shows them while it is open.
+filter those drafts out.
 Changes hands its PR source to walkthrough; walkthrough's Changes action opens
 PR mode with the shared selection. Picking a PR never generates a walkthrough.
 

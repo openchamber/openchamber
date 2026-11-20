@@ -2828,26 +2828,6 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   100% { transform: translateX(-100%); }
 }
 
-@keyframes open-file-name-marquee-scroll {
-  0% { transform: translateX(0); }
-  100% { transform: translateX(-50%); }
-}
-
-/*
- * A name too long for the header scrolls past once when the file opens, then
- * stands still: the track holds the name twice, so it ends where it began.
- */
-.open-file-name-marquee-track {
-  display: inline-flex;
-  min-width: max-content;
-  animation: open-file-name-marquee-scroll var(--open-file-name-marquee-duration, 14s) linear 1;
-}
-
-.open-file-name-marquee-item {
-  flex-shrink: 0;
-  padding-right: 2rem;
-}
-
 .marquee-text {
   display: inline-block;
   white-space: nowrap;
@@ -2867,7 +2847,6 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .open-file-name-marquee-track,
   .group:hover .marquee-text--active,
   .marquee-text--active:hover {
     animation: none;
@@ -2877,24 +2856,6 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   .group:hover .marquee-text--active,
   .marquee-text--active:hover {
     display: inline;
-  }
-
-  .open-file-name-marquee-track {
-    display: block;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    will-change: auto;
-  }
-
-  .open-file-name-marquee-track .open-file-name-marquee-item {
-    display: inline;
-    padding-right: 0;
-  }
-
-  .open-file-name-marquee-track .open-file-name-marquee-item[aria-hidden="true"] {
-    display: none;
   }
 
   .waiting-dim {

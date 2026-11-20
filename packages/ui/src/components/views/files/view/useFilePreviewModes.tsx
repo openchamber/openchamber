@@ -12,7 +12,7 @@ import { isFilePathMoveInFlight } from '@/lib/filePathMoves';
 import { isMarkdownFile, opensInFileCanvas, isHtmlFile } from './fileViewKinds';
 import { type useFileSaving, type useFileDraft } from './useFileSaving';
 import { type useFileKinds } from './useFileKinds';
-import { type useFileCanvasState, type useFileFullscreen } from './useFileCanvas';
+import { type useFileCanvasState } from './useFileCanvas';
 import { type useFileDocument } from './useFileDocument';
 import { type useFileMarkdownPreview } from './useFileMarkdownPreview';
 import { type useFileScope } from './useFileScope';
@@ -56,14 +56,13 @@ export function useFileDiagram() {
   return { drawioRemountNonce, setDrawioRemountNonce, diagramAutoSaveTimerRef, diagramXmlRef, diagramSavedXmlRef, pendingDrawioPreviewFrameRef, pendingCanvasPreviewFrameRef, diagramEditorRef, diagramSaved, setDiagramSaved };
 }
 
-export function useFilePreviewModes({ canvasState, diagram, draft, fileDocument, fileKinds, fileSaving, fullscreen, markdownPreview, scope, tabs, viewModes, files, isMobile, t }: {
+export function useFilePreviewModes({ canvasState, diagram, draft, fileDocument, fileKinds, fileSaving, markdownPreview, scope, tabs, viewModes, files, isMobile, t }: {
   canvasState: Pick<ReturnType<typeof useFileCanvasState>, 'canvasDirtyRef' | 'canvasEditorRef' | 'setCanvasDirty' | 'setCanvasRemountNonce'>;
   diagram: Pick<ReturnType<typeof useFileDiagram>, 'diagramAutoSaveTimerRef' | 'diagramSavedXmlRef' | 'diagramXmlRef' | 'pendingCanvasPreviewFrameRef' | 'pendingDrawioPreviewFrameRef' | 'setDiagramSaved' | 'setDrawioRemountNonce'>;
   draft: Pick<ReturnType<typeof useFileDraft>, 'autoSaveEnabled' | 'draftContent' | 'setDraftContent'>;
   fileDocument: Pick<ReturnType<typeof useFileDocument>, 'fileContent' | 'fileContentRevision' | 'fileLoading' | 'lastLoadedFileStatRef' | 'loadedFilePath' | 'pendingPathMoveRef' | 'setArtifactSize'>;
   fileKinds: Pick<ReturnType<typeof useFileKinds>, 'canEdit' | 'canMountCanvas' | 'guestFileEditor' | 'isDrawio' | 'isMarkdown'>;
   fileSaving: Pick<ReturnType<typeof useFileSaving>, 'AUTO_SAVE_DELAY' | 'applyLoadedTextContent' | 'readFileStat'>;
-  fullscreen: Pick<ReturnType<typeof useFileFullscreen>, 'isFullscreen'>;
   markdownPreview: Pick<ReturnType<typeof useFileMarkdownPreview>, 'focusMdPreviewContainer'>;
   scope: Pick<ReturnType<typeof useFileScope>, 'root'>;
   tabs: Pick<ReturnType<typeof useFileTabs>, 'openPaths' | 'selectedFile' | 'selectedFilePathRef'>;
@@ -78,7 +77,6 @@ export function useFilePreviewModes({ canvasState, diagram, draft, fileDocument,
   const { fileContent, fileContentRevision, fileLoading, lastLoadedFileStatRef, loadedFilePath, pendingPathMoveRef, setArtifactSize } = fileDocument;
   const { canEdit, canMountCanvas, guestFileEditor, isDrawio, isMarkdown } = fileKinds;
   const { AUTO_SAVE_DELAY, applyLoadedTextContent, readFileStat } = fileSaving;
-  const { isFullscreen } = fullscreen;
   const { focusMdPreviewContainer } = markdownPreview;
   const { root } = scope;
   const { openPaths, selectedFile, selectedFilePathRef } = tabs;
@@ -205,7 +203,7 @@ export function useFilePreviewModes({ canvasState, diagram, draft, fileDocument,
   React.useEffect(() => {
     if (!mdPreviewFocusTargetPath || isMobile) return;
     focusMdPreviewContainer();
-  }, [focusMdPreviewContainer, isFullscreen, isMobile, mdPreviewFocusTargetPath]);
+  }, [focusMdPreviewContainer, isMobile, mdPreviewFocusTargetPath]);
 
   const saveJsonViewMode = React.useCallback((mode: 'tree' | 'text') => {
     setJsonViewMode(mode);

@@ -62,8 +62,9 @@ when the server stopped at its deadline, when the regular expression is invalid
 failed; none of these is shown as an empty result. The server side is in
 `packages/web/server/lib/fs/DOCUMENTATION.md`.
 
-Desktop `FilesView` in editor-only mode neither loads nor constructs its unused
-tree. In the context panel the panel's tab strip owns the open files: closing
+`FilesView` is the open file's editor and has no tab row of its own. On the
+desktop it neither loads nor constructs a tree. In the context panel the
+panel's tab strip owns the open files: closing
 a file from the editor (Cmd/Ctrl+W in the desktop app, which the window menu
 turns into `openchamber:close-tab` through `lib/closeTabTarget.ts`, or the
 unsaved-changes prompt that may come first) goes through `onCloseFile` to
@@ -83,7 +84,7 @@ refresh after file mutations does. Each directory failure remains local and
 preserves its previous successful snapshot.
 
 Opening a file outside the workspace reads it directly through the active
-runtime, in both editor-only and full Files modes. Chat navigation and file
+runtime, on the desktop and on the phone. Chat navigation and file
 loading do not request native file grants. Server-backed text reads and metadata
 requests have a 30-second deadline, including response-body reads, so a stalled
 request reaches the existing error handler instead of leaving loading pending.
@@ -256,7 +257,7 @@ throwaway `FontFace` family removed when the tab closes), `TableArtifact`
 `OfficeArtifact` (docx, xlsx, pptx, odt, ods, odp, read-only, see below),
 and `BinaryArtifact` (name, type, size, download, and the desktop's open in
 the default app; never a decode attempt). `view/useArtifactPreview`
-is the single switch both the docked and the fullscreen viewer use.
+is the single switch the viewer uses.
 
 A file that cannot be shown fills the pane with `ContentState`
 (`components/ui/content-state.tsx`): icon, title, one sentence, actions. A
@@ -320,7 +321,7 @@ in the tree leaves the focus on the row, and the viewer unmounts while the
 next image loads, which drops the focus to the page; a listener on the viewer
 alone missed both. A viewer that is laid out nowhere, behind another tab of
 the panel, ignores the keys, and the first viewer to handle a key marks it
-handled, so the docked viewer behind the fullscreen one cannot step twice.
+handled, so a second viewer on the page cannot step on the same key.
 
 Non-text artifacts the browser must own (PDF, audio, video, fonts) are loaded
 through `getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', …)` with
@@ -923,7 +924,7 @@ editor: an extension's file editor (`contributes.fileEditors`, see
 `packages/sdk/DOCUMENTATION.md`). It exposes `FileCanvasHandle`
 (`fileCanvas.ts`); `getContent(purpose)` returns a `FileCanvasRead`: a
 snapshot, `null` for nothing yet, or a failure message. A failure fails the
-save or keeps the canvas open on a source or fullscreen toggle; it never falls
+save or keeps the canvas open on a source toggle; it never falls
 back to the stale text draft.
 
 An extension editor claims a file when an active extension's pattern matches
@@ -943,9 +944,7 @@ handed at mount, so `FilesView` remounts it with a `key` of path plus
 `canvasRemountNonce` whenever it must adopt content it did not author (a load,
 an external write, a toggle back from the source view, a discard). Its own
 save adopts content without a remount so the viewport is not reset. Exactly
-one instance is mounted, in the docked chain or in the fullscreen overlay;
-entering or leaving fullscreen moves unsaved edits through the text draft, as
-the source toggle does, and the other slot remounts from it.
+one instance is mounted.
 
 ### Canvas handoff invariants
 
@@ -988,10 +987,9 @@ built-in view with a toast. Its snapshot is bytes, written with
 write uploads use, with the stat baseline cleared so the poll does not take
 the write for an external change. The binary guards (`isBinaryFile`,
 `contentDetectedBinary`) that refuse text saves step aside only while a binary
-editor owns the file (`binaryCanvasRef`). There is no source toggle; moving to
-or from fullscreen saves unsaved changes first, because bytes cannot travel
-through the draft. An external change reloads the file and remounts the
-editor with the new bytes, unless it has unsaved changes.
+editor owns the file (`binaryCanvasRef`). There is no source toggle. An
+external change reloads the file and remounts the editor with the new bytes,
+unless it has unsaved changes.
 
 ## Excalidraw drawings
 

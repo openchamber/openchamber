@@ -18,11 +18,11 @@ export function renderFileContent({ artifacts, diagram, draft, fileAssets, fileC
   diagram: Pick<ReturnType<typeof useFileDiagram>, 'diagramEditorRef' | 'drawioRemountNonce'>;
   draft: Pick<ReturnType<typeof useFileDraft>, 'draftContent'>;
   fileAssets: Pick<ReturnType<typeof useFileAssets>, 'htmlPreviewUnreachable' | 'isPdfAssetAuthLoading'>;
-  fileCanvas: Pick<ReturnType<typeof useFileCanvas>, 'canvasElement' | 'canvasInFullscreen'>;
+  fileCanvas: Pick<ReturnType<typeof useFileCanvas>, 'canvasElement'>;
   fileDocument: Pick<ReturnType<typeof useFileDocument>, 'editorDocumentPath' | 'fileContent' | 'fileError' | 'fileLoading'>;
   fileKinds: Pick<ReturnType<typeof useFileKinds>, 'canUseShikiFileView' | 'isDrawio' | 'isHtml' | 'isJson' | 'isMarkdown'>;
   filePreviewModes: Pick<ReturnType<typeof useFilePreviewModes>, 'diagramEditorXml' | 'getMdViewMode' | 'handleDiagramChange'>;
-  filePreviewRendering: Pick<ReturnType<typeof useFilePreviewRendering>, 'mainViewVirtualizer' | 'renderShikiFileView' | 'restoreMainCodeScroll' | 'showCanvas'>;
+  filePreviewRendering: Pick<ReturnType<typeof useFilePreviewRendering>, 'renderShikiFileView' | 'showCanvas'>;
   tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile'>;
   viewModes: Pick<ReturnType<typeof useFileViewModes>, 'drawioViewMode' | 'htmlViewMode' | 'jsonViewMode' | 'textViewMode'>;
   htmlContent: () => React.ReactNode;
@@ -35,11 +35,11 @@ export function renderFileContent({ artifacts, diagram, draft, fileAssets, fileC
   const { diagramEditorRef, drawioRemountNonce } = diagram;
   const { draftContent } = draft;
   const { htmlPreviewUnreachable, isPdfAssetAuthLoading } = fileAssets;
-  const { canvasElement, canvasInFullscreen } = fileCanvas;
+  const { canvasElement } = fileCanvas;
   const { editorDocumentPath, fileContent, fileError, fileLoading } = fileDocument;
   const { canUseShikiFileView, isDrawio, isHtml, isJson, isMarkdown } = fileKinds;
   const { diagramEditorXml, getMdViewMode, handleDiagramChange } = filePreviewModes;
-  const { mainViewVirtualizer, renderShikiFileView, restoreMainCodeScroll, showCanvas } = filePreviewRendering;
+  const { renderShikiFileView, showCanvas } = filePreviewRendering;
   const { selectedFile } = tabs;
   const { drawioViewMode, htmlViewMode, jsonViewMode, textViewMode } = viewModes;
   return (
@@ -50,7 +50,7 @@ export function renderFileContent({ artifacts, diagram, draft, fileAssets, fileC
           ) : fileError ? (
             renderFileErrorState(selectedFile)
           ) : showCanvas ? (
-            canvasInFullscreen ? <div className="h-full" /> : canvasElement
+            canvasElement
           ) : artifactPreview ? (
             artifactPreview
           ) : selectedFile && isDrawio && drawioViewMode === 'preview' ? (
@@ -90,7 +90,7 @@ export function renderFileContent({ artifacts, diagram, draft, fileAssets, fileC
           ) : selectedFile && isHtml && htmlViewMode === 'preview' ? (
             htmlContent()
           ) : selectedFile && canUseShikiFileView && textViewMode === 'view' ? (
-            renderShikiFileView(selectedFile, draftContent, mainViewVirtualizer, restoreMainCodeScroll)
+            renderShikiFileView(selectedFile, draftContent)
           ) : (
             sourceEditor()
           )

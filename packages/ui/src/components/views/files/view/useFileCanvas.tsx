@@ -1,10 +1,9 @@
 import React from 'react';
 import { toast } from '@/components/ui';
-import { EMPTY_CANVAS_READ, type FileCanvasHandle } from '@/components/views/files/fileCanvas';
+import { type FileCanvasHandle } from '@/components/views/files/fileCanvas';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
-import { type FilesViewOptions } from './fileViewTypes';
 import { type useFileDraft, type useFileSaving } from './useFileSaving';
 import { type useFileTabs } from './useFileTabs';
 import { GuestFileEditor } from '@/components/views/files/GuestFileEditor';
@@ -28,45 +27,7 @@ export function useFileCanvasState() {
   return { canvasRemountNonce, setCanvasRemountNonce, canvasEditorRef, canvasDirty, setCanvasDirty, canvasDirtyRef, binaryCanvasRef, canvasSaved, setCanvasSaved, canvasWrapperRef, canvasLastEditAtRef };
 }
 
-export function useFileFullscreen({ canvasState, draft, tabs }: {
-  canvasState: Pick<ReturnType<typeof useFileCanvasState>, 'binaryCanvasRef' | 'canvasDirtyRef' | 'canvasEditorRef' | 'setCanvasDirty'>;
-  draft: Pick<ReturnType<typeof useFileDraft>, 'saveDraftRef' | 'setDraftContent'>;
-  tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFilePathRef'>;
-}) {
-  const { binaryCanvasRef, canvasDirtyRef, canvasEditorRef, setCanvasDirty } = canvasState;
-  const { saveDraftRef, setDraftContent } = draft;
-  const { selectedFilePathRef } = tabs;
-  const [isFullscreen, setIsFullscreen] = React.useState(false);
-  const changeFullscreen = React.useCallback((next: boolean) => {
-    if (!canvasDirtyRef.current) {
-      setIsFullscreen(next);
-      return;
-    }
-    const pathAtToggle = selectedFilePathRef.current;
-    if (binaryCanvasRef.current) {
-      void saveDraftRef.current?.().then((saved) => {
-        if (saved && selectedFilePathRef.current === pathAtToggle) setIsFullscreen(next);
-      });
-      return;
-    }
-    void Promise.resolve(canvasEditorRef.current?.getContent('handoff') ?? EMPTY_CANVAS_READ).then((read) => {
-      if (selectedFilePathRef.current !== pathAtToggle) return;
-      if (!read.ok) {
-        toast.error(read.message);
-        return;
-      }
-      if (read.snapshot && 'content' in read.snapshot) {
-        setDraftContent(read.snapshot.content);
-        setCanvasDirty(false);
-      }
-      setIsFullscreen(next);
-    });
-  }, []);
-
-  return { isFullscreen, changeFullscreen };
-}
-
-export function useFileCanvas({ canvasState, draft, fileAssets, fileDocument, fileKinds, filePreviewModes, filePreviewRendering, fileSaving, fullscreen, tabs, viewModes, files, mode, t }: {
+export function useFileCanvas({ canvasState, draft, fileAssets, fileDocument, fileKinds, filePreviewModes, filePreviewRendering, fileSaving, tabs, viewModes, files, t }: {
   canvasState: Pick<ReturnType<typeof useFileCanvasState>, 'binaryCanvasRef' | 'canvasEditorRef' | 'canvasLastEditAtRef' | 'canvasRemountNonce' | 'canvasWrapperRef' | 'setCanvasDirty' | 'setCanvasRemountNonce'>;
   draft: Pick<ReturnType<typeof useFileDraft>, 'draftContent'>;
   fileAssets: Pick<ReturnType<typeof useFileAssets>, 'loadCanvasBytes'>;
@@ -75,11 +36,9 @@ export function useFileCanvas({ canvasState, draft, fileAssets, fileDocument, fi
   filePreviewModes: Pick<ReturnType<typeof useFilePreviewModes>, 'handleCanvasUnsupported'>;
   filePreviewRendering: Pick<ReturnType<typeof useFilePreviewRendering>, 'showCanvas'>;
   fileSaving: Pick<ReturnType<typeof useFileSaving>, 'saveNow'>;
-  fullscreen: Pick<ReturnType<typeof useFileFullscreen>, 'isFullscreen'>;
   tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile' | 'selectedFileIsOutsideWorkspace' | 'selectedFilePathRef'>;
   viewModes: Pick<ReturnType<typeof useFileViewModes>, 'canvasViewModeByPathRef' | 'setCanvasViewMode'>;
   files: ReturnType<typeof useRuntimeAPIs>['files'];
-  mode: FilesViewOptions['mode'];
   t: ReturnType<typeof useI18n>['t'];
 }) {
   const { binaryCanvasRef, canvasEditorRef, canvasLastEditAtRef, canvasRemountNonce, canvasWrapperRef, setCanvasDirty, setCanvasRemountNonce } = canvasState;
@@ -90,7 +49,6 @@ export function useFileCanvas({ canvasState, draft, fileAssets, fileDocument, fi
   const { handleCanvasUnsupported } = filePreviewModes;
   const { showCanvas } = filePreviewRendering;
   const { saveNow } = fileSaving;
-  const { isFullscreen } = fullscreen;
   const { selectedFile, selectedFileIsOutsideWorkspace, selectedFilePathRef } = tabs;
   const { canvasViewModeByPathRef, setCanvasViewMode } = viewModes;
 
@@ -109,10 +67,7 @@ export function useFileCanvas({ canvasState, draft, fileAssets, fileDocument, fi
     toast.error(message);
   }, []);
 
-  const canvasInFullscreen = mode === 'full' && isFullscreen;
-  const canvasKey = selectedFile
-    ? `${editorDocumentPath ?? selectedFile.path}:${canvasRemountNonce}:${canvasInFullscreen ? 'fullscreen' : 'docked'}`
-    : '';
+  const canvasKey = selectedFile ? `${editorDocumentPath ?? selectedFile.path}:${canvasRemountNonce}` : '';
   const canvasElement = showCanvas && selectedFile && guestFileEditor ? (
     <div ref={canvasWrapperRef} className="h-full overflow-hidden" style={{ minHeight: '400px' }}>
       <GuestFileEditor
@@ -141,6 +96,6 @@ export function useFileCanvas({ canvasState, draft, fileAssets, fileDocument, fi
   }, []);
 
   return {
-  canvasInFullscreen, canvasElement, openExcalidrawExtensionCard,
+  canvasElement, openExcalidrawExtensionCard,
   };
 }
