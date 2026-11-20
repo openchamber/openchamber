@@ -231,7 +231,7 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
           headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
           signal: AbortSignal.timeout(OPENCODE_INFO_TIMEOUT_MS),
         }),
-        fetchLatestOpenCodeVersion(),
+        fetchLatestOpenCodeVersion().catch(() => null),
       ]);
       const rawInfo: unknown = await healthResponse.json().catch(() => null);
       const info = routeInputFields(rawInfo);

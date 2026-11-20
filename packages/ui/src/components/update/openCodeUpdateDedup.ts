@@ -51,6 +51,10 @@ export const resolveOpenCodeUpgradeStatusVersion = (
   return status.latestVersion.trim();
 };
 
+export const isOpenCodeLatestVersionLookupFailed = (
+  status: OpenCodeUpgradeStatusLike | null | undefined,
+): boolean => status?.available === null && status.latestVersion === null;
+
 export const isOpenCodeUpgradeSupported = (
   status: OpenCodeUpgradeStatusLike | null | undefined,
 ): boolean => status?.upgrade?.supported === true;
