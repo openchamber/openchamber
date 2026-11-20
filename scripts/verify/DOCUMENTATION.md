@@ -8,6 +8,7 @@ Sections: *Ownership*, *Running it*, *The feature map*, *Steps*, *Invariants*, *
 
 - `zones/*.json` is the feature map: per zone, its source files, its features (each with its own source files where they are narrower than the zone's) (what, how to reach, what proves it) and their scenarios as steps.
 - `vocabulary.json` names every part of the UI a step points at (`composer.send`, `sidebar.row`, `diff.added`) with its selector and one line saying what it is. It is the shared name for each thing, and the one place a selector changes when the markup does.
+- `server-routes.mjs` and `requests.mjs` select and record by server route (see *Running only what a change touches*).
 - `stand.mjs` starts and resets the isolated instance, `browser.mjs` drives Chrome, `steps.mjs` runs steps, `changed.mjs` picks the scenarios a change touches, `run.mjs` is the command.
 - `processes.mjs` owns process identities and recovery records under this checkout's `tmp/verify/owners`. `process-guardian.mjs` waits for the runner's pipe to close and reaps that run if its owner died without cleanup.
 
@@ -60,11 +61,15 @@ start "" /b /wait /high bun run verify -- composer > C:\Users\openc\verify-compo
 | Anything else under `scripts/verify/`, or a file the runner loads from `scripts/` (the fixtures, the isolated server) | Every scenario |
 | A file a feature's `sources` list, or under a listed directory | That feature |
 | A file the sources of some features import, through their components and hooks, or a store or library (`packages/ui/src/{stores,sync,lib}`) that code imports | Those features; every scenario when more than half the features import it |
+| A server file (`packages/web/server/`) loaded by files that register routes or handle WebSocket upgrades | The features whose scenarios made requests to those routes, by `requests.json`, with the features that list or import the file |
+| A server file that loads most of those files (the server's wiring), one that serves only requests most features make or a socket most of them hold open, or a deleted one | Every scenario |
 | App code nothing above reaches | Nothing; listed as covered by no scenario |
 
 The output names the feature each file led to, and lists the changed app files no scenario covers: for those the net has nothing to say, and a green run proves nothing about them. A change that selects nothing exits without starting a stand. `--list` with `--changed` prints the selection and the map without running.
 
 The selection code is `changed.mjs`, tested without a stand in `changed.test.mjs`.
+
+`requests.json` holds, for each feature, the requests its scenarios made to the server, as `METHOD route`, and under `*` the requests more than half the features make (what every page reads when it loads). Every run writes the requests a scenario's page made into its `result.json`, and `node scripts/verify/requests.mjs <artifact folders>` turns the results of a full run (all its parts) into the file. A feature is recorded anew only when all its scenarios passed in those results; otherwise it keeps what it had and adds what was seen. A new route or a moved handler is picked up by the next recording; until then a server file serving only that route is printed as uncovered.
 
 ## The feature map
 
@@ -323,6 +328,16 @@ Session state and the config store are imported by the code of 50 to 63 features
 ### Why a map change runs what changed and not everything
 
 Writing scenarios edits a zone file and the vocabulary in nearly every commit. Running every scenario for that would make `--changed` a full run for all scenario work. A zone file selects its features whose scenarios differ from the base, the vocabulary the features whose steps use a changed name; the runner, the steps and the fixtures can break any scenario and select all of them.
+
+### Why server files are selected by recorded requests
+
+The UI reaches the server over HTTP, so the import walk never arrives at server code: with eight server files listed by hand, 690 of 769 server files selected nothing, the Git routes and the server's wiring among them, and the run was green without playing a scenario. A hand-kept list of server folders per zone would go stale with every new route. The page already shows which requests a scenario makes, and the server's code shows which file answers each path and what that file loads, so the link is recorded and derived: a path belongs to the most specific `/api` pattern a serving file names (or a constants file it imports), and a changed server file selects through every serving file that loads it. Type-only imports count here, since a route file is handed the modules it calls and names them by type. With the recording 145 files select nothing.
+
+The method is part of a recorded request because reading the settings is something every page does and writing them is what a few scenarios check; by path alone the settings routes selected either everything or nothing that saves a setting.
+
+A `settings` step saves through the runner, outside the page, so it records its own request (`PUT@step`): the page saves settings on every load, and without the mark the few features that check a saved setting would be lost among all of them.
+
+What this does not see: requests a scenario makes through the CLI (they reach the same session routes the page uses), requests the server passes on to OpenCode, and a module handed to a route file as a plain callback with no type import, such as the settings store given to the settings routes. A file like that is selected through whatever else loads it, and a feature that depends on it lists it in its `sources`. A route renamed or removed inside a file that stays selects by the file's remaining routes only; a deleted file selects everything. A file is given every path it names, also one it only lists (the realtime proxy's allowed targets), which can select more than it serves and never less.
 
 ### Why uncovered files are printed and not ignored
 

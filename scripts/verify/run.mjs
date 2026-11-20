@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import process from "node:process"
 
 import { startBrowser } from "./browser.mjs"
-import { createSelector, diffMap, keepingChangedFiles, listChangedFiles, readMapAt, workingTreeFiles } from "./changed.mjs"
+import { createSelector, diffMap, keepingChangedFiles, listChangedFiles, readMapAt, readRecordedRequests, workingTreeFiles } from "./changed.mjs"
 import { DEFAULT_MODEL, attachKeptStand, startStand } from "./stand.mjs"
 import { acquireSlot } from "./slots.mjs"
 import { ACTION_NAMES, StepFailure, runStep } from "./steps.mjs"
@@ -104,12 +104,12 @@ const select = (scenarios, selection) => {
 const selectChanged = ({ zones, vocabulary }, scenarios, base) => {
   const changed = listChangedFiles(REPO_ROOT, base)
   const mapChanges = diffMap(readMapAt(REPO_ROOT, changed.from), changed.to ? readMapAt(REPO_ROOT, changed.to) : { zones, vocabulary })
-  const explained = createSelector(zones, keepingChangedFiles(workingTreeFiles(REPO_ROOT), changed.files)).explain(changed.files, mapChanges)
+  const explained = createSelector(zones, keepingChangedFiles(workingTreeFiles(REPO_ROOT), changed.files), readRecordedRequests(REPO_ROOT)).explain(changed.files, mapChanges)
   const ids = new Set(explained.flatMap((entry) => entry.features))
   const chosen = scenarios.filter((scenario) => ids.has(`${scenario.zone.zone}.${scenario.feature.id}`))
   const of = (reason) => explained.filter((entry) => entry.reason === reason)
   console.log(`${changed.files.length} files changed against ${changed.label}`)
-  for (const entry of [...of("net"), ...of("shared"), ...of("scenarios"), ...of("vocabulary"), ...of("listed"), ...of("imported")]) {
+  for (const entry of [...of("net"), ...of("shared"), ...of("scenarios"), ...of("vocabulary"), ...of("server"), ...of("listed"), ...of("imported"), ...of("routes")]) {
     const why = {
       net: "the net's runner or fixtures: every scenario",
       scenarios: entry.features.length ? `changed scenarios of ${entry.features.join(", ")}` : "no scenario changed",
@@ -117,6 +117,8 @@ const selectChanged = ({ zones, vocabulary }, scenarios, base) => {
       shared: `imported by the sources of ${entry.importers} of ${entry.total} features, more than half: every scenario`,
       listed: `listed in the sources of ${entry.features.join(", ")}`,
       imported: `imported by the sources of ${entry.features.join(", ")}`,
+      server: "the server's own wiring: every scenario",
+      routes: `serves requests of ${entry.features.join(", ")} (through ${entry.routeFiles?.map((routeFile) => routeFile.replace("packages/web/server/", "")).join(", ")})`,
     }[entry.reason]
     console.log(`  ${entry.file}\n    ${why}`)
   }
@@ -178,7 +180,7 @@ export const runScenario = async ({ scenario, stand, browser, vocabulary, outDir
   const dir = join(outDir, round > 1 ? `round-${round}` : "", scenario.id)
   mkdirSync(dir, { recursive: true })
   const startedAt = Date.now()
-  const result = { id: scenario.id, title: scenario.title, ok: true, seconds: 0, failure: null, artifacts: [], sourceUpdates: [], pageErrors: [], dir: relative(REPO_ROOT, dir) }
+  const result = { id: scenario.id, title: scenario.title, ok: true, seconds: 0, failure: null, artifacts: [], sourceUpdates: [], pageErrors: [], requests: [], dir: relative(REPO_ROOT, dir) }
   try {
     const reset = await stand.reset()
     if (reset?.failure) throw new Error(reset.failure)
@@ -194,7 +196,7 @@ export const runScenario = async ({ scenario, stand, browser, vocabulary, outDir
   await page.client.send("Browser.grantPermissions", { permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"], origin: stand.uiUrl, browserContextId: page.browserContextId }).catch(() => undefined)
   const downloadDir = join(dir, "downloads")
   await page.allowDownloads(downloadDir)
-  const ctx = { page, stand, vocabulary, vars: { project: stand.project }, background: [], dir, downloadDir, shots: 0, artifacts: result.artifacts, defaultModel: DEFAULT_MODEL }
+  const ctx = { page, stand, vocabulary, vars: { project: stand.project }, background: [], requests: new Set(), dir, downloadDir, shots: 0, artifacts: result.artifacts, defaultModel: DEFAULT_MODEL }
   for (const [index, step] of scenario.steps.entries()) {
     try {
       await runStep(step, ctx)
@@ -215,6 +217,7 @@ export const runScenario = async ({ scenario, stand, browser, vocabulary, outDir
   await Promise.all(ctx.background.map((task) => task.done))
   result.pageErrors = [...new Set(page.consoleErrors)].slice(0, 5)
   result.sourceUpdates = [...new Set(page.sourceUpdates)]
+  result.requests = [...new Set([...(page.apiRequests ?? []), ...ctx.requests])].sort()
   if (result.ok && result.sourceUpdates.length) {
     result.ok = false
     result.failure = { step: null, do: "page", on: null, message: "the page reloaded or hot-updated during the scenario, so its result does not count; rerun it with the source unchanged" }

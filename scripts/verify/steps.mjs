@@ -256,6 +256,8 @@ const ACTIONS = {
       body: JSON.stringify(values),
     })
     if (!response.ok) fail(`saving settings answered ${response.status}`)
+    // The page did not make this request, so its recorder cannot see it.
+    ctx.requests?.add("PUT@step /api/config/settings")
   },
   async "server.stop"(step, ctx) {
     await ctx.stand.stopApi()
