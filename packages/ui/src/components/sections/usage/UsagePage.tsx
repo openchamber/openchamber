@@ -236,7 +236,7 @@ export const UsagePage: React.FC = () => {
         <SettingsSection settingsItem="usage.model-quotas">
           <div className="divide-y divide-[var(--surface-subtle)]">
             {Object.entries(usage.windows).map(([label, window]) => (
-              <UsageCard key={label} title={label} window={window} providerId={selectedProviderId} />
+              <UsageCard key={label} title={label} window={window} providerId={selectedProviderId} showGiftReset />
             ))}
           </div>
         </SettingsSection>
@@ -288,6 +288,7 @@ export const UsagePage: React.FC = () => {
                             title={label}
                             subtitle={getDisplayModelName(model.name)}
                             window={window}
+                            providerId={selectedProviderId}
                             showToggle
                             toggleEnabled={isShown}
                             toggleDisabled={isShown && visibleModelNames.size === 1}
@@ -341,6 +342,7 @@ export const UsagePage: React.FC = () => {
                             title={label}
                             subtitle={getDisplayModelName(model.name)}
                             window={window}
+                            providerId={selectedProviderId}
                             showToggle
                             toggleEnabled={isShown}
                             toggleDisabled={isShown && visibleModelNames.size === 1}

@@ -51,22 +51,35 @@ export const formatQuotaWindowValueLabel = (
     : translate('settings.usage.consoleBudgets.spentOf', { spent, limit: money.format(value.limit) });
 };
 
+const MINUTE_MS = 60_000;
+const WEEK_MS = 7 * 24 * 60 * MINUTE_MS;
+const roundToMinute = (timestamp: number): number => Math.round(timestamp / MINUTE_MS) * MINUTE_MS;
+
+const getQuotaResetDate = (resetAt: number, providerId: string | undefined, now: Date): Date => {
+  const date = new Date(resetAt);
+  if (providerId === 'claude' && Number.isFinite(date.getTime()) && resetAt > now.getTime()) {
+    date.setTime(roundToMinute(resetAt));
+  }
+  return date;
+};
+
 export const formatQuotaResetLabel = (
   resetAt: number | null,
   fallback?: string | null,
   timeFormatPreference: TimeFormatPreference = 'auto',
+  providerId?: string,
 ): string => {
   if (!resetAt) {
     return fallback ?? '';
   }
 
   try {
-    const resetDate = new Date(resetAt);
+    const now = new Date();
+    const resetDate = getQuotaResetDate(resetAt, providerId, now);
     if (!Number.isFinite(resetDate.getTime())) {
       return fallback ?? '';
     }
 
-    const now = new Date();
     const isToday = resetDate.toDateString() === now.toDateString();
 
     if (isToday) {
@@ -89,16 +102,18 @@ export const formatQuotaResetShort = (
   resetAt: number | null,
   fallback?: string | null,
   timeFormatPreference: TimeFormatPreference = 'auto',
-  now: Date = new Date(),
+  { providerId, now = new Date() }: { providerId?: string; now?: Date } = {},
 ): string => {
   if (!resetAt) return fallback ?? '';
-  const resetDate = new Date(resetAt);
+  const resetDate = getQuotaResetDate(resetAt, providerId, now);
   if (!Number.isFinite(resetDate.getTime())) return fallback ?? '';
   if (resetDate.toDateString() === now.toDateString()) {
     return formatTimeForPreference(resetDate, timeFormatPreference, { fallback: fallback ?? '' });
   }
-  const untilMs = resetDate.getTime() - now.getTime();
-  if (untilMs > 0 && untilMs < 7 * 24 * 60 * 60 * 1000) {
+  const displayTime = resetDate.getTime();
+  const cutoff = now.getTime() + WEEK_MS;
+  const withinWeek = providerId === 'claude' ? displayTime <= roundToMinute(cutoff) : displayTime < cutoff;
+  if (displayTime > now.getTime() && withinWeek) {
     return formatDateTimeForPreference(resetDate, timeFormatPreference, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
   }
   return formatDateTimeForPreference(resetDate, timeFormatPreference, { month: 'short', day: 'numeric' });

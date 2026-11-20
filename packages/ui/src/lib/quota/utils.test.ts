@@ -44,10 +44,27 @@ describe('short reset times and compact counts for a narrow row', () => {
   const at = (days: number, hour: number, minute = 0) => new Date(2026, 10, 12 + days, hour, minute).getTime();
 
   test('a reset today shows its time alone, within the week its weekday and time, beyond it the month and day', () => {
-    expect(formatQuotaResetShort(at(0, 17), null, '24h', now)).toBe('17:00');
-    expect(formatQuotaResetShort(at(1, 12, 9), null, '24h', now)).toBe('Fri 12:09');
-    expect(formatQuotaResetShort(at(19, 9), null, '24h', now)).toBe('Dec 1');
-    expect(formatQuotaResetShort(null, 'in 3h', '24h', now)).toBe('in 3h');
+    expect(formatQuotaResetShort(at(0, 17), null, '24h', { now })).toBe('17:00');
+    expect(formatQuotaResetShort(at(1, 12, 9), null, '24h', { now })).toBe('Fri 12:09');
+    expect(formatQuotaResetShort(at(19, 9), null, '24h', { now })).toBe('Dec 1');
+    expect(formatQuotaResetShort(null, 'in 3h', '24h', { now })).toBe('in 3h');
+  });
+
+  test('the Claude 7-day reset keeps its clock time across a minute boundary', () => {
+    const cutoff = at(7, 10);
+    const claude = { providerId: 'claude', now };
+    expect(formatQuotaResetShort(cutoff - 1000, null, '24h', claude)).toBe('Thu 10:00');
+    expect(formatQuotaResetShort(cutoff, null, '24h', claude)).toBe('Thu 10:00');
+    expect(formatQuotaResetShort(cutoff + 1000, null, '24h', claude)).toBe('Thu 10:00');
+    expect(formatQuotaResetShort(cutoff + 60_000, null, '24h', claude)).toBe('Nov 19');
+    expect(formatQuotaResetShort(cutoff, null, '24h', { providerId: 'codex', now })).toBe('Nov 19');
+    expect(formatQuotaResetShort(cutoff, null, '24h', { ...claude, now: new Date(now.getTime() - 1000) })).toBe('Thu 10:00');
+  });
+
+  test('an elapsed Claude reset is not rounded into an upcoming one', () => {
+    const lateNow = new Date(2026, 10, 12, 23, 59, 55);
+    const elapsed = new Date(2026, 10, 12, 23, 59, 45).getTime();
+    expect(formatQuotaResetShort(elapsed, null, '24h', { providerId: 'claude', now: lateNow })).toBe('23:59');
   });
 
   test('long numbers in a count compact as token counts do; short ones stay as written', () => {

@@ -257,7 +257,7 @@ const UsageBody: React.FC<{ data: unknown }> = ({ data }) => {
                     }
                     const { key, window } = tightest;
                     const percent = displayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
-                    const reset = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
+                    const reset = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference, provider.providerId);
                     const caption = [formatWindowLabel(key), reset ? t('settings.usage.card.resetsAt', { time: reset }) : undefined].filter(Boolean).join(' · ');
                     return (
                         <React.Fragment key={provider.providerId}>

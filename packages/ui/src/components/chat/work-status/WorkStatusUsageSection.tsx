@@ -116,8 +116,10 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
             const metricLabel = formatQuotaWindowValueLabel(row.window, displayPercent, t);
             const shownMetric = compactQuotaValueLabel(metricLabel);
             const resetFallback = row.window.resetAfterFormatted ?? row.window.resetAtFormatted;
-            const resetLabel = formatQuotaResetShort(row.window.resetAt, resetFallback, timeFormatPreference);
-            const resetFull = formatQuotaResetLabel(row.window.resetAt, resetFallback, timeFormatPreference);
+            const { providerId } = group;
+            const { resetAt } = row.window;
+            const resetLabel = formatQuotaResetShort(resetAt, resetFallback, timeFormatPreference, { providerId });
+            const resetFull = formatQuotaResetLabel(resetAt, resetFallback, timeFormatPreference, providerId);
             const rowLabel = row.subtitle ? `${row.subtitle} · ${row.label}` : row.label;
             const tooltipLines = [
               shownMetric !== metricLabel ? `${rowLabel}: ${metricLabel}` : null,
