@@ -179,6 +179,10 @@ describe('when to link', () => {
     expect(DISPATCH_GUIDANCE).toContain('tools.openchamber inside execute');
     expect(SESSION_LINK_GUIDANCE).toContain('tools.openchamber inside a Code Mode execute script');
     expect(WORK_NAME_GUIDANCE).toContain('tools.openchamber inside execute');
+    for (const guidance of [SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, DISPATCH_GUIDANCE, WORKFLOW_GUIDANCE]) {
+      expect(guidance).toContain('if execute is unavailable');
+      expect(guidance).toContain('openchamber directly');
+    }
     expect(DISPATCH_GUIDANCE).toContain('session.send');
     expect(DISPATCH_GUIDANCE).toContain('subagent tool');
   });

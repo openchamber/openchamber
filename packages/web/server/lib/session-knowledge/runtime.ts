@@ -67,19 +67,19 @@ const MEMORY_SAVE_GUIDANCE = 'The openchamber_memory tool keeps memory across se
   + ' mention the save there briefly: the app shows only the text after a turn\'s last'
   + ' tool call as the reply.';
 
-export const SESSION_LINK_GUIDANCE = "Link to this session with session.link (tools.openchamber inside a Code Mode execute script),"
+export const SESSION_LINK_GUIDANCE = "Link to this session with session.link (tools.openchamber inside a Code Mode execute script; if execute is unavailable, call openchamber directly),"
   + " as soon as you know it, each issue or pull or merge request the user gives you to"
   + " work on, fix, investigate or review, that you open for this work, or that the work"
   + " resolves. One merely mentioned in passing stays unlinked. The reply need not say you linked it.";
 
-export const WORK_NAME_GUIDANCE = "Name the task with work.name (tools.openchamber inside execute) as soon as it is clear what"
+export const WORK_NAME_GUIDANCE = "Name the task with work.name (tools.openchamber inside execute; if execute is unavailable, call openchamber directly) as soon as it is clear what"
   + " the task is: at most 4 words naming the task itself, such as \"Login timeout fix\" or \"Sidebar task rows\","
   + " never a step of it. Write it in the language of the user's latest message, even when you work in"
   + " English: \"Таймаут входу\" for a user who writes Ukrainian. A branch name stays in English. Rename it only when the work"
   + " becomes a different task; finishing a step, fixing something on the way or a follow-up within the"
   + " same task is no reason. A name the user gave stays.";
 
-export const DISPATCH_GUIDANCE = "To hand work to another session, call tools.openchamber inside execute:"
+export const DISPATCH_GUIDANCE = "To hand work to another session, call tools.openchamber inside execute; if execute is unavailable, call openchamber directly:"
   + " session.create starts a new session, session.send gives a task to an existing one (session.list finds it by title)."
   + " A session the user wants for themselves, to follow and talk to, is theirs: create it without ownWork. A session you start"
   + " to get part of the work done and collect its answer, also when the user told you to hand that work off, takes"
@@ -186,7 +186,7 @@ export const WORKFLOW_GUIDANCE = 'The openchamber_workflow tool runs a script th
   + ' or needs results cross-checked at that scale, say so and offer a workflow; never start one unasked.'
   + ' A single feature, a few steps or a short loop over files you can do yourself never gets one.'
   + ' Every agent runs on your own model unless the script names another, and dozens of agents on a top model cost many times what a cheap one does.'
-  + ' So when you propose a workflow, give each phase a model in the same message (look them up with models.list, tools.openchamber inside execute, when you have it):'
+  + ' So when you propose a workflow, give each phase a model in the same message (look them up with models.list when you have the openchamber tool: tools.openchamber inside execute, or call openchamber directly if execute is unavailable):'
   + ' a cheap one for reading and checking against a fixed list, a strong one where a phase weighs judgement or writes what lands.'
   + ' Start the run once the user agrees to the models.'
   + ' When the user lets runs start without approval in Settings, workflow.run starts the run at once instead of showing it for approval, so agree on the plan and the models in the chat first all the same.';
