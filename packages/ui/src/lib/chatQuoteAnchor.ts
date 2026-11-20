@@ -1,6 +1,6 @@
 
 import { z } from 'zod';
-import { unified, type Plugin } from 'unified';
+import { unified, type Pluggable, type Plugin } from 'unified';
 import remarkParse from 'remark-parse';
 import { defaultRemarkPlugins } from 'streamdown';
 import type { Root, RootContent } from 'mdast';
@@ -200,6 +200,12 @@ export function resolveChatQuoteAnchor(root: Element, anchor: ChatQuoteAnchor): 
 
 const gfmEntry = defaultRemarkPlugins.gfm as [Plugin<[{ singleTilde?: boolean }?], Root>, Record<string, unknown>];
 const legacyQuoteParser = unified().use(remarkParse).use(gfmEntry[0], { singleTilde: false });
+
+export const parseMarkdownStructure = (source: string, pluginsBefore: Pluggable[], pluginsAfter: Pluggable[]): Root => unified().use(remarkParse)
+    .use(pluginsBefore)
+    .use(gfmEntry[0], { singleTilde: false })
+    .use(pluginsAfter)
+    .parse(source);
 
 export function legacyChatQuoteAnchor(quote: string): ChatQuoteAnchor {
     const text = (node: Root | RootContent): string => {

@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { Window } from 'happy-dom';
 import { Streamdown } from 'streamdown';
 import { getMarkdownCjk, getMarkdownProcessingOptions, markdownMath, remarkLiteralText } from './streamdownPlugins';
+import { prepareMarkdownMath } from './markdownMathBlocks';
 import { prepareUserMarkdownContent } from '../message/parts/userTextPartContent';
 
 const dom = new Window();
@@ -21,7 +22,7 @@ function render(source: string, raw = false, vscode = false, singleTilde = false
       pre: ({ node: _node, ...props }) => <pre {...props} />,
       strong: ({ node: _node, ...props }) => <strong {...props} />,
     }}
-  >{source}</Streamdown>);
+  >{prepareMarkdownMath(source, false).content}</Streamdown>);
   const body = dom.document.createElement('div');
   body.innerHTML = html;
   return body;
@@ -199,6 +200,39 @@ describe('Streamdown math and CJK compatibility', () => {
       expect(render(source).querySelectorAll('.katex').length).toBeGreaterThan(0);
     }
     expect(render('text \\[x\\]').querySelector('.katex')).toBeNull();
+  });
+
+  test('keeps a bracket display formula with blank lines together', () => {
+    const result = render('Before\n\n\\[\n\\boxed{x+\n\ny}\n\\]\n\nAfter');
+    expect(result.querySelectorAll('.katex-display')).toHaveLength(1);
+    expect(result.querySelector('annotation')?.textContent).toContain('\\boxed{x+\n\ny}');
+    expect(result.textContent).toContain('Before');
+    expect(result.textContent).toContain('After');
+  });
+
+  test('keeps multiline inline formulas and escaped bracket prose readable', () => {
+    expect(render('Before \\(x+\ny\\) after').querySelector('.katex')).not.toBeNull();
+    expect(render('\\[plain\\] text').textContent).toBe('[plain] text');
+    expect(render('\\[\\]').querySelector('.katex')).toBeNull();
+    expect(render('unfinished \\[x\nnext').querySelector('.katex')).toBeNull();
+  });
+
+  test('keeps links and lists when bracket prose does not close a display formula', () => {
+    const empty = render('\\[\\]\n\n[link](https://example.test)\n\n\\]');
+    expect(empty.querySelector('.katex')).toBeNull();
+    expect(empty.querySelector('a')?.getAttribute('href')).toBe('https://example.test');
+    const multilineLink = render('[See\n\\[options\\] guide](https://example.test)');
+    expect(multilineLink.querySelector('a')?.textContent).toBe('See\n[options] guide');
+    const list = render('- item\n\\[note\\] text');
+    expect(list.querySelector('li')?.textContent).toContain('[note] text');
+  });
+
+  test('does not close a formula at an escaped backslash before a bracket', () => {
+    const source = '\\[\n\\begin{matrix}\nx \\\\]\n\ny\n\\end{matrix}\n\\]';
+    const result = render(source);
+    expect(result.querySelectorAll('.katex-display')).toHaveLength(1);
+    expect(result.querySelector('.katex-error')).toBeNull();
+    expect(result.querySelector('annotation')?.textContent).toContain('x \\\\]');
   });
 
   test('keeps LaTeX emphasis characters inside dollar math (#5303)', () => {
