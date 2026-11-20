@@ -1203,8 +1203,8 @@ export function createNetworkOperations({
     return { authority, auxiliaryPlan, context, foundAfterPlanning };
   };
 
-  const auxiliaryTransfer = async (transfer: Awaited<ReturnType<typeof auxiliaryTransport>>, hydrationPlan: HydrationPlan, controls: ExecutionControls, args: string[], context: TransportContext, deadline: number) => {
-    const execute = () => commandResult(transfer.auxiliaryPlan, controls, args, context, deadline, { transfer: true });
+  const auxiliaryTransfer = async (transfer: Awaited<ReturnType<typeof auxiliaryTransport>>, hydrationPlan: HydrationPlan, controls: ExecutionControls, args: string[], context: TransportContext, deadline: number, options: { cwd?: string } = {}) => {
+    const execute = () => commandResult(transfer.auxiliaryPlan, controls, args, context, deadline, { transfer: true, ...options });
     if (!auditStore || !transfer.foundAfterPlanning) return execute();
     const { authority, auxiliaryPlan } = transfer;
     const endpointFingerprint = fingerprintRemoteUrl(auxiliaryPlan.rawEndpoint);
@@ -1530,10 +1530,18 @@ export function createNetworkOperations({
                   childIdentity = directoryIdentity(await fsImpl.lstat(childDirectory), childBirthtimeHolds);
                 });
               }
+              const childContext = { ...transfer.context, env: { ...transfer.context.env, GIT_LFS_SKIP_SMUDGE: '1' } };
               await auxiliaryTransfer(transfer, hydrationPlan, controls, [
                 'clone', '--no-checkout', '--no-tags', '--', endpoint.endpoint, childDirectory,
-              ], { ...transfer.context, env: { ...transfer.context.env, GIT_LFS_SKIP_SMUDGE: '1' } }, deadline);
+              ], childContext, deadline);
               await controls.markStepCompleted('transferred');
+              const gitlinkObject = await localGit(childDirectory, ['cat-file', '--batch-check'], controls, deadline,
+                { input: Buffer.from(`${module.gitlink}\n`) });
+              if (gitlinkObject === `${module.gitlink} missing\n`) {
+                await auxiliaryTransfer(transfer, hydrationPlan, controls, [
+                  'fetch', '--no-tags', '--', endpoint.endpoint, module.gitlink,
+                ], childContext, deadline, { cwd: childDirectory });
+              }
               await localGit(childDirectory, ['checkout', '--force', '--detach', module.gitlink], controls, deadline, { disableLfsFilters: true });
               childHead = (await localGit(childDirectory, ['rev-parse', '--verify', 'HEAD'], controls, deadline)).trim().toLowerCase();
               if (childHead !== module.gitlink) {
