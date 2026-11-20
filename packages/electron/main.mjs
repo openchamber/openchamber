@@ -1,4 +1,5 @@
 import { canReuseManagedOpenCodePreflight } from './opencode-readiness.mjs';
+import { createWindowGeometryState } from './window-geometry-state.mjs';
 import { OPEN_IN_APP_SPAWN_TIMEOUT_MS, WHERE_SPAWN_TIMEOUT_MS, WINDOWS_TERMINAL_PACKAGE_SPAWN_TIMEOUT_MS } from './spawn-sync-timeouts.mjs';
 import { compareSemver } from './semver-compare.mjs';
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
@@ -315,8 +316,6 @@ const state = {
   quakeNormalBounds: null,
   quakeNormalMaximized: false,
   focusedWindowIds: new Set(),
-  windowGeometryRevisions: new Map(),
-  windowGeometryTimers: new Map(),
   miniChatWindowsBySession: new Map(),
   sshStatuses: new Map(),
   sshLogs: new Map(),
@@ -920,33 +919,9 @@ const writeWindowState = async (browserWindow) => {
   });
 };
 
+const windowGeometryState = createWindowGeometryState({ persist: writeWindowState });
 const debounceWindowStatePersist = (browserWindow, immediate = false) => {
-  if (!browserWindow || browserWindow.isDestroyed()) return;
-  const key = String(browserWindow.id);
-  const revision = (state.windowGeometryRevisions.get(key) || 0) + 1;
-  state.windowGeometryRevisions.set(key, revision);
-
-  const existingTimer = state.windowGeometryTimers.get(key);
-  if (existingTimer) {
-    clearTimeout(existingTimer);
-    state.windowGeometryTimers.delete(key);
-  }
-
-  const persist = async () => {
-    if (state.windowGeometryRevisions.get(key) !== revision) return;
-    state.windowGeometryTimers.delete(key);
-    await writeWindowState(browserWindow);
-  };
-
-  if (immediate) {
-    void persist();
-    return;
-  }
-
-  const timer = setTimeout(() => {
-    void persist();
-  }, 300);
-  state.windowGeometryTimers.set(key, timer);
+  windowGeometryState.schedule(browserWindow, immediate);
 };
 
 const buildHealthUrl = (url) => {
@@ -2744,6 +2719,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
     debounceWindowStatePersist(browserWindow, true);
   });
   browserWindow.on('closed', () => {
+    windowGeometryState.cancel(browserWindow);
     state.focusedWindowIds.delete(browserWindow.id);
     if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
       state.mainWindow = null;
