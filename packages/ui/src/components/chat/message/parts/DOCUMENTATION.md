@@ -65,6 +65,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 - `ReasoningPart.tsx`
   - Thinking block UI (`ReasoningTimelineBlock`), summary + optional duration.
+  - Live reasoning displays throttled partial paragraphs, so an expanded trace does not stay empty until a paragraph finishes. The 100 ms throttle limits updates; assistant answer text retains its block-level reveal.
   - Presentation titles accept inline content. `TimelineNotice` uses this for completed compactions, appending the recorded `providerID/id` in the description color (also on empty-summary rows). Attribution comes from the stored compaction message or `session.compaction.ended`, never the current session selection. Running, failed, and older model-less compactions have no attribution. Custom presentation headers can shrink and wrap long identifiers; ordinary thinking rows retain their existing layout.
 
 - `components/LiveTurnActivity.tsx` (relative to the chat folder)
