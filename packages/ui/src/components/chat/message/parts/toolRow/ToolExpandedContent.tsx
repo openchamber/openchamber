@@ -39,7 +39,7 @@ import { TOOL_COLLAPSED_CUSTOM_STYLE, CODE_TAG_PROPS, TOOL_ERROR_TITLE_STYLE } f
 import { getRelativePath } from './toolPaths';
 import { buildWritePreviewPatch } from './toolChangeSummary';
 import { getToolDiagnosticSection } from './toolDiagnostics';
-import { parseQuestionOutput } from './questionOutput';
+import { questionAnswersForCall } from './questionOutput';
 import { ToolScrollableSection } from './ToolScrollableSection';
 import { CommandOutput } from './CommandOutput';
 import { ToolScrollableTextOutput } from './ToolScrollableTextOutput';
@@ -268,7 +268,7 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
 
         if (isQuestionTool(part.tool)) {
             if (state.status === 'completed' && hasStringOutput) {
-                const parsedQA = parseQuestionOutput(outputString);
+                const parsedQA = questionAnswersForCall(metadata, input, outputString, t('chat.htmlRender.unanswered'));
                 if (parsedQA && parsedQA.length > 0) {
                     return renderScrollableBlock(
                         <div className="space-y-2">
