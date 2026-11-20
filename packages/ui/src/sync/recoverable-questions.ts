@@ -101,11 +101,15 @@ function forgetReleasedForm(sessionID: string, formID: string): void {
   })
 }
 
+const QUESTION_DISMISSED_ERROR = "The user dismissed this question"
+
 export function classifyQuestionToolError(error: string, errorType: string | undefined, local: boolean): QuestionAskOutcome {
   if (local) return error === "Interrupted" ? "turn-death" : "unresolved"
   if (error === DEFERRED_QUESTION_NOTE) return "deferred"
-  if (errorType !== undefined && errorType !== "aborted") return "dismissed"
-  if (error === "Tool execution interrupted") return "turn-death"
+  if (errorType === "unknown" && error === QUESTION_DISMISSED_ERROR) return "dismissed"
+  if (errorType !== undefined && errorType !== "aborted" && errorType !== "unknown") return "dismissed"
+  if (error.startsWith("Tool execution interrupted")) return "turn-death"
+  if (error === "All fibers interrupted without error") return "turn-death"
   if (error === "Interaction cancelled because the location shut down") return "shutdown"
   return "unresolved"
 }
