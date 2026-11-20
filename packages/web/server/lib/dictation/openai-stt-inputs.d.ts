@@ -3,7 +3,7 @@ declare module 'openai' {
   import type { APIPromise } from 'openai/core/api-promise';
   import type { Transcription, TranscriptionCreateParamsNonStreaming } from 'openai/resources/audio/transcriptions';
 
-  export type SpeechClientOptions = Pick<ClientOptions, 'baseURL' | 'fetch'> & { apiKey: unknown };
+  export type SpeechClientOptions = Pick<ClientOptions, 'baseURL' | 'fetch' | 'fetchOptions'> & { apiKey: unknown };
   export type SpeechTranscriptionParams = Omit<TranscriptionCreateParamsNonStreaming<'json'>, 'model' | 'language'> & {
     model: unknown;
     language?: unknown;

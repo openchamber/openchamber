@@ -109,6 +109,9 @@ export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayT
   });
 
   app.post('/api/tts/speak', async (req, res) => {
+    if (!req.is('application/json')) {
+      return res.status(415).json({ error: 'Send the speech request as JSON' });
+    }
     try {
       const { text, voice = 'nova', model = 'gpt-4o-mini-tts', speed = 0.9, instructions, apiKey, baseURL, endpointPath } = speakBodySchema.parse(bodyOf(req.body));
 
@@ -228,6 +231,9 @@ export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayT
   });
 
   app.post('/api/tts/say/speak', async (req, res) => {
+    if (!req.is('application/json')) {
+      return res.status(415).json({ error: 'Send the speech request as JSON' });
+    }
     try {
       const { text, rate = 200, language, languageSample, voice: requestedVoice } = sayBodySchema.parse(bodyOf(req.body));
       let voice = requestedVoice?.trim() ? requestedVoice.trim() : 'Samantha';
@@ -264,7 +270,7 @@ export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayT
 
       console.log('[TTS-Say] Generating speech:', { textLength: text.length, voice, rate });
 
-      await execFileAsync('say', ['-v', voice, '-r', String(rate), '-o', tempFile, '--data-format=aac', text.trim()]);
+      await execFileAsync('say', ['-v', voice, '-r', String(rate), '-o', tempFile, '--data-format=aac', '--', text.trim()]);
 
       const audioBuffer = await fs.promises.readFile(tempFile);
 

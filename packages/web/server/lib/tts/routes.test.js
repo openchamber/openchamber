@@ -9,6 +9,7 @@ import path from 'node:path';
 
 import { registerTtsRoutes, speechVoiceHeaderValue } from './routes.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
+import { updateVoiceKeys } from './voice-keys.js';
 
 const createApp = (sayTTSCapability = null) => {
   const app = express();
@@ -61,6 +62,42 @@ describe('tts routes', () => {
       expect(response.headers['x-speech-language']).toBe('uk');
     } else {
       expect(response.status).toBe(503);
+    }
+  });
+
+  it('refuses a say form post, which another site can send without asking', async () => {
+    const app = express();
+    app.use(express.urlencoded({ extended: true }));
+    registerTtsRoutes(app, { sayTTSCapability: null });
+
+    const response = await request(app)
+      .post('/api/tts/say/speak')
+      .set('Origin', 'https://elsewhere.example')
+      .type('form')
+      .send({ text: 'Hello', voice: 'Samantha' });
+
+    expect(response.status).toBe(415);
+  });
+
+  it.skipIf(process.platform !== 'darwin')('hands voice, rate and text to say as plain values, never to a shell', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-say-'));
+    try {
+      const app = createApp(Promise.resolve({ available: true, voices: [] }));
+      const viaVoice = path.join(dir, 'voice');
+      const viaRate = path.join(dir, 'rate');
+      const viaText = path.join(dir, 'text.m4a');
+
+      await request(app).post('/api/tts/say/speak').send({ text: 'Hello', voice: `$(touch ${viaVoice})` });
+      await request(app).post('/api/tts/say/speak').send({ text: 'Hello', voice: 'Samantha', rate: `200 $(touch ${viaRate})` });
+      const spoken = await request(app).post('/api/tts/say/speak').send({ text: `-o${viaText}`, voice: 'Samantha' });
+
+      expect(fs.existsSync(viaVoice)).toBe(false);
+      expect(fs.existsSync(viaRate)).toBe(false);
+      expect(fs.existsSync(viaText)).toBe(false);
+      expect(spoken.status).toBe(200);
+      expect(spoken.headers['content-type']).toBe('audio/mp4');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
@@ -231,6 +268,93 @@ describe('tts routes', () => {
       upstream.close();
       upstream.closeAllConnections();
     }
+  });
+
+  describe('with the stored custom server key', () => {
+    const upstreams = [];
+
+    const startUpstream = async (handler) => {
+      const seen = [];
+      const server = createServer((upstreamRequest, upstreamResponse) => {
+        seen.push({ url: upstreamRequest.url, authorization: upstreamRequest.headers.authorization });
+        handler(upstreamRequest, upstreamResponse);
+      });
+      server.listen(0, '127.0.0.1');
+      await once(server, 'listening');
+      upstreams.push(server);
+      const origin = `http://127.0.0.1:${server.address().port}`;
+      return { seen, origin, baseURL: `${origin}/v1` };
+    };
+
+    const redirectTo = (location) => (_request, response) => {
+      response.writeHead(307, { Location: location });
+      response.end();
+    };
+
+    afterEach(() => {
+      for (const server of upstreams.splice(0)) {
+        server.close();
+        server.closeAllConnections();
+      }
+      updateVoiceKeys({ openaiCompatible: null, stt: null });
+    });
+
+    it('refuses a speech form post, which another site can send without asking', async () => {
+      const upstream = await startUpstream((_request, response) => {
+        response.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+        response.end(Buffer.from('audio'));
+      });
+      updateVoiceKeys({ openaiCompatible: 'sk-compat' });
+      const app = express();
+      app.use(express.json());
+      app.use(express.urlencoded({ extended: true }));
+      registerTtsRoutes(app, { sayTTSCapability: null });
+
+      const response = await request(app)
+        .post('/api/tts/speak')
+        .set('Origin', 'https://elsewhere.example')
+        .type('form')
+        .send({ text: 'Hello', baseURL: upstream.baseURL });
+
+      expect(response.status).toBe(415);
+      expect(upstream.seen).toHaveLength(0);
+    });
+
+    it('never follows a redirect from the speech server, so the text reaches only the approved host', async () => {
+      const target = await startUpstream((_request, response) => {
+        response.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+        response.end(Buffer.from('audio'));
+      });
+      const upstream = await startUpstream(redirectTo(`${target.origin}/v1/audio/speech`));
+      updateVoiceKeys({ openaiCompatible: 'sk-compat' });
+
+      const response = await request(createApp())
+        .post('/api/tts/speak')
+        .send({ text: 'Hello', baseURL: upstream.baseURL });
+
+      expect(response.status).toBe(500);
+      expect(upstream.seen).toEqual([{ url: '/v1/audio/speech', authorization: 'Bearer sk-compat' }]);
+      expect(target.seen).toHaveLength(0);
+    });
+
+    it('never follows a redirect from the transcription server, so the audio reaches only the approved host', async () => {
+      const target = await startUpstream((_request, response) => {
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ text: 'stolen' }));
+      });
+      const upstream = await startUpstream(redirectTo(`${target.origin}/v1/audio/transcriptions`));
+      updateVoiceKeys({ stt: 'sk-stt' });
+
+      const response = await request(createApp())
+        .post('/api/stt/transcribe')
+        .set('Content-Type', 'audio/wav')
+        .set('X-Base-URL', upstream.baseURL)
+        .send(Buffer.from('audio'));
+
+      expect(response.status).toBe(500);
+      expect(upstream.seen).toEqual([{ url: '/v1/audio/transcriptions', authorization: 'Bearer sk-stt' }]);
+      expect(target.seen).toHaveLength(0);
+    });
   });
 });
 
