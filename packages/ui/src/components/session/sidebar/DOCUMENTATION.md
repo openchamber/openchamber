@@ -1776,3 +1776,29 @@ anchored like a session doing so. A hidden list (the phone's while projects
 are reordered) keeps nothing. The sidebar never scrolled to a session the
 user opened or created, and still does not; the phone's drawer brings its
 row into view after the anchor (`scrollRequest`).
+
+### Why rows read the live record and the structure rebuilds on a structural key
+
+Every change to a session record replaced the global list, and the sidebar
+rebuilt its whole structure from about 4,000 sessions for it: several times at
+each turn's start and end, while the rows that changed were one to three. The
+structure now keeps its input list while every record in it has the same
+structural key (`list/sidebarStructureKey.ts`): the record minus the fields
+only a row shows (tokens, cost, outcome, model, agent, `time.idle` and the
+`openchamber.turn` metadata), plus the facts the structure derives from them
+(a done or review suggestion, which `time.idle` decides). `time.updated`
+counts only while the sidebar reads it: projects sorted by recent activity, a
+custom section filtered by activity, a search. A row reads its session's
+current record from the global store by id (`sessions/useLiveSessionNode.ts`),
+so what it shows follows the record even when the structure kept an older one.
+The live marks of a row (running, unread, the turn's length) already come from
+stores of their own. A new field read by the structure belongs in the key, and
+the key test (`sidebarStructureKey.test.ts`) names the fields left out.
+Rejected: patching one row inside the built structure, which every derived
+index (ownership, grouping, sections, row model) would have to support.
+Measured at 4x CPU throttle with 4,000 sessions and four sessions in a turn:
+structure builds per turn went from 5 to 7 down to 2 and the sidebar's time
+from about 420 to 285 ms; time in tasks over 50 ms fell by 37 percent. What
+still rebuilds the derived indexes at a turn's start and end is the ordering
+store: a session going active and settling again publishes new ranks, and
+group order reads those ranks too.

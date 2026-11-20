@@ -1,4 +1,5 @@
 import React from 'react';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -37,9 +38,9 @@ export function useSessionMarkdownExport(): {
       try {
         const childRecords = await loadExportRecords({ directory, sessionID: child.session.id });
         if (!childRecords) throw new Error('Session runtime changed during export');
-        const childTitle = child.session.title || t('sessions.sidebar.session.export.untitledSubagent');
-        // SAFETY: OpenCode session payloads may carry the optional agent label used by exports.
-        const childAgent = (child.session as Session & { agent?: string }).agent;
+        const childSession = useGlobalSessionsStore.getState().entityById.get(child.session.id) ?? child.session;
+        const childTitle = childSession.title || t('sessions.sidebar.session.export.untitledSubagent');
+        const childAgent = childSession.agent;
         const grandChildren = await collectChildExports(directory, child.children);
         skipped += grandChildren.skipped;
         results.push({

@@ -45,6 +45,7 @@ import { useSessionRowMenus } from './useSessionRowMenus';
 import { useSessionRowPlace } from './useSessionRowPlace';
 import { useSessionRowRename } from './useSessionRowRename';
 import { useSessionRowWork } from './useSessionRowWork';
+import { useLiveSessionNode } from './useLiveSessionNode';
 
 export type { SessionNodeItemProps } from './sessionNodeItemProps';
 
@@ -52,7 +53,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   streamPerfCount('ui.sidebar_session_node.render');
   const { t } = useI18n();
   const {
-    node,
+    node: structuralNode,
     depth = 0,
     ownsWork,
     groupDirectory,
@@ -93,6 +94,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   } = props;
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const rowTooltip = useScrollDismissedTooltip();
+  const node = useLiveSessionNode(structuralNode);
   const session = node.session;
   const { isOneLineTimelineRow, isTwoLineRow, isTimelineRow, isZoneRow } = resolveSessionRowLines(renderContext, detailed);
   const hidePinnedMarker = rowKey !== undefined && isPinnedZoneRowKey(rowKey);
