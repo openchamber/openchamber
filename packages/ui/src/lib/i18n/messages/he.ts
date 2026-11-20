@@ -2111,6 +2111,7 @@ export const dict = {
   'chat.goal.toast.actionFailed': 'עדכון היעד נכשל',
   'chat.goal.toast.distillFallback': 'המטרה חרגה מהמגבלה ולא ניתן היה לתמצת אותה — המבקר משתמש בגרסה מקוצרת',
   'chat.goal.row.aria': 'יעד ההפעלה — פתיחת פרטים',
+  'chat.goal.row.pausedHint': 'מושהה גם בזמן הצ׳אט',
   'chat.goal.button.createAria': 'הגדר יעד להפעלה',
   'chat.goal.button.manageAria': 'נהל את יעד ההפעלה',
   'chat.goal.button.armAria': 'התחל יעד עם ההודעה הבאה',

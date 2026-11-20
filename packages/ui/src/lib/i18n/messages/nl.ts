@@ -2211,6 +2211,7 @@ export const dict = {
   'chat.goal.toast.actionFailed': 'Kan de goal niet bijwerken',
   "chat.goal.toast.distillFallback": "De doelstelling overschreed de limiet en kon niet worden ingekort — voor de auditor wordt een ingekorte versie gebruikt",
   'chat.goal.row.aria': 'Goal voor sessie — details openen',
+  'chat.goal.row.pausedHint': 'Pauze tijdens chat',
   'chat.goal.button.createAria': 'Een goal voor de sessie instellen',
   'chat.goal.button.manageAria': 'Goal voor de sessie beheren',
   'chat.goal.button.armAria': 'Een goal starten met het volgende bericht',

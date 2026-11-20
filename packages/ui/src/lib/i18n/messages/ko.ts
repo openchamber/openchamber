@@ -2211,6 +2211,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.toast.actionFailed': '목표 업데이트에 실패했습니다',
   'chat.goal.toast.distillFallback': '목표가 제한을 초과했고 요약도 실패했습니다 — 감사에는 발췌본을 사용합니다',
   'chat.goal.row.aria': '세션 목표 — 세부 정보 열기',
+  'chat.goal.row.pausedHint': '채팅 중에도 일시 중지됨',
   'chat.goal.button.createAria': '세션 목표 설정',
   'chat.goal.button.manageAria': '세션 목표 관리',
   'chat.goal.button.armAria': '다음 메시지로 목표 시작',

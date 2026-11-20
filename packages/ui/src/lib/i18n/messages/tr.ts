@@ -2079,6 +2079,7 @@ export const dict = {
   'chat.goal.action.start': 'Hedefi başlat',
   'chat.goal.toast.actionFailed': 'Hedef güncellenemedi',
   'chat.goal.row.aria': 'Session hedefi — ayrıntıları aç',
+  'chat.goal.row.pausedHint': 'Sohbette askıda',
   'chat.goal.button.createAria': 'Bir session hedefi belirle',
   'chat.goal.button.manageAria': 'Session hedefini yönet',
   'chat.goal.button.armAria': 'Sonraki mesajla birlikte bir hedef başlat',

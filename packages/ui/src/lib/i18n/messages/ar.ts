@@ -2112,6 +2112,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.toast.actionFailed': 'تعذّر تحديث الهدف',
   'chat.goal.toast.distillFallback': 'تجاوزت الغاية الحد ولم يمكن تلخيصها — تُستخدم نسخة مقتطعة للمدقق',
   'chat.goal.row.aria': 'هدف الجلسة — فتح التفاصيل',
+  'chat.goal.row.pausedHint': 'متوقف أثناء الدردشة',
   'chat.goal.button.createAria': 'تعيين هدف للجلسة',
   'chat.goal.button.manageAria': 'إدارة هدف الجلسة',
   'chat.goal.button.armAria': 'بدء هدف مع الرسالة التالية',
