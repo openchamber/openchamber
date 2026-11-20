@@ -147,8 +147,8 @@ tool, so it never linked anything. It goes into `openchamber.guidance`.
 
 The same sessions are told how to hand work to another session
 (`DISPATCH_GUIDANCE`). Every guidance line that names an action of the
-`openchamber` tool writes the call path out as `tools.openchamber` inside
-`execute`. Told only "the openchamber tool", an agent looked for a direct tool
+`openchamber` tool names `tools.openchamber` inside `execute`, and the direct
+`openchamber` tool when `execute` is unavailable. Told only "the openchamber tool", an agent looked for a direct tool
 of that name, found `openchamber_secret` and `openchamber_render`, and called
 those again and again (#6608). The guidance also sends part of the
 agent's own task to its subagent tool, so a dispatch stays something the user
@@ -263,7 +263,8 @@ most expensive one, and dozens of those cost many times a cheap model.
 
 The tools whose call the chat draws (`openchamber_render`,
 `openchamber_secret`, `openchamber_workflow`) are direct tools; the rest sit
-behind Code Mode (`../agent-tool/DOCUMENTATION.md`). A session that has any of
+behind Code Mode when `execute` is available and are direct tools otherwise
+(`../agent-tool/DOCUMENTATION.md`). A session that has any of
 the direct ones is told, by name, that they are called directly and never from
 inside a Code Mode `execute` script (`directToolsGuidance`). OpenCode's Code
 Mode teaches the model that tools live in `execute`'s catalog: a model that
