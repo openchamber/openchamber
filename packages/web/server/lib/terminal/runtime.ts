@@ -419,7 +419,7 @@ export function createTerminalRuntime({
     const hostEnv = { ...process.env, PATH: buildAugmentedPath() };
     const inheritedEnv = environmentRuntime ? await environmentRuntime.applyToDirectory(cwd, hostEnv, { refresh: true }) : hostEnv;
     let lastError = null;
-    for (const executable of resolvedShell.executables) {
+    for await (const executable of resolvedShell.executables) {
       try {
         const env: NodeJS.ProcessEnv = { ...inheritedEnv, TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: themeMode === 'light' ? '0;15' : '15;0' };
         delete env.NODE_CHANNEL_FD;
