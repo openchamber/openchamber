@@ -88,10 +88,13 @@ export const buildTerminalShellLaunch = (executable: string, { mode = 'interacti
   return { executable, args: [...loginArgs, '-i', '-c', trimmedCommand] };
 };
 
+const WINDOWS_APPS_DIRECTORY = /[\\/]WindowsApps[\\/][^\\/]+$/i;
+
 export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecutable, probePowerShell = (file) => new Promise((resolve) => {
   execFile(file, ['-NoProfile', '-Command', 'exit 0'], { timeout: 3000, windowsHide: true }, (error) => resolve(!error));
 }), buildAugmentedPath = () => env.PATH || '', platform = process.platform, env = process.env }: TerminalShellResolverOptions) => {
   const isPowerShellAlias = async (file: string) => {
+    if (!WINDOWS_APPS_DIRECTORY.test(file)) return false;
     try {
       (fs.statSync ?? statSync)(file);
       return false;
@@ -116,7 +119,7 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
         const alias = path.join(directory, 'pwsh.exe');
         if (await probeAlias(alias)) return alias;
       }
-      return null;
+      return isExecutable(value) ? value : null;
     }
     const found = value.includes('/') || value.includes('\\') ? value : searchPathFor(value, buildAugmentedPath());
     if (found && isExecutable(found)) return found;

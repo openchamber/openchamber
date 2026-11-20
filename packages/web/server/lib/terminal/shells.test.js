@@ -70,6 +70,39 @@ describe('terminal shell resolver', () => {
     await expect(resolver.resolve('pwsh')).resolves.toEqual({ id: 'pwsh', executables: [alias] });
   });
 
+  it('launches a probe only for a Windows Store alias, never for another unreadable pwsh', async () => {
+    let probes = 0;
+    const resolver = createTerminalShellResolver({
+      platform: 'win32', env: {},
+      path: { delimiter: ';', join: (...parts) => parts.join('\\') },
+      fs: { statSync: () => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); } },
+      buildAugmentedPath: () => 'C:\\Tools',
+      searchPathFor: (name, directory) => `${directory}\\${name}.exe`,
+      isExecutable: () => false,
+      probePowerShell: async () => { probes++; return true; },
+    });
+
+    await expect(resolver.resolve('pwsh')).rejects.toThrow('not available');
+    expect(probes).toBe(0);
+  });
+
+  it('keeps a bare pwsh that is executable as given when PATH has no match', async () => {
+    const resolver = createTerminalShellResolver({
+      platform: 'win32', env: { OPENCHAMBER_TERMINAL_SHELL: 'pwsh' },
+      path: { delimiter: ';', join: (...parts) => parts.join('\\') },
+      fs: { statSync: () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); } },
+      buildAugmentedPath: () => 'C:\\Tools',
+      searchPathFor: () => null,
+      isExecutable: (candidate) => candidate === 'pwsh',
+      probePowerShell: async () => false,
+    });
+
+    const auto = await resolver.resolve('auto');
+    const first = [];
+    for await (const executable of auto.executables) { first.push(executable); break; }
+    expect(first).toEqual(['pwsh']);
+  });
+
   it('respects PATH order and ignores aliases that fail their launch probe', async () => {
     const alias = 'C:\\WindowsApps\\pwsh.exe';
     const installed = 'C:\\Tools\\pwsh.exe';
