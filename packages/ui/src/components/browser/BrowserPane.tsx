@@ -63,7 +63,8 @@ import { useAnnotationVoice } from './useAnnotationVoice';
 import type { AnnotationOverlayMessage } from '@/lib/browser/annotationOverlay';
 import { readEventPayload, useWebviewNavigation } from './useWebviewNavigation';
 import { useSteadyStage } from './useSteadyStage';
-import { deepActiveElement, isStageShown, useWebviewFocusGuard, type HoldPageFocus } from './useWebviewFocusGuard';
+import { isStageShown, useWebviewFocusGuard, type HoldPageFocus } from './useWebviewFocusGuard';
+import { usePageDrawn } from './usePageDrawn';
 
 export type BrowserPaneProps = {
   initialUrl: string;
@@ -108,11 +109,11 @@ const PAGE_QUIET_MS = 500;
 const OPEN_QUIET_MAX_MS = 5_000;
 const OPEN_SETTLE_BUDGET_MS = 30_000;
 const CAPTURE_QUIET_MAX_MS = 3_000;
-const INPUT_TIMEOUT_MS = 12_000;
 const CAPTURE_FRAME_WAIT_MAX_MS = 1_000;
 const CAPTURE_FRAME_TIMER_LATE_MS = 250;
 const quietResultSchema = z.object({ quiet: z.boolean() });
 const answeredDialogsSchema = z.array(z.object({ answer: z.string() }).catchall(z.json()));
+let keyboardTurn: Promise<void> = Promise.resolve();
 const jsonObjectSchema = z.record(z.string(), z.json());
 const annotateReplySchema = z.object({ value: z.json().nullable() });
 const annotationMessageReplySchema = z.object({ ended: z.boolean().optional(), message: z.string().nullable().optional() });
@@ -366,35 +367,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     }
   }, []);
 
-  const withPageDrawn = React.useCallback(async <T,>(run: () => Promise<T>): Promise<T> => {
-    const restoreStage = revealStage(stageRef.current, 'input');
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      if (!await waitForTwoFrames()) {
-        throw new Error('The OpenChamber window is not being drawn (minimized, on a workspace or tab that is not shown, or the screen is locked or off), so the page takes no input. browser.snapshot still reads the page.');
-      }
-      const late = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('The page did not take the input in time. Take a snapshot to see its state.')), INPUT_TIMEOUT_MS);
-      });
-      const userFocus = webviewRef.current && document.activeElement !== webviewRef.current ? deepActiveElement() : null;
-      let userActed = false;
-      const onUserInput = (event: Event) => { if (event.isTrusted) userActed = true; };
-      document.addEventListener('pointerdown', onUserInput, true);
-      document.addEventListener('keydown', onUserInput, true);
-      try {
-        return await Promise.race([run(), late]);
-      } finally {
-        document.removeEventListener('pointerdown', onUserInput, true);
-        document.removeEventListener('keydown', onUserInput, true);
-        if (!userActed && userFocus?.isConnected && userFocus !== document.body && deepActiveElement() !== userFocus && document.activeElement !== webviewRef.current) {
-          userFocus.focus({ preventScroll: true });
-        }
-      }
-    } finally {
-      clearTimeout(timer);
-      restoreStage();
-    }
-  }, []);
+  const withPageDrawn = usePageDrawn(stageRef, webviewRef, revealStage, waitForTwoFrames);
 
   const pageDriver = React.useMemo(() => createPageDriver({ drive: driveStep, withInput: withPageDrawn }), [driveStep, withPageDrawn]);
 
@@ -633,11 +606,33 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
       const emulated = await invokeDesktopCommand<{ focused: boolean }>('desktop_browser_keep_page_focused', {
         webContentsId: webview.getWebContentsId(),
       }).then((reply) => reply.focused === true).catch(() => false);
-      if (!emulated) {
+      if (!emulated && action !== 'browser.type' && action !== 'browser.press') {
         releasePageFocus = holdPageFocus();
         webview.focus({ preventScroll: true });
       }
     }
+    const keyboardAction = async (run: (expiresAt: number) => Promise<JsonObject>) => {
+      const previousTurn = keyboardTurn;
+      let endTurn = (): void => {};
+      keyboardTurn = new Promise<void>((resolve) => { endTurn = resolve; });
+      let release = (): void => {};
+      try {
+        return await withPageDrawn(async (expiresAt) => {
+          await previousTurn;
+          if (Date.now() >= expiresAt) throw new Error('The page did not take the input in time. Take a snapshot to see its state.');
+          release = holdPageFocus();
+          webview.focus({ preventScroll: true });
+          try {
+            return await run(expiresAt);
+          } finally {
+            release();
+          }
+        });
+      } finally {
+        release();
+        endTurn();
+      }
+    };
     let result: JsonObject;
     try {
       switch (action) {
@@ -651,8 +646,8 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
         case 'browser.click': result = await pageDriver.click(page); break;
         case 'browser.hover': result = await pageDriver.hover(page); break;
         case 'browser.drag': result = await pageDriver.drag(page); break;
-        case 'browser.type': result = await pageDriver.type(page); break;
-        case 'browser.press': result = await pageDriver.press(page); break;
+        case 'browser.type': result = await keyboardAction((expiresAt) => pageDriver.type(page, expiresAt)); break;
+        case 'browser.press': result = await keyboardAction((expiresAt) => pageDriver.press(page, expiresAt)); break;
         case 'browser.select': result = await pageDriver.select(page); break;
         case 'browser.scroll': return pageDriver.scroll(page);
         case 'browser.inspect': return pageDriver.inspect(page);
@@ -671,7 +666,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     await new Promise((resolve) => setTimeout(resolve, 150));
     await waitForIdle();
     return { url: toDisplayUrl(webview.getURL()), ...result };
-  }, [annotationHost, loadUrl, pageDriver, settlePage, stageUpload, waitForIdle, waitForQuiet, waitForView]);
+  }, [annotationHost, loadUrl, pageDriver, settlePage, stageUpload, waitForIdle, waitForQuiet, waitForView, withPageDrawn]);
 
   React.useEffect(() => {
     if (!webviewElement || ownerSessionId === null) return;

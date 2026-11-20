@@ -138,7 +138,7 @@ export const createPageDriver = ({
   withInput,
 }: {
   drive: DriveStep;
-  withInput: <T>(run: () => Promise<T>) => Promise<T>;
+  withInput: <T>(run: (expiresAt: number) => Promise<T>) => Promise<T>;
 }) => {
   let refs = new Map<string, { frameId: string; id: number; doc: string }>();
 
@@ -246,16 +246,22 @@ export const createPageDriver = ({
     return answer;
   };
 
-  const input = async (run: () => Promise<JsonObject>): Promise<JsonObject> => {
+  const expireAt = (expiresAt: number) => {
+    if (Date.now() >= expiresAt) throw new Error('The page did not take the input in time. Take a snapshot to see its state.');
+  };
+
+  const input = async (run: (expiresAt: number) => Promise<JsonObject>, deadline?: number): Promise<JsonObject> => {
     await ensureNoDialog();
-    return withInput(async () => {
+    const answer = async (expiresAt: number) => {
+      expireAt(expiresAt);
       try {
-        return await run();
+        return await run(expiresAt);
       } catch (error) {
         if (error instanceof DialogOpenError) return { dialog: dialogJson(error.dialog), note: dialogNote(error.dialog) };
         throw error;
       }
-    });
+    };
+    return deadline === undefined ? withInput(answer) : answer(deadline);
   };
 
   const snapshot = async (parameters: PageActionParameters): Promise<JsonObject> => {
@@ -364,13 +370,14 @@ export const createPageDriver = ({
     return nameInto({ dragged: true, to: destinationName ?? to.selector, mode: 'pointer' }, parameters.ref, from.selector);
   });
 
-  const type = (parameters: PageActionParameters) => input(async () => {
+  const type = (parameters: PageActionParameters, deadline?: number) => input(async (expiresAt) => {
     const resolved = await resolveTarget(parameters);
     const value = parameters.value ?? '';
+    expireAt(expiresAt);
     const focused = await evaluate(resolved.frameId, buildFocusFieldScript(resolved.target), focusedFieldSchema, resolved.name);
-    if (value) await watched('insertText', { text: value });
-    else await watched('press', { key: 'Delete' });
-    if (parameters.submit) await watched('press', { key: 'Enter' });
+    if (value) await watched('insertText', { text: value, expiresAt });
+    else await watched('press', { key: 'Delete', expiresAt });
+    if (parameters.submit) await watched('press', { key: 'Enter', expiresAt });
     const answer = nameInto({ typed: true }, parameters.ref, resolved.frame ? null : focused.selector ?? null);
     try {
       const typed = await evaluate(resolved.frameId, buildFieldValueScript(resolved.target), fieldValueSchema, resolved.name);
@@ -380,18 +387,19 @@ export const createPageDriver = ({
       if (error instanceof DialogOpenError) throw error;
     }
     return answer;
-  });
+  }, deadline);
 
-  const press = (parameters: PageActionParameters) => input(async () => {
+  const press = (parameters: PageActionParameters, deadline?: number) => input(async (expiresAt) => {
     const key = nonEmpty(parameters.key);
     if (!key) throw new Error('key is required, such as Enter, Escape, Tab or Meta+a');
     if (nonEmpty(parameters.ref) || nonEmpty(parameters.selector)) {
       const resolved = await resolveTarget(parameters);
+      expireAt(expiresAt);
       await evaluate(resolved.frameId, buildFocusScript(resolved.target), scriptRecordSchema, resolved.name);
     }
-    await watched('press', { key });
+    await watched('press', { key, expiresAt });
     return { pressed: key };
-  });
+  }, deadline);
 
   const select = async (parameters: PageActionParameters): Promise<JsonObject> => {
     await ensureNoDialog();
