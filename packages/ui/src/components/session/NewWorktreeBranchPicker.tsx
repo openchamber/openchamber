@@ -28,7 +28,7 @@ export type PickedBranch = { value: string; label: string };
 
 type BranchSection = { heading: string; branches: PickedBranch[] };
 
-const PAGE_SIZE = 100;
+const RENDER_STEP = 200;
 
 const findScrollableAncestor = (start: HTMLElement | null): HTMLElement | null => {
   let node = start;
@@ -64,7 +64,7 @@ export function NewWorktreeBranchPicker({
   const { t } = useI18n();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
-  const [page, setPage] = React.useState(0);
+  const [renderLimit, setRenderLimit] = React.useState(RENDER_STEP);
   const desktopContentRef = React.useRef<HTMLDivElement | null>(null);
   const mobileListRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -83,15 +83,23 @@ export function NewWorktreeBranchPicker({
   }, [localBranches, remoteBranches, query, searching, t]);
 
   const total = sections.reduce((count, section) => count + section.branches.length, 0);
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const currentPage = Math.min(page, pageCount - 1);
   let offset = 0;
   const visibleSections = sections.map((section) => {
-    const start = Math.max(0, currentPage * PAGE_SIZE - offset);
-    const end = (currentPage + 1) * PAGE_SIZE - offset;
+    const end = Math.max(0, renderLimit - offset);
     offset += section.branches.length;
-    return { ...section, branches: section.branches.slice(start, Math.max(start, end)) };
+    return { ...section, branches: section.branches.slice(0, end) };
   }).filter((section) => section.branches.length > 0);
+  const hasMore = renderLimit < total;
+
+  const observeListEnd = React.useCallback((node: HTMLDivElement | null) => {
+    if (!node) return undefined;
+    const root = node.closest<HTMLElement>('[data-slot="command-list"]') ?? findScrollableAncestor(node.parentElement);
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setRenderLimit((limit) => limit + RENDER_STEP);
+    }, { root, rootMargin: '200px' });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   React.useEffect(() => {
     if (!open) return;
@@ -102,25 +110,19 @@ export function NewWorktreeBranchPicker({
     }
     const list = desktopContentRef.current?.querySelector<HTMLElement>('[data-slot="command-list"]');
     if (list) list.scrollTop = 0;
-  }, [open, query, currentPage, isMobile]);
+  }, [open, query, isMobile]);
 
   const changeOpen = (next: boolean) => {
     setOpen(next);
-    if (!next) { setQuery(''); setPage(0); }
+    if (!next) { setQuery(''); setRenderLimit(RENDER_STEP); }
   };
   const choose = (branch: PickedBranch) => {
     onSelect(branch);
     changeOpen(false);
   };
 
-  const changeQuery = (next: string) => { setPage(0); setQuery(next); };
-  const pagination = pageCount > 1 ? (
-    <div className="flex items-center justify-between gap-2 px-2 py-1" onKeyDown={(event) => { if (event.key === 'Enter') event.stopPropagation(); }}>
-      <Button variant="ghost" size="sm" className={isMobile ? 'min-h-9' : undefined} disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>{t('contextPanel.browser.back')}</Button>
-      <span className="typography-meta text-muted-foreground" role="status">{currentPage + 1} / {pageCount}</span>
-      <Button variant="ghost" size="sm" className={isMobile ? 'min-h-9' : undefined} disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}>{t('chat.questionCard.next')}</Button>
-    </div>
-  ) : null;
+  const changeQuery = (next: string) => { setRenderLimit(RENDER_STEP); setQuery(next); };
+  const listEndMarker = open && hasMore ? <div ref={observeListEnd} aria-hidden="true" className="h-px" /> : null;
 
   const noBranches = localBranches.length === 0 && remoteBranches.length === 0;
   const status = isLoading
@@ -145,7 +147,7 @@ export function NewWorktreeBranchPicker({
           open={open}
           title={title}
           onClose={() => changeOpen(false)}
-          subheader={<><MobileSheetSearch value={query} onChange={changeQuery} placeholder={t('session.newWorktree.searchBranches')} />{pagination}</>}
+          subheader={<MobileSheetSearch value={query} onChange={changeQuery} placeholder={t('session.newWorktree.searchBranches')} />}
         >
           <div ref={mobileListRef}>
             {status ? (
@@ -159,6 +161,7 @@ export function NewWorktreeBranchPicker({
                 ))}
               </MobileSheetSection>
             ))}
+            {status ? null : listEndMarker}
           </div>
         </MobileOverlayPanel>
       </>
@@ -205,8 +208,8 @@ export function NewWorktreeBranchPicker({
                 </CommandGroup>
               </React.Fragment>
             ))}
+            {status ? null : listEndMarker}
           </CommandList>
-          {pagination}
         </Command>
       </DropdownMenuContent>
     </DropdownMenu>
