@@ -34,6 +34,20 @@ export function readQuakeModeSettings(root) {
   };
 }
 
+export function getQuakeDisplayBounds(screen) {
+  try {
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    if (display?.workArea || display?.bounds) return display.workArea || display.bounds;
+  } catch {
+  }
+  try {
+    const primary = screen.getPrimaryDisplay();
+    return primary?.workArea || primary?.bounds || null;
+  } catch {
+    return null;
+  }
+}
+
 export function computeQuakeBounds(displayBounds, heightFraction = DEFAULT_QUAKE_MODE_HEIGHT_FRACTION) {
   const bounds = displayBounds ?? {};
   const x = Number.isFinite(bounds.x) ? Math.round(bounds.x) : 0;

@@ -93,6 +93,7 @@ import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { convertShortcutComboToAccelerator, MINI_CHAT_GLOBAL_SHORTCUT_SETTING_KEY, normalizeStoredShortcutCombo, selectMiniChatGlobalShortcutAction } from './mini-chat-global-shortcut.mjs';
 import {
   computeQuakeBounds,
+  getQuakeDisplayBounds,
   parseQuakeHeightFraction,
   QUAKE_MODE_ENABLED_KEY,
   QUAKE_MODE_HEIGHT_KEY,
@@ -2221,23 +2222,6 @@ const shouldHideMainWindowToQuake = (browserWindow) => {
   return readSettingsRoot()[QUAKE_MODE_ENABLED_KEY] === true;
 };
 
-const getQuakeDisplayBounds = () => {
-  try {
-    const cursor = screen.getCursorScreenPoint();
-    const display = screen.getDisplayNearestPoint(cursor);
-    if (display?.bounds) return display.bounds;
-  } catch {
-    // A cursor that cannot be read (locked screen, RDP edge) falls through.
-  }
-  try {
-    const primary = screen.getPrimaryDisplay();
-    if (primary?.bounds) return primary.bounds;
-  } catch {
-    return null;
-  }
-  return null;
-};
-
 const showQuakeWindow = (browserWindow, heightFraction) => {
   if (!browserWindow || browserWindow.isDestroyed()) return false;
   if (!state.quakeActive) {
@@ -2258,7 +2242,7 @@ const showQuakeWindow = (browserWindow, heightFraction) => {
     if (process.platform === 'darwin') app.focus({ steal: true });
     if (browserWindow.isMinimized()) browserWindow.restore();
     if (state.quakeNormalMaximized) browserWindow.unmaximize();
-    const displayBounds = getQuakeDisplayBounds();
+    const displayBounds = getQuakeDisplayBounds(screen);
     if (displayBounds) {
       browserWindow.setBounds(computeQuakeBounds(displayBounds, heightFraction));
     }
