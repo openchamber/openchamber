@@ -69,7 +69,7 @@ import type {
 import type { SourceControlProviderDescriptor } from '../source-control/providers/descriptor';
 import type { TrackerAPI } from '../trackers/types';
 
-export type * from '../source-control/types'; export type { RebaseChangeRequestInput, SetAssigneesInput, UpdateChangeRequestBranchInput } from '../source-control/mutation-writes';
+export type * from '../source-control/types'; export type { SetAssigneesInput } from '../source-control/mutation-writes';
 export type * from '../trackers/types';
 export type {
   GitIdentityProfile,

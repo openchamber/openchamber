@@ -141,6 +141,7 @@ export const BranchPullRequestPreview: React.FC<{
                         submitRequirements={latestPull?.submitRequirements}
                         submitRequirementsUnreadable={latest.status === 'error'}
                         mergeable={changeRequest.mergeable ?? null}
+                        writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined}
                     />
                 )}
                 revisionChoice={latestPull?.revisions ? {
@@ -154,7 +155,7 @@ export const BranchPullRequestPreview: React.FC<{
                 onSaveText={saveText}
                 conversationWriteContext={context}
                 stateMenu={reference.state !== 'merged' ? (
-                    <SourceBoardStateMenuItems item={item} context={context} onChanged={refresh} writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined} />
+                    <SourceBoardStateMenuItems item={item} context={context} onChanged={refresh} />
                 ) : undefined}
                 commentAttachments={{ onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }}
                 threadActions={threadActions}

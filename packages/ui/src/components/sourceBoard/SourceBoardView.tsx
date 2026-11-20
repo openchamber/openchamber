@@ -519,19 +519,20 @@ const SourceBoardBody: React.FC<{
         </span>
     ) : null;
 
-    const latestPull = previewItem?.source === 'repository' && browser.repositoryLatestDetail.status === 'ready'
-        ? browser.repositoryLatestDetail.value.pull
-        : null;
-    const previewPullStatus = previewItem?.source === 'repository' && previewItem.reference.kind === 'pull'
-        ? readyValue(browser.pullStatusOf(previewItem.reference, previewItem.directory))
-        : null;
+    const latestPull = previewItem?.source === 'repository' && browser.repositoryLatestDetail.status === 'ready' ? browser.repositoryLatestDetail.value.pull : null;
+    const previewPullStatus = previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' ? readyValue(browser.pullStatusOf(previewItem.reference, previewItem.directory)) : null;
+    const { refreshRepositoryDetail, list: { retry: retryList } } = browser;
+    const refreshRepositoryItem = React.useCallback(
+        () => Promise.all([refreshRepositoryDetail(), retryList()]).then(() => undefined),
+        [refreshRepositoryDetail, retryList],
+    );
     const actions = previewItem ? (
         <SourceBoardActions
             item={previewItem}
             project={actionProject}
             context={readContext}
             onStartWorktree={(target, selection) => setWorktreeRequest({ project: target, selection })}
-            onChanged={browser.list.retry}
+            onChanged={refreshRepositoryItem}
             startIn={startIn}
             onLeave={onLeave}
             worktreeAvailable={!readsNestedRepository && !previewLinked}
@@ -540,6 +541,7 @@ const SourceBoardBody: React.FC<{
             submitRequirements={latestPull?.submitRequirements}
             submitRequirementsUnreadable={previewItem?.source === 'repository' && browser.repositoryLatestDetail.status === 'error'}
             mergeable={previewPullStatus?.mergeable ?? null}
+            writeAccess={previewItem?.source === 'repository' && browser.repositoryDetail.status === 'ready' ? browser.repositoryDetail.value.writeAccess : undefined}
         />
     ) : null;
 
@@ -562,11 +564,6 @@ const SourceBoardBody: React.FC<{
         ? browser.repositoryDetail.value.discussion
         : undefined;
 
-    const { refreshRepositoryDetail, list: { retry: retryList } } = browser;
-    const refreshRepositoryItem = React.useCallback(
-        () => Promise.all([refreshRepositoryDetail(), retryList()]).then(() => undefined),
-        [refreshRepositoryDetail, retryList],
-    );
     const writableReference = previewItem?.source === 'repository' && context ? { context, reference: previewItem.reference } : null;
     const saveText = writableReference ? async (input: { title: string; body: string }) => {
         await updateRepositoryItemText(sourceControl, writableReference.context, writableReference.reference, input);
@@ -659,7 +656,7 @@ const SourceBoardBody: React.FC<{
             commentActions={commentActions}
             stateMenu={previewItem?.source === 'repository' && previewItem.reference.state !== 'merged' && context
                 && (previewItem.reference.kind !== 'discussion' || canChangeDiscussionState(previewItem.reference, previewDiscussion)) ? (
-                <SourceBoardStateMenuItems item={previewItem} context={context} onChanged={refreshRepositoryItem} writeAccess={browser.repositoryDetail.status === 'ready' ? browser.repositoryDetail.value.writeAccess : undefined} />
+                <SourceBoardStateMenuItems item={previewItem} context={context} onChanged={refreshRepositoryItem} />
             ) : undefined}
             commentAttachments={previewItem?.source === 'repository'
                 ? { onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }
