@@ -9,12 +9,13 @@ import type { z } from 'zod';
 import type { GuestRecord } from './contracts.js';
 import type { HostCallbackRoute } from './host-callback.js';
 import type { createOpenChamberControlService } from '../openchamber-control/service.js';
+import type { SessionControlExecute, SessionReadAction } from '../openchamber-control/contracts.js';
 import type { createGuestInstructions } from './instructions.js';
 import type { createGuestMarks } from './marks.js';
 import { hasErrorMessage } from './input-guards.js';
 
 export type ServiceHostControl = Pick<ReturnType<typeof createOpenChamberControlService>,
-  'execute' | 'resolveSessionDirectory' | 'stopSession' | 'answerPermission' | 'answerForm' | 'dismissOpenForms'>;
+  'resolveSessionDirectory' | 'stopSession' | 'answerPermission' | 'answerForm' | 'dismissOpenForms'> & { execute: SessionControlExecute };
 
 export interface ServiceHostApiOptions {
   listGuests: () => Promise<GuestRecord[]>;
@@ -46,7 +47,7 @@ const controlFailure = (cause: unknown) => {
   return fail(status, 'SESSION_FAILED', status >= 500 ? 'OpenChamber could not reach the session.' : String(message ?? 'The call was refused.'));
 };
 
-const readSession = async (control: ServiceHostControl, action: 'session.messages' | 'session.status', input: SessionQuery) => {
+const readSession = async <Action extends SessionReadAction>(control: ServiceHostControl, action: Action, input: SessionQuery) => {
   const directory = await control.resolveSessionDirectory(input.sessionId);
   if (!directory) throw new OpenChamberControlError('Session not found', 404);
   return control.execute(action, input, directory);

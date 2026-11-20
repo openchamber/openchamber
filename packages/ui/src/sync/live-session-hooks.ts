@@ -109,17 +109,6 @@ export function useSessions(directory?: string) {
   )
 }
 
-const sessionStartTimesCache = new WeakMap<State["session"], ReadonlyMap<string, number>>()
-
-const readSessionStartTimes = (sessions: State["session"]): ReadonlyMap<string, number> => {
-  let startTimes = sessionStartTimesCache.get(sessions)
-  if (!startTimes) {
-    startTimes = new Map(sessions.map((session) => [session.id, session.time.created]))
-    sessionStartTimesCache.set(sessions, startTimes)
-  }
-  return startTimes
-}
-
 const haveSameStartTimes = (left: ReadonlyMap<string, number>, right: ReadonlyMap<string, number>): boolean => {
   if (left === right) return true
   if (left.size !== right.size) return false
@@ -129,15 +118,29 @@ const haveSameStartTimes = (left: ReadonlyMap<string, number>, right: ReadonlyMa
   return true
 }
 
+const listsHaveSameStartTimes = (left: State["session"], right: State["session"]): boolean => {
+  if (left === right) return true
+  if (left.length !== right.length) return false
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index].id !== right[index].id || left[index].time.created !== right[index].time.created) return false
+  }
+  return true
+}
+
 export function useSessionStartTimes(directory?: string): ReadonlyMap<string, number> {
   const store = useDirectoryStore(directory)
-  const cacheRef = useRef<ReadonlyMap<string, number> | null>(null)
+  const cacheRef = useRef<{ sessions: State["session"]; startTimes: ReadonlyMap<string, number> } | null>(null)
   const getSnapshot = useCallback(() => {
-    const next = readSessionStartTimes(store.getState().session)
+    const sessions = store.getState().session
     const cached = cacheRef.current
-    if (cached && haveSameStartTimes(cached, next)) return cached
-    cacheRef.current = next
-    return next
+    if (cached && listsHaveSameStartTimes(cached.sessions, sessions)) {
+      cached.sessions = sessions
+      return cached.startTimes
+    }
+    const next: ReadonlyMap<string, number> = new Map(sessions.map((session) => [session.id, session.time.created]))
+    const startTimes = cached && haveSameStartTimes(cached.startTimes, next) ? cached.startTimes : next
+    cacheRef.current = { sessions, startTimes }
+    return startTimes
   }, [store])
   const subscribe = useCallback((notify: () => void) => store.subscribe((state, previous) => {
     if (state.session !== previous.session) notify()

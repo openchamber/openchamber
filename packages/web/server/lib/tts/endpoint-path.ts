@@ -6,7 +6,7 @@ const hasControlCharacters = (value: string) => [...value].some((character) => c
 const ABSOLUTE_URL = /^[a-zA-Z][a-zA-Z\d+.-]*:/;
 const WHITESPACE = /\s/;
 
-export const normalizeEndpointPath = (value: string | null | undefined) => {
+export const normalizeEndpointPath = (value: Parameters<typeof stringInput.safeParse>[0]) => {
   const input = stringInput.safeParse(value);
   if (!input.success) {
     return { value: undefined };

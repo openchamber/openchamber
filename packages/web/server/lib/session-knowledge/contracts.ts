@@ -109,7 +109,7 @@ export interface SessionKnowledgeDependencies {
   isSecretRequestAvailable?: () => boolean | Promise<boolean>;
   isWorkflowAvailable?: () => boolean | Promise<boolean>;
   readExtensionInstructions?: (directory: string) => Promise<string | null>;
-  readSessionMetadata?: ((sessionId: string) => Promise<SessionMetadata>) | null;
+  readSessionMetadata?: ((sessionId: string) => Promise<SessionMetadata | undefined>) | null;
   persistSessionMetadata?: ((sessionId: string, directory: string, patch: {
     openchamber: { project_context_pins: SessionPins };
   }) => Promise<SessionMetadata>) | null;

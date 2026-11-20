@@ -34,9 +34,80 @@ OpenChamber's own server features live beside it: settings persistence in `../se
 
 ## Decisions
 
+### Why config and wire fields stay unchecked until use
+
+Markdown frontmatter can be any YAML value. `MarkdownDocument.frontmatter`
+therefore stays `unknown`; the skill reader checks each name and description,
+and the agent reader uses the canonical entity conversion. Agent updates keep
+unvalidated fields until that same conversion runs.
+
+MCP assignment files validate only their JSON object container. Their entries,
+OAuth response fields and thrown error metadata remain unchecked until the
+existing comparisons, record checks, numeric checks or URL conversion use them.
+The field-access helpers accept primitives and inherited members and preserve
+the TypeError of a direct nullish property read. A metadata-derived server name
+is not declared a string merely because its source is MCP.
+
+Config, environment and prompt-reference checks stay at their external
+boundaries. A dictionary lookup can resolve an inherited member, so array,
+plain-object and string checks must remain even where a declaration suggests
+that only the expected value can occur. Worktree config object checks continue
+to admit arrays, matching their existing property-reading behavior.
+
+Compaction writes the background flag under both `compaction.background` and
+`experimental.background_compaction`. OpenCode before 2.3.1 reads the latter;
+newer versions read the former.
+
+### Why hidden-session filtering keeps the schema's loose payload
+
+Hidden metadata proves neither a session ID's type nor the rest of a session
+record. Learned IDs retain their original values, and filtered pages expose
+the values their Zod schemas actually checked. Filtering must not validate,
+rewrite or discard unrelated payload fields.
+
+### Why credential reads and writes have different token contracts
+
+`projectCredentialValue` treats every non-key credential as OAuth for the
+legacy view. OpenCode also lists external credentials, so token fields in
+that projection can be `undefined`. Stored login reads select OAuth rows
+before projection. The create route inserts the value from its request and
+returns the inserted row by ID, so creating an OAuth row returns OAuth
+tokens. The SDK's general create return type does not express that
+relationship with the input.
+
 ### Why process records are per child and not one shared file
 
 Concurrent web, desktop, and VS Code hosts share the registry. One file per spawned PID avoids a shared read-modify-write race that can erase another live host's ownership record.
+
+### Why conversion inputs keep unchecked fields
+
+Unwrapping an OpenCode response checks only its object container and envelope
+keys. Its result stays unchecked until a consumer's existing guard or schema
+reads it. Active-session dictionaries likewise establish only the container;
+lineage, shell and job records use their existing schemas. A shell's metadata
+still needs its session-ID string check after parsing the metadata dictionary.
+
+Registry files establish an integer PID only. Owner and port fields remain
+unchecked until their integer tests, and arrays or inherited properties are not
+newly excluded. Error-property guards preserve property access on non-nullish
+values, including primitives. Managed config settings keep unchecked tool and
+failover selections until their existing boolean, string and array checks.
+
+### Why dependency options have a local declaration
+
+Node's `execFile` accepts an options object containing `stdio`, although its
+published declarations omit that property and it does not forward the option
+to the spawned process. `dependency-options.d.ts` admits that existing argument
+without changing its runtime effect. The registry imports it only as a type so
+the VS Code compiler also sees the declaration when following source imports.
+
+The SDK's host-version parser also accepts an omitted version at runtime through
+its string conversion, returning null. Its local overload preserves the
+authoring skill's existing `latest` fallback when no app version is supplied.
+The same declaration admits an undefined `replaceAll` replacement, which the
+standard string operation accepts through string conversion. The authoring
+template's parser-dependent branch cannot express that relationship to the
+compiler; neither its branch nor its fallback changes.
 
 ### Why registry operations are asynchronous and not synchronous
 
@@ -108,6 +179,15 @@ It adds no runtime implementation. `../../proxy-headers.js` resolves to its
 typed implementation so collected headers expose every forwarded name, rather
 than only the authorization property inferred from JavaScript.
 
+### Why plugin switch reads keep thrown values unchecked
+
+The switch store returns the original thrown value on a failed read. Only
+`ENOENT` means there is no switch file. A corrupt file or other read error keeps
+the last saved denials, and the warning uses the original value when it has no
+message. A plugin's relative path is resolved against the config that declares
+it; the last matching statement in the earliest matching config decides whether
+the denial can take effect.
+
 ## Entrypoints and structure
 - `packages/web/server/lib/opencode/index.js`: public entrypoint (currently baseline placeholder).
 - `packages/web/server/lib/opencode/auth.js`: provider authentication file operations.
@@ -125,7 +205,7 @@ than only the authorization property inferred from JavaScript.
 - `packages/web/server/lib/opencode/network-runtime.js`: OpenCode URL construction, health-probe readiness checks, and API prefix runtime.
 - `packages/web/server/lib/opencode/config-entity-routes.js`: route registration for agent/command/MCP config orchestration. OpenCode 2 watches these files, so a write is live as soon as it lands and the route answers plain success.
 - `packages/web/server/lib/opencode/mcp-oauth.js`: MCP OAuth from a browser on another machine: the start interception, the generated redirects, and the public callback. See "Remote MCP OAuth" below.
-- `packages/web/server/lib/opencode/websearch-config.js`: writes OpenCode's `websearch` choice (`PUT /api/config/websearch` in `routes.js`; body `{ selection: false | null | "random" | "<provider id>" }`, `null` removes the key, so OpenCode falls back to the answer given in its chat consent form, which it keeps in its own store) to `OPENCODE_CONFIG` when set, else the user config. `GET /api/config/websearch` returns `{ projectPath }`: the project config whose `websearch` overrides that write (see the load order below), so Settings disables the choice and names the file instead of letting it snap back; `findWebSearchProjectOverride` in `config-v2.js` holds the rule. The pure transform is `writeWebSearchSelection` in `config-v2.js`, shared with the VS Code bridge (`api:config/websearch`). The same file writes OpenCode's compaction settings (`PUT /api/config/compaction`; body `{ auto?, buffer?, keepTokens?, background? }`, token counts (for `buffer` also a share of the window such as `"20%"`, the form Settings writes, which needs OpenCode 2.2.4) or `null` to remove the key and booleans written as they are, so `false` also overrides a `true` in a lower config layer; they set `compaction.auto`, `compaction.buffer`, `compaction.keep.tokens` and `experimental.background_compaction`) to the same target; `compactionUpdateSchema` and `writeCompactionSettings` in `config-v2.js` are shared with the bridge (`api:config/compaction`). Settings reads the global values back from OpenCode's config, not from the file. A project config can still set any of these for itself; Settings says so in one line and does not look for project overrides, since whoever wrote one knows it is there.
+- `packages/web/server/lib/opencode/websearch-config.js`: writes OpenCode's `websearch` choice (`PUT /api/config/websearch` in `routes.js`; body `{ selection: false | null | "random" | "<provider id>" }`, `null` removes the key, so OpenCode falls back to the answer given in its chat consent form, which it keeps in its own store) to `OPENCODE_CONFIG` when set, else the user config. `GET /api/config/websearch` returns `{ projectPath }`: the project config whose `websearch` overrides that write (see the load order below), so Settings disables the choice and names the file instead of letting it snap back; `findWebSearchProjectOverride` in `config-v2.js` holds the rule. The pure transform is `writeWebSearchSelection` in `config-v2.js`, shared with the VS Code bridge (`api:config/websearch`). The same file writes OpenCode's compaction settings (`PUT /api/config/compaction`; body `{ auto?, buffer?, keepTokens?, background? }`, token counts (for `buffer` also a share of the window such as `"20%"`, the form Settings writes, which needs OpenCode 2.2.4) or `null` to remove the key and booleans written as they are, so `false` also overrides a `true` in a lower config layer; they set `compaction.auto`, `compaction.buffer`, `compaction.keep.tokens`, and `background` both `compaction.background` and `experimental.background_compaction`) to the same target; background compaction moved from that experimental flag (off by default) to `compaction.background` (on by default) in OpenCode 2.3.1, and each version ignores the other key, so the write covers every supported OpenCode and Settings reads the key the connected version reads (its version from `/api/opencode/compatibility`); `compactionUpdateSchema` and `writeCompactionSettings` in `config-v2.js` are shared with the bridge (`api:config/compaction`). Settings reads the global values back from OpenCode's config, not from the file. A project config can still set any of these for itself; Settings says so in one line and does not look for project overrides, since whoever wrote one knows it is there.
 
 OpenCode 2 loads the user config, then `OPENCODE_CONFIG`, then project `opencode.json[c]` files from the filesystem root down, then `.opencode/opencode.json[c]` files the same way (`getFolderConfigPaths` in `config-files.js`); the last file that sets a key wins, so a project file beats `OPENCODE_CONFIG` too. `findWebSearchProjectOverride` follows that order.
 - `packages/web/server/lib/opencode/config-mutation-response.js`: shared response builders for applied config mutations and external manual-restart guidance.
@@ -166,7 +246,7 @@ none, and a session can allow what this layer denies. A user rule after ours
 in that user's sessions. On the fallback path the same rules are merged into
 `OPENCODE_CONFIG_CONTENT` (`appendManagedPermissions`).
 - `packages/web/server/lib/opencode/model-discovery.js`: bounded custom-provider `/models` discovery and optional models.dev enrichment. It accepts only http(s), does not follow redirects, filters transport headers, never returns credentials, and treats models.dev failure as unenriched success. Edit requests may name the provider so the host can fall back to a stored credential when the form leaves the key blank — the key from OpenCode's credential store or, failing that, the provider's stored config entry (`settings.apiKey`, else the first `env` variable name that is set in the server environment) — but only while the form's base URL still matches the saved one, so a changed URL never receives the stored credential; an explicitly entered replacement key wins.
-- `packages/web/server/lib/opencode/skill-routes.js`: route registration for skill config CRUD, supporting files, and skills catalog scan/install flows.
+- `packages/web/server/lib/opencode/skill-routes.ts`: route registration for skill config CRUD, supporting files, and skills catalog scan/install flows.
 - `packages/web/server/lib/opencode/proxy.js`: OpenCode API/SSE forwarding and readiness-gate route registration.
 - `packages/web/server/lib/opencode/session-runtime.js`: session status/activity runtime for OpenCode SSE events.
 - `packages/web/server/lib/opencode/watcher.js`: global SSE watcher runtime for push/session event fanout.
@@ -174,7 +254,7 @@ in that user's sessions. On the fallback path the same rules are merged into
 - `packages/web/server/lib/opencode/markdown-files.js`: markdown files with YAML frontmatter and `{file:...}` prompt references.
 - `packages/web/server/lib/opencode/skill-files.js`: skill discovery and skill supporting files.
 - `packages/web/server/lib/opencode/atomic-write.js`: `writeFileAtomic(filePath, content)`, the one atomic file replace for files OpenCode watches (same-directory temp file, fsync, rename; mode of an existing file kept; a symlink, dangling or not, is followed to its file; a read-only file is refused like an in-place write; on Windows a rename refused with EPERM/EACCES/EBUSY falls back to a direct write). Used by `config-files.js`, `markdown-files.js` and the VS Code extension host's `opencodeConfig.ts`.
-- `packages/web/server/lib/opencode/config-v2.js`: the canonical OpenCode 2 shape layer — section-key resolution (v2 first, v1 fallback), permission map -> rule array translation, model `provider/model#variant` split/join, and the agent/command/MCP/provider/plugin entity conversions. Pure functions with no filesystem access; `packages/vscode/src/opencode-config-v2.ts` re-exports it so the web server and the extension host cannot write different files. See "Entity routes (v2 shapes)" below.
+- `packages/web/server/lib/opencode/config-v2.ts`: the canonical OpenCode 2 shape layer — section-key resolution (v2 first, v1 fallback), permission map -> rule array translation, model `provider/model#variant` split/join, and the agent/command/MCP/provider/plugin entity conversions. Pure functions with no filesystem access; `packages/vscode/src/opencode-config-v2.ts` re-exports it so the web server and the extension host cannot write different files. See "Entity routes (v2 shapes)" below.
 - `packages/web/server/lib/opencode/worktree-directory.js`: resolves OpenCode's `worktree.directory` into the absolute parent directory for new worktrees. Relative paths start at the canonical checkout, absolute paths are used as-is, and a leading `~` means home. Both the web server and VS Code's `gitService.ts` call `readWorktreeDirectorySetting` in `config-files.js`, which merges the global files, `OPENCODE_CONFIG`, and every discovered folder config in OpenCode order. Invalid JSONC or an unreadable file rejects the read; null means the setting is unset and keeps the data-dir default.
 - `packages/web/server/lib/ui-auth/ui-auth.js`: UI session authentication runtime (outside OpenCode module).
 - `packages/web/server/lib/ui-auth/ui-passkeys.js`: UI passkey storage and WebAuthn registration/authentication helpers (outside OpenCode module).
@@ -305,6 +385,14 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
 
 The fix prevents new damage but does not repair entries an earlier save already rewrote: `config-v2.js` leaves an existing `aisdk:@opencode/ai/*` value as it is. An affected user backs up the config file that defines the provider, restores the original bare bundled package (`@opencode/ai/...`) at the provider or model entry, and then retries.
 
+### Why custom provider validation retains field checks
+
+Provider edits and stored config contain unchecked values. Validation checks the
+fields before building the normalized config. Map keys returned by
+`Object.entries` are already strings. The model merge still checks that an
+existing model is a record before spreading it because the lookup uses a
+configured name.
+
 ## Public exports (config-files.js)
 - `OPENCODE_CONFIG_DIR`, `AGENT_DIR`, `COMMAND_DIR`, `SKILL_DIR`, `CONFIG_FILE`: Path constants rooted at `$XDG_CONFIG_HOME/opencode` when `XDG_CONFIG_HOME` is non-empty, otherwise `~/.config/opencode`. These constants are evaluated when the module loads; no files are migrated. `OPENCODE_CONFIG` remains a separate explicit config-file path and is resolved at call time for the custom config layer; it does not replace the global config directory.
 - `AGENT_SCOPE`, `COMMAND_SCOPE`, `SKILL_SCOPE`: Scope constants with USER and PROJECT values.
@@ -323,6 +411,56 @@ The fix prevents new damage but does not repair entries an earlier save already 
 
 Replacing an entire array discards comments inside untouched entries, so equal-length arrays use edits at the changed indices. A value retained at another changed index triggers whole-array replacement to avoid leaving a moved entry's comments at its old position. An array that only grew at its end or only lost elements, such as `policies` under the skill switch, gets one edit per element: an appended element goes on its own line at the last element's indentation, because `jsonc-parser`'s insertion reformats the line it lands on, and a removed element takes its line with it when nothing else is on it. Comments next to a removed element stay. Any other length change and the legacy `plugin` to `plugins` conversion still replace the array and can discard its internal comments.
 
+
+### Why config parsing retains object checks
+
+JSONC parsing establishes JSON values, not an OpenCode schema. Layer contents keep
+JSON-valued fields until their entity readers validate them. Recursive merges
+retain object and array checks on dictionary lookups, including inherited names.
+`isPlainObject` retains its original falsy return values for JavaScript callers.
+The JSONC library publishes `SyntaxKind` as a const enum despite exporting a
+runtime object; namespace destructuring keeps that runtime lookup. Its node lookup
+returns undefined for an absent root, which the caller short-circuit preserves.
+
+### Why external model fields remain unchecked
+
+The models.dev reader checks only a non-null object container and still accepts
+arrays. Its return type establishes no provider or model schema. The client
+projection copies its allowlisted fields without validating their values.
+Discovery narrows catalog and provider values through each existing Zod schema;
+passthrough fields stay unchecked until their individual parsers run.
+
+Plugin conversions preserve JSON-valued options when their input is JSON. Their
+declaration overloads carry that fact without narrowing the general unchecked
+input contract or removing array checks on config dictionaries.
+
+### Why dependency declarations stay local
+
+`dependency-contracts.d.ts` describes the optional Bun SQLite constructor and
+query methods used by migration top-up because this checkout has no Bun SQLite
+declarations. SQLite rows remain unchecked until their row schemas parse them.
+The same file exposes Node's native web-stream readers through their compatible
+DOM reader contracts, allowing `Readable.toWeb` output to reach `Response`
+without a cast. The `parseInt` overload retains JavaScript's coercing inputs;
+pre-converting a port with `String` would change how Symbols fail.
+
+### Why state and route inputs have different types
+
+The session runtime owns typed state maps and restart schedules. Its incoming
+events and pending request fields remain unchecked until the existing string,
+number and object checks. Object checks that accepted arrays retain that behavior.
+The watcher removes only the duplicate object checks after its own unwrap step.
+Password callbacks receive the string-or-null values already normalized by HMR,
+and the network hostname comes from the environment resolver's string result.
+
+HTTP bodies and rejected values retain unchecked fields. Settings and snippet
+services arrive through dependency injection; route orchestration does not
+establish their schemas. A checked object container is never a validated entity.
+Entity-route error matching retains callable `includes` methods on message
+objects, including inherited methods and non-boolean results. It observes only
+the result's truthiness and invokes the method with its original receiver through
+the native call intrinsic, so an overridden method `.call` property is ignored.
+Nullish body destructuring retains the original Node error message.
 
 ## Public exports (markdown-files.js)
 - `parseMdFile(filePath)`, `parseMdFileAsync(filePath)`, `writeMdFile(filePath, frontmatter, body)`: Markdown file operations with YAML frontmatter. A rewrite goes through `writeFileAtomic`; `flag: 'wx'` creates the file directly and passes EEXIST on.
@@ -1142,10 +1280,10 @@ headers }` or v1 `{ npm, options }`. The stored entry is always a
 - Returned API:
   - `getOpenCodeResolutionSnapshot(settings)`: returns configured/resolved OpenCode binary details plus effective managed-launch fields (`launchBinary`, `launchArgs`, `launchWrapperType`) when applicable.
 
-## Public exports (skills.js)
+## Public exports (skills.ts)
 - `getSkillSources(skillName, workingDirectory, discoveredSkill?, options?)`: returns the skill's Markdown metadata and instructions, source paths and scopes, and supporting files. Supporting files are included by default. `GET /api/config/skills` calls it once per skill with `{ includeSupportingFiles: false }`, which omits `md.supportingFiles` and skips walking supporting files.
 
-## Public exports (skill-routes.js)
+## Public exports (skill-routes.ts)
 - `registerSkillRoutes(app, dependencies)`: registers skills-related routes:
   - Skills config CRUD and metadata under `/api/config/skills*`
   - `DELETE /api/config/skills/:name` removes every copy of the name, in the project and the user's skill folders. With `scope` (`user`|`project`) and `source` (`opencode`|`claude`|`agents`) in the query it removes only the copy there and fails when that copy is missing; the integrations catalog uninstalls this way so it never removes a same-named skill the user keeps elsewhere
@@ -1165,9 +1303,19 @@ headers }` or v1 `{ npm, options }`. The stored entry is always a
     `.agents/skills` and `.opencode/skills` remain discoverable when the client
     omits `directory`. Requests without any project still list user-scoped skills.
 
+Catalog cache reads establish the object container. The route still checks
+metadata fields individually and passes cached skill fields through as read.
+For supporting-file routes Express can supply a wildcard as an array. It is
+converted to the same string the URL decoder received in JavaScript.
+
 ### Why parsed markdown is shared within a request
 
 Discovery already reads each skill's frontmatter and body. Source lookup uses that same read so listing does not open and parse the file again. The map holds a request's snapshot, so an edit during a list appears on the next request. Keeping entries across requests would need invalidation for external file edits.
+
+Skill detail keeps YAML `name` and `description` as read. Discovery still
+requires a string name. Writes preserve YAML values and let the Markdown
+writer interpolate the instruction body. Supporting file paths require
+strings; file data can also be a Node array-buffer view.
 
 ## Public exports (proxy.js)
 - `registerOpenCodeProxy(app, dependencies)`: registers OpenCode proxy routes and middleware.
@@ -1331,7 +1479,9 @@ under a running child.
   `opencode.browser` re-enables it. While `openchamber_image` is on,
   `-opencode.tool.image-generate` follows it: OpenCode's own opt-in image tool
   would give the agent a second image tool on a model the user did not pick
-  in Settings. The fallback path merges the same entries. Its layer sits above the user's
+  in Settings. While `openchamber_schedule` is on, `-opencode.tool.automation`
+  follows it the same way: OpenCode's opt-in automations (2.3.1) would be a
+  second scheduler that OpenChamber's Scheduled tasks do not show. The fallback path merges the same entries. Its layer sits above the user's
   global `opencode.json` and below their project config.
 - `OPENCODE_CONFIG_CONTENT` is passed through untouched, so whatever the user
   put there still applies.

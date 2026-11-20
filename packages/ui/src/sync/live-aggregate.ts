@@ -128,37 +128,120 @@ export const areStatusMapsEquivalent = (
   return true
 }
 
-let lastSources: ReadonlyArray<LiveStateSlice["session"]> = []
-let lastAggregate: Session[] = []
+type SessionSources = ReadonlyArray<LiveStateSlice["session"]>
+
+type LiveAggregate = {
+  sources: SessionSources
+  result: Session[]
+  winners: Map<string, Session>
+  rank: Map<string, number>
+  duplicates: Set<string>
+}
+
+let lastAggregate: LiveAggregate = {
+  sources: [],
+  result: [],
+  winners: new Map(),
+  rank: new Map(),
+  duplicates: new Set(),
+}
+
+const MAX_INCREMENTAL_CHANGES = 64
 
 export function aggregateLiveSessions(states: Iterable<LiveStateSlice>): Session[] {
   const sources = Array.from(states, (state) => state.session)
-  if (sources.length === lastSources.length && sources.every((source, index) => source === lastSources[index])) {
-    return lastAggregate
+  const previous = lastAggregate
+  if (sources.length === previous.sources.length && sources.every((source, index) => source === previous.sources[index])) {
+    return previous.result
   }
-  lastAggregate = aggregateSessionLists(sources)
-  lastSources = sources
-  return lastAggregate
+  lastAggregate = updateAggregate(previous, sources) ?? buildAggregate(sources)
+  return lastAggregate.result
 }
 
-function aggregateSessionLists(sources: ReadonlyArray<LiveStateSlice["session"]>): Session[] {
-  const sessionsById = new Map<string, Session>()
+function buildAggregate(sources: SessionSources): LiveAggregate {
+  const winners = new Map<string, Session>()
+  const duplicates = new Set<string>()
 
   for (const list of sources) {
     for (const session of list) {
       if (!session?.id) {
         continue
       }
-      const current = sessionsById.get(session.id)
+      const current = winners.get(session.id)
+      if (current) duplicates.add(session.id)
       if (!current || getSessionUpdatedAt(session) >= getSessionUpdatedAt(current)) {
-        sessionsById.set(session.id, session)
+        winners.set(session.id, session)
       }
     }
   }
 
-  return Array.from(sessionsById.values()).sort((left, right) => {
+  const rank = new Map<string, number>()
+  for (const id of winners.keys()) rank.set(id, rank.size)
+  const result = Array.from(winners.values()).sort((left, right) => {
     return getSessionUpdatedAt(right) - getSessionUpdatedAt(left)
   })
+  return { sources, result, winners, rank, duplicates }
+}
+
+function updateAggregate(previous: LiveAggregate, sources: SessionSources): LiveAggregate | null {
+  if (sources.length !== previous.sources.length) return null
+  const replaced = new Map<string, Session>()
+  for (let index = 0; index < sources.length; index += 1) {
+    const before = previous.sources[index]
+    const after = sources[index]
+    if (before === after) continue
+    if (before.length !== after.length) return null
+    for (let position = 0; position < after.length; position += 1) {
+      const old = before[position]
+      const next = after[position]
+      if (old === next) continue
+      if (old?.id !== next?.id) return null
+      if (!next?.id) continue
+      replaced.set(next.id, next)
+      if (replaced.size > MAX_INCREMENTAL_CHANGES) return null
+    }
+  }
+
+  const { winners, rank, duplicates } = previous
+  const compare = (left: Session, right: Session): number => (
+    getSessionUpdatedAt(right) - getSessionUpdatedAt(left)
+    || (rank.get(left.id) ?? 0) - (rank.get(right.id) ?? 0)
+  )
+  let result = previous.result
+  for (const [id, record] of replaced) {
+    const next = duplicates.has(id) ? findFreshestRecord(sources, id) : record
+    const current = winners.get(id)
+    if (!next || !current || next === current) continue
+    if (result === previous.result) result = result.slice()
+    const from = lowerBound(result, current, compare)
+    if (result[from] !== current) return null
+    result.splice(from, 1)
+    result.splice(lowerBound(result, next, compare), 0, next)
+    winners.set(id, next)
+  }
+  return { sources, result, winners, rank, duplicates }
+}
+
+function findFreshestRecord(sources: SessionSources, id: string): Session | undefined {
+  let match: Session | undefined
+  for (const list of sources) {
+    for (const session of list) {
+      if (session?.id !== id) continue
+      if (!match || getSessionUpdatedAt(session) >= getSessionUpdatedAt(match)) match = session
+    }
+  }
+  return match
+}
+
+function lowerBound(sessions: readonly Session[], target: Session, compare: (left: Session, right: Session) => number): number {
+  let low = 0
+  let high = sessions.length
+  while (low < high) {
+    const middle = (low + high) >>> 1
+    if (compare(sessions[middle], target) < 0) low = middle + 1
+    else high = middle
+  }
+  return low
 }
 
 export function aggregateLiveSessionStatuses(states: Iterable<LiveStateSlice>): Record<string, SessionStatus> {

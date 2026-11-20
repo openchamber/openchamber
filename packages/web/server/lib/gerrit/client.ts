@@ -39,7 +39,7 @@ export class GerritRequestError extends Error {
 
 const NETWORK_CODES = new Set(['ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT']);
 
-export function classifyGerritFailure(error: Error): GerritFailure {
+export function classifyGerritFailure(error: { name?: unknown; code?: unknown; cause?: unknown } | null | undefined): GerritFailure {
   if (error instanceof GerritRequestError) return error.kind;
   const directCode = errorRecord(error) ? error.code : undefined;
   const cause = errorRecord(error) ? error.cause : undefined;

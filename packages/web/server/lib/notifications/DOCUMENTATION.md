@@ -13,7 +13,7 @@ This module provides notification message preparation utilities for the web serv
 - `packages/web/server/lib/notifications/apns-runtime.js`: native iOS APNs device-token persistence + delivery. Two modes: **relay** (default — sign + POST tokens + generic text to the central Cloudflare relay `https://api.openchamber.dev/v1/push/send`, which holds the single project APNs key) and **direct** (fallback — sign ES256 JWT with Node crypto + HTTP/2, when `OPENCHAMBER_PUSH_RELAY_DISABLED=true`). Each server has an auto-generated ECDSA P-256 keypair (`getOrCreateRelayKeypair`, persisted in settings); it binds tokens on the relay (`/v1/push/register-token`) and signs every relay request, so the relay only delivers to tokens bound to that server. APNs is the native app's sole notification channel (no local notifications) and is NOT gated on UI visibility — iOS suppresses the foreground banner instead. Mobile push carries only generic text (scenario title + session name) — see `APNS.md`. In enterprise mode (`../enterprise-mode.js`) `fanoutPush` also drops the session name from APNs and sends web push with the scenario title, an empty body and the deep link only, since web push leaves through the browser vendor's push service. Desktop notifications and in-app toasts stay local and keep the full text.
 - `packages/web/server/lib/notifications/emitter-runtime.ts`: desktop/stdout + UI SSE notification emission runtime.
 - `packages/web/server/lib/notifications/emit-route.ts`: `POST /api/notifications/emit` for OpenCode plugins.
-- `packages/web/server/lib/notifications/runtime.js`: trigger runtime for OpenCode event-driven notification fanout.
+- `packages/web/server/lib/notifications/runtime.ts`: trigger runtime for OpenCode event-driven notification fanout.
 - `packages/web/server/lib/notifications/template-runtime.ts`: notification template variables and session text/title enrichment runtime. Zen-model helpers are retained as compatibility stubs only.
 - `packages/web/server/lib/notifications/template-locales.ts`: the notification text OpenChamber writes itself, per interface language. An empty template field means "no custom text", so the notification uses these defaults and the settings page shows them as placeholders. `settings-runtime.js` no longer seeds English template text into an install; it clears the seed older builds wrote. The server keeps its own list because it cannot import `packages/ui`; an unknown tag falls back to English.
 - `packages/web/server/lib/notifications/extension-channels.ts`: extension notification channels (`provides: ["notifications"]`), see *Extension notification channels* below. `channel-accounts.ts` is their account store, `channel-routes.js` the account card's routes.
@@ -246,25 +246,20 @@ The `settings` parameter for `prepareNotificationLastMessage` supports `maxLastM
 
 ## Decisions
 
-### Why the trigger runtime still uses JavaScript
+### Why channel delivery has a server-side notification kind
 
-The SDK contract still prevents a behavior-preserving TypeScript conversion:
+The server already forwards `share-answer` to extension channels. The SDK's
+published kind list omits it, but its wire reader checks the input object
+without validating the kind. The server delivery and serialization types
+include `share-answer` while leaving the SDK contract and the wire unchanged.
 
-- `runtime.js` sends `share-answer` to extension channels. The SDK's
-  `GUEST_NOTIFICATION_KINDS` and `GuestNotificationKind` in
-  `packages/sdk/src/service-providers.ts` omit that kind. The owning contract
-  needs to include it before this runtime can use `GuestNotification` honestly.
-  Widening the server's `deliver` parameter alone cannot resolve this:
-  `NotificationsProviderInputs.notify` also requires `GuestNotification` when
-  `extension-channels.ts` forwards the notification. Both contracts belong to
-  the SDK, outside the server-only type corrections allowed for this conversion.
+### Why trigger inputs keep their unchecked fields
 
-`GuestNotificationKind` is a type alias derived from the runtime kind list, so
-module augmentation cannot add `share-answer`. Exporting a server type or
-converting a helper cannot change `NotificationsProviderInputs.notify` either.
-Dropping or relabeling the notification would change delivery behavior. The
-remaining implementation therefore stays JavaScript until the SDK contract
-admits the kind already sent by this runtime.
+Event text and template variables retain their string checks. Session records
+need only be objects at the OpenCode read boundary; their title and goal are
+checked where used. Saved push tags retain the original truthiness checks and
+can contain non-string keys, causes or IDs. Missing session names on settlement
+pushes only affect presentation and never stop delivery.
 
 ### Why channel results follow their schemas
 

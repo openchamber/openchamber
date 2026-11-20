@@ -5,7 +5,7 @@ import type { BearerRequest, ClientInput, CreatedClient, RemoteClient } from '..
 import type { PasskeyOptions } from './ui-passkeys.js';
 
 type AuthRequest = Pick<IncomingMessage, 'headers' | 'method' | 'url'> & Partial<Pick<Request, 'query' | 'originalUrl' | 'baseUrl' | 'path' | 'secure'>>;
-type CookieResponse = Pick<Response, 'setHeader'> | null;
+type CookieResponse = { setHeader: (name: string, value: string) => void } | null;
 
 export interface ClientAuthentication {
   ok: boolean;
@@ -325,7 +325,7 @@ const parseCookies = (cookieHeader: Request['headers']['cookie']): Record<string
   }, {});
 };
 
-export const getBearerTokenFromRequest = (req: Pick<Request, 'headers'> | null | undefined) => {
+export const getBearerTokenFromRequest = (req: Partial<Pick<Request, 'headers'>> | null | undefined) => {
   const header = req?.headers?.authorization;
   const value = Array.isArray(header) ? header[0] : header;
   if (isString(value)) {

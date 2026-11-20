@@ -104,17 +104,46 @@ them. Renewal keeps only a nonempty string token and a positive finite expiry.
 Process output becomes text only after the shared string predicate accepts it.
 Numeric process exit codes and transport failure codes remain separate checks.
 
-### Why resource orchestration remains JavaScript
+### Why resource replies keep their wire types
 
 GitBeaker's `ProjectSchema.forked_from_project`,
 `MergeRequestSchema.head_pipeline`, `MergeRequestSchema.pipeline` and
-`MergeRequestSchema.user` are unchecked extension fields. Legacy resource paths
-read their properties and can pass a truthy, unchecked fork ID into
-`Projects.show`. Its declared project-ID parameter accepts only strings and
-numbers. Converting this boundary requires retaining the unchecked values and
-GitBeaker's runtime coercion, rather than declaring validated project metadata.
-The requester also exposes GraphQL bodies as a broad response union. The
-resource and provider implementations retain their JavaScript boundary.
+`MergeRequestSchema.user` are unchecked extension fields. The local GitBeaker
+declaration reflects the requester factory's JSON, text, Blob and stream
+responses and GitBeaker's expanded page shape. It promises no endpoint-specific
+schema. `Projects.show` stringifies unchecked fork IDs before
+encoding them; `RepositoryFiles.showRaw` passes its ref to the query formatter.
+GraphQL responses need their own field checks since the requester also returns
+text, blobs and streams. Draft note positions and response fields forwarded
+without validation retain their wire types.
+
+### Why mutation arguments are typed by route
+
+The route's normalizer establishes which fields the write and reconciliation
+can use. The mutation table keeps those contracts together and preserves the
+stored kind and digest fields. A draft comment always requires text; an
+ordinary review can publish drafts without supplying text.
+
+### Why payload checks remain in the mappers
+
+No transport schema validates resource payloads before the mappers see them.
+The mappers retain checks for primitive strings, integers, plain objects and
+arrays. A diff accepts either path as a nonempty string, then selects the first
+truthy path, which may be a non-string value from a malformed response.
+
+Request failures may carry arbitrary `code` and `name` fields. Classification
+still checks the type of `code` before using its string prefix. Fetch failures
+can supply a non-string error message; the request error keeps Error's message
+coercion and leaves the message absent for `undefined`.
+
+### Why mapper paths retain unchecked values
+
+Diff paths validate either path before selecting the first truthy raw value.
+A truthy non-string `new_path` with a valid `old_path` therefore passes through
+unchanged. Notes validate the combined fallback, so the same input omits the
+position. Compound raw-value selections remain `unknown` in the output contract
+unless the selected value itself is narrowed. Numeric note lines retain the
+nonnegative-integer check, including zero.
 
 ### Why repository string checks remain at the input boundary
 

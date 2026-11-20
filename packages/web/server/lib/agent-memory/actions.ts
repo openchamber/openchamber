@@ -3,6 +3,7 @@ import { MEMORY_BODY_MAX_LENGTH, MEMORY_TITLE_MAX_LENGTH } from './runtime.js';
 import { isMemoryType } from './contracts.js';
 import type { AgentMemoryRuntime } from './runtime.js';
 import type { MemoryChangedEvent, MemoryEntry, MemoryScope, MemoryTarget, MemoryWriteInput } from './contracts.js';
+import type { ControlInput } from '../openchamber-control/contracts.js';
 
 interface MemoryActionInput extends MemoryWriteInput {
   scope?: unknown;
@@ -69,7 +70,7 @@ export const createAgentMemoryActions = (dependencies: MemoryActionDependencies)
     throw createError(message, status);
   };
 
-  const resolveProjectId = async (contextDirectory: string | null | undefined) => {
+  const resolveProjectId = async (contextDirectory: ControlInput['directory']) => {
     const directory = asNonEmptyString(contextDirectory);
     const projectId = directory ? await resolveProjectIdForDirectory(directory) : '';
     if (!projectId) {
@@ -78,7 +79,7 @@ export const createAgentMemoryActions = (dependencies: MemoryActionDependencies)
     return projectId;
   };
 
-  const resolveTarget = async (input: MemoryActionInput, contextDirectory: string | null | undefined): Promise<MemoryTarget> => {
+  const resolveTarget = async (input: MemoryActionInput, contextDirectory: ControlInput['directory']): Promise<MemoryTarget> => {
     const scope = asNonEmptyString(input.scope);
     if (scope === 'global') return { scope: 'global' };
     if (scope === 'project') {
@@ -87,7 +88,7 @@ export const createAgentMemoryActions = (dependencies: MemoryActionDependencies)
     return fail('scope must be global or project', 400);
   };
 
-  const listBothScopes = async (contextDirectory: string | null | undefined) => {
+  const listBothScopes = async (contextDirectory: ControlInput['directory']) => {
     const directory = asNonEmptyString(contextDirectory);
     const projectId = directory ? await resolveProjectIdForDirectory(directory) : null;
     const result = await agentMemoryRuntime.readAll(projectId);
@@ -103,7 +104,7 @@ export const createAgentMemoryActions = (dependencies: MemoryActionDependencies)
     return listed;
   };
 
-  const list = async (input: MemoryActionInput, contextDirectory: string | null | undefined) => {
+  const list = async (input: MemoryActionInput, contextDirectory: ControlInput['directory']) => {
     const scope = asNonEmptyString(input.scope);
     if (!scope || scope === 'both') {
       return listBothScopes(contextDirectory);
@@ -113,7 +114,7 @@ export const createAgentMemoryActions = (dependencies: MemoryActionDependencies)
     return { memories: entries.map((entry) => toSummary(entry, target.scope)) };
   };
 
-  const read = async (input: MemoryActionInput, contextDirectory: string | null | undefined) => {
+  const read = async (input: MemoryActionInput, contextDirectory: ControlInput['directory']) => {
     const memoryId = asNonEmptyString(input.memoryId);
     const title = asNonEmptyString(input.title);
     if (!memoryId && !title) {
@@ -153,7 +154,7 @@ export const createAgentMemoryActions = (dependencies: MemoryActionDependencies)
     fail('No memory matches that id or title', 404);
   };
 
-  const save = async (input: MemoryActionInput, contextDirectory: string | null | undefined) => {
+  const save = async (input: MemoryActionInput, contextDirectory: ControlInput['directory']) => {
     const target = await resolveTarget(input, contextDirectory);
     const title = asNonEmptyString(input.title);
     const body = asNonEmptyString(input.body);
@@ -200,7 +201,7 @@ export const createAgentMemoryActions = (dependencies: MemoryActionDependencies)
     return response;
   };
 
-  const remove = async (input: MemoryActionInput, contextDirectory: string | null | undefined) => {
+  const remove = async (input: MemoryActionInput, contextDirectory: ControlInput['directory']) => {
     const target = await resolveTarget(input, contextDirectory);
     const memoryId = asNonEmptyString(input.memoryId);
     if (!memoryId) fail('memoryId is required for memory.delete', 400);
@@ -213,7 +214,7 @@ export const createAgentMemoryActions = (dependencies: MemoryActionDependencies)
     return { deleted: true, memoryId };
   };
 
-  const execute = async (action: string, input: MemoryActionInput = {}, contextDirectory?: string | null) => {
+  const execute = async (action: string, input: MemoryActionInput = {}, contextDirectory?: ControlInput['directory']) => {
     if (isAgentMemoryEnabled) {
       let enabled = false;
       try {

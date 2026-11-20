@@ -215,6 +215,10 @@ API and Vite launches use a small leader that stays alive until tree cleanup and
 
 Old runs without a registry are recognized only through `stand.json` in this checkout's artifacts and their isolated cwd, command paths or API/Vite environment. A standalone wrapper name or port is insufficient evidence. This migration reads candidate process environments locally and never logs them.
 
+### Why stands queue per machine and not per session
+
+A stand with its browser is the heaviest thing a session starts, and several sessions work on one machine. Two stands run side by side; a third pushed the machine into swap and made every run slower and flakier. So a run takes one of the machine's slots before it starts its stand (`slots.mjs`, slot files in the system temp folder holding the owner's process id) and waits when none is free; a slot whose owner is gone is taken over. Slots are read and changed by one process at a time, behind a guard folder, and a run gives back only a slot that still carries its own process id. A run frees its slot when it exits even if stopping its stand failed: a slot held by nobody would stop every later run, which is worse than one stand too many. `OPENCHAMBER_VERIFY_SLOTS` changes the limit for a bigger machine. `--attach` takes no slot, since its stand is already running; a stand kept with `--keep` holds its slot until it stops. Leaving the limit to each session's judgement was the alternative, and sessions cannot see each other.
+
 ### Why a dev instance and not the production build
 
 A refactor is checked many times while it is split; a production build takes minutes each time and the dev instance serves the edited source at once. The price is that dev-only behavior shows: React StrictMode, and libraries that assert in development. The Markdown pipeline's `devlop` assertion fails on the fixture's `showcase` document in dev, so no scenario uses that document.

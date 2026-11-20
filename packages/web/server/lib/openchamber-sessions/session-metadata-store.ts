@@ -185,7 +185,7 @@ export const createSessionMetadataStore = ({
     }
   };
 
-  const get = async (sessionID: string, { directory = '', signal }: MetadataReadOptions = {}) => {
+  const get = async (sessionID: string | null, { directory = '', signal }: MetadataReadOptions = {}) => {
     signal?.throwIfAborted();
     const id = asNonEmptyString(sessionID);
     if (!id) return {};

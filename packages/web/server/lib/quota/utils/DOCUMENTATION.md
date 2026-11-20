@@ -4,7 +4,7 @@
 
 Shared quota helpers normalize provider JSON, select credentials and format quota
 windows and result envelopes. Provider modules own HTTP reads and credential
-discovery. `contracts.ts` owns the converted helpers' data types.
+discovery. `contracts.ts` owns the helpers' data types.
 
 ## Invariants
 
@@ -26,21 +26,12 @@ discovery. `contracts.ts` owns the converted helpers' data types.
 
 ## Decisions
 
-### Why auth remains JavaScript
+### Why auth lookups keep their loose results
 
-`auth.js` imports `getOpenCodeDataDir` and `OPENCODE_CONFIG_DIR` from
-`../../opencode/config-files.js`. That owner's declaration exposes both paths without
-duplicating their configuration logic.
-
-`resolveConfigApiKey` currently evaluates `os.homedir()` without an `os` import
-when its caller omits `homeDir`. Adding the import would change an existing
-failure into success. The behavior-preserving conversion leaves this file
-unchanged until that defect can be fixed separately.
-
-`auth.test.js` asserts that omitting `homeDir` throws `os is not defined`.
-An ambient declaration for `os` would claim a runtime binding that this module
-does not provide. The unresolved name is local to this file; changing a
-neighbouring module's types cannot resolve it.
+`readJsonFile` returns parsed JSON and `normalizeAuthEntry` promises only
+`object`: neither checks fields, so each provider validates the fields it
+reads. `getAuthEntry` returns the first truthy entry with the caller's own
+entry type.
 
 ### Why external scalar guards remain
 

@@ -1,13 +1,11 @@
 import { EnvironmentPatchError, isProjectId, parseProjectPatch, parseUserPatch } from './store.js';
 import type { EnvironmentStore } from './store.js';
 import type { EnvironmentRuntime } from './runtime.js';
+import type { Response } from '../shared/http-contracts.js';
 
 type ProjectView = ReturnType<EnvironmentStore['describeProject']> & { status: ReturnType<EnvironmentRuntime['projectStatus']> };
 type EnvironmentResponseBody = ReturnType<EnvironmentStore['describeUser']> | ProjectView | { error: string };
-interface EnvironmentResponse {
-  status: (code: number) => EnvironmentResponse;
-  json: (body: EnvironmentResponseBody) => EnvironmentResponse;
-}
+type EnvironmentResponse = Response<EnvironmentResponseBody>;
 type EnvironmentRequest = { params: { projectId: string }; body: unknown };
 type EnvironmentHandler = (req: EnvironmentRequest, res: EnvironmentResponse) =>
   EnvironmentResponse | undefined | Promise<EnvironmentResponse | undefined>;

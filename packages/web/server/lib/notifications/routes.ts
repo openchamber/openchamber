@@ -30,7 +30,7 @@ interface NotificationRouteDependencies extends Pick<PushRuntime,
   'ensurePushInitialized' | 'getOrCreateVapidKeys' | 'addOrUpdatePushSubscription' | 'removePushSubscription' |
   'updateUiVisibility' | 'isUiVisible' | 'setPushInitialized'>, Pick<SessionRuntime,
   'getSessionActivitySnapshot' | 'getSessionStateSnapshot' | 'getSessionState'> {
-  uiAuthController?: { ensureSessionToken?: (req: NotificationRequest, res: NotificationResponse) => Promise<string | null> };
+  uiAuthController?: { ensureSessionToken?: (req: NotificationRequest, res: NotificationResponse) => string | null | Promise<string | null> };
   ensureGlobalWatcherStarted?: () => Promise<void>;
   getUiSessionTokenFromRequest: (req: NotificationRequest) => string | null;
   readSettingsFromDiskMigrated: () => Promise<PushSettings>;

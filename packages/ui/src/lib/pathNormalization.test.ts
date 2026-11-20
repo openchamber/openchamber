@@ -31,6 +31,7 @@ describe('normalizePath', () => {
   describe('drive letter casing', () => {
     test('uppercases lowercase Windows drive letter', () => {
       expect(normalizePath('c:\\Users\\me\\project')).toBe('C:/Users/me/project');
+      expect(normalizePath('c:/Users/me/project')).toBe('C:/Users/me/project');
     });
 
     test('preserves already-uppercase drive letter', () => {
@@ -98,6 +99,11 @@ describe('normalizePath', () => {
 
     test('strips trailing slashes from Unix paths', () => {
       expect(normalizePath('/home/user/project/')).toBe('/home/user/project');
+    });
+
+    test('trims whitespace around a path', () => {
+      expect(normalizePath(' /home/user/project')).toBe('/home/user/project');
+      expect(normalizePath('/home/user/project\n')).toBe('/home/user/project');
     });
   });
 

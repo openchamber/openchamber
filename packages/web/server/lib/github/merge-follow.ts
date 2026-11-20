@@ -5,7 +5,7 @@ import { isTrackedItemInput, parseTrackedItem, trackedItemKey } from '../tracked
 import type { ServerTrackedItemState, TrackedThread } from '../tracked-items/contracts.js';
 import type { createTrackedItemsService } from '../tracked-items/service.js';
 import type { MutationRecord, MutationResult } from '../source-control/mutation-storage.js';
-import type { ProviderMutationContext } from '../source-control/provider-contract.js';
+import type { ResolvedMutationTarget, ProviderMutationContext } from '../source-control/provider-contract.js';
 import type { GitHubEnvelope } from './contracts.js';
 
 type MergeSnapshot = z.infer<typeof snapshotSchema>;
@@ -20,12 +20,9 @@ interface MergeFollowOptions {
 interface MergeMutation {
   context: Pick<ProviderMutationContext, 'provider' | 'instance' | 'accountId'>;
   kind: string;
-  input: { cancel?: boolean; method: string };
+  input: { cancel?: unknown; method?: unknown };
 }
-type SucceededMutation = MergeMutation & (
-  { replayed: true; record: MutationRecord }
-  | { replayed: false; record: Pick<MutationRecord, 'target'> & { result: MutationResult } }
-);
+type SucceededMutation = MergeMutation & { replayed: boolean; record: MutationRecord };
 type TrackedService = Pick<ReturnType<typeof createTrackedItemsService>, 'setServerInterest' | 'subscribe' | 'refresh'>;
 interface ErrorFields { code?: unknown; message?: unknown }
 const hasErrorFields = (value: unknown): value is ErrorFields => value != null;
@@ -133,7 +130,7 @@ export function createMergeFollowRuntime({ dataDir, notify, now = Date.now }: Me
       unsubscribe = service.subscribe((states) => { void accept(states).catch((error: GitHubEnvelope['data']) => console.warn('[merge-follow] update failed:', errorField(error, 'message'))); });
       return serialize(async () => { await loaded; interest(); attachedService().refresh([...entries.values()].map((entry) => entry.item)); });
     },
-    onMutationStarting({ context, kind, input, target }: MergeMutation & { target?: MutationRecord['target'] }) {
+    onMutationStarting({ context, kind, input, target }: MergeMutation & { target?: ResolvedMutationTarget }) {
       if (context.provider !== 'github' || kind !== 'change-request-merge' || !input.cancel || !target) return null;
       const item = parseTrackedItem({ provider: 'github', kind: 'pull', instance: context.instance, accountId: context.accountId,
         owner: target.project.owner, repo: target.project.name, number: target.number });
@@ -158,7 +155,7 @@ export function createMergeFollowRuntime({ dataDir, notify, now = Date.now }: Me
       return serialize(async () => {
         await loaded;
         const key = trackedItemKey(item);
-        if (input.cancel || record.result.merged) {
+        if (input.cancel || record.result?.merged) {
           const previous = entries.get(key);
           if (!previous) return;
           entries.delete(key);
@@ -167,13 +164,14 @@ export function createMergeFollowRuntime({ dataDir, notify, now = Date.now }: Me
           interest();
           return;
         }
-        if (!WAITING_OUTCOMES.includes(record.result.outcome)) return;
+        const outcome = record.result?.outcome;
+        if (!WAITING_OUTCOMES.includes(outcome)) return;
         if (!entries.has(key) && entries.size >= 200) throw new Error('Too many followed pull requests');
         const previous = entries.get(key);
         entries.set(key, { item, startedAt: now(), last: {
           state: 'open', headSha: record.target.headSha,
-          isInMergeQueue: record.result.outcome === 'queued',
-          autoMergeRequest: record.result.outcome === 'auto-merge' ? { enabledAt: new Date(now()).toISOString(), mergeMethod: input.method.toUpperCase() } : null,
+          isInMergeQueue: outcome === 'queued',
+          autoMergeRequest: outcome === 'auto-merge' ? { enabledAt: new Date(now()).toISOString(), mergeMethod: String(input.method).toUpperCase() } : null,
         } });
         try { await persist(); }
         catch (error) { if (previous) entries.set(key, previous); else entries.delete(key); throw error; }

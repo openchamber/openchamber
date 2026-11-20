@@ -15,7 +15,7 @@ export const forgejoDescriptor = Object.freeze({
   instance: Object.freeze({
     ...giteaDescriptor.instance,
     defaultInstances: Object.freeze(['https://codeberg.org']),
-    normalize: (value: string) => normalizeOriginInstance(value, { label: 'Forgejo' }),
+    normalize: (value: string | undefined) => normalizeOriginInstance(value, { label: 'Forgejo' }),
   }),
   presentation: Object.freeze({
     ...giteaDescriptor.presentation,

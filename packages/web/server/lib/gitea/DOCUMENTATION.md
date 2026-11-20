@@ -95,56 +95,26 @@ gt puts its configuration under `GITEA_CLI_CONFIG_DIR`, else the platform's conf
 
 The injected process runner can return text or bytes; only string output supplies a token or a configuration path. Thrown values need not be `Error` instances. The failure guard establishes only non-nullness, leaving `code`, `killed` and `stderr` unchecked until their existing comparisons or string checks run. The YAML schemas remain nullable and passthrough: an active account's `auth_method` is checked by the schema, while unrelated file fields remain unknown. An invalid instance origin is skipped without preventing other hosts from being listed.
 
-### Why some implementations remain JavaScript
+### Why the client leaves JSON unchecked
 
-`shared/guards.js` exports `isString` as a boolean check. It accepts boxed
-strings and objects with a String `Symbol.toStringTag`, including objects
-without string methods. A predicate promising `string` or `String` would be
-false. Converting that small helper while preserving its boolean return does
-not narrow its callers.
+JSON syntax and pagination-container checks do not establish a Gitea payload
+schema. JSON reads and writes return `JsonValue`, and pages and collections
+contain unchecked JSON entries. Text and byte reads also admit `null` for a
+204. Resource checks still validate the fields they consume: a mapped
+repository establishes a numeric id, but its parent and pull request branches
+remain unchecked. Verification narrows version and user payloads with the
+existing checks before publishing their fields. User ids still accept every
+nonnegative integer, including values outside the safe-integer range.
 
-The exact blocked uses, starting with the largest implementation, are:
+Failure shapes leave fields unchecked until the existing string and status
+comparisons run. Their non-nullness guards preserve property reads on thrown
+primitives. The optional request-error status uses an erased declaration, so
+constructing an error without a status leaves that own property absent.
 
-- `resources.js`: `labelFilter` calls `name.includes` after `isString(name)`.
-  A String-tagged object without `includes` throws `TypeError` before any
-  provider call. Declaring unchecked label entries as strings hides that case.
-- `provider.js`: `serviceFor` assigns `sourceControlIdentity` and
-  `sourceControlPersistedAccount` to an arbitrary caught value. A resource
-  rejection with `null` or a number becomes a `TypeError` at that assignment.
-  Guarding and rethrowing the original value would change the rejection.
-- `mappers.js`: `mapGiteaReviewBody` calls `text(value.body).trim()`.
-  `text` can return a String-tagged object without `trim`. A boxed body is
-  returned unchanged in the mapped comment, so the result cannot promise a
-  primitive string either.
-- `client.js`: `classifyGiteaFailure` calls `code.startsWith`. A boxed TLS
-  code is classified as unreachable; a String-tagged object without that
-  method throws `TypeError`.
-- `verify.js`: `parseGiteaVersion` calls `match` and `parseGiteaUser` calls
-  `trim` after the same boolean check. `isVersion` establishes no stronger
-  string contract.
-
-The compiler reports `TS18046` at `labelFilter`, `serviceFor`,
-`classifyGiteaFailure` and `parseGiteaVersion`, and `TS2571` at the review
-body's `trim` when the unchecked inputs are annotated honestly. The folder's
-tests pin the label, review-body, failure-code and resource-rejection cases.
-Changing declarations or exporting types outside this folder cannot establish
-the missing methods or make every thrown value assignable.
-
-Type-only corrections to neighbouring modules, converting the shared boolean
-helper, and dependency declaration augmentations cannot resolve these remaining
-boundaries. The missing string methods are operations on unchecked values inside
-this folder, and the caught resource rejection has no declared type that can
-exclude null or primitives. Adding a guard, coercing the value, or replacing the
-operation would change the existing failure behavior. All five implementations
-therefore remain JavaScript until that behavior may change.
-
-`source-control/pat-account-auth.ts` now provides `PatAccountAuthOptions`,
-including the edition, SSH and CLI callbacks that this provider supplies.
-Those options no longer block conversion. The remaining client's inferred
-`namespace: null | undefined` and the native fetch declaration's refusal of
-an explicitly undefined body can be corrected with types, but neither
-correction removes the unchecked failure-code boundary. No outside file is
-changed for those corrections while the implementation remains JavaScript.
+The injected fetch contract permits the explicitly undefined request body that
+the client sends. Manual redirects include both Node's 3xx response and the
+browser-like `opaqueredirect` response defined by the Fetch standard; neither
+response is followed.
 
 ### Why remote resolution can be typed separately
 

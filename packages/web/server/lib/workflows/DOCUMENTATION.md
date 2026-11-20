@@ -37,7 +37,7 @@ card and the Workflows panel open them.
   folder, its permission rules, and its model when the call names none. An
   agent asked for a schema answer also gets an allow for
   `openchamber_workflow_answer`. Also posts the report as a synthetic message.
-- `json-schema.js`: the small part of JSON Schema `agent({ schema })` checks.
+- `json-schema.ts`: the small part of JSON Schema `agent({ schema })` checks.
 - `store.ts`: run files under `<data-dir>/workflow-runs/`, one per run. A
   settled run (finished, report delivered) stays in memory only as
   `lightenWorkflowRun(run)`: no script, prompts or full answers, enough for
@@ -146,7 +146,7 @@ session proposed. `workflow.save` writes a script to
   runs.
 - The schema check covers `type`, `properties`, `required`,
   `additionalProperties: false`, `items` and `enum`; other keywords pass
-  unchecked (`json-schema.js`).
+  unchecked (`json-schema.ts`).
 - A script is at most 100 000 characters and its `args` at most 50 000 as JSON;
   a run without `args` reads `{}`.
 - A report is minted with its message id before the first delivery attempt
@@ -301,33 +301,13 @@ permits the existing incremental request construction without changing the
 SDK's readonly contract elsewhere. The parent model is never rewritten to
 satisfy the declaration.
 
-### Why the schema implementation remains JavaScript
+### Why schema keys still use native coercion
 
-`json-schema.js` accepts loose schema objects through `../shared/guards.js`,
-which exposes a record predicate. Array entries in `type` and
-`required` are unchecked and receive native property-key coercion. Its type
-dictionary also exposes inherited members. Declaring those arrays as string
-arrays, or filtering them to strings, would overstate validation or change
-acceptance. In particular, the outside `ObjectConstructor.hasOwn` declaration
-accepts `PropertyKey`, while the JavaScript call coerces unchecked entries,
-including objects and null. The shared record predicate establishes neither a
-keyword contract nor property-key arrays.
-
-Even a local overload for `Object.hasOwn` cannot type `TYPE_CHECKS[type]`:
-the key is unchecked and a coerced key can select either a function or an
-inherited non-callable value. The optional call deliberately throws for
-`__proto__` and accepts `constructor`. A callable dictionary would overstate
-the contract; validating or converting keys would change its runtime behavior.
-
-Type-only corrections to neighbouring modules cannot resolve
-`validateJsonSchema`'s `TYPE_CHECKS[type]?.(value)` expression. TypeScript
-requires an index key and a callable optional-call target, while the existing
-checks establish neither for an entry of `schema.type`. Widening
-`Object.hasOwn` can describe its native coercion of `schema.required` entries,
-but cannot describe that indexed optional call. Exporting types, converting
-the shared re-export helper or augmenting dependency declarations leaves this
-local expression unchanged. The whole file remains JavaScript to preserve
-these unchecked-input behaviors.
+Entries in `type` and `required` are unchecked. `Object.fromEntries` supplies
+native property-key coercion for entries that are not already keys. Type
+lookups still see inherited members and bind the dictionary as the receiver.
+A missing entry does not match; a non-callable entry such as `__proto__`
+still throws a `TypeError`.
 
 `../opencode/session-activity.d.ts` supplies the activity probe's optional
 signal and leaves active-status values unchecked. `agent-session.ts` keeps its

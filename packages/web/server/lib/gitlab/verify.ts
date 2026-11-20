@@ -3,7 +3,7 @@ import { parseGitLabUser } from './user.js';
 
 export interface GitLabTokenVerificationOptions {
   origin: string;
-  token: string;
+  token: string | undefined;
   fetch?: typeof fetch;
   timeoutMs?: number;
 }

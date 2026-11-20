@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { hasMessage } from './contracts.js';
-import type { JsonValue } from '@opencode/client';
+import type { TranslatedEvent } from '../event-stream/translate-v2.js';
 
 const sessionEventSchema = z.object({
   type: z.string(),
@@ -28,7 +28,7 @@ export const createTurnDurationRecorder = <Result>({ persistSessionMetadataPatch
       .catch((cause: unknown) => console.warn('[turn-duration] could not record a turn length:', (hasMessage(cause) ? cause.message : undefined) ?? cause));
   };
 
-  const processPayload = (payload: JsonValue | undefined, directory = '') => {
+  const processPayload = (payload: TranslatedEvent | undefined, directory = '') => {
     if (hasEventType(payload) && payload.type === 'server.connected') {
       startedAt.clear();
       return;

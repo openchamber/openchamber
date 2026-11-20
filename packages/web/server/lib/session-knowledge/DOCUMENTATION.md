@@ -204,12 +204,12 @@ depends on how the user works.
 
 ### Invariants
 
-`ui-blocks-guidance.js` is generated from `packages/ui/src/components/chat/uiBlocks/guidance.ts` by `bun run --cwd packages/ui ui-blocks:generate`. Changes to the guidance originate in that source so regeneration preserves them.
+`ui-blocks-guidance.ts` is generated from `packages/ui/src/components/chat/uiBlocks/guidance.ts` by `bun run --cwd packages/ui ui-blocks:generate`. Changes to the guidance originate in that source so regeneration preserves them.
 
 A session whose agent has the managed `openchamber_render` tool (the setting is
 on and OpenChamber launched OpenCode, read through `isPageRenderingAvailable`)
 is told how to draw UI blocks inside its reply (`UI_BLOCKS_GUIDANCE`, generated
-from the UI's block catalog into `ui-blocks-guidance.js`, see
+from the UI's block catalog into `ui-blocks-guidance.ts`, see
 `packages/ui/src/components/chat/uiBlocks/DOCUMENTATION.md`) and when a page
 still beats them (`RENDER_PAGE_GUIDANCE`): how something looks, or a custom
 drawing the block components do not cover. Data is never a page, even when the
@@ -315,15 +315,3 @@ tool-availability callbacks retain their existing fallback values.
 String guards reject non-string and blank request values before trimming.
 Caught pin-write failures expose their message without assuming an Error
 instance or a string message.
-
-`ui-blocks-guidance.js` remains generated JavaScript because
-`UI_BLOCKS_GUIDANCE_PATH` in
-`packages/ui/src/components/chat/uiBlocks/guidanceModule.ts` owns its output
-path. Converting the output requires that symbol to target
-`ui-blocks-guidance.ts`. Renaming only the output would leave the generator
-writing the old filename and its generated-content test reading that filename.
-
-The remaining conversion requires a runtime output-path change in the UI
-generator. Server-only type corrections, type exports, helper conversions and
-dependency declarations cannot redirect that generator. Keep the generated
-JavaScript until the assignment includes changing `UI_BLOCKS_GUIDANCE_PATH`.

@@ -71,3 +71,7 @@ The sweep keeps a session for `ttlMs` after it is used or cancelled, which prese
 ### Why `localOnly` is stored at pairing and not derived from `usesRelay`
 
 `usesRelay` is false for every device paired before Pairing v2 and for a device paired through a public `https` tunnel, and neither of those stays inside the home network. Only the pairing link knows that the device was given nothing but LAN addresses, so the flag is taken from it once and kept on the client record, where `../notifications/client-push-access.js` reads it to send the device no push and `/api/client-auth/connection/candidates` reads it to leave the relay out. A device that reaches the server through the relay anyway is not local-only, so the relay request clears the flag. Devices paired before the flag existed keep their notifications; to stop them, the user pairs the device again. A phone that pairs again for the home network only replaces its old record through the dedupe key; `createClient` returns the ids it replaced so the redeem route can remove their push registrations, which would otherwise keep delivering under the old key.
+
+### Why candidate URL normalization checks for a string
+
+The pairing route passes the unchecked `serverUrl` body field. The normalizer ignores non-strings so the route can fall back to the request origin. URL parsing alone would coerce some non-string values into URLs.

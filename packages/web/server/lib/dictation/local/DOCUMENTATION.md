@@ -22,62 +22,66 @@ provider selection and readiness.
 
 ## Decisions
 
-### Why native loading remains JavaScript
+### Why native loading does not promise wrapper constructors
 
 `sherpa-onnx-node` 1.13.8 has JavaScript and JSDoc but no declaration entry.
-The fallback loads a raw `.node` addon, whose exports are not checked by the
-loader. A typed conversion could only return `unknown`, which the server's lint
-gate rejects for public results. Declaring constructors and their results would
-promise shapes that this boundary does not establish. The loader, recognizer and
-TTS implementations remain JavaScript at that boundary.
+The wrapper and raw addon both expose the native version string. The loader
+returns either module as-is and leaves the constructor fields unchecked.
+The raw addon exports `createOfflineRecognizer` and `createOfflineTts`; it
+does not expose the wrapper's `OfflineRecognizer` and `OfflineTts` classes.
 
-The missing outside contracts are `sherpa-onnx-node.OfflineRecognizer` and
-`sherpa-onnx-node.OfflineTts`, together with the corresponding raw
-`sherpa-onnx.node` exports. Their owner must describe constructor configuration,
-recognizer streams and results, TTS samples and sample rates, and optional
-cleanup methods. The wrapper has no declaration entry; importing it as a typed
-module produces TS7016. Typing only the wrapper would still leave the raw-addon
-fallback unchecked.
+Both engines check that the wrapper's class is a function before
+constructing it. The recognizer then throws the same `TypeError` the runtime
+would for a non-constructor; TTS throws its own message that tells the pinned
+wrapper's class from the raw addon's missing export. The native recognizer,
+its streams and results are declared by the fields the engine reads and stay
+unchecked, as the TTS engine's are. Kokoro requires a speaker bank and can name
+additional catalog file roles for lexicons. VITS, including Piper, accepts an
+optional espeak-ng data directory. The catalog types file roles as a plain
+dictionary, so the worker builds the TTS configuration through `ttsConfigOf`,
+which refuses a model type other than VITS or Kokoro and a missing model,
+tokens, espeak or voices file by name; the recognizer refuses a missing role
+the same way instead of passing `undefined` to `path.join`.
 
-The raw addon is not the wrapper's constructor API. The installed 1.13.8
-macOS ARM64 addon exports `createOfflineRecognizer` and `createOfflineTts`;
-its `OfflineRecognizer` and `OfflineTts` properties are absent. A local
-declaration that gives both loader paths the wrapper's constructors would be
-false. `loadSherpaOnnxNode` returns either module without checking these
-properties, and `SherpaOfflineRecognizerEngine` constructs the recognizer
-without a constructor guard. `SherpaTtsEngine` checks only that `OfflineTts`
-is a function, which does not establish its instance or generation-result
-contract. Correcting another server module's types or exporting its types
-cannot establish those native contracts.
+The recognizer decodes a whole segment at a time and raises the gain of a
+quiet segment, up to 50 times, toward a 0.6 peak. `takePendingSegment` hands
+the segment back without decoding it, so the worker acknowledges a commit
+before the decode, which is quadratic in the segment's length and would
+otherwise hold the IPC past the parent's request timeout;
+`sherpa-recognizer.test.js` guards that order.
 
-### Why the worker runtime and client remain JavaScript
+### Why TTS copies the generated samples
 
-Node's `Process.on('message')` listener receives `unknown`.
-`ChildProcess.on('message')` receives `Serializable`, which also includes scalar
-values and arbitrary objects. Neither outside contract establishes the request
-or response fields this folder reads. The worker accesses request fields without
-validation, and the client forwards response results and event payloads without
-validating their shapes.
+Electron's V8 memory cage rejects external-backed native typed arrays, so
+generation requests `enableExternalBuffer: false`. The engine accepts both
+native `Float32Array` and plain array output and copies into a `Float32Array`
+before encoding PCM16LE. Playback uses a positive numeric rate from the audio
+or engine, then falls back to 24 kHz. The speaker and speed checks still
+validate worker inputs at use time.
 
-These listeners would need an owner-provided checked request/response transport
-before their values could honestly have a dictation protocol type. Annotating a
-listener with that type would assert an unchecked shape. Adding rejection rules
-would change existing error and forwarding behavior. The runtime and client keep
-their existing IPC boundary, including advanced serialization and the audio
-buffer fallback.
+### Why the worker IPC is parsed on both ends
 
-In `DictationWorkerClient`, the first unresolved input is
-`handleWorkerMessage(message)`. Its response discriminator does not check
-`requestId`, `ok`, `result` or `error`. `synthesizeSpeech` then reads the
-unchecked result's audio and format; `createSession` forwards its unchecked
-sample rate. In `worker-runtime.js`, `handleRequest(message)` reads the
-unchecked process message's discriminator and fields before the audio
-conversion guard can run. `sendToParent` forwards segment events unchanged.
-Node's broad listener declarations accurately describe these inputs.
-Narrowing those declarations through augmentation would assert a protocol
-that Node does not check; widening them or converting a helper cannot
-establish the missing fields. New validation would change the existing
-acceptance and failure paths.
+Node hands a forked process's messages to listeners as `unknown` or
+`Serializable`, and neither side checked the fields it read: the worker took
+any request fields to the engines, and the client forwarded results and session
+events unchanged. `worker-protocol.ts` holds Zod schemas for both directions,
+and each side parses where a message arrives. A request with the wrong fields
+is answered `Malformed dictation worker request: <type>` on the same error path
+as an unknown type, which keeps its old message. A non-text language counts as
+no hint. Append audio is checked before the session lookup, so a bad payload is
+refused even for a session that is already gone. On the client, synthesized audio that is not bytes rejects the request,
+a sample rate that is not a positive number falls back to 16 kHz, a malformed
+committed or transcript payload becomes a session error, a malformed reply to
+a pending request rejects that request, because append, commit, clear and close
+have no timeout and would otherwise hold the worker open, and any other message
+outside the protocol is ignored, as unknown message types were.
+`worker-ipc.test.js` pins each case against a stand-in worker and the real
+forked one. Advanced serialization and the serialized-buffer fallback for audio
+are unchanged.
+
+`worker-process.js` stays JavaScript because it is the fork target run by path:
+it installs source resolution before importing `worker-runtime.ts`, and
+`scripts/node-source-entries.test.mjs` lists it as an entry.
 
 ### Why the downloader declares Node's fetch locally
 
@@ -100,7 +104,8 @@ Windows extracts with a 7-Zip binary outside `app.asar`.
 An isolated dependency layout keeps the platform package beneath
 `sherpa-onnx-node`. Resolution tries that wrapper's require first, then this
 module's require. The native-library directory is prepended to the platform's
-loader path before loading the raw addon.
+loader path before loading the raw addon. Windows can inherit a differently
+cased `PATH` key; reuse that key to avoid ambiguous child-process lookup.
 
 ### Why model-language hints are restricted
 

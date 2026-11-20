@@ -96,7 +96,7 @@ export async function getGhCliToken(host?: string | null, login?: string | null)
   return promise;
 }
 
-export function forgetGhCliToken(host: string | null | undefined, token: string) {
+export function forgetGhCliToken<Token>(host: string | null | undefined, token: Token) {
   const prefix = `${hostKeyFor(host)}\n`;
   for (const [key, answer] of answers) {
     if (key.startsWith(prefix) && answer.token === token) answers.delete(key);

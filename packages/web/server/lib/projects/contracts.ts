@@ -41,10 +41,10 @@ export interface PersonalProjectSetup extends Omit<SharedProjectConfig, 'plansDi
   notesTodosInRepository: boolean;
 }
 
-export type SharedProjectRead =
-  | { status: 'ok'; config: SharedProjectConfig; document: SharedProjectDocument }
+export type SharedProjectRead<Document extends SharedProjectDocument = SharedProjectDocument> =
+  | { status: 'ok'; config: SharedProjectConfig; document: Document }
   | { status: 'missing'; document?: never }
-  | { status: 'invalid'; reason: string; document?: SharedProjectDocument };
+  | { status: 'invalid'; reason: string; document?: Document };
 
 export interface StoredProjectSetupPatch {
   'setup-worktree'?: string[];
@@ -91,7 +91,7 @@ export type ScheduledTaskSchedule =
   | { kind: 'once'; date: string; time: string; timezone: string }
   | { kind: 'cron'; cron: string; timezone: string };
 
-export interface ScheduledTaskExecution {
+export type ScheduledTaskExecution = {
   prompt: string;
   providerID?: string;
   modelID?: string;
@@ -101,9 +101,9 @@ export interface ScheduledTaskExecution {
   goalEnabled?: boolean;
   goalTokenBudget?: number;
   permissionAutoAccept?: boolean;
-}
+};
 
-export interface ScheduledTaskState {
+export type ScheduledTaskState = {
   createdAt: number;
   updatedAt: number;
   lastStatus: ScheduledTaskStatus;
@@ -115,9 +115,9 @@ export interface ScheduledTaskState {
   lastError?: string | undefined;
   lastRunIsolated?: boolean | undefined;
   lastRunBranch?: string | undefined;
-}
+};
 
-export interface ScheduledTask {
+export type ScheduledTask = {
   id: string;
   name: string;
   enabled: boolean;
@@ -130,7 +130,7 @@ export interface ScheduledTask {
   baseBranch?: string;
   cleanupWorktree?: boolean;
   targetSessionId?: string;
-}
+};
 
 export interface ScheduledTaskStateResult {
   task: ScheduledTask | null;
@@ -153,7 +153,7 @@ export interface ScheduledWorktreeCleanup {
   branch: string | null;
   startedAt: number;
   ownerPID: number;
-  ownerInstance?: string;
+  ownerInstance?: string | undefined;
   phase: 'waiting' | 'removing';
 }
 
