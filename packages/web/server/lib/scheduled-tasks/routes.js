@@ -35,9 +35,10 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
   // Per-run history (#2174 Gap 1): one durable row per completed run,
   // newest first. since/until accept epoch milliseconds or any
   // Date.parse-able string; limit defaults to 200 (max 1000). A supplied
-  // non-empty bound that parses as neither is rejected with 400 (#2155):
-  // forwarding it as undefined would silently widen the request into an
-  // unfiltered one. An absent or empty bound stays "no filter".
+  // non-empty bound that parses as neither, or a repeated bound (array), is
+  // rejected with 400 (#2155, #2371): forwarding it as undefined would
+  // silently widen the request into an unfiltered one. An absent or empty
+  // bound stays "no filter".
   app.get('/api/projects/:projectId/scheduled-tasks/run-history', async (req, res) => {
     const projectID = parseProjectID(req);
     if (!projectID) {
@@ -54,6 +55,9 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
       return Number.isFinite(parsed) ? parsed : undefined;
     };
     const parseTimeFilter = (name, value) => {
+      if (value !== undefined && typeof value !== 'string') {
+        return { error: `${name} must be a single value` };
+      }
       const parsed = parseTime(value);
       if (typeof value === 'string' && value.length > 0 && parsed === undefined) {
         return { error: `${name} must be epoch milliseconds or a parseable date string` };
