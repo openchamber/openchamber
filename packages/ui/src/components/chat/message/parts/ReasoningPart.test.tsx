@@ -161,12 +161,13 @@ const installDomStub = () => {
   };
 };
 
-// A reasoning text whose summary (first 120 chars) fits in the header but
-// whose expanded body content should only appear when the disclosure is open.
+// A reasoning text whose summary is cut by the header bound but whose tail
+// should only appear when the disclosure is open.
 const LONG_REASONING =
   'First thought about the task at hand and how to approach it carefully.\n' +
-  'This second line goes into much deeper detail about the internal reasoning ' +
-  'process that should remain hidden in the collapsed header view.';
+  'This second line goes into much deeper detail about the internal reasoning. ' +
+  'Padding sentence so the summary passes the header bound. '.repeat(8) +
+  'UNIQUE_TAIL_MARKER that must stay out of the collapsed header.';
 
 describe('ReasoningTimelineBlock', () => {
   test('renders reasoning traces behind an accessible collapsed disclosure by default', () => {
@@ -234,10 +235,25 @@ describe('ReasoningTimelineBlock', () => {
       </TestProviders>,
     );
 
-    // Deep body content beyond 120 chars should be cut from the summary span
-    expect(markup).not.toContain('remain hidden in the collapsed header view');
+    // Text beyond the header bound is cut from the summary span
+    expect(markup).not.toContain('UNIQUE_TAIL_MARKER');
     // The ellipsis character marks that the text was truncated
     expect(markup).toContain('…');
+  });
+
+  test('keeps a summary that fits the new bound whole', () => {
+    const markup = renderToStaticMarkup(
+      <TestProviders>
+        <ReasoningTimelineBlock
+          text={`Checking the cache path before the wide layout change and confirming the header keeps the whole line ${'word '.repeat(20)}MEDIUMTAILMARKER.`}
+          blockId="reasoning-medium"
+        />
+      </TestProviders>,
+    );
+
+    // Longer than the old 80-character bound, shorter than the header bound.
+    expect(markup).toContain('MEDIUMTAILMARKER');
+    expect(markup).not.toContain('…');
   });
 
   test('omits trailing empty HTML comments from the header summary', () => {

@@ -36,7 +36,7 @@ const cleanReasoningText = (text: string): string => {
         .trim();
 };
 
-const SUMMARY_MAX_CHARS = 80;
+const SUMMARY_MAX_CHARS = 400;
 const SUMMARY_SOURCE_CHARS = 4000;
 const EXPANDED_CONTENT_UNMOUNT_DELAY_MS = 200;
 const EXPANDED_CONTENT_TRANSITION = { duration: 0.2, ease: 'easeOut' as const };
