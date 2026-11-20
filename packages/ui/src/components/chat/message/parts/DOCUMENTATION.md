@@ -700,6 +700,24 @@ and background rows follow the same rule through `useShellOutput`. Reading the
 whole output on every progress update is not an option: OpenCode sends one
 update, with the `shellID`, when the command starts.
 
+### Why a write row prefers a reported diff to its input preview
+
+A `write` row draws the call's content as a diff preview because the native
+tool reports no diff. A plugin that replaces the file tools reports one for the
+same call, and the row drew both, so one file's changes appeared twice.
+`carriesFileDiffs('write')` answers which tools *produce* per-file diffs, not
+which may show one, so the row's gate reads the result's own entries instead of
+that predicate. The reported diff wins because it is the only source with
+deletions when an existing file is overwritten, and because
+`resolveToolQuickOpenTarget` already resolves the row's line from the same
+entry. The preview hides only when the result branch actually draws that
+patch: an extension's output rule that replaces the result, or metadata whose
+diff text is no usable patch (the plain-text fallback entry), keeps the
+preview, while a valid patch shown as plain text because of its size still
+counts. Gating the result-diff branch back to edit and patch reopens the
+duplicate; `ToolPart.write-row-diff.test.tsx` pins the completed, running,
+native and unusable-patch cases.
+
 ### Message parts
 
 - Assistant Markdown treats raw HTML as inert visible text, including HTML
