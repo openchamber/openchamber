@@ -190,3 +190,63 @@ An `svg` fence in the Files Markdown preview draws as an image (`MarkdownSvg`). 
 ### Why an image and not inline markup
 
 Inline markup needs a sanitizer, and the app has none for SVG: `rehype-sanitize` strips `svg`, and a hand-written allowlist would be code to keep current against new attack forms. An image load gives the same picture for the case asked for (a static diagram) with no sanitizer, at the cost that the figure does not inherit page fonts or `currentColor`.
+
+# Bracket display math
+
+## Ownership
+
+`remarkMathCompatibility` parses inline and display math.
+`markdownMathBlocks` finds standalone bracket formulas with blank lines.
+It finds formulas at the document root and inside lists and quotes.
+It uses the shared Markdown parser.
+It prepares formulas before Streamdown completes partial text and divides a document into blocks.
+
+## Invariants
+
+- Formula contents stay unchanged in TeX annotations.
+- The file source for selection comments stays unchanged.
+- Code fences, links and ordinary bracket prose keep their Markdown behavior.
+- Content inside lists and quotes keeps its Markdown behavior.
+- Incomplete delimiters keep their Markdown behavior.
+- Remend reads `>` in a formula during its unfinished HTML tag handling.
+- Formulas inside a list nested in a quote remain unsupported.
+- Extension identifiers, repository references, and emoji shortcodes remain active outside formulas.
+- Candidates changed by those rules keep their Markdown behavior.
+- During streaming, rules permit formulas only when the formula body and surrounding source have no Markdown control characters.
+- If those rules and raw HTML are active, documents containing HTML keep their Markdown behavior.
+- Numeric single-dollar formulas follow the existing currency rule.
+
+## Decisions
+
+### Why Streamdown receives dollar delimiters
+
+Streamdown parses and groups `$$` formulas across blank lines.
+The preparer changes bracket delimiters to dollar delimiters of the same length.
+During streaming, it replaces formula punctuation with unused private-use characters.
+One Remend handler restores `>` before the HTML tag handler runs.
+Without it, an unfinished tag before a formula can hide the rest of the message.
+The final Remend handler restores the remaining punctuation before parsing.
+
+### Why text rules run on candidate paragraphs
+
+Text rules do not affect every formula.
+The parser applies those rules in the same order as the renderer.
+It leaves a candidate unchanged when a rule changes its text or turns the text into a link.
+
+### Why streaming text rules have a narrower scope
+
+Remend can join incomplete Markdown into an extension identifier.
+The preparer keeps the source when Markdown control characters make that result uncertain.
+The scope is checked again when streamed text is appended.
+
+### Why raw HTML keeps the source with text rules
+
+Raw HTML can wrap Markdown generated across paragraphs and containers.
+The preparer keeps the source when raw HTML nodes are present.
+Its preliminary parse includes math syntax so inline formulas do not count as HTML.
+
+### Why emoji rules carry a version
+
+Streamdown caches processors by the serialized plugin options.
+An emoji table is a `Map`, so its serialized value does not distinguish tables.
+The table version makes a replacement use a new processor.

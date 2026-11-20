@@ -7,7 +7,6 @@ import {
   type BlockProps,
   type Components,
   type HighlightResult,
-  type StreamdownProps,
 } from 'streamdown';
 import type { Pluggable } from 'unified';
 import type { Part } from '@/lib/opencode/model';
@@ -61,6 +60,7 @@ import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
 import { splitFrontmatter } from './markdown/frontmatter';
 import { MarkdownWindow, MarkdownWindowContext } from './markdown/markdownWindow';
 import { WindowedMarkdownBlock } from './markdown/WindowedMarkdownBlock';
+import { createMarkdownMathPreparer } from './markdown/markdownMathBlocks';
 import { FrontmatterProperties } from './markdown/FrontmatterProperties';
 import { isBareVideoUrl, markdownMediaCopySource, markdownMediaFilename } from './markdown/markdownVideo';
 
@@ -84,6 +84,19 @@ const defaultMermaidControls: MermaidControls = {
   download: true,
   copy: true,
   showPanZoomControls: true,
+};
+
+type MarkdownRule = RepositoryLinkContext | EmojiShortcodes;
+const markdownRuleVersions = new WeakMap<MarkdownRule, number>();
+let nextMarkdownRuleVersion = 1;
+const markdownRuleVersion = (rule: MarkdownRule | null | undefined): number => {
+  if (!rule) return 0;
+  let version = markdownRuleVersions.get(rule);
+  if (version === undefined) {
+    version = nextMarkdownRuleVersion++;
+    markdownRuleVersions.set(rule, version);
+  }
+  return version;
 };
 
 const ExportSafeImage: typeof MarkdownImage = (props) => {
@@ -169,7 +182,6 @@ const renderers = [
   { language: 'svg', component: MarkdownSvg },
 ];
 const linkSafety = { enabled: false };
-const remend: StreamdownProps['remend'] = { linkMode: 'text-only', singleTilde: false };
 const wholeDocument = (markdown: string) => [markdown];
 type BlockArrival = { active: boolean; firstNewIndex: number };
 const BlockArrivalContext = React.createContext<React.RefObject<BlockArrival>>({ current: { active: false, firstNewIndex: 0 } });
@@ -412,10 +424,16 @@ export function MarkdownContent({
   }, [isVSCode, purpose, preparedHighlights, fileReferences, directory, confirmFile]);
   const plugins = React.useMemo(() => ({ code, math: markdownMath, cjk: getMarkdownCjk(singleTilde), renderers }), [code, singleTilde]);
   const activeGuestLinks = guestLinks && guestLinks.length > 0 && !purpose ? guestLinks : null;
+  const prepareMath = React.useMemo(() => createMarkdownMathPreparer({ guestLinks: activeGuestLinks, repositoryLinks, emojiShortcodes, allowRawHtml: allowRawHtml && !literalText }), [activeGuestLinks, repositoryLinks, emojiShortcodes, allowRawHtml, literalText]);
+  const streamingMath = isStreaming && (windowed || mode === 'streaming');
+  const preparedMath = React.useMemo(
+    () => prepareMath(content, streamingMath, !(isStreaming && !streamingMath && (activeGuestLinks || repositoryLinks || emojiShortcodes))),
+    [activeGuestLinks, content, emojiShortcodes, isStreaming, prepareMath, repositoryLinks, streamingMath],
+  );
   const processing = React.useMemo(() => {
     const base = getMarkdownProcessingOptions(allowRawHtml, isVSCode, singleTilde);
     const extra: Pluggable[] = [];
-    if (emojiShortcodes) extra.push([remarkEmojiShortcodes, emojiShortcodes]);
+    if (emojiShortcodes) extra.push([remarkEmojiShortcodes, { shortcodes: emojiShortcodes, version: markdownRuleVersion(emojiShortcodes) }]);
     if (repositoryLinks) extra.push([remarkRepositoryReferences, repositoryLinks]);
     if (literalText) extra.push(remarkLiteralText);
     if (activeGuestLinks) extra.push([remarkGuestLinks, activeGuestLinks]);
@@ -465,18 +483,19 @@ export function MarkdownContent({
       lineNumbers
       controls={false}
       linkSafety={linkSafety}
-      remend={remend}
+      remend={preparedMath.remend}
       data-oc-html-mode={allowRawHtml ? 'sanitize' : 'text'}
       data-oc-export-highlighted={preparedHighlights ? 'ready' : undefined}
       data-oc-directory={directory}
       data-oc-guest-links={activeGuestLinks ? guestLinksVersion(activeGuestLinks) : undefined}
+      data-oc-reference-rules={repositoryLinks || emojiShortcodes ? `${markdownRuleVersion(repositoryLinks)}:${markdownRuleVersion(emojiShortcodes)}` : undefined}
       data-oc-runtime={runtimeKey}
       data-oc-file-references={fileReferences ? 'enabled' : 'disabled'}
       data-code-wrap={codeWrap ? 'true' : 'false'}
       data-table-wrap={tableWrap ? 'true' : 'false'}
       className="min-w-0 space-y-0"
     >
-      {content}
+      {preparedMath.content}
     </Streamdown>
   );
 
