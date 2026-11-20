@@ -48,12 +48,11 @@ const dropSplitTail = (text) => {
   return first >= 0xdc00 && first <= 0xdfff ? text.slice(1) : text;
 };
 
-const fitObjective = async ({ objective, charLimit, directory, sessionID, providerID, modelID, warn }) => {
+const fitObjective = async ({ objective, charLimit, directory, sessionID, providerID, modelID, warn, generateSmallModelText }) => {
   if (objective.length <= charLimit) return objective;
 
   let distilled = null;
   try {
-    const { generateSmallModelText } = await import('../small-model/index.js');
     const generated = await generateSmallModelText({
       prompt: objective,
       system: [
@@ -92,6 +91,12 @@ export const createSessionGoal = async ({
   persistSessionGoal,
   goalWriterSettings = readGoalWriterSettings(),
   writeSpec = writeGoalSpec,
+  writeObjectiveFile = writeObjective,
+  appendObjectiveVersionFile = appendObjectiveVersion,
+  generateSmallModelText = async (...args) => {
+    const smallModel = await import('../small-model/index.js');
+    return smallModel.generateSmallModelText(...args);
+  },
   // The objective is final: "Rewrite every goal" leaves it as it is.
   settled = false,
   // Keep the whole objective for the progress check instead of fitting it
@@ -125,15 +130,16 @@ export const createSessionGoal = async ({
     providerID,
     modelID,
     warn,
+    generateSmallModelText,
   });
   if (!objectiveText) throw new Error('goal objective is required');
 
   let objectiveFile = false;
   try {
-    await writeObjective(sessionID, objectiveText);
+    await writeObjectiveFile(sessionID, objectiveText);
     // The initial objective is the goal's first version (#1830). Best-effort:
     // a history failure must not cost the user the goal.
-    await appendObjectiveVersion(sessionID, objectiveText).catch((error) => {
+    await appendObjectiveVersionFile(sessionID, objectiveText).catch((error) => {
       warn('goal objective version record failed', error);
     });
     objectiveFile = true;

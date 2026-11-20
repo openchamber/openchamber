@@ -3,20 +3,11 @@ import express from 'express';
 import path from 'node:path';
 import request from 'supertest';
 
-vi.mock('child_process', () => ({
-  spawn: vi.fn(),
-  spawnSync: vi.fn(),
-}));
-
-vi.mock('../package-manager.js', () => ({
-  checkForUpdates: vi.fn(),
-  getUpdateCommand: vi.fn(),
-  detectPackageManagerDetails: vi.fn(),
-  isUnmanagedInstall: vi.fn(),
-}));
-
-const childProcess = await import('child_process');
-const packageManager = await import('../package-manager.js');
+const childProcess = { spawn: vi.fn(), spawnSync: vi.fn() };
+const packageManager = {
+  checkForUpdates: vi.fn(), getUpdateCommand: vi.fn(),
+  detectPackageManagerDetails: vi.fn(), isUnmanagedInstall: vi.fn(),
+};
 const { registerOpenChamberRoutes } = await import('./openchamber-routes.js');
 
 const createApp = ({
@@ -70,6 +61,9 @@ const createApp = ({
     fetchFreeZenModels: vi.fn(),
     getCachedZenModels: vi.fn(),
     desktopUpdater,
+    spawnChild: childProcess.spawn,
+    spawnSync: childProcess.spawnSync,
+    ...packageManager,
   };
 
   registerOpenChamberRoutes(app, dependencies);

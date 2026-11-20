@@ -6,24 +6,21 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 const TEMP_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'walkthrough-language-'));
 process.env.OPENCHAMBER_DATA_DIR = TEMP_DATA_DIR;
 
-vi.mock('../git/service.js', () => ({
-  getRepositoryRoot: vi.fn(async () => '/repo'),
-  getDiff: vi.fn(),
-  getRangeDiff: vi.fn(),
-  getUntrackedDiffs: vi.fn(async () => []),
-  listUntrackedPaths: vi.fn(async () => []),
-}));
-vi.mock('../small-model/index.js', () => ({
-  describeSmallModel: vi.fn(),
-  generateSmallModelText: vi.fn(),
-}));
-
 const { normalizeLanguage, languageName } = await import('./languages.js');
 const { buildPrompt } = await import('./prompt.js');
 const { buildCacheKey } = await import('./store.js');
-const { generateWalkthrough, getWalkthrough } = await import('./index.js');
-const { describeSmallModel, generateSmallModelText } = await import('../small-model/index.js');
-const { getDiff } = await import('../git/service.js');
+const { generateWalkthrough: generateWalkthroughImpl, getWalkthrough: getWalkthroughImpl } = await import('./index.js');
+const getDiff = vi.fn();
+const describeSmallModel = vi.fn();
+const generateSmallModelText = vi.fn();
+const walkthroughDeps = {
+  getRepositoryRoot: async () => '/repo', getDiff, getRangeDiff: vi.fn(),
+  getCommitDiff: vi.fn(async () => PATCH), getPullRequestDiff: vi.fn(async () => PATCH),
+  getUntrackedDiffs: async () => [], listUntrackedPaths: async () => [],
+  describeSmallModel, generateSmallModelText,
+};
+const generateWalkthrough = (options) => generateWalkthroughImpl(options, walkthroughDeps);
+const getWalkthrough = (options) => getWalkthroughImpl(options, walkthroughDeps);
 
 const SOURCE = { kind: 'working-tree', scope: 'all' };
 

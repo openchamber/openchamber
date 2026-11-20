@@ -32,38 +32,6 @@ const gitLibraries = {
   resolveWorktreeTopLevel: vi.fn(),
 };
 
-vi.mock('./index.js', () => ({
-  stageFiles: gitLibraries.stageFiles,
-  unstageFiles: gitLibraries.unstageFiles,
-  isGitRepository: gitLibraries.isGitRepository,
-  getStatus: gitLibraries.getStatus,
-  createWorktree: gitLibraries.createWorktree,
-  validateWorktreeCreate: gitLibraries.validateWorktreeCreate,
-  getWorktrees: gitLibraries.getWorktrees,
-  resolvePrimaryWorktreeRoot: gitLibraries.resolvePrimaryWorktreeRoot,
-  getGlobalIdentity: gitLibraries.getGlobalIdentity,
-  getCurrentIdentity: gitLibraries.getCurrentIdentity,
-  getRemoteUrl: gitLibraries.getRemoteUrl,
-  getRemotes: gitLibraries.getRemotes,
-  getRepositoryRemoteUrls: gitLibraries.getRepositoryRemoteUrls,
-  getProfiles: gitLibraries.getProfiles,
-  createProfile: gitLibraries.createProfile,
-  updateProfile: gitLibraries.updateProfile,
-  getProfile: gitLibraries.getProfile,
-  setLocalIdentity: gitLibraries.setLocalIdentity,
-  clearLocalIdentity: gitLibraries.clearLocalIdentity,
-  observeWorktreeTopology: gitLibraries.observeWorktreeTopology,
-  subscribeWorktreeTopologyChanges: gitLibraries.subscribeWorktreeTopologyChanges,
-  removeWorktree: gitLibraries.removeWorktree,
-  getPathDiff: gitLibraries.getPathDiff,
-  getPathDiffs: gitLibraries.getPathDiffs,
-  getRangeDiff: gitLibraries.getRangeDiff,
-  getCommitDiff: gitLibraries.getCommitDiff,
-  getLog: gitLibraries.getLog,
-  getCommitFiles: gitLibraries.getCommitFiles,
-  resolveWorktreeTopLevel: gitLibraries.resolveWorktreeTopLevel,
-}));
-
 const { registerGitRoutes } = await import('./routes.js');
 
 const createRouteRegistry = () => {
@@ -135,7 +103,7 @@ describe('git route renderer DTOs', () => {
       userName: 'Local Author', userEmail: 'local@example.com', sshCommand: 'ssh -i /private/local-key',
     });
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const globalResponse = createMockResponse();
     const currentResponse = createMockResponse();
 
@@ -151,7 +119,7 @@ describe('git route renderer DTOs', () => {
     gitLibraries.getRemoteUrl.mockResolvedValue(rawUrl);
     gitLibraries.getRemotes.mockResolvedValue([{ name: 'origin', fetchUrl: rawUrl, pushUrl: rawUrl }]);
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const urlResponse = createMockResponse();
     const remotesResponse = createMockResponse();
 
@@ -170,7 +138,7 @@ describe('git route renderer DTOs', () => {
       name: 'origin', fetchUrl: 'https://token:secret@', pushUrl: 'https://token:secret@',
     }]);
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const urlResponse = createMockResponse();
     const remotesResponse = createMockResponse();
 
@@ -188,7 +156,7 @@ describe('git route renderer DTOs', () => {
       signCommits: true, signingKey: '/public/signing.pub', color: 'string', icon: 'briefcase',
     }]);
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('GET', '/api/git/identities')({ query: {} }, response);
@@ -204,7 +172,7 @@ describe('git route renderer DTOs', () => {
 
   it('rejects legacy profile fields before create or update', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const createResponse = createMockResponse();
     const updateResponse = createMockResponse();
     const profile = { id: 'author-one', name: 'Work', userName: 'Author', userEmail: 'author@example.com' };
@@ -227,7 +195,7 @@ describe('git route renderer DTOs', () => {
     gitLibraries.clearLocalIdentity.mockResolvedValue(true);
     gitLibraries.setLocalIdentity.mockResolvedValue(undefined);
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/set-identity')({
@@ -253,7 +221,7 @@ describe('git route renderer DTOs', () => {
     gitLibraries.getGlobalIdentity.mockResolvedValue({ userName: null, userEmail: null, sshCommand: null });
     gitLibraries.clearLocalIdentity.mockResolvedValue(true);
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/set-identity')({
@@ -274,7 +242,7 @@ describe('git route renderer DTOs', () => {
     });
     gitLibraries.setLocalIdentity.mockResolvedValue(undefined);
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/set-identity')({
@@ -301,7 +269,7 @@ describe('git routes index mutations', () => {
 
   it('accepts legacy stage path payloads', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/stage')(
@@ -315,7 +283,7 @@ describe('git routes index mutations', () => {
 
   it('accepts bulk stage paths payloads', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/stage')(
@@ -329,7 +297,7 @@ describe('git routes index mutations', () => {
 
   it('accepts legacy unstage path payloads', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/unstage')(
@@ -343,7 +311,7 @@ describe('git routes index mutations', () => {
 
   it('accepts bulk unstage paths payloads', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/unstage')(
@@ -357,7 +325,7 @@ describe('git routes index mutations', () => {
 
   it('rejects invalid path payloads before calling git', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/stage')(
@@ -408,6 +376,7 @@ describe('contributor worktree authority', () => {
     const contributorProvenance = { compareAndSwap: vi.fn() };
     const { app, getRoute } = createRouteRegistry();
     registerGitRoutes(app, {
+      gitLibraryService: gitLibraries,
       resolveChangeRequestSource, createHttpsCredentialReference,
       resolveSourceControlAccount,
       networkOperations: {
@@ -454,6 +423,7 @@ describe('contributor worktree authority', () => {
     const transferContributorHead = vi.fn(async () => ({ state: 'succeeded' }));
     const { app, getRoute } = createRouteRegistry();
     registerGitRoutes(app, {
+      gitLibraryService: gitLibraries,
       resolveChangeRequestSource: vi.fn(async () => sameRepository),
       resolveSourceControlAccount: vi.fn(async () => ({
         credentialId: resolvedSource.context.accountId, credentialRevision: 3,
@@ -490,6 +460,7 @@ describe('contributor worktree authority', () => {
     });
     const { app, getRoute } = createRouteRegistry();
     registerGitRoutes(app, {
+      gitLibraryService: gitLibraries,
       resolveChangeRequestSource: vi.fn(async () => resolvedSource),
       resolveSourceControlAccount: vi.fn(async () => ({
         credentialId: resolvedSource.context.accountId, credentialRevision: 3,
@@ -523,6 +494,7 @@ describe('contributor worktree authority', () => {
     });
     const { app, getRoute } = createRouteRegistry();
     registerGitRoutes(app, {
+      gitLibraryService: gitLibraries,
       getSourceControlBinding: vi.fn(async () => ({
         revision: 7,
         repository: { repositoryId: 'repo_one', configRevision: 'config_one' },
@@ -553,6 +525,7 @@ describe('contributor worktree authority', () => {
     });
     const { app, getRoute } = createRouteRegistry();
     registerGitRoutes(app, {
+      gitLibraryService: gitLibraries,
       getSourceControlBinding: vi.fn(async () => ({
         revision: 0,
         repository: { repositoryId: 'repo_one', configRevision: 'config_one' },
@@ -578,7 +551,7 @@ describe('contributor worktree authority', () => {
 
   it('rejects client-supplied contributor endpoint and classification', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
     await getRoute('POST', '/api/git/worktrees')({
       query: { directory: '/repo' },
@@ -600,7 +573,7 @@ describe('worktree provenance listing', () => {
       { revision: 3, provenance: { kind: 'contributor-fork' } },
     ]);
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, { contributorProvenance: { readMany } });
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, contributorProvenance: { readMany } });
     const response = createMockResponse();
 
     await getRoute('GET', '/api/git/worktrees')({ query: { directory: '/repo' } }, response);
@@ -631,7 +604,7 @@ describe('git worktree topology routes', () => {
     gitLibraries.isGitRepository.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
     gitLibraries.getStatus.mockResolvedValue({ current: 'main' });
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const route = getRoute('GET', '/api/git/status');
 
     const repoResponse = createMockResponse();
@@ -650,7 +623,7 @@ describe('git worktree topology routes', () => {
       .mockResolvedValueOnce([])
       .mockRejectedValueOnce(new Error('git failed'));
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const route = getRoute('GET', '/api/git/worktrees');
 
     const listed = createMockResponse();
@@ -677,7 +650,7 @@ describe('git worktree topology routes', () => {
     gitLibraries.getWorktrees.mockResolvedValue([]);
     const emitWorktreeChanged = vi.fn();
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, { emitWorktreeChanged });
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, emitWorktreeChanged });
     const route = getRoute('GET', '/api/git/worktrees');
 
     await route({ query: { directory: '/repo' } }, createMockResponse());
@@ -712,6 +685,7 @@ describe('git worktree removal instance disposal', () => {
     gitLibraries.removeWorktree.mockResolvedValue(true);
     const { app, getRoute } = createRouteRegistry();
     registerGitRoutes(app, {
+      gitLibraryService: gitLibraries,
       worktreeBootstrapStore,
       emitWorktreeChanged: vi.fn(),
       buildOpenCodeUrl: (routePath) => `http://opencode.test${routePath}`,
@@ -753,6 +727,7 @@ describe('git worktree removal instance disposal', () => {
     gitLibraries.removeWorktree.mockResolvedValue(true);
     const { app, getRoute } = createRouteRegistry();
     registerGitRoutes(app, {
+      gitLibraryService: gitLibraries,
       worktreeBootstrapStore,
       buildOpenCodeUrl: (routePath) => `http://opencode.test${routePath}`,
       getOpenCodeAuthHeaders: () => ({}),
@@ -787,6 +762,7 @@ describe('git worktree removal instance disposal', () => {
     gitLibraries.removeWorktree.mockResolvedValue(true);
     const { app, getRoute } = createRouteRegistry();
     registerGitRoutes(app, {
+      gitLibraryService: gitLibraries,
       worktreeBootstrapStore,
       buildOpenCodeUrl: (routePath) => `http://opencode.test${routePath}`,
       getOpenCodeAuthHeaders: () => ({}),
@@ -821,6 +797,7 @@ describe('git worktree removal instance disposal', () => {
 
     const { app, getRoute } = createRouteRegistry();
     registerGitRoutes(app, {
+      gitLibraryService: gitLibraries,
       worktreeBootstrapStore,
       buildOpenCodeUrl: () => 'http://opencode.test/',
       getOpenCodeAuthHeaders: () => ({}),
@@ -838,7 +815,7 @@ describe('git worktree removal instance disposal', () => {
   it('removes a worktree without a disposal hook when the runtime helpers are absent', async () => {
     gitLibraries.removeWorktree.mockResolvedValue(true);
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, { worktreeBootstrapStore });
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, worktreeBootstrapStore });
 
     const response = createMockResponse();
     await getRoute('DELETE', '/api/git/worktrees')(
@@ -865,7 +842,7 @@ describe('git routes status discovery', () => {
   it('returns a soft non-repo payload for non-git folders', async () => {
     gitLibraries.isGitRepository.mockResolvedValue(false);
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('GET', '/api/git/status')(
@@ -892,7 +869,7 @@ describe('git routes status discovery', () => {
       }),
     );
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('GET', '/api/git/status')(
@@ -912,7 +889,7 @@ describe('git routes status discovery', () => {
     gitLibraries.isGitRepository.mockResolvedValue(true);
     gitLibraries.getStatus.mockResolvedValue({ current: 'main', files: [], isClean: true, ahead: 0, behind: 0 });
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('GET', '/api/git/status')(
@@ -928,7 +905,7 @@ describe('git routes status discovery', () => {
   it('rejects a repeated directory parameter on the check route', async () => {
     gitLibraries.isGitRepository.mockResolvedValue(true);
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('GET', '/api/git/check')(
@@ -959,7 +936,7 @@ describe('git routes status discovery', () => {
 
   it('keeps the absent-directory response on contributor-destinations unchanged', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('GET', '/api/git/contributor-destinations')(
@@ -1321,7 +1298,7 @@ describe('batched project reads', () => {
     }));
     gitLibraries.resolvePrimaryWorktreeRoot.mockImplementation(async (directory) => ({ root: `${directory}/root` }));
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/projects')({ body: { directories: ['/repo-a', '/plain', '/repo-b'], fields: ['status', 'root'] } }, response);
@@ -1341,7 +1318,7 @@ describe('batched project reads', () => {
     // still resolves to its single directory (issue #2121 disposition).
     gitLibraries.isGitRepository.mockResolvedValue(true);
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/projects')({ body: { directories: [['/repo'], '/plain'] } }, response);
@@ -1362,7 +1339,7 @@ describe('batched project reads', () => {
     });
     gitLibraries.resolvePrimaryWorktreeRoot.mockResolvedValue({ root: null });
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/projects')({ body: { directories: ['/ok', '/broken'], fields: ['status', 'root'] } }, response);
@@ -1374,7 +1351,7 @@ describe('batched project reads', () => {
   it('reads no status or root for a caller that only asks whether directories are repositories', async () => {
     gitLibraries.isGitRepository.mockImplementation(async (directory) => directory !== '/plain');
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/projects')({ body: { directories: ['/repo', '/plain'] } }, response);
@@ -1391,7 +1368,7 @@ describe('batched project reads', () => {
     gitLibraries.isGitRepository.mockResolvedValue(true);
     gitLibraries.resolvePrimaryWorktreeRoot.mockResolvedValue({ root: '/main' });
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/projects')({ body: { directories: ['/repo'], fields: ['root'] } }, response);
@@ -1402,7 +1379,7 @@ describe('batched project reads', () => {
 
   it('rejects a missing or empty directories array', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const handler = getRoute('POST', '/api/git/projects');
     const missing = createMockResponse();
     await handler({ body: {} }, missing);
@@ -1415,7 +1392,7 @@ describe('batched project reads', () => {
   it('lists worktrees for many directories on the worktree endpoint', async () => {
     gitLibraries.getWorktrees.mockImplementation(async (directory) => [{ path: `${directory}/w`, label: 'w' }]);
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/project-worktrees')({ body: { directories: ['/repo-a', '/repo-b'] } }, response);
@@ -1432,7 +1409,7 @@ describe('batched project reads', () => {
       return [];
     });
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/project-worktrees')({ body: { directories: ['/ok', '/broken'] } }, response);
@@ -1444,7 +1421,7 @@ describe('batched project reads', () => {
   it('observes worktree topology for a non-empty batched listing', async () => {
     gitLibraries.getWorktrees.mockImplementation(async (directory) => [{ path: `${directory}/w`, label: 'w' }]);
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/project-worktrees')({ body: { directories: ['/repo-a'] } }, response);
@@ -1456,7 +1433,7 @@ describe('batched project reads', () => {
   it('does not observe topology for an empty batched listing', async () => {
     gitLibraries.getWorktrees.mockResolvedValue([]);
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/project-worktrees')({ body: { directories: ['/repo-a'] } }, response);
@@ -1481,7 +1458,7 @@ describe('git route numeric parameters (#463/#464/#465)', () => {
 
   it('judges GET /api/git/diff context strictly', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const handler = getRoute('GET', '/api/git/diff');
     const cases = [['10junk', 3], ['1e3', 3], ['2.9', 3], ['-5', 3], ['abc', 3], [undefined, 3], ['0', 0], ['10', 10], ['9'.repeat(309), 3], ['100001', 100000], ['1000000', 100000], ['100000', 100000]];
     for (const [context, expected] of cases) {
@@ -1497,7 +1474,7 @@ describe('git route numeric parameters (#463/#464/#465)', () => {
 
   it('judges GET /api/git/range-diff context strictly', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const handler = getRoute('GET', '/api/git/range-diff');
     const cases = [['10junk', 3], ['2.9', 3], ['-5', 3], [undefined, 3], ['0', 0], ['5', 5]];
     for (const [context, expected] of cases) {
@@ -1513,7 +1490,7 @@ describe('git route numeric parameters (#463/#464/#465)', () => {
 
   it('judges POST /api/git/diffs context strictly', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const handler = getRoute('POST', '/api/git/diffs');
     const cases = [['10junk', 3], [2.9, 3], [-5, 3], [undefined, 3], [0, 0], [10, 10]];
     for (const [context, expected] of cases) {
@@ -1529,7 +1506,7 @@ describe('git route numeric parameters (#463/#464/#465)', () => {
 
   it('judges GET /api/git/commit-diff context strictly, so a fractional value cannot 500', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const handler = getRoute('GET', '/api/git/commit-diff');
     const cases = [['10junk', 3], ['2.9', 3], ['-5', 3], [undefined, 3], ['0', 0], ['10', 10]];
     for (const [context, expected] of cases) {
@@ -1547,7 +1524,7 @@ describe('git route numeric parameters (#463/#464/#465)', () => {
   it('rejects repeated path parameters on GET /api/git/commit-diff instead of omitting the pathspec', async () => {
     gitLibraries.getCommitDiff.mockResolvedValue('commit diff');
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const handler = getRoute('GET', '/api/git/commit-diff');
 
     const repeatedPath = createMockResponse();
@@ -1563,7 +1540,7 @@ describe('git route numeric parameters (#463/#464/#465)', () => {
 
   it('judges GET /api/git/log maxCount strictly, so a negative cannot reach git', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const handler = getRoute('GET', '/api/git/log');
     const cases = [
       ['10junk', undefined], ['1e3', undefined], ['2.5', undefined], ['0', undefined], ['-5', undefined], ['abc', undefined],
@@ -1590,7 +1567,7 @@ describe('git routes repeated query parameters (issue #2291)', () => {
   it('rejects a repeated directory on GET /api/git/remote-url and validates the remote parameter', async () => {
     gitLibraries.getRemoteUrl.mockResolvedValue('https://example.com/team/repo.git');
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const handler = getRoute('GET', '/api/git/remote-url');
 
     const repeatedDirectory = createMockResponse();
@@ -1623,7 +1600,7 @@ describe('git routes repeated query parameters (issue #2291)', () => {
   it('rejects a repeated directory on the identity routes', async () => {
     gitLibraries.getCurrentIdentity.mockResolvedValue({ userName: 'A', userEmail: 'a@example.com' });
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
 
     const current = createMockResponse();
     await getRoute('GET', '/api/git/current-identity')({ query: { directory: ['/repo', '/other'] } }, current);
@@ -1638,7 +1615,7 @@ describe('git routes repeated query parameters (issue #2291)', () => {
 
   it('rejects a repeated directory on primary-root and toplevel', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
 
     const primary = createMockResponse();
     await getRoute('GET', '/api/git/primary-root')({ query: { directory: ['/repo', '/other'] } }, primary);
@@ -1652,7 +1629,7 @@ describe('git routes repeated query parameters (issue #2291)', () => {
   it('rejects a repeated directory on GET /api/git/diff and keeps single-value behavior', async () => {
     gitLibraries.getPathDiff.mockResolvedValue({ diff: 'diff text', submodule: null });
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const handler = getRoute('GET', '/api/git/diff');
 
     const repeated = createMockResponse();
@@ -1669,7 +1646,7 @@ describe('git routes repeated query parameters (issue #2291)', () => {
   it('rejects repeated parameters on GET /api/git/log and GET /api/git/commit-files', async () => {
     gitLibraries.getLog.mockResolvedValue({ all: [], latest: null, total: 0 });
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
 
     const repeatedFrom = createMockResponse();
     await getRoute('GET', '/api/git/log')({ query: { directory: '/repo', from: ['a', 'b'] } }, repeatedFrom);
@@ -1693,7 +1670,7 @@ describe('git routes repeated query parameters (issue #2291)', () => {
   it('rejects a repeated path on GET /api/git/range-diff instead of dropping it', async () => {
     gitLibraries.getRangeDiff.mockResolvedValue('range diff');
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app);
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
     const handler = getRoute('GET', '/api/git/range-diff');
 
     const repeatedPath = createMockResponse();
