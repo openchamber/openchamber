@@ -11,6 +11,9 @@ Checkout commands run `bin/cli.js` with Bun, including `start:web` and the
 behavior-verification stand. Published commands run `build/bin/cli.js`.
 Each CLI loads its own sibling server tree, so both paths work without a stale
 build entering the development loop.
+The package also ships `bin/cli.js` as a compatibility entry for startup
+services created before the build directory existed. It forwards execution to
+the built CLI so those services survive an upgrade.
 
 - `../cli.js`
   - Keeps the package bin, shebang and legacy exports. Its static imports are Node builtins, so the source resolver runs before the CLI graph links.

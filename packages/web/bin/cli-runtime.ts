@@ -371,7 +371,8 @@ async function main() {
   await commands[command](options);
 }
 
-const isCliExecution = isModuleCliExecution(process.argv[1], new URL('./cli.js', import.meta.url).href, fs.realpathSync, 'openchamber');
+const isCliExecution = isModuleCliExecution(process.argv[1], new URL('./cli.js', import.meta.url).href, fs.realpathSync, 'openchamber')
+  || isModuleCliExecution(process.argv[1], new URL('../../bin/cli.js', import.meta.url).href, fs.realpathSync);
 
 if (isCliExecution) {
   let isHandlingSigint = false;

@@ -124,6 +124,7 @@
   "files": [
     "dist",
     "build",
+    "bin/cli.js",
     "public",
     "package.json",
     "README.md"
