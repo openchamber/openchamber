@@ -12,6 +12,12 @@ type ZoneFitWatch = {
   readRowWidth: () => number | undefined;
 };
 
+const displacedZones = new Set<string>();
+const displacedKey = (directoryKey: string, zone: string) => `${directoryKey}\0${zone}`;
+
+export const isZoneDisplaced = (directoryKey: string, zone: string): boolean =>
+  displacedZones.has(displacedKey(directoryKey, zone));
+
 export const watchZoneFit = ({ directoryKey, folded, readRowWidth }: ZoneFitWatch): (() => void) => {
   const sidesShown = (state: UIState) => {
     const panel = state.contextPanelByDirectory[directoryKey];
@@ -33,6 +39,11 @@ export const watchZoneFit = ({ directoryKey, folded, readRowWidth }: ZoneFitWatc
   };
 
   let displaced: { side: Side; by: Side; tabId: string } | null = null;
+  const setDisplaced = (next: typeof displaced) => {
+    if (displaced) displacedZones.delete(displacedKey(directoryKey, displaced.side));
+    displaced = next;
+    if (next) displacedZones.add(displacedKey(directoryKey, next.side));
+  };
   let settingSidebar = false;
   let previous = sidesShown(useUIStore.getState());
   let previousExpanded = anyZoneExpanded(useUIStore.getState());
@@ -76,7 +87,7 @@ export const watchZoneFit = ({ directoryKey, folded, readRowWidth }: ZoneFitWatc
     });
     if (plan.displace) {
       const tabId = getZoneView(state.contextPanelByDirectory[directoryKey], plan.displace).activeTabId;
-      if (tabId) displaced = { side: plan.displace, by: opening, tabId };
+      if (tabId) setDisplaced({ side: plan.displace, by: opening, tabId });
     }
     if (plan.collapseSidebar) {
       setFoldReason(opening);
@@ -91,7 +102,7 @@ export const watchZoneFit = ({ directoryKey, folded, readRowWidth }: ZoneFitWatc
       return;
     }
     const restore = displaced?.by === closed ? displaced : null;
-    if (restore) displaced = null;
+    if (restore) setDisplaced(null);
     if (folded.current === closed) {
       if (restore) {
         setFoldReason(restore.side);
@@ -102,7 +113,7 @@ export const watchZoneFit = ({ directoryKey, folded, readRowWidth }: ZoneFitWatc
     if (restore) useUIStore.getState().setActiveContextPanelTab(directoryKey, restore.tabId);
   };
 
-  return useUIStore.subscribe((state, prevState) => {
+  const unsubscribe = useUIStore.subscribe((state, prevState) => {
     if (state.isSidebarOpen !== prevState.isSidebarOpen && !settingSidebar) setFoldReason(null);
     const shown = sidesShown(state);
     const expanded = anyZoneExpanded(state);
@@ -117,7 +128,7 @@ export const watchZoneFit = ({ directoryKey, folded, readRowWidth }: ZoneFitWatc
       const opposite = side === 'left' ? 'right' : 'left';
       if (!opened.includes(opposite)) continue;
       if (folded.current === side) setFoldReason(opposite);
-      if (displaced?.by === side) displaced = null;
+      if (displaced?.by === side) setDisplaced(null);
     }
     for (const side of closed) giveBack(side);
     for (const side of opened) makeRoom(state, side, shown);
@@ -128,4 +139,8 @@ export const watchZoneFit = ({ directoryKey, folded, readRowWidth }: ZoneFitWatc
       unfoldSidebar();
     }
   });
+  return () => {
+    unsubscribe();
+    setDisplaced(null);
+  };
 };
