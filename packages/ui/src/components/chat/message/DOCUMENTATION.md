@@ -123,6 +123,19 @@ A long answer can span several virtualized rows, and earlier text can be folded
 or unmounted. Export renders every text part afresh so it includes the whole
 reply and settled highlighting.
 
+### Why the PNG carries the app's loaded fonts
+
+The export SVG runs outside the chat document. Its font scanner can read
+stylesheet rules, but the app loads its appearance fonts through `FontFace`.
+The font loader registers each URL-based face at once and reads its data for
+the SVG in the background, so the exporter can add it alongside stylesheet
+fonts such as KaTeX, usually without another request on Save. The screen face
+never waits for that read, so startup and terminal refits keep their timing.
+Without the embedded copy, longer fallback glyphs can wrap inside a code chip
+measured with the original font. A failed read is not kept: the image still
+saves without that face, and the next Save reads it again.
+The VS Code webview retains its existing font policy and skips the CDN prefetch.
+
 ### Why plan dialogs mount lazily and not on every streaming message
 
 The dialog first mounts when opened, then stays mounted for its closing

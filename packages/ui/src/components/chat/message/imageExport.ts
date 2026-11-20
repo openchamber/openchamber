@@ -1,6 +1,7 @@
 import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
 import type { VSCodeAPI } from '@/lib/api/types';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { loadedAppFontCSS } from '@/lib/fontLoader';
 import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
 import type { Theme } from '@/types/theme';
 
@@ -162,8 +163,9 @@ export const saveMessageImageExport = async ({ source, width, fileName, vscode }
 }): Promise<MessageImageSaveResult> => {
     let wrapper: HTMLDivElement | null = null;
     try {
-        const { toPng } = await import('html-to-image');
-        const backgroundColor = window.getComputedStyle(document.documentElement).getPropertyValue('--surface-background').trim()
+        const { getFontEmbedCSS, toPng } = await import('html-to-image');
+        const rootStyle = window.getComputedStyle(document.documentElement);
+        const backgroundColor = rootStyle.getPropertyValue('--surface-background').trim()
             || window.getComputedStyle(source).backgroundColor
             || window.getComputedStyle(document.body).backgroundColor;
         wrapper = document.createElement('div');
@@ -183,6 +185,11 @@ export const saveMessageImageExport = async ({ source, width, fileName, vscode }
         const clone = prepareMessageImageClone(source);
         wrapper.appendChild(clone);
         document.body.appendChild(wrapper);
+        const stylesheetFontCSS = await getFontEmbedCSS(wrapper);
+        const appFontCSS = await loadedAppFontCSS([
+            rootStyle.getPropertyValue('--font-sans'),
+            rootStyle.getPropertyValue('--font-mono'),
+        ]);
         if (width) fitMessageImageExportLayout(wrapper, clone, width);
         const bounds = wrapper.getBoundingClientRect();
         const canvasWidth = Math.ceil(bounds.width);
@@ -193,6 +200,7 @@ export const saveMessageImageExport = async ({ source, width, fileName, vscode }
             height: canvasHeight,
             pixelRatio: resolveMessageImageExportPixelRatio(canvasWidth, canvasHeight),
             backgroundColor,
+            fontEmbedCSS: [stylesheetFontCSS, appFontCSS].filter(Boolean).join('\n'),
         });
         return await deliverMessageImage(dataUrl, fileName, vscode);
     } finally {
