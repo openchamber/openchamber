@@ -45,6 +45,7 @@ type ChatContainerProps = {
     autoOpenDraft?: boolean;
     readOnly?: boolean;
     pinnedSession?: { sessionId: string; directory: string | null };
+    registerParentSessionBack?: (handler: (() => void) | null) => void;
 };
 
 export const ChatContainer: React.FC<ChatContainerProps> = ({
@@ -52,6 +53,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     autoOpenDraft: autoOpenDraftProp = true,
     readOnly = false,
     pinnedSession,
+    registerParentSessionBack,
 }) => {
     const { t } = useI18n();
     const {
@@ -381,6 +383,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                         directory={effectiveSessionDirectory}
                         hidden={hideReturnToParent}
                         openSession={columnActions.openSession}
+                        registerParentSessionBack={registerParentSessionBack}
                     />
                     {sessionSurface}
                     {chatSearch.open && currentSessionId && messageSearchEnabled ? (
