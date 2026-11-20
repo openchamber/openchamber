@@ -67,6 +67,7 @@ Access tokens never appear here or in a `request` result.
 | `onResolve(handler)` | register the handler for your slash commands. It gets `{ command, args }` and returns an attach item or `null`. |
 | `setBadge(count)` | mark your rail icon with a dot and put the count (0 to 999) in its tooltip, or `null` to clear it |
 | `openCommit(sha)` | open the Diff view on that commit of the current project. `sha` is 7 to 64 hex characters; OpenChamber reads the commit itself. |
+| `openWalkthrough({ base })` | open Walkthrough on This branch of the current project, compared with `base`: `main`, `origin/main`, or a full ref. The base becomes the branch's chosen base; the user can still change it and clicks Generate themselves. A base the repository does not have rejects with `NOT_FOUND` and changes nothing. The phone, Mini Chat and VS Code reject with `UNSUPPORTED`. |
 | `setHeight(px)` | set the height of your Work Status section. OpenChamber keeps it between 24 and 480 pixels; taller content scrolls inside your page. Other places ignore it. |
 | `onFileOpen(listener)` | file editors: get the file to edit, `{ path, name, readOnly }` plus `encoding: "text"` with `content`, or `encoding: "binary"` with `bytes`. Also makes Cmd/Ctrl+S in your page save. |
 | `onFileSnapshot(handler)` | file editors: return `{ content, version }` (or `{ bytes, version }` for a binary editor), the whole edited file. OpenChamber calls it to save and before switching to the source view or fullscreen. |

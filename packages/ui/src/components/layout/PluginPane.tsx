@@ -54,10 +54,9 @@ import { useHostTypography } from '@/lib/guests/useHostTypography';
 import { guestGenerate } from '@/lib/guests/generate';
 import { guestGenerateResults, lateGenerateResult, type GenerateOwner } from '@/lib/guests/generate-results';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { openGuestCommit, readCurrentBranch } from '@/lib/guests/open-commit';
+import { guestNavigationEffects } from '@/lib/guests/navigation';
 import { openGuestSurface } from '@/lib/guests/open-surface';
 import { openGuestUrl } from '@/lib/guests/open-url';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { registerGuestResolver, type GuestResolveOutcome } from '@/lib/guests/resolve';
@@ -914,16 +913,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           if (!guestEnabledRef.current) return;
           useGuestBadgeStore.getState().setBadge(guestIdRef.current, count);
         },
-        openCommit: (sha) => {
-          const git = getRegisteredRuntimeAPIs()?.git ?? null;
-          return openGuestCommit({
-          sha,
-          directory: directoryRef.current || null,
-          git,
-          currentBranch: (dir) => (git ? readCurrentBranch(git, dir) : Promise.resolve(null)),
-          supported: !isVSCodeRuntime(),
-          });
-        },
+        ...guestNavigationEffects(() => directoryRef.current || null),
         resize: (height) => {
           onResizeRef.current?.(height);
         },

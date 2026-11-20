@@ -947,6 +947,14 @@ describe('actions, commands, and badge wire shapes', () => {
     }
   });
 
+  test('accepts open-walkthrough with a bounded base and drops the rest', () => {
+    expect(parseGuestMessage({ ...envelope, type: 'open-walkthrough', id: 'w-1', payload: { base: ' main ' } })).toMatchObject({ payload: { base: 'main' } });
+    for (const base of ['', '   ', 'x'.repeat(256)]) {
+      expect(parseGuestMessage({ ...envelope, type: 'open-walkthrough', id: 'w-1', payload: { base } })).toBeNull();
+    }
+    expect(parseGuestMessage({ ...envelope, type: 'open-walkthrough', id: 'w-1', payload: {} })).toBeNull();
+  });
+
   test('accepts resize heights in range and drops the rest', () => {
     expect(parseGuestMessage({ ...envelope, type: 'resize', id: 'h-1', payload: { height: 180 } })).toMatchObject({ payload: { height: 180 } });
     expect(parseGuestMessage({ ...envelope, type: 'resize', id: 'h-1', payload: { height: -1 } })).toBeNull();

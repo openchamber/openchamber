@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { guestSessionWorktreeSchema, guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceQuerySchema, guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
 import { guestStatusControlEventSchema, guestStatusControlsSchema } from './status-control-schemas.ts';
 import { guestPopoverClosedEventSchema, guestPopoverDataSchema, guestPopoverRequestSchema } from './popover-schemas.ts';
+import { GUEST_COMMIT_SHA, GUEST_WALKTHROUGH_BASE_MAX } from './navigation.ts';
 import { GUEST_MICROPHONE_END_REASONS, GUEST_MICROPHONE_FRAME_MAX, GUEST_MICROPHONE_SAMPLE_RATE_MAX, GUEST_MICROPHONE_SAMPLE_RATE_MIN } from './microphone.ts';
 import { GUEST_SHELL_END_STATUSES, GUEST_SHELL_ID_MAX, GUEST_SHELLS_MAX, GUEST_SHELL_OUTPUT_TAIL_MAX } from './shells.ts';
 
@@ -15,7 +16,6 @@ import {
   GUEST_ATTACH_AUTHOR_MAX,
   GUEST_BADGE_MAX,
   GUEST_FRAME_HEIGHT_MAX,
-  GUEST_COMMIT_SHA,
   GUEST_ITEM_MESSAGE_TEXT_MAX,
   GUEST_ITEM_SESSION_MAX,
   GUEST_RESOLVE_ERROR_MAX,
@@ -714,6 +714,14 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
     id: z.string().min(1),
     payload: z.object({
       sha: z.string().regex(GUEST_COMMIT_SHA),
+    }),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('open-walkthrough'),
+    id: z.string().min(1),
+    payload: z.object({
+      base: z.string().trim().min(1).max(GUEST_WALKTHROUGH_BASE_MAX),
     }),
   }),
   z.object({
