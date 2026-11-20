@@ -2793,6 +2793,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.customFontPlaceholder': 'Nazwy czcionek oddzielone przecinkami, np. Cascadia Mono, Microsoft YaHei',
   'settings.openchamber.visual.field.customFontAria': 'Lista własnych czcionek',
   'settings.openchamber.visual.field.customFontHint': 'Czcionki zapasowe oddziel przecinkami. Cała lista może mieć do 100 znaków.',
+  'settings.openchamber.defaults.field.showSubagents': 'Pokaż sesje podagentów',
+  'settings.openchamber.defaults.field.showSubagentsInfo': 'Wyświetla sesje tworzone przez agenta pod sesją, która go uruchomiła. Po wyłączeniu sesja nadrzędna nadal pokazuje ich stan, czas i oczekujące prośby, a odznaka otwiera sesję czekającą na Ciebie.',
   'settings.openchamber.defaults.field.showChats': 'Pokazuj czaty na pasku bocznym',
   'settings.openchamber.visual.field.fileEditorVimMappings': 'Mapowania Vim',
   'settings.openchamber.visual.field.fileEditorVimMappingsInfo': 'Jedno mapowanie w wierszu, zapisane jak w vimrc. Działają zawsze, gdy edytor jest w trybie Vim. Obsługiwane są map, noremap oraz ich odmiany n, i, v, x i o.',

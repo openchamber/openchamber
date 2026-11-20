@@ -2783,6 +2783,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.customFontPlaceholder': 'Schriftnamen, durch Kommas getrennt, z. B. Cascadia Mono, Microsoft YaHei',
   'settings.openchamber.visual.field.customFontAria': 'Liste eigener Schriften',
   'settings.openchamber.visual.field.customFontHint': 'Trenne Ersatzschriften durch Kommas. Die gesamte Liste darf bis zu 100 Zeichen lang sein.',
+  'settings.openchamber.defaults.field.showSubagents': 'Subagent-Sitzungen anzeigen',
+  'settings.openchamber.defaults.field.showSubagentsInfo': 'Listet die Sitzungen, die ein Agent unter der Sitzung erzeugt, die ihn gestartet hat. Auch ausgeschaltet behält die übergeordnete Sitzung deren Status, Laufzeit und offene Anfragen; das Abzeichen öffnet weiterhin die wartende Sitzung.',
   'settings.openchamber.defaults.field.showChats': 'Chats in der Seitenleiste anzeigen',
   'settings.openchamber.visual.field.fileEditorVimMappings': 'Vim-Mappings',
   'settings.openchamber.visual.field.fileEditorVimMappingsInfo': 'Ein Mapping pro Zeile, geschrieben wie in einer vimrc. Sie gelten, sobald der Editor im Vim-Modus ist. Unterstützt map, noremap und ihre n-, i-, v-, x- und o-Varianten.',

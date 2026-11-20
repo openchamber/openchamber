@@ -10,6 +10,7 @@ import type { ChangeRequestTerm, SourceControlProviderDescriptor } from '@/lib/s
 import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta } from './metadata';
 import { OPENCHAMBER_TOOLS_SEARCH_ITEMS } from './search-openchamber-tools';
+import { SIDEBAR_SESSION_SEARCH_ITEMS } from './search-sidebar-sessions';
 
 type SettingsSearchTitle =
   | { titleKey: I18nKey; titleParams?: I18nParams; literalTitle?: never }
@@ -690,13 +691,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['permissions', 'auto-accept', 'accept', 'safety net', 'ask', 'shield', 'approval', 'new session'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
-  {
-    id: 'sessions.show-chats',
-    page: 'sessions',
-    titleKey: 'settings.openchamber.defaults.field.showChats',
-    keywords: ['chats', 'sidebar', 'hide', 'show', 'section'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
+  ...SIDEBAR_SESSION_SEARCH_ITEMS,
   {
     id: 'sessions.work',
     page: 'sessions',

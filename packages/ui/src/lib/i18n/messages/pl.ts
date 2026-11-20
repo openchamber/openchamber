@@ -525,6 +525,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': 'Minimalny',
   'sessions.sidebar.header.displayMode.showWork': 'Pokaż sekcję W toku',
   'sessions.sidebar.header.displayMode.showPinned': 'Pokaż sekcję Przypięte',
+  'sessions.sidebar.header.displayMode.showSubagents': 'Pokaż sesje podagentów',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Szczegółowe wiersze',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'Nazywaj worktree według gałęzi',
   'sessions.sidebar.activity.pinnedTitle': 'Przypięte',

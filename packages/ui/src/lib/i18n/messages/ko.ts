@@ -687,6 +687,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': '최소',
   'sessions.sidebar.header.displayMode.showWork': '작업 중 섹션 표시',
   'sessions.sidebar.header.displayMode.showPinned': '고정됨 섹션 표시',
+  'sessions.sidebar.header.displayMode.showSubagents': '하위 에이전트 세션 표시',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '자세한 행',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'worktree를 브랜치 이름으로 표시',
   'sessions.sidebar.activity.pinnedTitle': '고정됨',

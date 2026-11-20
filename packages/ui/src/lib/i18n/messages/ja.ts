@@ -687,6 +687,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': 'ミニマル',
   'sessions.sidebar.header.displayMode.showWork': '作業中セクションを表示',
   'sessions.sidebar.header.displayMode.showPinned': 'ピン留めセクションを表示',
+  'sessions.sidebar.header.displayMode.showSubagents': 'サブエージェントのセッションを表示',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '詳細な行',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'worktree をブランチ名で表示',
   'sessions.sidebar.activity.pinnedTitle': 'ピン留め',

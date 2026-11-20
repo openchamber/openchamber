@@ -635,6 +635,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.minimal': 'Minimal',
   'sessions.sidebar.header.displayMode.showWork': 'Bereich In Arbeit anzeigen',
   'sessions.sidebar.header.displayMode.showPinned': 'Bereich Angeheftet anzeigen',
+  'sessions.sidebar.header.displayMode.showSubagents': 'Subagent-Sitzungen anzeigen',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Ausführliche Zeilen',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'Worktrees nach Branch benennen',
   'sessions.sidebar.activity.pinnedTitle': 'Angeheftet',

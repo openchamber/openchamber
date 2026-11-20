@@ -686,6 +686,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.minimal': 'Minimaal',
   'sessions.sidebar.header.displayMode.showWork': 'Sectie In bewerking tonen',
   'sessions.sidebar.header.displayMode.showPinned': 'Sectie Vastgezet tonen',
+  'sessions.sidebar.header.displayMode.showSubagents': 'Subagent-sessies tonen',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Gedetailleerde rijen',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'Worktrees naar branch benoemen',
   'sessions.sidebar.activity.pinnedTitle': 'Vastgezet',

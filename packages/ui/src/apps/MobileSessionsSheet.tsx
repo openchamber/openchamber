@@ -71,6 +71,7 @@ import { MobileProjectIcon } from './MobileProjectIcon';
 import { selectHasChats } from './mobileSessionFields';
 import { getProjectLabel, normalizePath } from './mobilePaths';
 import { MobileSessionList } from './mobileSidebar/MobileSessionList';
+import { MobileRowDisplayItems } from './mobileSidebar/MobileRowDisplayItems';
 import { MobileSidebarActionsProvider, useMobileSidebarRowsStore, type MobileSidebarActions } from './mobileSidebar/mobileSidebarState';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -180,10 +181,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const setKeepWorkInPlace = useSessionDisplayStore((state) => state.setKeepWorkInPlace);
   const keepPinnedInPlace = useSessionDisplayStore((state) => state.keepPinnedInPlace);
   const setKeepPinnedInPlace = useSessionDisplayStore((state) => state.setKeepPinnedInPlace);
-  const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
-  const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
-  const worktreeNameByBranch = useSessionDisplayStore((state) => state.worktreeNameByBranch);
-  const setWorktreeNameByBranch = useSessionDisplayStore((state) => state.setWorktreeNameByBranch);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const savedSections = useSessionDisplayStore((state) => state.sections);
   const customSections = React.useMemo(() => savedSections.filter((entry) => entry.kind === 'custom'), [savedSections]);
@@ -350,12 +347,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         {sessionWorkEnabled && showWorkSection ? renderMenuChoice('in-place', 'sessions.sidebar.header.displayMode.keepWorkInPlace', keepWorkInPlace, toggleSetting(keepWorkInPlace, setKeepWorkInPlace, (next) => {
           void updateDesktopSettings({ sidebarKeepWorkInPlace: next });
         })) : null}
-        {renderMenuChoice('detailed', 'sessions.sidebar.header.displayMode.detailedZoneRows', detailedZoneRows, toggleSetting(detailedZoneRows, setDetailedZoneRows, (next) => {
-          void updateDesktopSettings({ sidebarDetailedZoneRows: next });
-        }))}
-        {renderMenuChoice('branch-names', 'sessions.sidebar.header.displayMode.worktreeNameByBranch', worktreeNameByBranch, toggleSetting(worktreeNameByBranch, setWorktreeNameByBranch, (next) => {
-          void updateDesktopSettings({ sidebarWorktreeNameByBranch: next });
-        }))}
+        <MobileRowDisplayItems />
         <DropdownMenuSeparator />
         {canEditOrder ? (
           <DropdownMenuItem onClick={() => setEditingOrder(true)} className={MOBILE_MENU_ITEM_CLASS}>

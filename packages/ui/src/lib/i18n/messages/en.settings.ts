@@ -2782,6 +2782,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.customFontPlaceholder': 'Font names, comma-separated, e.g. Cascadia Mono, Microsoft YaHei',
   'settings.openchamber.visual.field.customFontAria': 'Custom font list',
   'settings.openchamber.visual.field.customFontHint': 'Separate fallback fonts with commas. The whole list can be up to 100 characters.',
+  'settings.openchamber.defaults.field.showSubagents': 'Show subagent sessions',
+  'settings.openchamber.defaults.field.showSubagentsInfo': 'Lists the sessions an agent spawns under the session that spawned them. When off, a parent keeps their activity, time and pending requests, and its badge still opens the one waiting for you.',
   'settings.openchamber.defaults.field.showChats': 'Show chats in the sidebar',
   'settings.openchamber.visual.field.fileEditorVimMappings': 'Vim mappings',
   'settings.openchamber.visual.field.fileEditorVimMappingsInfo': 'One mapping per line, written as in a vimrc. They apply whenever the editor is in Vim mode. Supports map, noremap and their n, i, v, x and o forms.',
