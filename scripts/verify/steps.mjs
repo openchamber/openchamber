@@ -389,6 +389,28 @@ const ACTIONS = {
     const { ok, state } = await waitForState(ctx, target, SEE_CHECK(step), timeoutOf(step))
     if (!ok) fail(`expected ${describe(step)}${step.count !== undefined ? ` ×${step.count}` : ""}${step.disabled !== undefined ? (step.disabled ? " disabled" : " enabled") : ""}; found ${stateLine(state)}`)
   },
+  async above(step, ctx) {
+    if (!step.to?.on) fail("\"above\" needs \"to\" with its own \"on\"")
+    const upper = resolveTarget(step, ctx)
+    const lower = resolveTarget(step.to, ctx)
+    const name = (part) => `${describe(part)}${part.session ? ` of ${ctx.vars[part.session] ?? part.session}` : ""}${part.scope ? ` in ${part.scope}` : ""}${part.index ? ` #${part.index}` : ""}`
+    const deadline = Date.now() + timeoutOf(step)
+    let tops = null
+    while (true) {
+      tops = await ctx.page.evaluate(`(() => {
+        const top = (shown, index) => shown[index] ? shown[index].getBoundingClientRect().top : null
+        return { upper: top(${ctx.page.query(upper)}, ${upper.index}), lower: top(${ctx.page.query(lower)}, ${lower.index}) }
+      })()`)
+      if (tops.upper !== null && tops.lower !== null && tops.upper < tops.lower) return
+      const left = deadline - Date.now()
+      if (left <= 0) break
+      await wait(Math.min(150, left))
+    }
+    const what = `expected ${name(step)} above ${name(step.to)}`
+    if (tops.upper === null) fail(`${what}; the first is not rendered`)
+    if (tops.lower === null) fail(`${what}; the second is not rendered`)
+    fail(`${what}; it is at ${Math.round(tops.upper)} px, the other at ${Math.round(tops.lower)} px`)
+  },
   async gone(step, ctx) {
     const target = resolveTarget(step, ctx)
     const { ok, state } = await waitForState(ctx, target, (current) => current.shown === 0, timeoutOf(step))

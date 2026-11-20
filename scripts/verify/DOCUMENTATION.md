@@ -140,6 +140,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 | `see` `on`, `count`, `disabled`, `inView` | Waits until the element shows (exactly `count` of them; `count: 0` asserts none; `inView` on screen: some innermost element holding `text` intersects the viewport) |
 | `gone` `on` | Waits until no such element shows |
 | `steady` `on`, `count`, `ms` | Fails if the count changes during `ms` |
+| `above` `on`, `to` | Waits until the element's top is above that of `to` (an object with its own `on`, `text`, `index`): the order of sidebar sections and rows. Compares rendered elements by layout position, on screen or scrolled off |
 | `editor` `equals`, `contains`, `empty`, `caret` | Waits for the composer's text; `caret: "start"` or `"end"` also waits for the focused, collapsed cursor at that edge |
 | `terminal.expect` `on`, `contains` or `equals` | Selects the visible canvas grid with a real drag and copies it with Cmd/Ctrl+C until its text matches; replaces the clipboard |
 | `terminal.select` `on` | Selects the visible terminal grid with a real drag. Use before menu Copy because a previous keyboard Copy may clear the selection on the host. |
