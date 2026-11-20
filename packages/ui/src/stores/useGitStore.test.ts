@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
-import type { GitStatus } from '@/lib/api/types';
+import type { GitStatus, GitBranchListOptions } from '@/lib/api/types';
 import { useGitStore } from './useGitStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getDeferredSafeStorage, getSafeStorage } from '@/stores/utils/safeStorage';
@@ -626,7 +626,7 @@ describe('useGitStore', () => {
     const asked: Array<string | undefined> = [];
     const git = {
       ...createGitApi(async () => createStatus()),
-      getGitBranches: async (_directory: string, options?: { remote?: 'local' | 'live' }) => {
+      getGitBranches: async (_directory: string, options?: GitBranchListOptions) => {
         asked.push(options?.remote);
         const detail = { current: false, name: '', commit: '', label: '' };
         const local = ['main', 'remotes/origin/main'];
@@ -652,7 +652,7 @@ describe('useGitStore', () => {
     const live = createDeferred<Awaited<ReturnType<GitAPI['getGitBranches']>>>();
     const git = {
       ...createGitApi(async () => createStatus()),
-      getGitBranches: async (_directory: string, options?: { remote?: 'local' | 'live' }) => (
+      getGitBranches: async (_directory: string, options?: GitBranchListOptions) => (
         options?.remote === 'live' ? live.promise : { all: ['main', 'created-meanwhile'], current: 'main', branches: {} }
       ),
     };

@@ -1400,7 +1400,7 @@ export async function isLinkedWorktree(directory: string): Promise<boolean> {
 }
 
 export async function getGitBranches(directory: string, options?: GitBranchListOptions): Promise<GitBranch> {
-  const response = await runtimeFetch(buildUrl(`${API_BASE}/branches`, directory, options?.remote ? { remote: options.remote } : undefined));
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/branches`, directory, options));
   if (!response.ok) {
     throw new Error(`Failed to get branches: ${response.statusText}`);
   }

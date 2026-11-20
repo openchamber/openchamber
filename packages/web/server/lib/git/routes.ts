@@ -1566,14 +1566,14 @@ export function registerGitRoutes(app: Application, {
   }));
 
   app.get('/api/git/branches', async (req, res) => {
-    const { getBranches } = await getGitLibraries();
+    const { getBranches, parseBranchListQuery } = await getGitLibraries();
     try {
       const directory = req.query.directory;
       if (!directory || !isString(directory)) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const branches = await getBranches(directory, { remote: req.query.remote === 'live' ? 'live' : 'local' });
+      const branches = await getBranches(directory, parseBranchListQuery(isString(req.query.remote) ? req.query.remote : '', isString(req.query.query) ? req.query.query : '', Number(req.query.limit)));
       res.json(branches);
     } catch (error) {
       console.error('Failed to get branches:', error);

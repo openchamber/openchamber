@@ -9,7 +9,6 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-  CommandSeparator,
 } from '@/components/ui/command';
 import {
   DropdownMenu,
@@ -20,6 +19,7 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { shouldDismissDropdown } from '@/components/ui/dropdown-navigation';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { MobileSheetRow, MobileSheetSearch, MobileSheetSection } from '@/components/ui/MobileSheetList';
+import { useRemoteBranchSearch } from '@/hooks/useRemoteBranchSearch';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { rankBranchesForQuery } from '@/lib/worktrees/branchSearch';
@@ -27,6 +27,9 @@ import { rankBranchesForQuery } from '@/lib/worktrees/branchSearch';
 export type PickedBranch = { value: string; label: string };
 
 type BranchSection = { heading: string; branches: PickedBranch[] };
+
+const REMOTE_FULL_RANK_LIMIT = 1000;
+const REMOTE_RANK_CANDIDATE_LIMIT = 500;
 
 const findScrollableAncestor = (start: HTMLElement | null): HTMLElement | null => {
   let node = start;
@@ -44,6 +47,7 @@ export function NewWorktreeBranchPicker({
   title,
   localBranches,
   remoteBranches,
+  searchRemoteBranches,
   isLoading,
   isMobile,
   disabled = false,
@@ -54,6 +58,7 @@ export function NewWorktreeBranchPicker({
   title: string;
   localBranches: string[];
   remoteBranches: string[];
+  searchRemoteBranches?: (query: string) => Promise<string[]>;
   isLoading: boolean;
   isMobile: boolean;
   disabled?: boolean;
@@ -65,19 +70,39 @@ export function NewWorktreeBranchPicker({
   const desktopContentRef = React.useRef<HTMLDivElement | null>(null);
   const mobileListRef = React.useRef<HTMLDivElement | null>(null);
 
-  const searching = query.trim().length > 0;
+  const normalizedQuery = query.trim().toLowerCase();
+  const searching = normalizedQuery.length > 0;
+  const remoteSearch = useRemoteBranchSearch({
+    enabled: open && remoteBranches.length === 0,
+    query,
+    search: searchRemoteBranches,
+  });
+
+  const knownRemotes = React.useMemo(() => {
+    if (!searching || remoteBranches.length === 0) return [];
+    if (remoteBranches.length <= REMOTE_FULL_RANK_LIMIT) return remoteBranches;
+    const narrowed: string[] = [];
+    for (const branch of remoteBranches) {
+      if (!branch.toLowerCase().includes(normalizedQuery)) continue;
+      narrowed.push(branch);
+      if (narrowed.length >= REMOTE_RANK_CANDIDATE_LIMIT) break;
+    }
+    return narrowed;
+  }, [searching, remoteBranches, normalizedQuery]);
+
+  const matchingRemoteBranches = remoteBranches.length > 0 ? knownRemotes : remoteSearch.matches;
+
   const sections = React.useMemo((): BranchSection[] => {
-    const ranked = rankBranchesForQuery({ localBranches, remoteBranches, query });
+    const ranked = rankBranchesForQuery({ localBranches, remoteBranches: matchingRemoteBranches, query });
     if (searching) {
       return ranked.matching.length > 0
         ? [{ heading: t('session.newWorktree.matchingBranches'), branches: ranked.matching.map(({ value: branch, label }) => ({ value: branch, label })) }]
         : [];
     }
-    return [
-      { heading: t('session.newWorktree.localBranches'), branches: ranked.otherLocal.map((branch) => ({ value: branch, label: branch })) },
-      { heading: t('session.newWorktree.remoteBranches'), branches: ranked.otherRemote.map((branch) => ({ value: `remotes/${branch}`, label: branch })) },
-    ].filter((section) => section.branches.length > 0);
-  }, [localBranches, remoteBranches, query, searching, t]);
+    return ranked.otherLocal.length > 0
+      ? [{ heading: t('session.newWorktree.localBranches'), branches: ranked.otherLocal.map((branch) => ({ value: branch, label: branch })) }]
+      : [];
+  }, [localBranches, matchingRemoteBranches, query, searching, t]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -92,20 +117,26 @@ export function NewWorktreeBranchPicker({
 
   const changeOpen = (next: boolean) => {
     setOpen(next);
-    if (!next) setQuery('');
+    if (!next) {
+      setQuery('');
+      remoteSearch.reset();
+    }
   };
   const choose = (branch: PickedBranch) => {
     onSelect(branch);
     changeOpen(false);
   };
 
-  const noBranches = localBranches.length === 0 && remoteBranches.length === 0;
-  const status = isLoading
+  const status = isLoading && !searching && localBranches.length === 0
     ? t('session.newWorktree.loadingBranches')
-    : noBranches
-      ? t('session.newWorktree.noBranchesFound')
-      : searching && sections.length === 0
-        ? t('session.newWorktree.noMatchingBranches')
+    : searching && sections.length === 0
+      ? remoteSearch.failed
+        ? t('branchPickerDialog.error.failedToLoad')
+        : remoteSearch.isSearching
+          ? t('session.newWorktree.loadingBranches')
+          : t('session.newWorktree.noMatchingBranches')
+      : !searching && localBranches.length === 0
+        ? t('session.newWorktree.noBranchesFound')
         : null;
   const triggerLabel = (
     <span className={cn('truncate', value ? 'text-foreground' : 'text-muted-foreground')}>{value || placeholder}</span>
@@ -170,17 +201,14 @@ export function NewWorktreeBranchPicker({
           <CommandList disableHorizontal>
             {status ? (
               <CommandEmpty>{status}</CommandEmpty>
-            ) : sections.map((section, index) => (
-              <React.Fragment key={section.heading}>
-                {index > 0 ? <CommandSeparator /> : null}
-                <CommandGroup heading={section.heading}>
-                  {section.branches.map((branch) => (
-                    <CommandItem key={branch.value} value={branch.value} onSelect={() => choose(branch)}>
-                      <span className="typography-small break-all">{branch.label}</span>
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              </React.Fragment>
+            ) : sections.map((section) => (
+              <CommandGroup key={section.heading} heading={section.heading}>
+                {section.branches.map((branch) => (
+                  <CommandItem key={branch.value} value={branch.value} onSelect={() => choose(branch)}>
+                    <span className="typography-small break-all">{branch.label}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
             ))}
           </CommandList>
         </Command>

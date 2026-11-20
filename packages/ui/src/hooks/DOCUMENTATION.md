@@ -91,6 +91,7 @@ A hook here owns the lifetime of what it subscribes to. Mechanics that another m
 - A selected repository that no longer resolves is dropped and discovery runs again. Repositories that already failed a probe are not auto-picked again, which would loop probe and discovery.
 - An established root keeps its own data and offers its submodules in the picker. Only a root with no repository auto-selects a nested one. That guess is not persisted and yields once the root has its own commit.
 - A worktree whose creation has not finished looks dirty: its setup commands and initial git reset are still running. Surfaces that report uncommitted changes consult the pending state and show nothing instead of reporting bootstrap noise.
+- The worktree dialog's branch data is read outside the git store: local branches and each remote's default branch name when it opens, and matching remote branches when a picker search asks for them. A live fetch replaces the list; a runtime switch or a newer load discards an older answer.
 
 ### Keyboard, focus and window behavior
 

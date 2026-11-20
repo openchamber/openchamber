@@ -235,7 +235,7 @@ async function getGitApi(): Promise<GitAPI | null> {
   return initGitExtension();
 }
 
-async function getRepository(directory: string): Promise<Repository | null> {
+export async function getRepository(directory: string): Promise<Repository | null> {
   const api = await getGitApi();
   if (!api) return null;
 
@@ -573,122 +573,6 @@ async function getGitStatusRaw(directory: string): Promise<GitStatusResult> {
   };
 }
 
-
-interface GitBranchDetails {
-  current: boolean;
-  name: string;
-  commit: string;
-  label: string;
-  tracking?: string;
-  ahead?: number;
-  behind?: number;
-}
-
-export interface GitBranchResult {
-  all: string[];
-  current: string;
-  branches: Record<string, GitBranchDetails>;
-}
-
-export async function getGitUnpushedBranchCounts(directory: string, requestedBranches: string[]): Promise<{ counts: Record<string, number> }> {
-  const requested = [...new Set(requestedBranches)].filter(Boolean).slice(0, 5);
-  if (requested.length === 0) return { counts: {} };
-  const local = new Set((await getGitBranchesRaw(directory)).all.filter((branch) => !branch.startsWith('remotes/')));
-  const counts: Record<string, number> = {};
-  await Promise.all(requested.map(async (branch) => {
-    if (!local.has(branch)) return;
-    const upstreamResult = await execGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', `${branch}@{upstream}`], directory);
-    const upstream = upstreamResult.exitCode === 0 ? upstreamResult.stdout.trim() : '';
-    if (!upstream) return;
-    const countResult = await execGit(['rev-list', '--count', `${upstream}..${branch}`], directory);
-    const count = countResult.exitCode === 0 ? Number.parseInt(countResult.stdout.trim(), 10) : 0;
-    if (Number.isFinite(count) && count > 0) counts[branch] = count;
-  }));
-  return { counts };
-}
-
-export async function getGitBranches(directory: string): Promise<GitBranchResult> {
-  const repo = await getRepository(directory);
-  
-  if (!repo) {
-    return getGitBranchesRaw(directory);
-  }
-
-  const state = repo.state;
-  const currentBranch = state.HEAD?.name || '';
-  const branches: Record<string, GitBranchDetails> = {};
-  const all: string[] = [];
-
-  const localRefs = await repo.getBranches({ remote: false });
-  for (const ref of localRefs) {
-    if (ref.name) {
-      all.push(ref.name);
-      branches[ref.name] = {
-        current: ref.name === currentBranch,
-        name: ref.name,
-        commit: ref.commit || '',
-        label: ref.name,
-      };
-    }
-  }
-
-  const remoteRefs = await repo.getBranches({ remote: true });
-  for (const ref of remoteRefs) {
-    if (ref.name) {
-      const remoteBranchName = `remotes/${ref.name}`;
-      all.push(remoteBranchName);
-      branches[remoteBranchName] = {
-        current: false,
-        name: remoteBranchName,
-        commit: ref.commit || '',
-        label: ref.name,
-      };
-    }
-  }
-
-  if (state.HEAD?.name && state.HEAD?.upstream) {
-    const branchInfo = branches[state.HEAD.name];
-    if (branchInfo) {
-      branchInfo.tracking = `${state.HEAD.upstream.remote}/${state.HEAD.upstream.name}`;
-      branchInfo.ahead = state.HEAD.ahead;
-      branchInfo.behind = state.HEAD.behind;
-    }
-  }
-
-  return { all, current: currentBranch, branches };
-}
-
-async function getGitBranchesRaw(directory: string): Promise<GitBranchResult> {
-  const result = await execGit(['branch', '-a', '-v', '--format=%(refname:short)|%(objectname:short)|%(upstream:short)|%(HEAD)'], directory);
-  
-  if (result.exitCode !== 0) {
-    return { all: [], current: '', branches: {} };
-  }
-
-  const lines = result.stdout.trim().split('\n').filter(Boolean);
-  const branches: Record<string, GitBranchDetails> = {};
-  const all: string[] = [];
-  let current = '';
-
-  for (const line of lines) {
-    const [name, commit, tracking, head] = line.split('|');
-    if (name) {
-      all.push(name);
-      const isCurrent = head === '*';
-      if (isCurrent) current = name;
-      
-      branches[name] = {
-        current: isCurrent,
-        name,
-        commit: commit || '',
-        label: name.replace(/^remotes\//, ''),
-        tracking: tracking || undefined,
-      };
-    }
-  }
-
-  return { all, current, branches };
-}
 
 export async function createBranch(directory: string, name: string, startPoint?: string): Promise<{ success: boolean; branch: string }> {
   const repo = await getRepository(directory);

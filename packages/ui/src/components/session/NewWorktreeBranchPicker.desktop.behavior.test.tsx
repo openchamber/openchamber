@@ -7,7 +7,10 @@ import { Window } from 'happy-dom';
  * happy-dom cannot reproduce Chromium's visibility scan; the observer checks
  * commit-time focus, before Base UI's passive focus effect.
  */
-const openDesktopDropdown = async (run: (input: HTMLInputElement, selected: { value: string; label: string }[]) => Promise<void>) => {
+const openDesktopDropdown = async (
+  run: (input: HTMLInputElement, selected: { value: string; label: string }[]) => Promise<void>,
+  overrides: Partial<React.ComponentProps<typeof import('./NewWorktreeBranchPicker').NewWorktreeBranchPicker>> = {},
+) => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const globals = {
@@ -55,6 +58,7 @@ const openDesktopDropdown = async (run: (input: HTMLInputElement, selected: { va
           isLoading={false}
           isMobile={false}
            onSelect={(branch) => selected.push(branch)}
+          {...overrides}
         />
       </I18nProvider>,
     ));
@@ -95,6 +99,40 @@ const openDesktopDropdown = async (run: (input: HTMLInputElement, selected: { va
 };
 
 describe('NewWorktreeBranchPicker desktop dropdown', () => {
+  test('lists local branches and leaves remote branches out until a search', async () => {
+    const searches: string[] = [];
+    await openDesktopDropdown(async () => {
+      const values = [...document.querySelectorAll('[data-slot="command-item"]')]
+        .map((item) => item.getAttribute('data-value'));
+      expect(values).toEqual(['main', 'feature/one', 'feature/two']);
+      expect(searches).toEqual([]);
+    }, {
+      localBranches: ['main', 'feature/one', 'feature/two'],
+      remoteBranches: ['origin/dev', 'origin/teammate'],
+      searchRemoteBranches: async (query) => {
+        searches.push(query);
+        return [];
+      },
+    });
+  });
+
+  test('ranks remote branches it already knows once a search names them', async () => {
+    await openDesktopDropdown(async (search) => {
+      await act(async () => {
+        // SAFETY: happy-dom implements the HTMLInputElement value setter this test needs.
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+        setter.call(search, 'remote');
+        search.dispatchEvent(new window.Event('input', { bubbles: true }));
+      });
+      const values = [...document.querySelectorAll('[data-slot="command-item"]')]
+        .map((item) => item.getAttribute('data-value'));
+      expect(values).toContain('remotes/origin/remote-thing');
+    }, {
+      localBranches: ['main'],
+      remoteBranches: ['origin/remote-thing'],
+    });
+  });
+
   for (const keys of [['ArrowDown', 'ArrowUp'], ['n', 'p']]) {
     test(`${keys.join('/')} navigate filtered branches and Enter selects from the focused search`, async () => {
       await openDesktopDropdown(async (search, selected) => {

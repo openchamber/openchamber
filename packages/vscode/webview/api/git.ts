@@ -7,6 +7,7 @@ import type {
   GitAPI,
   GitStatus,
   GitBranch,
+  GitBranchListOptions,
   GitDeleteBranchPayload,
   GitRemoveRemotePayload,
   GitWorktreeInfo,
@@ -241,8 +242,14 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     return sendBridgeMessage<boolean>('api:git/worktree-type', { directory });
   },
 
-  getGitBranches: async (directory: string): Promise<GitBranch> => {
-    return sendBridgeMessage<GitBranch>('api:git/branches', { directory, method: 'GET' });
+  getGitBranches: async (directory: string, options?: GitBranchListOptions): Promise<GitBranch> => {
+    return sendBridgeMessage<GitBranch>('api:git/branches', {
+      directory,
+      method: 'GET',
+      remote: options?.remote,
+      query: options?.query,
+      limit: options?.limit,
+    });
   },
 
   getGitUnpushedBranchCounts: async (directory: string, branches: string[]) => {

@@ -1,5 +1,5 @@
 import React, { act } from 'react';
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, jest, mock, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
 // React detects input-event support when its DOM renderer is first imported.
@@ -137,8 +137,27 @@ mock.module('@/sync/session-actions', () => ({
   createSession: async () => null,
   updateSessionTitle: async () => undefined,
 }));
+const testGitApi = {
+  getGitBranches: async (
+    _directory: string,
+    options?: { remote?: 'none' | 'local' | 'live'; query?: string },
+  ) => {
+    const local = {
+      all: ['main'],
+      current: 'main',
+      branches: { main: { current: true, name: 'main', commit: '', label: 'main' } },
+    };
+    if (!options || options.remote === 'none') return local;
+    if (options.query) return { all: ['remotes/pr-fork/contrib/feature-x'], current: 'main', branches: {} };
+    return { ...local, all: [...local.all, 'remotes/origin/main'] };
+  },
+};
+
 mock.module('@/hooks/useRuntimeAPIs', () => ({
-  useRuntimeAPIs: () => ({ sourceControl: { issueGet: () => readIssue(), issueComments: async () => [] }, git: null }),
+  useRuntimeAPIs: () => ({
+    sourceControl: { issueGet: () => readIssue(), issueComments: async () => [] },
+    git: testGitApi,
+  }),
 }));
 mock.module('@/stores/useGitStore', () => ({
   ...actualGitStore,
@@ -313,6 +332,54 @@ describe('NewWorktreeDialog behavior', () => {
       createdPath = null;
       readIssue = async () => null;
       readContext = null;
+      dom.restore();
+    }
+  });
+
+  test('a stacked start branch found only on another remote picks that remote', async () => {
+    const dom = installDom();
+    const root = createRoot(dom.container);
+    try {
+      await act(async () => root.render(
+        <I18nProvider>
+          <NewWorktreeDialog open onOpenChange={() => undefined} initialSourceBranch="contrib/feature-x" />
+        </I18nProvider>,
+      ));
+      for (let pass = 0; pass < 10; pass += 1) {
+        await act(async () => {});
+      }
+      const basedOn = [...dom.container.querySelectorAll('button')]
+        .find((button) => (button.textContent || '').includes('contrib/feature-x'));
+      expect(basedOn?.textContent).toBe('remotes/pr-fork/contrib/feature-x');
+    } finally {
+      await act(async () => root.unmount());
+      dom.restore();
+    }
+  });
+
+  test('validates once after a field settles, not again on every scheduled pass', async () => {
+    jest.useFakeTimers();
+    validatedNames = [];
+    const dom = installDom();
+    const root = createRoot(dom.container);
+    try {
+      await act(async () => root.render(<I18nProvider><NewWorktreeDialog open onOpenChange={() => undefined} /></I18nProvider>));
+      const branchInput = dom.container.querySelector<HTMLInputElement>('input[placeholder="feature/my-awesome-feature"]');
+      if (!branchInput) throw new Error('Missing branch field');
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      await act(async () => {
+        setValue?.call(branchInput, 'feature/validated-once');
+        branchInput.dispatchEvent(new Event('input', { bubbles: true }));
+        branchInput.dispatchEvent(new window.FocusEvent('focusout', { bubbles: true }));
+      });
+      await act(async () => { jest.advanceTimersByTime(1000); });
+      expect(validatedNames).toHaveLength(1);
+      expect(validatedNames[0]).toEqual({ branchName: 'feature/validated-once', worktreeName: 'feature-validated-once' });
+      await act(async () => { jest.advanceTimersByTime(2000); });
+      expect(validatedNames).toHaveLength(1);
+    } finally {
+      await act(async () => root.unmount());
+      jest.useRealTimers();
       dom.restore();
     }
   });

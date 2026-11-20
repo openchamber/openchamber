@@ -3,11 +3,10 @@ import { describe, expect, test } from 'bun:test';
 import { rankBranchesForQuery } from './branchSearch';
 
 describe('rankBranchesForQuery', () => {
-  test('empty query keeps everything in the other groups', () => {
+  test('empty query keeps the local branches in the other group', () => {
     const result = rankBranchesForQuery({ localBranches: ['main'], remoteBranches: ['origin/dev'], query: ' ' });
     expect(result.matching).toEqual([]);
     expect(result.otherLocal).toEqual(['main']);
-    expect(result.otherRemote).toEqual(['origin/dev']);
   });
 
   test('orders matches by relevance, not alphabetically', () => {
@@ -23,7 +22,6 @@ describe('rankBranchesForQuery', () => {
       'origin/fix/scroll-old',
     ]);
     expect(result.otherLocal).toEqual(['main']);
-    expect(result.otherRemote).toEqual([]);
   });
 
   test('remote matches carry the remotes/ checkout value', () => {

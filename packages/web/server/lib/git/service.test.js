@@ -6615,6 +6615,43 @@ describe.runIf(canRunGit())('getBranches', () => {
     expect(branches.all).not.toContain('remotes/origin/remote-only');
   });
 
+  it('lists only local branches when asked for none, keeping the defaults a new branch bases on', async () => {
+    const { repository } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
+    runGit(repository, ['branch', 'local-topic']);
+
+    const branches = await getBranches(repository, { remote: 'none' });
+
+    expect(branches.all).toContain('next');
+    expect(branches.all).toContain('local-topic');
+    expect(branches.all.filter((name) => name.startsWith('remotes/'))).toEqual([]);
+    expect(branches.current).toBe('next');
+    expect(branches.defaultBranches).toEqual({ origin: 'react' });
+    expect(branches.branches['local-topic']).toMatchObject({ current: false });
+  });
+
+  it('narrows remote branches to a query, caps them, and keeps every local branch', async () => {
+    const { repository } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
+    for (const branch of ['feature/apple', 'feature/apricot', 'fix/apple']) {
+      const localName = `local-${branch.replace('/', '-')}`;
+      runGit(repository, ['branch', localName]);
+      runGit(repository, ['push', 'origin', `${localName}:${branch}`]);
+    }
+    runGit(repository, ['fetch', 'origin']);
+
+    const branches = await getBranches(repository, { remote: 'local', query: 'APPLE' });
+
+    expect(branches.all).toContain('next');
+    expect(branches.all).toContain('local-feature-apple');
+    expect(branches.all).toContain('remotes/origin/feature/apple');
+    expect(branches.all).toContain('remotes/origin/fix/apple');
+    expect(branches.all).not.toContain('remotes/origin/feature/apricot');
+    expect(branches.all).not.toContain('remotes/origin/react');
+
+    const capped = await getBranches(repository, { remote: 'local', query: 'apple', limit: 1 });
+    expect(capped.all.filter((name) => name.startsWith('remotes/'))).toHaveLength(1);
+    expect(capped.all).toContain('local-feature-apple');
+  });
+
   it('does not list a detached HEAD as a branch', async () => {
     const { repository } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
     runGit(repository, ['tag', 'v2.1.3']);

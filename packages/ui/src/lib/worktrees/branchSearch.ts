@@ -7,7 +7,6 @@ export interface RankedBranchGroups {
     source: 'local' | 'remote';
   }>;
   otherLocal: string[];
-  otherRemote: string[];
 }
 
 export function rankBranchesForQuery(args: {
@@ -22,7 +21,6 @@ export function rankBranchesForQuery(args: {
     return {
       matching: [],
       otherLocal: localBranches,
-      otherRemote: remoteBranches,
     };
   }
 
@@ -36,6 +34,5 @@ export function rankBranchesForQuery(args: {
   return {
     matching,
     otherLocal: candidates.filter((entry) => entry.source === 'local' && !matched.has(entry)).map((entry) => entry.label),
-    otherRemote: candidates.filter((entry) => entry.source === 'remote' && !matched.has(entry)).map((entry) => entry.label),
   };
 }

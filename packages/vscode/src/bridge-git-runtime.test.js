@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
 const gitService = {
+  getRepository: mock(async () => null),
   stageGitFiles: mock(),
   unstageGitFiles: mock(),
   createWorktree: mock(),

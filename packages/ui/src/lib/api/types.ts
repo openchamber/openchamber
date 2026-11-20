@@ -336,7 +336,7 @@ export interface GitBranchDetails {
   behind?: number;
 }
 
-export type GitBranchListOptions = { remote?: 'local' | 'live' };
+export type GitBranchListOptions = { remote?: 'none' | 'local' | 'live'; query?: string; limit?: number };
 
 export interface GitBranch {
   all: string[];

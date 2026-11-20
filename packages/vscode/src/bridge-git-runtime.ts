@@ -1,6 +1,7 @@
 import { OpenCode } from '@opencode/client';
 import { z } from 'zod';
 import * as gitService from './gitService';
+import { getGitBranches, getGitUnpushedBranchCounts } from './gitBranches';
 import type { BridgeContext, BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -80,12 +81,15 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
     }
 
     case 'api:git/branches': {
-      const { directory, method, name, startPoint, force } = (payload || {}) as {
+      const { directory, method, name, startPoint, force, remote, query, limit } = (payload || {}) as {
         directory?: string;
         method?: string;
         name?: string;
         startPoint?: string;
         force?: boolean;
+        remote?: 'none' | 'local' | 'live';
+        query?: string;
+        limit?: number;
       };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
@@ -93,7 +97,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       const normalizedMethod = typeof method === 'string' ? method.toUpperCase() : 'GET';
 
       if (normalizedMethod === 'GET') {
-        const branches = await gitService.getGitBranches(directory!);
+        const branches = await getGitBranches(directory!, { remote, query, limit });
         return { id, type, success: true, data: branches };
       }
 
@@ -123,7 +127,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!Array.isArray(branches) || branches.some((branch) => typeof branch !== 'string')) {
         return { id, type, success: false, error: 'branches must be an array of branch names' };
       }
-      return { id, type, success: true, data: await gitService.getGitUnpushedBranchCounts(directory!, branches) };
+      return { id, type, success: true, data: await getGitUnpushedBranchCounts(directory!, branches) };
     }
 
     case 'api:git/remote-branches': {

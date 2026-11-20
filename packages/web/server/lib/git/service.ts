@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { simpleGit } from 'simple-git';
 import { createSerialRefresh } from './serial-refresh.js';
+import { getRemoteDefaultBranches, readBranchList, readLocalBranchRefs, type BranchListOptions } from './branches.js';
 import { stripAppImageLauncherEnv } from '../inherited-env.js';
 import fs from 'fs';
 import path from 'path';
@@ -18,7 +19,7 @@ import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from '
 import { resolveSshAuthSock } from './ssh-auth-sock.js';
 import { randomUUID } from 'crypto';
 import { worktreeBootstrapFailureMessage } from './worktree-bootstrap-storage.js';
-import type { SimpleGit, BranchSummary, FileStatusResult, RemoteWithRefs } from 'simple-git';
+import type { SimpleGit, FileStatusResult } from 'simple-git';
 import type { ChildProcess } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import type {
@@ -4426,40 +4427,13 @@ export async function commit(directory: string, message: string, options: { file
   });
 }
 
-const withoutDetachedHeadEntry = (summary: BranchSummary) => {
-  if (!summary.detached) {
-    return { all: summary.all, branches: summary.branches };
-  }
-  const index = summary.all.indexOf(summary.current);
-  const all = summary.all.filter((_, entryIndex) => entryIndex !== index);
-  const branches = { ...summary.branches };
-  if (!all.includes(summary.current)) {
-    delete branches[summary.current];
-  }
-  return { all, branches };
-};
+export { parseBranchListQuery } from './branches.js';
 
-export async function getBranches(directory: string, { remote = 'local' } = {}) {
+export async function getBranches(directory: string, options: BranchListOptions = {}) {
   const { git } = await createRepositoryGitContext(directory);
 
   try {
-    const result = await git.branch();
-    const { all: allBranches, branches } = withoutDetachedHeadEntry(result);
-    const remoteBranches = allBranches.filter(branch => branch.startsWith('remotes/'));
-    const activeRemoteBranches = remote === 'local'
-      ? remoteBranches
-      : await filterActiveRemoteBranches(git, directory, remoteBranches);
-    const defaultBranches = await getRemoteDefaultBranches(git);
-
-    return {
-      all: [
-        ...allBranches.filter(branch => !branch.startsWith('remotes/')),
-        ...activeRemoteBranches,
-      ],
-      current: result.current,
-      branches,
-      defaultBranches,
-    };
+    return await readBranchList(git, directory, options);
   } catch (error) {
     console.error('Failed to get branches:', error);
     throw error;
@@ -4473,7 +4447,7 @@ export async function getUnpushedBranchCounts(directory: string, branchNames: st
     .slice(0, 5);
   if (requested.length === 0) return { counts: {} };
 
-  const local = new Set((await git.branchLocal()).all);
+  const local = new Set((await readLocalBranchRefs(git)).all);
   const counts: Record<string, number> = {};
   await Promise.all(requested.map(async (branch) => {
     if (!local.has(branch)) return;
@@ -4487,96 +4461,6 @@ export async function getUnpushedBranchCounts(directory: string, branchNames: st
     if (Number.isFinite(count) && count > 0) counts[branch] = count;
   }));
   return { counts };
-}
-
-async function getRemoteDefaultBranches(git: SimpleGit) {
-  let defaults: Record<string, string> = {};
-
-  try {
-    const refs = await git.raw([
-      'for-each-ref',
-      '--format=%(refname) %(symref)',
-      'refs/remotes',
-    ]);
-    defaults = Object.fromEntries(
-      refs.trim().split('\n').flatMap((line): [string, string][] => {
-        const [ref = '', symbolicRef] = line.split(' ');
-        const match = ref.match(/^refs\/remotes\/([^/]+)\/HEAD$/);
-        const prefix = match ? `refs/remotes/${match[1]}/` : '';
-        return match && symbolicRef !== undefined && symbolicRef.startsWith(prefix)
-          ? [[match[1] ?? '', symbolicRef.slice(prefix.length)]]
-          : [];
-      })
-    );
-  } catch {
-    defaults = {};
-  }
-
-  return defaults;
-}
-
-const REMOTE_HEADS_TTL_MS = 30_000;
-const remoteHeadsCache = new Map<string, { at: number; localKey: string; heads: Promise<Set<string>> }>();
-
-const readRemoteHeads = (git: SimpleGit, directory: string, remote: RemoteWithRefs, localRefs: string[]) => {
-  const key = `${directory}\0${remote.name}\0${remote.refs?.fetch ?? ''}`;
-  const localKey = localRefs.join('\n');
-  const cached = remoteHeadsCache.get(key);
-  if (cached && cached.localKey === localKey && Date.now() - cached.at < REMOTE_HEADS_TTL_MS) return cached.heads;
-  const heads = git.raw(['ls-remote', '--heads', '--', remote.name]).then((output) => {
-    const names = new Set<string>();
-    for (const line of output.trim().split('\n')) {
-      if (line.includes('\trefs/heads/')) names.add((line.split('\t')[1] ?? '').replace('refs/heads/', ''));
-    }
-    return names;
-  });
-  const entry = { at: Date.now(), localKey, heads };
-  remoteHeadsCache.set(key, entry);
-  heads.catch(() => { if (remoteHeadsCache.get(key) === entry) remoteHeadsCache.delete(key); });
-  return heads;
-};
-
-async function filterActiveRemoteBranches(git: SimpleGit, directory: string, remoteBranches: string[]) {
-  try {
-    const remotes = await git.getRemotes(true);
-    const branchesByRemote = new Map<string, Set<string>>();
-
-    const unreachableRemotes = new Set<string>();
-
-    await Promise.all(remotes.map(async (remote) => {
-      try {
-        const localRefs = remoteBranches.filter((branch) => branch.startsWith(`remotes/${remote.name}/`));
-        branchesByRemote.set(remote.name, await readRemoteHeads(git, directory, remote, localRefs));
-      } catch {
-        unreachableRemotes.add(remote.name);
-      }
-    }));
-
-    const activeBranches = remoteBranches.filter(remoteBranch => {
-      const match = remoteBranch.match(/^remotes\/[^/]+\/(.+)$/);
-      if (!match) return false;
-      const remoteName = remoteBranch.split('/')[1] ?? '';
-      const branchName = match[1] ?? '';
-      if (unreachableRemotes.has(remoteName)) return true;
-      return branchesByRemote.get(remoteName)?.has(branchName) ?? false;
-    });
-
-    const seenBranches = new Set(activeBranches);
-    for (const [remoteName, actualRemoteBranches] of branchesByRemote) {
-      for (const branchName of actualRemoteBranches) {
-        const qualifiedBranch = `remotes/${remoteName}/${branchName}`;
-        if (!seenBranches.has(qualifiedBranch)) {
-          seenBranches.add(qualifiedBranch);
-          activeBranches.push(qualifiedBranch);
-        }
-      }
-    }
-
-    return activeBranches;
-  } catch (error) {
-    console.warn('Failed to filter active remote branches, returning all:', errorField(error, 'message'));
-    return remoteBranches;
-  }
 }
 
 export async function createBranch(directory: string, branchName: string, options: { startPoint?: string } = {}) {

@@ -43,9 +43,10 @@ own their contracts in `project-context/DOCUMENTATION.md` and
 - Dialog defaults reset on opening. Background configuration refreshes and goal
   toggles preserve user-edited instructions; closing retains fields through the
   exit animation.
-- New-worktree source selection waits for fetched branches. Persisted branch
-  seeds contain only local branches and can incorrectly select local `main` when
-  the bound remote's default branch should win.
+- New-worktree source selection waits for the local branch listing, not a remote
+  one. The picker lists local branches only and searches remote branches on
+  demand; the bound remote's default tracking ref, known from
+  `refs/remotes/<remote>/HEAD`, still wins over local `main` as the default source.
 - A stacked branch starts from its named parent, fetching the remote copy when
   needed. Failure to find it never substitutes the project root's current branch.
 - Worktree folder names remain ASCII and keep their initial random name when a
@@ -91,6 +92,17 @@ own their contracts in `project-context/DOCUMENTATION.md` and
   small model; unavailable configuration disables it with an explanation.
 
 ## Decisions
+
+### Why the branch picker does not list every remote branch
+
+A repository can track tens of thousands of remote branches. Listing them costs a
+large response, a full sort, and one row per branch, before the person can pick a
+local branch they already have. The dialog therefore asks for `remote: 'none'`
+only, and typing in the picker asks the server for the remote names that contain
+the query. A list the person explicitly fetched with *Fetch branches* is ranked
+on the client instead, where its candidates are narrowed by substring first.
+Rejected: hiding the rows but still transferring every name, because ranking a
+large remote list on each keystroke is the second half of the cost.
 
 ### Why the branch picker explicitly focuses its input
 

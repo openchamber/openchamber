@@ -36,7 +36,7 @@ import { handleWorktreeCreateKeyDown } from './worktreeCreateKeyboard';
 import { NewWorktreeBranchPicker } from './NewWorktreeBranchPicker';
 import { resolveBranchOnTopSource, resolveDefaultSourceBranch } from '@/lib/worktrees/worktreeSourceBranchPreference';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { useGitBranches, useGitBranchesFetchedAt, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
+import { useWorktreeBranchData } from '@/hooks/useWorktreeBranchData';
 import { ReferencePickerDialog, type ReferencePickerConfirmFailure } from '@/components/references/ReferencePickerDialog';
 import { referencePickerItemKey, trackerReferenceSource, type ReferencePickerSelection, type ReferencePickerSource } from '@/components/references/referencePickerItems';
 import { trackerPresentation } from '@/lib/trackers/presentation';
@@ -169,22 +169,9 @@ export function NewWorktreeDialog({
   const [existingBranch, setExistingBranch] = React.useState<ExistingBranchState>({ selectedBranch: '', worktreeName: '' });
   const [sourceBranch, setSourceBranch] = React.useState('');
 
-  const branches = useGitBranches(projectDirectory);
-  const isLoadingBranches = useGitLoadingBranches(projectDirectory);
-  const fetchBranches = useGitStore((state) => state.fetchBranches);
-
-  const localBranches = React.useMemo(() => {
-    if (!branches?.all) return [];
-    return branches.all.filter((branchName: string) => !branchName.startsWith('remotes/')).sort();
-  }, [branches]);
-
-  const remoteBranches = React.useMemo(() => {
-    if (!branches?.all) return [];
-    return branches.all
-      .filter((branchName: string) => branchName.startsWith('remotes/'))
-      .map((branchName: string) => branchName.replace(/^remotes\//, ''))
-      .sort();
-  }, [branches]);
+  const branchList = useWorktreeBranchData({ open, directory: projectDirectory, git });
+  const { localBranches, remoteBranches, isLoadingBranches, fetchedBranchList } = branchList;
+  const canFetchBranches = Boolean(projectDirectory && git);
 
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const existingWorktreeNames = React.useMemo(() => {
@@ -203,20 +190,6 @@ export function NewWorktreeDialog({
     return `${generateBranchSlug()}-${Date.now().toString(36).slice(-4)}`;
   }, [existingWorktreeNames]);
 
-  const canFetchBranches = Boolean(projectDirectory && git);
-  const handleFetchBranches = React.useCallback(() => {
-    if (!projectDirectory || !git) return;
-    void fetchBranches(projectDirectory, git, { remote: 'live' });
-  }, [projectDirectory, git, fetchBranches]);
-
-  const branchesFetchedAt = useGitBranchesFetchedAt(projectDirectory);
-  const fetchedBranchList = branchesFetchedAt > 0 ? branches?.all : undefined;
-  React.useEffect(() => {
-    if (!open || !projectDirectory || !git) return;
-    if (fetchedBranchList) return;
-    void fetchBranches(projectDirectory, git);
-  }, [open, projectDirectory, git, fetchedBranchList, fetchBranches]);
-
   const [validation, setValidation] = React.useState<ValidationState>({
     isValidating: false,
     branchError: null,
@@ -224,7 +197,7 @@ export function NewWorktreeDialog({
     touched: false,
   });
   const [isCreating, setIsCreating] = React.useState(false);
-  const [validationAbortController, setValidationAbortController] = React.useState<AbortController | null>(null);
+  const validationAbortControllerRef = React.useRef<AbortController | null>(null);
   const [fallbackFolderName, setFallbackFolderName] = React.useState('');
   const folderNameForBranch = React.useCallback(
     (branch: string) => slugifyWorktreeName(branch) || fallbackFolderName,
@@ -251,29 +224,50 @@ export function NewWorktreeDialog({
   const startsNewBranch = mode === 'new-branch' || (mode === 'from-item' && !linkedPr);
 
   const onTopRemote = repositoryContext && repositoryContext !== 'missing' ? repositoryContext.primaryRemote : 'origin';
+  const { searchRemoteBranches } = branchList;
   React.useEffect(() => {
     if (!open || !initialSourceBranch || !fetchedBranchList || sourceBranch) return;
-    setSourceBranch(resolveBranchOnTopSource(fetchedBranchList, initialSourceBranch) || `remotes/${onTopRemote}/${initialSourceBranch}`);
-  }, [open, initialSourceBranch, fetchedBranchList, sourceBranch, onTopRemote]);
+    const localSource = resolveBranchOnTopSource(fetchedBranchList, initialSourceBranch);
+    if (localSource) {
+      setSourceBranch(localSource);
+      return;
+    }
+    let cancelled = false;
+    void searchRemoteBranches(initialSourceBranch).then((remoteNames) => {
+      if (cancelled) return;
+      const exact = remoteNames.filter((remoteName) => remoteName.slice(remoteName.indexOf('/') + 1) === initialSourceBranch);
+      const preferred = exact.find((remoteName) => remoteName.startsWith(`${onTopRemote}/`)) ?? exact[0];
+      setSourceBranch(preferred ? `remotes/${preferred}` : `remotes/${onTopRemote}/${initialSourceBranch}`);
+    }).catch(() => {
+      if (!cancelled) setSourceBranch(`remotes/${onTopRemote}/${initialSourceBranch}`);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, initialSourceBranch, fetchedBranchList, sourceBranch, onTopRemote, searchRemoteBranches]);
 
   React.useEffect(() => {
     if (!open || initialSourceBranch || !fetchedBranchList || !projectDirectory || sourceBranch) return;
     let cancelled = false;
     void getRootBranch(projectDirectory).catch(() => null).then((rootBranch) => {
       if (cancelled) return;
-      const defaultBranches = branches?.defaultBranches ?? {};
-      const defaultBranch = defaultBranches[onTopRemote] ?? null;
-      const preferred = resolveDefaultSourceBranch({ branches: fetchedBranchList, rootBranch, defaultBranch, remote: onTopRemote });
+      const defaultBranch = branchList.defaultBranches?.[onTopRemote] ?? null;
+      const candidates = defaultBranch
+        ? [...fetchedBranchList, `remotes/${onTopRemote}/${defaultBranch}`]
+        : fetchedBranchList;
+      const preferred = resolveDefaultSourceBranch({ branches: candidates, rootBranch, defaultBranch, remote: onTopRemote });
       if (preferred) setSourceBranch((current) => current || preferred);
     });
     return () => {
       cancelled = true;
     };
-  }, [open, initialSourceBranch, fetchedBranchList, branches?.defaultBranches, projectDirectory, sourceBranch, onTopRemote]);
+  }, [open, initialSourceBranch, fetchedBranchList, branchList.defaultBranches, projectDirectory, sourceBranch, onTopRemote]);
 
   React.useLayoutEffect(() => {
     if (!open) {
       initializedForCurrentOpen.current = false;
+      validationAbortControllerRef.current?.abort();
+      validationAbortControllerRef.current = null;
       return;
     }
     if (initializedForCurrentOpen.current) return;
@@ -305,11 +299,9 @@ export function NewWorktreeDialog({
   const validateInputs = React.useCallback(async () => {
     if (!projectRef || !validation.touched || isCreating) return;
 
-    if (validationAbortController) {
-      validationAbortController.abort();
-    }
+    validationAbortControllerRef.current?.abort();
     const abortController = new AbortController();
-    setValidationAbortController(abortController);
+    validationAbortControllerRef.current = abortController;
     setValidation(prev => ({ ...prev, isValidating: true }));
 
     try {
@@ -320,7 +312,7 @@ export function NewWorktreeDialog({
 
       if (normalizedBranch && normalizedWorktree) {
         const prConfig = linkedPr && linkedPrContext
-          ? resolvePrWorktreeConfig(linkedPr, linkedPrContext, branches?.branches ?? {})
+          ? resolvePrWorktreeConfig(linkedPr, linkedPrContext, branchList.branchDetails ?? {})
           : null;
         const validateArgs: CreateWorktreeArgs = {
           mode: mode === 'existing-branch' || prConfig ? 'existing' : 'new',
@@ -360,9 +352,8 @@ export function NewWorktreeDialog({
     worktreeName,
     linkedPr,
     linkedPrContext,
-    branches?.branches,
+    branchList.branchDetails,
     validation.touched,
-    validationAbortController,
     isCreating,
     t,
   ]);
@@ -419,10 +410,8 @@ export function NewWorktreeDialog({
       return;
     }
 
-    if (validationAbortController) {
-      validationAbortController.abort();
-      setValidationAbortController(null);
-    }
+    validationAbortControllerRef.current?.abort();
+    validationAbortControllerRef.current = null;
     setValidation((prev) => ({ ...prev, isValidating: false, branchError: null, worktreeError: null }));
     setIsCreating(true);
 
@@ -434,7 +423,7 @@ export function NewWorktreeDialog({
       const args: CreateWorktreeArgs = (() => {
         if (linkedPr) {
           if (!linkedPrContext) throw new Error(tItem('session.newWorktree.error.changeRequestAuthorityMissing'));
-          const prConfig = resolvePrWorktreeConfig(linkedPr, linkedPrContext, branches?.branches ?? {});
+          const prConfig = resolvePrWorktreeConfig(linkedPr, linkedPrContext, branchList.branchDetails ?? {});
           sourceLabel = prConfig.sourceLabel;
           return {
             preferredName: normalizedBranch || normalizedWorktree,
@@ -732,6 +721,7 @@ export function NewWorktreeDialog({
           title={t('session.newWorktree.selectBranch')}
           localBranches={localBranches}
           remoteBranches={remoteBranches}
+          searchRemoteBranches={remoteBranches.length === 0 ? branchList.searchRemoteBranches : undefined}
           isLoading={isLoadingBranches}
           isMobile={isMobile}
           onSelect={(branch) => {
@@ -744,7 +734,7 @@ export function NewWorktreeDialog({
         variant="ghost"
         size="sm"
         className="h-8 w-8 shrink-0 px-0"
-        onClick={handleFetchBranches}
+        onClick={branchList.fetchLiveBranches}
         disabled={!canFetchBranches || isLoadingBranches}
         title={t('session.newWorktree.fetchBranches')}
         aria-label={t('session.newWorktree.fetchBranches')}
@@ -771,6 +761,7 @@ export function NewWorktreeDialog({
       title={t('session.newWorktree.selectSourceBranch')}
       localBranches={localBranches}
       remoteBranches={remoteBranches}
+      searchRemoteBranches={remoteBranches.length === 0 ? branchList.searchRemoteBranches : undefined}
       isLoading={isLoadingBranches}
       isMobile={isMobile}
       disabled={!startsNewBranch}
