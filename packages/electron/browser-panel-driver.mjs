@@ -36,6 +36,11 @@ const NAMED_KEYS = {
 
 const MODIFIER_BITS = { Alt: 1, Control: 2, Meta: 4, Shift: 8 };
 
+const SHIFTED_US_KEYS = {
+  '1': '!', '2': '@', '3': '#', '4': '$', '5': '%', '6': '^', '7': '&', '8': '*', '9': '(', '0': ')',
+  '`': '~', '-': '_', '=': '+', '[': '{', ']': '}', '\\': '|', ';': ':', "'": '"', ',': '<', '.': '>', '/': '?',
+};
+
 // external: https://www.electronjs.org/docs/latest/api/web-contents#contentssendinputeventinputevent macOS editing shortcuts require the corresponding edit command as well as synthesized keys.
 const EDITING_COMMANDS = { a: 'selectAll', c: 'copy', v: 'paste', x: 'cut', z: 'undo' };
 
@@ -60,7 +65,9 @@ export const keyEventsFor = (combo, platform = process.platform) => {
     keyCode = named.keyCode;
     text = named.text;
   } else if ([...keyName].length === 1) {
-    key = (modifiers & MODIFIER_BITS.Shift) && /[a-z]/.test(keyName) ? keyName.toUpperCase() : keyName;
+    key = (modifiers & MODIFIER_BITS.Shift)
+      ? (SHIFTED_US_KEYS[keyName] ?? (/[a-z]/.test(keyName) ? keyName.toUpperCase() : keyName))
+      : keyName;
     const upper = keyName.toUpperCase();
     if (/[A-Z]/.test(upper)) {
       code = `Key${upper}`;
@@ -87,7 +94,7 @@ export const keyEventsFor = (combo, platform = process.platform) => {
   const down = { ...base, type: text ? 'keyDown' : 'rawKeyDown' };
   if (text) {
     down.text = text;
-    down.unmodifiedText = text;
+    down.unmodifiedText = named ? text : keyName;
   }
   if (command) down.commands = [command];
   return [down, { ...base, type: 'keyUp' }];

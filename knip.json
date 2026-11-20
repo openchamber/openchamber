@@ -54,6 +54,7 @@
       "project": [
         "bin/**/*.js",
         "server/**/*.{js,mjs,cjs}",
+        "server/lib/routing/runtime.ts",
         "src/**/*.{ts,tsx}"
       ]
     },
