@@ -2435,6 +2435,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.fileAttachment.toast.tooLarge': '{name} 过大，无法附加（超过 {size}）。如果它在项目中，请用 @ 提及。',
   'chat.fileAttachment.toast.heicConversionFailed': '{name} 无法从 HEIC 转换为 JPEG，因此未附加。请将照片保存为 JPEG 后重试。',
   'chat.fileAttachment.toast.overSendLimit': '{name} 过大，无法附加（超过 {size}）。',
+  'chat.fileAttachment.toast.documentAttachedAsPath': '无法将 {name} 转换为文本，因此会把文件路径交给代理，由代理自行读取。',
   'chat.fileAttachment.activeEditor.addFile': '将文件添加到上下文:{name}',
   'chat.fileAttachment.activeEditor.pinSelection': '将选择固定到上下文',
   'chat.fileAttachment.openInDiagram': '在图表视图中打开',

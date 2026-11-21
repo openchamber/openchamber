@@ -2437,6 +2437,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.fileAttachment.toast.tooLarge": "{name} завеликий, щоб прикріпити (понад {size}). Якщо файл є в проєкті, згадайте його через @.",
   "chat.fileAttachment.toast.heicConversionFailed": "Не вдалося конвертувати {name} з HEIC у JPEG, тому файл не додано. Збережіть фото як JPEG і додайте його знову.",
   "chat.fileAttachment.toast.overSendLimit": "{name} завеликий, щоб прикріпити (понад {size}).",
+  "chat.fileAttachment.toast.documentAttachedAsPath": "Не вдалося перетворити {name} на текст, тож агент отримає шлях до файлу і прочитає його сам.",
   "chat.fileAttachment.activeEditor.addFile": "Додати файл:{name} до контексту",
   "chat.fileAttachment.activeEditor.pinSelection": "Прикріпити вибір у контексті",
   "chat.fileAttachment.openInDiagram": "Відкрити в перегляді діаграми",

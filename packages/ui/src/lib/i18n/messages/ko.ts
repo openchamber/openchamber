@@ -2469,6 +2469,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.fileAttachment.toast.tooLarge': '{name}은(는) 너무 커서 첨부할 수 없습니다({size} 초과). 프로젝트에 있는 파일이면 @로 멘션하세요.',
   'chat.fileAttachment.toast.heicConversionFailed': '{name} 파일을 HEIC에서 JPEG로 변환하지 못해 첨부되지 않았습니다. 사진을 JPEG로 저장한 뒤 다시 첨부하세요.',
   'chat.fileAttachment.toast.overSendLimit': '{name}은(는) 너무 커서 첨부할 수 없습니다({size} 초과).',
+  'chat.fileAttachment.toast.documentAttachedAsPath': '{name}을(를) 텍스트로 변환할 수 없어 에이전트에게 경로를 전달합니다. 에이전트가 파일을 직접 읽습니다.',
   'chat.fileAttachment.activeEditor.addFile': '컨텍스트에 파일 추가:{name}',
   'chat.fileAttachment.activeEditor.pinSelection': '컨텍스트에 선택 고정',
   'chat.fileAttachment.openInDiagram': '다이어그램 보기에서 열기',

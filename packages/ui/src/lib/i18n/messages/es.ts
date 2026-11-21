@@ -2437,6 +2437,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.fileAttachment.toast.tooLarge": "{name} es demasiado grande para adjuntarlo (más de {size}). Si está en el proyecto, menciónalo con @.",
   "chat.fileAttachment.toast.heicConversionFailed": "No se pudo convertir {name} de HEIC a JPEG, así que no se adjuntó. Guarda la foto como JPEG y vuelve a adjuntarla.",
   "chat.fileAttachment.toast.overSendLimit": "{name} es demasiado grande para adjuntarlo (más de {size}).",
+  "chat.fileAttachment.toast.documentAttachedAsPath": "No se pudo convertir {name} a texto, así que el agente recibe su ruta y lee el archivo por su cuenta.",
   "chat.fileAttachment.activeEditor.addFile": "Agregar archivo:{name} al contexto",
   "chat.fileAttachment.activeEditor.pinSelection": "Anclar selección al contexto",
   "chat.fileAttachment.openInDiagram": "Abrir en vista de diagrama",

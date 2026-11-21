@@ -2469,6 +2469,7 @@ export const dict = {
   'chat.fileAttachment.toast.tooLarge': '{name} is too large to attach (over {size}). Mention it with @ if it is in the project.',
   'chat.fileAttachment.toast.heicConversionFailed': '{name} could not be converted from HEIC to JPEG, so it was not attached. Save the photo as JPEG and attach it again.',
   'chat.fileAttachment.toast.overSendLimit': '{name} is too large to attach (over {size}).',
+  'chat.fileAttachment.toast.documentAttachedAsPath': 'Couldn\'t convert {name} to text, so the agent gets its path and reads the file itself.',
   'chat.fileAttachment.activeEditor.addFile': 'Add file:{name} to context',
   'chat.fileAttachment.activeEditor.pinSelection': 'Pin selection to context',
   'chat.fileAttachment.openInDiagram': 'Open in diagram view',

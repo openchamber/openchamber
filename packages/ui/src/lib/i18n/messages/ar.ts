@@ -2369,6 +2369,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.fileAttachment.toast.tooLarge': '{name} كبير جدًا بحيث لا يمكن إرفاقه (أكثر من {size}). إذا كان ضمن المشروع، فاذكره باستخدام @.',
   'chat.fileAttachment.toast.heicConversionFailed': 'تعذّر تحويل {name} من HEIC إلى JPEG، لذا لم يُرفق. احفظ الصورة بصيغة JPEG وأرفقها مرة أخرى.',
   'chat.fileAttachment.toast.overSendLimit': '{name} كبير جدًا بحيث لا يمكن إرفاقه (أكثر من {size}).',
+  'chat.fileAttachment.toast.documentAttachedAsPath': 'تعذّر تحويل {name} إلى نص، لذا يحصل الوكيل على مساره ويقرأ الملف بنفسه.',
   'chat.fileAttachment.activeEditor.addFile': 'إضافة file:{name} إلى السياق',
   'chat.fileAttachment.activeEditor.pinSelection': 'تثبيت التحديد في السياق',
   'chat.fileAttachment.openInDiagram': 'فتح في عرض المخطط',

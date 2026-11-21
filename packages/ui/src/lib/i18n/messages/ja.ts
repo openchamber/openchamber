@@ -2465,6 +2465,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.fileAttachment.toast.tooLarge': '{name} は大きすぎるため添付できません（{size} 超）。プロジェクト内のファイルなら @ でメンションしてください。',
   'chat.fileAttachment.toast.heicConversionFailed': '{name} を HEIC から JPEG に変換できなかったため、添付されませんでした。写真を JPEG で保存してから、もう一度添付してください。',
   'chat.fileAttachment.toast.overSendLimit': '{name} は大きすぎるため添付できません（{size} 超）。',
+  'chat.fileAttachment.toast.documentAttachedAsPath': '{name} をテキストに変換できなかったため、エージェントにはファイルのパスを渡し、エージェントが自分で読み込みます。',
   'chat.fileAttachment.activeEditor.addFile': 'ファイル {name}をコンテキストに追加',
   'chat.fileAttachment.activeEditor.pinSelection': '選択範囲をコンテキストに固定',
   'chat.fileAttachment.openInDiagram': 'ダイアグラムビューで開く',

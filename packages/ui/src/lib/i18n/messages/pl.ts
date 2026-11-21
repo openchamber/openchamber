@@ -1021,6 +1021,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.fileAttachment.toast.tooLarge': 'Plik {name} jest za duży, aby go załączyć (ponad {size}). Jeśli jest w projekcie, wspomnij go przez @.',
   'chat.fileAttachment.toast.heicConversionFailed': 'Nie udało się przekonwertować pliku {name} z HEIC do JPEG, więc go nie załączono. Zapisz zdjęcie jako JPEG i załącz je ponownie.',
   'chat.fileAttachment.toast.overSendLimit': 'Plik {name} jest za duży, aby go załączyć (ponad {size}).',
+  'chat.fileAttachment.toast.documentAttachedAsPath': 'Nie udało się przekonwertować pliku {name} na tekst, więc agent dostaje jego ścieżkę i sam odczyta plik.',
   'chat.fileAttachment.activeEditor.addFile': 'Dodaj plik:{name} do kontekstu',
   'chat.fileAttachment.activeEditor.pinSelection': 'Przypnij zaznaczenie do kontekstu',
   'chat.fileAttachment.openInDiagram': 'Otwórz w widoku diagramu',

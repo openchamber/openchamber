@@ -2329,6 +2329,7 @@ export const dict = {
   'chat.fileAttachment.toast.tooLarge': '{name} eklenemeyecek kadar büyük ({size} üzeri). Projedeyse @ ile anın.',
   'chat.fileAttachment.toast.heicConversionFailed': '{name} HEIC\'ten JPEG\'e dönüştürülemediği için eklenmedi. Fotoğrafı JPEG olarak kaydedip yeniden ekleyin.',
   'chat.fileAttachment.toast.overSendLimit': '{name} eklenemeyecek kadar büyük ({size} üzeri).',
+  'chat.fileAttachment.toast.documentAttachedAsPath': '{name} metne dönüştürülemedi. Ajan dosyanın yolunu alır ve dosyayı kendisi okur.',
   'chat.fileAttachment.activeEditor.addFile': '{name} dosyasını bağlama ekle',
   'chat.fileAttachment.activeEditor.pinSelection': 'Seçimi bağlama sabitle',
   'chat.fileAttachment.openInDiagram': 'Diyagram görünümünde aç',

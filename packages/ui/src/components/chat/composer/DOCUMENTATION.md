@@ -897,7 +897,10 @@ Office documents (docx, pptx, xlsx, odt, odp, ods) that arrive through
 Code's picker) follow the profile setting `documentAttachBehavior` (`ask` /
 `save` / `convert`, default `ask`). The other files of the same batch attach at
 once as before. `convert` sends the documents down the ordinary attachment
-path, where the store extracts their text (`sync/DOCUMENTATION.md`). `save`
+path, where the store extracts their text (`sync/DOCUMENTATION.md`). On the
+desktop a document the store cannot convert (over 10 MB, or unreadable) still
+attaches as its path note, and an info toast says the agent gets the path
+instead of text: refusing it would leave the agent nothing. `save`
 (shown as "Attach as is") writes the original bytes with
 `opencodeClient.writeOpenCodeTempFiles`, as a saved image is written, and
 links each as `[name](absolute path)`, with `<` and `>` in the name replaced by

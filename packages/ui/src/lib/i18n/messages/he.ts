@@ -2368,6 +2368,7 @@ export const dict = {
   'chat.fileAttachment.toast.tooLarge': '{name} גדול מדי לצירוף (מעל {size}). אם הקובץ נמצא בפרויקט, אפשר לאזכר אותו עם @.',
   'chat.fileAttachment.toast.heicConversionFailed': 'לא ניתן היה להמיר את {name} מ-HEIC ל-JPEG, ולכן הוא לא צורף. שמרו את התמונה כ-JPEG וצרפו אותה שוב.',
   'chat.fileAttachment.toast.overSendLimit': '{name} גדול מדי לצירוף (מעל {size}).',
+  'chat.fileAttachment.toast.documentAttachedAsPath': 'לא ניתן היה להמיר את {name} לטקסט, ולכן הסוכן מקבל את הנתיב שלו וקורא את הקובץ בעצמו.',
   'chat.fileAttachment.activeEditor.addFile': 'הוסף את file:{name} להקשר',
   'chat.fileAttachment.activeEditor.pinSelection': 'הצמד את הבחירה להקשר',
   'chat.fileAttachment.openInDiagram': 'פתח בתצוגת תרשים',

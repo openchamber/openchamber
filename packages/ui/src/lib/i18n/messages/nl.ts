@@ -2469,6 +2469,7 @@ export const dict = {
   'chat.fileAttachment.toast.tooLarge': '{name} is te groot om bij te voegen (meer dan {size}). Staat het bestand in het project, noem het dan met @.',
   'chat.fileAttachment.toast.heicConversionFailed': '{name} kon niet van HEIC naar JPEG worden omgezet en is daarom niet bijgevoegd. Sla de foto op als JPEG en voeg hem opnieuw toe.',
   'chat.fileAttachment.toast.overSendLimit': '{name} is te groot om bij te voegen (meer dan {size}).',
+  'chat.fileAttachment.toast.documentAttachedAsPath': '{name} kon niet naar tekst worden omgezet. De agent krijgt het pad en leest het bestand zelf.',
   'chat.fileAttachment.activeEditor.addFile': 'Bestand {name} aan context toevoegen',
   'chat.fileAttachment.activeEditor.pinSelection': 'Selectie aan context vastzetten',
   'chat.fileAttachment.openInDiagram': 'In diagramweergave openen',
