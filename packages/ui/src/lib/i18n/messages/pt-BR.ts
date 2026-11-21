@@ -3222,6 +3222,8 @@ export const dict: Record<I18nKey, string> = {
   "desktopHostSwitcher.error.pairingInvalidResponse": "O servidor retornou uma resposta de pareamento inválida.",
   "desktopHostSwitcher.error.failedToOpenNewWindow": "Não foi possível abrir nova janela",
   "desktopHostSwitcher.instance.local": "Local",
+  "tray.instance.local": "OpenChamber local",
+  "tray.instance.fallback": "Instância",
   "desktopHostSwitcher.instance.fallback": "Instância",
   "desktopHostSwitcher.startup.title": "Instância SSH padrão não disponível",
   "desktopHostSwitcher.startup.connectingTo": "Conectando a {host}...",

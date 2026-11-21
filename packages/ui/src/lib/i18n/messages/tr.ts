@@ -3081,6 +3081,8 @@ export const dict = {
   'desktopHostSwitcher.error.pairingInvalidResponse': 'Sunucu geçersiz bir eşleştirme yanıtı döndürdü.',
   'desktopHostSwitcher.error.failedToOpenNewWindow': 'Yeni pencere açılamadı',
   'desktopHostSwitcher.instance.local': 'Yerel',
+  'tray.instance.local': 'Yerel OpenChamber',
+  'tray.instance.fallback': 'Örnek',
   'desktopHostSwitcher.instance.fallback': 'Instance',
   'desktopHostSwitcher.startup.title': 'Varsayılan SSH instance\'ı kullanılamıyor',
   'desktopHostSwitcher.startup.connectingTo': '{host} adresine bağlanılıyor...',

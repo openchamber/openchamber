@@ -3166,6 +3166,8 @@ export const dict = {
   'desktopHostSwitcher.error.pairingInvalidResponse': 'השרת החזיר תגובת צימוד לא תקינה.',
   'desktopHostSwitcher.error.failedToOpenNewWindow': 'פתיחת חלון חדש נכשלה',
   'desktopHostSwitcher.instance.local': 'מקומי',
+  'tray.instance.local': 'OpenChamber מקומי',
+  'tray.instance.fallback': 'מופע',
   'desktopHostSwitcher.instance.fallback': 'מופע',
   'desktopHostSwitcher.startup.title': 'מופע ה-SSH של ברירת המחדל אינו זמין',
   'desktopHostSwitcher.startup.connectingTo': 'מתחבר אל {host}…',

@@ -24,6 +24,9 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
     invokeDesktop('desktop_set_locale', { locale }).catch((error) => {
       console.warn('[i18n] failed to sync locale to desktop shell', error);
     });
+    invokeDesktop('desktop_set_tray_locale', { locale }).catch((error) => {
+      console.warn('[i18n] failed to sync locale to desktop tray', error);
+    });
   }, [locale]);
 
   const value = React.useMemo<I18nContextValue>(() => {

@@ -2946,6 +2946,8 @@ export const dict = {
   'desktopHostSwitcher.error.pairingInvalidResponse': 'Le serveur a renvoyé une réponse de jumelage invalide.',
   'desktopHostSwitcher.error.failedToOpenNewWindow': 'Échec de l\'ouverture d\'une nouvelle fenêtre',
   'desktopHostSwitcher.instance.local': 'Local',
+  'tray.instance.local': 'OpenChamber local',
+  'tray.instance.fallback': 'Instance',
   'desktopHostSwitcher.instance.fallback': 'Instance',
   'desktopHostSwitcher.startup.title': 'Instance SSH par défaut indisponible',
   'desktopHostSwitcher.startup.connectingTo': 'Connexion à {host}...',

@@ -3266,6 +3266,8 @@ export const dict = {
   'desktopHostSwitcher.error.pairingInvalidResponse': 'The server returned an invalid pairing response.',
   'desktopHostSwitcher.error.failedToOpenNewWindow': 'Failed to open new window',
   'desktopHostSwitcher.instance.local': 'Local',
+  'tray.instance.local': 'Local OpenChamber',
+  'tray.instance.fallback': 'Instance',
   'desktopHostSwitcher.instance.fallback': 'Instance',
   'desktopHostSwitcher.startup.title': 'Default SSH instance unavailable',
   'desktopHostSwitcher.startup.connectingTo': 'Connecting to {host}...',

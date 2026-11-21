@@ -3266,6 +3266,8 @@ export const dict: Record<I18nKey, string> = {
   'desktopHostSwitcher.error.pairingInvalidResponse': '서버가 유효하지 않은 페어링 응답을 반환했습니다.',
   'desktopHostSwitcher.error.failedToOpenNewWindow': '새 창 열기에 실패했습니다',
   'desktopHostSwitcher.instance.local': '로컬',
+  'tray.instance.local': '로컬 OpenChamber',
+  'tray.instance.fallback': '인스턴스',
   'desktopHostSwitcher.instance.fallback': '인스턴스',
   'desktopHostSwitcher.startup.title': '기본 SSH 인스턴스를 사용할 수 없습니다',
   'desktopHostSwitcher.startup.connectingTo': '{host}에 연결 중…',

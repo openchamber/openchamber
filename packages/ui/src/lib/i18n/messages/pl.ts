@@ -2163,6 +2163,8 @@ export const dict: Record<I18nKey, string> = {
   'desktopHostSwitcher.header.default': 'Domyślny',
   'desktopHostSwitcher.instance.fallback': 'Instancja',
   'desktopHostSwitcher.instance.local': 'Lokalny',
+  'tray.instance.local': 'Lokalny OpenChamber',
+  'tray.instance.fallback': 'Instancja',
   'desktopHostSwitcher.ssh.connectingTo': 'Łączenie z {host}',
   'desktopHostSwitcher.ssh.instanceFallback': 'Instancja SSH',
   'desktopHostSwitcher.ssh.needInstancesHint': 'Potrzebujesz instancji SSH? Zarządzaj nimi w Ustawieniach.',

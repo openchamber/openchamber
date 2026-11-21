@@ -101,7 +101,7 @@ date
 
 ## Desktop Native Menus
 
-The Electron app menu and the right-click context menu are native, outside `@/lib/i18n`. Their labels live in `packages/electron/menu-locales.mjs` (`MENU_LOCALE_DICTIONARIES`, `CONTEXT_MENU_LABEL_DICTIONARIES`), keyed by the same locale codes as the UI. A new menu item gets its label in every locale there, and a new UI language gets its own entry there in the same change; `menu-locales.test.mjs` checks key parity.
+The Electron app menu and the right-click context menu are native, outside `@/lib/i18n`. Their labels live in `packages/electron/menu-locales.mjs` (`MENU_LOCALE_DICTIONARIES`, `CONTEXT_MENU_LABEL_DICTIONARIES`), keyed by the same locale codes as the UI. A new menu item gets its label in every locale there, and a new UI language gets its own entry there in the same change; `menu-locales.test.mjs` checks key parity. The tray menu and tooltip labels live in `packages/electron/tray-locales.mjs` (`TRAY_LOCALE_DICTIONARIES`) under the same rule; `tray-menu.test.mjs` checks their parity.
 
 ## Adding a UI Language
 
@@ -112,7 +112,7 @@ A new locale code lands in all of these in one change:
 - `packages/ui/src/lib/i18n/runtime.ts`: the `Locale` union, `LOCALES`, `LOCALE_LABEL_KEYS`, and `normalizeLocale` (include legacy tags the platforms still send, such as `iw` for Hebrew). A right-to-left language also joins `RTL_LOCALES`; the layout side is owned by `rtl-layout`.
 - `store.ts` (lazy import), `intl.ts` (Intl tag), `bootstrap.ts` (startup strings), `messages.test.ts`.
 - `messages/<locale>.ts` and `messages/<locale>.settings.ts`, a `<locale>` block in every `messages/*.i18n.ts`, and a `common.language.<name>` label in every existing dictionary.
-- `packages/electron/menu-locales.mjs` (see above).
+- `packages/electron/menu-locales.mjs` and `packages/electron/tray-locales.mjs` (see above).
 - `packages/web/server/lib/settings/settings-helpers.js` `UI_LOCALE_VALUES`: without it the server drops the saved choice. `packages/web/server/lib/walkthrough/languages.js` names the language for walkthrough prompts.
 
 ## Translation Boundary
@@ -130,7 +130,7 @@ Keep these literal:
 ## Completion Criteria
 
 - No new hardcoded user-facing English in changed UI files.
-- Every new key exists in all dictionaries with a real translation, including `packages/electron/menu-locales.mjs` for native menu labels.
+- Every new key exists in all dictionaries with a real translation, including `packages/electron/menu-locales.mjs` and `packages/electron/tray-locales.mjs` for native menu and tray labels.
 - All translated values are resolved inside a reactive render/hook boundary.
 - No locale state added to broad/shared stores.
 - No full app remount for locale changes.

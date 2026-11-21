@@ -3222,6 +3222,8 @@ export const dict: Record<I18nKey, string> = {
   "desktopHostSwitcher.error.pairingInvalidResponse": "El servidor devolvió una respuesta de vinculación no válida.",
   "desktopHostSwitcher.error.failedToOpenNewWindow": "No se pudo abrir nueva ventana",
   "desktopHostSwitcher.instance.local": "Local",
+  "tray.instance.local": "OpenChamber local",
+  "tray.instance.fallback": "Instancia",
   "desktopHostSwitcher.instance.fallback": "Instancia",
   "desktopHostSwitcher.startup.title": "Instancia SSH predeterminada no disponible",
   "desktopHostSwitcher.startup.connectingTo": "Conectando a {host}...",

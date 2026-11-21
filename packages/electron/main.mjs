@@ -18,7 +18,7 @@ import { collectLocalFileDiagnostics, collectSshBufferDiagnostics } from '@openc
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { persistMainWindowState } from './window-state.mjs';
 import { attachWindowEvents, isNativeWindowVisible } from './window-events.mjs';
-import { createTrayController } from './tray.mjs';
+import { createTrayController, createTrayLocaleRouter } from './tray.mjs';
 import { buildDockMenuTemplate, buildUnreadJumpList, isJumpListSessionId } from './dock-menu.mjs';
 import { createSessionLinkGate } from './session-link-gate.mjs';
 import { applyDevDockIdentity, applyDockBadge } from './dev-dock-identity.mjs';
@@ -76,7 +76,7 @@ import {
   sanitizeClientTokenForStorage,
   sanitizeHostRelayForStorage,
 } from './desktop-hosts-storage.mjs';
-import { isSplashColor, redactHostsConfigForRemote } from './remote-page-policy.mjs';
+import { COMMANDS_SAFE_FOR_REMOTE, isSplashColor, parseTrayLocale, redactHostsConfigForRemote } from './remote-page-policy.mjs';
 import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
 import { findReusableHostWindowIndex, normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, resolveSenderHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
 import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
@@ -3770,6 +3770,8 @@ const closeAllDevTunnels = () => {
   pending.then((client) => client.closeAll()).catch(() => {});
 };
 
+const trayLocaleRouter = createTrayLocaleRouter((locale) => state.trayController?.setLocale(locale));
+
 const handleInvoke = async (browserWindow, command, args = {}) => {
   switch (command) {
     case 'desktop_collect_local_diagnostics':
@@ -4260,6 +4262,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_tray_update':
       if (state.trayController) {
         try {
+          trayLocaleRouter.publish(browserWindow);
           state.trayController.update(args || {});
         } catch (error) {
           log.warn('[electron] tray update failed', error);
@@ -4889,6 +4892,11 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         visible: isNativeWindowVisible(browserWindow),
       };
 
+    case 'desktop_set_tray_locale': {
+      trayLocaleRouter.setLocale(browserWindow, parseTrayLocale(args?.locale));
+      return null;
+    }
+
     case 'desktop_set_locale': {
       if (typeof args.locale === 'string') {
         setContextMenuLocale(args.locale);
@@ -5349,31 +5357,6 @@ const isLocalSender = (webContents) => {
   }
 };
 
-const COMMANDS_SAFE_FOR_REMOTE = new Set([
-  'desktop_hosts_get',
-  'desktop_host_probe',
-  'desktop_switch_to_local',
-  'desktop_new_window',
-  'desktop_set_menu_shortcuts',
-  'desktop_new_window_at_url',
-  'desktop_new_window_for_host',
-  'desktop_set_window_title',
-  'desktop_set_window_theme',
-  'desktop_set_close_tab_target',
-  'desktop_is_window_fullscreen',
-  'desktop_start_window_drag',
-  'desktop_minimize_current_window',
-  'desktop_toggle_current_window_maximized',
-  'desktop_close_current_window',
-  'desktop_get_current_window_state',
-  'desktop_get_app_version',
-  'desktop_get_lan_address',
-  'desktop_capture_page_rect',
-  'desktop_tray_update',
-  'desktop_tray_actions_ready',
-  'desktop_clear_session_notifications',
-]);
-
 ipcMain.handle('openchamber:invoke', async (event, command, args) => {
   if (!isLocalSender(event.sender) && !COMMANDS_SAFE_FOR_REMOTE.has(command)) {
     log.warn(`[ipc] rejected ${command} from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
@@ -5524,10 +5507,9 @@ const setupTray = () => {
   }
   try {
     state.trayController = createTrayController({
-      ...assets,
+      ...assets, locale: readPreferredLocale(),
       onAction: (action) => { void dispatchTrayAction(action); },
     });
-    state.trayController.update({ sessions: [], approvals: [] });
     if (!state.trayFocusListener) {
       state.trayFocusListener = (_event, browserWindow) => {
         if (browserWindow && !browserWindow.isDestroyed()) {

@@ -2975,6 +2975,8 @@ export const dict = {
   'desktopHostSwitcher.error.pairingInvalidResponse': 'Der Server hat eine ungültige Antwort auf die Kopplungsanfrage zurückgegeben.',
   'desktopHostSwitcher.error.failedToOpenNewWindow': 'Öffnen eines neuen Fensters fehlgeschlagen',
   'desktopHostSwitcher.instance.local': 'Lokal',
+  'tray.instance.local': 'Lokales OpenChamber',
+  'tray.instance.fallback': 'Instanz',
   'desktopHostSwitcher.instance.fallback': 'Instanz',
   'desktopHostSwitcher.startup.title': 'Standard-SSH-Instanz nicht verfügbar',
   'desktopHostSwitcher.startup.connectingTo': 'Verbindung zu {host} herstellen...',

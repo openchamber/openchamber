@@ -3222,6 +3222,8 @@ export const dict: Record<I18nKey, string> = {
   "desktopHostSwitcher.error.pairingInvalidResponse": "Сервер повернув некоректну відповідь на запит сполучення.",
   "desktopHostSwitcher.error.failedToOpenNewWindow": "Не вдалося відкрити нове вікно",
   "desktopHostSwitcher.instance.local": "Local",
+  "tray.instance.local": "Локальний OpenChamber",
+  "tray.instance.fallback": "Екземпляр",
   "desktopHostSwitcher.instance.fallback": "Інстанс",
   "desktopHostSwitcher.startup.title": "Типовий інстанс SSH недоступний",
   "desktopHostSwitcher.startup.connectingTo": "Підключення до {host}...",
