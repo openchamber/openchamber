@@ -102,20 +102,25 @@ const applyExtensionProviders = (next: ExtensionQuotaProvider[]): void => {
   if (sameExtensionQuotaProviders(state.extensionProviders, next)) return;
   const gone = state.extensionProviders.map((previous) => previous.id).filter((id) => !next.some((entry) => entry.id === id));
   const isGone = (id: string): boolean => gone.some((goneId) => goneId === id);
-  for (const id of gone) {
+  const replaced = state.extensionProviders
+    .filter((previous) => next.some((entry) => entry.id === previous.id && !sameExtensionQuotaProviders([previous], [entry])))
+    .map((previous) => previous.id);
+  const stale = [...gone, ...replaced];
+  const isStale = (id: string): boolean => stale.some((staleId) => staleId === id);
+  for (const id of stale) {
     quotaRequests.get(id)?.controller.abort();
     quotaRequests.delete(id);
   }
   useQuotaStore.setState((current) => {
     const refreshErrors = { ...current.refreshErrors };
-    for (const id of gone) delete refreshErrors[id];
+    for (const id of stale) delete refreshErrors[id];
     return {
       extensionProviders: next,
       dropdownProviderIds: resolveDropdownProviderIds(current.savedDropdownProviderIds, quotaProviderIds(next)),
-      results: gone.length > 0 ? current.results.filter((result) => !isGone(result.providerId)) : current.results,
+      results: stale.length > 0 ? current.results.filter((result) => !isStale(result.providerId)) : current.results,
       refreshErrors,
       selectedProviderId: current.selectedProviderId !== null && isGone(current.selectedProviderId) ? null : current.selectedProviderId,
-      isFetchingProvider: Object.fromEntries(Object.entries(current.isFetchingProvider).filter(([id]) => !isGone(id))),
+      isFetchingProvider: Object.fromEntries(Object.entries(current.isFetchingProvider).filter(([id]) => !isStale(id))),
       isLoading: quotaRequests.size > 0,
     };
   });

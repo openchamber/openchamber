@@ -15,9 +15,14 @@ const window = (windowSeconds: number | null, usedPercent: number | null = 10, v
   valueLabel: valueLabel ?? null,
 });
 
-const group = (providerId: string, rows: Array<{ key: string; label: string; subtitle?: string; seconds: number | null; used?: number | null; valueLabel?: string }>): UsageProviderGroup => ({
+const group = (
+  providerId: string,
+  rows: Array<{ key: string; label: string; subtitle?: string; seconds: number | null; used?: number | null; valueLabel?: string }>,
+  providers: string[] = [],
+): UsageProviderGroup => ({
   providerId: providerId as UsageProviderGroup['providerId'],
   providerName: providerId,
+  providers,
   status: null,
   rows: rows.map((row) => ({
     key: row.key,
@@ -169,5 +174,43 @@ describe('pickUsageHeadline', () => {
     extension.rows[1]!.window.value = { kind: 'requests', count: 300 };
 
     expect(pickUsageHeadline([extension], 'ext-quota')?.row.key).toBe('window-daily');
+  });
+
+  test('resolves an extension group through its declared providers', () => {
+    const ext = group('ext-xiaomi-quota', [{ key: 'credits', label: 'Credits Balance', seconds: null }], ['xiaomi']);
+    expect(pickUsageHeadline([ext], 'xiaomi')?.group.providerId).toBe('ext-xiaomi-quota');
+    expect(pickUsageHeadline([ext], 'xiaomi')?.row.label).toBe('Credits Balance');
+  });
+
+  test('prefers a built-in group over an extension that also declares the provider', () => {
+    const builtin = group('deepseek', [{ key: 'w', label: 'Weekly Limit', seconds: 7 * 24 * HOUR }]);
+    const ext = group('ext-deepseek-usage', [{ key: 'credits', label: 'Credits Balance', seconds: null }], ['deepseek']);
+    expect(pickUsageHeadline([builtin, ext], 'deepseek')?.group.providerId).toBe('deepseek');
+  });
+
+  test('leaves an extension that declares several credentials out of the headline', () => {
+    const ext = group('ext-multi-usage', [{ key: 'credits', label: 'Credits Balance', seconds: null }], ['openrouter', 'deepinfra']);
+    expect(pickUsageHeadline([ext], 'deepinfra')).toBeNull();
+  });
+
+  test('matches extension declarations by the exact provider id, not a built-in alias', () => {
+    const google = group('ext-google-usage', [{ key: 'g', label: 'Google Daily', seconds: 24 * HOUR }], ['google']);
+    const gemini = group('ext-gemini-usage', [{ key: 'd', label: 'Daily', seconds: 24 * HOUR }], ['gemini']);
+    expect(pickUsageHeadline([google, gemini], 'gemini')?.group.providerId).toBe('ext-gemini-usage');
+    expect(pickUsageHeadline([group('ext-claude-usage', [{ key: 'd', label: 'Daily', seconds: 24 * HOUR }], ['claude'])], 'anthropic')).toBeNull();
+  });
+
+  test('skips a declaring extension with no rows for the next one that has a balance', () => {
+    const failed = group('ext-xiaomi-a', [], ['xiaomi']);
+    const working = group('ext-xiaomi-b', [{ key: 'credits', label: 'Credits Balance', seconds: null }], ['xiaomi']);
+    expect(pickUsageHeadline([failed, working], 'xiaomi')?.group.providerId).toBe('ext-xiaomi-b');
+    expect(pickUsageHeadline([failed], 'xiaomi')).toBeNull();
+  });
+
+  test('skips a declaring extension whose rows have nothing to show', () => {
+    const blank = group('ext-xiaomi-a', [{ key: 'daily', label: 'Daily', seconds: 24 * HOUR, used: null }], ['xiaomi']);
+    const working = group('ext-xiaomi-b', [{ key: 'credits', label: 'Credits Balance', seconds: null, used: null, valueLabel: '$4.20' }], ['xiaomi']);
+    expect(pickUsageHeadline([blank, working], 'xiaomi')?.row.label).toBe('Credits Balance');
+    expect(pickUsageHeadline([blank], 'xiaomi')).toBeNull();
   });
 });

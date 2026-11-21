@@ -169,6 +169,7 @@ export function createExtensionQuotaProvider({
     providerName,
     icon: guest.icon,
     guestId: guest.id,
+    providers: [...providerIds],
     isConfigured: (auth: LegacyAuthFile) => providerIds.length === 0 || Object.keys(pickCredentials(auth, providerIds)).length > 0,
     fetchQuota,
   });

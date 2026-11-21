@@ -42,7 +42,7 @@ describe('extension usage providers follow the catalog', () => {
     const h = harness();
     await h.quotas.reconcile();
     expect(h.ids()).toEqual(['ext-teapot-usage']);
-    expect(h.attached.get('ext-teapot-usage')).toMatchObject({ providerName: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage' });
+    expect(h.attached.get('ext-teapot-usage')).toMatchObject({ providerName: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage', providers: ['teapot'] });
     expect(h.emitChanged).toHaveBeenCalledTimes(1);
     const first = h.attached.get('ext-teapot-usage');
 
