@@ -383,6 +383,20 @@ describe('buildSessionSidebarRowModel', () => {
     expect(order).toEqual(['caption:Clients', 'project:project-b', 'caption:projects', 'project:project-a']);
   });
 
+  test('keeps the Projects caption when every project is in a group', () => {
+    const projectB: ProjectSection = { project: { id: 'project-b', normalizedPath: '/other' }, groups: [group([node('b')], { directory: '/other', folderScopeKey: '/other' })] };
+    const input = args([project([group([node('a')])]), projectB]);
+    input.projectsCaption = true;
+    input.blocks = [
+      { kind: 'project-group', id: 'g1', name: 'Clients', projectIds: ['project-a', 'project-b'], hideWhenEmpty: false, preview: false },
+      { kind: 'projects', excludedProjectIds: new Set(['project-a', 'project-b']) },
+    ];
+
+    const rows = buildSessionSidebarRowModel(input).rows;
+    expect(rows.flatMap((row) => (row.kind === 'caption' ? [row.caption] : [])))
+      .toEqual(['section:g1', 'projects']);
+  });
+
   test('a session in work stays in its folder', () => {
     const input = args([project([group([node('in-folder'), node('top-level')])])]);
     input.foldersMap = { '/repo': [{ id: 'outer', name: 'Outer', createdAt: 1, sessionIds: ['in-folder'] }] };

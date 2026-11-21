@@ -746,8 +746,10 @@ the same Mark all as read.
   is the row's size, medium weight, beside its icon, and the indent of its
   sessions sets it apart from them. A project a size up and bold, with
   captioned zones above it, read as a heading of another level (maintainer,
-  2026-10-28). The caption shows only with something listed above the
-  projects, never in single-project mode. The caption folds like a zone: closed, it
+  2026-10-28). The caption shows with something listed above the projects, and
+  stays when a group the user made claims every project, because its add button
+  is then the only way to add one. It never shows in single-project mode or with
+  no project at all. The caption folds like a zone: closed, it
   hides every project (`PROJECTS_CAPTION_COLLAPSE_KEY` in the zones' saved
   collapse set); Expand all opens it, Collapse all leaves it as it is and
   folds the projects one by one. One-line rows (sessions, works, drafts,

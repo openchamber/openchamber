@@ -1137,6 +1137,18 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       const active = projectSections.find((section) => section.project.id === args.activeProjectId) ?? projectSections[0];
       projectSections = active ? [active] : [];
     }
+    // Every project is claimed by a group the user made. The caption carries the
+    // add button, so it stays even when this section has no project to list.
+    if (projectSections.length === 0 && sections.length > 0) {
+      push({
+        kind: 'caption',
+        key: 'caption:projects',
+        estimateSize: SECTION_HEADER_ESTIMATE,
+        caption: 'projects',
+        collapsed: args.collapsedActivities.has(PROJECTS_CAPTION_COLLAPSE_KEY),
+      });
+      return;
+    }
     appendProjectSections(projectSections, { key: 'projects', always: false });
   };
 
