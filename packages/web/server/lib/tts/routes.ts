@@ -10,6 +10,7 @@ import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summariz
 import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage } from './language-detect.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 import { describeVoiceKeys, readVoiceKey, updateVoiceKeys, voiceKeysPatchSchema } from './voice-keys.js';
+import { listCustomServerVoices } from './voices.js';
 
 const optionalText = z.string().optional().catch(undefined);
 const optionalNumber = z.number().optional().catch(undefined);
@@ -38,6 +39,10 @@ const sayBodySchema = z.object({
   rate: optionalNumber,
   language: z.unknown().optional(),
   languageSample: optionalText,
+}).catch({});
+
+const voicesBodySchema = z.object({
+  baseURL: z.unknown().optional(),
 }).catch({});
 
 const sttHeadersSchema = z.object({
@@ -181,6 +186,24 @@ export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayT
         });
       }
     }
+  });
+
+  app.post('/api/tts/voices', async (req, res) => {
+    if (!req.is('application/json')) {
+      return res.status(415).json({ error: 'Send the voice list request as JSON' });
+    }
+    const base = normalizeCustomOpenAIBaseURL(voicesBodySchema.parse(bodyOf(req.body)).baseURL);
+    if (base.code === 'enterprise_mode') {
+      return res.status(403).json({ error: base.error, code: base.code });
+    }
+    if (!base.value) {
+      return res.status(400).json({ error: base.error ?? 'A custom server URL is required', code: base.code ?? 'invalid_base_url' });
+    }
+    const result = await listCustomServerVoices(base.value, readVoiceKey('openaiCompatible'));
+    if (result.code) {
+      return res.status(502).json({ code: result.code });
+    }
+    return res.json({ voices: result.voices });
   });
 
   app.post('/api/text/summarize', async (req, res) => {
