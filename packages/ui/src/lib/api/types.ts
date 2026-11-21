@@ -19,6 +19,7 @@ import type {
   PageResult,
   PullRequestStack,
   ProjectUpstream,
+  ReviewerStateValue,
   ReadyChangeRequestInput,
   DraftChangeRequestInput,
   CommentInput,
@@ -1571,11 +1572,8 @@ export type RepositoryReferenceThread = {
   replies: RepositoryReferenceComment[];
 };
 
-export type RepositoryReferenceReviewer = {
-  id: string;
-  login: string;
-  avatarUrl?: string;
-};
+export type RepositoryReferenceReviewer = { id: string; login: string; avatarUrl?: string };
+export type RepositoryReferenceReviewerState = RepositoryReferenceReviewer & { state: ReviewerStateValue };
 
 export type RepositoryReferenceDetail = {
   number: number;
@@ -1586,6 +1584,7 @@ export type RepositoryReferenceDetail = {
   pull: {
     reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
     reviewers: RepositoryReferenceReviewer[];
+    reviewerStates?: RepositoryReferenceReviewerState[];
     additions: number;
     deletions: number;
     changedFiles: number;

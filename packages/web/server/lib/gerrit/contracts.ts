@@ -52,6 +52,10 @@ export type GerritVoteLabel = Omit<ChangeRequestVoteLabel, 'votes'> & {
   votes: Array<{ user: GerritUser; value: number }>;
 };
 export type GerritSubmitRequirement = ChangeRequestSubmitRequirement;
+export type GerritReviewerState = {
+  user: GerritUser;
+  state: 'pending' | 'approved' | 'changes_requested' | 'commented' | 'dismissed';
+};
 export type GerritRevision = {
   number: number;
   sha: string;

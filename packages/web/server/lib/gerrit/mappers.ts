@@ -3,7 +3,7 @@ import { splitProjectPath } from '../source-control/project-path.js';
 import type { GerritJson } from './contracts.js';
 import type {
   GerritChange, GerritChangeState, GerritComment, GerritFile, GerritIdentity, GerritLiveSummary,
-  GerritProject, GerritRevision, GerritSubmitRequirement, GerritUser, GerritVoteLabel,
+  GerritProject, GerritRevision, GerritReviewerState, GerritSubmitRequirement, GerritUser, GerritVoteLabel,
 } from './contracts.js';
 
 type Input = GerritJson | undefined;
@@ -120,6 +120,32 @@ const voteValue = (key: Input) => {
 };
 
 const LABEL_STATUSES: Array<[string, GerritVoteLabel['status']]> = [['rejected', 'rejected'], ['approved', 'approved'], ['disliked', 'disliked'], ['recommended', 'recommended']];
+
+export function mapGerritReviewerStates(raw: Input, identity: GerritIdentity): GerritReviewerState[] | undefined {
+  const label = field(field(raw, 'labels'), 'Code-Review');
+  if (!plainObject(label)) return undefined;
+  const pendingRaw = field(raw, 'pending_reviewers');
+  const pending = Array.isArray(pendingRaw) ? pendingRaw : field(pendingRaw, 'REVIEWER');
+  const ownerId = mapGerritUser(field(raw, 'owner'), identity)?.id;
+  const scale = plainObject(label.values) ? Object.keys(label.values).map(voteValue).filter((value): value is number => value !== null && value > 0) : [];
+  const top = scale.length > 0 ? Math.max(...scale) : 2;
+  const states = new Map<string, GerritReviewerState>();
+  const votes = field(label, 'all');
+  for (const approval of Array.isArray(votes) ? votes : []) {
+    const user = mapGerritUser(approval, identity);
+    const value = field(approval, 'value');
+    let state: GerritReviewerState['state'] | undefined;
+    if (value === undefined || value === 0) state = 'pending';
+    else if (isInteger(value)) state = value >= top ? 'approved' : value > 0 ? 'commented' : 'changes_requested';
+    if (user && state && user.id !== ownerId) states.set(user.id, { user, state });
+  }
+  const roster = field(field(raw, 'reviewers'), 'REVIEWER');
+  for (const account of [...(Array.isArray(pending) ? pending : []), ...(Array.isArray(roster) ? roster : [])]) {
+    const user = mapGerritUser(account, identity);
+    if (user && user.id !== ownerId && !states.has(user.id)) states.set(user.id, { user, state: 'pending' });
+  }
+  return [...states.values()];
+}
 
 export function mapGerritVoteLabels(raw: Input, identity: GerritIdentity): GerritVoteLabel[] {
   const labels = field(raw, 'labels');

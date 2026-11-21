@@ -120,6 +120,10 @@ describe('list-backed references', () => {
           commits: [{ sha: 'aaa', headline: 'first', authorName: 'Sam', committedAt: '2025-12-31', url: null }],
           commitsComplete: false,
           verdicts: [{ state: 'approved', createdAt: '2026-01-15', url: 'v' }],
+          reviewerStates: [
+            { user: { ...identity, id: '7', username: 'ann', avatarUrl: 'https://gitlab.com/ann.png' }, state: 'approved' },
+            { user: { ...identity, id: '8', username: 'bo' }, state: 'pending' },
+          ],
         };
       },
     }), context, page.items[0]!);
@@ -130,6 +134,10 @@ describe('list-backed references', () => {
     expect(detail.pull).toMatchObject({ additions: 5, deletions: 1, changedFiles: 2, checks: { state: 'success' } });
     // Only the newest commits came, so the total is unknown.
     expect(detail.pull).toMatchObject({ commits: [{ sha: 'aaa', headline: 'first', author: null, authorName: 'Sam' }], commitTotal: null });
+    expect(detail.pull?.reviewerStates).toEqual([
+      { id: '7', login: 'ann', avatarUrl: 'https://gitlab.com/ann.png', state: 'approved' },
+      { id: '8', login: 'bo', state: 'pending' },
+    ]);
   });
 
   test('a GitLab note carries its id and write capabilities into the preview', async () => {
@@ -143,6 +151,8 @@ describe('list-backed references', () => {
       }),
     }), context, page.items[0]);
     expect(detail.comments[0]).toMatchObject({ id: 'n1', canUpdate: true, canDelete: false });
+    // A host that says nothing about reviewer state leaves the field absent.
+    expect(detail.pull).not.toHaveProperty('reviewerStates');
 
     // A note the host says nothing about keeps its id and no capabilities, so the buttons stay.
     const silent = await fetchListBackedReferenceDetail(reads({

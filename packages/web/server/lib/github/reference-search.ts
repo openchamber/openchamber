@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import type { SourceControlJson } from '@openchamber/sdk';
 import { checkContextSchema, isGraphqlRateLimitError, parseSummaryRefs, summarizeCheckContexts, toDiscussionState } from './pr-summaries.js';
+import { toReviewerStates, toReviewers } from './reviewer-states.js';
 import { graphqlAliasesSchema, hasProperty, retainedEntry, referenceDirectory, livePage, referenceNodeAt } from './contracts.js';
 import { parseReferenceLookup, repoKey } from './reference-links.js';
 import type { Octokit, PullRequestQuery, GitHubEnvelope, SummaryRef, AcrossContext, ReferenceRepo, Reference, DetailLineComment, DetailEntry, StatusDictionary, SearchInput, AcrossGroup, AcrossPosition, CommentPermissions, EditableText, ReferenceDetail, LookupVariables, AcrossPage, AcrossSearchInput } from './contracts.js';
@@ -650,11 +651,8 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }: Pul
     commentTotal: item.comments.totalCount,
     pull: {
       reviewDecision: item.reviewDecision ? REVIEW_DECISIONS[item.reviewDecision] : null,
-      reviewers: item.reviewRequests.nodes.flatMap(({ requestedReviewer: reviewer }) => (
-        reviewer?.__typename === 'User' && reviewer.login
-          ? [{ id: reviewer.login, ...toAuthor({ login: reviewer.login, avatarUrl: reviewer.avatarUrl }) }]
-          : []
-      )),
+      reviewers: toReviewers(item.reviewRequests.nodes),
+      reviewerStates: toReviewerStates(item.reviews.nodes, item.reviewRequests.nodes),
       checks: item.state === 'OPEN'
         ? summarizeCheckContexts(item.headCommit.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [])
         : null,

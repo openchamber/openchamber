@@ -5,7 +5,7 @@ import { changeRequestNetworkTarget } from '../source-control/repository-network
 import {
   asDraftTitle, asReadyTitle, branchRepoId, liveChangeRequestSummary, liveIssueSummary,
   mapGiteaChangedFile, mapGiteaCI, mapGiteaComment, mapGiteaCommit, mapGiteaIssue, mapGiteaPull, mapGiteaRepo,
-  mapGiteaReviewBody, mapGiteaReviewComment, mapGiteaUser, mapGiteaVerdict, splitUnifiedDiff,
+  mapGiteaReviewBody, mapGiteaReviewComment, mapGiteaReviewerStates, mapGiteaUser, mapGiteaVerdict, splitUnifiedDiff, SUBMITTED_REVIEW_STATES,
 } from './mappers.js';
 import { resolveGiteaReposFromDirectory } from './repo.js';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
@@ -98,8 +98,6 @@ const labelFilter = (labels: ListOptions['labels'], label: string) => {
   return labels.join(',');
 };
 const REVIEW_EVENTS = Object.freeze({ approve: 'APPROVED', 'request-changes': 'REQUEST_CHANGES', comment: 'COMMENT' });
-
-const SUBMITTED_REVIEW_STATES: Pick<ReadonlySet<Input>, 'has'> = new Set(['APPROVED', 'REQUEST_CHANGES', 'COMMENT']);
 
 const hasFailureFields = (value: unknown): value is Failure => value != null;
 const statusOf = (error: Failure | null | undefined) => error?.status ?? error?.response?.status;
@@ -491,6 +489,7 @@ export function createGiteaResourceService({
           const mapped = mapGiteaUser(user, identity);
           return mapped ? [mapped] : [];
         }),
+        reviewerStates: mapGiteaReviewerStates(reviews, raw.requested_reviewers, identity),
         verdicts: reviews.flatMap((review) => {
           const mapped = mapGiteaVerdict(review, identity, request.url);
           return mapped ? [mapped] : [];

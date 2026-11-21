@@ -302,8 +302,7 @@ export type SourceControlMutationTarget = {
   project: SourceControlProjectRef;
   number?: number;
   head?: string;
-  base?: string;
-  headSha?: string;
+  base?: string; headSha?: string;
 };
 
 export type SourceControlMutationResolution = { providerTarget: SourceControlJsonObject; target: SourceControlMutationTarget };
@@ -346,6 +345,8 @@ export type SourceControlProviderInputs = {
   'mutation.reconcile': MutationStepInput;
 };
 
+export type { SourceControlChangeRequestContext, SourceControlReviewerState } from './source-control-reviewers.ts';
+
 export type SourceControlNumericForgeUser = { id: number; login: string; name?: string; email?: string; avatarUrl?: string };
 export type SourceControlStringForgeUser = { id: string; login: string; name?: string; email?: string; avatarUrl?: string };
 export type SourceControlForgeUser = SourceControlNumericForgeUser | SourceControlStringForgeUser;
@@ -374,8 +375,7 @@ export type SourceControlMutationResult = {
   ready?: boolean;
   draft?: boolean;
   commented?: boolean;
-  failureStatus?: number;
-  failureCode?: string;
+  failureStatus?: number; failureCode?: string;
 };
 export type SourceControlReconcileData = {
   state: 'succeeded' | 'failed' | 'outcome-unknown';

@@ -248,6 +248,15 @@ describe('source-control provider contract', () => {
       submitRequirements: [{ name: 'Code-Review', status: 'unsatisfied' }],
       revisions: [{ number: 1, sha: 'd'.repeat(40), createdAt: '2026-10-01T00:00:00Z', ref: 'refs/changes/12/12/1' }],
     }).success).toBe(true);
+    expect(schemas.data.changeRequestContext.safeParse({
+      reviewerStates: [{ user: { id: '9', username: 'ann' }, state: 'approved' }],
+    }).success).toBe(true);
+    expect(schemas.data.changeRequestContext.safeParse({
+      reviewerStates: [{ user: { id: '9' }, state: 'approved' }],
+    }).success).toBe(false);
+    expect(schemas.data.changeRequestContext.safeParse({
+      reviewerStates: [{ user: { id: '9', username: 'ann' }, state: 'unknown' }],
+    }).success).toBe(false);
   });
 
   test('reads the UI parses itself pass as any JSON object or array', () => {

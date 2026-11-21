@@ -105,6 +105,13 @@ const referenceCommentFields = {
   }).optional().catch(undefined),
 };
 
+const reviewerStateSchema = z.object({
+  id: z.string(),
+  login: z.string(),
+  avatarUrl: z.string().optional(),
+  state: z.enum(['pending', 'approved', 'changes_requested', 'commented', 'dismissed']),
+});
+
 const referenceDetailResultSchema = z.discriminatedUnion('connected', [
   z.object({ connected: z.literal(false) }),
   z.object({
@@ -130,6 +137,10 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
       pull: z.object({
         reviewDecision: z.enum(['approved', 'changes_requested', 'review_required']).nullable(),
         reviewers: z.array(z.object({ id: z.string(), login: z.string(), avatarUrl: z.string().optional() })).default([]),
+        reviewerStates: z.array(z.unknown()).transform((entries) => entries.flatMap((entry) => {
+          const parsed = reviewerStateSchema.safeParse(entry);
+          return parsed.success ? [parsed.data] : [];
+        })).optional().catch(undefined),
         checks: checksSummarySchema.nullable().optional(),
         additions: z.number(),
         deletions: z.number(),

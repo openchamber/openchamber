@@ -182,6 +182,18 @@ const liveSummariesSchema = z.object({
 const identitySchema = z.object({ provider: text, instance: text }).passthrough();
 const projectSchema = z.object({ provider: text, instance: text, id: text, owner: text, name: text, url: text }).passthrough();
 
+const reviewerStateSchema = z.object({
+  user: z.object({ id: stringUserId, username: z.string().min(1).max(256), avatarUrl: z.string().max(2_048).optional() }).passthrough(),
+  state: z.enum(['pending', 'approved', 'changes_requested', 'commented', 'dismissed']),
+}).passthrough();
+
+const changeRequestContextSchema = z.object({
+  reviewerStates: z.array(reviewerStateSchema).optional(),
+}).passthrough().refine(
+  (value) => JSON.stringify(value).length <= SOURCE_CONTROL_PROVIDER_RESPONSE_MAX,
+  { message: 'answer is larger than the response cap' },
+);
+
 const STACK_LAYERS_MAX = 50;
 
 const changeRequestStackSchema = z.object({
@@ -240,7 +252,7 @@ const dataSchemas = {
   'auth.status': z.object({ user: forgeUserSchema.nullable() }),
   changeRequestStatus: changeRequestStatusSchema,
   listChangeRequests: passThroughSchema,
-  changeRequestContext: passThroughSchema,
+  changeRequestContext: changeRequestContextSchema,
   listIssues: passThroughSchema,
   getIssue: passThroughSchema,
   issueComments: passThroughSchema,
