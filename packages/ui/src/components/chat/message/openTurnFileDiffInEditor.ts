@@ -22,5 +22,5 @@ export const openTurnFileDiffInEditor = async ({
         await editor.openFile(absolutePath);
         return;
     }
-    await editor.openDiff('', absolutePath, undefined, { line: extractFirstChangedLineFromDiff(patch), patch });
+    await editor.openDiff('', absolutePath, undefined, { line: extractFirstChangedLineFromDiff(patch), patch, snapshot: true });
 };

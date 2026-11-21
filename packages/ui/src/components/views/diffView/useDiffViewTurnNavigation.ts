@@ -23,7 +23,7 @@ interface DiffViewTurnNavigationOptions {
     pendingTurnDiffFile: ReturnType<typeof useUIStore.getState>['pendingTurnDiffFile'];
     setPendingTurnDiffFile: ReturnType<typeof useUIStore.getState>['setPendingTurnDiffFile'];
     diffScope: DiffScope | null;
-    currentSessionId: string | null;
+    panelSessionId: string | null;
     turnDiffSettled: boolean;
     rootDirectory: string | undefined;
     lastTurnDiffs: TurnSnapshotDiff[];
@@ -42,8 +42,8 @@ interface DiffViewTurnNavigationOptions {
 
 export function useDiffViewTurnNavigation({
     visible, activeDiffScope, setActiveDiffScope, setDisplayFile, setDisplayFileStaged, shouldPinAfterAlignRef,
-    pendingScrollTargetRef, expandStackedFile, setScrollRequestNonce, pendingTurnDiffFile, diffScope, currentSessionId,
-    setPendingTurnDiffFile, turnDiffSettled, rootDirectory, lastTurnDiffs, onDiffScopeChange, effectiveDirectory,
+    pendingScrollTargetRef, expandStackedFile, setScrollRequestNonce, pendingTurnDiffFile, diffScope,
+    panelSessionId, setPendingTurnDiffFile, turnDiffSettled, rootDirectory, lastTurnDiffs, onDiffScopeChange, effectiveDirectory,
     repositoriesKnown, rootIsGitRepo, nestedRepos, repositoryOptions, selectNestedRepo, fetchStatus, git, changedFiles,
     files,
 }: DiffViewTurnNavigationOptions) {
@@ -52,7 +52,7 @@ export function useDiffViewTurnNavigation({
     } | null>(null);
     const fallbackStatusRequestRef = React.useRef<string | null>(null);
     const [editorOpenGate] = React.useState(createLatestRequestGate);
-    const gateSessionRef = React.useRef(currentSessionId);
+    const gateSessionRef = React.useRef(panelSessionId);
     const revealListedFile = React.useCallback((path: string) => {
         setDisplayFile(path);
         setDisplayFileStaged(false);
@@ -66,7 +66,7 @@ export function useDiffViewTurnNavigation({
         if (!pendingTurnDiffFile) return;
         editorOpenGate.cancel();
         if (!visible) return;
-        if (diffScope !== 'turn' || pendingTurnDiffFile.sessionId !== currentSessionId) {
+        if (diffScope !== 'turn' || pendingTurnDiffFile.panelSessionId !== panelSessionId) {
             setPendingTurnDiffFile(null);
             return;
         }
@@ -80,15 +80,15 @@ export function useDiffViewTurnNavigation({
         }
         fallbackStatusRequestRef.current = null;
         setChangedFallback({
-            file, picked: false, statusReadFor: null, isCurrent: beginChangedFileOpen(editorOpenGate, currentSessionId),
+            file, picked: false, statusReadFor: null, isCurrent: beginChangedFileOpen(editorOpenGate, panelSessionId),
         });
         setActiveDiffScope('working');
         onDiffScopeChange?.('working');
-    }, [activeDiffScope, currentSessionId, diffScope, editorOpenGate, lastTurnDiffs, onDiffScopeChange, pendingTurnDiffFile, revealListedFile, rootDirectory, setPendingTurnDiffFile, turnDiffSettled, visible]);
+    }, [activeDiffScope, diffScope, editorOpenGate, lastTurnDiffs, onDiffScopeChange, panelSessionId, pendingTurnDiffFile, revealListedFile, rootDirectory, setPendingTurnDiffFile, turnDiffSettled, visible]);
 
     React.useEffect(() => {
-        if (gateSessionRef.current !== currentSessionId) {
-            gateSessionRef.current = currentSessionId;
+        if (gateSessionRef.current !== panelSessionId) {
+            gateSessionRef.current = panelSessionId;
             editorOpenGate.cancel();
         }
         if (!changedFallback || !visible || !effectiveDirectory) return;
@@ -128,5 +128,5 @@ export function useDiffViewTurnNavigation({
         setChangedFallback(null);
         const listed = findRepoFile(changedFallback.file, effectiveDirectory, changedFiles.map((file) => file.path));
         if (listed) revealListedFile(listed);
-    }, [activeDiffScope, changedFallback, changedFiles, currentSessionId, editorOpenGate, effectiveDirectory, fetchStatus, files, git, nestedRepos, repositoriesKnown, repositoryOptions, revealListedFile, rootDirectory, rootIsGitRepo, selectNestedRepo, visible]);
+    }, [activeDiffScope, changedFallback, changedFiles, editorOpenGate, effectiveDirectory, fetchStatus, files, git, nestedRepos, repositoriesKnown, repositoryOptions, revealListedFile, rootDirectory, rootIsGitRepo, panelSessionId, selectNestedRepo, visible]);
 }

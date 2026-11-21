@@ -98,6 +98,11 @@ generic rendering.
   event variant. Only open-ended plugin RPC frames reach the default branch;
   adding an upstream event must expose an exhaustiveness failure. PTYs retain
   their own transport, and only session-tagged shell commands affect turns.
+- Turn order comes from OpenCode's per-session `durable.seq`, never from event
+  times. `wire-admission.ts` keeps the newest sequence one event stream has seen
+  per session and reports a turn start or end that is not newer as stale; the
+  event pipeline drops it before translation (`sync/DOCUMENTATION.md`, *Why turn
+  boundaries follow OpenCode's sequence and not the client clock*).
 - Config folding preserves named entries from lower-priority documents. Policy
   decisions read every document because the effective document retains only the
   last policy list. Policy ordering and legacy resource spellings mirror

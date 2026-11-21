@@ -44,6 +44,7 @@ declare module '@gitbeaker/rest' {
       show(projectId: ProjectId, number: number): Reply;
       allCommits(projectId: ProjectId, number: number, options?: Options): Reply;
       allDiffs(projectId: ProjectId, number: number, options?: Options): Reply;
+      showReviewers(projectId: ProjectId, number: number): Reply;
       create(projectId: ProjectId, head: string, base: string, title: string, options?: Options): Reply;
       edit(projectId: ProjectId, number: number, options: Options): Reply;
       merge(projectId: ProjectId, number: number, options?: Options): Reply;

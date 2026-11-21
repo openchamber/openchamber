@@ -27,6 +27,8 @@ import type { WorkflowRun } from '@/lib/workflows/model';
 import { PendingWorkflowApprovals } from '../workflows/PendingWorkflowApprovals';
 import { WorkflowsPanel } from '../workflows/WorkflowsPanel';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { opencodeClient } from '@/lib/opencode/client';
+import { FULL_CONTEXT_DIFF_LINES } from '@/components/views/diffView/diffContextLines';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { ChatColumnSessionContext } from '../chatColumnSession';
 
@@ -48,6 +50,7 @@ plugin({
 // Loaded after the plugin: its imports reach the logo glob that Bun cannot
 // expand on its own.
 const { TurnFold, TurnPagesRow } = await import('./LiveTurnActivity');
+const { TurnChangedFilePills } = await import('../message/body/TurnChangedFilePills');
 
 const unavailable = (): never => { throw new Error('Activity rendering must not call runtime APIs'); };
 const runtimeApis: RuntimeAPIs = {
@@ -139,8 +142,9 @@ function ActivityHoldProbe() {
     return null;
 }
 
-function Harness({ record, retired = false, changedFiles, isLatestTurn = true, holdingMessageId, onCopyMessage, onCopyTurn }: {
+function Harness({ record, retired = false, changedFiles, isLatestTurn = true, noticeOpened = false, holdingMessageId, onCopyMessage, onCopyTurn }: {
     record: TurnRecord;
+    noticeOpened?: boolean;
     retired?: boolean;
     changedFiles?: TurnChangedFile[];
     isLatestTurn?: boolean;
@@ -162,7 +166,7 @@ function Harness({ record, retired = false, changedFiles, isLatestTurn = true, h
                 onCopyMessage={onCopyMessage ? () => onCopyMessage(message.info.id) : undefined}
                 onCopyTurn={message === record.assistantMessages.at(-1) ? onCopyTurn : undefined}
                 turnGroupingContext={{
-                    turnId: 'user', isFirstAssistantInTurn: message === record.assistantMessages[0],
+                    turnId: 'user', snapshotTurnId: noticeOpened ? undefined : 'user', isFirstAssistantInTurn: message === record.assistantMessages[0],
                     isLastAssistantInTurn: message === record.assistantMessages.at(-1),
                     isLatestTurn, changedFiles, isWorking: false, hasTools: record.hasTools, hasReasoning: record.hasReasoning,
                 }}
@@ -655,15 +659,72 @@ describe('live Activity with the real message body', () => {
         expect(container.querySelector('span[title="src/c.ts"]')?.textContent).toBe('c.ts+1 −0');
     });
 
-    test('keeps historical files informational and withholds the list before stop', async () => {
+    test('opens a historical turn diff in the VS Code editor using the column session', async () => {
+        const patch = '--- a/src/older.ts\n+++ b/src/older.ts\n@@ -1 +1 @@\n-old\n+new\n';
+        const getDiff = spyOn(opencodeClient, 'getSessionTurnDiff').mockResolvedValue([{ file: 'src/older.ts', patch, status: 'modified', additions: 1, deletions: 1 }]);
+        const opened: unknown[][] = [];
+        // SAFETY: Object.create inherits the complete RuntimeAPIs test fixture; only the runtime and editor are overridden.
+        const vscodeApis = Object.assign(Object.create(runtimeApis) as RuntimeAPIs, {
+            runtime: { ...runtimeApis.runtime, isVSCode: true },
+            editor: {
+                openDiff: async (...args: Parameters<NonNullable<RuntimeAPIs['editor']>['openDiff']>) => { opened.push(args); },
+                openFile: async () => { throw new Error('Expected the historical diff'); },
+            },
+        });
+        try {
+            await act(async () => root.render(
+                <RuntimeAPIContext.Provider value={vscodeApis}>
+                    <SyncProvider sdk={sdk} directory="/project">
+                    <I18nProvider>
+                        <ChatColumnSessionContext.Provider value={{ sessionId: 'pinned-session', directory: '/project' }}>
+                            <TurnChangedFilePills files={[{ file: 'src/older.ts', additions: 1, deletions: 1 }]} turnId="older-user" isLatestTurn={false} />
+                        </ChatColumnSessionContext.Provider>
+                    </I18nProvider>
+                    </SyncProvider>
+                </RuntimeAPIContext.Provider>,
+            ));
+            await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Open src/older.ts"]')?.click());
+            expect(getDiff.mock.calls).toEqual([['pinned-session', { directory: '/project', from: 'older-user', context: FULL_CONTEXT_DIFF_LINES }]]);
+            expect(opened).toEqual([['', '/project/src/older.ts', undefined, { line: 1, patch, snapshot: true }]]);
+        } finally {
+            getDiff.mockRestore();
+        }
+    });
+
+    test('opens historical turn files after stop and withholds the list before stop', async () => {
         const files = Array.from({ length: 5 }, (_, index) => ({ file: `src/file-${index}.ts`, additions: 1, deletions: 0 }));
         const final = assistant('final', [text('answer', 'Done')], 'tool-calls');
-        await act(async () => root.render(<Harness record={turn([final])} changedFiles={files} isLatestTurn={false} />));
+        const record = turn([final]);
+        await act(async () => root.render(<Harness record={record} changedFiles={files} isLatestTurn={false} />));
         expect(container.textContent).not.toContain('file-0.ts');
-        await act(async () => root.render(<Harness record={turn([assistant('final', final.parts, 'stop')])} changedFiles={files} isLatestTurn={false} />));
+        await act(async () => root.render(<ChatColumnSessionContext.Provider value={{ sessionId: 'session', directory: '/project' }}>
+            <Harness record={turn([assistant('final', final.parts, 'stop')])} changedFiles={files} isLatestTurn={false} />
+        </ChatColumnSessionContext.Provider>));
         expect(container.textContent).toContain('file-0.ts');
         await act(async () => changedFilesToggle()?.click());
         expect(container.textContent).toContain('file-4.ts');
+        expect(container.querySelectorAll('button[aria-label^="Open src/file-"]')).toHaveLength(5);
+        const previousSessionId = useSessionUIStore.getState().currentSessionId;
+        await act(async () => useSessionUIStore.setState({ currentSessionId: 'other-session' }));
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Open src/file-4.ts"]')?.click());
+        expect(useUIStore.getState().pendingTurnDiffFile).toEqual({
+            file: 'src/file-4.ts', sessionId: 'session', turnId: record.turnId, panelSessionId: 'other-session',
+        });
+        // The newest reply's chip opens Last turn itself, not a selection of its own.
+        await act(async () => root.render(<ChatColumnSessionContext.Provider value={{ sessionId: 'session', directory: '/project' }}>
+            <Harness record={turn([assistant('final', final.parts, 'stop')])} changedFiles={files} isLatestTurn />
+        </ChatColumnSessionContext.Provider>));
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Open src/file-0.ts"]')?.click());
+        expect(useUIStore.getState().pendingTurnDiffFile).toEqual({ file: 'src/file-0.ts', sessionId: 'session', turnId: undefined, panelSessionId: 'other-session' });
+        // An older reply whose turn a notice opened has no user message to read its snapshot from.
+        await act(async () => root.render(<ChatColumnSessionContext.Provider value={{ sessionId: 'session', directory: '/project' }}>
+            <Harness record={turn([assistant('final', final.parts, 'stop')])} changedFiles={files} isLatestTurn={false} noticeOpened />
+        </ChatColumnSessionContext.Provider>));
+        expect(container.textContent).toContain('file-0.ts');
         expect(container.querySelectorAll('button[aria-label^="Open src/file-"]')).toHaveLength(0);
+        await act(async () => {
+            useUIStore.getState().setPendingTurnDiffFile(null);
+            useSessionUIStore.setState({ currentSessionId: previousSessionId });
+        });
     });
 });

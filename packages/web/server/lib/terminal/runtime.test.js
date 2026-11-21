@@ -10,6 +10,8 @@ import { WebSocket } from 'ws';
 
 import { createTerminalRuntime, loadTerminalPtyProvider } from './runtime.js';
 import { createTerminalWsControlFrame, readTerminalWsControlFrame } from './terminal-ws-protocol.js';
+import { createTunnelAuth } from '../tunnels/tunnel-auth.js';
+import { createRequestSecurityRuntime } from '../security/request-security.js';
 
 // Drives the raw upgrade handler by hand. A `ws` client hides the HTTP response
 // once the 101 lands, and a real client cannot be made to upgrade one socket
@@ -1079,6 +1081,103 @@ describe('terminal runtime', () => {
       await new Promise(resolve => server.close(resolve));
     }
   }, 15_000);
+
+  it('binds tunnel-authenticated terminal sockets to session expiry and revocation', async () => {
+    const { createUiAuth } = await import('../ui-auth/ui-auth.js');
+    const uiAuthController = createUiAuth({ password: crypto.randomBytes(24).toString('hex') });
+    const tunnelAuthController = createTunnelAuth();
+    const publicUrl = 'https://terminal-tunnel.example.test';
+    const tunnelId = 'terminal-test-tunnel';
+    tunnelAuthController.setActiveTunnel({ tunnelId, publicUrl });
+    const exchange = (sessionTtlMs) => {
+      const { token } = tunnelAuthController.issueBootstrapToken({ ttlMs: 60_000 });
+      const response = { cookie: null, setHeader(_name, value) { this.cookie = value.split(';')[0]; } };
+      const result = tunnelAuthController.exchangeBootstrapToken({
+        req: { headers: { host: new URL(publicUrl).host }, socket: { remoteAddress: '127.0.0.1' } },
+        res: response,
+        token,
+        sessionTtlMs,
+      });
+      expect(result.ok).toBe(true);
+      return response.cookie;
+    };
+
+    const server = http.createServer();
+    const otherUiOrigin = `${publicUrl}:8443`;
+    const security = createRequestSecurityRuntime({ readSettingsFromDiskMigrated: async () => ({ publicOrigin: otherUiOrigin }) });
+    // Stands in for a paired client's URL token, which the UI auth controller accepts on its own.
+    const pairedAwareUiAuth = {
+      enabled: true,
+      ensureSessionToken: (req, res) => (req.url.endsWith('?pairedToken=valid') ? 'client:paired' : uiAuthController.ensureSessionToken(req, res)),
+    };
+    const { routes, processes, runtime } = createHarness({ server, uiAuthController: pairedAwareUiAuth, tunnelAuthController, ...security });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const socketUrl = `ws://127.0.0.1:${server.address().port}/api/terminal/ws`;
+    const sockets = [];
+    try {
+      await routes.post.get('/api/terminal/create')({ body: { sessionId: 'tunnel-terminal', cwd: '/repo' } }, createResponse());
+      expect(processes).toHaveLength(1);
+
+      const connect = (cookie, origin = publicUrl) => {
+        const socket = new WebSocket(socketUrl, {
+          origin,
+          headers: { Host: 'terminal-tunnel.example.test', Cookie: cookie },
+        });
+        sockets.push(socket);
+        const hello = new Promise(resolve => socket.once('message', raw => resolve(readTerminalWsControlFrame(raw))));
+        return new Promise((resolve, reject) => {
+          socket.once('error', reject);
+          socket.once('unexpected-response', (_request, response) => {
+            response.resume();
+            resolve({ socket, status: response.statusCode });
+          });
+          socket.once('open', () => {
+            resolve({ socket, status: 101, hello });
+          });
+        });
+      };
+      const opened = async (cookie) => {
+        const result = await connect(cookie);
+        expect(result.status).toBe(101);
+        expect(await result.hello).toEqual({ t: 'hello', v: 3 });
+        return result.socket;
+      };
+      const closed = socket => new Promise(resolve => socket.once('close', resolve));
+      const noSession = await connect('oc_tunnel_session=missing');
+      expect(noSession.status).toBe(401);
+      const paired = new WebSocket(`${socketUrl}?pairedToken=valid`, { origin: 'capacitor://localhost', headers: { Host: 'studio-mac.local' } });
+      sockets.push(paired);
+      await new Promise((resolve, reject) => { paired.once('open', resolve); paired.once('error', reject); });
+      paired.terminate();
+      const revocationCookie = exchange(60_000);
+      const revocationSocket = await opened(revocationCookie);
+      expect((await connect(revocationCookie, 'https://untrusted.example')).status).toBe(403);
+      expect((await connect(revocationCookie, otherUiOrigin)).status).toBe(403);
+      const revocationClose = closed(revocationSocket);
+      tunnelAuthController.revokeTunnelArtifacts(tunnelId);
+      await revocationClose;
+      expect(revocationSocket.readyState).toBe(WebSocket.CLOSED);
+      expect((await connect(revocationCookie)).status).toBe(401);
+      expect(processes[0].killed).toBe(false);
+
+      const expiring = exchange(500);
+      const expiringSocket = await opened(expiring);
+      await closed(expiringSocket);
+      expect((await connect(expiring)).status).toBe(401);
+      expect(processes[0].killed).toBe(false);
+      const replacedCookie = exchange(60_000);
+      const replacing = closed(await opened(replacedCookie));
+      tunnelAuthController.setActiveTunnel({ tunnelId: 'replacement-tunnel', publicUrl });
+      await replacing;
+      expect((await connect(replacedCookie)).status).toBe(401);
+      expect(processes[0].killed).toBe(false);
+    } finally {
+      for (const socket of sockets) socket.terminate();
+      await runtime.shutdown();
+      await new Promise(resolve => server.close(resolve));
+      uiAuthController.dispose();
+    }
+  });
 
   it('creates command-mode sessions and echoes the effective mode', async () => {
     const harness = createHarness({

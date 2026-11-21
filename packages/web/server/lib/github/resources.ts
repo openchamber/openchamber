@@ -26,7 +26,6 @@ import {
 import {
   buildReferenceSearchQuery,
   fetchDiscussionDetail,
-  fetchPullStack,
   fetchReferenceDetail,
   labelSearchQualifiers,
   mapReferencesAcross,
@@ -37,10 +36,12 @@ import {
   searchGitHubReferences,
   searchGitHubReferencesAcross,
 } from './reference-search.js';
+import { createContextCache } from './context-cache.js';
+import { fetchPullStack } from './pull-stack.js';
+import { referencesField } from './references.js';
 import { parseReferenceLink } from './reference-links.js';
 import { fetchReviewState } from './review-draft.js';
 import { readReviewSummaries } from './review-summaries.js';
-import { createContextCache } from './context-cache.js';
 import type { Octokit, RestEndpointMethodTypes } from '@octokit/rest';
 import type { ProviderImplementation, ProviderSession } from '../source-control/provider-contract.js';
 import type { ContributorProvenanceRead } from '../git/contributor-provenance-storage.js';
@@ -460,7 +461,7 @@ export function createGitHubResources({
       return result;
     },
 
-    changeRequestContext: async ({ session, context, directory, number, project, remote, includeDiff, includeCIDetails }: ResourceInput<'changeRequestContext'>) => {
+    changeRequestContext: async ({ session, context, directory, number, project, remote, includeDiff, includeCIDetails, includeReferences }: ResourceInput<'changeRequestContext'>) => {
       const { octokit } = accountOf(session);
       const identity = identityOf(session);
       const requestedRepo = project ? { owner: project.owner, repo: project.name } : null;
@@ -472,7 +473,7 @@ export function createGitHubResources({
         primaryRemote: remote,
         number,
       };
-      const cacheKey = JSON.stringify([directory, number, includeDiff, requestedRepo ? `${requestedRepo.owner}/${requestedRepo.repo}` : null, scope, context?.linked === true]);
+      const cacheKey = JSON.stringify([directory, number, includeDiff, includeReferences === true, requestedRepo ? `${requestedRepo.owner}/${requestedRepo.repo}` : null, scope, context?.linked === true]);
       const cached = contextCache.read(cacheKey, includeCIDetails);
       if (cached) return cached;
       const started = contextCache.begin();
@@ -533,6 +534,7 @@ export function createGitHubResources({
         const stack = await fetchPullStack({ octokit, owner: repo.owner, repo: repo.repo, number }).catch(() => undefined);
         if (stack !== undefined) result.stack = stack;
       }
+      if (includeReferences) Object.assign(result, await referencesField(octokit, repo.owner, repo.repo, number));
       contextCache.store(cacheKey, scope, result, includeCIDetails, started);
       return result;
     },
@@ -598,14 +600,15 @@ export function createGitHubResources({
       return result;
     },
 
-    getIssue: async ({ session, context, directory, number, project, remote }: ResourceInput<'getIssue'>) => {
+    getIssue: async ({ session, context, directory, number, project, remote, includeReferences }: ResourceInput<'getIssue'>) => {
       const { octokit } = accountOf(session);
       const identity = identityOf(session);
       const repo = await resolveRepoForRequest(octokit, directory, project ? { owner: project.owner, repo: project.name } : null, remote, { linked: context?.linked });
       if (!repo) return null;
       const issue = requireGitHubIssue((await octokit.rest.issues.get({ owner: repo.owner, repo: repo.repo, issue_number: number }))?.data, 'GitHub returned an invalid issue');
       if (issue.pull_request) throw responseError(400, { error: 'Not a GitHub issue' });
-      return mapIssue(issue, mapProject(repo, identity), identity);
+      const mapped = mapIssue(issue, mapProject(repo, identity), identity);
+      return includeReferences ? { ...mapped, ...(await referencesField(octokit, repo.owner, repo.repo, number)) } : mapped;
     },
 
     issueComments: async ({ session, context, directory, number, project, remote }: ResourceInput<'issueComments'>) => {
@@ -812,7 +815,7 @@ export function createGitHubResources({
       }
     },
 
-    referenceDetail: ({ session, context, directory, remote, project, number, host, kind }: ResourceInput<'referenceDetail'>) => pickerRead(async () => {
+    referenceDetail: ({ session, context, directory, remote, project, number, host, kind, includeReferences }: ResourceInput<'referenceDetail'>) => pickerRead(async () => {
       const { octokit: github, rateLimit } = await load();
       const requestedHost = String(host ?? '').trim().toLowerCase();
       const octokit = requestedHost ? await github.getOctokitOrNull(requestedHost) : accountOf(session).octokit;
@@ -832,8 +835,11 @@ export function createGitHubResources({
         repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote, { linked: context?.linked });
         if (!repo) throw notInProject();
       }
-      const read = kind === 'discussion' ? fetchDiscussionDetail : fetchReferenceDetail;
-      return { connected: true, detail: await read({ octokit, owner: repo.owner, repo: repo.repo, number }) };
+      const query = { octokit, owner: repo.owner, repo: repo.repo, number };
+      const detail = kind === 'discussion'
+        ? await fetchDiscussionDetail(query)
+        : await fetchReferenceDetail({ ...query, includeReferences: includeReferences === true });
+      return { connected: true, detail };
     }),
 
     reviewState: ({ session, directory, remote, project, number }: ResourceInput<'reviewState'>) => pickerRead(async () => {

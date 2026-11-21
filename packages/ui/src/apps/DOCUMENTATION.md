@@ -18,6 +18,9 @@
 - A header edit writes a fresh secure entry before publishing its metadata reference. Failure preserves the old reference and credentials. Replaced and removed references are deleted after the metadata commit. Native bridge calls remain bounded by the existing secure-storage timeout.
 - Native mobile with headers uses the existing fetch-based OpenChamber event stream reader and the native WebSocket adapter behind `openRuntimeWebSocket`. Files media previews use bounded runtime HTTP reads and owned object URLs; prepared chat images use the existing validated data-URL loader. HTML previews and inline Markdown video still use browser-owned URLs without proxy headers.
 - An empty welcome-form header editor preserves a saved connection's headers. Explicit clearing belongs to the prefilled Instances edit form. Cancelling a password prompt does not erase existing header credentials.
+- A native device token belongs to every saved instance. Registration and removal go to every saved server once, each on its own: the relay binds a token to each server that registered it, so one server failing, or answering `localOnly` (a phone paired with it for the home network only, which it neither stores nor binds), leaves the others as they are. Only a phone whose active server is home-network-only and that has no other saved server skips the permission prompt and registration, and only then does the Notifications page disable the switch and explain why; with another saved server the switch stays on and a line says only the active server stays silent. Registrations and removals for saved servers run one after another (`mobilePushTokens.ts`), so removing an instance sends its unregister after a registration already on its way to it. Their direct requests pass the same `/health` identity gate as a connect probe before the saved client token is attached. The device token is kept in secure storage, so turning notifications off or removing an instance also works after a cold launch that never registered in this process. Turning notifications off removes the token from each saved server and the active runtime; removing an instance reads that server's credentials before they disappear and then unregisters from it; when that request fails, the server keeps the token.
+- A push carries `serverId` next to `sessionId`. Before opening its session the app switches to the saved instance with that identity, also on a cold start before any instance has connected, and holds the intent until the new runtime initializes. The switch accepts only an address that answers `/health` with that identity. A saved instance that never reported its identity is asked for it when a push names an unknown one. An unknown or unreachable instance leaves the session unopened rather than opening it on the active server.
+- A direct connection learns the server's identity from `/health` into `pushServerId` when it connects, so an older manually-added instance can still be matched by a later push. This field does not key the stored client token, so learning it cannot orphan the token or change the active runtime key.
 
 - Chat-side Settings entry points request the native Settings tab through `RuntimeAPIs.vscode`. They preserve chat selection, drafts and the current layout. The source's in-page dialog flag is cleared so it cannot block chat shortcuts.
 - Only the Settings root receives page navigation. The bridge parses it before applying it to stores, and the mounted root signals readiness before the host consumes pending navigation.
@@ -102,13 +105,20 @@
 ### Changes and files
 
 - Changes waits for the requested repository before applying commit scope; a repository outside the folder cannot borrow another repository's commit selection. Explicit commit navigation ends a board-selected PR override, and every repository change clears repository-bound PR selection.
-- A changed-file request looks in Last turn first, then in its repository's freshly read working-tree status. Only an answer for the current session settles it; failed reads retain Retry. Manual navigation or leaving the scope ends the request, while repository resolution alone does not replay it.
+- A changed-file request looks in its turn first (Last turn, or the older turn its chip names), then in its repository's freshly read working-tree status. The request carries the chip's session and folder, which read the turn, and the session on screen at the click, which owns it: only an answer while that session is on screen settles it, so a chip from another session still reaches the working-tree step; failed reads retain Retry. Manual navigation or leaving the scope ends the request, while repository resolution alone does not replay it. The older turn's folder lives in the pane's navigation, not in the surface's root, so a project switch drops the selection with the owner and the list, Last turn and Git actions belong to the new project.
 - Comparison expansion belongs to the exact path, range and retry cache entry. Branch and commit views request full context from Git; PR views reconstruct full contents from GitHub's two file versions. A pure rename has no hunks to draw. New nested-repository answers supersede earlier declined-diff results.
 - Hidden workspace panes keep navigation but perform visibility-scoped reads only while shown. Entering a comparison scope reports loading during render to avoid a false empty frame; revisits retain the previous list while refreshing. Failed background folder reloads preserve the listing already on screen.
 - Mobile reverts bound concurrency because the server serializes them per repository and excess POSTs occupy connections needed for reads. Local branch creation never implicitly pushes. A failed publish before a dirty switch leaves the user on the committed branch; pull conflicts remain a merge in progress.
 - Identity selection uses the repository's bound primary remote and the same configuration answers as add and clone. Trusting system Git is confirmed in repository configuration because selecting a menu item alone cannot authorize that trust.
 - Worktree deletion handles sessions in every subfolder while their directory still exists. Archiving rolls back if removal fails; keeping sessions moves them to the project first. Teardown retries reread options at execution time, and failed remote-branch deletion preserves the worktree with its reason.
 - Files navigation remains rooted for parent traversal, while an explicit chat tool target can open outside the workspace through the editor's existing outside-workspace read path. Image-preview navigation retains the browsed folder as Back's destination. Upload completion reloads only the folder still on screen.
+- A phone file or change list keeps the offset it left when a preview or diff
+  replaces it, and a file's search results, a folder's listing and each change
+  mode are their own list. A folder child starts at its top rather than
+  inheriting the parent's offset (the list's `memoryKey`). Search results of
+  the same folder and query stay on screen while a return re-runs the search
+  (`mobileFilesList`): a loading placeholder there would clamp the restored
+  offset and be saved as the list's. A failed folder read or search is not the list.
 
 ### Native chrome, notifications and snapshots
 
@@ -124,6 +134,18 @@
 - Widget session ordering, unread state and project ownership match the shared lifecycle and sidebar, including worktrees and isolated spaces. The iOS bridge returns a JSON primitive or null so failed construction cannot overwrite a good App Group snapshot. Widget quotas use the Usage page's selected providers, models, formatting and theme colors without copying credentials.
 
 ## Decisions
+
+### Why mobile push registers with every saved instance and not only the connected one
+
+A phone with two saved servers stayed quiet for the one it was not connected to: the token went only to the active server, and the relay kept one owning server per token. The relay now keeps one binding per token and server (openchamber-website `apps/api`, `push_tokens`), and the app registers with every saved server, in no particular order. An ordering that left the active server registered last was weighed and dropped: it only mattered while each registration took the token from the previous server, and the relay change ships before this app. The cost is that every saved server can push to the phone.
+
+### Why a notification switch holds the tap until the runtime is ready
+
+Switching instances resets the shell and clears `ready`. Opening the session as soon as the endpoint changes would run against the previous server's stores or session list. The intent stays stashed until the shell reports ready again, then opens on the new runtime.
+
+### Why a direct connection learns its pushServerId from /health
+
+A manually added instance had no relay identity on file, so a push from it carried an id that matched no saved entry. The health probe already runs on every connect; keeping the reported id under a separate field makes a later notification switch possible without re-pairing, and without changing the key the client token is stored under.
 
 ### Why a visited extension tab keeps its frame and not a fresh load per visit
 

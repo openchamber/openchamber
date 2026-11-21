@@ -5,12 +5,34 @@ import type { RelayTunnelWebSocket } from './relay/tunnel-client';
 let nextFetchResponse = (): Response => new Response(null, { status: 500 });
 mock.module('./runtime-fetch', () => ({ runtimeFetch: async () => nextFetchResponse() }));
 const socketPaths: string[] = [];
-mock.module('./runtime-url', () => ({ getRuntimeUrlResolver: () => ({ websocket: (path: string) => { socketPaths.push(path); return 'ws://example.test/terminal'; } }) }));
+const openedSocketUrls: string[] = [];
+let tunnelSessionConfirmed = false;
+let urlTokenMintCalls = 0;
+let mockSocketFactory: (() => RelayTunnelWebSocket) | null = null;
+const mockRuntimeUrlResolver = {
+  websocket: (path: string) => {
+    socketPaths.push(path);
+    return `wss://host.example${path}${path.includes('?') ? '&' : '?'}oc_url_token=short`;
+  },
+  sameOriginCookieWebSocket: (path: string) => `wss://host.example${path}`,
+  auth: (path: string) => `https://host.example${path}`,
+};
+const runtimeUrl = await import('./runtime-url');
+const runtimeAuth = await import('./runtime-auth');
+mock.module('./runtime-url', () => ({ ...runtimeUrl, getRuntimeUrlResolver: () => mockRuntimeUrlResolver }));
 mock.module('./runtime-auth', () => ({
+  ...runtimeAuth,
   clearRuntimeUrlAuthToken: () => undefined,
-  refreshRuntimeUrlAuthToken: async () => undefined,
+  refreshRuntimeUrlAuthToken: async () => { urlTokenMintCalls += 1; return 'url-token'; },
+  hasSameOriginTunnelSession: async () => tunnelSessionConfirmed,
 }));
-mock.module('./relay/runtime-socket', () => ({ openRuntimeWebSocket: () => { throw new Error('not used in tests'); } }));
+mock.module('./relay/runtime-socket', () => ({
+  openRuntimeWebSocket: (url: string) => {
+    openedSocketUrls.push(url);
+    if (mockSocketFactory) return mockSocketFactory();
+    throw new Error('not used in tests');
+  },
+}));
 
 const { connectTerminalStream, createTerminalSession, disposeTerminalInputTransport, isTerminalCwdMissingError, parseTerminalSession, parseTerminalSessionPurpose, TerminalRequestError, TerminalTransport } = await import('./terminalApi');
 
@@ -597,6 +619,57 @@ describe('terminal transport', () => {
 });
 
 describe('one terminal socket per target', () => {
+  test('opens a confirmed host tunnel with a cookie-backed secure socket and keeps spaces on URL-token auth', async () => {
+    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const sockets: FakeSocket[] = [];
+    let stopHost: (() => void) | null = null;
+    let stopSpace: (() => void) | null = null;
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        location: { origin: 'https://host.example', href: 'https://host.example/' },
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      },
+    });
+    tunnelSessionConfirmed = true;
+    urlTokenMintCalls = 0;
+    openedSocketUrls.length = 0;
+    socketPaths.length = 0;
+    let markOpened: () => void = () => {};
+    const bothOpen = new Promise<void>(resolve => { markOpened = resolve; });
+    mockSocketFactory = () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      queueMicrotask(() => {
+        socket.open();
+        if (sockets.length === 2 && sockets.every(s => s.readyState === 1)) markOpened();
+      });
+      return socket;
+    };
+    try {
+      stopHost = connectTerminalStream('t-cookie-host', () => undefined, () => undefined, '/home/me/app');
+      stopSpace = connectTerminalStream('t-token-space', () => undefined, () => undefined, '/spaces/a1b2c3d4e5f6/app');
+      await bothOpen;
+
+      expect(openedSocketUrls).toEqual([
+        'wss://host.example/api/terminal/ws',
+        'wss://host.example/api/terminal/ws?directory=%2Fspaces%2Fa1b2c3d4e5f6&oc_url_token=short',
+      ]);
+      expect(urlTokenMintCalls).toBe(1);
+      expect(sockets).toHaveLength(2);
+      expect(sockets.every((socket) => socket.readyState === 1)).toBe(true);
+    } finally {
+      stopHost?.();
+      stopSpace?.();
+      disposeTerminalInputTransport();
+      tunnelSessionConfirmed = false;
+      mockSocketFactory = null;
+      if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+      else Reflect.deleteProperty(globalThis, 'window');
+    }
+  });
+
   test('a terminal inside an isolated space is attached over that space\'s socket, a host terminal over the host\'s', async () => {
     socketPaths.length = 0;
     const SPACE = 'a1b2c3d4e5f6';
@@ -607,7 +680,10 @@ describe('one terminal socket per target', () => {
     const stopSpaceAgain = connectTerminalStream('t-space-2', () => undefined, onError, `/spaces/${SPACE}/app/src`);
     await new Promise((resolve) => setTimeout(resolve, 0));
     // The dial fails in this test, which is fine: the path is what is under test.
-    expect(socketPaths).toEqual(['/api/terminal/ws', `/api/terminal/ws?directory=${encodeURIComponent(`/spaces/${SPACE}`)}`]);
+    expect([...socketPaths].sort()).toEqual([
+      '/api/terminal/ws',
+      `/api/terminal/ws?directory=${encodeURIComponent(`/spaces/${SPACE}`)}`,
+    ].sort());
     stopHost();
     stopSpace();
     stopSpaceAgain();

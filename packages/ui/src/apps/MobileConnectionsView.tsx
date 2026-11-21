@@ -23,6 +23,7 @@ import {
   useMobileConnection,
   type MobileSavedConnection,
 } from './mobileConnections';
+import { forgetPushTokenForConnection } from './mobilePushTokens';
 import { isQrScanSupported, parseConnectionPayload, scanConnectionQr } from './mobileQrScan';
 import { MobileQrConnectionLoading, MobileQrScannerOverlay } from './MobileQrScannerOverlay';
 import { buildMobileHeaderValues, createMobileHeaderDrafts, type MobileHeaderDraft } from './mobileRequestHeaders';
@@ -228,7 +229,8 @@ export const MobileConnectionsView: React.FC<Props> = (props) => {
     closeActions();
     if (formTarget?.kind === 'edit' && formTarget.id === id) closeForm();
     const wasLast = connections.length === 1;
-    void removeConnection(id).then((removed) => {
+    const target = connections.find((connection) => connection.id === id);
+    void (target ? forgetPushTokenForConnection(target) : Promise.resolve()).then(() => removeConnection(id)).then((removed) => {
       if (!removed || mode !== 'instances') return;
       if (wasLast || isActiveRuntimeConnection(removed)) props.onActiveConnectionDeleted();
     });

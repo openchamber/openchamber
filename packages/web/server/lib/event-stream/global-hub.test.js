@@ -28,6 +28,65 @@ it('bounds a contiguous replay suffix by UTF-8 bytes and event count', async () 
   } finally { hub.stop(); }
 });
 
+it('drops a turn start or end OpenCode already moved past, before replay and every subscriber', async () => {
+  const execution = (type, seq, extra = {}) => `data: ${JSON.stringify({
+    id: `evt_${type}_${seq}`, type, created: 1000 + seq,
+    durable: { aggregateID: 'ses_1', seq, version: 1 },
+    data: { sessionID: 'ses_1', ...extra },
+  })}\n\n`;
+  const failed = { error: { type: 'provider.no-route', message: 'Model unavailable' } };
+  const received = [];
+  const hub = createGlobalMessageStreamHub({
+    buildOpenCodeUrl: path => `http://127.0.0.1:4096${path}`,
+    getOpenCodeAuthHeaders: () => ({}),
+    upstreamReconnectDelayMs: 60_000,
+    fetchImpl: async () => createSseResponse({ blocks: [
+      execution('session.execution.started', 1),
+      execution('session.execution.failed', 2, failed),
+      execution('session.execution.started', 3),
+      execution('session.execution.failed', 2, failed),
+      execution('session.deleted', 4),
+      execution('session.execution.started', 1),
+    ] }),
+  });
+  hub.subscribeEvent(event => received.push(`${event.payload.type} ${event.payload.durable.seq}`));
+  try {
+    await readUpstream(hub);
+    expect(received).toEqual([
+      'session.execution.started 1',
+      'session.execution.failed 2',
+      'session.execution.started 3',
+      'session.deleted 4',
+      'session.execution.started 1',
+    ]);
+    expect(hub.replayAfter('evt_session.execution.started_3').map(entry => entry.eventId)).toEqual([
+      'evt_session.deleted_4',
+      'evt_session.execution.started_1',
+    ]);
+  } finally { hub.stop(); }
+});
+
+it('lets a space event move only the count of the session it names', async () => {
+  const block = (type, seq) => `data: ${JSON.stringify({ id: `evt_${seq}`, type, durable: { aggregateID: 'ses_host', seq, version: 1 }, data: { sessionID: 'ses_host' } })}\n\n`;
+  const received = [];
+  const hub = createGlobalMessageStreamHub({
+    buildOpenCodeUrl: path => `http://127.0.0.1:4096${path}`,
+    getOpenCodeAuthHeaders: () => ({}),
+    upstreamReconnectDelayMs: 60_000,
+    fetchImpl: async () => createSseResponse({ blocks: [block('session.execution.started', 1), block('session.execution.succeeded', 2)] }),
+  });
+  hub.subscribeEvent(event => received.push(event.payload.type), { spaces: true });
+  try {
+    hub.injectEvent({
+      payload: { id: 'evt_space', type: 'session.step.started', durable: { aggregateID: 'ses_host', seq: 99, version: 1 }, data: { sessionID: 'ses_space' } },
+      directory: '/space', spaceId: 'space_1',
+    });
+    hub.flushPending();
+    await readUpstream(hub);
+    expect(received).toEqual(['session.step.started', 'session.execution.started', 'session.execution.succeeded']);
+  } finally { hub.stop(); }
+});
+
 function createSseResponse({ blocks = [] } = {}) {
   const encoder = new TextEncoder();
   let index = 0;

@@ -105,9 +105,20 @@ export const readChatDraft = (identity: ChatDraftIdentity | null): ChatDraftSnap
     : { text: '', confirmedMentions: new Set() };
 };
 
+const ownSlotWorkDrafts = new Set<string>();
+
+export const keepWorkDraftOwnSlot = (workDraftId: string): void => {
+  ownSlotWorkDrafts.add(workDraftId);
+};
+
+export const workDraftKeepsOwnSlot = (workDraftId: string | null | undefined): boolean => (
+  Boolean(workDraftId && ownSlotWorkDrafts.has(workDraftId))
+);
+
 export const readChatDraftClaimingFolderDraft = (identity: ChatDraftIdentity | null): ChatDraftSnapshot => {
   const saved = readChatDraft(identity);
-  if (!identity || workDraftIdOfComposerKey(identity.sessionId) === null || saved.text) return saved;
+  const workDraftId = workDraftIdOfComposerKey(identity?.sessionId);
+  if (!identity || workDraftId === null || saved.text || workDraftKeepsOwnSlot(workDraftId)) return saved;
   const folderIdentity = { ...identity, sessionId: null };
   const folderDraft = readChatDraft(folderIdentity);
   if (!folderDraft.text) return saved;

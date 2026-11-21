@@ -584,7 +584,12 @@ var handleSurface = async (req, res, url) => {
     if (surface.seq <= after) {
       await new Promise((resolve) => {
         surface.waiters.push(resolve);
-        setTimeout(resolve, wait);
+        setTimeout(() => {
+          const at = surface.waiters.indexOf(resolve);
+          if (at !== -1)
+            surface.waiters.splice(at, 1);
+          resolve();
+        }, wait);
       });
     }
     if (surface.seq <= after) {
@@ -674,7 +679,7 @@ http.createServer((req, res) => {
   }
   if (url.pathname === "/state" && req.method === "GET") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ url: page.url, title: page.title, caller: lastCaller }));
+    res.end(JSON.stringify({ url: page.url, title: page.title, caller: lastCaller, waiters: surface.waiters.length }));
     return;
   }
   if (url.pathname === "/navigate" && req.method === "POST") {

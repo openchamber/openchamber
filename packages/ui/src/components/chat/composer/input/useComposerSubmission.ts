@@ -64,6 +64,7 @@ import { collectInlineSkillMentions } from './composerMentionTokens';
 import { recordLinkedReferences } from './recordLinkedReferences';
 import { handleComposerSendFailure } from './handleComposerSendFailure';
 import { createComposerSubmitErrorMessage } from './createComposerSubmitErrorMessage';
+import { saveAttachmentsHeldForSend } from './saveAttachmentsHeldForSend';
 
 type Dependencies = {
     i18n: Pick<ReturnType<typeof useI18n>, 't'>;
@@ -149,6 +150,14 @@ export function useComposerSubmission({
         if (await waitForPendingAttachments()) {
             void handleSubmitRef.current(options);
             return;
+        }
+        if (!options?.queuedOnly) {
+            const held = await saveAttachmentsHeldForSend(chatDraftIdentity, currentDirectory ?? undefined, t);
+            if (held === 'stopped') return;
+            if (held === 'saved') {
+                void handleSubmitRef.current(options);
+                return;
+            }
         }
         if (isBtwActive && currentSessionId && (btwPanel.creating || useBtwStore.getState().byParent[currentSessionId]?.pendingSend)) return;
         if (pendingFirstSend) return;

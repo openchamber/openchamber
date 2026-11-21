@@ -3,7 +3,7 @@ import React from 'react';
 import type { ProjectRef } from '@/lib/projectContextApi';
 
 export type MobileAppActions = {
-  openChanges: (options?: { diffPath?: string | null; staged?: boolean; scope?: 'turn' }) => void;
+  openChanges: (options?: { diffPath?: string | null; staged?: boolean; scope?: 'turn'; turnId?: string; sessionId?: string | null; directory?: string | null }) => void;
   openFiles: () => void;
   openSourceBoard: () => void;
   openPlan: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;

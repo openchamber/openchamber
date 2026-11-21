@@ -173,17 +173,19 @@ same endpoints a real Gitea serves. It can refuse a token with 401 (`refuseToken
 branch (`push`), and logs every write (`writes`), so a test can prove a
 mutation reached the forge exactly once.
 `packages/sdk/scripts/source-control-example.test.ts` runs the built service
-against it through a stand-in for OpenChamber's outbound proxy.
+against it through a stand-in for OpenChamber's outbound proxy. A fourth pull
+request is reachable by number but stays out of the pull list, so the review
+summary fixture and the reviewer state fixture on pull request 2 can differ
+without changing the list or the numbers the create route assigns.
 
 Rebuild after editing the service or the SDK. `main.ts`, `mutations.ts` and
-`review-drafts.ts` are three bundles: the entry loads the other two through a
-computed specifier, so the bundler emits them as their own files instead of
-inlining them.
+`review-drafts.ts` are three bundles, and `review-summaries.ts` is loaded the
+same way: the entry loads them through a computed specifier, so the bundler
+emits them as their own files instead of inlining them. The service also loads
+the reviewer state, reference, and diff mappings from their own bundles:
 
 ```bash
-for name in main mutations review-drafts; do
-  bun packages/sdk/scripts/bundle-guest.ts --node \
-    "packages/sdk/examples/source-control-provider/service/$name.ts" \
-    "packages/sdk/examples/source-control-provider/service/$name.js"
+for entry in main mutations review-drafts review-summaries reviewer-states references diff; do
+  bun packages/sdk/scripts/bundle-guest.ts --node "packages/sdk/examples/source-control-provider/service/$entry.ts" "packages/sdk/examples/source-control-provider/service/$entry.js"
 done
 ```

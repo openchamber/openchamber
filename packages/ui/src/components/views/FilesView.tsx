@@ -5,6 +5,7 @@ import { renderFileHtmlPreview } from './files/view/renderFileHtmlPreview';
 import { renderFileHtmlUnavailable } from './files/view/renderFileHtmlUnavailable';
 import { renderFileMarkdownPreview } from './files/view/renderFileMarkdownPreview';
 import { renderFileDiscardDialog } from './files/view/renderFileDiscardDialog';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -75,6 +76,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ visible = true, onCloseFil
   const uploads = useFileUploads({ fileDirectory, scope });
   const operations = useFileOperations({ fileDirectory, fileDocument, layout, scope, tabs, files, isMobile, t });
   const search = useFileSearch({ scope });
+  const treeSearchQuery = search.debouncedSearchQuery.trim();
+  const treeRuntimeKey = getRuntimeKey();
+  const treeMemoryKey = isMobile && !layout.showMobilePageContent
+    ? (treeSearchQuery
+      ? `tree:${treeRuntimeKey}:${scope.root}:search:${scope.currentDirectory}:${treeSearchQuery}`
+      : `tree:${treeRuntimeKey}:${scope.root}`)
+    : null;
+  const treeMemoryReady = treeSearchQuery
+    ? !search.searching
+      && search.resultsFor?.directory === scope.currentDirectory
+      && search.resultsFor.query === treeSearchQuery
+    : Boolean(scope.root && fileDirectory.childrenByDir[scope.root]) && !fileDirectory.loadErrorsByDir[scope.root]
+      && !search.searching && search.searchResults.length === 0;
   const fileSaving = useFileSaving({ canvasState, diagram, draft, fileDocument, scope, tabs, files, t });
   useFileKeybinds({
     canvasState, editor, fileSaving, markdownPreview,
@@ -150,6 +164,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ visible = true, onCloseFil
   });
   const fileTreePanel = renderFileTreePanel({
     fileDirectory, fileOpening, fileTreeRendering, operations, scope, search, tabs, uploads, t,
+    memoryKey: treeMemoryKey,
+    memoryReady: treeMemoryReady,
   });
   const imageFullscreenViewer = renderFileImageFullscreen({ artifacts, fileDocument, imageFullscreen, tabs, t });
   const { showMobilePageContent } = layout;

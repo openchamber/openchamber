@@ -218,6 +218,32 @@ export function mapGiteaReviewBody(value: JsonValue | undefined, identity: Gitea
 const VERDICTS = new Map<JsonValue | undefined, 'approved' | 'changes_requested'>([['APPROVED', 'approved'], ['REQUEST_CHANGES', 'changes_requested']]);
 export type GiteaVerdict = { state: 'approved' | 'changes_requested'; url: string; createdAt: string | null; author?: GiteaUser };
 
+export const SUBMITTED_REVIEW_STATES: Pick<ReadonlySet<JsonValue | undefined>, 'has'> = new Set(['APPROVED', 'REQUEST_CHANGES', 'COMMENT']);
+
+const REVIEWER_STATES = new Map<JsonValue | undefined, GiteaReviewerState['state']>([
+  ['APPROVED', 'approved'], ['REQUEST_CHANGES', 'changes_requested'], ['COMMENT', 'commented'],
+]);
+
+export type GiteaReviewerState = {
+  user: GiteaUser;
+  state: 'pending' | 'approved' | 'changes_requested' | 'commented' | 'dismissed';
+};
+
+export function mapGiteaReviewerStates(reviews: JsonValue[], requested: JsonValue | undefined, identity: GiteaIdentity): GiteaReviewerState[] {
+  const states = new Map<string, GiteaReviewerState>();
+  const ordered = [...reviews].sort((left, right) => text(field(left, 'submitted_at')).localeCompare(text(field(right, 'submitted_at'))));
+  for (const review of ordered) {
+    const user = mapGiteaUser(field(review, 'user'), identity);
+    const state = field(review, 'dismissed') === true ? 'pending' : REVIEWER_STATES.get(field(review, 'state'));
+    if (user && state) states.set(user.id, { user, state });
+  }
+  for (const user of Array.isArray(requested) ? requested : []) {
+    const mapped = mapGiteaUser(user, identity);
+    if (mapped && !states.has(mapped.id)) states.set(mapped.id, { user: mapped, state: 'pending' });
+  }
+  return [...states.values()];
+}
+
 export function mapGiteaVerdict(value: JsonValue | undefined, identity: GiteaIdentity, fallbackUrl = '') {
   if (!isJsonObject(value) || value.dismissed === true) return null;
   const state = VERDICTS.get(value.state);

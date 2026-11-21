@@ -26,30 +26,32 @@ type LastTurnDiff = {
 export function useLastTurnDiff(
     sessionId: string | null,
     directory: string | undefined,
-    { enabled, live }: { enabled: boolean; live: boolean },
+    { enabled, live, from }: { enabled: boolean; live: boolean; from?: string },
 ): LastTurnDiff {
     const { t } = useI18n();
     const transcriptKey = useSessionMessagesSelector(enabled ? sessionId ?? '' : '', directory, selectTranscriptKey);
     const statusType = useSessionStatus(enabled ? sessionId ?? '' : '', directory)?.type;
     const running = statusType !== undefined && statusType !== 'idle';
-    const [result, setResult] = React.useState<{ sessionId: string; readKey: string; diffs: TurnSnapshotDiff[] } | null>(null);
-    const [failure, setFailure] = React.useState<{ sessionId: string; message: string } | null>(null);
+    const [result, setResult] = React.useState<{ sessionId: string; directory: string | undefined; from?: string; readKey: string; diffs: TurnSnapshotDiff[] } | null>(null);
+    const [failure, setFailure] = React.useState<{ sessionId: string; readKey: string; message: string } | null>(null);
     const [attempt, nextAttempt] = React.useReducer((value: number) => value + 1, 0);
     const retry = React.useCallback(() => {
         setFailure(null);
         nextAttempt();
     }, []);
     const waiting = running && !live;
-    const readKey = JSON.stringify([attempt, running, transcriptKey]);
+    const readKey = JSON.stringify([attempt, running, transcriptKey, from, directory]);
 
     React.useEffect(() => {
         if (!enabled || !sessionId || waiting) return;
         let cancelled = false;
-        void opencodeClient.getSessionTurnDiff(sessionId, { directory })
+        void opencodeClient.getSessionTurnDiff(sessionId, { directory, from })
             .then((files) => {
                 if (cancelled) return;
                 setResult({
                     sessionId,
+                    directory,
+                    from,
                     readKey,
                     diffs: files.map((entry) => ({
                         file: entry.file,
@@ -64,16 +66,16 @@ export function useLastTurnDiff(
             .catch((error) => {
                 if (cancelled) return;
                 console.warn('[last-turn-diff] turn diff unavailable:', error instanceof Error ? error.message : error);
-                setFailure({ sessionId, message: error instanceof Error && error.message ? error.message : t('diffView.state.failedToLoadDiff') });
+                setFailure({ sessionId, readKey, message: error instanceof Error && error.message ? error.message : t('diffView.state.failedToLoadDiff') });
             });
         return () => {
             cancelled = true;
         };
-    }, [directory, enabled, readKey, sessionId, t, waiting]);
+    }, [directory, enabled, from, readKey, sessionId, t, waiting]);
 
-    const own = result && result.sessionId === sessionId ? result : null;
+    const own = result && result.sessionId === sessionId && result.directory === directory && result.from === from ? result : null;
     const diffs = own?.diffs ?? EMPTY_DIFFS;
-    const error = failure && failure.sessionId === sessionId ? failure.message : null;
+    const error = failure && failure.sessionId === sessionId && failure.readKey === readKey ? failure.message : null;
     return {
         diffs,
         count: own && !waiting ? diffs.length : null,

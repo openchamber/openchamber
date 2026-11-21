@@ -2021,6 +2021,7 @@ export const settingsDict = {
   'settings.notifications.page.delivery.enableAria': '啟用通知',
   'settings.notifications.page.delivery.enableLabel': '啟用通知',
   'settings.notifications.page.delivery.localOnlyDevice': '此裝置僅透過家用網路配對，因此不會收到通知，因為通知需經由網際網路送達手機。若要接收通知，請重新新增此裝置並選擇「任何地方」。',
+  'settings.notifications.page.delivery.localOnlyServer': '此伺服器僅透過家用網路配對，因此不會傳送通知。你儲存的其他伺服器仍會傳送通知。',
   'settings.notifications.page.delivery.focusedAria': '應用程式聚焦時通知',
   'settings.notifications.page.delivery.focusedLabel': '應用程式聚焦時通知',
   'settings.notifications.page.delivery.testAction': '送出測試通知',

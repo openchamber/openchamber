@@ -1,7 +1,11 @@
 import type { SourceControlProviderId } from './providers/descriptor.js';
 import type { RepositoryReferenceReview } from './reviewSummary.js';
+import type { ChangeRequestReviewState, ChangeRequestReviewerState } from './review-types';
+import type { SourceControlReferenceLink } from './references.js';
 
 export type { RepositoryReferenceReview };
+export type { ChangeRequestReviewState, ChangeRequestReviewerState, ReviewDraftComment, ReviewPerson, ReviewThread, ReviewerStateValue } from './review-types';
+export type { SourceControlReferenceLink } from './references.js';
 
 export type SourceControlProvider = SourceControlProviderId;
 
@@ -295,6 +299,7 @@ export interface Issue extends SourceControlIdentity {
   labels?: Label[];
   createdAt?: string;
   updatedAt?: string;
+  references?: SourceControlReferenceLink[];
 }
 
 export interface IssueComment extends SourceControlIdentity {
@@ -519,6 +524,8 @@ export interface ChangeRequestContext {
   verdicts?: ChangeRequestVerdict[];
   reviews?: RepositoryReferenceReview[];
   reviewers?: SourceControlUser[];
+  reviewerStates?: ChangeRequestReviewerState[];
+  references?: SourceControlReferenceLink[];
   stack?: PullRequestStack | null;
   voteLabels?: ChangeRequestVoteLabel[];
   submitRequirements?: ChangeRequestSubmitRequirement[];
@@ -713,50 +720,6 @@ export interface ReviewDismissInput extends SourceControlMutationContext<SourceC
   reviewId?: string;
   message?: string;
   dismissed?: boolean;
-}
-
-export interface ReviewPerson {
-  login: string;
-  avatarUrl?: string;
-}
-
-export interface ReviewDraftComment {
-  id: string;
-  path: string;
-  side: ReviewCommentSide;
-  line: number | null;
-  startLine: number | null;
-  body: string;
-  author: ReviewPerson | null;
-}
-
-export interface ReviewThreadComment {
-  id: string;
-  body: string;
-  createdAt: string;
-  url: string;
-  author: ReviewPerson | null;
-}
-
-export interface ReviewThread {
-  id: string;
-  path: string;
-  side: ReviewCommentSide;
-  line: number | null;
-  startLine: number | null;
-  resolved: boolean;
-  outdated?: boolean;
-  canReply: boolean;
-  canResolve: boolean;
-  comments: ReviewThreadComment[];
-}
-
-export interface ChangeRequestReviewState {
-  viewerIsAuthor: boolean;
-  headSha: string;
-  draft: { id: string; body: string; comments: ReviewDraftComment[] } | null;
-  threads: ReviewThread[];
-  truncated: boolean;
 }
 
 export type ChangeRequestReviewStateResult =

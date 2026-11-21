@@ -2143,6 +2143,7 @@ export const settingsDict = {
   "settings.notifications.page.delivery.enableAria": "Ativar notificações",
   "settings.notifications.page.delivery.enableLabel": "Ativar notificações",
   "settings.notifications.page.delivery.localOnlyDevice": "Este dispositivo está pareado só com a sua rede doméstica, então não recebe notificações, porque elas chegam ao telefone pela internet. Para recebê-las, adicione o dispositivo de novo e escolha \"Em qualquer lugar\".",
+  "settings.notifications.page.delivery.localOnlyServer": "Este servidor está pareado só para a sua rede doméstica, então não envia notificações. Seus outros servidores salvos continuam enviando.",
   "settings.notifications.page.delivery.focusedAria": "Notificar enquanto o aplicativo estiver em foco",
   "settings.notifications.page.delivery.focusedLabel": "Notificar enquanto o aplicativo está em foco",
   "settings.notifications.page.delivery.testAction": "Enviar notificação de teste",
