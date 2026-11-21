@@ -2595,6 +2595,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.messageTransport.sse.description': 'استخدام Server-Sent Events لبث الرسائل.',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.label': 'مطوي',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.description': 'إبقاء النشاط مطويًا افتراضيًا.',
+  'settings.openchamber.visual.option.activityRenderMode.text.label': 'مع النص',
   'settings.openchamber.visual.option.activityRenderMode.summary.label': 'موسّع',
   'settings.openchamber.visual.option.activityRenderMode.summary.description': 'توسيع النشاط افتراضيًا.',
   'settings.openchamber.visual.option.timeFormat.auto.label': 'تلقائي',

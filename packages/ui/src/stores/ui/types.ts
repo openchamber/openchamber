@@ -19,7 +19,7 @@ type MermaidRenderingMode = 'svg' | 'ascii';
 
 type UserMessageRenderingMode = 'markdown' | 'plain';
 
-type ActivityRenderMode = 'collapsed' | 'summary';
+type ActivityRenderMode = 'collapsed' | 'text' | 'summary';
 
 export type SessionRetentionAction = 'archive' | 'delete';
 

@@ -2581,6 +2581,7 @@ export const settingsDict = {
   "settings.openchamber.visual.option.messageTransport.sse.description": "Usar server-sent events para transmitir mensajes.",
   "settings.openchamber.visual.option.activityRenderMode.collapsed.label": "Colapsado",
   "settings.openchamber.visual.option.activityRenderMode.collapsed.description": "Mantener la Actividad colapsada por defecto.",
+  "settings.openchamber.visual.option.activityRenderMode.text.label": "Con texto",
   "settings.openchamber.visual.option.activityRenderMode.summary.label": "Expandido",
   "settings.openchamber.visual.option.activityRenderMode.summary.description": "Expandir la Actividad por defecto.",
   "settings.openchamber.visual.option.timeFormat.auto.label": "Auto",

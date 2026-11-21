@@ -2584,6 +2584,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.messageTransport.sse.description': '使用 Server-Sent Events 进行消息流传输。',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.label': '折叠',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.description': '默认折叠 Activity。',
+  'settings.openchamber.visual.option.activityRenderMode.text.label': '含文字',
   'settings.openchamber.visual.option.activityRenderMode.summary.label': '展开',
   'settings.openchamber.visual.option.activityRenderMode.summary.description': '默认展开 Activity。',
   'settings.openchamber.visual.option.timeFormat.auto.label': '自动',

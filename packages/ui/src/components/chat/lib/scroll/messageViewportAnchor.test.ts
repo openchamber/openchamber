@@ -52,6 +52,15 @@ describe('captureMessageViewportAnchor', () => {
         expect(captureMessageViewportAnchor(container)).toEqual({ messageId: 'above-edge', offsetTop: -60 });
     });
 
+    test('never anchors to text shown outside the message that wrote it', () => {
+        const { container, addMessage } = createTimeline();
+        const kept = addMessage('step', { top: 120, height: 30 });
+        kept.dataset.messageHoisted = '';
+        addMessage('answer', { top: 160, height: 200 });
+
+        expect(captureMessageViewportAnchor(container)).toEqual({ messageId: 'answer', offsetTop: 60 });
+    });
+
     test('skips a sticky header stuck to the top edge', () => {
         const { container, addMessage } = createTimeline();
         const header = document.createElement('div');

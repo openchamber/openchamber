@@ -30,7 +30,7 @@ export const captureMessageViewportAnchor = (container: HTMLElement): MessageVie
     let best: { node: HTMLElement; top: number } | null = null;
     let fallback: { node: HTMLElement; top: number } | null = null;
 
-    for (const node of container.querySelectorAll<HTMLElement>('[data-message-id]')) {
+    for (const node of container.querySelectorAll<HTMLElement>('[data-message-id]:not([data-message-hoisted])')) {
         const rect = node.getBoundingClientRect();
         if (rect.bottom <= containerTop + 1) continue;
         if (!fallback || rect.top < fallback.top) fallback = { node, top: rect.top };

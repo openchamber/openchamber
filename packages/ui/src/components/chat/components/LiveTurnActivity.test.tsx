@@ -101,25 +101,26 @@ function turn(messages: ChatMessageEntry[]): TurnRecord {
 }
 
 // The rows a turn under a fold becomes in the list, drawn the way MessageList draws them.
-function TurnRows({ record, retired, expanded, onToggle, renderMessage }: {
+function TurnRows({ record, retired, expanded, keepText = false, onToggle, renderMessage }: {
     record: TurnRecord;
     retired: boolean;
     expanded: boolean;
+    keepText?: boolean;
     onToggle: () => void;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
 }) {
     const rows = buildTimelineRows([{ kind: 'turn', key: 'turn', turn: record, isLastTurn: true, hasLaterAssistant: retired }], {
-        collapsedActivity: true, expandedTurns: new Map([[record.turnId, expanded]]), showReasoningTraces: true,
+        collapsedActivity: true, keepActivityText: keepText, expandedTurns: new Map([[record.turnId, expanded]]), showReasoningTraces: true,
     }, []);
     const finalMessageId = rows.find((row) => row.kind === 'turn-fold')?.finalMessageId;
-    const { hoistedPages, finalContext } = useTurnFoldContexts(record, retired, expanded, finalMessageId);
+    const { hoistedPages, finalContext } = useTurnFoldContexts(record, retired, expanded, finalMessageId, keepText);
     return <LiveTurnHoistedPagesContext.Provider value={hoistedPages}>
         {rows.map((row) => {
             if (row.kind === 'turn-fold') {
                 return <TurnFold key={row.key} turn={record} hasLaterAssistant={retired} expanded={expanded}
-                    finalMessageId={row.finalMessageId} onToggle={onToggle} renderMessage={renderMessage} />;
+                    finalMessageId={row.finalMessageId} keepText={keepText} onToggle={onToggle} renderMessage={renderMessage} />;
             }
-            if (row.kind === 'turn-pages') return <TurnPagesRow key={row.key} turn={record} />;
+            if (row.kind === 'turn-pages') return <TurnPagesRow key={row.key} turn={record} keepText={keepText} />;
             if (row.kind !== 'turn-message') return null;
             const message = record.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
             if (!message) return null;
@@ -142,10 +143,11 @@ function ActivityHoldProbe() {
     return null;
 }
 
-function Harness({ record, retired = false, changedFiles, isLatestTurn = true, noticeOpened = false, holdingMessageId, onCopyMessage, onCopyTurn }: {
+function Harness({ record, retired = false, keepText = false, changedFiles, isLatestTurn = true, noticeOpened = false, holdingMessageId, onCopyMessage, onCopyTurn }: {
     record: TurnRecord;
     noticeOpened?: boolean;
     retired?: boolean;
+    keepText?: boolean;
     changedFiles?: TurnChangedFile[];
     isLatestTurn?: boolean;
     holdingMessageId?: string;
@@ -177,7 +179,7 @@ function Harness({ record, retired = false, changedFiles, isLatestTurn = true, n
         <ThemeSystemContext.Provider value={themeContext}>
             <SyncProvider sdk={sdk} directory="/project">
                 <I18nProvider>
-                    <TurnRows record={record} retired={retired} expanded={expanded}
+                    <TurnRows record={record} retired={retired} expanded={expanded} keepText={keepText && !expanded}
                         onToggle={() => setExpanded((value) => !value)} renderMessage={renderMessage} />
                 </I18nProvider>
             </SyncProvider>
@@ -227,6 +229,41 @@ describe('live Activity with the real message body', () => {
         await act(async () => root.unmount());
         useWorkflowRunsStore.getState().reset();
         restore();
+    });
+
+    test('With text shows what the agent wrote between steps under a closed fold and returns it to its step when opened', async () => {
+        const note: Part = { type: 'text', id: 'note', text: 'Reading the helper first', sessionID: 'session', messageID: 'progress', time: { start: 1, end: 2 } };
+        const record = turn([
+            assistant('progress', [note, readPart], 'tool-calls'),
+            assistant('final', [text('answer', 'All done')], 'stop'),
+        ]);
+        const messageOf = (content: string) => [...container.querySelectorAll<HTMLElement>('[data-fixture-message]')]
+            .find((message) => message.textContent?.includes(content))?.dataset.fixtureMessage;
+        await act(async () => root.render(<Harness record={record} />));
+        expect(container.textContent).not.toContain('Reading the helper first');
+
+        await act(async () => root.render(<Harness record={record} keepText />));
+        expect(messageOf('Reading the helper first')).toBe('final');
+        // Shown in the answer row, it is still the text of the step that wrote it.
+        expect(container.querySelector('[data-message-id="progress"] [data-chat-quote-root]')?.textContent).toContain('Reading the helper first');
+        expect(container.querySelector('[data-fixture-message="progress"]')).toBeNull();
+        const shown = container.textContent ?? '';
+        expect(shown.indexOf('Reading the helper first')).toBeLessThan(shown.indexOf('All done'));
+
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
+        expect(messageOf('Reading the helper first')).toBe('progress');
+        expect(container.textContent?.split('Reading the helper first')).toHaveLength(2);
+    });
+
+    test('With text keeps a stopped turn\'s later steps under the closed fold', async () => {
+        const note: Part = { type: 'text', id: 'note', text: 'Reading the helper first', sessionID: 'session', messageID: 'progress', time: { start: 1, end: 2 } };
+        const record = turn([
+            assistant('progress', [note], 'tool-calls'),
+            assistant('later', [{ ...readPart, id: 'later-read', callID: 'later-read', messageID: 'later' }], 'tool-calls'),
+        ]);
+        await act(async () => root.render(<Harness record={record} retired keepText />));
+        expect(container.textContent).toContain('Reading the helper first');
+        expect([...container.querySelectorAll('[data-fixture-message="later"]')].filter((step) => !step.closest('[inert]'))).toHaveLength(0);
     });
 
     test('keeps both proposed workflow cards outside Activity while approval is pending', async () => {
