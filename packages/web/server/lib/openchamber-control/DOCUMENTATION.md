@@ -581,7 +581,15 @@ constructor retains its existing `Object.assign` behavior.
   caller can retry that directory without a `worktree` parameter.
   The CLI prints the retained directory and a retry command preserving the
   prompt and selection options without creating another worktree.
-  An empty-session create without a prompt keeps its existing selection behavior.
+  An empty-session create stores any requested model and variant on the
+  OpenCode session, so a later send can reuse them. A variant without a model
+  resolves the model first; a create with no selection leaves defaults unset.
+  The stored model is the catalog id of the session directory's checkout, so a
+  model named by its upstream id, or one a new worktree does not offer, never
+  lands as an unusable selection; when the catalog cannot be read, the create
+  fails as not ready instead of pinning an unverified model. A malformed model reference is rejected, and
+  Auto needs a prompt to select a model; both are refused for an empty session
+  before any worktree is created.
 - Usage errors name the missing or conflicting input so CLI and agent-tool
   callers can correct an invalid request without an upfront usage manual.
 - Explicit `projectId` or `directory` scope takes precedence over the managed
