@@ -76,3 +76,14 @@ describe('rotate-credentials command', () => {
     expect(generateCompletionScript('fish')).toContain('rotate-credentials');
   });
 });
+
+describe('handoff target options', () => {
+  it('accepts an explicit successor entry and downgrade opt-in only for handoff', () => {
+    const parsed = parseArgs(['handoff', '--entry', '/opt/new/bin/cli.js', '--allow-downgrade']);
+    expect(parsed.options.handoffEntry).toBe('/opt/new/bin/cli.js');
+    expect(parsed.options.allowDowngrade).toBe(true);
+    expect(parseArgs(['status', '--entry', '/opt/new/bin/cli.js']).removedFlagErrors).toContain(
+      'Unknown option for status: --entry (used by: handoff)',
+    );
+  });
+});
