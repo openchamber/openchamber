@@ -1,7 +1,8 @@
 import type { Octokit, RestEndpointMethodTypes } from '@octokit/rest';
 import { z } from 'zod';
-import type { acrossContextSchema, detailCommentSchema, acrossRequestSchema, stateSchema, peopleSchema, toReference, fetchPullStack } from './reference-search.js';
 import type { GitHubReviewerState } from './reviewer-states.js';
+import type { acrossContextSchema, detailCommentSchema, acrossRequestSchema, stateSchema, peopleSchema, toReference } from './reference-search.js';
+import type { fetchPullStack } from './pull-stack.js';
 import type { summarizeCheckContexts } from './pr-summaries.js';
 export type { SummaryRef } from './pr-summaries.js';
 export type { Octokit, RestEndpointMethodTypes } from '@octokit/rest';

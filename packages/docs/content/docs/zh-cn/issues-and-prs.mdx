@@ -50,6 +50,8 @@ Linear：
 
 标题旁的铅笔可以同时编辑标题和描述。<kbd>⌘</kbd>+<kbd>Enter</kbd> 保存（Windows 和 Linux 上为 <kbd>Ctrl</kbd>+<kbd>Enter</kbd>），<kbd>Esc</kbd> 取消，之后预览会显示托管平台保存的内容。通过链接打开的条目没有铅笔，无法修改文字的托管平台也没有。
 
+Issue 和拉取请求会在时间线中列出提及它们的条目，每条带有提及者、时间，以及打开该条目的标签（跨仓库时为 `owner/repo#42`）。讨论没有这样的列表：GitHub 不为讨论提供时间线。GitHub、GitLab、Gitea、Forgejo 以及会发送这些条目的扩展所添加的主机会显示这些行；Gerrit 不显示。
+
 ## 评论与评审
 
 issue 或拉取请求的动态下方有一个评论框。**Comment** 会把你写的内容发布到仓库的托管服务，按 <kbd>⌘</kbd>+<kbd>Enter</kbd>（Windows 和 Linux 上为 <kbd>Ctrl</kbd>+<kbd>Enter</kbd>）效果相同。文字在发布成功前一直留在框里，所以发布失败也不会丢失内容。切换到其他条目会清空评论框。Linear issue 没有评论框。

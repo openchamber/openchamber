@@ -4,10 +4,11 @@ import { mapLimited } from '../shared/map-limited.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 import {
   asDraftTitle, asReadyTitle, branchRepoId, liveChangeRequestSummary, liveIssueSummary,
-  mapGiteaChangedFile, mapGiteaCI, mapGiteaComment, mapGiteaCommit, mapGiteaIssue, mapGiteaPull, mapGiteaRepo,
+  mapGiteaChangedFile, mapGiteaCI, mapGiteaComment, mapGiteaIssue, mapGiteaPull, mapGiteaRepo,
   mapGiteaReviewBody, mapGiteaReviewComment, mapGiteaReviewerStates, mapGiteaUser, mapGiteaVerdict, splitUnifiedDiff, SUBMITTED_REVIEW_STATES,
 } from './mappers.js';
 import { resolveGiteaReposFromDirectory } from './repo.js';
+import { readTimelineCommits, readTimelineReferences, withIssueReferences, withReferences } from './references.js';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
 import type { ProviderMutationContext, ProviderReadContext } from '../source-control/provider-contract.js';
 import type { reviewCommentPosition } from '../source-control/review-position.js';
@@ -30,7 +31,7 @@ type Repos = [Repo, ...Repo[]];
 type Remote = string | null | undefined;
 type Selector = Repository | null | undefined;
 type NetworkOptions = { requireComplete?: boolean; linked?: boolean | undefined };
-type ReadOptions = { remote?: Remote; linked?: boolean | undefined; project?: Selector };
+type ReadOptions = { remote?: Remote; linked?: boolean | undefined; project?: Selector; includeReferences?: boolean | undefined };
 type Ref = { owner: string; repo: string; number: number };
 type ListOptions = {
   labels?: string[] | undefined;
@@ -74,7 +75,6 @@ const PAGE_LIMIT = 50;
 const LIST_PAGE = 20;
 const COLLECTION_MAX_ITEMS = 2000;
 const STATUS_SCAN_MAX_PAGES = 5;
-const TIMELINE_COMMIT_LIMIT = 50;
 const LIVE_SUMMARY_CONCURRENCY = 4;
 const LIST_DETAIL_CONCURRENCY = 4;
 const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
@@ -344,15 +344,6 @@ export function createGiteaResourceService({
     return pulls.filter((raw) => !mergedOnly || field(raw, 'merged') === true).map((raw) => requirePull(raw, repo.project));
   };
 
-  const readTimelineCommits = async (repo: string, number: number) => {
-    const first = await client.page(`${repo}/pulls/${number}/commits`, { files: false, verification: false }, { page: 1, limit: TIMELINE_COMMIT_LIMIT });
-    const items = first.items.flatMap((commit) => {
-      const mapped = mapGiteaCommit(commit);
-      return mapped ? [mapped] : [];
-    }).reverse();
-    return { items, complete: !first.hasMore };
-  };
-
   const readIssueComments = async (repo: Repository, number: number) => {
     const comments = await client.get(`${repoPath(repo)}/issues/${number}/comments`);
     if (!array(comments)) throw malformed(`${providerLabel} returned an invalid comment list`);
@@ -432,7 +423,7 @@ export function createGiteaResourceService({
     async changeRequestContext(directory: string, number: number, options: ReadOptions & { includeDiff?: boolean | undefined; includeTimeline?: boolean | undefined } = {}) {
       const { target, raw, request, net } = await findPull(directory, number, options.project, { remote: options.remote, linked: options.linked });
       const repo = repoPath(target.project);
-      const [comments, reviews, diffText, changedFiles, ci, headProject, commits, viewer] = await Promise.all([
+      const [comments, reviews, diffText, changedFiles, ci, headProject, commits, references, viewer] = await Promise.all([
         readIssueComments(target.project, number),
         client.collection(`${repo}/pulls/${number}/reviews`, {}, { limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS, message: `${providerLabel} pull request has more reviews than OpenChamber reads` }),
         options.includeDiff ? client.text(`${repo}/pulls/${number}.diff`) : Promise.resolve(''),
@@ -441,7 +432,8 @@ export function createGiteaResourceService({
           : Promise.resolve([]),
         readCI(target.project, request.headSha),
         headProjectOf(raw, target, net.targets),
-        options.includeTimeline ? readTimelineCommits(repo, number) : Promise.resolve(null),
+        options.includeTimeline ? readTimelineCommits(client, repo, number) : Promise.resolve(null),
+        options.includeTimeline && options.includeReferences ? readTimelineReferences(client, repo, number) : Promise.resolve([]),
         readCurrentLogin().catch(() => null),
       ]);
       const reviewsWithComments = reviews.filter((review): review is JsonObject => plainObject(review) && integer(review.id) && Number(review.comments_count) > 0);
@@ -482,7 +474,7 @@ export function createGiteaResourceService({
       };
       if (!options.includeTimeline || !commits) return context;
       return {
-        ...context,
+        ...withReferences(context, references),
         commits: commits.items,
         commitsComplete: commits.complete,
         reviewers: (array(raw.requested_reviewers) ? raw.requested_reviewers : []).flatMap((user) => {
@@ -513,9 +505,10 @@ export function createGiteaResourceService({
       return { items, page, hasMore: result.hasMore };
     },
 
-    async getIssue(directory: string, number: number, selector?: Selector, remote?: Remote, { linked }: ReadOptions = {}) {
+    async getIssue(directory: string, number: number, selector?: Selector, remote?: Remote, { linked, includeReferences }: ReadOptions = {}) {
       const { target } = await network(directory, selector, remote, { linked });
-      return requireIssue(await client.get(`${repoPath(target.project)}/issues/${number}`), target.project);
+      const issue = requireIssue(await client.get(`${repoPath(target.project)}/issues/${number}`), target.project);
+      return includeReferences ? withIssueReferences(client, repoPath(target.project), issue, number) : issue;
     },
 
     async issueComments(directory: string, number: number, selector?: Selector, remote?: Remote, { linked }: ReadOptions = {}) {

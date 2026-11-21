@@ -909,7 +909,7 @@ export function registerProviderRoutes(app: Router, {
         project,
         number,
         host: requestText(req.query?.host),
-        kind,
+        kind, includeReferences: req.query?.references === '1',
       }));
     }, {
       validate: (req) => (!requestText(req.query?.directory) || !namesProject(req)
@@ -1011,7 +1011,7 @@ export function registerProviderRoutes(app: Router, {
         number,
         includeDiff: req.query?.diff === '1',
         includeCIDetails: req.query?.checkDetails === '1',
-        includeTimeline: req.query?.timeline === '1',
+        includeTimeline: req.query?.timeline === '1', includeReferences: req.query?.references === '1',
         project: optionalProject(req),
         context: trustedContext, remote: trustedContext.primaryRemote,
       }, revision)));
@@ -1045,7 +1045,7 @@ export function registerProviderRoutes(app: Router, {
           directory,
           number,
           project: optionalProject(req),
-          context: trustedContext, remote: trustedContext.primaryRemote,
+          context: trustedContext, remote: trustedContext.primaryRemote, includeReferences: method === 'getIssue' && req.query?.references === '1',
         }));
       }, {
         validate: (req) => (!requestIssueNumber(req.query?.number)

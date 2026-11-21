@@ -187,12 +187,55 @@ const reviewerStateSchema = z.object({
   state: z.enum(['pending', 'approved', 'changes_requested', 'commented', 'dismissed']),
 }).passthrough();
 
+const referenceUrlSchema = z.string().min(1).max(2_048).refine(
+  (value) => /^https?:\/\//i.test(value) && URL.canParse(value), { message: 'must be an http(s) URL' },
+);
+
+const referenceAuthorSchema = z.object({
+  login: z.string().min(1).max(256),
+  avatarUrl: z.string().max(2_048).optional(),
+}).passthrough();
+
+const referenceLinkSchema = z.object({
+  kind: z.enum(['issue', 'pull']),
+  number: positiveInteger,
+  url: referenceUrlSchema,
+  createdAt: z.string().max(64).nullable(),
+  title: z.string().max(4_096).optional(),
+  repo: z.string().min(1).max(1_024).optional(),
+  author: referenceAuthorSchema.optional(),
+}).passthrough();
+
+const withValidReferences = <T extends Record<string, unknown>>({ references, ...rest }: T) => {
+  const links = Array.isArray(references)
+    ? references.flatMap((entry) => {
+      const parsed = referenceLinkSchema.safeParse(entry);
+      return parsed.success ? [parsed.data] : [];
+    })
+    : [];
+  return links.length > 0 ? { ...rest, references: links } : rest;
+};
+
+const referencesCarrierSchema = jsonObject.refine(
+  (value) => JSON.stringify(value).length <= SOURCE_CONTROL_PROVIDER_RESPONSE_MAX,
+  { message: 'answer is larger than the response cap' },
+).transform(withValidReferences);
+
 const changeRequestContextSchema = z.object({
-  reviewerStates: z.array(reviewerStateSchema).optional(),
+  reviewerStates: z.unknown().optional(),
 }).passthrough().refine(
   (value) => JSON.stringify(value).length <= SOURCE_CONTROL_PROVIDER_RESPONSE_MAX,
   { message: 'answer is larger than the response cap' },
-);
+).transform(({ reviewerStates, ...rest }) => {
+  const states = Array.isArray(reviewerStates)
+    ? reviewerStates.flatMap((entry) => {
+      const parsed = reviewerStateSchema.safeParse(entry);
+      return parsed.success ? [parsed.data] : [];
+    })
+    : [];
+  const context = withValidReferences(rest);
+  return states.length > 0 ? { ...context, reviewerStates: states } : context;
+});
 
 const STACK_LAYERS_MAX = 50;
 
@@ -254,7 +297,7 @@ const dataSchemas = {
   listChangeRequests: passThroughSchema,
   changeRequestContext: changeRequestContextSchema,
   listIssues: passThroughSchema,
-  getIssue: passThroughSchema,
+  getIssue: referencesCarrierSchema,
   issueComments: passThroughSchema,
   projectUpstream: passThroughSchema,
   projectBranches: passThroughSchema,

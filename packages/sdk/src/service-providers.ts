@@ -321,10 +321,10 @@ export type SourceControlProviderInputs = {
   changeRequestStatus: ReadInput & { branch: string; force: boolean };
   listChangeRequests: ListInput;
   changeRequestContext: ReadInput & RevisionInput & {
-    number: number; project?: SourceControlProjectSelector; includeDiff: boolean; includeCIDetails: boolean; includeTimeline: boolean;
+    number: number; project?: SourceControlProjectSelector; includeDiff: boolean; includeCIDetails: boolean; includeTimeline: boolean; includeReferences?: boolean;
   };
   listIssues: ListInput;
-  getIssue: ReadInput & { number: number; project?: SourceControlProjectSelector };
+  getIssue: ReadInput & { number: number; project?: SourceControlProjectSelector; includeReferences?: boolean };
   issueComments: ReadInput & { number: number; project?: SourceControlProjectSelector };
   projectUpstream: ReadInput;
   projectBranches: ReadInput & { project: SourceControlProjectSelector };

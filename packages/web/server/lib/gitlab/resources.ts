@@ -5,6 +5,8 @@ import { changeRequestNetworkTarget } from '../source-control/repository-network
 import { mapGitLabCI, mapGitLabCommit, mapGitLabDiff, mapGitLabIssue, mapGitLabMergeRequest, mapGitLabNote, mapGitLabProject, mapGitLabUser, mapGitLabVerdictNote } from './mappers.js';
 import { readDiffStats, readReviewerStates } from './context-extras.js';
 import { resolveGitLabProjectsFromDirectory } from './repo.js';
+import { gitPatchForDiff } from './diff-patch.js';
+import { systemReferences, withIssueReferences, withReferences } from './references.js';
 import { isPlainObject as isPlain, isPresent, isString } from './validation.js';
 import type { SourceControlMutationTarget, SourceControlProjectRef } from '@openchamber/sdk';
 import type { ProviderReadContext } from '../source-control/provider-contract.js';
@@ -21,7 +23,7 @@ type Selector = Pick<SourceControlProjectRef, 'owner' | 'name'> | null | undefin
 type Remote = string | undefined;
 type Project = { raw: JsonObject & { id: number }; project: GitLabMappedProject };
 type Projects = [Project, ...Project[]];
-type ReadOptions = { remote?: Remote; linked?: boolean | undefined; requireComplete?: boolean | undefined;
+type ReadOptions = { remote?: Remote; linked?: boolean | undefined; includeReferences?: boolean | undefined; requireComplete?: boolean | undefined;
   constrainToPrimary?: boolean | undefined; requireNetwork?: boolean | undefined; project?: Selector };
 type ListOptions = { labels?: string[] | undefined; state?: string | undefined; people?: string | undefined; remote?: Remote;
   page?: number | undefined; query?: string | undefined };
@@ -131,23 +133,6 @@ function projectPath(owner: string, name: string) {
   return `${owner}/${name}`;
 }
 
-function gitPatchForDiff(file: JsonObject) {
-  const oldPath = text(file.old_path) || file.new_path;
-  const newPath = text(file.new_path) || file.old_path;
-  const lines = [`diff --git a/${oldPath} b/${newPath}`];
-  if (file.new_file === true) lines.push(`new file mode ${text(file.b_mode) || '100644'}`);
-  else if (file.deleted_file === true) lines.push(`deleted file mode ${text(file.a_mode) || '100644'}`);
-  else if (text(file.a_mode) && text(file.b_mode) && file.a_mode !== file.b_mode) lines.push(`old mode ${file.a_mode}`, `new mode ${file.b_mode}`);
-  if (file.renamed_file === true) lines.push(`rename from ${oldPath}`, `rename to ${newPath}`);
-  const body = isString(file.diff) ? file.diff : '';
-  if (body.startsWith('@@')) {
-    lines.push(`--- ${file.new_file === true ? '/dev/null' : `a/${oldPath}`}`);
-    lines.push(`+++ ${file.deleted_file === true ? '/dev/null' : `b/${newPath}`}`);
-  }
-  const header = `${lines.join('\n')}\n`;
-  if (!body) return header;
-  return `${header}${body.endsWith('\n') ? body : `${body}\n`}`;
-}
 
 const LIVE_SUMMARY_CONCURRENCY = 4;
 const PIPELINE_PENDING = new Set(['created', 'waiting_for_resource', 'preparing', 'pending', 'running', 'manual', 'scheduled']);
@@ -1372,9 +1357,12 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       };
       const withStack = chain === undefined ? context : { ...context, stack: chain };
       if (!options.includeTimeline) return withStack;
+      const withRefs = options.includeReferences
+        ? withReferences(withStack, systemReferences(notes, String(obj(raw)?.web_url ?? ''), projectPath(target.project.owner, target.project.name)))
+        : withStack;
       if (canonicalReads && !Array.isArray(commitPage?.items)) throw new Error('GitLab returned an invalid merge request commit list');
       const timeline = {
-        ...withStack,
+        ...withRefs,
         commits: asArray(commitPage?.items).flatMap((commit) => {
           const mapped = mapGitLabCommit(obj(commit));
           return mapped ? [mapped] : [];
@@ -1412,12 +1400,13 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       return { items, page: options.page ?? 1, hasMore: page.hasMore };
     },
 
-    async getIssue(directory: string, number: number, selector?: Selector, remote?: Remote, { linked }: ReadOptions = {}) {
+    async getIssue(directory: string, number: number, selector?: Selector, remote?: Remote, { linked, includeReferences }: ReadOptions = {}) {
       const target = await constrainedProject(directory, selector, remote, { linked });
       const raw = await client.Issues.show(number, { projectId: target.project.id });
-      return canonicalReads
+      const issue = canonicalReads
         ? requireIssue(raw, target.project)
         : requireMapped(mapGitLabIssue(obj(raw), identity, target.project), 'GitLab returned an invalid issue');
+      return includeReferences ? withIssueReferences(client, target.project, issue, number, String(obj(raw)?.web_url ?? '')) : issue;
     },
 
     async changeRequestPatch(directory: string, number: number, options: ReadOptions = {}) {

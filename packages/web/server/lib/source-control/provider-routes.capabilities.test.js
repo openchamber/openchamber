@@ -236,6 +236,33 @@ describe('provider routes for change hosts', () => {
     expect(issue.body).toEqual({ title: 'from the provider' });
   });
 
+  it('asks for cross-references only on the item reads, and only when the request did', async () => {
+    const { app, impl } = routesWith(acme);
+    const calls = [];
+    impl.resources = {
+      getIssue(input) { calls.push(['getIssue', input]); return Promise.resolve({ number: input.number }); },
+      issueComments(input) { calls.push(['issueComments', input]); return Promise.resolve([]); },
+      changeRequestContext(input) { calls.push(['changeRequestContext', input]); return Promise.resolve({ number: input.number }); },
+    };
+    await request(app).get('/api/source-control/acme/issues/get')
+      .query({ instance, directory: '/repo', number: '5', references: '1' }).expect(200);
+    await request(app).get('/api/source-control/acme/issues/get')
+      .query({ instance, directory: '/repo', number: '6', timeline: '1' }).expect(200);
+    await request(app).get('/api/source-control/acme/issues/comments')
+      .query({ instance, directory: '/repo', number: '5', references: '1' }).expect(200);
+    await request(app).get('/api/source-control/acme/pulls/context')
+      .query({ instance, directory: '/repo', number: '7', timeline: '1' }).expect(200);
+    await request(app).get('/api/source-control/acme/pulls/context')
+      .query({ instance, directory: '/repo', number: '8', timeline: '1', references: '1' }).expect(200);
+    expect(calls).toEqual([
+      ['getIssue', expect.objectContaining({ number: 5, includeReferences: true })],
+      ['getIssue', expect.objectContaining({ number: 6, includeReferences: false })],
+      ['issueComments', expect.objectContaining({ includeReferences: false })],
+      ['changeRequestContext', expect.objectContaining({ number: 7, includeTimeline: true, includeReferences: false })],
+      ['changeRequestContext', expect.objectContaining({ number: 8, includeTimeline: true, includeReferences: true })],
+    ]);
+  });
+
   it('answers a mutation body the injected validator refuses with that validator\'s own status', async () => {
     const impl = fakeImplementation();
     const providers = createSourceControlProviders({

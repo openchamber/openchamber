@@ -299,6 +299,117 @@ describe('GitLab resource service', () => {
     expect(result.issueComments[0].thread).toEqual({ id: 'abc', resolved: false, resolvable: true, first: true, canResolve: false, canReply: false });
   });
 
+  it('reads cross-references from the timeline system notes, one per mention', async () => {
+    const mentioned = (id, body, createdAt) => ({
+      id, system: true, body, created_at: createdAt, author: { id: 3, username: 'sam', avatar_url: `${origin}/uploads/sam.png` },
+    });
+    const notes = [
+      mentioned(1, 'mentioned in issue #21', '2026-10-02T10:00:00Z'),
+      mentioned(2, 'mentioned in issue lib/sub#3', '2026-10-02T11:00:00Z'),
+      mentioned(3, 'mentioned in merge request !45', '2026-10-02T12:00:00Z'),
+      mentioned(4, 'mentioned in issue #7 and public issue #8', '2026-10-02T13:00:00Z'),
+      // A project in the same namespace goes by its slug alone.
+      mentioned(9, 'mentioned in merge request tools!23', '2026-10-02T13:30:00Z'),
+      mentioned(10, 'mentioned in issue tools#24', '2026-10-02T13:40:00Z'),
+      // A commit reference and any other system note name no item.
+      mentioned(5, 'mentioned in commit 0123456789abcdef', '2026-10-02T14:00:00Z'),
+      mentioned(6, 'added 1 commit', '2026-10-02T15:00:00Z'),
+      // Only a system note is GitLab's own record of a cross-reference.
+      { id: 7, body: 'mentioned in issue #99', created_at: '2026-10-02T16:00:00Z', author: { id: 3, username: 'sam' } },
+      { id: 8, system: true, body: 'mentioned in a comment', created_at: '2026-10-02T17:00:00Z' },
+    ];
+    const { service } = setup({
+      // team/repo is the merge request's own project, by path.
+      Projects: { show: vi.fn(async (id) => (id === 'team/repo' || Number(id) === 2 ? targetProject : sourceProject)) },
+      MergeRequests: { ...setup().client.MergeRequests, allCommits: list([]) },
+      MergeRequestDiscussions: { all: list(notes.map((note) => ({ id: `d${note.id}`, individual_note: true, notes: [note] }))) },
+    });
+
+    // The timeline alone, as every preview outside the Source Board reads it, carries none.
+    const timelineOnly = await service.changeRequestContext('/repo', 5, { includeTimeline: true, project: { owner: 'team', name: 'repo' } });
+    expect(timelineOnly).not.toHaveProperty('references');
+    const result = await service.changeRequestContext('/repo', 5, { includeTimeline: true, includeReferences: true, project: { owner: 'team', name: 'repo' } });
+
+    const author = { login: 'sam', avatarUrl: `${origin}/uploads/sam.png` };
+    expect(result.references).toEqual([
+      { kind: 'issue', number: 21, url: `${origin}/team/repo/-/issues/21`, repo: 'team/repo', createdAt: '2026-10-02T10:00:00Z', author },
+      // The note names the project a cross-project reference lives in.
+      { kind: 'issue', number: 3, url: `${origin}/lib/sub/-/issues/3`, repo: 'lib/sub', createdAt: '2026-10-02T11:00:00Z', author },
+      { kind: 'pull', number: 45, url: `${origin}/team/repo/-/merge_requests/45`, repo: 'team/repo', createdAt: '2026-10-02T12:00:00Z', author },
+      { kind: 'issue', number: 7, url: `${origin}/team/repo/-/issues/7`, repo: 'team/repo', createdAt: '2026-10-02T13:00:00Z', author },
+      { kind: 'issue', number: 8, url: `${origin}/team/repo/-/issues/8`, repo: 'team/repo', createdAt: '2026-10-02T13:00:00Z', author },
+      { kind: 'pull', number: 23, url: `${origin}/team/tools/-/merge_requests/23`, repo: 'team/tools', createdAt: '2026-10-02T13:30:00Z', author },
+      { kind: 'issue', number: 24, url: `${origin}/team/tools/-/issues/24`, repo: 'team/tools', createdAt: '2026-10-02T13:40:00Z', author },
+    ]);
+    // A system note carries no title.
+    expect(result.references.some((reference) => 'title' in reference)).toBe(false);
+  });
+
+  it('leaves the cross-references off when no system note names another item', async () => {
+    const { service } = setup({
+      MergeRequests: { ...setup().client.MergeRequests, allCommits: list([]) },
+      MergeRequestDiscussions: { all: list([{ id: 'abc', individual_note: true, notes: [{ id: 10, body: 'Rename this', author: { id: 3, username: 'sam' } }] }]) },
+    });
+
+    const timeline = await service.changeRequestContext('/repo', 5, { includeTimeline: true, includeReferences: true });
+    expect(timeline).not.toHaveProperty('references');
+
+    // A list-only read asks for no notes on top of the one it already reads.
+    const context = await service.changeRequestContext('/repo', 5, {});
+    expect(context).not.toHaveProperty('references');
+  });
+
+  it.each([
+    ['gitlab.com', 'https://gitlab.com'],
+    ['a self-hosted host', 'https://gitlab.example.com:8443'],
+  ])("reads an issue's cross-references and builds their URLs on %s", async (_label, host) => {
+    const project = { id: 11, path_with_namespace: 'me/repo', web_url: `${host}/me/repo`, http_url_to_repo: `${host}/me/repo.git` };
+    const issue = { iid: 3, title: 'Bug', web_url: `${host}/me/repo/-/issues/3`, state: 'opened' };
+    const client = {
+      Projects: { show: vi.fn(async () => project) },
+      Issues: { show: vi.fn(async () => issue) },
+      IssueNotes: { all: vi.fn(async () => [
+        { id: 1, system: true, body: 'mentioned in issue #9', created_at: '2026-01-02T00:00:00Z', author: { username: 'sam' } },
+        { id: 2, system: true, body: 'mentioned in merge request other/lib!4', created_at: '2026-01-01T00:00:00Z' },
+      ]) },
+    };
+    const resolveProjects = vi.fn(async () => ({
+      branch: 'main',
+      projects: [{ projectPath: 'me/repo', remoteName: 'origin', url: `${host}/me/repo` }],
+    }));
+    const service = createGitLabResourceService({ origin: host, client, resolveProjects });
+
+    const result = await service.getIssue('/repo', 3, undefined, 'origin', { includeReferences: true });
+
+    // Oldest first, whichever order the notes arrived in.
+    expect(result.references).toEqual([
+      { kind: 'pull', number: 4, url: `${host}/other/lib/-/merge_requests/4`, repo: 'other/lib', createdAt: '2026-01-01T00:00:00Z', author: null },
+      { kind: 'issue', number: 9, url: `${host}/me/repo/-/issues/9`, repo: 'me/repo', createdAt: '2026-01-02T00:00:00Z', author: { login: 'sam' } },
+    ]);
+    expect(client.IssueNotes.all).toHaveBeenCalledWith('11', 3, { sort: 'desc', orderBy: 'created_at', perPage: 100, maxPages: 1 });
+  });
+
+  it('keeps an issue readable when its cross-reference read fails', async () => {
+    const { service } = setup({
+      IssueNotes: { all: vi.fn(async () => { throw Object.assign(new Error('unavailable'), { status: 503 }); }) },
+    });
+
+    const issue = await service.getIssue('/repo', 3, undefined, 'origin', { includeReferences: true });
+    expect(issue).toMatchObject({ number: 3 });
+    expect(issue).not.toHaveProperty('references');
+  });
+
+  it('reads no notes for an issue detail that shows no timeline', async () => {
+    const all = vi.fn(async () => []);
+    const { service } = setup({ IssueNotes: { all } });
+
+    const issue = await service.getIssue('/repo', 3, undefined, 'origin');
+
+    expect(issue).toMatchObject({ number: 3 });
+    expect(issue).not.toHaveProperty('references');
+    expect(all).not.toHaveBeenCalled();
+  });
+
   it('starts, answers and resolves threads on the merge request the path names', async () => {
     const thread = { id: 'abc', individual_note: false, notes: [{ id: 10, body: 'x', resolvable: true, resolved: true }] };
     const discussions = {
