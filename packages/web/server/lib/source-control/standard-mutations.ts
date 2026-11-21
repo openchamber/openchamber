@@ -197,6 +197,19 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
     },
     ...reviewDraftEntries({ commentText, fail: (message) => { throw invalidMutationContext(message); } }),
   };
+  if (descriptor.presentation.features.rebase === true) {
+    entries['/pr/rebase'] = {
+      kind: 'change-request-rebase',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const expectedHeadSha = requestText(input.expectedHeadSha);
+        if (!/^[0-9a-f]{40}$/.test(expectedHeadSha)) {
+          throw invalidMutationContext('expectedHeadSha is required and must be a 40-character lowercase hex SHA');
+        }
+        return { expectedHeadSha, digest: { expectedHeadSha } };
+      },
+    };
+  }
   for (const [route, kind] of [['/pr/comment', 'change-request-comment'], ['/issues/comment', 'issue-comment']] satisfies [string, string][]) {
     entries[route] = {
       kind,

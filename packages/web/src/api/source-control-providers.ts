@@ -50,7 +50,7 @@ export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly PublishedSourceControlP
     },
     features: {
       ...BUILT_IN_FEATURES_OFF,
-      referenceSearch: true, referenceDetail: true, listStatuses: true, referencesAcross: true, issueCloseReason: true, baseChange: true, updateBranch: true,
+      referenceSearch: true, referenceDetail: true, listStatuses: true, referencesAcross: true, issueCloseReason: true, baseChange: true, updateBranch: true, rebase: true,
       lock: true, subscription: true,
       changeRequestPatch: true,
     },

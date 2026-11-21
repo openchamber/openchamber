@@ -1,14 +1,15 @@
 import type { SourceControlJson, SourceControlJsonObject, SourceControlMutationTarget } from '@openchamber/sdk';
 import type { MutationCompletion } from '../source-control/mutation-storage.js';
 import type { Octokit } from './contracts.js';
-import type { GitHubMutationInput, MutationPull } from './mutations.js';
+import type { GitHubMutationInput, GitHubMutationTarget, MutationPull } from './mutations.js';
+import type { JsonObject } from '../shared/json-values.js';
 
 type MutationTarget = SourceControlMutationTarget;
 type Project = Pick<MutationTarget['project'], 'owner' | 'name'>;
 type DigestOf = <Fields extends { target: MutationTarget }>(fields: Fields) => string;
 type MutationError = (message: string) => Error;
 type RequiredText = (value: SourceControlJson | undefined, name: string) => string;
-type ProviderString = (value: SourceControlJson | undefined) => value is string;
+type ProviderString = (value: unknown) => value is string;
 
 interface ChangeRequestWriteDeps {
   requireMutationPullRequest(raw: MutationPull | null | undefined, message: string, octokit: Octokit): MutationPull;
@@ -17,6 +18,8 @@ interface ChangeRequestWriteDeps {
   targetMatches(expected: Pick<MutationTarget, 'number' | 'head' | 'base' | 'headSha'>, pull: MutationPull): boolean;
   invalidProviderPayload(message: string): Error;
   rejected<Result>(operation: () => Promise<Result>): Promise<Result>;
+  isProviderString: ProviderString;
+  graphqlWrite(octokit: Octokit, query: string, variables: JsonObject): Promise<void>;
 }
 
 export const normalizeChangeRequestWrite = (
@@ -28,7 +31,7 @@ export const normalizeChangeRequestWrite = (
     if (base.length > 256 || base.startsWith('refs/heads/')) throw mutationError('base is invalid');
     return { input: { base }, digest: (target: MutationTarget) => digestOf({ target, base }) };
   }
-  if (operation === 'update-branch') {
+  if (operation === 'update-branch' || operation === 'rebase') {
     const { expectedHeadSha } = body;
     if (!isProviderString(expectedHeadSha) || !/^[0-9a-f]{40}$/.test(expectedHeadSha)) {
       throw mutationError('expectedHeadSha is invalid');
@@ -51,6 +54,7 @@ export const performChangeRequestWrite = async (
   target: MutationTarget,
   input: GitHubMutationInput,
   deps: ChangeRequestWriteDeps,
+  providerTarget: Pick<GitHubMutationTarget, 'pullRequestId'> = {},
 ) => {
   if (operation === 'base') {
     const updated = deps.requireMutationPullRequest((await octokit.rest.pulls.update({
@@ -60,6 +64,18 @@ export const performChangeRequestWrite = async (
       || !deps.targetMatches(input.base === undefined ? target : { ...target, base: input.base }, updated)) {
       throw deps.invalidProviderPayload('GitHub returned an updated pull request with an unexpected base');
     }
+    return {};
+  }
+  if (operation === 'rebase') {
+    const { pullRequestId } = providerTarget;
+    if (!deps.isProviderString(pullRequestId) || !pullRequestId) {
+      throw deps.invalidProviderPayload('GitHub returned an invalid pull request id');
+    }
+    await deps.graphqlWrite(
+      octokit,
+      'mutation($input: UpdatePullRequestBranchInput!) { updatePullRequestBranch(input: $input) { clientMutationId } }',
+      { input: { pullRequestId, expectedHeadOid: input.expectedHeadSha, updateMethod: 'REBASE' } },
+    );
     return {};
   }
   await deps.rejected(() => octokit.rest.pulls.updateBranch({

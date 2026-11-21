@@ -49,7 +49,7 @@ export const githubLikeDescriptor = (): SourceControlProviderDescriptor => acmeD
     changeRequest: ['/{owner}/{repo}/pull/{number}'], issue: ['/{owner}/{repo}/issues/{number}'],
     discussion: ['/{owner}/{repo}/discussions/{number}'], commit: ['/{owner}/{repo}/commit/{sha}'], user: ['/{user}'],
   },
-  features: { ...acmeDescriptor().features, discussions: true },
+  features: { ...acmeDescriptor().features, discussions: true, rebase: true },
 });
 
 export const gitlabLikeDescriptor = (): SourceControlProviderDescriptor => acmeDescriptor({

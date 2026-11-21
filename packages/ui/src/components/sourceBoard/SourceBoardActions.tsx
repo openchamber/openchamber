@@ -28,7 +28,7 @@ import { cn } from '@/lib/utils';
 import type { ChangeRequestSubmitRequirement, DiscussionCloseReason, DraftChangeRequestInput, SetStateInput, SourceControlCapabilities } from '@/lib/source-control/types';
 import { useChangeRequestDiffServing, useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
-import { branchActionFor } from './branchAction';
+import { branchActionsFor } from './branchAction';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
@@ -261,7 +261,7 @@ export const SourceBoardActions: React.FC<{
                 target: { project: { owner: openPull.sourceRepo.owner, name: openPull.sourceRepo.repo }, number: openPull.number },
             };
             if (action === 'update') await sourceControl.changeRequestUpdateBranch({ ...payload, expectedHeadSha: openPull.headSha });
-            else await sourceControl.changeRequestRebase(payload);
+            else await sourceControl.changeRequestRebase({ ...payload, expectedHeadSha: openPull.headSha });
             toast.success(t(action === 'update' ? 'sourceBoard.actions.branchUpdated' : 'sourceBoard.actions.rebased', { reference: label }));
         } catch (error) {
             toast.error(
@@ -288,8 +288,7 @@ export const SourceBoardActions: React.FC<{
         } finally { setBusy(null); onChanged(); }
     };
 
-    const branchAction = context ? branchActionFor(openPull, descriptor.features, { writeAccess, waitingMerge: Boolean(waitingMerge) }) : null;
-    const branchLabel = branchAction ? t(branchAction === 'update' ? 'sourceBoard.actions.updateBranch' : 'sourceBoard.actions.rebase') : '';
+    const branchActions = context ? branchActionsFor(openPull, descriptor.features, { writeAccess, waitingMerge: Boolean(waitingMerge) }) : [];
 
     const maintenance = (
         <>
@@ -338,15 +337,19 @@ export const SourceBoardActions: React.FC<{
                     ) : null}
                 </div>
             ) : null}
-            {branchAction ? (
-                <ActionButton
-                    icon={branchAction === 'update' ? 'arrow-up-double' : 'git-merge'}
-                    label={branchLabel}
-                    tooltip={branchLabel}
-                    onClick={() => void changeBranch(branchAction)}
-                    busy={busy === 'branch'}
-                />
-            ) : null}
+            {branchActions.map((branchAction) => {
+                const branchLabel = t(branchAction === 'update' ? 'sourceBoard.actions.updateBranch' : 'sourceBoard.actions.rebase');
+                return (
+                    <ActionButton
+                        key={branchAction}
+                        icon={branchAction === 'update' ? 'arrow-up-double' : 'git-merge'}
+                        label={branchLabel}
+                        tooltip={branchLabel}
+                        onClick={() => void changeBranch(branchAction)}
+                        busy={busy === 'branch'}
+                    />
+                );
+            })}
             {openPull && !openPull.draft && unmet.length > 0 ? (
                 <span
                     className="min-w-0 max-w-[16rem] truncate typography-meta text-muted-foreground"
@@ -369,7 +372,7 @@ export const SourceBoardActions: React.FC<{
 
     return (
         <div className="flex min-h-8 flex-wrap items-center gap-2">
-            <div className="me-auto flex min-w-0 items-center gap-2">
+            <div className="me-auto flex min-w-0 flex-wrap items-center gap-2">
                 {startIn}
                 {maintenance}
             </div>

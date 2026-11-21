@@ -139,7 +139,7 @@ const ROUTE_OPERATIONS = Object.freeze({
   '/issues/comment/update': 'issue-comment-update',
   '/issues/comment/delete': 'issue-comment-delete',
   '/pr/state': 'state', '/pr/lock': 'change-request-lock', '/pr/subscription': 'change-request-subscription',
-  '/pr/base': 'base', '/pr/update-branch': 'update-branch',
+  '/pr/base': 'base', '/pr/update-branch': 'update-branch', '/pr/rebase': 'rebase',
   '/issues/state': 'issue-state', '/issues/lock': 'issue-lock', '/issues/subscription': 'issue-subscription',
   '/pr/labels': 'labels',
   '/issues/labels': 'issue-labels', '/issues/assignees': 'issue-assignees',
@@ -923,7 +923,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
   const reconcileExisting = async (octokit: ReturnType<GitHubMutationOptions['octokitOf']>, operation: string, target: MutationTarget, input: GitHubMutationInput): Promise<MutationCompletion> => {
     if (['comment', 'review', 'issue-comment', 'thread-reply', 'discussion-comment'].includes(operation)) return unknownOutcome();
     if (REVIEW_DRAFT_OPERATIONS.has(operation)) return unknownOutcome();
-    if (operation === 'update-branch') return reconcileUpdateBranch(octokit, target, input, { requireMutationPullRequest, unknownOutcome }); if (operation === 'issue-lock' || operation === 'change-request-lock' || operation === 'issue-subscription' || operation === 'change-request-subscription') return reconcileConversationWrite(octokit, operation, target, input, unknownOutcome);
+    if (operation === 'update-branch' || operation === 'rebase') return reconcileUpdateBranch(octokit, target, input, { requireMutationPullRequest, unknownOutcome }); if (operation === 'issue-lock' || operation === 'change-request-lock' || operation === 'issue-subscription' || operation === 'change-request-subscription') return reconcileConversationWrite(octokit, operation, target, input, unknownOutcome);
     const project = target.project;
     if (operation === 'discussion-update') {
       const discussion = await readDiscussion(octokit, project, target.number);
@@ -1113,6 +1113,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       if (!already && !nodeId) throw invalidProviderPayload('GitHub returned an invalid pull request node id');
       return { providerTarget: { already, nodeId: nodeId ?? null }, target };
     }
+    if (operation === 'rebase') return { providerTarget: { pullRequestId: requireField(optionalText(pr.node_id, 'pull request node id', true), 'pull request node id') }, target };
     return { providerTarget: subscriptionTarget(operation, pr, optionalText, invalidProviderPayload), target };
   };
 
@@ -1181,9 +1182,8 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
         return performConversationWrite(octokit, operation, input, { providerTarget, target }, { rejected, graphqlWrite });
       case 'state':
         return setState(() => octokit.rest.pulls.update({ owner: project.owner, repo: project.name, pull_number: number(), state: state() }), state());
-      case 'base':
-      case 'update-branch':
-        return performChangeRequestWrite(operation, octokit, project, target, input, { requireMutationPullRequest, sameProject, pullTargetProject, targetMatches, invalidProviderPayload, rejected });
+      case 'base': case 'update-branch': case 'rebase':
+        return performChangeRequestWrite(operation, octokit, project, target, input, { requireMutationPullRequest, sameProject, pullTargetProject, targetMatches, invalidProviderPayload, rejected, isProviderString, graphqlWrite: (targetOctokit, query, variables) => graphqlWrite(targetOctokit, query, variables).then(() => undefined) }, providerTarget);
       case 'issue-state':
         return performIssueState(setState, octokit, project, target, input);
       case 'issue-update': {

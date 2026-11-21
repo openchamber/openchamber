@@ -18,6 +18,6 @@ const write: Write = async (fetch, path, payload, fields) => {
 export const createBranchWrites = (fetch: Parameters<typeof post>[0]) => ({
   changeRequestSetBase: (payload: SetChangeRequestBaseInput) => write(fetch, '/pr/base', payload, { base: payload.base }),
   changeRequestUpdateBranch: (payload: UpdateChangeRequestBranchInput) => write(fetch, '/pr/update-branch', payload, { expectedHeadSha: payload.expectedHeadSha }),
-  changeRequestRebase: (payload: RebaseChangeRequestInput) => write(fetch, '/pr/rebase', payload, {}),
+  changeRequestRebase: (payload: RebaseChangeRequestInput) => write(fetch, '/pr/rebase', payload, { expectedHeadSha: payload.expectedHeadSha }),
   issueSetAssignees: (payload: SetAssigneesInput) => write(fetch, '/issues/assignees', payload, { assignees: payload.assignees }),
 });

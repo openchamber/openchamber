@@ -106,6 +106,7 @@
         "changeRequestEdit": true,
         "baseChange": true,
         "updateBranch": true,
+        "rebase": true,
         "advancedSearch": true,
         "commentEdit": true,
         "lock": true,

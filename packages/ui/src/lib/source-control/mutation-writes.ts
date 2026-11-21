@@ -33,4 +33,6 @@ export interface UpdateChangeRequestBranchInput extends SourceControlMutationCon
   expectedHeadSha: string;
 }
 
-export type RebaseChangeRequestInput = SourceControlMutationContext<SourceControlExistingMutationTarget>;
+export interface RebaseChangeRequestInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  expectedHeadSha: string;
+}
