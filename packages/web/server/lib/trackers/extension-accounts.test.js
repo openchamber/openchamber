@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { TRACKER_SESSION_RECORDS_MAX, createTrackerAccounts, trackerAccountsPersistPath } from './extension-accounts.js';
 
@@ -15,6 +15,7 @@ const store = async () => {
   return { accounts, dir };
 };
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
@@ -24,6 +25,8 @@ const target = { authorizeUrl: 'https://yt.example.com/hub/auth', tokenUrl: 'htt
 
 describe('tracker accounts', () => {
   it('stores accounts on one instance with their credentials, hands credentials to the reader alone, and keeps the file private', async () => {
+    const writeFile = vi.spyOn(fs, 'writeFile');
+    const chmod = vi.spyOn(fs, 'chmod');
     const { accounts, dir } = await store();
     const connection = accounts.beginConnect('ext-yt');
     const view = await accounts.connect('ext-yt', { instance: 'https://yt.example.com', account: mona, credential: token('secret-1') }, connection);
@@ -38,7 +41,9 @@ describe('tracker accounts', () => {
     expect(stored.accounts[0].credential).toEqual(token('secret-1'));
     expect(stored.accounts[0].revision).toMatch(/^[0-9a-f-]{36}$/);
     const mode = (await fs.stat(trackerAccountsPersistPath(dir))).mode & 0o777;
-    expect(mode).toBe(0o600);
+    expect(writeFile).toHaveBeenCalledWith(expect.any(String), expect.any(String), { encoding: 'utf8', mode: 0o600 });
+    expect(chmod).toHaveBeenCalledWith(trackerAccountsPersistPath(dir), 0o600);
+    if (process.platform !== 'win32') expect(mode).toBe(0o600);
     expect(await accounts.list()).toEqual({ 'ext-yt': view });
   });
 

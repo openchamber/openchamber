@@ -10,13 +10,15 @@ import { guestCommandEntries, type GuestCommandEntry } from '@/lib/guests/comman
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { enabledGuestSurfaces } from '@/lib/guests/surfaces';
 import { guestPanelOpensHere, mayGuestShowOnPhone, phoneGuestPanelModes } from '@/lib/guests/phone';
+import { guestsInScope, isGuestInFolders, isGuestTabHidden, toGuestScopePaths, useGuestScopeStore } from '@/lib/guests/folders';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
 import { useGuestsStore } from '@/lib/guests/store';
 import type { InstalledGuest } from '@/lib/guests/types';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import type { ContextSurfaceDescriptor } from '@/lib/surfaces/registry';
-import { isPluginContextPanelMode, type PluginContextPanelMode } from '@/lib/surfaces/modes';
+import { isPluginContextPanelMode, pluginIdFromMode, type PluginContextPanelMode } from '@/lib/surfaces/modes';
+import type { ContextPanelDirectoryState } from '@/stores/ui/types';
 
 export type GuestAttachItem = {
   id: string;
@@ -29,8 +31,20 @@ export type GuestAttachItem = {
 const EMPTY_ACTIONS: GuestActionEntry[] = [];
 const EMPTY_COMMANDS: GuestCommandEntry[] = [];
 
-const useGuestCatalog = () => {
+type GuestScope = ReadonlyArray<string | null | undefined>;
+
+const useScopedGuests = (scope?: GuestScope): InstalledGuest[] => {
   const guests = useGuestsStore((state) => state.guests);
+  const openScope = useGuestScopeStore((state) => state.paths);
+  const ownScope = scope ? toGuestScopePaths(scope).join('\n') : null;
+  return React.useMemo(() => (ownScope === null
+    ? guestsInScope(guests, openScope)
+    : guests.filter((guest) => isGuestInFolders(guest, ownScope ? ownScope.split('\n') : []))
+  ), [guests, openScope, ownScope]);
+};
+
+const useGuestCatalog = (scope?: GuestScope) => {
+  const guests = useScopedGuests(scope);
   const [runtimeKey, setRuntimeKey] = React.useState(getRuntimeKey);
 
   React.useEffect(() => {
@@ -54,7 +68,7 @@ export const useGuestSurfaces = (): ContextSurfaceDescriptor[] => {
 };
 
 export const useGuestPages = () => {
-  const guests = useGuestsStore((state) => state.guests);
+  const guests = useScopedGuests();
   return React.useMemo(() => {
     if (isVSCodeRuntime()) return [];
     const phone = isMobileSurfaceRuntime();
@@ -65,14 +79,14 @@ export const useGuestPages = () => {
 const NO_PHONE_PANELS: PluginContextPanelMode[] = [];
 
 export const usePhoneGuestPanelModes = (): PluginContextPanelMode[] => {
-  const key = useGuestsStore((state) => phoneGuestPanelModes(state.guests).join('\n'));
+  const key = phoneGuestPanelModes(useScopedGuests()).join('\n');
   return React.useMemo(() => (key ? key.split('\n').filter(isPluginContextPanelMode) : NO_PHONE_PANELS), [key]);
 };
 
 const EMPTY_STATUS_SECTIONS: InstalledGuest[] = [];
 
 export const useGuestStatusSections = (): InstalledGuest[] => {
-  const guests = useGuestsStore((state) => state.guests);
+  const guests = useScopedGuests();
   return React.useMemo(() => {
     if (isVSCodeRuntime()) return EMPTY_STATUS_SECTIONS;
     const sections = guests.filter((guest) => (guest.statusEntry || guest.statusSource) && isGuestActive(guest));
@@ -80,8 +94,8 @@ export const useGuestStatusSections = (): InstalledGuest[] => {
   }, [guests]);
 };
 
-export const useGuestActions = (): GuestActionEntry[] => {
-  const guests = useGuestsStore((state) => state.guests);
+export const useGuestActions = (scope?: GuestScope): GuestActionEntry[] => {
+  const guests = useScopedGuests(scope);
 
   return React.useMemo(() => {
     if (isVSCodeRuntime()) return EMPTY_ACTIONS;
@@ -92,7 +106,7 @@ export const useGuestActions = (): GuestActionEntry[] => {
 };
 
 export const useGuestCommands = (reservedNames: ReadonlySet<string>): GuestCommandEntry[] => {
-  const guests = useGuestsStore((state) => state.guests);
+  const guests = useScopedGuests();
 
   return React.useMemo(() => {
     if (isVSCodeRuntime()) return EMPTY_COMMANDS;
@@ -101,8 +115,8 @@ export const useGuestCommands = (reservedNames: ReadonlySet<string>): GuestComma
   }, [guests, reservedNames]);
 };
 
-export const useGuestAttachItems = (): GuestAttachItem[] => {
-  const { guests, runtimeKey } = useGuestCatalog();
+export const useGuestAttachItems = (scope?: GuestScope): GuestAttachItem[] => {
+  const { guests, runtimeKey } = useGuestCatalog(scope);
 
   return React.useMemo(() => {
     if (isVSCodeRuntime()) return [];
@@ -123,4 +137,16 @@ export const useGuestAttachItems = (): GuestAttachItem[] => {
     return items;
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [guests, runtimeKey]);
+};
+
+export const useGuestTabsInScope = (panel: ContextPanelDirectoryState | undefined): ContextPanelDirectoryState | undefined => {
+  const status = useGuestsStore((state) => state.status);
+  const guests = useGuestsStore((state) => state.guests);
+  const paths = useGuestScopeStore((state) => state.paths);
+  return React.useMemo(() => {
+    if (!panel) return panel;
+    const catalog = { loaded: status !== 'idle' && status !== 'loading', guests };
+    const tabs = panel.tabs.filter((tab) => !isPluginContextPanelMode(tab.mode) || !isGuestTabHidden(pluginIdFromMode(tab.mode), catalog, paths));
+    return tabs.length === panel.tabs.length ? panel : { ...panel, tabs };
+  }, [guests, panel, paths, status]);
 };

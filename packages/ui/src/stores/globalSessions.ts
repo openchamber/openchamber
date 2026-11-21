@@ -24,6 +24,17 @@ export const filterManagedChatsForRuntime = (sessions: Session[], vscode: boolea
 
 const isArchivedSession = (session: GlobalSessionRecord): boolean => Boolean(session.time?.archived);
 
+export const addUnlistedLiveSessions = (active: Session[], archived: readonly Session[], live?: readonly Session[]): Session[] => {
+  if (!live || live.length === 0) return active;
+  const listed = new Set([...active, ...archived].map((session) => session.id));
+  const unlisted = live.filter((session) => {
+    if (listed.has(session.id)) return false;
+    listed.add(session.id);
+    return true;
+  });
+  return unlisted.length > 0 ? [...active, ...unlisted] : active;
+};
+
 export const splitGlobalSessionsByArchived = <T extends GlobalSessionRecord>(
     sessions: T[],
 ): { active: T[]; archived: T[] } => {

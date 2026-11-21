@@ -2,7 +2,7 @@
 
 ## Ownership
 
-`runtime.js` owns terminal identity, PTY processes, launch mode, session purpose, ordered output, bounded scrollback, WebSocket attachments, and lifecycle routes. `shutdown.js` owns bounded runtime-wide process cleanup. `shells.js` discovers executable shell families, resolves the persisted shell ID, and builds the per-shell argv for interactive versus command launches. Clients own tab arrangement. Interactive terminals use stable IDs; project actions keep a stable UI tab and allocate a fresh terminal ID for each command execution. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
+`runtime.ts` owns terminal identity, PTY processes, launch mode, session purpose, ordered output, bounded scrollback, WebSocket attachments, and lifecycle routes. `shutdown.ts` owns bounded runtime-wide process cleanup. `shells.ts` discovers executable shell families, resolves the persisted shell ID, and builds the per-shell argv for interactive versus command launches. Clients own tab arrangement. Interactive terminals use stable IDs; project actions keep a stable UI tab and allocate a fresh terminal ID for each command execution. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
 
 ## Protocol
 
@@ -48,7 +48,44 @@ The runtime also exposes `listTerminals({ directory })` and `readTerminal(sessio
 - Shutdown is single-flight, rejects new creates, cancels pending creates, and waits for pending creates and restarts before clearing live sessions. A PTY that arrives during shutdown follows the same cancellation cleanup as a pending create that was explicitly closed.
 - On POSIX, shutdown disconnects input and gives terminal workloads a shared 20-second SIGTERM grace. Process-table snapshots retain descendant ownership across shell exit and separate job-control groups; PID start times guard against reused PIDs. Linux reads `/proc` directly so minimal containers do not need `ps`. Shells remain open until the workloads exit, then receive SIGHUP. An exec'ed server receives SIGTERM and the full grace even though it occupies the shell PID. Remaining processes receive SIGKILL at the deadline. A process-table failure warns and forces known owned processes closed. Windows retains ConPTY-owned teardown because it has no POSIX signal protocol.
 
+## TypeScript boundaries
+
+Create passes unchecked `cwd` to the injected `node:path.resolve` before
+validating the directory. The terminal's platform declarations expose the
+single-argument native validation call. Node returns a resolved string for a
+string argument and throws `ERR_INVALID_ARG_TYPE` for other values. The create
+route returns that native message and code. Restart still validates the
+directory first.
+
+The helpers own their exported shell, replay-parser, appearance, shutdown and
+frame contracts. Relative import specifiers keep `.js`. The `ws` constructors,
+frames and events use `../shared/websocket-contracts.js` through the shared
+package declaration. The terminal's platform declarations also expose the
+optional Bun version global for the Node-only server check.
+
+Shell preferences and appearance colours arrive unchecked from HTTP. The shell
+resolver checks the preference and keeps its PATH and platform fallbacks when
+`/etc/shells` cannot be read. Create and restart retain the raw colours. The
+theme parser checks each colour before use, and the appearance route updates a
+colour only when its input is a string.
+
+The frame reader accepts every non-null JSON object, including arrays. It does
+not establish a v3 message shape; `runtime.ts` checks the version, kind, session
+id and input after decoding. URL and text-message string guards remain at their
+HTTP and WebSocket boundaries. ArrayBuffer and Uint8Array inputs call separate
+`Buffer.from` overloads with the same runtime semantics: ArrayBuffer storage is
+shared, Uint8Array storage is copied, and an existing Buffer passes through.
+
+Shutdown checks error codes from native filesystem and process operations before
+ignoring an absent process. A missing `ps` status field still throws a TypeError
+and enters the existing warning and forced-cleanup path. Pending replay state
+keeps the original empty-string sentinel and bounded mutable fragments.
+
 ## Decisions
+
+### Why PowerShell aliases need a launch probe
+
+Windows Store execution aliases can reject `stat` with `EACCES` while remaining launchable. Shell discovery probes those PowerShell candidates, and only ones inside a `WindowsApps` directory or one of its package folders, with a bounded, profile-free command in PATH order; other executables keep the normal file check. Auto resolves fallback shells as the PTY needs them, so a PowerShell probe cannot delay an earlier usable shell. Explicit selection only probes candidates for that shell. A bare `pwsh` with no PATH match still falls back to the plain executable check.
 
 ### Why events and not polling
 
@@ -90,12 +127,13 @@ The WebSocket path must remain in both `isUrlAuthWebSocketPath` and relay `ALLOW
 
 ## Verification
 
-Run:
+Terminal tests use Vitest through the web package script. Auth and relay tests
+use Bun's test runner:
 
 ```sh
-bun test packages/web/server/lib/terminal/runtime.test.js packages/web/server/lib/terminal/terminal-ws-protocol.test.js
-bun run --cwd packages/web test server/lib/terminal/shutdown.test.js
-bun test packages/web/server/lib/ui-auth/ui-auth.test.js packages/web/server/lib/relay/cross-compat.test.js
+bun run --cwd packages/web test server/lib/terminal
+bun test packages/web/server/lib/ui-auth/ui-auth.test.js
+bun test packages/web/server/lib/relay/cross-compat.test.js
 ```
 
 The #3389 macOS ARM64 reproduction used real Electron 43.7.0 PTYs and HTTP

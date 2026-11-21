@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { vi } from 'vitest';
 import { translateWireEvent } from '../event-stream/translate-v2.js';
 
 import {
@@ -615,11 +616,23 @@ describe('session lifecycle events', () => {
   });
 
   test('archiving announces, restoring does not', async () => {
-    const { runtime, calls } = harness({ catalog: [lifecycle()] });
-    runtime.processPayload({ type: 'openchamber:session-archived', properties: { sessionID: 'ses_1', archivedAt: null } }, '');
-    runtime.processPayload({ type: 'openchamber:session-archived', properties: { sessionID: 'ses_1', archivedAt: 5 } }, '');
-    await settle();
-    expect(typesPosted(calls)).toEqual(['session-archived']);
+    vi.useFakeTimers();
+    const settleEvents = async () => {
+      const pending = settle();
+      await vi.runAllTimersAsync();
+      await pending;
+    };
+    try {
+      const { runtime, calls } = harness({ catalog: [lifecycle()] });
+      runtime.processPayload({ type: 'openchamber:session-archived', properties: { sessionID: 'ses_1', archivedAt: null } }, '');
+      await settleEvents();
+      expect(typesPosted(calls)).toEqual([]);
+      runtime.processPayload({ type: 'openchamber:session-archived', properties: { sessionID: 'ses_1', archivedAt: 5 } }, '');
+      await settleEvents();
+      expect(typesPosted(calls)).toEqual(['session-archived']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test('an archive is announced once whoever reports it, and again after a restore or a while', async () => {

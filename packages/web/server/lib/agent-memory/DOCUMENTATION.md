@@ -2,9 +2,9 @@
 
 ## Ownership
 
-This module owns the agent memory store (`runtime.js`), the `openchamber_memory`
-tool's actions (`actions.js`), the panel's routes (`routes.js`), which store a
-folder belongs to (`project-resolution.js`), and dreaming (`dreaming.js`), the
+This module owns the agent memory store (`runtime.ts`), the `openchamber_memory`
+tool's actions (`actions.ts`), the panel's routes (`routes.ts`), which store a
+folder belongs to (`project-resolution.ts`), and dreaming (`dreaming.ts`), the
 pass that tidies the store on its own. What a session is told about memory is
 `../session-knowledge`; the panel is `packages/ui/src/components/session/project-context`.
 
@@ -64,6 +64,29 @@ keeping them apart keeps an agent mistake out of the user's notes.
   the pass ran cannot be told from the pass's own and is undone with it.
 - A pass's session carries `metadata.hidden: true` and is deleted when the pass
   ends, so no client or server-side consumer ever sees it.
+
+### Why boundary types retain unchecked fields
+
+`contracts.ts` owns stored entries, scope targets and the input guards. Its loose
+record schema describes object membership only; each field remains unchecked
+until the consumer narrows it. Settings and memory write fields likewise remain
+unknown until their existing checks run. `recordDream` parses the record but
+only checks whether snapshots and after-lists are arrays, so its result retains
+unknown array elements. `readDreamState` validates the after-list and sanitizes
+the snapshot before exposing entries.
+
+Text guards remain at file, tool and directory boundaries, including the public
+threat-pattern helpers called from JavaScript. UUID generation retains its
+runtime capability check so an unavailable `crypto.randomUUID` keeps the
+existing fallback. Internal string clamping and optional injected callbacks
+rely on their typed contracts.
+
+### Why routes validate request fields before calling the store
+
+Routes use the shared HTTP contracts, whose query and body fields remain
+unchecked. The memory text and type guards preserve the accepted request values;
+an absent patch field stays absent. Scope resolution returns either a target or
+an error, so a rejected scope cannot reach the store.
 
 ## Dreaming
 

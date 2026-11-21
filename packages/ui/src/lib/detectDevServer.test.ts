@@ -16,11 +16,12 @@ describe('dev server discovery from saved project actions', () => {
   test('skips a report command with Start-Process and finds the saved dev server', async () => {
     const detected = await detectDevServerCommand('/repo', [
       { id: 'report', name: 'Start daily report', command: 'powershell -Command "Start-Process report-tool"' },
-      { id: 'dev', name: 'Start dev server', command: 'python3 -m http.server 8000' },
+      { id: 'dev', name: 'Start dev server', command: 'python3 -m http.server 8000', openUrl: 'http://localhost:4321/preview' },
     ], null);
 
     expect(detected?.command).toBe('python3 -m http.server 8000');
     expect(detected?.actionId).toBe('dev');
+    expect(detected?.previewUrlHint).toBe('http://localhost:4321/preview');
   });
 
   test('does not treat an unrelated saved action as a dev server', async () => {

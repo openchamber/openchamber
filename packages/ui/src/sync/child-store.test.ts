@@ -788,20 +788,26 @@ describe('ChildStoreManager bootstrap context liveness', () => {
         captured = context;
       },
     });
-    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'current-directory' });
-    await settle();
-    expect(manager.getBootstrapState('/workspace')).toBe('complete');
+    const completed = deferred();
+    const unsubscribe = manager.subscribeBootstrap(() => {
+      if (manager.getBootstrapState('/workspace') === 'complete') completed.resolve();
+    });
+    try {
+      manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'current-directory' });
+      await completed.promise;
+      expect(manager.getBootstrapState('/workspace')).toBe('complete');
 
-    // bootstrapDirectory schedules deferred recovery pulls (permission.list
-    // and friends) from a setTimeout(0), which always runs after the pump's
-    // .finally() has cleaned up the run entry. isCurrent must remain true
-    // there, or those pulls and every commit they make get skipped.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(captured?.isCurrent()).toBe(true);
+      // Completion is published after the pump's .finally() removes the run.
+      // Deferred recovery pulls must still be allowed to commit at that point.
+      expect(captured?.isCurrent()).toBe(true);
 
-    cleanup();
-    expect(captured?.isCurrent()).toBe(false);
-    manager.disposeAll();
+      cleanup();
+      expect(captured?.isCurrent()).toBe(false);
+    } finally {
+      unsubscribe();
+      cleanup();
+      manager.disposeAll();
+    }
   });
 
   test('a newer same-directory run invalidates the previous context', async () => {

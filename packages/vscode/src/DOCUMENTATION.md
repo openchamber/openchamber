@@ -24,6 +24,14 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 - A single resolved Shiki theme supplies both variants when the opposite theme cannot be found, preserving the active editor's highlighting. Active-theme lookup wins for the current variant; preferred themes supply the opposite variant. Theme resolution also listens for configuration changes because `workbench.colorTheme` can update after the active-theme event.
 - The logo between the `brand:flat-logo` markers in `webviewHtml.ts` belongs to `scripts/brand/generate.mjs` and shares its drawing with `OpenChamberLogo.tsx`.
 
+### Why the splash uses discrete updates and not a smooth animation
+
+The loading logo advances its lit roof tier once per second because a smooth CSS animation repaints the logo on every frame. Reduced-motion mode leaves the logo static.
+
+### Why the splash shows errors and not connection progress text
+
+The animated logo already indicates startup activity, so normal connection states leave the status text empty. Errors populate that text so a startup failure remains visible.
+
 ### Bridge reads and configuration
 
 - Config tests import `opencodeConfigTestHome` before `opencodeConfig` or `opencodeConfigPaths`. Config paths freeze at module load, so later isolation leaves reads and writes pointed at the user's real OpenCode config directory.
@@ -61,7 +69,9 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 - Background Git and setup commands receive EOF on stdin because no user can answer their prompts. Payload-derived remote values stay positional after `--` so a leading hyphen cannot become a Git option.
 - OpenCode owns sandbox registration when a location boots. The extension never writes OpenCode storage JSON to register a worktree. Run snapshots use private refs so Git keeps them reachable without displaying them as branches or tags.
 - Batch staging retries unmatched paths individually because queued optimistic mutations can already have staged a deleted file, and one unmatched path would fail the whole batch. Stash apply first restores the index split and falls back to plain apply when that split cannot be reinstated.
+- Stash file counts use `stash show --include-untracked --name-only`, matching the server. The flag includes the third parent's untracked files without another Git process per stash.
 - Log base resolution prefers a local ref and falls back to `origin/<ref>` only when the local ref is missing. A newly initialized branch without commits has empty history. Remote URL parsing accepts CRLF and ignores suffix decorations after the URL-kind marker, preserves the first URL, and uses Git's name-as-URL fallback when no fetch URL exists.
+- Branch listing returns `defaultBranches` like the web server: each remote's default as its local `refs/remotes/<remote>/HEAD` records it, without contacting the remote or guessing one for a remote with no known HEAD. The raw `git branch` path (no Git extension) names remote branches `remotes/<remote>/<branch>` like the extension path and leaves out a remote's HEAD symref, so the shared UI can split local from remote and lift the defaults in the New Worktree base picker.
 
 ### Process, session and quota state
 
@@ -80,7 +90,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 - Go quota parsing isolates malformed meters, rejects unusable limits and resets, and treats `access: null` as no subscription. A Console key's 403 means no Go subscription; only `api_key_expired` identifies an expired key. When a connected Console account also fails, its failure supplies the actionable error.
 - Codex CLI fallback usage identifies the CLI account by email because OpenCode's token-sharing credential cannot establish whose quota the CLI returns. An access-enforcement 401 on that token is distinct from expiry; without a CLI sign-in the user needs the ChatGPT usage page. Claude tokens with no expiry remain unknown, expired tokens are checked before a 429 cooldown, and `Retry-After: 0` ends that cooldown.
 - Kimi ratio-based `usages` takes precedence over duplicated counted limits, omits the code-only share of the monthly total, and skips non-finite ratios. Legacy blocks can supply used or remaining counts. A pay-as-you-go Moonshot key reads balance because the Kimi Code usage endpoint refuses it.
-- OpenRouter quota uses the configured gateway base that receives chat credentials. Native and legacy config sections are read independently so a native entry without an address cannot hide a legacy address; a config failure still permits the default-endpoint lookup.
+- OpenRouter quota uses the configured gateway base that receives chat credentials. Native and legacy config sections are read independently so a native entry without an address cannot hide a legacy address; a config failure still permits the default-endpoint lookup. Monthly spending from `usage_monthly` and `byok_usage_monthly` stays beside any cap as `monthly_total`, `monthly_credits`, and `monthly_byok`; the raw amounts are summed before display rounding, unreadable counters including blank strings stay unknown, and only exact-zero categories are omitted. A set cap whose `limit_remaining` is unreadable stays as a cap window with an unknown spent amount.
 - Z.ai and BigModel business errors can arrive in HTTP 200 envelopes. Credit limits use total `usage` and consumed `currentValue`; token-only limits can supply just a percentage. Gift reset metadata never fails quota refresh, interprets timestamps as UTC+8, and selects the nearest unexpired claimable reset. Activation sends the listed grant kind with `GLOBAL` as the missing-kind fallback.
 - Quota windows preserve provider-specific limits: a null current daily quota means no cap, kWh annual subscriptions still reset monthly without an invented duration, allowance ceilings include the remaining credit wallet, and Cline calendar months carry no fixed duration. Fixed 30-day and 365-day approximations belong only to display labels. A blank DeepInfra balance remains missing data.
 
@@ -148,7 +158,7 @@ unchanged; raw global session records remain available for cleanup.
 
 - `gitService.ts`
   - Owns VS Code Git and worktree operations.
-  - Reads `worktree.directory` through the web server's `shared.js` reader on the canonical checkout. Both runtimes merge ancestor files and checkout-local configs in OpenCode order, with project files overriding `OPENCODE_CONFIG`; malformed or unreadable configs fail creation before choosing a folder.
+  - Reads `worktree.directory` through the web server's `config-files.js` reader on the canonical checkout. Both runtimes merge ancestor files and checkout-local configs in OpenCode order, with project files overriding `OPENCODE_CONFIG`; malformed or unreadable configs fail creation before choosing a folder.
   - Preview and creation follow the [worktree path identity rule](../../web/server/lib/git/DOCUMENTATION.md#why-preview-and-creation-resolve-the-parent-after-creating-it), returning canonical paths. Workspace admission stays unchanged.
   - `api:git/diff` and `api:git/file-diff` classify the status path first through `gitPathDiff.ts`, matching the web server's diff routes. The host answers `{ kind: 'diff' | 'file-diff', ..., submodule }` or `{ kind: 'unavailable', reason: 'path_not_found' | 'nested_repository', message }`. Their bridge handlers were dead surface (DiffView is not mounted in VS Code) and are gone; `getGitDiff` remains on the host only for the SCM commit-message generator, and the gitPathDiff contract is covered by `gitPathDiff.test.ts`.
   - `api:git/status` rows carry a rename's or copy's source as `previousPath`, as the web server's status does: from the Git API change's `originalUri`, or from the source entry `git status -z` lists after the destination in the raw fallback. The Changes view that reads it is not mounted here; the field keeps the status contract the same on every runtime.
@@ -255,7 +265,7 @@ Kimi quota requests combine the 25-second refresh deadline and a 5-second reques
   - Owns managed-versus-external capability decisions and latest-version checks.
   - Managed runtimes run the resolved CLI with `upgrade` through the manager's operation queue and the shared `packages/web/server/lib/opencode/cli-upgrade.js` executor. The queued action resolves the CLI with the same fallback as capability reporting; it does not require a live server process just to update the binary. OpenCode chooses its installer. On Windows a running managed server stops for the install and starts again afterwards, because a running `opencode.exe` cannot be replaced (see `packages/web/server/lib/opencode/DOCUMENTATION.md`). Concurrent webviews share one installation; failures allow another attempt. The existing Reload action restarts the server afterwards. The bridge waits for command completion without its default 30-second timeout. External connections and missing CLIs reject upgrades before spawning. Version checks remain available for external connections.
 
-- Plugin metadata and OpenCode version checks use `packages/web/server/lib/opencode/npm-registry-config.js`, the same resolver as the web server. It reads inherited registry settings and the user's `.npmrc`, supports scoped registries, and sends credentials only in HTTP headers.
+- Plugin metadata and OpenCode version checks use `packages/web/server/lib/npm/npm-registry-config.js`, the same resolver as the web server. It reads inherited registry settings and the user's `.npmrc`, supports scoped registries, and sends credentials only in HTTP headers.
 
 - `sessionNotifications.ts`
   - Shows OpenChamber notifications (finished turn, error, question, the Settings test) as `vscode.window.showInformationMessage`. The webview keeps deciding which events notify and their text from the shared notification settings.
@@ -624,6 +634,9 @@ features sharing the `openchamber` namespace do not erase each other. An entry
 an older version left in `sessions-metadata.json` is laid over the record on
 reads and pushed to OpenCode on that session's next write, then dropped from
 the file; the web server sweeps the rest.
+The extension serializes metadata writes per session. A conditional write
+compares the expected metadata within that queue and returns the current value
+on conflict. This queue does not serialize writes from another process.
 
 The webview answers `POST /api/openchamber/sessions/archive|unarchive` and
 `GET|POST /api/openchamber/sessions/:id/metadata` through the

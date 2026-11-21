@@ -27,7 +27,6 @@ const createPayload = () => {
     '[Desktop Entry]', 'Name=OpenChamber', 'Exec=AppRun --no-sandbox %U', 'Icon=openchamber', 'StartupWMClass=openchamber', '',
   ].join('\n'));
   writeElf(path.join(root, 'openchamber'), 'x64');
-  writeElf(path.join(root, 'resources/opencode-cli/opencode'), 'x64');
   writeElf(path.join(root, 'resources/ripgrep/rg'), 'x64');
   for (const name of ['pty.node', 'sherpa-onnx.node']) {
     writeElf(path.join(root, 'resources/app.asar.unpacked/node_modules', name), 'x64');
@@ -40,7 +39,7 @@ const verify = (root) => verifyExtractedPayload({
   root,
   targetArchitecture: 'x64',
   expectedOpenCodeVersion: '1.17.18',
-  runCliVersion: () => '1.17.18',
+  checkOpenCodeServer: () => ({ version: '1.17.18' }),
 });
 
 test('reads supported ELF architectures', () => {
@@ -67,7 +66,7 @@ test('verifies identity, version, and native payload architecture', () => {
       root,
       targetArchitecture: 'x64',
       expectedOpenCodeVersion: '1.17.18',
-      runCliVersion: () => '1.17.18',
+      checkOpenCodeServer: () => ({ version: '1.17.18' }),
     });
     assert.equal(result.nativeModuleCount, 2);
   } finally {
@@ -83,28 +82,28 @@ test('fails on a missing native module', () => {
       root,
       targetArchitecture: 'x64',
       expectedOpenCodeVersion: '1.17.18',
-      runCliVersion: () => '1.17.18',
+      checkOpenCodeServer: () => ({ version: '1.17.18' }),
     }), /Missing packaged native module: pty\.node/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('fails on wrong CLI version or native architecture', () => {
+test('fails on a failed bundled server check or native architecture', () => {
   const root = createPayload();
   try {
     assert.throws(() => verifyExtractedPayload({
       root,
       targetArchitecture: 'x64',
       expectedOpenCodeVersion: '1.17.18',
-      runCliVersion: () => '1.17.17',
-    }), /OpenCode CLI version mismatch/);
+      checkOpenCodeServer: () => { throw new Error('Bundled OpenCode server reports 1.17.17, expected 1.17.18'); },
+    }), /Bundled OpenCode server reports 1\.17\.17/);
     writeElf(path.join(root, 'resources/app.asar.unpacked/node_modules/pty.node'), 'arm64');
     assert.throws(() => verifyExtractedPayload({
       root,
       targetArchitecture: 'x64',
       expectedOpenCodeVersion: '1.17.18',
-      runCliVersion: () => '1.17.18',
+      checkOpenCodeServer: () => ({ version: '1.17.18' }),
     }), /Native module architecture mismatch/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

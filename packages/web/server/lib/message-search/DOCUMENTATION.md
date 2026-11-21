@@ -49,7 +49,7 @@ throwaway OpenCode: `env -i HOME PATH TMPDIR OPENCODE_SERVER_PASSWORD=<throwaway
 ## On by default
 
 Search is on unless `messageSearchEnabled` (instance scope, `settings.json`)
-is `false` (`isMessageSearchEnabled` in `opencode/settings-helpers.js`). A
+is `false` (`isMessageSearchEnabled` in `settings/settings-helpers.js`). A
 settings file that never mentions the key belongs to a user who never chose
 and gets the default; an explicit `false` is a choice and stays. The settings
 response always carries the resolved value, because the client keeps its own
@@ -84,10 +84,10 @@ overlays before the file closes under them.
 
 ## Ownership
 
-- `sqlite.js` opens the builtin SQLite (`node:sqlite` on Node and Electron,
+- `sqlite.ts` opens the builtin SQLite (`node:sqlite` on Node and Electron,
   `bun:sqlite` on Bun). No dependency; without either the runtime reports
   itself unavailable and the route answers 503.
-- `store.js` owns the file `<dataDir>/message-search.sqlite`: `sessions`,
+- `store.ts` owns the file `<dataDir>/message-search.sqlite`: `sessions`,
   `messages`, and an external-content FTS5 index with the trigram tokenizer
   (any 3+ characters inside a word, any script, case-insensitive). The schema
   version lives in `meta`; schema 4 migrates schema 3 in one transaction to
@@ -101,11 +101,11 @@ overlays before the file closes under them.
   when its text changed.
   It also builds snippets: FTS5's `snippet()` counts trigrams and cuts a hit to
   a few characters, so the window is taken in JS on the returned hits.
-- `indexer.js` keeps the index in step with OpenCode.
-- `runtime.js` follows the setting, wires the indexer to the global event hub
+- `indexer.ts` keeps the index in step with OpenCode.
+- `runtime.ts` follows the setting, wires the indexer to the global event hub
   while on, answers queries, reports status (state, file size, progress) and
   deletes the file (while on, a fresh index starts at once: "rebuild").
-- `routes.js` serves `GET /api/openchamber/message-search`,
+- `routes.ts` serves `GET /api/openchamber/message-search`,
   `GET /api/openchamber/message-search/sessions`,
   `GET .../message-search/status` and `DELETE .../message-search/index`.
 
@@ -114,6 +114,44 @@ overlays before the file closes under them.
 A backfill runs the same few statements tens of thousands of times, so the
 wrapper prepares each SQL string once and reuses the statement. Preparing per
 call would put the parse cost inside that loop.
+
+### Why SQLite exposes native rows
+
+SQLite column affinities do not guarantee types in these tables. Reads preserve
+the driver's column-value records, including blob cursors and text timestamps.
+The grouped queries select `sessionId` explicitly and use its native value as
+the grouping key and SQL binding. Cursor comparisons retain JavaScript's
+numeric, lexical and bigint rules. Directory totals retain string key coercion
+and the existing behavior of inherited keys. Only snippet construction needs a
+string body, so it keeps the existing `TypeError` for other SQLite values.
+
+The OpenCode client declares `message.list` cursors and `session.message.get`
+message ids as strings. Its query encoder sends byte-array cursors as indexed
+parameters, and its path encoder sends byte-array anchors as comma-separated
+segments. Filtering them would change what the indexer sends.
+The indexer declares the transport inputs locally and parses the SDK responses
+with its own schemas before using them. The archive event timestamp falls back
+to `null` for missing or invalid values, including non-finite numbers.
+
+The server check includes Node types only. The Bun constructor contract here
+describes the database and statement methods this adapter uses, including
+nullable reads, without importing unavailable `bun:sqlite` declarations.
+Runtime selection still probes Node first, then Bun, and caches `null` if
+neither can open an in-memory database. Failed probes keep that cache at `null`.
+
+### Why routes use a structural HTTP contract
+
+This workspace has no Express declarations. The route registrar describes only
+the request, response and registration methods it uses, following the server's
+other typed route modules. Query types come from the existing Zod schema, and
+result types remain inferred from the runtime rather than claiming validated
+SQLite rows. `contracts.ts` names the route's search inputs, including string
+exclusions: JavaScript inference otherwise treats the runtime's `exclude = []`
+as `never[]`. Request parsing, defaults, cursor validation and own-property checks
+remain at the route boundary.
+
+Thrown values may carry a non-string `message`; the error guard checks only
+property presence so the existing truthy-message fallback and JSON value survive.
 
 ## Keeping in step
 

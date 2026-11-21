@@ -16,6 +16,7 @@ import { LiveActivityCollapse } from './LiveActivityCollapse';
 import { ShownPartCard } from '../message/parts/ShownToolCard';
 import { useActivityRowGlide, useLiveRowsFloor } from './useActivityRowGlide';
 import { foldContentId, finalActivityContentId, useTurnFold } from './useTurnFold';
+import { LiveActivityInteractionContext } from './liveActivityContext';
 import { dispatchRowExpand } from '../lib/scroll/timelineScrollIntent';
 import { renderedPage } from '@/lib/opencode/tools';
 import type { ShownPart } from '../lib/turns/liveActivity';
@@ -35,14 +36,24 @@ interface TurnFoldProps {
 
 export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, onToggle, renderMessage }: TurnFoldProps) {
     const { t } = useI18n();
-    const { finalMessage, activityMessages, settled, isExpanded, pages } = useTurnFold(turn, hasLaterAssistant, expanded, finalMessageId);
+    const { finalMessage, activityMessages, settled, isExpanded: autoExpanded, pages } = useTurnFold(turn, hasLaterAssistant, expanded, finalMessageId);
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
-    const trim = React.useMemo(() => (expanded
+    const [interactionHolds, setInteractionHolds] = React.useState(0);
+    const pagesShown = !finalMessage && pages.length > 0;
+    const hold = React.useCallback(() => setInteractionHolds((count) => count + 1), []);
+    const release = React.useCallback(() => setInteractionHolds((count) => Math.max(0, count - 1)), []);
+    const interaction = React.useMemo(() => ({ hold, release, pagesShown }), [hold, release, pagesShown]);
+    const held = interactionHolds > 0;
+    const isExpanded = held || autoExpanded;
+    const liveTrim = React.useMemo(() => (expanded
         ? null
         : planActivityTrim(
             activityMessages.map((message) => activityRowParts(message.parts, showReasoningTraces).length),
             LIVE_ACTIVITY_VISIBLE_ROWS,
         )), [activityMessages, expanded, showReasoningTraces]);
+    const trimRef = React.useRef(liveTrim);
+    if (!held) trimRef.current = liveTrim;
+    const trim = held && !expanded ? trimRef.current : liveTrim;
     const shownMessages = React.useMemo(
         () => (trim && trim.hiddenMessages > 0 ? activityMessages.slice(trim.hiddenMessages) : activityMessages),
         [activityMessages, trim],
@@ -58,8 +69,11 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
     const previewFloorRef = React.useRef<HTMLDivElement>(null);
     const previewRef = React.useRef<HTMLDivElement>(null);
     useActivityRowGlide(rowsRef, hiddenRows, !settled && !expanded);
-    useLiveRowsFloor(previewFloorRef, previewRef, !settled && !expanded);
-    const lastPageMessageId = !finalMessage && pages.length > 0 ? pages[pages.length - 1]?.messageID : undefined;
+    useLiveRowsFloor(previewFloorRef, previewRef, !expanded && (held || !settled));
+    const livePageMessageId = !finalMessage && pages.length > 0 ? pages[pages.length - 1]?.messageID : undefined;
+    const pageMessageIdRef = React.useRef(livePageMessageId);
+    if (!held) pageMessageIdRef.current = livePageMessageId;
+    const lastPageMessageId = held ? pageMessageIdRef.current : livePageMessageId;
     const [messagesAbovePages, messagesBelowPages] = React.useMemo(() => {
         const pageIndex = lastPageMessageId ? activityMessages.findIndex((message) => message.info.id === lastPageMessageId) : -1;
         if (pageIndex < 0) return [shownMessages, NO_MESSAGES];
@@ -113,27 +127,29 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
                 </div>
             </div>
             {expanded ? null : (
-                <div ref={previewFloorRef}>
-                    <div ref={previewRef}>
-                        <LiveActivityCollapse expanded={isExpanded} id={contentId}>
-                            <div ref={rowsRef}>
+                <LiveActivityInteractionContext.Provider value={interaction}>
+                    <div ref={previewFloorRef}>
+                        <div ref={previewRef}>
+                            <LiveActivityCollapse expanded={isExpanded} id={contentId}>
+                                <div ref={rowsRef}>
+                                    <ActivityRowSkipContext.Provider value={rowSkip}>
+                                        {messagesAbovePages.map((message) => (
+                                            <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
+                                        ))}
+                                    </ActivityRowSkipContext.Provider>
+                                </div>
+                            </LiveActivityCollapse>
+                            {pagesShown ? <TurnPages pages={pages} /> : null}
+                            {messagesBelowPages.length > 0 ? (
                                 <ActivityRowSkipContext.Provider value={rowSkip}>
-                                    {messagesAbovePages.map((message) => (
+                                    {messagesBelowPages.map((message) => (
                                         <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
                                     ))}
                                 </ActivityRowSkipContext.Provider>
-                            </div>
-                        </LiveActivityCollapse>
-                        {!finalMessage && pages.length > 0 ? <TurnPages pages={pages} /> : null}
-                        {messagesBelowPages.length > 0 ? (
-                            <ActivityRowSkipContext.Provider value={rowSkip}>
-                                {messagesBelowPages.map((message) => (
-                                    <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
-                                ))}
-                            </ActivityRowSkipContext.Provider>
-                        ) : null}
+                            ) : null}
+                        </div>
                     </div>
-                </div>
+                </LiveActivityInteractionContext.Provider>
             )}
         </div>
     );

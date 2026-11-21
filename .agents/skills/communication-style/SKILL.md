@@ -110,7 +110,7 @@ These feel "writerly" to the author and read as AI tells to everyone else.
 
 21. **Chatbot phrases.** "I hope this helps!", "Let me know if...", "Certainly!", "Great question!", "You're absolutely right!", "Found the smoking gun!". Remove and respond directly.
 22. **Cutoff disclaimers.** "While specific details are limited...". Find the facts or say plainly what you don't know.
-23. **Grading the message you answer.** "Good way to put it.", "That's a good read.", "Fair point." open the reply with a verdict on how the other person wrote. Start with your own point. Agreeing with what they said is fine: say so plainly and build on it.
+23. **Grading the message you answer.** "Good way to put it.", "Fair point.", "Good catch.", "That's a real bug.", "This is useful." put a verdict on the other person's message, on how they wrote it or on whether what they reported holds up. Nobody asked for the grade, so it reads as a model judging its input. Answer with what you know or what happened, the way you'd type it in chat: "Yeah, that one got fixed today." Agreeing with what they said is fine: say so plainly and build on it.
 24. **Echoing the message back.** A reply that answers every sentence it got, or describes the reader's own work back to them, reads like a summary of their message. Answer the points that need an answer and add only what they don't know yet.
 
 ### Punctuation and formatting

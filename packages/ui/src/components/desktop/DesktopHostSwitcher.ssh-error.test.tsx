@@ -23,7 +23,13 @@ mock.module('@/components/ui', () => ({ toast: { success() {}, error() {} } }));
 const ids = ['error', 'idle', 'ready', 'degraded', 'master_connecting'];
 const connected: string[] = [];
 const switches: Parameters<typeof import('@/lib/runtime-switch').switchRuntimeEndpoint>[0][] = [];
+const opened: { url: string; clientToken: string | null }[] = [];
+const saved: { hosts: { id: string; url: string; clientToken?: string }[]; defaultHostId: string | null }[] = [];
 let failHostRead = false;
+let releaseConnect: (() => void) | null = null;
+let holdConnect = false;
+let releaseOpen: (() => void) | null = null;
+let holdOpen = false;
 const desktop = await import('@/lib/desktop');
 mock.module('@/lib/desktop', () => ({ ...desktop, isDesktopShell: () => true, isElectronShell: () => true }));
 const hosts = await import('@/lib/desktopHosts');
@@ -31,17 +37,31 @@ mock.module('@/lib/desktopHosts', () => ({
   ...hosts,
   desktopHostsGet: async () => {
     if (failHostRead) throw new Error('Host read failed');
-    return { hosts: ids.map((id) => ({ id, label: `SSH ${id}`, url: connected.includes(id) ? 'http://localhost:4321' : 'http://localhost' })), defaultHostId: 'local', localOrigin: 'http://localhost' };
+    return {
+      hosts: ids.map((id) => connected.includes(id)
+        ? { id, label: `SSH ${id}`, url: 'http://localhost:4321', clientToken: `token-${id}` }
+        : { id, label: `SSH ${id}`, url: 'http://localhost' }),
+      defaultHostId: 'local',
+      localOrigin: 'http://localhost',
+    };
   },
+  desktopHostsSet: async (config: (typeof saved)[number]) => { saved.push(config); },
   desktopLocalClientTokenGet: async () => '',
   desktopHostProbe: async () => ({ status: 'ok', latencyMs: 1 }),
+  desktopOpenNewWindowAtUrl: async (url: string, options: { clientToken: string | null }) => {
+    opened.push({ url, clientToken: options.clientToken });
+    if (holdOpen) await new Promise<void>((resolve) => { releaseOpen = resolve; });
+  },
 }));
 const ssh = await import('@/lib/desktopSsh');
 mock.module('@/lib/desktopSsh', () => ({
   ...ssh,
   desktopSshInstancesGet: async () => ({ instances: ids.map((id) => ({ id })) }),
   desktopSshStatus: async () => ids.map((id) => ({ id, phase: connected.includes(id) ? 'ready' : id, startedByUs: false, retryAttempt: 0, requiresUserAction: false, updatedAtMs: 0 })),
-  desktopSshConnect: async (id: string) => { connected.push(id); },
+  desktopSshConnect: async (id: string) => {
+    if (holdConnect) await new Promise<void>((resolve) => { releaseConnect = resolve; });
+    connected.push(id);
+  },
 }));
 mock.module('@/lib/desktopRelayRestore', () => ({ scheduleDesktopHostCandidateRefresh: () => undefined }));
 const runtime = await import('@/lib/runtime-switch');
@@ -82,6 +102,58 @@ test('offers connect for error and idle SSH instances only and retries in place'
     expect(switches[0]?.apiBaseUrl).toBe('http://localhost:4321');
   } finally {
     failHostRead = false;
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test('opening an idle SSH instance in a new window waits for the tunnel, opens once across a menu remount and keeps the refreshed entry', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root = createRoot(container);
+  const render = async () => {
+    await act(async () => { root.render(<I18nProvider><DesktopHostSwitcherDialog open embedded onOpenChange={() => undefined} /></I18nProvider>); });
+  };
+  try {
+    await render();
+    const row = (id: string) => [...container.querySelectorAll('span')].find((element) => element.textContent === `SSH ${id}`)?.closest('.group');
+    const openButton = () => row('idle')?.querySelector<HTMLButtonElement>('button[aria-label="Open in new window"]');
+    const starButton = () => row('ready')?.querySelector<HTMLButtonElement>('button[aria-label="Set as default"]');
+    expect(openButton()?.disabled).toBe(false);
+
+    holdConnect = true;
+    await act(async () => { openButton()!.click(); });
+    await act(async () => { openButton()!.click(); });
+    expect(opened).toEqual([]);
+    expect(openButton()?.disabled).toBe(true);
+    expect(starButton()?.disabled).toBe(true);
+
+    // The sidebar menu unmounts its switcher on close; the reopened one still sees the pending open.
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render();
+    expect(openButton()?.disabled).toBe(true);
+    expect(starButton()?.disabled).toBe(true);
+
+    holdConnect = false;
+    holdOpen = true;
+    await act(async () => { releaseConnect?.(); });
+    expect(opened).toEqual([{ url: 'http://localhost:4321/', clientToken: 'token-idle' }]);
+    expect(openButton()?.disabled).toBe(true);
+    expect(starButton()?.disabled).toBe(false);
+
+    holdOpen = false;
+    await act(async () => { releaseOpen?.(); });
+    expect(opened).toHaveLength(1);
+    expect(openButton()?.disabled).toBe(false);
+
+    await act(async () => { starButton()!.click(); });
+    expect(saved.at(-1)?.hosts.find((host) => host.id === 'idle')).toMatchObject({ url: 'http://localhost:4321', clientToken: 'token-idle' });
+  } finally {
+    holdConnect = false;
+    holdOpen = false;
+    releaseConnect = null;
+    releaseOpen = null;
     await act(async () => root.unmount());
     container.remove();
   }

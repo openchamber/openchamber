@@ -1,10 +1,18 @@
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
-import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test, vi } from 'bun:test';
 import { Window, type HTMLElement as HappyHTMLElement } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
 
 import type { CommandAutocompleteHandle } from './CommandAutocomplete';
+
+declare module 'bun:test' {
+  export const vi: {
+    useFakeTimers(): void;
+    useRealTimers(): void;
+    runAllTimers(): void;
+  };
+}
 
 let CommandAutocomplete: typeof import('./CommandAutocomplete')['CommandAutocomplete'];
 let SkillAutocomplete: typeof import('./SkillAutocomplete')['SkillAutocomplete'];
@@ -126,14 +134,27 @@ for (const kind of ['command', 'skill'] as const) {
     expect(Array.from(item.querySelectorAll('.uppercase')).map((badge) => badge.textContent)).toEqual(['project']);
     expect(item.querySelector('.font-normal')?.textContent).toBe('First details');
 
-    await act(async () => {
-      item.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 30, clientY: 30 }));
-      await new Promise((resolve) => setTimeout(resolve, 260));
-    });
-    await press('ArrowDown');
-    expect(details()).toBeNull();
-    await press('Enter');
-    expect(selections).toEqual(['oc-scroll']);
+    const originalSetTimeout = dom.setTimeout;
+    const originalClearTimeout = dom.clearTimeout;
+    vi.useFakeTimers();
+    dom.setTimeout = globalThis.setTimeout;
+    dom.clearTimeout = globalThis.clearTimeout;
+    try {
+      await act(async () => {
+        item.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 30, clientY: 30 }));
+      });
+      // Exhaust pending hover timers before checking that no tooltip can open.
+      await act(async () => { vi.runAllTimers(); });
+      await press('ArrowDown');
+      await act(async () => { vi.runAllTimers(); });
+      expect(details()).toBeNull();
+      await press('Enter');
+      expect(selections).toEqual(['oc-scroll']);
+    } finally {
+      dom.setTimeout = originalSetTimeout;
+      dom.clearTimeout = originalClearTimeout;
+      vi.useRealTimers();
+    }
   });
 
   test(`${kind}: a list placed below the caret keeps the height its placement gave it`, async () => {

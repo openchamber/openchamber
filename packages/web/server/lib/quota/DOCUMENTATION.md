@@ -17,6 +17,7 @@ This module fetches quota and usage signals for supported providers in the web s
 - Decoded Codex CLI profile claims identify the displayed account only. The claims are unverified and grant no authority.
 - Codex usage requests reject redirects because the bearer credential belongs to the fixed usage origin.
 - Unreadable API-key file or environment references resolve to no credential. Sending the unresolved reference as a bearer token would misreport missing configuration as an authentication failure.
+- Google quota accepts the direct login methods `oauth` and `gemini-cli` (what OpenCode stores for "OAuth with Google (Gemini CLI)") and legacy credentials without a method ID. Other methods belong to their plugins and are not sent to Google quota endpoints.
 
 Node server entrypoints apply `../network-defaults.js` before serving requests,
 including the daemon launched directly through `server/index.js`. Connection
@@ -24,8 +25,8 @@ attempts get 5 seconds without changing address-family selection. The VS Code
 extension applies the same policy in its own process at activation.
 
 ## Entrypoints and structure
-- `packages/web/server/lib/quota/index.js`: public entrypoint imported by `packages/web/server/index.js`.
-- `packages/web/server/lib/quota/routes.js`: Express route registration for quota endpoints.
+- `packages/web/server/lib/quota/index.ts`: public entrypoint loaded by the runtime and feature-route composition through its `.js` specifier.
+- `packages/web/server/lib/quota/routes.ts`: Express route registration for quota endpoints.
 - `packages/web/server/lib/quota/providers/index.js`: provider registry, configured-provider list, and provider dispatcher.
 - `packages/web/server/lib/quota/providers/antigravity/`: Antigravity-specific auth, API, and transform modules.
 - `packages/web/server/lib/quota/providers/google/`: Google-specific auth, API, and transform modules.
@@ -86,7 +87,7 @@ the list loses its usage card with no error.
 - The `openchamber_usage` agent tool (`../openchamber-control/usage-read.js`), which calls the same `listConfiguredQuotaProviders` and `fetchQuotaForProvider` in-process, with the page's deadlines and fallback. It asks only `listUsagePageProviders()`: every registry entry except `github-copilot-addon`, which the page never reads, then the attached extensions. The UI's built-in list (`QUOTA_PROVIDERS` in `packages/ui/src/lib/quota/providers/index.ts`) and this one are kept equal by a test in `usage-read.test.js`, so a new provider is added to both, and a registry entry the page does not show joins `NOT_ON_USAGE_PAGE`.
 
 ## Internal-only provider module
-- `providers/openai.js` exists for logic parity/reuse but is intentionally not registered for dispatcher ID routing.
+- `providers/openai.ts` exists for logic parity/reuse but is intentionally not registered for dispatcher ID routing.
 
 ## Response contract
 All providers should return results via shared helpers to preserve API shape:
@@ -141,7 +142,7 @@ A refunded or cancelled Go subscription keeps `product: "go"` and sends `access:
 
 ### OpenCode Console budgets
 
-The OpenCode Go result also carries the Console budgets of the same sign-in, the monthly spend limits a Console workspace sets on its member, as `usage.consoleBudgets` (`console-budgets.js`, shared with the VS Code extension host). They come from the running OpenCode (`GET /api/experimental/usage/limits`, OpenCode 2.2, read in the default directory through `../opencode/auth.js`), which resolves the active `opencode` sign-in itself and answers `null` without one, so an API key shows no budgets. The read runs beside the Go read and is best-effort: any failure drops the budgets, never the meters.
+The OpenCode Go result also carries the Console budgets of the same sign-in, the monthly spend limits a Console workspace sets on its member, as `usage.consoleBudgets` (`console-budgets.ts`, shared with the VS Code extension host). They come from the running OpenCode (`GET /api/experimental/usage/limits`, OpenCode 2.2, read in the default directory through `../opencode/auth.js`), which resolves the active `opencode` sign-in itself and answers `null` without one, so an API key shows no budgets. The read runs beside the Go read and is best-effort: any failure drops the budgets, never the meters.
 
 - **Only the usage page shows them.** They sit outside `usage.windows`, so the work status panel, which reads windows and models, never lists them.
 - **Order**: the budget with the least left comes first. `kind`, `sharing` and `perModel` carry what the Console names a budget by; the UI words them.
@@ -153,6 +154,72 @@ The OpenCode Go result also carries the Console budgets of the same sign-in, the
 - A malformed budget is dropped independently, so it cannot hide other valid budgets.
 
 On the first OpenCode Go usage refresh after upgrading, OpenChamber deletes the obsolete `quota/opencode-go.json` credential file without reading its cookie value.
+
+### Why the budget decorator infers its return type
+
+Attaching budgets can replace null usage with an empty window map and turn a failed result into a configured success. Its return type includes those replacements; promising the input's exact generic type would preserve literal false flags or null usage that the returned object no longer has. The budget types live in the implementation, while Zod still parses each external budget independently.
+
+## TypeScript conversion boundaries
+
+The extension adapter is TypeScript. `extensionProviderId` returns a nullable ID
+that the adapter passes unchanged to `buildResult`. The formatter copies that ID
+without validation, so its result and input contracts carry the caller's ID type;
+their default remains string for built-in providers. Registration still validates
+the adapter's ID before storing it. Wire windows use the SDK schema's inferred
+type, and the adapter retains their optional structured `value` beside the
+formatter's derived fields.
+
+The registry and catalog reconciler are TypeScript. The registry validates an
+adapter's nullable ID before storing the original provider object. Catalog rows
+use `GuestRecord` from the catalog's owning module; the eligibility predicate
+establishes the service, quota contribution and capability grants using the
+existing adapter check. The registry stays independent of the adapter at runtime,
+so listing extensions does not load credentials or provider modules.
+
+The credential routes accept a provider only when it is an own key of the
+fixed-key `normalizers` object exported by `credentials/providers.ts`. Any other
+path segment, including names every object inherits such as `constructor` and
+`__proto__`, answers 404 before a normalizer, validator or the credential store
+is reached.
+
+### Why routes retain unchecked-input guards
+
+Express bodies stay unknown until checked. The credential JSON predicate checks
+the parsed body without cloning or changing its values, including numeric
+overflow accepted by JSON parsing. The gift-reset field predicate permits
+property reads on every non-nullish value, preserving JavaScript's primitive
+property access. Reset types still require membership in the provider's list.
+
+Thrown messages remain unchecked values, including inherited or non-string
+messages. Nullish thrown values still cause a TypeError when their message is
+read. Credential and gift-reset errors retain their existing Error-instance
+checks and fallback messages.
+
+### Why the adapter keeps catalog and thrown-value checks
+
+The catalog reader is injectable, so its capability-grant array check remains.
+Credential selection retains its own-key and truthiness tests to exclude
+prototype members and absent credentials. Thrown values may be primitives or
+objects with inherited `message` and `code` properties. The error-field predicate
+excludes only null and undefined, preserving optional property access and nullish
+fallbacks without promising string fields.
+
+`persistPath` names the extension store whose enabled flag the service proxy
+reads. `reconcile` refreshes the registered set when a call finds an ineligible
+guest.
+
+### Why reconciliation keeps the catalog and error checks
+
+The catalog array check remains unchanged at the injected reader boundary.
+Thrown values are unchecked. The optional-message predicate establishes only that
+property access is legal by excluding null and undefined. JavaScript also allows
+property access on primitives, including inherited messages, so an object-only
+guard would change that behavior. The optional message remains unknown, and a
+nullish message still falls back to the thrown value.
+
+Node tests that load the provider registry directly must preload
+`packages/web/scripts/register-server-sources.mjs`, since the registry imports
+converted helpers through `.js` specifiers without the server entrypoint.
 
 ## Mistral quota semantics
 
@@ -442,11 +509,15 @@ trade a wrong number for no number.
 
 OpenRouter quota reads `GET <base>/key`, where `<base>` is the provider's configured `baseURL` (`settings.baseURL`, legacy `options.baseURL`, or legacy `api`, folded by `toProviderEntity`; the v2 `providers.openrouter` entry wins, and the v1 `provider.openrouter` entry is read when the v2 one sets no address) read from the merged opencode config layers; with nothing configured or a config read failure, `<base>` falls back to `https://openrouter.ai/api/v1`. A gateway user's key is only valid against that gateway, so the usage lookup must ride the same base as chat. The default endpoint `GET https://openrouter.ai/api/v1/key` is documented as callable with any valid API key. `GET /api/v1/credits` is documented as "Management key required" and is not used. Calling `/credits` with a normal inference key has been observed to return HTTP 200 with `{total_credits:0, total_usage:0}` rather than an error; this behavior is not documented and is why the old implementation silently rendered "$0.00 left · $0.00 spent". A `/credits` fallback for unlimited keys would render the same zeros, so unlimited keys report `usage_monthly` instead.
 
-The documented `limit`, `limit_remaining`, and `limit_reset` fields are present and null on unlimited keys; null means unlimited, never missing data. For a limited key, window usage is `limit - limit_remaining`, not `usage`: `usage` is all-time and measures a different axis from the current reset window. Pairing `usage` with the current limit produces a wrong number. `limit_remaining` is server-computed and already honors `include_byok_in_limit`, so `byok_*` fields are ignored.
+The documented `limit`, `limit_remaining`, and `limit_reset` fields are present and null on unlimited keys; null means unlimited, never missing data. For a limited key, cap usage is `limit - limit_remaining`, not `usage`: `usage` is all-time and measures a different axis from the current reset window. Pairing `usage` with the current limit produces a wrong number. `limit_remaining` is server-computed and already honors `include_byok_in_limit`, so the cap never adds BYOK usage again.
 
-Unlimited keys report `usage_monthly` in a `monthly` window with no percent. `limit_reset` is a period string (`daily`, `weekly`, `monthly`, or null), not a timestamp; `resetAt` is derived from the documented midnight-UTC boundaries, with weeks starting Monday. A set `limit` with a null `limit_reset` is a lifetime cap and maps to the `key_limit` window with no reset, which the UI titles Key Limit. `limit` is the spending cap set on the API key, not the account balance; the balance is only readable with a management key through `/credits`, so it is not shown.
+`usage_monthly` and `byok_usage_monthly` are USD counters for the current UTC calendar month, scoped to the active key including usage from other apps. They are reported as three separate windows beside any cap window: `monthly_total` (the raw sum of both counters), `monthly_credits` (`usage_monthly`), and `monthly_byok` (`byok_usage_monthly`). The total is summed from the raw amounts before any display rounding, so individually rounded cents can differ from the total's cents. The distinct `monthly_*` keys keep spending windows apart from a `monthly` cap window. Categories carry the structured spend value and no preformatted label, so the shared UI formats money and labels through the active locale.
 
-Keep `packages/web/server/lib/quota/providers/openrouter.js` and `packages/vscode/src/quotaProviders.ts` in sync, as with the Kimi and Copilot providers; the VS Code extension duplicates this parsing logic rather than importing the web provider.
+Missing or invalid counters, including blank strings, are unknown, never zero: an unknown category remains visible with `value.spent: null` and the total withholds its numeric amount when either counter is unknown. A category is omitted only when its reported amount is exactly zero; when both are zero the total remains as `$0.00`. A set `limit` with an unreadable `limit_remaining` keeps its cap window with no percentage and `value: { kind: 'spend', spent: null, limit }`, so Usage and both compact summaries read "Unknown of $30.00" instead of losing the cap; a null `limit` is uncapped and adds no cap window. A malformed counter leaves a usable cap visible; a response with neither a readable cap nor a usable counter is "No quota data in response".
+
+`limit_reset` is a period string (`daily`, `weekly`, `monthly`, or null), not a timestamp; `resetAt` is derived from the documented midnight-UTC boundaries, with weeks starting Monday. A set `limit` with a null `limit_reset` is a lifetime cap and maps to the `key_limit` window with no reset, which the UI titles Key Limit. The monthly spend total carries the monthly reset; category rows are details of that same month. `limit` is the spending cap set on the API key, not the account balance; the balance is only readable with a management key through `/credits`, so it is not shown.
+
+Keep `packages/web/server/lib/quota/providers/openrouter.ts` and `packages/vscode/src/quotaProviders.ts` in sync, as with the Kimi and Copilot providers; the VS Code extension duplicates this parsing logic rather than importing the web provider.
 
 ## Zhipu AI Coding Plan semantics
 

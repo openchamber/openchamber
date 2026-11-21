@@ -21,20 +21,38 @@ export const QuotaCredentials: React.FC<{ providerId: QuotaCredentialProviderId;
   const [status, setStatus] = React.useState<Status | null>(null);
   const [values, setValues] = React.useState<CredentialPayload>({});
   const [busy, setBusy] = React.useState(false);
+  const [shownProviderId, setShownProviderId] = React.useState(providerId);
+  if (shownProviderId !== providerId) {
+    setShownProviderId(providerId);
+    setStatus(null);
+    setValues({});
+  }
   const route = `/api/quota/credentials/${providerId}`;
-  React.useEffect(() => { void runtimeFetch(route).then(async (response) => {
-    if (!response.ok) throw new Error();
-    const next: Status = await response.json();
-    setStatus(next); setValues({});
-  }).catch(() => setStatus({ configured: false })); }, [route]);
+  const shownRoute = React.useRef(route);
+  const savedCount = React.useRef(0);
+  React.useEffect(() => {
+    shownRoute.current = route;
+    const savedBefore = savedCount.current;
+    let current = true;
+    void runtimeFetch(route).then(async (response) => {
+      if (!response.ok) throw new Error();
+      const next: Status = await response.json();
+      if (current && savedCount.current === savedBefore) setStatus(next);
+    }).catch(() => { if (current) setStatus({ configured: false }); });
+    return () => { current = false; };
+  }, [route]);
   const request = async (path: string, method: string, body?: CredentialPayload) => {
+    const submitted = values;
     setBusy(true);
     try {
       const response = await runtimeFetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.error);
-      if (payload?.configured !== undefined) setStatus(payload);
-      setValues({});
+      savedCount.current += 1;
+      if (shownRoute.current === route) {
+        if (payload?.configured !== undefined) setStatus(payload);
+        setValues((current) => (current === submitted ? {} : current));
+      }
       toast.success(t('settings.providers.page.quotaCredentials.saved', { provider: providerName }));
     } catch (error) { toast.error(error instanceof Error && error.message ? error.message : t('settings.providers.page.openCodeGo.saveFailed')); }
     finally { setBusy(false); }

@@ -14,7 +14,7 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
 
 ## Modules
 
-- `variables.js`: pure helpers. The name rule (`isVariableName`) refuses
+- `variables.ts`: pure helpers. The name rule (`isVariableName`) refuses
   `__proto__`, which fits the pattern but replaces an object's prototype when
   assigned as a key, and which no tool reads. Reading command output
   (`parseEnvironmentOutput`) recognizes devenv/nix JSON, flat JSON from
@@ -35,7 +35,7 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
   inherited list (duplicates dropped) and replaces everything else. It
   reuses the inherited spelling of a list variable (`Path` on Windows), so
   the child never gets both `PATH` and `Path`.
-- `store.js`: `<dataDir>/environment.json`, mode 0600, written atomically and
+- `store.ts`: `<dataDir>/environment.json`, mode 0600, written atomically and
   by one writer at a time in this process. A write goes to a temporary file
   and is renamed, which keeps that file's mode, so a wider file left by an
   older version becomes 0600. Project ids are path-derived
@@ -46,22 +46,39 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
   retried on the next call. A file that exists but cannot be read or parsed
   throws `EnvironmentStoreError`; it never reads as empty, because a write
   on top would erase every stored value. Patches: a string sets, `null`
-  removes, an absent name stays.
-- `runtime.js`: `createEnvironmentRuntime` decides what each spawn gets.
+  removes, an absent name stays. `secrets` are the values the user saved on
+  an agent's `secret.run` card (`../openchamber-control/secret-run.ts`), per
+  project or, under `user`, for all projects: `projectSecrets` and
+  `userSecrets` read them for that command, `projectEntry` and
+  `userVariables` leave them out, so no spawn gets them, and Settings
+  (Projects → Environment, and General) lists their names and offers only
+  removal. `removeSecrets` is the card's Forget: it removes names from both
+  places in one write, only while each holds the value the card showed, and
+  throws `EnvironmentConflictError` otherwise without removing anything.
+  Inside an isolated space the store is created with `savesSecrets: false`
+  and refuses any `secrets` change, since the container's file is not the
+  host's and Settings would never show it. A version from before `secrets` drops them when it reads the file
+  (zod strips unknown keys), and its next write leaves them out: going back a
+  version loses the saved secrets, while the variables survive.
+- `runtime.ts`: `createEnvironmentRuntime` decides what each spawn gets.
   `forDirectory(dir)` finds the project (a configured project containing the
   directory, or for a linked worktree the project at the same place in the
   primary checkout, read from the `.git` file because Git itself asks this
   runtime for its environment) and layers user variables, command output,
   then project variables. The lookup runs only when the store holds a
-  project entry, so the Git polling of a user who configured nothing pays
-  nothing. `forOpenCode()` answers `opencode service set env` variables under
+  project's variables or command, so the Git polling of a user who
+  configured nothing, saved secrets aside, pays nothing. `forOpenCode()` answers `opencode service set env` variables under
   the user variables. `applyToDirectory(dir, env)` is the overlay consumers
-  call.
-- `opencode-service-env.js`: reads `env` from `service.json` in OpenCode's
+  call. `projectIdFor(dir)` answers the same project lookup alone, for the
+  saved secrets.
+- `opencode-service-env.ts`: reads `env` from `service.json` in OpenCode's
   global config directory (the stable channel's file only). Not a published
   OpenCode contract; anything unexpected reads as no variables.
-- `routes.js`: `/api/environment` (user) and `/api/environment/projects/:id`
-  (+ `/reload`). On the JSON-body allowlist in `opencode/core-routes.js`.
+- `routes.ts`: `/api/environment` (user) and `/api/environment/projects/:id`
+  (+ `/reload`). On the JSON-body allowlist in `server-frame/core-routes.js`. A
+  project save drops the command output the runtime kept only when it
+  changes `variables` or `command`; removing a saved secret keeps it, since
+  background spawns read that cache without running the command.
 
 ## Who receives what
 
@@ -99,7 +116,7 @@ token, PATH entries it needs) are applied after the user's variables and win.
   five minutes is used by the next user action while a fresh run happens in
   the background. Editing the project's settings drops what was kept, and a
   run that started before the edit is not kept.
-- `refresh-scope.js`: the AsyncLocalStorage flag behind `runAsUserAction` /
+- `refresh-scope.ts`: the AsyncLocalStorage flag behind `runAsUserAction` /
   `isUserAction`, so the Git service needs no extra argument between route
   and spawn.
 - **The command is personal.** It is read only from `environment.json`, never
@@ -123,3 +140,28 @@ token, PATH entries it needs) are applied after the user's variables and win.
 | Web, hosted mobile, Capacitor | The server route; Settings sections render. |
 | Electron | Same server, in process. |
 | VS Code | No OpenChamber server: both Settings sections are hidden and nothing is applied to the processes the extension host starts. |
+
+## Decisions
+
+### Why runtime errors keep property-access semantics
+
+Store failures read `message` from the thrown value, including inherited
+properties and non-Error objects. The runtime's guard permits property access on
+every non-nullish value without promising a message type. Null and undefined
+still throw a TypeError. The broader project-lookup catch keeps its original
+Error check.
+
+### Why the routes use a local HTTP contract
+
+This workspace has no Express declarations. The routes describe only the HTTP
+operations they use, following the other converted route modules. Request bodies
+remain `unknown` until the store's exported patch parsers validate them. Store
+updates also validate their input because JavaScript callers use them directly.
+
+### Why command output keeps its coercion and own-key checks
+
+JSON parsing establishes only JSON value types. The string guard keeps the original
+`String(value) === value` test, including failures during coercion. Object and
+array checks select flat or exported Nix variables. Own-key checks keep inherited
+object members out of project lookups and variable expansion, including names
+such as `constructor`.

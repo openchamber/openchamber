@@ -3,7 +3,7 @@ import React, { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { OpenCode } from '@opencode/client'
 import { opencodeClient } from '@/lib/opencode/client'
-import type { Message, Session } from '@/lib/opencode/model'
+import type { Message, Part, Session } from '@/lib/opencode/model'
 import {
   areModelChoicesEqual,
   extractSessionRecordModelChoice,
@@ -15,6 +15,7 @@ import {
   SyncProvider,
   useDirectoryStore,
   useLiveSessionsExcluding,
+  useRecoveredQuestions,
   useSessionDirectory,
   useSessionMessagesSelector,
   useSessionSelector,
@@ -72,12 +73,15 @@ const assistant = (id: string, total: number, overrides: Partial<Extract<Message
 
 const selectRecordAgent = (record: Session | undefined) => record?.agent
 
+const NO_PARTS: Record<string, Part[]> = {}
+
 type Readings = {
   directory: string | undefined
   agent: string | undefined
   recordChoice: UserModelChoice | null
   contextUsage: SessionContextUsage | null
   liveGap: Session[]
+  recovered: ReturnType<typeof useRecoveredQuestions>
 }
 
 let store: ReturnType<typeof useDirectoryStore> | null = null
@@ -92,7 +96,8 @@ const Probe = ({ excludedIds }: { excludedIds: ReadonlySet<string> }) => {
   const selectUsage = React.useCallback((messages: Message[]) => buildSessionContextUsage(messages, 200_000, 32_000), [])
   const contextUsage = useSessionMessagesSelector(SESSION_ID, DIR, selectUsage, isSameContextUsage)
   const liveGap = useLiveSessionsExcluding(excludedIds)
-  readings = { directory, agent, recordChoice, contextUsage, liveGap }
+  const recovered = useRecoveredQuestions(SESSION_ID, DIR)
+  readings = { directory, agent, recordChoice, contextUsage, liveGap, recovered }
   renders += 1
   return null
 }
@@ -111,8 +116,8 @@ describe('session leaf subscriptions', () => {
     ))
   }
 
-  const seed = async (sessions: Session[], messages: Message[]) => {
-    await act(async () => store!.setState({ session: sessions, message: { [SESSION_ID]: messages } }))
+  const seed = async (sessions: Session[], messages: Message[], part: Record<string, Part[]> = NO_PARTS) => {
+    await act(async () => store!.setState({ session: sessions, message: { [SESSION_ID]: messages }, part }))
   }
 
   beforeEach(() => {
@@ -143,7 +148,7 @@ describe('session leaf subscriptions', () => {
     dom.restore()
   })
 
-  test('a time-only session update and a re-sent message list do not re-render', async () => {
+  test('a time-only session update, a re-sent message list and a streamed part do not re-render', async () => {
     const excluded = new Set([SESSION_ID])
     await render(excluded)
     await seed([session()], [assistant('msg_1', 50_000)])
@@ -165,11 +170,17 @@ describe('session leaf subscriptions', () => {
     const usage = readings?.contextUsage
     for (let step = 2; step < 12; step += 1) {
       // What a streamed step publishes: a new record with a newer
-      // `time.updated`, and a new message list with the same token reading.
-      await seed([session({ time: { created: 1, updated: step } })], [assistant('msg_1', 50_000, { time: { created: 10, streamed: step } })])
+      // `time.updated`, a new message list with the same token reading, and
+      // the reply's text part grown by a delta.
+      await seed(
+        [session({ time: { created: 1, updated: step } })],
+        [assistant('msg_1', 50_000, { time: { created: 10, streamed: step } })],
+        { msg_1: [{ id: 'prt_1', messageID: 'msg_1', sessionID: SESSION_ID, type: 'text', text: 'x'.repeat(step) }] },
+      )
     }
 
     expect(renders).toBe(settled)
+    expect(readings?.recovered).toEqual([])
     expect(readings?.recordChoice).toBe(choice)
     expect(readings?.contextUsage).toBe(usage)
   })

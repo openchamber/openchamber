@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="tile_new_session">جلسة جديدة</string>
+    <string name="tile_new_session_description">بدء جلسة OpenChamber جديدة</string>
+    <string name="sealed_push_channel_name">تحديثات الوكيل</string>
+    <string name="widget_usage_label">الاستخدام</string>
+    <string name="widget_sessions_label">الجلسات</string>
+    <string name="widget_usage_description">حصص الاستخدام من المزوّدين المتصلين</string>
+    <string name="widget_sessions_description">الجلسات الأخيرة واختصار لمحادثة جديدة</string>
+    <string name="widget_open_to_sync">افتح OpenChamber للمزامنة</string>
+    <string name="widget_refresh">تحديث</string>
+    <string name="widget_new_session">جلسة جديدة</string>
+</resources>

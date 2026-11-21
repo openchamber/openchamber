@@ -36,6 +36,8 @@ Bu, yalnızca bir kez çalışan bir bağlama callback'i değildir. Arayüzü ve
 
 Erişim token'ları burada da, `request` sonucunda da asla görünmez.
 
+`ready.session` ve `onSession` isteğe bağlı `context` ve `tokens` alanlarını da sağlar. `context: { tokens, limit } | null`, son asistan adımından sonra bağlam penceresinin doluluk oranını gösterir; model sınırı bilinmiyorsa `limit` değeri `null` olur. Sıkıştırmadan sonra yeni ölçüme kadar `context` değeri `null` kalır. `tokens: { prompt, output, reasoning, cacheRead, cacheWrite, cacheHitPercent } | null`, oturumun birikimli token kullanımını içerir. `prompt` önbelleksiz girdiyi ve önbellek okuma/yazmalarını kapsar. Prompt tokenı yoksa `cacheHitPercent` değeri `null` olur. Ölçümden önce iki alan da `null` olur; eski host'lar bu alanları içermez. Değişiklikler `onSession` üzerinden bildirilir.
+
 `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` ve `onItem` geç abone olduğunuzda en son değeri yeniden gönderir, sonra değiştikçe tetiklenmeye devam eder.
 
 `theme.tokens`, `primaryText`, `successText`, `warningText`, `errorText` ve `infoText` alanlarını içerir. Bu zorunlu alanlar, host'un nötr arka planlar ve UI kit'in hafif renkli kontrolleri için hesapladığı metin renklerini taşır; düz renk dolguları için değildir. `applyHostReady` her durum güncellemesinde bunları uygular. CSS değişkenleri için [UI kit](/sdk/ui/) sayfasına bakın.
@@ -67,6 +69,7 @@ Erişim token'ları burada da, `request` sonucunda da asla görünmez.
 | `onResolve(handler)` | eğik çizgi komutlarınız için işleyiciyi kaydeder. `{ command, args }` alır ve iliştirilecek bir öğe ya da `null` döndürür. |
 | `setBadge(count)` | şerit simgenizi bir noktayla işaretler ve sayıyı (0 ile 999 arası) ipucunda gösterir, `null` ile temizler |
 | `openCommit(sha)` | geçerli projenin o commit'inde Diff görünümünü açar. `sha` 7 ile 64 onaltılık karakterdir; commit'i OpenChamber kendisi okur. |
+| `openWalkthrough({ base })` | geçerli projenin Bu branch kapsamında İnceleme turunu açar ve `base` ile karşılaştırır: `main`, `origin/main` ya da tam bir ref. Base, branch için seçilen base olur; kullanıcı onu yine değiştirebilir ve İnceleme turu oluştur düğmesine kendisi basar. Depoda olmayan bir base `NOT_FOUND` ile reddedilir ve hiçbir şeyi değiştirmez. Telefonda, Mini Chat'te ve VS Code'da `UNSUPPORTED`. |
 | `setHeight(px)` | Work Status bölümünüzün yüksekliğini ayarlar. OpenChamber bunu 24 ile 480 piksel arasında tutar; daha uzun içerik sayfanızın içinde kayar. Başka yerlerde yok sayılır. |
 | `onFileOpen(listener)` | dosya düzenleyiciler: düzenlenecek dosyayı alır, `{ path, name, readOnly }` ile birlikte `encoding: "text"` ve `content` ya da `encoding: "binary"` ve `bytes`. Ayrıca sayfanızda Cmd/Ctrl+S ile kaydetmeyi sağlar. |
 | `onFileSnapshot(handler)` | dosya düzenleyiciler: düzenlenmiş dosyanın tamamını `{ content, version }` (ikili bir düzenleyicide `{ bytes, version }`) olarak döndürür. OpenChamber bunu kaydetmek için ve kaynak görünümüne ya da tam ekrana geçmeden önce çağırır. |

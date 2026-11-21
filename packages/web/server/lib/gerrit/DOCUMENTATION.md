@@ -72,6 +72,64 @@ Gerrit is the last built-in in `BUILT_IN_DESCRIPTORS` (`source-control/provider-
 
 ## Decisions
 
+### Why wire values retain their JSON type
+
+The REST client parses JSON without validating an endpoint-specific schema.
+Mapper inputs therefore use the JSON schema's inferred type until a mapper
+checks the fields it needs. Revision timestamps can be null when Gerrit omits
+them or sends an invalid timestamp; the local revision contract preserves that
+value even though the shared `ChangeRequestRevision` declaration requires a
+string.
+
+The same shared declaration requires a string local-tip SHA, while missing local
+tips produce null here. Its mutation-route collection is mutable; the provider's
+published collection is frozen. These mismatches belong to
+`source-control/provider-contract.d.ts`. `ProbeInstance` already accepts the null
+version produced by an anonymously refused version read.
+
+`client.ts` retains an explicitly present `body: undefined` for bodyless calls
+to its injected fetch function. `fetch.d.ts` adds the overload that accepts this
+runtime-supported input without dropping the property or substituting null.
+The global fetch guard's header reader accepts header-bearing options, and its
+body reader accepts an explicitly undefined body, which their code already
+handles. `GerritRequestError.status` stays absent when no status was supplied.
+
+`resources.ts` consumes a resource-client contract whose JSON answers retain
+the schema's inferred type. It does not depend on the JavaScript client's
+credential defaults. Its mutation context and target fields use the shared
+`ProviderReadContext` and SDK `SourceControlMutationTarget`; the standard
+mutation normalizers require a change number before target resolution.
+
+The provider uses `StandardMutationInput` from the shared normalizer. The
+mutation route selects which normalized fields are required by its operation.
+The resource wrapper attaches the acting account to rejected objects. A
+rejection that cannot take those fields still fails with `TypeError`.
+
+Review draft maps validate their container only. Draft members, timeline commit
+fields and published comment bodies retain their JSON types until their
+individual checks. Copying published comments must preserve own `__proto__`
+properties without changing the copy's prototype. A null draft still fails
+before a deletion is sent for that entry. Line-range comparison retains
+JavaScript's numeric coercion of the unchecked ending line.
+
+### Why optional property probes retain their runtime checks
+
+Dictionary lookups retain `Array.isArray` and own-property checks because names
+can select inherited Object members. String, integer and object checks still
+validate provider JSON and Git output before those values enter mapped results.
+
+### Why Gerrit defaults remain explicit
+
+The 16 KiB comment limit follows Gerrit's documented
+[`change.commentSizeLimit`](https://gerrit-review.googlesource.com/Documentation/config-gerrit.html#change.commentSizeLimit)
+default. [Related changes](https://gerrit-review.googlesource.com/Documentation/rest-api-changes.html#related-change-and-commit-info)
+omit work-in-progress status, so stack layers retain `draft: false`.
+
+Manual redirects can produce an opaque response under the
+[Fetch specification](https://fetch.spec.whatwg.org/#concept-filtered-response-opaque-redirect).
+The client rejects that response alongside ordinary HTTP redirects before
+reading the body.
+
 ### Why writes are sent once and not retried
 
 A write answered with 502 may already be applied. The durable executor handles that uncertainty; a client retry can duplicate the write.

@@ -53,7 +53,7 @@ ENV PATH=${NPM_CONFIG_PREFIX}/bin:${PATH}
 
 RUN npm config set prefix /home/openchamber/.npm-global && mkdir -p /home/openchamber/.npm-global && \
   mkdir -p /home/openchamber/.local /home/openchamber/.config /home/openchamber/.ssh && \
-  npm install -g @opencode/cli@2.3.0
+  npm install -g @opencode/cli@2.3.2
 
 # cloudflared 2026.3.0 - update digest explicitly when upgrading
 COPY --from=cloudflare/cloudflared@sha256:6d91c121b803126f7a5344005d17a9324788fc09d305b6e2560ec6040a7ae283 /usr/local/bin/cloudflared /usr/local/bin/cloudflared
@@ -71,8 +71,7 @@ COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/packages/web/package.json ./packages/web/package.json
 COPY --from=builder /app/packages/sdk/package.json ./packages/sdk/package.json
 COPY --from=builder /app/packages/sdk/dist ./packages/sdk/dist
-COPY --from=builder /app/packages/web/bin ./packages/web/bin
-COPY --from=builder /app/packages/web/server ./packages/web/server
+COPY --from=builder /app/packages/web/build ./packages/web/build
 COPY --from=builder /app/packages/web/dist ./packages/web/dist
 
 EXPOSE 3000

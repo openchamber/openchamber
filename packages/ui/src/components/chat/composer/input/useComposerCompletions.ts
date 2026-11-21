@@ -55,8 +55,6 @@ export function useComposerCompletions({
         const lastAtSymbol = value.substring(0, cursorPosition).lastIndexOf('@');
         const start = lastAtSymbol === -1 ? cursorPosition : lastAtSymbol;
 
-        // replaceRange reports the edit synchronously. Mark the inserted
-        // occurrence before its change callback resolves the next trigger.
         completingMentionRef.current = true;
         try {
             editor.replaceRange(start, cursorPosition, `@${name} `);
@@ -80,7 +78,6 @@ export function useComposerCompletions({
         completeMentionSelection(mentionPath);
     });
 
-    // A session is written as its link, which draws as a chip with its title.
     const handleSessionSelect = useStableHandler((session: Session) => {
         const message = composerText.get();
         const cursorPosition = composerRef.current?.getSelection().start ?? message.length;
@@ -99,8 +96,6 @@ export function useComposerCompletions({
         composerRef.current?.focus();
     });
 
-    // The row's content is read now: a row that cannot be read leaves no chip
-    // to send with nothing behind it, and says so.
     const handleExtensionMentionSelect = useStableHandler((mention: GuestMention) => {
         const editor = composerRef.current;
         if (editor) {
@@ -117,7 +112,6 @@ export function useComposerCompletions({
                 toast.error(t('chat.composer.extensionMention.failed', { title: mention.title, extension: mention.label }));
                 return;
             }
-            // This composer's own chip, and only while it still shows the draft it was picked in.
             if (JSON.stringify(currentChatDraftIdentityRef.current) === pickedIn) handleGuestAttach(item);
         });
     });
@@ -170,8 +164,6 @@ export function useComposerCompletions({
         composerRef.current?.focus();
     });
 
-    // "Save draft as #name": the draft goes into the snippet without the
-    // `#name` being typed, and once saved that token leaves the composer.
     const snippetDraftText = useComposerTextValue(
         composerText,
         (text) => (openAutocomplete === 'snippet' ? withoutSnippetToken(text, autocompleteQuery) : undefined),

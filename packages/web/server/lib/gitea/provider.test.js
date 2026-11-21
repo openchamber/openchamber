@@ -41,6 +41,17 @@ async function setup(routes = forkNetworkRoutes(), { execFile = missingGt, readF
 }
 
 describe('Gitea provider authentication', () => {
+  it.each([null, 1])('throws a TypeError when a resource rejects with %s', async (failure) => {
+    const { impl } = await setup(forkNetworkRoutes({
+      'GET /repos/bob/app': () => { throw failure; },
+    }));
+    await impl.auth.connectToken({ instance: ORIGIN, token: 'pat-1' });
+    const session = await impl.auth.resolveAccount({ instance: ORIGIN });
+
+    await expect(impl.resources.projectUpstream({ session, directory: '/repo', remote: 'origin' }))
+      .rejects.toThrow(TypeError);
+  });
+
   it('connects with a verified personal access token and reports the account', async () => {
     const { impl, events, calls } = await setup();
 

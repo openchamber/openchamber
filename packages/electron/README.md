@@ -190,12 +190,12 @@ so the window crashed for hours. Counting crashes in a row stops any such
 loop, and dropping the saved layout removes the trigger seen so far. Settings
 and the open chat stay; a crash they cause still stops at the fourth crash.
 
-The compatibility gate can reuse the embedded managed OpenCode CLI preflight
+The compatibility gate can reuse the embedded managed OpenCode preflight
 through `desktop_managed_opencode_compatible`. Main matches the requested
 API origin to the local backend and reads the lifecycle-owned preflight promise.
 A pending check is shared; successful checks allow UI initialization before
 server health becomes ready. Restart invalidates the result. This avoids a second
-CLI version process during startup.
+version process during startup.
 External OpenCode, remote instances, HMR backends without an embedded handle,
 and unavailable IPC retain the HTTP compatibility check. The renderer discards
 IPC results if its endpoint changes while the read is pending.
@@ -215,7 +215,7 @@ IPC results if its endpoint changes while the read is pending.
 | `app-cache.mjs` | Help > Clear Cache: drops the HTTP cache only, keeps site storage (device settings, pinned sessions, login cookies), reloads windows |
 | `session-link-gate.mjs` | Whether the main window's current document listens for session links: it does once it asks for its pending links, or after a fallback delay for a remote page that never asks. Until then links wait in the queue |
 | `pairing-deep-link.mjs` | Validates an `openchamber://connect` pairing link for the confirmation prompt. After the user confirms, the main window's renderer redeems it (`desktop_take_pending_host_actions`) with the same code as Import Link, so relay-only links pair over the E2EE tunnel. `openchamber://host/<id>` for a host with a relay leg goes through the same queue |
-| `remote-page-policy.mjs` | What remote-safe IPC accepts from and returns to another server's page: splash colour parsing, host list without credentials |
+| `remote-page-policy.mjs` | What remote-safe IPC accepts from and returns to another server's page: the commands remote pages may invoke, splash colour parsing, tray locale codes, host list without credentials |
 | `shell-environment.mjs` | Asynchronous login-shell environment discovery and shared one-shot probe |
 | `windows-app-discovery.mjs` | Windows "Open in": which apps are installed, their icons, and launch candidates. Every `where.exe` and PowerShell lookup is awaited, because a synchronous spawn per candidate froze the window for the whole scan |
 | `linux-app-discovery.mjs` | Linux "Open in": installed FreeDesktop entries, their icons, launch candidates and the chain that runs them. The generic "Terminal" id tries `xdg-terminal-exec` first with `--dir=<path>`, the only spelling the reference implementation parses. The binary runs only after its file, or the file a packaged launcher forwards to, shows support for `--dir=`, and `--print-id` runs bounded only where that file lists it, because older versions ignore that flag and `--help` and open a terminal. Explicit apps reach it only after their own entry fails. Every terminal candidate starts in the project directory; entries get it as an argument through `%f`/`%F` or a known working-directory option. A single-instance terminal without either opens in its own directory. A candidate that exits non-zero within 1 second counts as failed and the chain moves on (#6092) |
@@ -227,9 +227,10 @@ IPC results if its endpoint changes while the read is pending.
 | `scripts/electron-dev.mjs` | Desktop dev launcher with Vite HMR support |
 | `scripts/ensure-electron.mjs` | Verifies the installed Electron binary is complete and repairs it via the postinstall under Bun |
 | `scripts/build-web-assets.mjs` | Builds `packages/web` and stages UI assets into `resources/web-dist` |
-| `scripts/prepare-opencode-cli.mjs` | Downloads and stages the pinned OpenCode CLI into `resources/opencode-cli` |
+| `opencode-server/` | The OpenCode server the app ships, built from OpenCode's npm packages; see its `DOCUMENTATION.md` |
+| `scripts/prepare-opencode-server.mjs` | Bundles the pinned OpenCode server and stages it, with the target's native files, into `resources/opencode-server` |
+| `scripts/verify-opencode-server.mjs` | Checks the staged (`--staged`) or packaged (`--packaged`) OpenCode server: version, target natives, `--version` |
 | `scripts/windows-executable.mjs` | Reads the CPU architecture of a Windows executable from its PE header |
-| `scripts/opencode-cli-version.mjs` | Reads the pinned OpenCode CLI version and parses `opencode --version` output |
 | `scripts/bundle-main.mjs` | Bundles Electron main code into `dist-bundle/{entry,main,early-startup}.mjs` for packaging |
 | `scripts/rebuild-native.mjs` | Rebuilds native modules against the Electron runtime |
 | `scripts/package.mjs` | Runs `electron-builder`, with unsigned Windows builds when signing env is missing. With `OPENCHAMBER_DESKTOP_CHANNEL=canary` it passes the configuration from `scripts/canary-build-config.mjs`, which swaps in the Canary icons |
@@ -309,11 +310,18 @@ bun run lint:electron
 
 `electron:dev:bundled` builds and uses packaged web assets instead of the HMR server. Use it when testing behavior closer to a packaged app.
 
-Both dev variants run the staged OpenCode CLI from `resources/opencode-cli` (the one `prepare:opencode-cli` stages and packaged builds ship), not the `opencode` on PATH. `electron-dev.mjs` passes the directory to the backend as `OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR`; when the binary is missing it warns and falls back to PATH.
+Both dev variants run the staged OpenCode server from `resources/opencode-server` (the one `prepare:opencode-server` stages and packaged builds ship), not the `opencode` on PATH. `electron-dev.mjs` passes the directory to the backend as `OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR`; the HMR backend runs it on the machine's Node. When it is missing, the launcher warns and falls back to PATH.
 
 ## Packaging
 
-Built-in SDK extensions are built by the web build into `@openchamber/web/server/built-in-extensions`. Electron Builder unpacks that directory from ASAR, and `main.mjs` supplies its physical path to the backend. This keeps both iframe assets and future Node service entries usable. Sources and the registry live in `packages/extensions`; user data remains in the instance data directory.
+Built-in SDK extensions ship in `@openchamber/web/build/server/built-in-extensions`. Electron Builder unpacks that directory from ASAR, and `main.mjs` supplies its physical path to the backend. Sources and the registry live in `packages/extensions`; user data remains in the instance data directory.
+
+The server and CLI ship from `@openchamber/web/build/{server,bin}` through the
+package exports map. `build:web-assets` builds that output as well as the UI.
+Development selects the `openchamber-source` export condition and preloads
+`packages/web/scripts/register-server-sources.mjs`. The resolver maps missing
+server and CLI `.js` imports to their converted `.ts` sources, so development
+keeps working without a backend build.
 
 From the repo root:
 
@@ -324,7 +332,7 @@ bun run electron:build
 That runs, in order:
 
 1. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
-2. `prepare:opencode-cli` to download/cache the pinned OpenCode CLI and copy it into `packages/electron/resources/opencode-cli`.
+2. `prepare:opencode-server` to bundle the pinned OpenCode server and stage it, with the target architecture's native files, into `packages/electron/resources/opencode-server`.
 3. `prepare:ripgrep` to download/cache the target architecture's ripgrep and copy it into `packages/electron/resources/ripgrep`.
 4. `bundle:main` to create `packages/electron/dist-bundle/{entry,main,early-startup}.mjs`.
 5. `rebuild:native` to rebuild native modules for Electron.
@@ -332,7 +340,16 @@ That runs, in order:
 
 Build output goes to `packages/electron/dist`.
 
-Electron Builder copies the `@openchamber/web` workspace package whole, ignoring its `files` field, so `build.files` in `package.json` excludes what the packaged runtime never loads: the web package's `dist` (packaged builds serve `Resources/web-dist` through `OPENCHAMBER_DIST_DIR`), its `src`, configs, tests and stray tarballs; TypeScript sources, source maps and Markdown other than licenses from every dependency; `bun-pty`, which only the Bun runtime imports; luxon builds other than `build/node` (CommonJS, for cron-parser) and `build/es6` (ESM, for the server); and `node-pty` prebuilds other than `${platform}-${arch}` (the Electron-rebuilt `build/Release` binary loads first; `${platform}` is the build host, which matches the target because `rebuild:native` already builds for the host OS). Keep these exclusions in the top-level `files`: Electron Builder treats a platform-level `files` list as its own file set, and one holding only exclusions copies the whole package directory into the archive. The `afterPack` hook then reads the `app.asar` header (`scripts/packaged-app-contents.cjs`) and fails the build when anything outside `node_modules` other than the bundled main files, `preload.mjs` and `package.json` is packed, when the web `dist` is packed, or when the bundled main files, the web server entry and manifest, or the unpacked git helpers are missing.
+Electron Builder copies workspace packages regardless of their `files` field.
+The top-level `build.files` rules exclude the web package's original `server`,
+`bin`, UI `dist`, sources, configs and tests. The UI ships once in
+`Resources/web-dist`, selected through `OPENCHAMBER_DIST_DIR`. The web package's
+inline-source maps stay packaged; other dependency maps, TypeScript and
+non-license Markdown stay out. Existing exclusions for Bun-only modules,
+unused luxon builds and other-platform native binaries remain in place.
+`afterPack` checks the resulting ASAR for the emitted entry, its source map,
+manifest, built-in registry and unpacked git helpers. It rejects original
+server and CLI trees, duplicate web UI output and unexpected app files.
 
 Windows voice-model installation uses the native decoder from `7zip-bin`, a runtime dependency of the web backend. Its executable stays in `app.asar.unpacked` so the server can spawn it directly with a hidden window. Windows packaging keeps only the target decoder architecture; macOS and Linux packaging exclude all decoder binaries. The `afterPack` check requires the target Windows decoder in both the ASAR header and the unpacked directory, including ARM64 builds on x64 hosts. Extraction and staging remain owned by the [dictation module](../web/server/lib/dictation/DOCUMENTATION.md).
 
@@ -352,7 +369,7 @@ Making terminals and OpenCode their own responsible process (a private `responsi
 2. `build-installer` puts the signed `OpenChamber.exe` into the same unpacked app and builds the installer from it (`--prepackaged`), with the signed uninstaller in place. The request uses `windows-installer`.
 3. `finalize` regenerates the blockmap and `latest.yml`, which electron-builder computed from the unsigned installer.
 
-Only those executables are ours. Electron's DLLs, `elevate.exe`, the bundled OpenCode CLI, ripgrep and node-pty's binaries come from upstream projects, and SignPath Foundation's terms forbid signing them with our certificate; they ship unsigned inside the signed installer.
+Only those executables are ours. Electron's DLLs, `elevate.exe`, the bundled OpenCode server's native files, ripgrep and node-pty's binaries come from upstream projects, and SignPath Foundation's terms forbid signing them with our certificate; they ship unsigned inside the signed installer.
 
 #### Why Windows releases get their own workflow
 
@@ -372,7 +389,7 @@ macOS packaging needs Xcode/build tools for notarized builds and icon asset comp
 
 Windows packaging needs NSIS support through `electron-builder`. If no Windows signing env is set, `package.mjs` disables code signing and builds an unsigned installer. `build.nsis.include` adds `resources/installer.nsh`, which declares the installer and uninstaller DPI-aware; without it Windows scales their windows as a bitmap and they look blurred at a display scale above 100% (#5010). Windows updates use `latest.yml` for x64 and the `latest-arm64.yml` channel for ARM64 so each installation resolves an architecture-matching installer.
 
-Linux packages must be built natively. Set `OPENCHAMBER_TARGET_ARCH=x64` or `OPENCHAMBER_TARGET_ARCH=arm64` when packaging; the build rejects a target that does not match the Linux host. The same target selects the bundled OpenCode CLI, native Electron rebuild, and Electron Builder architecture. Linux identity is stable across architectures: executable `openchamber`, desktop file `openchamber.desktop`, icon `openchamber`, and `StartupWMClass=openchamber`.
+Linux packages must be built natively. Set `OPENCHAMBER_TARGET_ARCH=x64` or `OPENCHAMBER_TARGET_ARCH=arm64` when packaging; the build rejects a target that does not match the Linux host. The same target selects the bundled OpenCode server's native files, native Electron rebuild, and Electron Builder architecture. Linux identity is stable across architectures: executable `openchamber`, desktop file `openchamber.desktop`, icon `openchamber`, and `StartupWMClass=openchamber`.
 
 The Linux icon is the 512×512 `resources/icons/app-icon.png`, which the AppImage carries at `usr/share/icons/hicolor/512x512/apps/openchamber.png`. Keep it a PNG of at most 512×512: electron-builder's default AppImage path puts an SVG at `hicolor/scalable/` without the `apps/` directory, and the hicolor theme declares no size above 512, so in both cases launchers cannot resolve `Icon=openchamber` (#4766, #2934).
 
@@ -380,7 +397,7 @@ GNOME 46+ shows a window's icon only through a `.desktop` file that matches its 
 
 The `.deb` and `.rpm` install to `/opt/OpenChamber` and use their own `resources/linux/after-install.tpl` and `after-remove.tpl`: electron-builder's scripts minus the `/usr/bin/openchamber` link, because `openchamber` on `PATH` is the CLI of `@openchamber/web` and the link would replace it. The menu entry starts `/opt/OpenChamber/openchamber`. The package `Maintainer` and `Homepage` come from `linux.maintainer` and `homepage` in `package.json`; `fpm` refuses to build a `.deb` without them.
 
-After packaging, run `bun run --cwd packages/electron verify:linux-appimage`. The verifier extracts the final AppImage and checks its ELF architecture, desktop identity, theme icon and `.DirIcon`, Electron executable, pinned OpenCode CLI version and architecture, and all packaged native `.node` modules.
+After packaging, run `bun run --cwd packages/electron verify:linux-appimage`. The verifier extracts the final AppImage and checks its ELF architecture, desktop identity, theme icon and `.DirIcon`, Electron executable, the bundled OpenCode server (pinned version and the architecture of its native files), and all packaged native `.node` modules.
 
 Running a packaged Linux AppImage requires FUSE (`libfuse.so.2`, typically `libfuse2` / `libfuse2t64` on Debian/Ubuntu). Without FUSE, start with `APPIMAGE_EXTRACT_AND_RUN=1`. Keep the AppImage on a writable path so in-app updates can replace it.
 
@@ -442,16 +459,29 @@ window and works while the main window is hidden or minimized without revealing
 it. The menu can open with cached usage; the renderer pushes a new tray snapshot
 when the fetch lands. No quota timer runs for the tray.
 
-## Bundled OpenCode CLI
+The tray menu and tooltip use `tray-locales.mjs`, sharing locale normalization
+and common actions with `menu-locales.mjs`. The controller seeds the initial
+empty menu in the preferred locale before the renderer sends live state.
+The controller retains its last snapshot so `desktop_set_tray_locale` can rebuild
+labels immediately, even while session activity is idle. That command is
+remote-safe and accepts only a locale the tray has labels for, so a window
+loading its UI from a remote instance moves the tray to its language while
+`desktop_set_locale` (native menus) stays local-only. Only the window that
+published the snapshot the tray shows relabels it; a Mini Chat or another
+window's locale is kept and applied when that window publishes next. The renderer resolves
+instance and quota fallback text again when its dictionary loads; user-provided
+host and session names remain literal.
 
-Packaged Desktop builds include the official OpenCode CLI release pinned by `opencodeCli.version` in `packages/electron/package.json` (OpenChamber requires OpenCode 2.x). OpenCode 2.x ships on npm rather than as GitHub release assets, so `prepare:opencode-cli` downloads the platform package tarball (`@opencode/cli-<os>-<arch>`, the same one OpenCode's own installer uses), caches it under `packages/electron/.cache/opencode-cli`, stages `opencode` or `opencode.exe` into `resources/opencode-cli`, and verifies `opencode --version` before packaging. Re-running the step is fast when the staged binary already matches the pinned version. The target architecture comes from `OPENCHAMBER_TARGET_ARCH` or `ELECTRON_BUILDER_ARCH`, falling back to the build host. A Windows build for another architecture does not run the binary, because the arm64 release job runs on an x64 runner that cannot start it; there the step checks the version in the package's `package.json` instead; on Windows `verify:opencode-cli` and `verify:opencode-cli:packaged` also read the binary's PE header (`scripts/windows-executable.mjs`) and fail when it was built for another architecture.
+## Bundled OpenCode server
+
+Packaged Desktop builds include OpenCode's server at the exact `@opencode/server` version pinned in `devDependencies` of `packages/electron/package.json` (OpenChamber requires OpenCode 2.x), built from OpenCode's npm packages rather than shipped as OpenCode's CLI binary. `prepare:opencode-server` bundles `opencode-server/serve.mjs` with Bun into `resources/opencode-server`, downloads the target platform's native packages (node-pty, the file watcher, FFF and its FFI binding, OpenCode's persistent PTY daemon) from npm at the versions their parent packages name, caches them under `packages/electron/.cache/opencode-server`, and stages their files under `resources/opencode-server/assets` with a `manifest.json`. The target architecture comes from `OPENCHAMBER_TARGET_ARCH` or `ELECTRON_BUILDER_ARCH`, falling back to the build host. `verify:opencode-server` and `verify:opencode-server:packaged` check the version, read the header of every native file (Mach-O, PE or ELF, `scripts/binary-architecture.mjs`) against the target architecture, and run `--version`: on the packaged app's own executable on macOS and Windows when this host can run it, else on Node, which needs no native code for it (the Linux executable loads GTK first, which CI runners need not have). The app runs the server on its own executable with `ELECTRON_RUN_AS_NODE=1`; `opencode-server/DOCUMENTATION.md` has the contract.
 
 Managed local Desktop startup prefers OpenCode binaries in this order:
 
 0. `opencodeBinary` in the machine policy file, when an administrator pinned one. It has no fallback: an unusable pin stops startup instead of trying the entries below (see `packages/web/server/lib/enterprise-mode.js`).
 1. `settings.opencodeBinary`.
 2. Environment overrides: `OPENCODE_BINARY`, `OPENCODE_PATH`, `OPENCHAMBER_OPENCODE_PATH`, or `OPENCHAMBER_OPENCODE_BIN`.
-3. The bundled Desktop CLI in `process.resourcesPath/opencode-cli`.
+3. The bundled Desktop server in `process.resourcesPath/opencode-server` (`OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR` in development). It is a script, so it never goes on PATH or into `OPENCODE_BINARY`: terminals and agent shells keep the user's own `opencode`.
 4. System installs discovered from PATH.
 5. Known npm/Bun/Homebrew/Scoop/Chocolatey and other standard install locations.
 6. Platform discovery through `where opencode` on Windows or a login shell on macOS/Linux.
@@ -475,7 +505,6 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
 | `OPENCHAMBER_HMR_API_PORT` | Preferred API port for desktop dev, default `3901` |
 | `OPENCHAMBER_ELECTRON_REMOTE_DEBUGGING_PORT` | Development only: opens Chromium's DevTools protocol on this loopback port so a debugger can attach to the dev window; ignored in packaged builds |
 | `OPENCHAMBER_RUNTIME=desktop` | Set by Electron before starting the web server |
-| `OPENCHAMBER_OPENCODE_CLI_VERSION` | Optional packaging override for the bundled OpenCode CLI version; defaults to `opencodeCli.version` in `packages/electron/package.json` |
 | `OPENCHAMBER_TARGET_ARCH` | Explicit desktop package architecture (`x64` or `arm64`); Linux requires it to match the native host |
 | `OPENCHAMBER_DESKTOP_NOTIFY=true` | Enables desktop notification flow in the web server |
 | `OPENCHAMBER_SKIP_API_COMPRESSION=true` | Defaulted by Desktop to reduce local CPU overhead |
@@ -555,6 +584,12 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   drops session cookies (no expiry) on quit, and many sign-ins live in one, so
   before quitting they are rewritten with an expiry (`browser-panel-cookies.mjs`),
   as Chrome keeps them when it continues where you left off.
+  Pages see a plain Chrome user agent, without the `OpenChamber/` and
+  `Electron/` tokens, because some sites refuse Electron. Google's sign-in
+  hosts (`accounts.google.com`, `accounts.youtube.com`) are the exception:
+  Google rejects an embedded browser that claims to be Chrome ("This browser
+  or app may not be secure") and lets one that names Electron through, so
+  requests to those hosts get the `Electron/` token back in their header.
 - `window.open` from a page in that session (`browserPanelWindowOpenTarget`): a
   scripted popup opens as a sandboxed child window of the app window, keeping
   `window.opener`, so a Google, GitHub or SSO sign-in can post its result back;
@@ -568,8 +603,11 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   same as a target=_blank link, so the session's preload (`browser-panel-preload.cjs`, exposes nothing) marks every
   `window.open` that keeps its opener as a popup. A link aimed at a new tab is
   noopener by default and becomes a panel tab
-  (`openchamber:browser-panel-open-tab` to the renderer). Pages of an
-  isolated space keep everything in place, so nothing leaves the space's session.
+  (`openchamber:browser-panel-open-tab` to the renderer). The event carries
+  Electron's referrer URL and policy for the new tab's first load; a renderer
+  older than the shell ignores it. Pages of an isolated space keep everything in
+  place, so nothing leaves the space's session; a link loaded in place sends the
+  same referrer.
   Popups close with the window that opened them and do not count as app windows
   when closing the last one hides the app on macOS.
 
@@ -593,7 +631,7 @@ Add new native capabilities in this order:
 
 1. Add or update the `preload.mjs` bridge only if a new renderer-facing shape is needed.
 2. Add the real command handling in `main.mjs` under `openchamber:invoke`.
-3. Gate privileged commands in main process logic so remote pages cannot access local filesystem or shell capabilities. A command added to `COMMANDS_SAFE_FOR_REMOTE` takes input from, and answers, another server's page: parse what it stores and strip credentials from what it returns (`remote-page-policy.mjs`). Splash colours, for example, end up in the trusted splash page, and `desktop_hosts_get` hands remote pages the host list without tokens or auth headers.
+3. Gate privileged commands in main process logic so remote pages cannot access local filesystem or shell capabilities. A command added to `COMMANDS_SAFE_FOR_REMOTE` (`remote-page-policy.mjs`) takes input from, and answers, another server's page: parse what it stores and strip credentials from what it returns (`remote-page-policy.mjs`). Splash colours, for example, end up in the trusted splash page, and `desktop_hosts_get` hands remote pages the host list without tokens or auth headers.
 4. Keep shared UI runtime contracts in `packages/ui` and server/runtime APIs in `packages/web` when the behavior is not inherently native.
 
 ## Update channels and Canary

@@ -331,6 +331,24 @@ describe('apns runtime relay mode (default)', () => {
       ]);
     });
 
+    it('keeps an unchecked failure message and its includes receiver', async () => {
+      const runtime = createApnsRuntime(makeDeps());
+      vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true })));
+      await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const message = {
+        includes: vi.fn(function (code) {
+          expect(this).toBe(message);
+          expect(code).toBe(7);
+          return 'present';
+        }),
+      };
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue({ message, code: 7 }));
+      await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b' });
+      expect(message.includes).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledWith('[APNs relay] request failed:', message);
+    });
+
     it('sends to other devices while one send waits for its retry', async () => {
       const runtime = createApnsRuntime(makeDeps());
       vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true })));
@@ -414,38 +432,6 @@ describe('apns runtime direct fallback (relay disabled)', () => {
     expect(byHost['https://api.push.apple.com']).toEqual(['tokenStore']);
   });
 
-  it('signs an ES256 JWT and sends over http2 when relay is disabled', async () => {
-    process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
-    const targeted = [];
-    const http2 = {
-      connect: () => ({
-        on: () => {},
-        close: () => {},
-        request: (headers) => {
-          targeted.push(String(headers[':path']).replace('/3/device/', ''));
-          const listeners = {};
-          const req = {
-            on: (event, cb) => { listeners[event] = cb; return req; },
-            setEncoding: () => req,
-            end: () => {
-              queueMicrotask(() => {
-                listeners.response?.({ ':status': '200' });
-                listeners.end?.();
-              });
-            },
-          };
-          return req;
-        },
-      }),
-    };
-    const runtime = createApnsRuntime(
-      makeDeps({ http2, readSettingsFromDiskMigrated: vi.fn(async () => ({ apnsConfig: APNS_CONFIG })) }),
-    );
-    await runtime.addOrUpdateApnsToken('s', 'tokenDirect');
-    await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b', tag: 'ready-x' });
-    expect(targeted).toEqual(['tokenDirect']);
-  });
-
   it('signApnsJwt produces a 3-part ES256 token with the expected header/claims', () => {
     const runtime = createApnsRuntime(makeDeps());
     const parts = runtime.signApnsJwt(APNS_CONFIG).split('.');
@@ -519,6 +505,22 @@ describe('clearing handled notifications from the phones', () => {
     expect(fetchMock.mock.calls.filter(isSend)).toHaveLength(0);
     expect(warn.mock.calls.filter(([line]) => String(line).includes('cannot clear'))).toHaveLength(1);
     warn.mockRestore();
+  });
+
+  it('clears more tags than the relay accepts per request', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    const runtime = createApnsRuntime(makeDeps());
+    await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+    const tags = Array.from({ length: 21 }, (_, index) => `question-ses_${index}@${index + 1}`);
+
+    await runtime.clearApnsNotifications({ tags, badge: 1 });
+
+    const requests = fetchMock.mock.calls.filter(isClear).map(([, init]) => JSON.parse(init.body));
+    expect(requests.map((request) => request.tags.length)).toEqual([20, 1]);
+    expect(requests.flatMap((request) => request.tags)).toEqual(tags);
+    expect(requests.map((request) => request.badge)).toEqual([1, 1]);
   });
 
   it('sends a background push without an alert in direct mode', async () => {

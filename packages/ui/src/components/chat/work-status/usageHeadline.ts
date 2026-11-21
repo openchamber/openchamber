@@ -1,4 +1,5 @@
 import type { UsageProviderGroup, UsageLimitRow } from '@/components/usage/usageGroups';
+import { openRouterSpendSelection } from '@/lib/quota/windowKeys';
 
 
 const QUOTA_PROVIDER_ALIASES = new Map<string, string>([
@@ -33,9 +34,13 @@ export const pickUsageHeadline = (
   const providerRows = group.rows.filter((row) => !row.subtitle);
   const rows = providerRows.length > 0 ? providerRows : group.rows;
 
+  const windowRows = new Map(rows.filter((row) => row.key.startsWith('window-')).map((row) => [row.key.slice('window-'.length), row]));
+  const openRouter = openRouterSpendSelection(group.providerId, Object.fromEntries([...windowRows].map(([key, row]) => [key, row.window])));
+  const candidates = openRouter ? openRouter.capKeys.flatMap((key) => windowRows.get(key) ?? []) : rows;
+
   let best: UsageLimitRow | null = null;
   let bestSeconds = Number.POSITIVE_INFINITY;
-  for (const row of rows) {
+  for (const row of candidates) {
     const seconds = row.window.windowSeconds;
     if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) continue;
     if (seconds < bestSeconds) {
@@ -44,5 +49,5 @@ export const pickUsageHeadline = (
     }
   }
 
-  return { group, row: best ?? rows[0] };
+  return { group, row: best ?? candidates[0] ?? (openRouter ? windowRows.get(openRouter.fallbackKey) : undefined) ?? rows[0] };
 };

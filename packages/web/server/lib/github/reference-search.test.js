@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  buildReferenceSearchQuery, fetchDiscussionDetail, fetchReferenceDetail, parseReferenceLink, parseReferenceLookup, readPullStatusRefs,
+  buildReferenceSearchQuery, fetchDiscussionDetail, fetchReferenceDetail, readPullStatusRefs,
   readReferencePeople, readReferenceState, reviewCommentExcerpt, searchGitHubReferences, searchGitHubReferencesAcross, toReference,
 } from './reference-search.js';
+import { parseReferenceLink, parseReferenceLookup } from './reference-links.js';
 
 const origin = { owner: 'acme', repo: 'app', source: 'origin' };
 const upstream = { owner: 'Upstream', repo: 'App', source: 'upstream' };
@@ -211,6 +212,26 @@ describe('searchGitHubReferencesAcross', () => {
     expect(url.items).toHaveLength(1);
     expect(calls).toHaveLength(1);
     expect(calls[0].n0).toBe('repo41');
+    calls.length = 0;
+    const enterprise = [{ accountId: 'e', octokit, host: 'ghe.example.com', repos: entries }];
+    const own = await searchGitHubReferencesAcross({ ...options, groups: enterprise, text: 'https://ghe.example.com/acme/repo41/pull/7' });
+    expect(own.items).toHaveLength(1);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].n0).toBe('repo41');
+    const searched = [];
+    const searchOnly = { graphql: async (_query, variables) => {
+      searched.push(variables);
+      return { search: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } };
+    } };
+    await searchGitHubReferencesAcross({ ...options, groups: [{ ...enterprise[0], octokit: searchOnly }], text: 'https://www.github.com/acme/repo41/pull/7' });
+    expect(searched.length).toBeGreaterThan(0);
+    expect(searched.every((call) => typeof call.q === 'string')).toBe(true);
+    searched.length = 0;
+    calls.length = 0;
+    const mixed = [enterprise[0], { accountId: 'p', octokit: searchOnly, host: 'github.com', repos: entries }];
+    const pasted = await searchGitHubReferencesAcross({ ...options, groups: mixed, text: 'https://ghe.example.com/acme/repo41/pull/7' });
+    expect(pasted.items).toHaveLength(1);
+    expect(searched).toHaveLength(0);
   });
 
   it('keeps every page newest first, holding back what a quieter search read until the busier one passes it', async () => {
@@ -304,6 +325,13 @@ describe('parseReferenceLink', () => {
     expect(parseReferenceLink('https://ghe.example.com/a/b/issues/1', 'github.com')).toBeNull();
     expect(parseReferenceLink('#12', 'github.com')).toBeNull();
     expect(parseReferenceLink('https://github.com/a/b', 'github.com')).toBeNull();
+  });
+
+  it('matches an Enterprise host by its full name, www prefix included', () => {
+    expect(parseReferenceLink('https://www.ghe.example.com/a/b/pull/3', 'www.ghe.example.com')).toEqual({ owner: 'a', repo: 'b', number: 3 });
+    expect(parseReferenceLink('https://www.ghe.example.com/a/b/pull/3', 'ghe.example.com')).toBeNull();
+    expect(parseReferenceLink('https://other.example.com/a/b/pull/3', 'ghe.example.com')).toBeNull();
+    expect(parseReferenceLink('https://ghe.example.com:443/a/b/pull/3', 'ghe.example.com')).toEqual({ owner: 'a', repo: 'b', number: 3 });
   });
 });
 

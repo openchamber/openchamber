@@ -121,7 +121,9 @@ the user can want independently:
   Mode, like render: the chat draws the images in place of the call's row from
   its stored result, which an `execute` script would hide.
 - `openchamber_secret` — `secret.run`, `secret.request` and `secret.forget`.
-  `secret.run` asks OpenCode's shell permission for its command line in the
+  Its description and parameters live in `secret-tool.ts`, under names of
+  their own, since `label` means something else in the web tool. `secret.run`
+  asks OpenCode's shell permission for its command line in the
   plugin, before the call reaches the server: `ctx.permission.assert` with
   action `shell`, the line `secretRunCommandLine` draws as the resource and
   `<program> *` as the pattern to save, so the session's shell rules apply as
@@ -134,7 +136,8 @@ the user can want independently:
   reported, so no payload field can reach another session's remembered values.
   `secret.request` is a
   card where the user types one secret the agent asked for (`label`, `reason`,
-  optional `placeholder`). Both wait, with the same plugin machinery as a page
+  optional `placeholder`). Both wait, and so does a `secret.forget` with
+  `saved: true`, which the user confirms on a card, with the same plugin machinery as a page
   with `awaitAnswer` (call id, `timeout: false`, the `session.prompt` hook
   that ends the wait when the user writes in the chat and leaves it running
   for an agent's or a queued prompt, the inbox events for the user's prompt
@@ -279,7 +282,13 @@ metadata and failure handling identical, which is what the caller depends on.
    authenticated HTTP adapter, so Goal Mode ordering, CLI wait behavior,
    result delivery, partial-failure reporting, and scheduled-task contracts
    have one owner.
-6. Each action definition owns a short presentation title and a separate
+6. While the `openchamber` tool is on, the plugin also hooks OpenCode's
+   `compaction` and asks `POST /api/openchamber/agent-tool/lead-compaction`
+   (same address and token, route in `../session-lead/server.js`) whether this
+   compaction is a lead's sleep compaction. A summary in the answer becomes the
+   compaction's result and OpenCode makes no model call; no summary, or any
+   failure to ask, leaves the compaction to the model.
+7. Each action definition owns a short presentation title and a separate
    agent-facing description. The generated schema uses the description to state
    required inputs or one non-obvious behavior, while completed calls use the
    short title in native tool metadata.
@@ -514,3 +523,48 @@ tool fails rather than driving the browser. An unresolvable action answers with
 the actions that tool actually has, because an error that only says
 "unsupported" leaves the model to guess a second wrong name — which is exactly
 what happened before this existed.
+
+## TypeScript boundary
+
+`callback-address.ts` accepts listener and socket addresses as strings, null or
+undefined. An absent host and a wildcard bind use loopback. Normalization keeps
+the existing trimming, case folding and IPv4-mapped IPv6 handling. Its callers
+are this folder's runtime and `../git/repository-credential-runtime.js`; imports
+keep their `.js` specifiers.
+
+`runtime.ts` owns the callback envelope, plugin options, dependency contract
+and result envelope. Action fields remain unchecked until their owning service
+validates them. `AgentToolInput` extends the control service's `ControlInput`
+with the adapter and tool-specific fields. Execution options and successful
+results come from `../openchamber-control/service.js`; partial failure fields
+retain the unchecked types exported by `../openchamber-control/error.js`.
+Express uses `../shared/http-contracts.js`.
+
+The injected execution and directory-resolution callbacks are optional typed
+functions, so their presence checks no longer repeat `typeof`. Every `typeof`
+in generated JavaScript remains: tool inputs, parsed JSON, callback responses
+and the OpenCode permission capability cross an untyped process boundary.
+Array and own-property checks remain for revived inputs, parameter selection
+and action-title dictionaries, including names inherited from Object.
+
+The runtime imports action definitions, workflow limits, render and secret
+helpers, sharing limits, shared guards and the callback-address helper. Its
+external inputs are HTTP JSON, socket addresses and authorization headers,
+listener host and port, the injected session-directory resolver, and the control
+service's returned values and thrown failures. The generated plugin additionally
+reads callback URL/token and proxy environment variables, tool inputs, session
+hooks, inbox events, permission capabilities and HTTP response JSON. Their
+validation and failure handling stay unchanged.
+
+### Why plugin source stays standalone JavaScript
+
+OpenCode loads the generated plugin through a bare dynamic import and requires
+a directory with a package manifest resolving its entrypoint. The plugin imports
+nothing and declares plain JSON Schema. Its generated comments and source text
+remain unchanged by the server's TypeScript conversion.
+
+### Why workflow permission rules are session-overridable
+
+OpenCode applies configuration rules to every agent before reading the session's
+own rules. The managed rule denies the workflow answer tool globally, while a
+workflow agent's session can allow it.

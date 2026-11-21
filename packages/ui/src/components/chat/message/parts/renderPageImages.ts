@@ -10,7 +10,7 @@ import {
     resolveWorkspaceMarkdownImageSource,
 } from '../../markdown/markdownImageAssets';
 
-const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>\n]*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
+const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])(?:(?!\1)[^<>\n])*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
 const PAGE_IMAGE_BUDGET_BYTES = 25 * 1024 * 1024;
 const OLDER_SERVER_MAX_IMAGES = 12;
 

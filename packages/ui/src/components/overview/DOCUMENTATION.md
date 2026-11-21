@@ -4,9 +4,10 @@
 
 The overview page: one read of what waits on the user, what runs, what looks
 done, and which worktrees can go, across every registered project. It opens
-from the sidebar header and the command palette on desktop and web, and from
-the sessions drawer footer on the phone (`OverviewPage layout="mobile"`). VS
-Code has none: without a server there are no done hints, recaps or worktrees.
+from the sidebar's Pages section and the command palette on desktop and web,
+and from the sessions drawer's More menu on the phone
+(`OverviewPage layout="mobile"`). VS Code has none: without a server there are
+no done hints, recaps or worktrees.
 
 Why the page exists, every decision behind its rules and its look, and what is
 left to build are in `ADR.md` beside this file.

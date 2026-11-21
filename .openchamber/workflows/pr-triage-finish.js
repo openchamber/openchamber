@@ -10,7 +10,7 @@ export const meta = {
 // Nothing here pushes or writes to GitHub: the coordinator runs finish.sh per
 // READY PR after the maintainer's go, which rebases onto current main first.
 const SKILL = '.agents/skills/triage-prs/SKILL.md';
-const SOL = 'openai/gpt-6.1-sol';
+const SOL = 'openai/gpt-6.2-sol';
 // The review runs on another model than the fix, so it reads what Opus read past.
 const OPUS = 'claude-agent/opus#medium';
 const models = { fix: OPUS, review: SOL, apply: OPUS, ...(args.models || {}) };

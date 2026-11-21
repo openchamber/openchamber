@@ -29,9 +29,15 @@ Agentes de um workflow em execução não podem iniciar um workflow próprio.
 
 ## Iniciar execuções sem aprovação
 
-Em **Ferramenta de workflows**, ative **Iniciar execuções sem minha aprovação** para que uma execução iniciada pelo agente comece na hora. O card dela a mostra em execução, sem o botão **Executar workflow**, e você ainda pode encerrá-la com **Parar**. Isso serve para trabalho que você combinou e depois deixou andando: por exemplo, você pede ao agente que teste alguns modelos em um piloto pequeno e rode o trabalho todo no melhor, e ele pode iniciar essa execução enquanto você está fora.
+Em **Ferramenta de workflows**, **Iniciar execuções sem minha aprovação** decide se uma execução iniciada pelo agente espera o seu clique:
 
-O agente continua propondo o plano e os modelos no chat antes de iniciar uma execução. A configuração pula só o clique. O servidor a lê em cada execução, então com a caixa desmarcada toda execução volta a esperar por você. Os limites abaixo continuam os mesmos.
+- **Não**: toda execução espera até você selecionar **Executar workflow**
+- **Para leads**: execuções iniciadas por um [lead](/pt-br/leads/) começam na hora, todas as outras sessões continuam esperando
+- **Sempre**: toda execução começa na hora
+
+Uma execução que começa na hora aparece em execução no card dela, sem o botão **Executar workflow**, e você ainda pode encerrá-la com **Parar**. Isso serve para trabalho que você combinou e depois deixou andando: por exemplo, você pede ao agente que teste alguns modelos em um piloto pequeno e rode o trabalho todo no melhor, e ele pode iniciar essa execução enquanto você está fora.
+
+Uma sessão comum continua propondo o plano e os modelos no chat antes de iniciar uma execução; a configuração pula só o clique. Um lead conduz o trabalho dele sozinho, então com **Para leads** ele pode iniciar uma execução sem perguntar antes. O servidor lê a configuração em cada execução, então voltar para **Não** faz toda execução esperar por você de novo. Os limites abaixo continuam os mesmos.
 
 ## Modelos e custo
 

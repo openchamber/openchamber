@@ -5,9 +5,13 @@ import type { useComposerEditorState } from './useComposerEditorState';
 import type { useComposerEditorActions } from './useComposerEditorActions';
 import type { useComposerDraftText } from './useComposerDraftText';
 import type { useComposerAttachmentWork } from './useComposerAttachmentWork';
+import type { useComposerLargePasteState } from './useComposerLargePasteState';
+import type { useComposerMobileShell } from './useComposerMobileShell';
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
-import { useInputStore } from '@/sync/input-store';
+import { MAX_ATTACHMENT_BYTES, useInputStore } from '@/sync/input-store';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
+import { formatFileSize } from '@/lib/fileSize';
 import { getChatDraftIdentityKey } from '@/lib/chatDraftPersistence';
 import { toast } from '@/components/ui';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -15,6 +19,10 @@ import { assignImageAttachmentFilenames, buildAttachmentCitationText, buildImage
 import { assignFileAttachmentFilenames, attachmentsCitedIn } from '@/lib/attachmentIdentity';
 import { buildImagePasteInsertion, withInlineInsertionBoundaries } from '../../composer/text';
 import { getFileMentionInputSourceForInsertedText } from './composerMentionTokens';
+import { isDocumentAttachmentFilename } from '@/sync/attachment-files';
+import { isCapacitorApp } from '@/lib/platform';
+import { beginLargeTextPasteOffer, resolveLargeTextPasteOffer } from '../../composer/largeTextPasteOffer';
+import type { LargeTextPasteChoiceAction } from '../../composer/ui/LargeTextPasteChoice';
 
 type Dependencies = {
     editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
@@ -24,10 +32,12 @@ type Dependencies = {
     editorActions: Pick<ReturnType<typeof useComposerEditorActions>, 'insertTextAtSelection'>;
     selection: Pick<ReturnType<typeof useComposerSelection>, 'currentModelMetadata' | 'currentModelId' | 'currentProviderId'>;
     sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'currentDirectory' | 'addAttachedFile' | 'chatDraftIdentity' | 'attachedFiles'>;
+    largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteOfferIdRef' | 'setLargeTextPasteOffer'>;
+    mobileShell: Pick<ReturnType<typeof useComposerMobileShell>, 'mobileShell'>;
 };
 
 export function useComposerFileIntake({
-    editorState, draftText, i18n, attachmentWork, editorActions, selection, sessionScope,
+    editorState, draftText, i18n, attachmentWork, editorActions, selection, sessionScope, largePasteState, mobileShell: mobileShellState,
 }: Dependencies) {
     const { composerRef } = editorState;
     const { composerText } = draftText;
@@ -36,6 +46,8 @@ export function useComposerFileIntake({
     const { insertTextAtSelection } = editorActions;
     const { currentModelMetadata, currentModelId, currentProviderId } = selection;
     const { currentDirectory, addAttachedFile, chatDraftIdentity, attachedFiles } = sessionScope;
+    const { largeTextPasteOfferIdRef, setLargeTextPasteOffer } = largePasteState;
+    const { mobileShell } = mobileShellState;
 
     const insertCitationAtSelection = React.useCallback((citationText: string, leadingText: string) => {
         if (!citationText && !leadingText) return;
@@ -59,16 +71,6 @@ export function useComposerFileIntake({
 
     const currentModelKey = `${currentProviderId ?? ''}/${currentModelId ?? ''}`;
 
-    /**
-     * Saves the images where OpenCode runs and cites each saved one in the
-     * draft as `[name](path)`, so the model, a subagent or a tool opens it by
-     * path: in place of the attachment for a model that takes no images
-     * (#5087), next to it for one that does (#5218). Each image gets a name no
-     * attachment or link in the draft uses yet. Answers both groups under
-     * those names; the caller attaches the unsaved ones as before, and in
-     * `alongside` the `attachable` saved ones too. A HEIC saved unconverted
-     * gets only its link (`prepareImageToSave`).
-     */
     const saveImagesWithPathCitation = React.useCallback(async (
         files: File[],
         leadingText: string,
@@ -81,7 +83,6 @@ export function useComposerFileIntake({
             ...findImagePathCitationNames(composerRef.current?.getValue() ?? composerText.get()),
         ]);
         const images = files.map((file, index) => renameFileForAttachmentCitation(file, names[index]));
-        // A cold or remote OpenCode can take seconds; this toast says what is going on.
         const savingToastId = toast.loading(t('chat.chatInput.toast.imagesSaving', { files: images.map((file) => file.name).join(', ') }));
         const prepared = await Promise.all(images.map((file) => prepareImageToSave(file).catch(() => null)));
         const readable = prepared.filter((entry) => entry !== null);
@@ -104,7 +105,6 @@ export function useComposerFileIntake({
         };
         const unsaved = images.filter((_file, index) => !isSaved(index));
         if (results.some((result) => 'error' in result)) {
-            // The error text can carry the path; the name says what failed.
             console.warn('[chat] Saving an image failed', results.flatMap((result) => 'error' in result ? [result.error.name] : []));
         }
 
@@ -114,11 +114,8 @@ export function useComposerFileIntake({
             const savedFiles = saved.map((result) => result.filename).join(', ');
             const folder = firstPath.slice(0, firstPath.lastIndexOf('/'));
             if (mode === 'alongside') {
-                // One toast for a run of pastes; the newest names the latest folder.
                 toast.info(t('chat.chatInput.toast.imagesSaved', { files: savedFiles, folder }), { id: `images-saved:${currentModelKey}` });
             } else {
-                // When some failed, the modality warning for those (attached next)
-                // takes the shared id, so this toast keeps its own.
                 toast.info(t('chat.chatInput.toast.imagesSavedForTextModel', {
                     model: currentModelName,
                     files: savedFiles,
@@ -139,14 +136,49 @@ export function useComposerFileIntake({
         };
     }, [currentDirectory, currentModelKey, currentModelName, insertCitationAtSelection, t, composerText, composerRef]);
 
-    /**
-     * Attach files that arrived by paste or drop and cite each one in the
-     * draft as `[name]`, the same way pasted images are cited. Images get a
-     * generated unique name up front; other files keep their own name and are
-     * cited only once they attached, so a rejected file leaves no dangling
-     * citation.
-     */
-    /** Points a chip at its file's new name, where intake renamed the file. */
+    const saveDocumentsWithPathCitation = React.useCallback(async (files: File[], attachmentDraftKey: string | null, isCurrentRuntime: () => boolean): Promise<void> => {
+        const isCurrent = () => useInputStore.getState().attachmentDraftKey === attachmentDraftKey && isCurrentRuntime();
+        if (!isCurrent()) return;
+        const names = assignFileAttachmentFilenames(files.map((file) => ({ name: file.name.replace(/[<>]/g, '_') })), [
+            ...useInputStore.getState().attachedFiles.map((file) => file.filename),
+            ...pendingPastedAttachmentFilenamesRef.current,
+            ...findImagePathCitationNames(composerRef.current?.getValue() ?? composerText.get()),
+        ]);
+        const writable = files.flatMap((file, index) => {
+            if (file.size <= MAX_ATTACHMENT_BYTES) {
+                return [{ filename: names[index], bytes: async () => new Uint8Array(await file.arrayBuffer()) }];
+            }
+            toast.error(t('chat.fileAttachment.toast.overSendLimit', { name: names[index], size: formatFileSize(MAX_ATTACHMENT_BYTES) }));
+            return [];
+        });
+        if (writable.length === 0) return;
+        const savingToastId = toast.loading(t('chat.chatInput.toast.imagesSaving', { files: writable.map(({ filename }) => filename).join(', ') }));
+        let results: Awaited<ReturnType<typeof opencodeClient.writeOpenCodeTempFiles>>;
+        try {
+            results = await opencodeClient.writeOpenCodeTempFiles(currentDirectory, writable, { isCurrentRuntime });
+        } catch (error) {
+            results = writable.map(({ filename }) => ({ filename, error: error instanceof Error ? error : new Error(String(error)) }));
+        }
+        toast.dismiss(savingToastId);
+        if (!isCurrent()) return;
+
+        const saved = results.flatMap((result) => 'path' in result ? [result] : []);
+        if (results.some((result) => 'error' in result)) {
+            console.warn('[chat] Saving a document failed', results.flatMap((result) => 'error' in result ? [result.error.name] : []));
+        }
+        if (saved.length > 0) {
+            insertCitationAtSelection(buildImagePathCitationText(saved), '');
+            const firstPath = saved[0].path.replace(/\\/g, '/');
+            toast.info(t('chat.chatInput.toast.imagesSaved', {
+                files: saved.map((result) => result.filename).join(', '),
+                folder: firstPath.slice(0, firstPath.lastIndexOf('/')),
+            }));
+        }
+        const savedNames = new Set(saved.map((result) => result.filename));
+        const failed = writable.map(({ filename }) => filename).filter((name) => !savedNames.has(name));
+        if (failed.length > 0) toast.error(t('chat.chatInput.toast.imageCopySaveFailed', { files: failed.join(', ') }));
+    }, [currentDirectory, insertCitationAtSelection, t, composerText, composerRef, pendingPastedAttachmentFilenamesRef]);
+
     const renameCitation = React.useCallback((from: string, to: string) => {
         const editor = composerRef.current;
         if (!editor) return;
@@ -168,12 +200,10 @@ export function useComposerFileIntake({
             insertCitationAtSelection(filenames.length > 0 ? buildAttachmentCitationText(filenames) : '', text);
         };
 
-        // With the setting on, links to saved images keep their names too, so an
-        // attachment after a failed save never repeats one.
         const usedNames = () => [
             ...useInputStore.getState().attachedFiles.map((file) => file.filename),
             ...pendingPastedAttachmentFilenamesRef.current,
-            ...(savePastedImagesAsFiles ? findImagePathCitationNames(composerRef.current?.getValue() ?? composerText.get()) : []),
+            ...findImagePathCitationNames(composerRef.current?.getValue() ?? composerText.get()),
         ];
 
         let savedAny = false;
@@ -186,7 +216,6 @@ export function useComposerFileIntake({
                 leadingText = '';
             }
             if (imageSaveMode === 'alongside') {
-                // The links already name these, so they attach without a second citation.
                 for (const file of attachable) {
                     try {
                         attached = (await addAttachedFile(file)) || attached;
@@ -201,8 +230,6 @@ export function useComposerFileIntake({
         }
 
         const assignedImageNames = assignImageAttachmentFilenames(imageFiles, usedNames());
-        // Pending before the text lands, so the editor draws the citation as a
-        // chip in the same transaction that inserts it.
         for (const filename of assignedImageNames) pendingPastedAttachmentFilenamesRef.current.add(filename);
         insertCitation(assignedImageNames, leadingText);
 
@@ -210,7 +237,6 @@ export function useComposerFileIntake({
             const filename = assignedImageNames[index];
             const file = renameFileForAttachmentCitation(imageFiles[index], filename);
             try {
-                // Intake can rename the file (a HEIC becomes a JPEG): its chip follows.
                 attached = (await addAttachedFile(file, undefined, ([landed]) => {
                     if (landed && landed.filename.toLowerCase() !== filename.toLowerCase()) renameCitation(filename, landed.filename);
                 })) || attached;
@@ -221,7 +247,6 @@ export function useComposerFileIntake({
                 pendingPastedAttachmentFilenamesRef.current.delete(filename);
             }
             if (useInputStore.getState().attachmentDraftKey !== attachmentDraftKey) {
-                // The draft changed under the paste: the rest never attach here.
                 for (const rest of assignedImageNames.slice(index + 1)) pendingPastedAttachmentFilenamesRef.current.delete(rest);
                 return;
             }
@@ -229,14 +254,12 @@ export function useComposerFileIntake({
 
         const attachedOtherNames: string[] = [];
         let reported = false;
-        // Each chip names one attachment, so a name already taken gets `-2`.
         const otherNames = assignFileAttachmentFilenames(otherFiles, usedNames());
         for (let index = 0; index < otherFiles.length; index += 1) {
             const file = otherNames[index] === otherFiles[index].name
                 ? otherFiles[index]
                 : renameFileForAttachmentCitation(otherFiles[index], otherNames[index]);
             try {
-                // The chip names the file as intake kept it, which can differ from the picked name.
                 let landedName = file.name;
                 if (await addAttachedFile(file, undefined, ([landed]) => { if (landed) landedName = landed.filename; })) {
                     attached = true;
@@ -244,7 +267,6 @@ export function useComposerFileIntake({
                 }
             } catch (error) {
                 console.error('File attach failed', error);
-                // The store names the cause (a file too large to attach).
                 if (error instanceof Error) {
                     toast.error(error.message);
                     reported = true;
@@ -257,12 +279,8 @@ export function useComposerFileIntake({
         if (files.length > 0 && !attached && !savedAny && !reported) {
             toast.error(t('chat.chatInput.toast.attachFileFailed'));
         }
-    }, [addAttachedFile, imageSaveMode, insertCitationAtSelection, renameCitation, savePastedImagesAsFiles, saveImagesWithPathCitation, t, composerText, composerRef, pendingPastedAttachmentFilenamesRef]);
+    }, [addAttachedFile, imageSaveMode, insertCitationAtSelection, renameCitation, saveImagesWithPathCitation, t, composerText, composerRef, pendingPastedAttachmentFilenamesRef]);
 
-    // VS Code adds files from outside the composer (the open-file suggestion,
-    // the editor's and the explorer's "add to chat"); each new one gets its
-    // chip at the caret. The files a draft already had when it came on screen
-    // are its own and keep the chips its text has.
     const seenVSCodeAttachmentsRef = React.useRef<{ draftKey: string; ids: Set<string> } | null>(null);
 
     React.useEffect(() => {
@@ -278,15 +296,50 @@ export function useComposerFileIntake({
         if (uncited.length > 0) insertCitationAtSelection(buildAttachmentCitationText(uncited.map((file) => file.filename)), '');
     }, [attachedFiles, chatDraftIdentity, composerText, insertCitationAtSelection, composerRef]);
 
-    // A send waits for files still being read: their chips are in the text,
-    // and a send includes only attached files the text cites.
-    const attachFilesWithCitation = React.useCallback((files: File[], leadingText: string = ''): Promise<void> => {
-        const work = attachFilesWithCitationNow(files, leadingText);
+    const trackAttachWork = React.useCallback((work: Promise<void>): Promise<void> => {
         pendingAttachWorkRef.current.add(work);
         const settle = () => { pendingAttachWorkRef.current.delete(work); };
         work.then(settle, settle);
         return work;
-    }, [attachFilesWithCitationNow, pendingAttachWorkRef]);
+    }, [pendingAttachWorkRef]);
+
+    const offerDocumentChoice = React.useCallback((documents: File[], attachmentDraftKey: string | null, isCurrentRuntime: () => boolean) => {
+        const offerId = beginLargeTextPasteOffer(largeTextPasteOfferIdRef.current);
+        largeTextPasteOfferIdRef.current = offerId;
+        const resolve = (action: LargeTextPasteChoiceAction, explicitlyChosen: boolean, typedText?: string) => {
+            const resolution = resolveLargeTextPasteOffer(largeTextPasteOfferIdRef.current, offerId, { explicitlyChosen });
+            largeTextPasteOfferIdRef.current = resolution.nextOfferId;
+            if (!resolution.accepted) return;
+            setLargeTextPasteOffer(null);
+            void trackAttachWork(action === 'attach'
+                ? saveDocumentsWithPathCitation(documents, attachmentDraftKey, isCurrentRuntime)
+                : attachFilesWithCitationNow(documents));
+            if (typedText) insertTextAtSelection(typedText);
+            if (resolution.restoreFocus) {
+                if (composerRef.current) composerRef.current.focus({ preventScroll: isCapacitorApp() });
+                else mobileShell.expand();
+            }
+        };
+        setLargeTextPasteOffer({ id: offerId, kind: 'documents', resolve });
+        if (useUIStore.getState().isMobile && !mobileShell.expanded) mobileShell.expand();
+    }, [attachFilesWithCitationNow, insertTextAtSelection, largeTextPasteOfferIdRef, mobileShell, saveDocumentsWithPathCitation, setLargeTextPasteOffer, trackAttachWork, composerRef]);
+
+    const attachFilesWithCitation = React.useCallback((files: File[], leadingText: string = ''): Promise<void> => {
+        const documents = files.filter((file) => isDocumentAttachmentFilename(file.name));
+        const behavior = useUIStore.getState().documentAttachBehavior;
+        if (documents.length === 0 || behavior === 'convert') return trackAttachWork(attachFilesWithCitationNow(files, leadingText));
+
+        const attachmentDraftKey = useInputStore.getState().attachmentDraftKey;
+        const isCurrentRuntime = captureRuntimeInstance();
+        const others = files.filter((file) => !documents.includes(file));
+        if (behavior === 'save') {
+            return trackAttachWork(attachFilesWithCitationNow(others, leadingText)
+                .then(() => saveDocumentsWithPathCitation(documents, attachmentDraftKey, isCurrentRuntime)));
+        }
+        const work = trackAttachWork(attachFilesWithCitationNow(others, leadingText));
+        offerDocumentChoice(documents, attachmentDraftKey, isCurrentRuntime);
+        return work;
+    }, [attachFilesWithCitationNow, offerDocumentChoice, saveDocumentsWithPathCitation, trackAttachWork]);
 
     return {
         attachFilesWithCitation, insertCitationAtSelection,

@@ -10,10 +10,6 @@ interface SettingsWindowProps {
   onOpenChange: (open: boolean) => void;
 }
 
-/**
- * Settings rendered as a centered window with blurred backdrop.
- * Used for desktop and web (non-mobile) environments.
- */
 export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChange }) => {
   const { t } = useI18n();
   const descriptionId = React.useId();
@@ -33,8 +29,6 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
     );
   }, []);
 
-  // Cmd/Ctrl+W in the desktop app closes the settings window instead of the
-  // window behind it, through the same guard its own close control uses.
   React.useEffect(() => {
     if (!open) return;
     return registerCloseTabTarget(() => {
@@ -54,7 +48,6 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
       <Dialog.Portal>
         <Dialog.Backdrop
           className={cn(
-            // The dialogs' scrim (DialogOverlay), one value across modal windows.
             'oc-glass-backdrop fixed inset-0 z-50 bg-surface-overlay/60',
             'transition-opacity duration-150 ease-out',
             'data-[starting-style]:opacity-0 data-[ending-style]:opacity-0',
@@ -64,8 +57,6 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
           <Dialog.Popup
             ref={popupRef}
             aria-describedby={descriptionId}
-            // Open straight into the settings search, so typing filters at
-            // once; the window itself if the field is not there.
             initialFocus={focusSettingsSearch}
             className={cn(
               'relative pointer-events-auto outline-none',
@@ -75,8 +66,6 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
               'transition-all duration-150 ease-out',
               'data-[starting-style]:opacity-0 data-[starting-style]:scale-[0.98]',
               'data-[ending-style]:opacity-0 data-[ending-style]:scale-[0.98]',
-              // Dim this window when a nested dialog (e.g. "Add a device") opens
-              // on top of it, mirroring how the page behind a dialog is dimmed.
               'data-[nested-dialog-open]:brightness-[0.55] dark:data-[nested-dialog-open]:brightness-[0.4]',
             )}
           >

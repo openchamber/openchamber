@@ -142,7 +142,7 @@ export const OPENCHAMBER_TOOLS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'general',
     titleKey: 'settings.openchamber.tools.workflowAutoApprove.label',
     descriptionKey: 'settings.openchamber.tools.workflowAutoApprove.info',
-    keywords: ['workflow', 'workflows', 'approve', 'approval', 'auto', 'automatic', 'start', 'without asking', 'unattended', 'overnight'],
+    keywords: ['workflow', 'workflows', 'approve', 'approval', 'auto', 'automatic', 'start', 'without asking', 'unattended', 'overnight', 'lead', 'leads'],
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentWorkflowFeatureAvailable && useUIStore.getState().agentWorkflowToolEnabled,
   },
 ];

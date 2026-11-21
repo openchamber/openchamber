@@ -1,7 +1,7 @@
 {
   "zone": "workflows",
   "name": "Workflows",
-  "sources": ["packages/web/server/lib/workflows/runtime.js", "packages/ui/src/components/sections/openchamber/OpenChamberToolsSettings.tsx", "packages/ui/src/components/chat/workflows/WorkflowRunCard.tsx"],
+  "sources": ["packages/web/server/lib/workflows/runtime.ts", "packages/ui/src/components/sections/openchamber/OpenChamberToolsSettings.tsx", "packages/ui/src/components/chat/workflows/WorkflowRunCard.tsx"],
   "features": [
     {
       "id": "approval",
@@ -21,6 +21,7 @@
             {"do": "click", "on": "settings.switch", "item": "sessions.agent-workflow-tool"},
             {"do": "see", "on": "settings.switchOn", "item": "sessions.agent-workflow-tool"},
             {"do": "see", "on": "settings.checkboxOff", "item": "sessions.agent-workflow-auto-approve"},
+            {"do": "settings", "expect": {"agentWorkflowToolEnabled": true}},
             {"do": "session.create", "as": "s", "title": "Workflow asks first"},
             {"do": "session.send", "session": "s", "prompt": "Run the workflow we agreed on over the API files.", "model": "perf/agent-20tools-20000cps"},
             {"do": "open", "session": "s"},
@@ -48,6 +49,7 @@
             {"do": "click", "on": "settings.switch", "item": "sessions.agent-workflow-tool"},
             {"do": "click", "on": "settings.checkbox", "item": "sessions.agent-workflow-auto-approve"},
             {"do": "see", "on": "settings.checkboxOn", "item": "sessions.agent-workflow-auto-approve"},
+            {"do": "settings", "expect": {"agentWorkflowToolEnabled": true, "agentWorkflowAutoApprove": true}},
             {"do": "session.create", "as": "s", "title": "Workflow starts at once"},
             {"do": "session.send", "session": "s", "prompt": "Run the workflow we agreed on over the API files.", "model": "perf/agent-20tools-20000cps"},
             {"do": "open", "session": "s"},

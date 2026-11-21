@@ -74,6 +74,7 @@ export type InstalledGuest = {
   source?: GuestSource;
   path?: string | null;
   enabled?: boolean;
+  folders?: string[];
   origin?: GuestGitOrigin;
   update?: GuestUpdate;
 };

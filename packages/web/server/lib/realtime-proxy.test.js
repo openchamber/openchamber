@@ -20,15 +20,15 @@ const closeServer = async (server) => {
   await new Promise((resolve) => server.close(() => resolve()));
 };
 
-const startProxyServer = async ({ apiBaseUrl, authToken = 'ui-token', originAllowed = true } = {}) => {
+const startProxyServer = async ({ apiBaseUrl, authToken = 'ui-token', originAllowed = true, requestHeaders = { 'X-Proxy-Auth': 'secret' }, runtimeConfig } = {}) => {
   const app = express();
   const server = http.createServer(app);
   const runtime = attachRealtimeProxy({
     app,
     server,
-    getDesktopRuntimeConfig: () => ({
+    getDesktopRuntimeConfig: () => runtimeConfig || ({
       apiBaseUrl,
-      requestHeaders: { 'X-Proxy-Auth': 'secret' },
+      requestHeaders,
     }),
     getUiAuthController: () => ({
       ensureSessionToken: async () => authToken,
@@ -102,6 +102,69 @@ describe('realtime proxy URL builders', () => {
 });
 
 describe('realtime proxy', () => {
+  it('reads the unchecked runtime URL once before validating it', async () => {
+    const upstream = await startSseUpstream();
+    let reads = 0;
+    const { origin, runtime } = await startProxyServer({
+      runtimeConfig: {
+        get apiBaseUrl() {
+          reads += 1;
+          return reads === 1 ? upstream.origin : '';
+        },
+        requestHeaders: { 'X-Proxy-Auth': 'secret' },
+      },
+    });
+    try {
+      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/global/event`));
+      expect(response.status).toBe(200);
+      await response.text();
+      expect(reads).toBe(1);
+    } finally {
+      runtime.stop();
+    }
+  });
+
+  it('keeps runtime header validation for unchecked values and forbidden headers', async () => {
+    const upstream = await startSseUpstream();
+    const { origin, runtime } = await startProxyServer({
+      apiBaseUrl: upstream.origin,
+      requestHeaders: {
+        'X-Safe': ' trimmed ',
+        Authorization: 'discarded',
+        'X-Number': 42,
+        'X-Lines': 'first\r\nsecond',
+        'Bad:Name': 'discarded',
+      },
+    });
+    try {
+      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/global/event`));
+      expect(response.status).toBe(200);
+      await response.text();
+      expect(upstream.requests[0].headers['x-safe']).toBe('trimmed');
+      for (const name of ['authorization', 'x-number', 'x-lines', 'bad:name']) {
+        expect(upstream.requests[0].headers[name]).toBeUndefined();
+      }
+    } finally {
+      runtime.stop();
+    }
+  });
+
+  it('retains enumerable string headers from arrays', async () => {
+    const upstream = await startSseUpstream();
+    const { origin, runtime } = await startProxyServer({
+      apiBaseUrl: upstream.origin,
+      requestHeaders: [' array-value '],
+    });
+    try {
+      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/global/event`));
+      expect(response.status).toBe(200);
+      await response.text();
+      expect(upstream.requests[0].headers['0']).toBe('array-value');
+    } finally {
+      runtime.stop();
+    }
+  });
+
   it('streams SSE chunks and forwards safe SSE headers with configured runtime headers', async () => {
     const upstream = await startSseUpstream();
     const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstream.origin });

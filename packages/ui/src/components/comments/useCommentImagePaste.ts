@@ -79,10 +79,21 @@ export const useCommentImagePaste = () => {
     pendingFilenamesRef.current.clear();
   }, []);
 
+  const snapshotPastedImages = React.useCallback((): ReadonlyMap<string, File> => new Map(pendingRef.current), []);
+
+  const adoptPastedImages = React.useCallback((images: ReadonlyMap<string, File>) => {
+    for (const [filename, file] of images) {
+      pendingRef.current.set(filename, file);
+      pendingFilenamesRef.current.add(filename);
+    }
+  }, []);
+
   return {
     takePastedImages,
     attachCitedImages,
     discardPastedImages,
+    snapshotPastedImages,
+    adoptPastedImages,
     pendingFilenames: pendingFilenamesRef.current,
   };
 };

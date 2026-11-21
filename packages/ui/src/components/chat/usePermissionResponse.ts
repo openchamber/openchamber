@@ -9,20 +9,12 @@ import { useUIStore } from '@/stores/useUIStore';
 
 type ColumnKind = 'main' | 'pinned';
 
-// Newest pending card of a chat owns that chat's keyboard; older cards wait
-// their turn. With a chat pinned in the side panel, each chat answers only the
-// keys pressed inside it (anywhere else counts as the main chat).
 const activePermissionCards: Array<{ id: string; column: ColumnKind }> = [];
 
 const columnOfEvent = (event: KeyboardEvent): ColumnKind => (
   event.target instanceof Element && event.target.closest('[data-chat-column="pinned"]') ? 'pinned' : 'main'
 );
 
-/**
- * The reply a key press gives. "Always" needs something to save. Bindings are
- * single chords matched here, in the capture phase, because the composer would
- * otherwise take the default Alt+Enter as a new line.
- */
 export const permissionShortcutReply = (
   event: KeyboardEvent,
   canSave: boolean,
@@ -36,7 +28,6 @@ export const permissionShortcutReply = (
   return canSave && pressed('permission_allow_always') ? 'always' : null;
 };
 
-/** The request was raised by a child of the session the user is looking at. */
 export const usePermissionFromSubagent = (permission: PermissionRequest): boolean => {
   const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
   const sessions = useSessions(currentSessionDirectory ?? undefined);
@@ -47,11 +38,6 @@ export const usePermissionFromSubagent = (permission: PermissionRequest): boolea
   }, [permission.sessionID, currentSessionId, sessions]);
 };
 
-/**
- * Replies to one request and owns its keyboard shortcuts while it is the
- * newest pending one (see `permissionShortcutReply`). Shared by the inline
- * card and the dock.
- */
 export const usePermissionResponse = (
   permission: PermissionRequest,
   onResponse?: (response: PermissionReply) => void,

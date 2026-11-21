@@ -17,7 +17,7 @@ client). VS Code does not mount `ContextPanel`, so it has no such menu.
 
 ## Context panel file tabs
 
-`ContextPanel` owns the open-file strip in each workspace zone. Its editor mounts `FilesView` in editor-only mode, which omits that view's own tab row. The file strip enables `SortableTabsStrip`'s `scrollWithWheel` option, so a regular vertical mouse wheel reaches tabs past either edge without changing the open file or showing a scrollbar. Other context panel tab modes keep their existing wheel behavior.
+`ContextPanel` owns the open-file strip in each workspace zone. Its editor mounts `FilesView`, which has no tab row of its own. The file strip enables `SortableTabsStrip`'s `scrollWithWheel` option, so a regular vertical mouse wheel reaches tabs past either edge without changing the open file or showing a scrollbar. Other context panel tab modes keep their existing wheel behavior.
 
 ## Header session tabs
 
@@ -221,6 +221,10 @@ so it survives the sidebar closing and reopening. A folder change remounts the t
   neither consumes items nor clears badges, retains generation answers or
   acquires a microphone. Visible entries use panel/page entries; hidden execution
   prefers background.entry with panel.entry as the compatibility fallback.
+- Closing the rail zone drops the item handed to its panel, so a reopen hands
+  `null` instead of a stale item. Switching tabs, covering the panel, or the
+  fit arbiter closing the zone to make room and giving it back keeps it;
+  the mobile drawer does not pass `panelOpen` and keeps its item.
 - A new guest document retires the previous document's generation waiters.
   Answers arriving after a document leaves are retained for the next listening
   frame. File delivery and command registration wait for hello or load; theme
@@ -332,6 +336,23 @@ Only nearby rows enter the DOM, keeping large repositories' restyle and
 accessibility work outside zone-opening animations. Dragged, focused and
 animating rows remain mounted to retain dragend delivery, focus and continuity;
 the virtualizer owns anchoring, so browser scroll anchoring stays disabled.
+
+### Why the tree hook returns rows and not the virtualizer
+
+React Compiler skips `useVirtualFileTree`, which calls `useVirtualizer`, but
+compiles `SidebarFilesTreeContent`. Reading `getVirtualItems()` from the stable
+virtualizer object inside the component let the compiler cache the row list,
+so a rerender the virtualizer asked for drew the old rows: the tree stayed
+empty after its tab came back. The hook hands the component values that change
+with the range (`virtualRows`, `totalSize`) and the stable `measureRow`.
+
+### Why a zero row height keeps the last size and not the measurement
+
+An inactive context tab hides its pane with `display: none`, and the rows'
+ResizeObserver then reports a height of 0. Cached, those zeros stacked every row
+at the top of the tree once the tab came back, and the shared measured height
+fed 0 into the estimate of rows never mounted. A row is never 0 px tall while
+shown, so a 0 measurement keeps the row's cached size (or its estimate).
 
 ### Why remembered tree widths and not mounted-row widths alone
 

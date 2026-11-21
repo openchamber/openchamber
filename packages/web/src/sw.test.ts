@@ -42,6 +42,63 @@ async function setup(clients: TestClient[]) {
   };
 }
 
+type TestPushPayload = { title: string; body?: string; tag?: string };
+
+type TestPushEvent = {
+  data: { json: () => TestPushPayload };
+  waitUntil: (work: Promise<void>) => void;
+};
+
+async function setupPush(clients: Array<{ visibilityState: string; focused: boolean }> = []) {
+  let push: (event: TestPushEvent) => void = () => {};
+  const showNotification = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal('self', {
+    clients: { matchAll: async () => clients },
+    registration: { showNotification },
+    addEventListener: (name: string, handler: typeof push) => {
+      if (name === 'push') push = handler;
+    },
+  });
+  vi.resetModules();
+  await import('./sw');
+  return {
+    showNotification,
+    push: (payload: TestPushPayload) => {
+      let completion = Promise.resolve();
+      push({
+        data: { json: () => payload },
+        waitUntil: (work) => { completion = work; },
+      });
+      return completion;
+    },
+  };
+}
+
+test('a later push re-alerts while retaining the same notification tag', async () => {
+  const app = await setupPush();
+  await app.push({ title: 'Ready', body: 'First turn', tag: 'ready-session' });
+  await app.push({ title: 'Ready', body: 'Second turn', tag: 'ready-session' });
+
+  expect(app.showNotification).toHaveBeenCalledTimes(2);
+  expect(app.showNotification).toHaveBeenLastCalledWith('Ready', expect.objectContaining({
+    body: 'Second turn', tag: 'ready-session', renotify: true,
+  }));
+});
+
+test.each([undefined, ''])('a push without a nonempty tag (%s) does not request renotify', async (tag) => {
+  const app = await setupPush();
+  await app.push({ title: 'Ready', tag });
+
+  expect(app.showNotification).toHaveBeenCalledOnce();
+  expect(app.showNotification.mock.calls[0]?.[1]).not.toHaveProperty('renotify', true);
+});
+
+test('a focused client still suppresses background push delivery', async () => {
+  const app = await setupPush([{ visibilityState: 'visible', focused: true }]);
+  await app.push({ title: 'Ready', tag: 'ready-session' });
+  expect(app.showNotification).not.toHaveBeenCalled();
+});
+
 test('a running PWA accepts notification navigation without a document load', async () => {
   const navigate = vi.fn();
   const focus = vi.fn().mockResolvedValue(undefined);

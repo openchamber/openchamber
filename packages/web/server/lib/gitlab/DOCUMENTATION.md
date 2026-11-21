@@ -81,6 +81,79 @@ GitLab has no stack object. A merge request's chain is read with its context (`c
 
 A self-managed GitLab sets its SSH host separately (`gitlab_ssh_host`), often a different name behind a reverse proxy, so requiring the instance host there rejected every project on such instances. The web and HTTP clone URLs stay bound to the instance because the server and UI may open them; the SSH URL is only passed through as `sshUrl` and nothing connects to it, so its project path is the check that still catches a mismatched payload.
 
+### Why validation retains the shared predicates
+
+`validation.ts` re-exports the original functions from `shared/guards.js`; consumers
+rely on their identity. The shared owner supplies the record predicate.
+The shared `object-guards.ts` owner supplies a primitive-string predicate, so
+boxed strings and objects with a string tag do not pass validation.
+
+Token verification returns the parser's checked numeric user ID, trimmed login
+and optional string profile fields. Fetch rejections
+may contain an arbitrary `message`. The verifier's nullish predicate permits
+reading an optional, unchecked message only; it promises no Error instance or
+string value. Inherited properties, getter receivers, falsy-message fallback
+and Error's message coercion retain the optional property access behavior.
+
+### Why OAuth payload and process-failure fields stay unchecked
+
+OAuth JSON and rejected process calls can carry arbitrary field values. Their
+nullish predicates permit property reads only. Device authorization validates
+its required strings and finite numbers before returning them; optional fields
+such as `verification_uri_complete` remain unchecked until their consumer tests
+them. Renewal keeps only a nonempty string token and a positive finite expiry.
+Process output becomes text only after the shared string predicate accepts it.
+Numeric process exit codes and transport failure codes remain separate checks.
+
+### Why resource replies keep their wire types
+
+GitBeaker's `ProjectSchema.forked_from_project`,
+`MergeRequestSchema.head_pipeline`, `MergeRequestSchema.pipeline` and
+`MergeRequestSchema.user` are unchecked extension fields. The local GitBeaker
+declaration reflects the requester factory's JSON, text, Blob and stream
+responses and GitBeaker's expanded page shape. It promises no endpoint-specific
+schema. `Projects.show` stringifies unchecked fork IDs before
+encoding them; `RepositoryFiles.showRaw` passes its ref to the query formatter.
+GraphQL responses need their own field checks since the requester also returns
+text, blobs and streams. Draft note positions and response fields forwarded
+without validation retain their wire types.
+
+### Why mutation arguments are typed by route
+
+The route's normalizer establishes which fields the write and reconciliation
+can use. The mutation table keeps those contracts together and preserves the
+stored kind and digest fields. A draft comment always requires text; an
+ordinary review can publish drafts without supplying text.
+
+### Why payload checks remain in the mappers
+
+No transport schema validates resource payloads before the mappers see them.
+The mappers retain checks for primitive strings, integers, plain objects and
+arrays. A diff accepts either path as a nonempty string, then selects the first
+truthy path, which may be a non-string value from a malformed response.
+
+Request failures may carry arbitrary `code` and `name` fields. Classification
+still checks the type of `code` before using its string prefix. Fetch failures
+can supply a non-string error message; the request error keeps Error's message
+coercion and leaves the message absent for `undefined`.
+
+### Why mapper paths retain unchecked values
+
+Diff paths validate either path before selecting the first truthy raw value.
+A truthy non-string `new_path` with a valid `old_path` therefore passes through
+unchanged. Notes validate the combined fallback, so the same input omits the
+position. Compound raw-value selections remain `unknown` in the output contract
+unless the selected value itself is narrowed. Numeric note lines retain the
+nonnegative-integer check, including zero.
+
+### Why repository string checks remain at the input boundary
+
+Remote URLs, tracking values and remote names come from Git configuration or
+unconverted callers. They retain the primitive-string check, including rejection
+of boxed strings. Exact-remote results always carry `remoteName`, even when its
+value is explicitly undefined. The SSH parser checks capture occupancy before
+using the two required regular-expression groups.
+
 ## Review drafts
 
 A review is the viewer's draft notes (`MergeRequestDraftNotes`). `/pr/review` publishes them first, then gives the verdict, so what it answers is on the merge request when it lands. GitLab refuses an unchanged line named by one side, so `/pr/review/comment` reads the file's hunks for both numbers (`pairedDiffLine`), and a range goes as its two ends with GitLab's `line_code`. A thread whose position has another `head_sha` belongs to an older push: it stays on the board. Discarding removes notes one by one, because GitLab has no call for the whole draft.

@@ -1,0 +1,95 @@
+name: behavior net
+
+# The whole behavior net (scripts/verify/DOCUMENTATION.md) once a night on the
+# default branch, in six parts. Pull requests play only the scenarios their
+# files touch; this run plays the rest, and from what the scenarios requested
+# it refreshes scripts/verify/requests.json, by which a changed server file
+# selects its scenarios. A changed file arrives as a pull request.
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: behavior-net-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  net:
+    name: net (${{ matrix.part }}/6)
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Play the net
+        run: bun run verify -- --retry-failed --shard ${{ matrix.part }}/6
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: behavior-net-${{ matrix.part }}
+          path: |
+            tmp/verify/**/summary.json
+            tmp/verify/**/result.json
+            tmp/verify/**/failure.png
+            tmp/verify/**/logs/**
+          retention-days: 7
+
+  requests:
+    name: refresh requests.json
+    needs: net
+    # A red part still recorded what its scenarios requested; the recorder
+    # keeps what a failed feature had before.
+    if: always() && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: net-results
+          pattern: behavior-net-*
+      - name: Record the requests
+        run: node scripts/verify/requests.mjs net-results
+      - name: Open a pull request when the file changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          file=scripts/verify/requests.json
+          title="chore(verify): refresh the recorded requests"
+          open=$(gh pr list --head ci/net-requests --state open --json number -q '.[0].number')
+          if git diff --quiet -- "$file"; then
+            echo "requests.json is up to date"
+            if [ -n "$open" ]; then gh pr close "$open" --comment "The default branch records the same requests again."; fi
+            exit 0
+          fi
+          if [ -n "$open" ] && git fetch -q origin ci/net-requests && git show FETCH_HEAD:"$file" | cmp -s - "$file"; then
+            echo "pull request #$open already proposes this file"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B ci/net-requests
+          git commit -m "$title" -- "$file"
+          git push --force origin ci/net-requests
+          if [ -z "$open" ]; then
+            gh pr create --head ci/net-requests --title "$title" --body "The nightly run of the behavior net recorded different requests than $file holds: a route was added, moved or is no longer requested. Merging keeps verify --changed selecting the right scenarios for server changes."
+          fi

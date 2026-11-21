@@ -7,6 +7,30 @@ import { serveTestHttp } from './test-http-server';
 
 const originalFetch = globalThis.fetch;
 
+test('absolute runtime asset reads carry auth while external asset reads stay anonymous', async () => {
+  const previous = getRuntimeUrlResolver();
+  const runtime = await serveTestHttp((request, response) => {
+    response.end(JSON.stringify({ path: request.url, authorization: request.headers.authorization ?? null }));
+  });
+  const external = await serveTestHttp((request, response) => {
+    response.end(JSON.stringify({ path: request.url, authorization: request.headers.authorization ?? null }));
+  });
+  try {
+    configureRuntimeUrlResolver({ apiBaseUrl: new URL('/instance', runtime.url).toString() });
+    setRuntimeBearerToken('synthetic-runtime-token');
+    const path = '/instance/api/fs/raw?path=diagram.mmd';
+    const owned = await runtimeFetch(new URL(path, runtime.url));
+    expect(await owned.json()).toEqual({ path, authorization: 'Bearer synthetic-runtime-token' });
+    const unowned = await runtimeFetch(new URL(path, external.url));
+    expect(await unowned.json()).toEqual({ path, authorization: null });
+  } finally {
+    clearRuntimeAuthCredentialProvider();
+    setRuntimeUrlResolver(previous);
+    runtime.close();
+    external.close();
+  }
+});
+
 test('mobile runtime credentials cannot follow HTTP redirects through fetch or the bridge', async () => {
   const previous = getRuntimeUrlResolver();
   const originalWindow = globalThis.window;

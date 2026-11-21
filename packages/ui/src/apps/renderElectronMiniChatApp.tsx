@@ -10,6 +10,7 @@ import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { I18nProvider } from '@/lib/i18n';
+import { markMiniChatWindow } from '@/lib/miniChatWindow';
 import { leaveLastActiveSessionToMainWindow } from '@/sync/last-session-cache';
 import { prefetchSessionBeforeMount } from '@/sync/sync-context';
 import { ElectronMiniChatApp } from './ElectronMiniChatApp';
@@ -17,6 +18,7 @@ import { readMiniChatConfig } from './miniChatConfig';
 import { initializeSharedPreferences } from './initializeSharedPreferences';
 
 export function renderElectronMiniChatApp(apis: RuntimeAPIs) {
+  markMiniChatWindow();
   initializeSharedPreferences({ logLabel: '[mini-chat-main]' });
   leaveLastActiveSessionToMainWindow();
   preloadMarkdownRenderer();

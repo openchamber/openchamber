@@ -219,7 +219,7 @@ const extensionOf = (name: string): string => {
   return index === -1 ? "" : name.slice(index + 1).toLowerCase()
 }
 
-const isDocumentAttachmentFilename = (name: string): boolean => DOCUMENT_EXTENSIONS.has(extensionOf(name))
+export const isDocumentAttachmentFilename = (name: string): boolean => DOCUMENT_EXTENSIONS.has(extensionOf(name))
 
 export const isReadOnSendMentionFilename = (name: string): boolean => {
   const extension = extensionOf(name)

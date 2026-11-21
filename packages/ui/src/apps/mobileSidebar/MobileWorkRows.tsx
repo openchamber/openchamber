@@ -56,7 +56,7 @@ export const MobileWorktreeRow: React.FC<{
   const { revealed, renaming } = useMobileRowSwipe(row.key);
   const work = useWorktreeWork({ group: row.group, projectId: row.projectId, collapsed: row.collapsed, onNavigate: actions.close });
   const { worktree, space, spaceName, project, refs, label, secondName, branch, title, inWork, selected, finishing, worktreeRemoving, activityState } = work;
-  const guestMarks = useWorkRowGuestMarks({ space: Boolean(space), projectId: project?.id ?? row.projectId ?? null, directory: work.directory, branch });
+  const guestMarks = useWorkRowGuestMarks({ space: Boolean(space), projectId: project?.id ?? row.projectId ?? null, projectPath: project?.path ?? null, directory: work.directory, branch });
   const marks = <MobileGuestMarks marks={guestMarks} onOpenRow={() => work.open()} />;
   const projectNamed = useZoneProjectNames();
   const mixedProject = useMixedRowProject(row.projectId, row.mixed && row.detailed);

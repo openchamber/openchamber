@@ -1,3 +1,5 @@
+import { fixtureCommand, javascriptCommand } from "./shell-command.mjs"
+
 /**
  * Scripted conversations for the fixture provider, keyed by the user's prompt.
  *
@@ -464,7 +466,7 @@ export const DESIGN_SESSIONS = [
 ]
 
 // The OpenAI protocol sends a message's content as a string or as a list of parts.
-const textOf = (content) => (Array.isArray(content) ? content.map((part) => part?.text ?? "").join("\n") : String(content ?? ""))
+export const fixtureMessageText = (content) => (Array.isArray(content) ? content.map((part) => part?.text ?? "").join("\n") : String(content ?? ""))
 
 // Turns behavior scenarios (scripts/verify) send that no design shot shows.
 // The workflow's agents answer slowly so a scenario sees the run while it works.
@@ -496,8 +498,8 @@ const operatorWorktreeTurn = (id, prompt, title, worktree) => ({
 })
 
 /**
- * `SUBAGENT_PROMPT` starts a subagent that thinks for thirty seconds, so its
- * session is still running while a scenario looks at it.
+ * `SUBAGENT_PROMPT` starts a subagent that waits until stopped, so its
+ * session stays running while a scenario opens its chat.
  * `SUBAGENT_PERMISSION_PROMPT` starts a subagent that reads `notes.secret`,
  * which the verify stand asks permission for, so the subagent's read-only
  * session asks for a permission.
@@ -530,7 +532,7 @@ const VERIFY_TURNS = [
   }],
   answer: `Added ${LOCALES.length} locale files under \`src/locales\`, each with the inbox title.\n`,
 },
-  subagentTurn("verify_subagent", SUBAGENT_PROMPT, "Review the parser", "perf/think-30s"),
+  subagentTurn("verify_subagent", SUBAGENT_PROMPT, "Review the parser", "perf/wait-for-stop"),
   subagentTurn("verify_subagent_permission", SUBAGENT_PERMISSION_PROMPT, SECRET_NOTES_PROMPT, "perf/stream-20000cps"),
 {
   id: "verify_secret_notes",
@@ -586,19 +588,19 @@ const VERIFY_TURNS = [
   {
     id: "tools_shell",
     prompt: "Print the verify banner in the shell.",
-    steps: [{ text: "Printing it.", calls: [{ name: "shell", arguments: { command: "echo verify-banner-$((6 * 7)); echo verify-second-$((7 * 8))" } }] }],
+    steps: [{ text: "Printing it.", calls: [{ name: "shell", arguments: { command: javascriptCommand("process.stdout.write('verify-banner-' + (6 * 7) + '\\nverify-second-' + (7 * 8) + '\\n')") } }] }],
     answer: "The banner is printed.\n",
   },
   {
     id: "tools_shell_long",
     prompt: "Run the long verify watcher in the shell.",
-    steps: [{ text: "Starting the watcher.", calls: [{ name: "shell", arguments: { command: "echo verify-watcher-$((3 * 4)); sleep 120; echo verify-watcher-done" } }] }],
+    steps: [{ text: "Starting the watcher.", calls: [{ name: "shell", arguments: { command: fixtureCommand({ output: "verify-watcher-12\n", hold: true }) } }] }],
     answer: "The watcher ended.\n",
   },
   {
     id: "tools_shell_background",
     prompt: "Run the verify watcher in the background.",
-    steps: [{ text: "Starting it in the background.", calls: [{ name: "shell", arguments: { command: "echo verify-background-$((5 * 5)); sleep 120", background: true } }] }],
+    steps: [{ text: "Starting it in the background.", calls: [{ name: "shell", arguments: { command: fixtureCommand({ output: "verify-background-25\n", hold: true }), background: true } }] }],
     answer: "The watcher runs in the background.\n",
   },
   {
@@ -751,6 +753,22 @@ const VERIFY_TURNS = [
 ]
 
 const TURNS = [
+  {
+    id: "verify_reply_decisions_received",
+    prompt: "The user answered the UI block in your previous reply:",
+    answer: "Decision choices received.\n",
+  },
+  {
+    id: "verify_reply_decisions",
+    prompt: "Show the verification decision cards.",
+    answer: [
+      '```openui-lang',
+      'root = Stack([policy, date])',
+      'policy = Card("Q1: Which document takes precedence when the rules conflict?", [Text("Choose the policy to use for conflicting rules."), Button("Use version 1.1 for conflicts", "primary"), Button("Keep the old rules")])',
+      'date = Card("Q2: When does attendance resume?", [Button("On the return date"), Button("On the following day")])',
+      '```',
+    ].join('\n'),
+  },
   ...DESIGN_SESSIONS.flatMap((session) => session.turns.map((turn, index) => ({ ...turn, id: `${session.key}_${index + 1}` }))),
   ...VERIFY_TURNS,
 ]
@@ -763,7 +781,7 @@ const TURNS = [
 export const planScriptedResponse = (messages) => {
   const lastPrompt = messages.findLastIndex((message) => message?.role === "user")
   if (lastPrompt < 0) return null
-  const prompt = textOf(messages[lastPrompt].content)
+  const prompt = fixtureMessageText(messages[lastPrompt].content)
   const turn = TURNS.find((candidate) => prompt.includes(candidate.prompt))
   if (!turn) return null
   const toolResults = messages.slice(lastPrompt + 1).filter((message) => message?.role === "tool").length

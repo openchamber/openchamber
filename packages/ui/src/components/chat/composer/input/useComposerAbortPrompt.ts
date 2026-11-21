@@ -11,8 +11,6 @@ export function useComposerAbortPrompt({
 }: Dependencies) {
     const { currentSessionId, clearAbortPrompt } = sessionScope;
 
-    // A prompt armed for the session this composer leaves goes with it. Only
-    // that one: another chat open beside this one arms prompts of its own.
     const abortPromptOwnerRef = React.useRef(currentSessionId);
 
     React.useEffect(() => {

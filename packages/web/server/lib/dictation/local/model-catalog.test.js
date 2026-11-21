@@ -7,10 +7,25 @@ import {
   RETIRED_LOCAL_MODEL_DIRS,
   getLocalSttModelSpec,
   getLocalTtsDefaultSpeaker,
+  isLocalModelId,
+  isLocalSttModelId,
+  isLocalTtsModelId,
   resolveLocalTtsModelForLanguage,
 } from './model-catalog.js';
 
 describe('local STT catalog', () => {
+  it('accepts only string ids owned by either catalog', () => {
+    for (const guard of [isLocalModelId, isLocalSttModelId, isLocalTtsModelId]) {
+      for (const id of [undefined, null, 0, {}, 'constructor', 'toString', '__proto__']) {
+        expect(guard(id)).toBe(false);
+      }
+    }
+    expect(isLocalSttModelId(DEFAULT_LOCAL_STT_MODEL)).toBe(true);
+    expect(isLocalTtsModelId(DEFAULT_LOCAL_TTS_MODEL)).toBe(true);
+    expect(isLocalModelId(DEFAULT_LOCAL_STT_MODEL)).toBe(true);
+    expect(isLocalModelId(DEFAULT_LOCAL_TTS_MODEL)).toBe(true);
+  });
+
   // The files the recognizer engine reads for each model type.
   const filesByType = {
     nemo_transducer: ['encoder', 'decoder', 'joiner', 'tokens'],
@@ -57,6 +72,7 @@ describe('local TTS catalog', () => {
     expect(getLocalTtsDefaultSpeaker('kokoro-multi-lang-v1_1', 'zh')).toBe(3);
     expect(getLocalTtsDefaultSpeaker('kokoro-multi-lang-v1_1', 'en')).toBe(0);
     expect(getLocalTtsDefaultSpeaker('piper-uk_UA-lada-x_low', 'uk')).toBeUndefined();
+    expect(getLocalTtsDefaultSpeaker('kokoro-multi-lang-v1_1', 'constructor')).toBeUndefined();
   });
 
   it('every TTS entry declares its languages and installable files', () => {

@@ -80,7 +80,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { useSshConfirmation } from './useSshConfirmation';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsInlineLink } from '@/components/sections/classification/JevAccessNote';
-
+import { fetchBypassingRuntimeBridge } from '@/lib/runtime-fetch';
 const randomPort = (): number => {
   return Math.floor(20000 + Math.random() * 30000);
 };
@@ -692,7 +692,7 @@ export const RemoteInstancesPage: React.FC = () => {
       const candidateUrl = normalizeHostUrl(candidate.url);
       if (!candidateUrl) continue;
       try {
-        const response = await fetch(`${candidateUrl}/api/client-auth/pairing/redeem`, { ...redeemInit, signal: AbortSignal.timeout(15_000) });
+        const response = await fetchBypassingRuntimeBridge(`${candidateUrl}/api/client-auth/pairing/redeem`, { ...redeemInit, signal: AbortSignal.timeout(15_000) });
         const token = await tokenFromResponse(response);
         if (token) {
           redeemed = { kind: 'direct', url: candidateUrl, token };

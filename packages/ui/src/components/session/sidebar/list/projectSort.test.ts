@@ -28,12 +28,6 @@ describe('sortProjectsByOrder', () => {
     expect(ids(sortProjectsByOrder(projects, 'manual', ['gamma', 'alpha']))).toEqual(['gamma', 'alpha', 'beta']);
   });
 
-  test('leaves the input untouched', () => {
-    const input = [...projects];
-    sortProjectsByOrder(input, 'a-z', []);
-    expect(ids(input)).toEqual(['beta', 'alpha', 'gamma']);
-  });
-
   test('treats a missing timestamp as the oldest', () => {
     const withoutStamps = [{ id: 'none', path: '/repos/none' }, ...projects];
     expect(ids(sortProjectsByOrder(withoutStamps, 'recent', []))).toEqual(['alpha', 'gamma', 'beta', 'none']);

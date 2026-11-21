@@ -43,7 +43,7 @@ response carries `X-Speech-Model` and `X-Speech-Language`.
   Chunk reordering by `seq` + ack, resampling to the provider rate, segment
   splitting inside pauses, silence suppression by PCM peak, partial-transcript
   concatenation, adaptive finalization timeout.
-- `service.js` — provider resolution and readiness. Providers:
+- `service.ts` — provider resolution and readiness. Providers:
   - `local` (default): a sherpa-onnx model from `local/model-catalog.js`
     (Parakeet TDT, Whisper, Qwen3-ASR) in a forked worker process. A saved
     model id the catalog no longer has counts as no pick (see Decisions).
@@ -86,9 +86,13 @@ absent `endpointPath` keeps the OpenAI `/v1/audio/transcriptions` path.
 
 ## Segmentation
 
-A dictation is one segment unless it runs long. Past `segmentMinSeconds`
-(15 s) the manager cuts inside the first pause it finds, so cuts land between
-words; `segmentMaxSeconds` (25 s) is a hard cap for speech with no pause in it.
+A dictation is one segment unless it runs long. For local models the manager
+cuts at the first pause after 15 s, or at 25 s without a pause. For the
+OpenAI-compatible provider those bounds are 60 s and 120 s, so its transcription
+has more context. At 16 kHz PCM16, 120 s is under 4 MB of WAV audio, below
+OpenAI's 25 MB upload limit. Other compatible servers may have lower limits.
+The finalization deadline includes audio already committed but still awaiting a
+transcript, as well as the uncommitted tail.
 
 Pauses are found inside each ~1 s client chunk, not at chunk boundaries: the
 chunk is scored in 50 ms RMS frames; a frame is quiet when it is close to the
@@ -113,6 +117,10 @@ the user is still speaking, so only the tail is left to transcribe on stop.
 
 ## Invariants
 
+- The fork target `local/worker-process.js` stays a JavaScript bootstrap and
+  registers the source resolver before loading `worker-runtime.js`. Forked
+  processes have their own resolver state even when the parent loaded the hook.
+
 - Never load `sherpa-onnx-node` in the main server process.
 - Transcription happens on commit only; sessions never emit non-final
   transcripts. The `partial` messages a client receives are the concatenation
@@ -134,6 +142,80 @@ the user is still speaking, so only the tail is left to transcribe on stop.
 - Extraction diagnostics retain only the stderr tail so a failing subprocess cannot grow the server's memory without bound.
 
 ## Decisions
+
+### Why stream event fields remain unchecked
+
+The stream manager uses TypeScript but does not validate forwarded worker event
+fields. Segment ids remain unknown map keys, transcript values remain unknown
+until the existing array join converts them, and final flags retain their
+truthiness test. The injected session contract describes the properties consumed
+by the listeners without claiming their values are strings or booleans.
+
+WebSocket start fields likewise remain unknown. Correction stringifies its
+language hint when constructing the prompt, so its options accept the unchecked
+hint the manager already forwards. Rejections retain inherited and non-string
+message values, including primitive boxing and the original truthy fallback.
+
+Contiguous audio chunks are occupied map entries. A missing entry still fails
+rather than skipping audio. A session result without a session and a correction
+state without its callback still fail with TypeError. RMS indexing substitutes
+NaN only for missing numeric samples, preserving JavaScript's comparison result.
+
+### Why provider options stay unchecked until use
+
+WebSocket start options carry unchecked fields. The service keeps the truthiness
+defaults for the compatible configuration, API key and remote language hint.
+The URL and path normalizers check their inputs. The local session forwards the
+language hint via IPC, where model-language resolution checks it. The worker
+client accepts explicitly absent speaker and speed values because it already
+forwards them in the speech request.
+
+The installed OpenAI SDK's constructor leaves a non-string, non-function API key
+unset for authentication. Its multipart encoder handles model and language fields
+with the same conversion and failure rules as other form fields. The local SDK
+declaration describes those inputs without promising that authentication or an
+upstream request will succeed.
+
+Status still fails if an id from the catalog's enumerated keys has no entry.
+Download failures retain a truthy rejection message verbatim, and the corrupt
+model check coerces that message to a string only for the regex match.
+
+### Why the runtime retains unchecked property values
+
+HTTP speech fields and WebSocket messages remain unchecked until their existing
+field checks run. WebSocket start options accept arrays as well as objects.
+The speech-body and rejection-message predicates establish only non-nullish
+property access, including JavaScript's primitive boxing; they do not promise
+string fields or require own properties. Rejection messages remain arbitrary
+values, with the original truthy-message fallback.
+
+`Number.isInteger` remains the speaker-id acceptance check. The speech-error
+predicate retains the service result's truthiness check and distinguishes its
+readiness errors from its audio result. The WebSocket server uses default client
+tracking; a missing client set still throws rather than silently skipping cleanup.
+
+The Small Model's JavaScript destructuring infers required properties for its
+optional arguments. Correction supplies explicit `undefined` for the unused
+arguments; the generation function reads only the destructured values, so these
+remain the same as absent arguments. Service status and speech option types admit
+the explicit `undefined` values the runtime already supplies.
+
+### Why audio indexing preserves missing samples
+
+Typed-array indexing can produce `undefined`. Arithmetic on a missing sample
+produces `NaN`, including fractional RMS frame indices and invalid resampler
+positions. Numeric calculations retain that outcome instead of substituting
+silence or throwing. The resampler carry retains its original null/undefined
+distinction.
+
+IPC buffer views can start at odd byte offsets. PCM helpers copy those views
+before creating an `Int16Array`, which requires an aligned start offset.
+
+The audio helpers import no external modules. Their inputs are PCM buffers,
+format strings and numeric rates supplied by the stream manager and local
+recognizer/worker. The correction helper receives finished text, an optional
+language and an injected Small Model generator. Its deadline, generation
+failure and implausible corrections still fall back to the original text.
 
 ### Why Parakeet Ultra is the default model and not v3 or v2
 

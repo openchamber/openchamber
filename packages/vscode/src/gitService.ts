@@ -6,11 +6,18 @@ import * as fs from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { execGit as executeGit } from './bridge-git-process-runtime';
-import { readWorktreeDirectorySetting } from '../../web/server/lib/opencode/shared.js';
+import { readWorktreeDirectorySetting } from '../../web/server/lib/opencode/config-files.js';
 import { isContributorForkGitDirectory } from '../../web/server/lib/git/contributor-provenance-storage.js';
 import { readProjectStartCommand } from '../../web/server/lib/opencode/project-start-command.js';
 import { readSubmoduleState, resolveGitPathTarget, type GitPathUnavailable, type GitSubmoduleState } from './gitPathDiff';
 import { parseGitRemoteListing, type GitRemote } from './gitRemoteListing';
+import {
+  parseRawBranchListing,
+  parseRemoteDefaultBranches,
+  RAW_BRANCH_LISTING_ARGS,
+  REMOTE_DEFAULT_BRANCHES_ARGS,
+  type GitBranchDetails,
+} from './gitBranchListing';
 import type { API as GitAPI, Change, Repository, GitExtension, Status } from './git.d';
 
 let gitApi: GitAPI | null = null;
@@ -574,20 +581,16 @@ async function getGitStatusRaw(directory: string): Promise<GitStatusResult> {
 }
 
 
-interface GitBranchDetails {
-  current: boolean;
-  name: string;
-  commit: string;
-  label: string;
-  tracking?: string;
-  ahead?: number;
-  behind?: number;
-}
-
 export interface GitBranchResult {
   all: string[];
   current: string;
   branches: Record<string, GitBranchDetails>;
+  defaultBranches?: Record<string, string>;
+}
+
+async function getRemoteDefaultBranches(directory: string): Promise<Record<string, string>> {
+  const result = await execGit(REMOTE_DEFAULT_BRANCHES_ARGS, directory);
+  return result.exitCode === 0 ? parseRemoteDefaultBranches(result.stdout) : {};
 }
 
 export async function getGitUnpushedBranchCounts(directory: string, requestedBranches: string[]): Promise<{ counts: Record<string, number> }> {
@@ -655,39 +658,15 @@ export async function getGitBranches(directory: string): Promise<GitBranchResult
     }
   }
 
-  return { all, current: currentBranch, branches };
+  return { all, current: currentBranch, branches, defaultBranches: await getRemoteDefaultBranches(directory) };
 }
 
 async function getGitBranchesRaw(directory: string): Promise<GitBranchResult> {
-  const result = await execGit(['branch', '-a', '-v', '--format=%(refname:short)|%(objectname:short)|%(upstream:short)|%(HEAD)'], directory);
-  
+  const result = await execGit(RAW_BRANCH_LISTING_ARGS, directory);
   if (result.exitCode !== 0) {
     return { all: [], current: '', branches: {} };
   }
-
-  const lines = result.stdout.trim().split('\n').filter(Boolean);
-  const branches: Record<string, GitBranchDetails> = {};
-  const all: string[] = [];
-  let current = '';
-
-  for (const line of lines) {
-    const [name, commit, tracking, head] = line.split('|');
-    if (name) {
-      all.push(name);
-      const isCurrent = head === '*';
-      if (isCurrent) current = name;
-      
-      branches[name] = {
-        current: isCurrent,
-        name,
-        commit: commit || '',
-        label: name.replace(/^remotes\//, ''),
-        tracking: tracking || undefined,
-      };
-    }
-  }
-
-  return { all, current, branches };
+  return { ...parseRawBranchListing(result.stdout), defaultBranches: await getRemoteDefaultBranches(directory) };
 }
 
 export async function createBranch(directory: string, name: string, startPoint?: string): Promise<{ success: boolean; branch: string }> {
@@ -2778,7 +2757,7 @@ export async function countGitStashFiles(directory: string, refs: string[]): Pro
     while (cursor < uniqueRefs.length) {
       const ref = uniqueRefs[cursor++];
       if (!ref) continue;
-      const names = await execGit(['stash', 'show', '--name-only', ref], directory);
+      const names = await execGit(['stash', 'show', '--include-untracked', '--name-only', ref], directory);
       counts[ref] = names.exitCode === 0 ? names.stdout.split('\n').map((line) => line.trim()).filter(Boolean).length : 0;
     }
   };

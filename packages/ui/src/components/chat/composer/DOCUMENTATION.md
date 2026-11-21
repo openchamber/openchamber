@@ -230,6 +230,17 @@ the "looks done" hint or the review offer, the suggestion
 queue, composer content and a new-session draft hide the suggestion; a
 new-session draft also hides the queue.
 
+A paused goal's row shows a hint ("Paused during chat") in place of the status
+word, because sending a message moves the chat on while the goal stays paused.
+While paused, the hint and Resume own the row: below a 28rem row (a phone,
+Mini Chat) the token count leaves it, and the goal dialog keeps the full
+used/budget numbers; on a wider row the count gives up its width first. The
+objective keeps 40px either way. Other statuses keep their layout.
+`scripts/perf/session-goal-row.browser.test.mjs` checks that every translation
+shows whole beside Resume at 360, 375 and 390px with a long objective and a
+token budget, in Liberation Sans and in a wider face standing in for DejaVu
+Sans, and that a wide row shows the whole count.
+
 While a session's first send is pending (`pendingDraftSends` in
 `session-ui-store`, from Enter in the draft until the request that starts the
 turn has left), the composer keeps what is typed and sends nothing: Send is
@@ -754,7 +765,7 @@ comment in the prompt and shows it all the same, and editing it moves it out.
 | `parallel/` | "Run in parallel": the launch state of a new-session draft (prompt variants, models per variant, worktrees, setup, auto-fusion) and the strip that renders it above the editor |
 | `text.ts` | How inserted text meets the text already there |
 | `largeTextPaste.ts` | Detect large plain-text pastes, own the double-paste gesture, and build virtual `.txt` files |
-| `largeTextPasteOffer.ts` | Large-paste choice offer id begin/resolve (supersede + double-apply guards) |
+| `largeTextPasteOffer.ts` | Offer id begin/resolve for the choice above the composer, large paste or office documents (supersede + double-apply guards) |
 
 `ChatInput.handlePaste` owns paste orchestration: URL-over-selection markdown
 links, clipboard files, and large plain-text pastes. Pasted and dropped files
@@ -773,7 +784,7 @@ caret). There are no thumbnails above the input.
 
 - The draft's files are a pool; a send, a queued message and a parallel
   launch take the ones their text cites (`attachmentsCitedIn`, `[name]` or the
-  `[name](path)` link of an image saved as a file), plus the screenshots of
+  `[name](path)` link of an image or office document saved as a file), plus the screenshots of
   the browser annotations going with it. Deleting a chip drops its file, and
   undo, which only rewrites the text, brings it back. A send waits for files
   still being read.
@@ -831,8 +842,7 @@ attaches as before, with an error toast. A HEIC the bundled decoder cannot read
 only its link in both cases: providers refuse HEIC image parts, and the store's
 own fallback for it (`sync/DOCUMENTATION.md`) would write a second copy and add
 a chip that repeats the link. With the setting off nothing is
-saved. One setting covers both cases: a split by model kind read as a puzzle of
-exceptions in Settings, and nobody needs the files for one kind of model only.
+saved at paste, and the send step below covers a text-only model.
 The browser annotation screenshot and comment-field image pastes keep
 attaching. The bytes go through the active runtime's OpenCode route (the
 OpenChamber server's proxy, the VS Code bridge, the relay for a phone), so the
@@ -840,6 +850,17 @@ file lands on the machine OpenCode runs on, which may not be the user's. Why
 OpenCode writes the file and not the OpenChamber server: only OpenCode knows
 its temp folder and its filesystem, and an external OpenCode or a space runs
 elsewhere than the server.
+
+A model whose metadata lists no `image` input never receives an image part,
+whatever the setting says: an image part to such a model fails the turn. Every
+image a send or a launch still carries (a pasted image attached with the
+setting off or under a model picked earlier, the annotation screenshot, a
+comment-field paste) goes through `sync/text-model-images.ts` and arrives as a
+text note naming the file under the same filename (`sync/DOCUMENTATION.md`).
+The composer says so once per model in a toast when such an image lands or the
+model changes to a text-only one. Converting at send, and not at attach, keeps
+the image a real attachment while the model can still change: picking a model
+that reads images sends the picture itself.
 Large pastes (about 2,000 characters or 25 lines) follow the composer setting
 `largeTextPasteBehavior` (`ask` / `attach` / `inline` / `inline-double-paste`). Attaching creates an
 in-memory `text/plain` file named `pasted-context-N.txt`, inserts a bracket
@@ -871,6 +892,57 @@ editor focus, expanding the collapsed pill if needed. Hosted mobile focuses
 inside the tap; Capacitor uses the shell's existing next-frame keyboard timing
 when the pill expands. A newer large paste replaces an unanswered choice, and a
 draft, mode or runtime change drops it, so it never lands in another draft.
+Office documents (docx, pptx, xlsx, odt, odp, ods) that arrive through
+`attachFilesWithCitation` (an OS drop, a clipboard file, the attach menu, VS
+Code's picker) follow the profile setting `documentAttachBehavior` (`ask` /
+`save` / `convert`, default `ask`). The other files of the same batch attach at
+once as before. `convert` sends the documents down the ordinary attachment
+path, where the store extracts their text (`sync/DOCUMENTATION.md`). `save`
+(shown as "Attach as is") writes the original bytes with
+`opencodeClient.writeOpenCodeTempFiles`, as a saved image is written, and
+links each as `[name](absolute path)`, with `<` and `>` in the name replaced by
+`_` so the link's `<path>` destination still parses. A converted file or
+image never reuses a name already in such a link, whatever the image setting,
+so a link's label cannot cite an unrelated attachment. A file that could not be read or written
+is named in an error toast, gets no link and is not converted, and the rest of
+the batch keeps its links. A document over the 20 MB send limit
+(`MAX_ATTACHMENT_BYTES`) is refused by name before anything is read, and the
+writer reads each file right before its own write, so a batch holds one
+document in memory at a time. No model check applies: the link replaces the
+extraction for every model. The draft and the runtime instance
+(`captureRuntimeInstance`, so switching away and back still counts as a
+change) are captured when the files arrive; the writer stops before its next request once the runtime
+changed, and a draft or runtime that changed before the write answered gets
+no link. `ask` posts one choice for the batch's documents in the large-paste
+slot (`kind: 'documents'`) with "Attach as is" first. The choice keeps its two
+actions: `attach` keeps the content whole (Attach as is) and `inline` is the
+fallback (Convert to text). Keys, focus, blur and the draft, mode and runtime
+scope are the large paste's, with Convert as the fallback where a large paste
+pastes inline. While a choice of either kind is unanswered, Send and Queue do
+nothing and the draft stays: on touch the choice never takes focus, so a tap
+on Send would otherwise go out without the documents or the pasted text.
+A choice for files picked from a phone's collapsed pill expands the composer,
+where the choice shows, and holds the mobile shell expanded until it is
+answered, so a tap outside the editor cannot hide it behind the pill. A path-only drop (a Files panel row, a VS Code
+explorer URI) still becomes an `@` mention and never reaches the setting.
+
+### Why office documents ask in the large-paste slot and not a choice of their own
+
+The maintainer asked for the document choice to look and behave exactly like
+the large-paste one. Sharing the offer state gives it the same component,
+keyboard, focus and scope guards with no second copy, and keeps one choice
+above the composer at a time: a newer offer of either kind replaces an
+unanswered one, whose files are dropped as an unanswered large paste is.
+
+### Why the choice counts as a floating layer for the window-focus refocus
+
+Files picked through a dialog (VS Code's open dialog, a native file chooser)
+arrive after the window gets its focus back, so the document choice mounts
+just as `useKeyboardShortcuts` runs the window-focus refocus. Without the
+choice on `inputRedirect`'s floating-layer list, that refocus moved focus to
+the editor two frames later, and the choice took the move for an answer and
+converted the files. Listing it keeps the answer with the user; a click or
+focus moved elsewhere still answers Convert, as for a large paste.
 
 ## The prompt language
 
@@ -1148,6 +1220,37 @@ cap their width at the available line width minus the shared chip's 2px inline
 margins; the label's existing ellipsis then handles long summaries. This is local
 to the composer and leaves the source string and sent-message chips unchanged.
 
+### Why the hint is a `::before` and not `placeholder()`
+
+The empty composer's hint is a `::before` on its first line, drawn by
+`editor/theme.ts` from the `cm-composer-empty` class and the
+`--composer-placeholder` property that `ComposerEditor` puts on the content
+element. CodeMirror's `placeholder()` widget sat at the caret of an empty
+document and broke the text probe that iOS smart-spacing keyboards run before
+committing, so nothing typed arrived (#5093). A pseudo-element is not in the
+DOM, so that probe sees an empty line.
+
+### Why the hint's generated text has empty alternative text
+
+Chromium on Android counts text a pseudo-element paints inside an editable as
+the field's own text. Without alternative text, the empty composer reported
+"Plan, build, or ask" with the caret after it to accessibility services, and
+dictation apps that read the field inserted their text as a continuation of the
+hint (#7096). `content: var(--composer-placeholder) / ""` keeps the hint on
+screen and gives it empty accessible text. The DOM is unchanged, so the
+keyboard text probe from #5093 still sees an empty line.
+
+The rule sits behind `@supports (content: "" / "")` for browsers without
+alternative text in `content`, Safari before 17.4 among them. A value with
+`var()` always passes parsing, so such a browser keeps the declaration and only
+finds it invalid after substituting the variable. `content` then falls back to
+`normal`, the earlier rule does not step in, and the hint disappears.
+
+The guarded rule lives in its own spec merged after
+`COMPOSER_EDITOR_THEME_SPEC`, so it is emitted later than the rule it
+overrides. Its selector has no `&`, because inside an @-block style-mod expands
+`&` against the @-rule and the rule never reaches the page.
+
 ## Ordering rules worth knowing
 
 ### Why mention deduplication requires a full path
@@ -1315,7 +1418,11 @@ command can leave the queue untouched and delivery can take only part of it.
   the origin from `ComposerDictation`'s `onStart`, and a transcript whose
   origin is no longer the rendered draft is appended to the origin's draft
   through `restoreDraft`. It is not inserted or sent in the visible session,
-  including for **Insert and send**, and a toast says where it went.
+  including for **Insert and send**, and a toast says where it went. The origin
+  is the rendered draft, not the live store selection, so a draft the store has
+  just opened must render in the same commit
+  (`useShownSessionSelection`, see `sync/DOCUMENTATION.md`, "Session switch
+  commit"): a deferred draft recorded the session still on screen (#6927).
   The dictation shortcut starts in the focused composer's form, falling back
   to the main chat when no form has focus. Mobile mic triggers explicitly
   address their own form. One mounted dictation engine owns capture and
@@ -1576,7 +1683,10 @@ dashed chip says why it will not be sent and can be deleted.
 
 The screenshot belongs to its annotation: a chip in the prompt would separate
 the two, and removing it left the prompt claiming the screenshot was
-attached. It is a chip in the annotation's own row and leaves with it.
+attached. It is a chip in the annotation's own row and leaves with it. The
+chip's own remove button, shown on hover and always on a touch screen, drops
+only the screenshot: the row keeps its comment and selection, and its prompt
+says `Screenshot: not attached`.
 
 ### Why a sent message keeps its image and file previews
 
@@ -1774,8 +1884,9 @@ one app-wide composer state is split per column:
   composer is the pinned chat's when the user last clicked or focused into
   that column and it is still on screen, the main chat's otherwise. Input
   stays where it is when its target takes text or is a button, link, tab,
-  list or menu item, while a dialog, menu, open select, settings or the BTW
-  composer is on screen, during IME composition, and while text is selected, because typing
+  list or menu item, while a dialog, menu, open select, settings, the BTW
+  composer or the choice above the composer (large paste, office documents)
+  is on screen, during IME composition, and while text is selected, because typing
   over a selection starts a comment on it. The window-focus refocus skips a
   focused field, terminal, editor or embedded page and keeps a selection.
   `useKeyboardShortcuts` calls it after the shortcut dispatcher, so a
@@ -2068,7 +2179,8 @@ composer (see "Enter preference"): its Send action attaches.
 While the comment is open, the selection menu keeps the quoted range painted
 through its existing highlight overlay (rAF on scroll/resize, no polling); the
 Range lives in that menu component only and is released when the comment
-ends or the message unmounts.
+ends or the message unmounts. A desktop inline comment moves to the next menu
+of the same message instead (see the message module's invariants).
 
 Voice: the comment shell mounts its own `ComposerDictation` whose insert
 callbacks target the comment draft (insert-and-send attaches; it never sends).

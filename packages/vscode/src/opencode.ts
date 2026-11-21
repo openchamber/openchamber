@@ -1,4 +1,5 @@
 import { installOpenCodeV2, supportsOpenCodeV2Install } from '../../web/server/lib/opencode/v2-install.js';
+import { isRetiredBundledCliSetting } from '../../web/server/lib/opencode/bundled-opencode-server.js';
 import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpenCodeVersion, readOpenCodeInfo, isSupportedOpenCodeVersion, type OpenCodeCompatibility } from '../../web/server/lib/opencode/compatibility.js';
 import * as vscode from 'vscode';
 import * as os from 'os';
@@ -10,7 +11,7 @@ import { randomBytes } from 'crypto';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkingDirectoryChange } from './workingDirectoryChange';
 import { reapOrphanedProcesses } from './opencodeProcessRegistry';
-import { applyProviderEnvAliases } from './provider-env-aliases';
+import { prepareManagedOpenCodeEnv } from '../../web/server/lib/opencode/managed-opencode-env.js';
 import { assignInjectedEnv } from './injected-env';
 import { checkOpenCodeVersionOutput } from './opencodeVersion';
 import { isSameOpenCodeServer } from './opencodeServiceUrl';
@@ -245,9 +246,7 @@ function validateConfiguredOpencodeBinaryForManagedStart(): string | null {
   try {
     const settings = readOpenChamberSettings();
     const raw = typeof settings.opencodeBinary === 'string' ? settings.opencodeBinary.trim() : '';
-    if (raw) {
-      candidates.push(raw);
-    }
+    if (raw && !isRetiredBundledCliSetting(raw)) candidates.push(raw);
   } catch {
     // ignore
   }
@@ -817,7 +816,7 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
       const port = await allocateManagedOpenCodePort();
       startup.signal.throwIfAborted();
       userOwnsOpenCodeConfig = (process.env.OPENCODE_CONFIG ?? '').trim().length > 0;
-      serverEnv = applyProviderEnvAliases({ ...process.env });
+      serverEnv = prepareManagedOpenCodeEnv({ ...process.env });
       applyPluginSwitchPolicies(serverEnv, serverWorkingDirectory(), { userOwnsConfig: userOwnsOpenCodeConfig });
       server = spawnManagedOpenCodeServer(serverCwd, port, READY_CHECK_TIMEOUT_MS, startup.signal, serverEnv);
       await server.ready;

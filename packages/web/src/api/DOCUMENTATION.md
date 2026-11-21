@@ -51,6 +51,10 @@ The wire answer is cached per runtime key because the adapter outlives a runtime
 
 Background push is the delivery channel when the web/PWA client is not focused. The main notification toggle and templates stay enabled, but a hidden page with an active push subscription does not also show the same foreground notification. Installed PWAs differ here: some expose `Notification.permission` yet only allow notifications through an active service worker registration.
 
+### Why tagged notifications request renotify
+
+A session keeps the same notification tag across turns so its latest notification replaces the old one. Tagged notifications set `renotify` so a later turn alerts again when the old notification is still present. Untagged notifications omit it because browsers reject `renotify: true` without a nonempty tag. The short delivery-deduplication window still suppresses duplicate copies of the same event.
+
 ### Why the legacy Linear adapter mirrors the server's descriptor
 
 A legacy server serves exactly Linear, in Linear's own shapes. The adapter maps them the same way the server's tracker adapter does (`server/lib/linear/tracker.js`), and `BUILT_IN_LINEAR_TRACKER` must stay identical to that module's descriptor. Servers from before multiple workspaces name only the organization, so that single organization becomes the one account. Such a server serves no extension tracker, so the extension-only connect and OAuth-client routes report `UNSUPPORTED`.

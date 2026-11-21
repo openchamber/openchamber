@@ -50,6 +50,10 @@ OpenChamber web 服务器监听的地址。使用 `0.0.0.0` 可允许其他机�
 
 允许在自己页面的框架中显示 OpenChamber 的源，用空格分隔，例如 `https://dash.example.com`。`*` 允许任何站点。默认只有 OpenChamber 本身及其桌面和移动应用可以嵌入它，其他站点无法在它的按钮上叠加内容。
 
+### `OPENCHAMBER_TRUSTED_PROXIES`
+
+运行在其他机器或其他容器中的反向代理地址，用逗号分隔，例如 `192.168.1.10` 或 `172.18.0.0/16`。OpenChamber 按客户端限制登录失败次数，只有当请求来自本机或这里列出的地址时，才会从 `X-Forwarded-For` 读取客户端地址。未列出的代理会被当作一个客户端，因此一个人的失败尝试可能会让它后面的所有人暂时无法登录。
+
 ### `OPENCHAMBER_DATA_DIR`
 
 覆盖 OpenChamber 数据目录。默认是 `~/.config/openchamber`。

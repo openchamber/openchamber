@@ -32,6 +32,41 @@ OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
 
 如果 `OPENCODE_HOST` 缺少端口或带有路径，OpenChamber 会忽略它并回退到启动自己的服务器。如果你期望的连接没有发生，请留意启动日志中的 `[config]` 警告。
 
+## 与 VS Code 共用一个服务器
+
+桌面应用和 VS Code 扩展通常各自启动一个 OpenCode 服务器。在 Windows 上，部分插件（包括 `opencode-mem`）无法在两个进程中打开同一个数据库。让两个应用连接同一个服务器即可避免这个冲突。
+
+共用的服务器需要 OpenCode 2.2.4 或更新版本。版本更旧时，两个应用都会停在“更新 OpenCode”界面。
+
+1. 退出 OpenChamber Desktop 和 VS Code，让它们管理的服务器停止。同时停止其他使用相同插件数据的 OpenCode 服务器，例如在终端中运行的服务器。OpenCode TUI 也会启动一个后台服务器，关闭 TUI 后它仍会继续运行。用 `opencode service status` 查看它，用 `opencode service stop` 停止它。
+2. 启动一个 OpenCode 服务器并保持运行：
+
+   ```bash
+   opencode serve --port 4096
+   ```
+
+   OpenCode 会在 `server listening on` 这一行中打印它监听的地址。下面步骤中出现 `http://localhost:4096` 的地方，都改用这个地址。
+
+   如果 `OPENCODE_PASSWORD` 和 `OPENCODE_SERVER_PASSWORD` 都没有设置，OpenCode 还会打印一个生成的 `server password`。如果设置了其中一个，它不会打印密码，服务器会使用你设置的密码。请妥善保管密码，并在后续步骤中使用。
+
+3. 使用 `OPENCODE_HOST=http://localhost:4096`、`OPENCODE_SKIP_START=true`，以及设为服务器密码的 `OPENCODE_PASSWORD` 启动 OpenChamber Desktop。在 Windows 上，从 PowerShell 窗口启动：
+
+   ```powershell
+   $env:OPENCODE_HOST = 'http://localhost:4096'
+   $env:OPENCODE_SKIP_START = 'true'
+   $password = Read-Host 'OpenCode server password' -AsSecureString
+   $env:OPENCODE_PASSWORD = [System.Net.NetworkCredential]::new('', $password).Password
+   & "$env:LOCALAPPDATA\Programs\@openchamberelectron\OpenChamber.exe"
+   ```
+
+   如果你把 Desktop 安装在其他位置，请使用你的 `OpenChamber.exe` 路径。
+
+4. 在同一个 PowerShell 窗口中用 `code` 启动 VS Code。在 VS Code 设置中把 `openchamber.apiUrl` 设为 `http://localhost:4096`，然后运行 **Developer: Reload Window**。
+
+现在两个应用都使用该地址上的服务器。使用任一应用期间，请保持服务器运行。每次都要像第 3、4 步那样从 PowerShell 启动两个应用：从开始菜单打开时，Desktop 会再次启动自己的服务器，VS Code 也没有共享服务器的密码。如果在未设置密码的情况下重启服务器，它会打印新密码，请改用新密码。未设置 `OPENCODE_PASSWORD` 时，旧名称 `OPENCODE_SERVER_PASSWORD` 也可以使用。不要把服务器暴露在不受信任的网络中。这种方式不适用于 Desktop 自动管理的服务器，因为它的端口和密码会变化。
+
+外部服务器不会获得 OpenChamber 管理的插件。如果任一应用无法连接，请参阅 [OpenCode 连接](/zh-cn/troubleshooting/opencode-connection/)。
+
 ## 从 CLI 管理服务器
 
 ```bash

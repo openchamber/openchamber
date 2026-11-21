@@ -6,7 +6,7 @@ import { useAgentMissingFromCatalog, useModelMissingFromCatalog } from './agentA
 import type { EditPermissionMode } from '@/stores/types/sessionTypes';
 import type { ModelMetadata } from '@/types';
 import type { Agent, Message, PermissionRuleset, Session } from '@/lib/opencode/model';
-import type { PermissionEffect } from '@opencode/client';
+import type { PermissionEffect } from '@/lib/opencode/model';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -84,7 +84,6 @@ const selectLatestReplyModelChoice = (messages: Message[], state: State) => find
     (messageId) => state.part[messageId],
 );
 
-/** A section caption in the composer's pickers, the same as the model picker's. */
 
 const AgentDescriptionTooltip: React.FC<{
     description?: string;
@@ -108,10 +107,6 @@ const AgentDescriptionTooltip: React.FC<{
     );
 };
 
-/**
- * Star on an agent row. Starred agents are what Tab cycles through; the press
- * is kept from the row so starring never picks the agent.
- */
 const AgentFavoriteToggle: React.FC<{
     favorite: boolean;
     onToggle: () => void;
@@ -147,12 +142,6 @@ const AgentFavoriteToggle: React.FC<{
     );
 };
 
-/**
- * Sampling knobs an agent sets.
- *
- * v2 folded them into the provider request body, which is free-form JSON, so
- * each one is read back with an explicit check rather than trusted.
- */
 const agentSampling = (agent: Agent, key: 'temperature' | 'topP'): number | undefined => {
     const value = agent.request?.body?.[key];
     return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
@@ -161,13 +150,6 @@ const agentSampling = (agent: Agent, key: 'temperature' | 'topP'): number | unde
 const agentTemperature = (agent: Agent): number | undefined => agentSampling(agent, 'temperature');
 const agentTopP = (agent: Agent): number | undefined => agentSampling(agent, 'topP');
 
-/**
- * The effect a ruleset gives an action, most specific rule last.
- *
- * v2 rules are `{ action, resource, effect }`: `action` is the capability
- * ("edit", "shell"), `resource` the pattern it applies to. A wildcard rule for
- * the action wins over the catch-all `*` rule.
- */
 const resolveWildcardPermissionEffect = (rules: PermissionRuleset, action: string): PermissionEffect | undefined => {
     for (let i = rules.length - 1; i >= 0; i -= 1) {
         const rule = rules[i];
@@ -366,32 +348,19 @@ type ModelControlsProps = {
     className?: string;
     mobilePanel?: MobileControlsPanel;
     onMobilePanelChange?: (panel: MobileControlsPanel) => void;
-    /** Offers "Run on several models" at the top of the desktop model picker. */
     onRunInParallel?: () => void;
-    /** Shows the agent picker alone, for a composer whose models are chosen elsewhere. Desktop only. */
     agentOnly?: boolean;
-    /**
-     * Picker effort changes become the model's remembered level. Off for a
-     * BTW fork, whose own effort must not change the main chat's default.
-     */
     rememberVariantPicks?: boolean;
 } & (
     | { selection?: never; sessionId?: never; modelSelectorOpen?: never; onModelSelectorOpenChange?: never }
     | {
         selection: BtwSelection;
-        /** The session an agent pick is saved for: a chat pinned in the side panel, or a BTW fork. */
         sessionId: string | null;
-        /**
-         * The model picker's open state, owned by a composer that answers the
-         * model and effort shortcuts for this selection (BTW). The tooltips
-         * then name those shortcuts.
-         */
         modelSelectorOpen?: boolean;
         onModelSelectorOpenChange?: (open: boolean) => void;
     }
 );
 
-/** Beside "Loading" the shared spinner; beside "Unavailable", an error, a still warning. */
 const ReadinessMark: React.FC<{ unavailable: boolean; className: string }> = ({ unavailable, className }) => (
     unavailable ? <Icon name="error-warning" className={className} /> : <Spinner className={className} />
 );
@@ -410,9 +379,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 }) => {
     const { t } = useI18n();
     const { focusInput: focusColumnInput } = useChatColumnActions();
-    // A controlled picker (a chat pinned in the side panel, a BTW fork) lists
-    // the catalog of its own session's folder, which can be another one than
-    // the main chat's active folder. The main chat keeps the active catalog.
     const columnDirectory = useChatSessionSelection().directory;
     const catalogDirectory = selection ? columnDirectory ?? undefined : undefined;
     const { isReady, isUnavailable } = useOpenCodeReadiness('models', catalogDirectory);
@@ -439,10 +405,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const currentModelId = useConfigStore((state) => selection ? selection.model?.modelId ?? '' : state.currentModelId);
     const effectiveCurrentVariant = useConfigStore((state) => state.currentVariant);
     const currentVariantSelection = useConfigStore((state) => state.currentVariantSelection);
-    // What the picker shows is what the next send carries: an explicit choice
-    // when there is one, "Default" when "Default" was picked, and otherwise the
-    // inherited effort — showing "Default" while an inherited effort is in
-    // force is how a switch away from it looks like it did not stick.
     let currentVariant = currentVariantSelection.override === null
         ? undefined
         : currentVariantSelection.override ?? effectiveCurrentVariant;
@@ -467,7 +429,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const getCurrentProvider = useConfigStore((state) => state.getCurrentProvider);
     const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
     const getCurrentAgent = useConfigStore((state) => state.getCurrentAgent);
-    // Use visible agents (excludes hidden internal agents)
     const agents = React.useMemo(() => filterVisibleAgents(catalogAgents), [catalogAgents]);
     const primaryAgents = React.useMemo(() => agents.filter((agent) => agent.mode === 'primary'), [agents]);
     const tracedReadyRef = React.useRef(false);
@@ -484,7 +445,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         });
     }, [agents.length, currentAgentName, currentModelId, currentProviderId, isReady, providers.length, selection]);
 
-    // Controlled selections never restore from the main session or its history.
     const currentSessionId = useSessionUIStore((s) => selection ? null : s.currentSessionId);
     const getDirectoryForSession = useSessionUIStore((s) => s.getDirectoryForSession);
     const sync = useSync();
@@ -517,14 +477,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const stickySessionAgentName = currentSessionId ? stickySessionAgentRef.current : null;
 
-    // Prefer per-session selection over global config to avoid flicker during server-driven mode switches.
     const uiAgentName = currentSessionId
         ? (sessionSavedAgentName || stickySessionAgentName || currentAgentName)
         : currentAgentName;
-    // Display only, like `knownCurrentModel`: while this directory's agents
-    // are still arriving, show the chosen (or default) agent as another
-    // catalog knows it instead of "Select agent".
-    // The send would stop with an error, so the picker says so beforehand.
     const agentUnavailable = useAgentMissingFromCatalog(uiAgentName);
     const agentUnavailableText = agentUnavailable && uiAgentName
         ? t('chat.modelControls.agentUnavailable', { agent: uiAgentName })
@@ -555,33 +510,20 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         getEffectiveShortcutCombo('cycle_agent', cycleAgentShortcutOverride ? { cycle_agent: cycleAgentShortcutOverride } : undefined)
     ), [cycleAgentShortcutOverride]);
 
-    // Separate state for agent selector to avoid conflict with model selector
     const [isAgentSelectorOpen, setIsAgentSelectorOpen] = React.useState(false);
     const { favoriteModelsList, recentModelsList } = useModelLists(catalogDirectory);
-    // Auto routing: the server resolves `openchamber/auto` into a real model per
-    // send. Offered only while the server says it can honour it, in the main
-    // composer and in controlled selections (BTW) alike.
     const autoReady = useRoutingStore(selectAutoReady);
     const autoEntry = React.useMemo<ModelPickerEntry | null>(() => (autoReady
         ? { providerID: AUTO_PROVIDER_ID, modelID: AUTO_MODEL_ID, model: { id: AUTO_MODEL_ID, name: t('chat.modelControls.autoModel') } }
         : null), [autoReady, t]);
     const isAutoSelected = isAutoModel(currentProviderId, currentModelId);
-    // Its provider was removed: the send would stop with an error, so the
-    // picker says so beforehand, as it does for a missing agent.
     const modelUnavailable = useModelMissingFromCatalog(catalogDirectory, currentProviderId, currentModelId);
 
     const { isMobile: deviceIsMobile } = useDeviceInfo();
-    // The composer decides whether it renders the mobile layout from the UI
-    // store (the Capacitor shell forces it true even on tablets/iPad, where
-    // useDeviceInfo classifies the wide screen as non-mobile). The bottom-sheet
-    // panels must follow the SAME source: with the device flag alone, tapping
-    // the model/agent chip on an iPad set the panel state while the sheet
-    // itself rendered null.
     const uiIsMobile = useUIStore((state) => state.isMobile);
     const isMobile = deviceIsMobile || uiIsMobile;
     const isDesktop = React.useMemo(() => isDesktopShell(), []);
     const isVSCodeRuntime = useIsVSCodeRuntime();
-    // Only use mobile panels on actual mobile devices, VSCode uses desktop dropdowns
     const isCompact = isMobile;
     const [localMobilePanel, setLocalMobilePanel] = React.useState<MobileControlsPanel>(null);
     const usingExternalMobilePanel = mobilePanel !== undefined && typeof onMobilePanelChange === 'function';
@@ -594,16 +536,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const closeMobilePanel = React.useCallback(() => setActiveMobilePanel(null), [setActiveMobilePanel]);
     const closeMobileTooltip = React.useCallback(() => setMobileTooltipOpen(null), []);
     const longPressTimerRef = React.useRef<NodeJS.Timeout | undefined>(undefined);
-    // Use global state for model selector (allows Ctrl+M shortcut)
     const agentMenuOpen = isModelSelectorOpen;
-    // The model and agent menus open upward from the composer, and downward
-    // only when the composer sits too close to the top to fit them.
     const modelTriggerRef = React.useRef<HTMLDivElement>(null);
     const agentTriggerRef = React.useRef<HTMLDivElement>(null);
     const agentListRef = React.useRef<HTMLDivElement>(null);
     const modelMenuSide = usePopupSideOnOpen(agentMenuOpen, modelTriggerRef, 'top');
     const agentMenuSide = usePopupSideOnOpen(isAgentSelectorOpen, agentTriggerRef, 'top');
-    // A picker that now names a longer or shorter choice eases into its new width.
     const variantTriggerRef = React.useRef<HTMLDivElement>(null);
     useWidthMorph(modelTriggerRef);
     useWidthMorph(agentTriggerRef);
@@ -630,7 +568,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
     }, [activeMobilePanel]);
 
-    // Handle model selector close behavior (separate from agent selector)
     const prevModelSelectorOpenRef = React.useRef(isModelSelectorOpen);
     React.useEffect(() => {
         const wasOpen = prevModelSelectorOpenRef.current;
@@ -643,21 +580,16 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             setPendingThinkingVariants(new Map());
             setAdjustedThinkingModels(new Set());
 
-            // Restore focus to chat input when model selector closes
             if (wasOpen && !isCompact) {
                 requestAnimationFrame(focusColumnInput);
             }
         }
     }, [focusColumnInput, isModelSelectorOpen, isCompact]);
 
-    // Handle agent selector close behavior
     const [agentSearchQuery, setAgentSearchQuery] = React.useState('');
     React.useEffect(() => {
         if (isAgentSelectorOpen) return;
-        // Every picker drops its query, so the next open lists every agent.
         setAgentSearchQuery('');
-        // The focus return is the main composer's: a controlled picker's own
-        // column owns where the caret goes.
         if (!selection && !isCompact) requestAnimationFrame(focusColumnInput);
     }, [focusColumnInput, isAgentSelectorOpen, isCompact, selection]);
 
@@ -682,8 +614,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const controlIconSize = sizeVariant === 'mobile' ? 'size-5' : sizeVariant === 'vscode' ? 'size-4' : 'size-4';
     const providerLogoSize = sizeVariant === 'mobile' ? 'size-[21px]' : 'size-[17px]';
     const controlTextSize = isCompact ? 'typography-micro' : 'typography-meta';
-    // The model unit (logo, name, effort) to the agent: 16px on the desktop
-    // footer, a group gap; the footer adds 20px before the mic and Send.
     const inlineGapClass = sizeVariant === 'mobile' ? 'gap-x-1' : sizeVariant === 'vscode' ? 'gap-x-2' : 'gap-x-4';
 
     const currentProvider = selection ? providers.find((provider) => provider.id === currentProviderId) : getCurrentProvider();
@@ -692,10 +622,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const currentModelForMetadata = currentModelId
         ? models.find((model: ProviderModel) => model.id === currentModelId)
         : undefined;
-    // Display only: a directory OpenCode is still starting lists part of its
-    // catalog for a second or two, so the name and efforts another catalog
-    // knows for this model stay on screen. Everything that decides or
-    // validates the selection keeps reading the active catalog.
     const knownCurrentModel = useConfigStore((state) => (
         currentModelForMetadata ? undefined : selectKnownCatalogModel(state, currentProviderId, currentModelId)
     ));
@@ -729,13 +655,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         [currentMetadata, localizeMetaLabel],
     );
 
-    // Compute from current model each render to avoid stale variants
-    // in draft/session transitions.
-    // `getCurrentModelVariants()` builds a new array each call. The effort
-    // effect below depends on this list, and a fresh identity on every store
-    // tick (a form event, a status ping) re-ran it and briefly re-applied the
-    // inherited effort over the user's pick — the picker flickered. Keyed on
-    // the content so identity only changes when the variants do.
     const rawAvailableVariants = selection
         ? listModelVariantIds(currentProvider?.models.find((model) => model.id === currentModelId)?.variants)
         : getCurrentModelVariants();
@@ -773,14 +692,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         currentSessionId ?? '',
         currentSessionDirectory ?? undefined,
     );
-    // OpenCode 2 keeps the selection on the session record itself (`model`
-    // with its variant, and `agent`), and that is what the next prompt runs
-    // on, so it is the authority when a session opens. The last assistant
-    // reply is the fallback for a record that has no model yet. The record's
-    // agent is followed by its own effect below, so a choice carries an agent
-    // only when the record has none.
-    // Both are read as derived choices: the record and the message list are
-    // replaced on every streamed step while the choice stays the same.
     const sessionRecordAgent = useSessionSelector(
         currentSessionId ?? undefined,
         currentSessionDirectory ?? undefined,
@@ -797,7 +708,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         currentSessionDirectory ?? undefined,
         selectLatestReplyModelChoice,
         areModelChoicesEqual,
-        // The choice is read from the reply's parts, which can load after it.
         true,
     );
     const latestLoadedUserChoice = React.useMemo(() => {
@@ -867,8 +777,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         const variantOptions = getModelVariantOptions(providerId, modelId);
         if (variantOptions.length === 0) return undefined;
 
-        // Keep a `null` inherited choice: it is an explicit Default the model
-        // remembers, not "nothing chosen".
         let currentInherited: string | null | undefined;
         if (currentProviderId === providerId && currentModelId === modelId) {
             currentInherited = currentVariantSelection.inherited !== undefined
@@ -890,13 +798,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         );
     }, [agents, currentAgentName, currentModelId, currentProviderId, currentVariantSelection, effectiveCurrentVariant, getDefaultVariantForModel, getModelVariantOptions, lastUsedEfforts, uiAgentName]);
 
-    /**
-     * The session's recorded choice for this model, in the selection store's
-     * three states: an effort name, `null` for an explicit "Default", and
-     * `undefined` for no choice at all. Collapsing `null` into `undefined` here
-     * would hand a real "Default" back to the callers as "nothing chosen", and
-     * they would re-record it as a choice on the next write.
-     */
     const resolveModelVariantSelection = React.useCallback((
         providerId: string,
         modelId: string,
@@ -911,7 +812,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         const selectionSessionId = selection ? controlledSessionId : currentSessionId;
         if (selectionSessionId && effectiveAgentName) {
             const savedVariant = getAgentModelVariantForSession(selectionSessionId, effectiveAgentName, providerId, modelId);
-            // An explicit "Default" is a choice: it stops the fallbacks below.
             if (savedVariant === null) {
                 return null;
             }
@@ -920,8 +820,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
         }
 
-        // Restoring a session must not record an inherited level as the
-        // session's own pick; the effort effect resolves it afterwards.
         if (options?.includeInherited === false) {
             return undefined;
         }
@@ -970,15 +868,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         rememberEffort(providerId, modelId, variant ?? null);
     }, [rememberVariantPicks]);
 
-    /**
-     * Records `variant` as this session's effort for the model, in the same
-     * three states the selection store defines: an effort name, `null` for an
-     * explicit "Default", `undefined` for no choice so the inherited effort
-     * applies. Callers decide which one they mean — the picker turns its own
-     * "Default" into `null`, while restore paths pass `undefined` through when
-     * they found nothing, because "the history carries no effort" is not the
-     * user having chosen "Default".
-     */
     const commitVariantSelectionForModel = React.useCallback((providerId: string, modelId: string, variant: string | null | undefined, agentNameOverride?: string | null) => {
         if (selection) {
             if (controlledSessionId && selection.agent) {
@@ -1029,20 +918,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return 'applied';
     }, [addRecentModel, commitVariantSelectionForModel, resolveLiveAgentName, tryApplyModelSelection, selection]);
 
-    // Every agent switch lands on the session record (`session.agent.selected`),
-    // whoever made it: this composer's send, another client, a plugin. A switch
-    // the composer has not followed yet is newer than what the composer shows,
-    // so the picker takes it, unless a pick made here is still unsent: the
-    // next send switches the session to that pick. An unchanged record leaves
-    // a pick in place, across reopen and reload too. The model is not part of a switch:
-    // the session keeps running on its own, so the model shown (Auto included)
-    // stays as it is; a model switch is followed by the restore below.
     React.useEffect(() => {
         if (!currentSessionId || !contextHydrated || !sessionRecordAgent) return;
         if (!useSelectionStore.getState().followSessionAgent(currentSessionId, sessionRecordAgent)) return;
         if (useConfigStore.getState().currentAgentName === sessionRecordAgent) return;
-        // The model this session last used with that agent is not what it
-        // runs on now, so the agent-change effect must not bring it back.
         prevAgentNameRef.current = sessionRecordAgent;
         setAgent(sessionRecordAgent, { keepModel: true });
     }, [contextHydrated, currentSessionId, sessionRecordAgent, setAgent]);
@@ -1053,8 +932,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
-        // The session record needs no loaded transcript; a message-derived
-        // choice does, so a partial snapshot is never treated as authoritative.
         const snapshotReady = hasRenderableCurrentSessionSnapshot || Boolean(sessionRecordChoice);
         if (!contextHydrated || providers.length === 0 || !snapshotReady || !latestLoadedUserChoice?.providerID || !latestLoadedUserChoice.modelID) {
             return;
@@ -1073,16 +950,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
-        // Without an agent in the choice, the session's agent is whatever the
-        // composer holds for it now: the record's, once followed, or a pick
-        // made after it.
         const restoreAgentName = latestLoadedUserChoice.agent || resolveLiveAgentName() || undefined;
 
-        // The record's model follows the agent's rule: one the composer has
-        // not reconciled with yet is a newer switch (another client, a plugin)
-        // and outranks a model or effort picked here. Auto is the exception:
-        // with Auto the router itself switches the session's model each turn,
-        // and the picker keeps showing Auto.
         const recordModelKey = sessionRecordChoice && latestLoadedUserChoice === sessionRecordChoice
             ? `${sessionRecordChoice.providerID}/${sessionRecordChoice.modelID}#${sessionRecordChoice.variant ?? ''}`
             : null;
@@ -1092,15 +961,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             if (recordModelKey) useSelectionStore.getState().markSessionModelFollowed(currentSessionId, recordModelKey);
         };
 
-        // History can never say "Auto": the server replaces the sentinel with
-        // a real model before OpenCode stores the message. A saved Auto is the
-        // newer truth, so it wins over the model the last turn actually ran on.
-        // Until the routing state has loaded, Auto cannot be applied yet, so
-        // the restore stays pending instead of letting history overwrite it.
         const savedSessionModel = getSessionModelSelection(currentSessionId);
         const savedAuto = Boolean(savedSessionModel) && isAutoModel(savedSessionModel!.providerId, savedSessionModel!.modelId);
         if (savedAuto && isStaleAutoSelection(savedSessionModel!.providerId, savedSessionModel!.modelId)) {
-            // Auto saved under a server that could route; this one cannot.
             useConfigStore.getState().dropStaleAutoSelection();
         } else if (savedAuto) {
             if (!autoReady) return;
@@ -1123,9 +986,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
             markRecordModelFollowed();
             latestLoadedUserChoiceRestoreRef.current = restoreKey;
-            // The saved-selections effect must still get its one-time run so the
-            // persisted session agent is applied via setAgent; only the model
-            // was restored here.
             return;
         }
 
@@ -1137,8 +997,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             && getModelVariantOptions(latestLoadedUserChoice.providerID, latestLoadedUserChoice.modelID).includes(latestLoadedUserChoice.variant)
             ? latestLoadedUserChoice.variant
             : undefined;
-        // A saved choice may be newer than the last sent message, including an
-        // explicit Default. Reloading history must not replace that choice.
         const savedVariant = currentSessionId && restoreAgentName
             ? getAgentModelVariantForSession(
                 currentSessionId,
@@ -1147,8 +1005,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 latestLoadedUserChoice.modelID,
             )
             : undefined;
-        // A newer switch brings its own effort; a record without one says
-        // nothing about effort, so the saved choice stays.
         let restoredVariant: string | null | undefined = savedVariant !== undefined ? savedVariant : historicalVariant;
         if (recordModelSwitched && historicalVariant) restoredVariant = historicalVariant;
         const applyResult = applyModelSelectionWithVariant(
@@ -1161,9 +1017,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
-        // The effort is not written again here: `applyModelSelectionWithVariant`
-        // above already recorded `historicalVariant` for this same agent and
-        // model, and a second write can only disagree with the first.
         if (latestLoadedUserChoice.agent) {
             saveSessionAgentSelection(currentSessionId, latestLoadedUserChoice.agent);
         }
@@ -1201,8 +1054,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
-        // Persisted selections hydrate a session once. Live agent changes are
-        // resolved by setAgent and must not be overwritten by session history.
         if (restoredSessionSelectionRef.current === currentSessionId) {
             return;
         }
@@ -1283,8 +1134,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 ? (useSelectionStore.getState().getSessionAgentSelection(currentSessionId) || stickySessionAgentRef.current)
                 : null;
 
-            // If we already have a valid agent selected (often from server-injected mode switch),
-            // don't override it with a fallback.
             const preferred =
                 (currentSessionId
                     ? (useSelectionStore.getState().getSessionAgentSelection(currentSessionId) || stickySessionAgentRef.current)
@@ -1325,9 +1174,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
 
         if (!hasRenderableCurrentSessionSnapshot) {
-            // The session's own directory: falling back to the sync directory
-            // loads a worktree session into the wrong store and races the
-            // chat's own load under a different dedupe key.
             const sessionDirectory = currentSessionDirectory ?? undefined;
             if (!sync.isLoading(currentSessionId, sessionDirectory)) {
                 void sync.ensureSessionRenderable(currentSessionId, false, sessionDirectory);
@@ -1359,13 +1205,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         sync,
     ]);
 
-    // The picker shows the session's agent, while a send carries the app-wide
-    // one. That one drifts on its own: another session or folder sets it, an
-    // agent list reload resolves it again. Whatever moved it, it goes back to
-    // the session's agent, so the agent shown is the agent sent; the switch
-    // brings back the model this session last used with it, and keeps Auto.
-    // Both are read live: the restores above may have moved either one in
-    // this same commit.
     React.useEffect(() => {
         if (selection || !currentSessionId || !contextHydrated || !agentsResolved) return;
         const sessionAgentName = useSelectionStore.getState().getSessionAgentSelection(currentSessionId);
@@ -1431,23 +1270,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         selection,
     ]);
 
-    // Declared before the re-sync below so that, on the render a model switch
-    // lands, a pick made on the previous model no longer holds back the new
-    // model's default.
     React.useEffect(() => {
         manualVariantSelectionRef.current = false;
     }, [currentProviderId, currentModelId]);
 
     React.useEffect(() => {
         if (selection) return;
-        // Missing discovery/context data cannot invalidate a configured effort.
-        // Clearing it here also marks the automatic draft selection as manual.
         if (!contextHydrated || !currentAgentName || (currentModelId && !currentModelForMetadata)) return;
 
         if (!currentProviderId || !currentModelId) {
-            // Switching the draft to another directory empties the automatic
-            // model until that directory's catalog resolves it; that gap is not
-            // a model without efforts and must not erase the one picked.
             if (!providersResolved) return;
             manualVariantSelectionRef.current = false;
             setCurrentVariant(undefined);
@@ -1460,15 +1291,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
-        // The chosen effort does not exist on this model: drop the choice and
-        // inherit, rather than pin an explicit "Default" the user never picked.
         if (currentVariant && !availableVariants.includes(currentVariant)) {
             setCurrentVariantOverride(undefined, resolveInheritedVariantForModel(currentProviderId, currentModelId));
             return;
         }
 
-        // Draft state (no session yet): seed from the model's configured default, but don't override
-        // user selection while drafting.
         if (!currentSessionId) {
             if (currentVariantSelection.override === undefined && !manualVariantSelectionRef.current) {
                 const desired = resolveInheritedVariantForModel(currentProviderId, currentModelId);
@@ -1488,7 +1315,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         if (savedVariant && availableVariants.includes(savedVariant)) {
             setCurrentVariantOverride(savedVariant, inheritedVariant);
         } else if (savedVariant === null || currentVariantSelection.override === null) {
-            // "Default" was picked for this session, or is picked right now.
             setCurrentVariantOverride(null, inheritedVariant);
         } else {
             setCurrentVariantOverride(undefined, inheritedVariant);
@@ -1510,8 +1336,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         resolveInheritedVariantForModel,
         setCurrentVariant,
         setCurrentVariantOverride,
-        // `getDefaultVariantForModel` reads these from the store; listing them
-        // re-resolves the inherited effort when the Settings defaults change.
         settingsDefaultModel,
         settingsDefaultVariant,
         selection,
@@ -1519,8 +1343,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const handleVariantSelect = React.useCallback((variant: string | undefined) => {
         if (currentProviderId && currentModelId) {
-            // Picked in the effort menu, so no effort means the user picked
-            // "Default" — a choice, recorded as `null`.
             commitVariantSelectionForModel(currentProviderId, currentModelId, variant ?? null);
             rememberVariantForModel(currentProviderId, currentModelId, variant ?? null);
         }
@@ -1529,14 +1351,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const handleAgentChange = React.useCallback((agentName: string, options?: { closeModelSelector?: boolean }) => {
         if (selection) {
             if (!controlledSessionId) return;
-            // The pick belongs to the controlled session only; the app-wide
-            // agent stays the main chat's.
             pickSessionAgent(controlledSessionId, agentName);
-            // An effort is remembered per agent and model, so an agent this
-            // session has not run yet has none for the current model. Carry
-            // the level the composer is on, including an explicit Default;
-            // without it a BTW fork loses the effort it copied from the main
-            // chat the moment its agent changes.
             if (
                 currentProviderId && currentModelId && selection.variant !== undefined
                 && getAgentModelVariantForSession(controlledSessionId, agentName, currentProviderId, currentModelId) === undefined
@@ -1553,8 +1368,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
         try {
-            // The pick reaches the session with the next send; held as
-            // unsent until then, so the session record cannot replace it.
             if (currentSessionId) {
                 pickSessionAgent(currentSessionId, agentName);
             }
@@ -1586,8 +1399,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     ]);
 
     const handleCycleAgentFromModelPicker = React.useCallback((direction: 1 | -1) => {
-        // Auto hides the agent control, so the shortcut must not change a
-        // choice the user cannot see.
         if (isAutoSelected) return;
         const nextAgentName = getCycledPrimaryAgentName(agents, currentAgentName, direction, useUIStore.getState().favoriteAgents);
         if (!nextAgentName) {
@@ -1620,8 +1431,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     ) => {
         try {
             const effectiveAgentName = options?.agentName ?? resolveLiveAgentName() ?? undefined;
-            // `applyVariant` is only set when the user adjusted the effort in
-            // the model picker, so no effort means an explicit "Default".
             const result = options?.applyVariant
                 ? applyModelSelectionWithVariant(providerId, modelId, options.variant ?? null, effectiveAgentName)
                 : selection
@@ -1641,19 +1450,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             const pickedSessionId = selection ? controlledSessionId : currentSessionId;
             if (pickedSessionId) useSelectionStore.getState().pickSessionModel(pickedSessionId, providerId, modelId);
             if (!selection && !options?.applyVariant && !isAutoModel(providerId, modelId)) {
-                // Add to recent models on successful selection. Auto is pinned, not recent.
                 addRecentModel(providerId, modelId);
             }
             if (!selection) {
-                // A new session starts on this pick when nothing configured names a
-                // model. Only a person's pick writes it, never a session restore.
                 setLastSelectedModel(providerId, modelId);
             }
             setAgentMenuOpen(false);
             if (isCompact) {
                 closeMobilePanel();
             }
-            // Restore focus to chat input after model selection.
             requestAnimationFrame(focusColumnInput);
         } catch (error) {
             console.error('[ModelControls] Handle model change error:', error);
@@ -1954,8 +1759,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         );
     };
 
-    // Chosen in the phone's model sheet: the row runs with the effort it would
-    // show, and no effort there means "Default".
     const handleMobileModelApply = (providerId: string, modelId: string) => {
         const result = selection
             ? applyModelSelectionWithVariant(providerId, modelId, resolveModelVariantSelection(providerId, modelId) ?? null)
@@ -1976,8 +1779,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         requestAnimationFrame(focusColumnInput);
     };
 
-    // The phone's sheet draws the desktop model list: one line per model and
-    // details on a long press. The effort lives in the composer, after the model.
     const renderMobileModelPanel = () => {
         if (!isCompact) return null;
 
@@ -2004,8 +1805,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
                     onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
                     onEntryDetails={(entry) => {
-                        // The details take the keys: a search field left focused
-                        // under them would close the list on Escape instead.
                         if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
                         setMobileDetailsEntry(entry);
                     }}
@@ -2024,8 +1823,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         );
     };
 
-    // A long press on a model in the sheet: what the desktop card says, and
-    // the star, which rows on a touch screen leave off.
     const renderMobileModelDetails = () => {
         if (!isCompact || !mobileDetailsEntry) return null;
         const { providerID, modelID, model } = mobileDetailsEntry;
@@ -2039,7 +1836,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 onClose={() => setMobileDetailsEntry(null)}
                 title={getModelDisplayName(model)}
                 footer={(
-                    // Stacked: side by side, "Remove from favorites" outgrew its half.
                     <div className="flex flex-col gap-2">
                         <Button size="lg" className="w-full" onClick={() => handleMobileModelApply(providerID, modelID)}>
                             {t('chat.modelControls.useModel')}
@@ -2074,7 +1870,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         const isDefault = !selectedVariant;
 
         const handleSelect = (variant: string | undefined) => {
-            // Chosen in the mobile effort panel: no effort means "Default".
             const result = applyModelSelectionWithVariant(targetProviderId, targetModelId, variant ?? null);
             if (result !== 'applied') {
                 return;
@@ -2103,13 +1898,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         );
     };
 
-    // The phone's agent sheet reads like the desktop agent menu: flat rows,
-    // the agent's colour on its dot only, starred agents first.
     const renderMobileAgentPanel = () => {
         if (!isCompact) return null;
 
         const isFavoriteAgent = (agent: Agent) => favoriteAgents.includes(agent.name);
-        // Starred agents in the order the cycle runs through them.
         const favoriteAgentRows = selectableDesktopAgents.filter(isFavoriteAgent);
         const otherAgentRows = [...selectableDesktopAgents]
             .filter((agent) => !isFavoriteAgent(agent))
@@ -2142,7 +1934,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             >
                 {favoriteAgentRows.length > 0 ? (
                     <>
-                        {/* The composer's agent button cycles through these on a tap. */}
                         <MobileSheetSection title={t('chat.modelControls.favorites')} hint={t('chat.modelControls.favoriteAgentsTapHint')}>
                             {favoriteAgentRows.map(renderAgentRow)}
                         </MobileSheetSection>
@@ -2275,7 +2066,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             const variantsWithDefault: Array<string | undefined> = [undefined, ...variantKeys];
             const currentVariantIndex = variantsWithDefault.indexOf(activeModelVariant);
             const safeCurrentIndex = currentVariantIndex >= 0 ? currentVariantIndex : 0;
-            // The next level lies toward the end of the line: right in LTR, left in RTL.
             const forwardKey = isRightToLeft(e.currentTarget) ? 'ArrowLeft' : 'ArrowRight';
             const direction = e.key === forwardKey ? 1 : -1;
             const nextVariantIndex = (safeCurrentIndex + direction + variantsWithDefault.length) % variantsWithDefault.length;
@@ -2291,8 +2081,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 next.add(mapKey);
                 return next;
             });
-            // Arrow keys change the level on the row itself, before a model is
-            // chosen: remember it for that model now.
             rememberVariantForModel(providerID, modelID, nextVariant ?? null);
             setModelPickerRenderVersion((version) => version + 1);
             return true;
@@ -2350,7 +2138,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 : resolveModelVariantSelection(entry.providerID, entry.modelID) ?? undefined;
             const displayLabel = effectiveVariant ? formatEffortLabel(effectiveVariant) : t('chat.modelControls.default');
 
-            // The effort as the composer shows it after the model: "/ medium".
             return (
                 <span className={cn(
                     'typography-micro whitespace-nowrap lowercase',
@@ -2394,8 +2181,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         <Icon name="error-warning" className={cn(controlIconSize, 'flex-shrink-0 text-[var(--status-warning)]')} />
                                     ) : currentProviderId ? (
                                         <>
-                                            {/* Provider logos read smaller than the sprite icons
-                                                beside them at the same box size, so they get a step up. */}
                                             <ProviderLogo
                                                 providerId={currentProviderId}
                                                 className={cn(providerLogoSize, 'flex-shrink-0')}
@@ -2410,7 +2195,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                             ref={modelLabelRef}
                                             key={`${currentProviderId}-${currentModelId}`}
                                             className={cn(
-                                                // Cut short, the name ends in an ellipsis (`.marquee-text--active`).
                                                 'model-controls__model-label overflow-hidden text-ellipsis',
                                                 controlTextSize,
                                                 'font-medium whitespace-nowrap text-foreground min-w-0',
@@ -2476,7 +2260,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         : false;
 
                                     return (
-                                        // Hint groups 16px apart, so they read as separate keys and not one sentence.
                                         <div className="flex items-center gap-x-4 whitespace-nowrap overflow-hidden">
                                             <span>{t('chat.modelControls.keyboardHintNavigate')}</span>
                                             {agentShortcut ? <span>{t('chat.modelControls.keyboardHintSwitchAgent', { shortcut: agentShortcut })}</span> : null}
@@ -2688,14 +2471,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         const displayVariant = currentVariant ? formatEffortLabel(currentVariant) : t('chat.modelControls.default');
         const isDefault = !currentVariant;
         const isGreyEffort = getEffortTone(currentVariant) === 'default';
-        // The effort reads as a quiet suffix of the model name: "Opus 5.5 / medium",
-        // tinted by level. It brightens on its own hover, so the pointer shows it
-        // is a control of its own; where the row is too narrow for it, its icon
-        // stands in.
         const triggerLabel = (
             <>
                 <Icon name="brain-ai-3" className={cn('model-controls__variant-icon flex-shrink-0 text-muted-foreground group-hover:text-foreground', controlIconSize)} />
-                {/* At the label's size, so it sits on the label's baseline. */}
                 <span aria-hidden="true" className={cn('model-controls__variant-slash text-muted-foreground/60', controlTextSize)}>/</span>
                 <span
                     className={cn(
@@ -2712,8 +2490,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 </span>
             </>
         );
-        // An effort nobody picked in this composer is this model's configured
-        // default; the tooltip says so.
         const isInherited = !selection && !isDefault && currentVariantSelection.override === undefined;
         const agentVariant = currentAgent?.model?.providerID === currentProviderId
             && currentAgent.model.id === currentModelId
@@ -2742,7 +2518,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     }}
                     aria-label={tooltipText}
                     className={cn(
-                        // Drawn as the main composer's phone row: 36px to tap in a 26px row.
                         'model-controls__variant-trigger group -my-[5px] flex flex-shrink-0 items-center gap-1 px-1.5 focus:outline-none',
                         buttonHeight,
                         'cursor-pointer hover:bg-transparent',
@@ -2762,7 +2537,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 ref={variantTriggerRef}
                                 aria-label={tooltipText}
                                 className={cn(
-                                    // Keeps its width: the model's name is what truncates (index.css).
                                     'model-controls__variant-trigger group flex flex-shrink-0 items-center gap-1 cursor-pointer select-none hover:bg-transparent overflow-hidden',
                                     buttonHeight,
                                 )}
@@ -2795,7 +2569,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 </DropdownMenuItem>
                             );
                         })}
-                        {/* The model picker's footer, flush with the menu's edges. */}
                         <div className="-mx-1 -mb-1 mt-1 flex items-center gap-x-4 overflow-hidden whitespace-nowrap border-t border-edge-muted px-3 pt-1 pb-1.5 typography-micro text-muted-foreground">
                             <span>{t('chat.modelControls.keyboardHintNavigate')}</span>
                             {thinkingShortcut ? <span>{t('chat.modelControls.keyboardHintSwitchThinking', { shortcut: thinkingShortcut })}</span> : null}
@@ -2809,7 +2582,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         );
     };
 
-    // A missing agent swaps its own mark for the warning one, the same size.
     const renderAgentMark = () => agentUnavailable ? (
         <Icon name="error-warning" className={cn(controlIconSize, 'flex-shrink-0 text-[var(--status-warning)]')} />
     ) : (
@@ -2819,7 +2591,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 'flex-shrink-0',
                 uiAgentName ? '' : 'text-muted-foreground'
             )}
-            // At rest in the composer: the agent's hue, quieted (restingAgentColor).
             style={uiAgentName ? { color: restingAgentColor(getAgentColor(uiAgentName).color) } : undefined}
         />
     );
@@ -2827,8 +2598,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const renderAgentSelector = () => {
         if (!isCompact) {
             const isFavoriteAgent = (agent: Agent) => favoriteAgents.includes(agent.name);
-            // Starred agents in the order Tab cycles through them. A search lists
-            // every match by rank instead, so Enter picks the row on top.
             const favoriteAgentRows = agentSearchQuery.trim() ? [] : selectableDesktopAgents.filter(isFavoriteAgent);
             const otherAgentRows = favoriteAgentRows.length > 0
                 ? sortedAndFilteredAgents.filter((agent) => !isFavoriteAgent(agent))
@@ -2836,8 +2605,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             const focusFirstAgentItem = () => {
                 agentListRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
             };
-            // The field keeps typing to itself; ArrowDown or Ctrl+N steps into the
-            // list, and Enter picks the top result.
             const handleAgentSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
                 if (handleDropdownNavigationKey(event, (key) => { if (key === 'ArrowDown') focusFirstAgentItem(); })) return;
                 if (event.key === 'ArrowDown') {
@@ -2874,7 +2641,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 </AgentDescriptionTooltip>
             );
             return (
-                // Keeps its width: the model's name truncates first, so the agent keeps its label (index.css).
                 <div className="flex flex-shrink-0 items-center gap-2">
                     <Tooltip delayDuration={600}>
                         <DropdownMenu open={canSelectAgent && isAgentSelectorOpen} onOpenChange={canSelectAgent ? setIsAgentSelectorOpen : undefined}>
@@ -3011,8 +2777,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     </>
                 ) : (
                     <>
-                        {/* As the main composer's agent button: the name in the
-                            agent's colour, a mark only when it is missing. */}
                         {agentUnavailable ? renderAgentMark() : null}
                         <span
                             className={cn(
@@ -3034,11 +2798,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const inlineMobileSelection = isMobile && Boolean(selection);
     const inlineClassName = cn(
         'flex items-center min-w-0',
-        // The labels collapse to icons as a desktop row narrows (index.css). A
-        // phone keeps them, as the main composer's row does, and truncates.
         !isMobile && '@container/model-controls',
-        // Only force full-width + truncation behaviors on true mobile layouts.
-        // VS Code also uses "compact" mode, but should keep its right-aligned inline sizing.
         isMobile && 'w-full',
         className,
     );
@@ -3053,19 +2813,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 <div
                     className={cn(
                         'flex items-center min-w-0 flex-1',
-                        // A phone lays the row out as the main composer's: model left, agent right.
                         inlineMobileSelection ? 'justify-between' : 'justify-end',
-                        // No overflow-hidden: mobile.css makes it a vertical scroller,
-                        // and the 36px triggers in this 26px row would draw its thumb.
                         inlineGapClass,
-                        // The desktop footer's group gaps: 16px to the agent here,
-                        // and this padding plus the footer's 8px gap make 20px to
-                        // the mic. Collapsed narrow, both tighten to 12px (index.css).
                         sizeVariant === 'default' && 'model-controls__row pe-3',
                     )}
                 >
-                    {/* The effort follows the model as its suffix, one unit with it:
-                        6px on the desktop, as an icon to its label. */}
                     <div className={cn('flex items-center min-w-0', isMobile ? 'gap-x-0.5' : sizeVariant === 'vscode' ? 'gap-x-2' : 'gap-x-1.5')}>
                         {renderModelSelector()}
                         {renderVariantSelector()}

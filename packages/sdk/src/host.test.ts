@@ -13,6 +13,7 @@ import {
   GUEST_TOAST_MAX,
   type GuestMessage,
   type HostMessage,
+  type SessionSnapshot,
 } from './contract.ts';
 import { GUEST_SHELL_OUTPUT_TAIL_MAX } from './shells.ts';
 
@@ -387,6 +388,31 @@ describe('connectHost', () => {
       },
     }));
     expect(seen).toEqual(['Later']);
+    host.dispose();
+  });
+
+  test('delivers usage on ready and on later session updates', () => {
+    const parent = createFrame();
+    const guest = createFrame();
+    guest.parent = parent.parent;
+    const host = connectHost({ target: guest, acceptSource: () => true });
+    const usage = { prompt: 1000, output: 20, reasoning: 10, cacheRead: 700, cacheWrite: 100, cacheHitPercent: 70 };
+    const initial = { id: 'ses-1', title: 'Hello', busy: true,
+      context: { tokens: 800, limit: 4000 }, tokens: usage };
+    guest.dispatch(new MessageEvent('message', {
+      data: { ...ready, payload: { ...ready.payload, session: initial } },
+    }));
+    const seen: Array<SessionSnapshot | null> = [];
+    host.onSession((session) => { seen.push(session); });
+    const updated = { ...initial, context: null, tokens: { ...usage, output: 40 } };
+    guest.dispatch(new MessageEvent('message', {
+      data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1,
+        type: 'session', payload: { session: updated } },
+    }));
+    expect(seen).toEqual([initial, updated]);
+    const replayed: Array<SessionSnapshot | null> = [];
+    host.onSession((session) => { replayed.push(session); });
+    expect(replayed).toEqual([updated]);
     host.dispose();
   });
 
@@ -1083,6 +1109,19 @@ describe('connectHost resolve and badge', () => {
     const sent = host.openCommit('abcdef1').catch(() => undefined);
     await expect(host.openCommit('main')).rejects.toMatchObject({ code: 'HOST_REJECTED' });
     expect(parent.posted.filter((message) => message.type === 'open-commit').map((message) => (message.type === 'open-commit' ? message.payload.sha : ''))).toEqual(['abcdef1']);
+    host.dispose();
+    await sent;
+  });
+
+  test('openWalkthrough posts a trimmed base and refuses an empty or oversized one locally', async () => {
+    const parent = createFrame();
+    const guest = createFrame();
+    guest.parent = parent.parent;
+    const host = connectHost({ target: guest, acceptSource: () => true });
+    const sent = host.openWalkthrough({ base: ' origin/main ' }).catch(() => undefined);
+    await expect(host.openWalkthrough({ base: '  ' })).rejects.toMatchObject({ code: 'HOST_REJECTED' });
+    await expect(host.openWalkthrough({ base: 'x'.repeat(256) })).rejects.toMatchObject({ code: 'HOST_REJECTED' });
+    expect(parent.posted.filter((message) => message.type === 'open-walkthrough').map((message) => (message.type === 'open-walkthrough' ? message.payload.base : ''))).toEqual(['origin/main']);
     host.dispose();
     await sent;
   });

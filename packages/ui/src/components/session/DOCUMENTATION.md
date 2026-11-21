@@ -46,6 +46,10 @@ own their contracts in `project-context/DOCUMENTATION.md` and
 - New-worktree source selection waits for fetched branches. Persisted branch
   seeds contain only local branches and can incorrectly select local `main` when
   the bound remote's default branch should win.
+- The "Based on" picker lists each remote's detected default branch first while
+  nothing is typed, the bound remote's first, and only when that branch is in the
+  fetched list. A typed query ranks them with every other branch. The
+  existing-branch picker lists no defaults: it checks out a branch, not a base.
 - A stacked branch starts from its named parent, fetching the remote copy when
   needed. Failure to find it never substitutes the project root's current branch.
 - Worktree folder names remain ASCII and keep their initial random name when a
@@ -58,6 +62,24 @@ own their contracts in `project-context/DOCUMENTATION.md` and
   eligibility reads remain errors because an empty picker would claim the project
   has no sessions. Request identity depends on session directories and IDs, so
   streaming record updates do not restart eligibility reads.
+- The target picker's candidates take the global session cache as authority; a
+  live directory copy only adds a session the cache holds neither as active nor
+  as archived, through the stores' own gap-fill helper
+  (`addUnlistedLiveSessions` in `stores/globalSessions.ts`). Until the cache's first
+  full load is done (`hasLoaded`) and an eligibility read started after it has
+  answered, the picker reads as loading, even when live sessions are already
+  checked, so a partial list never looks complete. Candidates that no read has
+  started for yet also read as loading; only an empty candidate set is an empty
+  project. A later refresh keeps the shown list (`useScheduledTaskTargets`).
+- The target picker lists root sessions while its search is empty and subagents
+  only through a search, each named as its parent's subagent. Review sessions
+  count as roots and `ownWork` workers never appear. A query equal to a whole
+  session id finds that session; anything else, `ses_`-prefixed text included,
+  searches titles. The saved target shows first on the empty list, even when it
+  is a subagent, ineligible or not loaded; a saved target that became an
+  `ownWork` worker stays on the field but is not offered as a row. Ctrl+N/P in
+  the search box moves the highlight by physical key, so it works on any
+  keyboard layout.
 - The selected scheduled-task scope is mirrored synchronously for async work.
   Only the newest request for the scope on screen can replace the list or finish
   its spinner. Task actions retain the scope of the displayed list, and an editor
@@ -98,6 +120,12 @@ The picker requests autofocus because Chromium's focus scan can skip candidates
 under its `display: contents` portal. Keyboard events reach cmdk before propagation
 stops, so the enclosing menu's typeahead cannot consume branch navigation.
 
+### Why the base picker lifts every remote's default
+
+The comparison picker lifts only the bound remote's default because it rejects a
+base on another remote. A new worktree can start from any remote branch, and work
+in a fork often starts from upstream's default, so every remote's default is lifted.
+
 ### Why repository identity is one choice
 
 An identity carries account, authentication transport and commit signature together.
@@ -113,6 +141,14 @@ touch offers no tooltip to explain an icon alone.
 
 Each hint waits for a resting pointer in its own tooltip group. Menus focus hovered
 items, so focus-triggered hints would open immediately while scanning the menu.
+
+### Why the target picker hides subagents until a search
+
+A task may target a subagent session (#3340), so hiding subagents outright would
+remove an accepted feature, and listing them all buried the root sessions under
+hundreds of runs. The maintainer chose roots at rest with subagents one search
+away. The list stops at 100 rows with a line asking for a sharper query, because
+cmdk renders every row it navigates and a project can hold thousands of sessions.
 
 ### Why the switcher orders by recency
 

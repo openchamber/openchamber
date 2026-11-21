@@ -103,6 +103,11 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
             actions.openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: project.normalizedPath });
             phone.close();
           }}
+          onNewLead={() => {
+            actions.setActiveProjectIdOnly(project.id);
+            actions.openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: project.normalizedPath, lead: true });
+            phone.close();
+          }}
           onRemove={() => actions.removeProject(project.id)}
         />;
       }

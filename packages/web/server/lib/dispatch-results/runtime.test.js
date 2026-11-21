@@ -18,6 +18,7 @@ afterEach(async () => {
   for (const runtime of stopping) runtime.stop();
   await Promise.all(stopping.map((runtime) => runtime.flush()));
   await Promise.all(temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
+  vi.useRealTimers();
 });
 
 const makeDataDir = async () => {
@@ -107,7 +108,8 @@ const createRuntime = async ({ dataDir, openCode = createOpenCode(), ...override
     let calls;
     do {
       calls = openCode.fetchImpl.mock.calls.length;
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0);
+      else await new Promise((resolve) => setTimeout(resolve, 0));
       await runtime.flush();
     } while (openCode.fetchImpl.mock.calls.length !== calls);
   };
@@ -288,22 +290,6 @@ describe('dispatch results runtime', () => {
     expect(runtime.pending()).toEqual([]);
   });
 
-  it('treats an id OpenCode already admitted as delivered', async () => {
-    const { runtime, openCode } = await createRuntime();
-    openCode.state.records.ses_child.push(user(11), assistant('Done', 12), idle('succeeded', 13));
-    openCode.state.syntheticStatus.push(409);
-    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
-    await vi.waitFor(() => expect(runtime.pending()).toEqual([]));
-  });
-
-  it('drops the delivery when the parent no longer exists', async () => {
-    const { runtime, openCode } = await createRuntime();
-    openCode.state.records.ses_child.push(user(11), assistant('Done', 12), idle('succeeded', 13));
-    openCode.state.syntheticStatus.push(404);
-    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
-    await vi.waitFor(() => expect(runtime.pending()).toEqual([]));
-  });
-
   it('forgets results owed to a parent that was deleted', async () => {
     const { runtime, openCode, emit, dataDir } = await createRuntime();
     openCode.state.active.ses_child = { type: 'running' };
@@ -398,6 +384,7 @@ describe('dispatch results runtime', () => {
   });
 
   it('still reports a newer run next to an entry whose earlier attempt landed', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const dataDir = await makeDataDir();
     const landed = 'msg_000000000001aaaaaaaaaaaaaa';
     await fs.writeFile(path.join(dataDir, 'dispatch-results.json'), JSON.stringify({

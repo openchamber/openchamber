@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -13,6 +13,8 @@ import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { getPinnedSessionKey } from '@/lib/sessionPins';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { useI18nStore } from '@/lib/i18n';
+import { dict as germanDictionary } from '@/lib/i18n/messages/de';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { applyBackgroundShellEvents } from '@/sync/background-shells';
@@ -33,6 +35,10 @@ const Harness = () => {
   useTraySync();
   return null;
 };
+
+const flush = () => act(async () => {
+  jest.advanceTimersByTime(500);
+});
 
 const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
 opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home' });
@@ -62,17 +68,16 @@ describe('Dock badge with the macOS menu bar disabled', () => {
   // A turn ends: OpenCode stamps `time.idle`, which leaves the session unread.
   const finishTurn = (id: string) => patchSession(id, (time) => ({ ...time, idle: ++clock }));
   const view = (id: string) => patchSession(id, (time) => ({ ...time, viewed: time.idle }));
-  const flush = async () => {
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
-  };
-
   beforeEach(() => {
     dom = new Window({ url: 'http://localhost/' });
+    jest.useFakeTimers();
     Object.assign(dom, {
       __OPENCHAMBER_PLATFORM__: 'darwin',
       __OPENCHAMBER_ELECTRON__: { runtime: 'electron', trayEnabled: false },
       __OPENCHAMBER_DESKTOP__: { invoke, listen },
       setInterval: intervals,
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout,
     });
     Object.assign(globalThis, {
       window: dom, document: dom.document, navigator: dom.navigator,
@@ -92,6 +97,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     useProjectsStore.setState({ projects: [] });
+    jest.useRealTimers();
     await dom.happyDOM.close();
   });
 
@@ -283,25 +289,27 @@ describe('tray approvals carry whether a permission can be remembered', () => {
   const previousProjects = useProjectsStore.getState().projects;
   let dom: Window;
   let root: Root;
-  const snapshots: Array<{ approvals?: Array<{ id: string; canSave: boolean }> }> = [];
+  const snapshots: Array<{ approvals?: Array<{ id: string; canSave: boolean }>; instanceName?: string }> = [];
   const invoke = async (command: string, args?: { approvals?: Array<{ id: string; canSave: boolean }> }) => {
     if (command === 'desktop_tray_update') snapshots.push(args as never);
     return null;
   };
   const listen = async () => () => {};
-  const flush = async () => {
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
-  };
   const canSaveById = () => Object.fromEntries(
     (snapshots.at(-1)?.approvals ?? []).map((a) => [a.id, a.canSave]),
   );
 
   beforeEach(() => {
     dom = new Window({ url: 'http://localhost/' });
+    jest.useFakeTimers();
     Object.assign(dom, {
       __OPENCHAMBER_PLATFORM__: 'darwin',
       __OPENCHAMBER_ELECTRON__: { runtime: 'electron', trayEnabled: true },
       __OPENCHAMBER_DESKTOP__: { invoke, listen },
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout,
+      setInterval: globalThis.setInterval,
+      clearInterval: globalThis.clearInterval,
     });
     Object.assign(globalThis, {
       window: dom, document: dom.document, navigator: dom.navigator,
@@ -319,6 +327,7 @@ describe('tray approvals carry whether a permission can be remembered', () => {
     await act(async () => root.unmount());
     resetGlobalBlockingRequests();
     useProjectsStore.setState({ projects: previousProjects });
+    jest.useRealTimers();
     await dom.happyDOM.close();
   });
 
@@ -331,6 +340,20 @@ describe('tray approvals carry whether a permission can be remembered', () => {
     await flush();
 
     expect(canSaveById()).toEqual({ 'live-save': true, 'live-once': false });
+  });
+
+  test('updates the local instance label when the language changes', async () => {
+    const original = useI18nStore.getState().dictionary;
+    try {
+      await act(async () => root.render(<Harness />));
+      await flush();
+      expect(snapshots.at(-1)?.instanceName).toBe('Local OpenChamber');
+      useI18nStore.setState({ dictionary: germanDictionary });
+      await flush();
+      expect(snapshots.at(-1)?.instanceName).toBe('Lokales OpenChamber');
+    } finally {
+      useI18nStore.setState({ dictionary: original });
+    }
   });
 
   test('a seeded ask does too, so an unopened directory does not lose the option', async () => {
@@ -386,17 +409,19 @@ describe('Tray sessions follow the configured projects', () => {
     return null;
   };
   const listen = async () => () => {};
-  const flush = async () => {
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
-  };
   const lastSnapshot = () => snapshots.at(-1);
 
   beforeEach(() => {
     dom = new Window({ url: 'http://localhost/' });
+    jest.useFakeTimers();
     Object.assign(dom, {
       __OPENCHAMBER_PLATFORM__: 'darwin',
       __OPENCHAMBER_ELECTRON__: { runtime: 'electron', trayEnabled: true },
       __OPENCHAMBER_DESKTOP__: { invoke, listen },
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout,
+      setInterval: globalThis.setInterval,
+      clearInterval: globalThis.clearInterval,
     });
     Object.assign(globalThis, {
       window: dom, document: dom.document, navigator: dom.navigator,
@@ -421,6 +446,7 @@ describe('Tray sessions follow the configured projects', () => {
     resetGlobalBlockingRequests();
     useProjectsStore.setState({ projects: [] });
     useSessionUIStore.setState({ availableWorktreesByProject: new Map() });
+    jest.useRealTimers();
     await dom.happyDOM.close();
   });
 

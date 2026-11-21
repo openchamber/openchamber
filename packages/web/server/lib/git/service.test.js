@@ -42,6 +42,7 @@ import {
   stashPush,
   stashApply,
   listStashes,
+  countStashFiles,
   getWorktrees,
   setWorktreeTaskTitle,
   setWorktreePinned,
@@ -305,6 +306,14 @@ describe('resolveBaseRefForLog', () => {
     const checkRef = async () => true;
     expect(await resolveBaseRefForLog('   ', checkRef)).toBeUndefined();
   });
+
+  it('keeps boxed and tagged strings outside the primitive-string boundary', async () => {
+    const checkRef = vi.fn(async () => true);
+    const tagged = { [Symbol.toStringTag]: 'String', trim: () => 'main' };
+    expect(await resolveBaseRefForLog(Object('main'), checkRef)).toBeUndefined();
+    expect(await resolveBaseRefForLog(tagged, checkRef)).toBeUndefined();
+    expect(checkRef).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -382,6 +391,28 @@ describe.runIf(canRunGit())('configureRepositoryTransport', () => {
     runGit(repo, ['config', '--local', 'core.sshCommand', 'ssh -i ~/.ssh/mine']);
     await configureRepositoryTransport(repo, { sshCommand: null });
     expect(sshCommand(repo)).toBe('ssh -i ~/.ssh/mine');
+  });
+});
+
+describe.runIf(canRunGit() && process.platform !== 'win32')('SSH agent lookup', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('launches a gpg agent that leaves no SSH socket once, not for every Git command', async () => {
+    const home = createTempDir();
+    const bin = path.join(home, 'bin');
+    const calls = path.join(home, 'gpgconf-calls');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'gpgconf'), `#!/bin/sh\necho "$*" >> '${calls}'\n[ "$1" = --list-dirs ] && echo '${path.join(home, 'S.gpg-agent.ssh')}'\nexit 0\n`, { mode: 0o755 });
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH}`);
+    vi.stubEnv('SSH_AUTH_SOCK', undefined);
+    const { tmpDir } = await createTempRepo();
+
+    await getStatus(tmpDir);
+    await getStatus(tmpDir);
+
+    const launches = fs.readFileSync(calls, 'utf8').split('\n').filter((line) => line === '--launch gpg-agent');
+    expect(launches).toHaveLength(1);
   });
 });
 
@@ -7489,6 +7520,39 @@ describe('getCheckedOutBranch', () => {
 });
 
 describe('carry path validation and stashing', () => {
+  it.each([
+    { name: 'only untracked', tracked: false, untracked: true, staged: false, count: 1 },
+    { name: 'tracked and untracked', tracked: true, untracked: true, staged: false, count: 2 },
+    { name: 'only tracked', tracked: true, untracked: false, staged: false, count: 1 },
+    { name: 'a staged new file', tracked: false, untracked: false, staged: true, count: 1 },
+  ])('counts stash files with $name', async ({ tracked, untracked, staged, count }) => {
+    if (!canRunGit()) return;
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'tracked.txt'), 'original\n');
+    runGit(repo, ['add', '.']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    if (tracked) fs.writeFileSync(path.join(repo, 'tracked.txt'), 'modified\n');
+    if (untracked) fs.writeFileSync(path.join(repo, 'untracked.txt'), 'new\n');
+    if (staged) {
+      fs.writeFileSync(path.join(repo, 'staged.txt'), 'staged\n');
+      runGit(repo, ['add', 'staged.txt']);
+    }
+
+    await stashPush(repo, { message: 'count test' });
+    const [stash] = await listStashes(repo);
+    await expect(countStashFiles(repo, [stash.ref, stash.ref, stash.hash])).resolves.toEqual({
+      [stash.ref]: count,
+      [stash.hash]: count,
+    });
+    await stashApply(repo, { ref: stash.ref });
+    if (tracked) expect(fs.readFileSync(path.join(repo, 'tracked.txt'), 'utf8')).toBe('modified\n');
+    if (untracked) expect(fs.readFileSync(path.join(repo, 'untracked.txt'), 'utf8')).toBe('new\n');
+    if (staged) expect(runGit(repo, ['diff', '--cached', '--name-only']).trim()).toBe('staged.txt');
+  });
+
   it('checks literal paths from the session directory and stashes absolute paths from the root', async () => {
     if (!canRunGit()) return;
     const repo = createTempDir();

@@ -66,6 +66,11 @@ OpenCode and the fixture provider on Ctrl-C. Pass `--dir tmp/perf-serve/project`
 to the session commands. Every command except `profile:animation` and
 `profile:startup` without `--url` needs a running server.
 
+The isolated Node launcher preloads a checkout's server source resolver when
+it exists, before loading the source CLI. This preserves `.js` specifiers as
+server and CLI folders convert to TypeScript; older comparison checkouts keep
+their original arguments.
+
 ## Running An Isolated Copy
 
 Any server, dev shell or Electron an agent starts for a check runs beside the
@@ -78,9 +83,12 @@ maintainer's own app and dev shell, on the same machine.
   `desktopUiPassword`, when the run needs the saved projects or hosts. A shell
   inside the desktop app inherits its `OPENCHAMBER_*` variables (UI password,
   dist dir, agent-tool URL and token) and `OPENCODE_PASSWORD`: start copies
-  with `env -i HOME USER PATH SHELL TMPDIR` or unset them first, and use
-  `OPENCODE_BINARY=/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode`
-  when `~/.opencode/bin/opencode` lags the version the repo needs.
+  with `env -i HOME USER PATH SHELL TMPDIR` or unset them first. When
+  `~/.opencode/bin/opencode` lags the version the repo needs, run the OpenCode
+  the desktop bundles instead: `bun run --cwd packages/electron prepare:opencode-server`,
+  then `OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR=$PWD/packages/electron/resources/opencode-server`
+  for a server started from `packages/web/server` (the CLI's `serve` still needs a real
+  CLI in `OPENCODE_BINARY`).
 - **Dev server:** from the repo root, after the env is clean,
   `OPENCHAMBER_DATA_DIR=<scratch>/oc-data OPENCHAMBER_HMR_UI_PORT=5391 OPENCHAMBER_HMR_API_PORT=3991 bun run dev`
   in the background; the UI is at `http://127.0.0.1:5391/`. It runs React
@@ -168,11 +176,12 @@ To run the same probe against OpenCode's app on the stand's data, with
 ```bash
 HOME=$PWD/../state/home \
 OPENCODE_CONFIG_CONTENT="$(node ../../../scripts/perf/fixture-provider.mjs 4798 --print-config)" \
-/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode serve --hostname 127.0.0.1 --port 4870
+~/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4870
 ```
 
-It serves its web app at `/` and prints a throwaway `server password` in its
-log. In the page choose "Use password", enter `http://127.0.0.1:4870` and that
+This needs the OpenCode CLI: the server the desktop bundles has no web app.
+The CLI serves its web app at `/` and prints a throwaway `server password` in
+its log. In the page choose "Use password", enter `http://127.0.0.1:4870` and that
 password, and connect; it lists the same sessions as `profile:serve`. Its
 controls carry `data-slot` and `data-component` attributes
 (`[data-slot=session-review-toggle] button`, `[data-component=resize-handle]`),
@@ -366,6 +375,16 @@ processes, with the trace events that spent it. `--save-trace` writes the raw
 timeline for the DevTools Performance panel.
 
 ### Deterministic stimulus
+
+`scripts/verify` starts the provider with `--verify-control`. In that mode,
+`GET /__verify/active?session=<id>&prompt=<text>` reports only whether a matching
+streaming request is active, using `x-opencode-session-id` and the latest user
+message. Closed requests are removed immediately. Normal profiling launches
+have no control endpoint.
+
+The verification stand also supplies `startFixture`'s optional `onSpawn`
+callback to record process ownership before the fixture starts listening.
+Profiling callers retain their existing fixture lifecycle.
 
 A hosted model returns a different length at a different speed on every run,
 and streaming cost follows the rate of deltas, not the amount of text. Two
@@ -788,6 +807,17 @@ OPENCHAMBER_TEST_CHROME=/path/to/chrome node --test scripts/perf/chat-quote-popo
 ```
 
 It skips without Chrome and fails on an explicit invalid Chrome path, the same as the JSON tree test.
+
+## Paused goal row regression
+
+`session-goal-row.browser.test.mjs` renders the real `SessionGoalRow` with the UI stylesheet in the phone layout (`mobile-pointer`, touch, 360, 375 and 390 px, plus a 768 px row) in an isolated Vite fixture with its own optimizer cache. Only the row's goal hooks and its action are stubbed: a paused goal with a long objective and a token budget. In every locale it checks that the localized paused hint shows whole beside Resume, Resume's localized label shows whole beside its icon, Resume stays inside the row and the row does not overflow; on the narrow widths the token count must be gone (the goal dialog keeps it), on the wide row it must show whole. A longer translation or a layout change that gives the count priority fails it. Like the tests around it, it stays on loopback and stops what it started.
+
+The app draws in the system font, so the fixture pins `--font-sans` to fonts `pdfjs-dist` ships and fails when they do not load or Chrome paints Latin and Cyrillic hints in another face. Each case runs twice: in Liberation Sans Regular (Arial widths) and in Liberation Sans Bold drawn at normal weight, a wide face standing in for DejaVu Sans, which CI's Ubuntu falls back to and which cut the Polish hint at 390 px when the count stayed in the row. Arabic, Hebrew and CJK text still comes from the host's fonts.
+
+```bash
+node --test scripts/perf/session-goal-row.browser.test.mjs
+OPENCHAMBER_TEST_CHROME=/path/to/chrome node --test scripts/perf/session-goal-row.browser.test.mjs
+```
 
 ## Rendered page layout regression
 

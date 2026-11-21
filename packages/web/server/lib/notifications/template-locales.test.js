@@ -1,5 +1,3 @@
-import fsPromises from 'fs/promises';
-
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -70,22 +68,15 @@ describe('notification template locales', () => {
 });
 
 describe('notification defaults match the settings page', () => {
-  // The settings page renders these keys as the placeholder of an empty field,
-  // so the text the server sends has to be the same string. Read from disk:
-  // the server cannot import packages/ui, which is why the mirror exists.
+  // Compare the dictionaries the settings page uses with the server defaults.
   const readUiDefaults = async (locale) => {
-    const file = new URL(`../../../../ui/src/lib/i18n/messages/${locale}.settings.ts`, import.meta.url);
-    const source = await fsPromises.readFile(file, 'utf8');
-    const value = async (key) => {
-      const match = source.match(new RegExp(`['"]settings\\.notifications\\.page\\.template\\.defaults\\.${key}['"]:\\s*(['"])((?:\\\\.|(?!\\1).)*)\\1`));
-      if (!match) throw new Error(`${locale} has no ${key}`);
-      return match[2].replace(/\\(['"])/g, '$1');
-    };
+    const { settingsDict } = await import(`../../../../ui/src/lib/i18n/messages/${locale}.settings.ts`);
+    const value = (key) => settingsDict[`settings.notifications.page.template.defaults.${key}`];
     return {
-      completion: { title: await value('completion\\.title'), message: await value('completion\\.message') },
-      subtask: { title: await value('subtask\\.title'), message: await value('subtask\\.message') },
-      errorTitle: await value('error\\.title'),
-      questionTitle: await value('question\\.title'),
+      completion: { title: value('completion.title'), message: value('completion.message') },
+      subtask: { title: value('subtask.title'), message: value('subtask.message') },
+      errorTitle: value('error.title'),
+      questionTitle: value('question.title'),
     };
   };
 

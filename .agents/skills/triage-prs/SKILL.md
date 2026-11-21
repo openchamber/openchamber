@@ -30,7 +30,7 @@ Bucket every non-draft PR:
 | Clean | mergeable and not waiting on the author | phase 3 review pool |
 | Draft | `isDraft` | untouched while the author committed within 14 days, and always for the team's own drafts (`btriapitsyn`, `yulia-ivashko`, `deatheros`, `AlexKutas`, `Galnaz`); otherwise close with **stale-draft** |
 
-Those five authors' PRs are the team bucket and skip review: they land through the team's own process. The exception is `btriapitsyn`'s `deslop/<date>` PRs, weekly cleanups a scheduled agent opens: review them for behavior preservation only and merge once CI is green. `IbrahimKhan12` is reviewed like anyone else, but fixes left on his PRs, as on any team member's, are ours to finish, never a push-back list.
+Those five authors' PRs are the team bucket and skip review: they land through the team's own process. The exception is `btriapitsyn`'s `deslop/<date>` PRs, weekly cleanups a scheduled agent opens: review them for behavior preservation only and merge once CI is green. `Galnaz` is the other exception: his PRs build tasks the maintainer wrote out for him, so they go to the review pool with everyone else's and land after review. `IbrahimKhan12` is reviewed like anyone else, but fixes left on his PRs, as on any team member's, are ours to finish, never a push-back list.
 
 Then detect **duplicate clusters** across the survivors: pairs with high title-token overlap or high changed-file overlap. For each cluster recommend one keeper (prefer: mergeable over conflicted, references an issue, smaller diff, earlier author — a later near-identical body is likely a regenerated copy of the earlier PR, and the earlier author keeps the credit); the rest close with **duplicate-close**.
 
@@ -126,6 +126,8 @@ After a batch of merges:
 
 Maintainer decisions that settle a PR without asking again. A PR that contradicts one gets the verdict the line implies; the close comment gives the reason in plain words. Each line was checked against the code when added; one the code no longer matches goes back to the maintainer instead of being applied.
 
+- **`Cyneric`'s PRs get no benefit of the doubt.** They come in volume from an automated pipeline over our issues. A part that is speculative, out of scope or extra is cut without deliberating; a PR that is done badly and easier to redo than to fix is declined; a fix for an edge setup (a fork, an unusual install) that adds risk or code for everyone else is declined. What remains is a plain fix that lands like any other.
+
 - **Other agent runtimes** (ACP, Pi, DeepSeek Harness) are declined: OpenChamber runs on OpenCode, and a second backend doubles every session contract. Never word it as "we are a UI for OpenCode" ([#2010](https://github.com/openchamber/openchamber/issues/2010), [#3654](https://github.com/openchamber/openchamber/issues/3654), [#5700](https://github.com/openchamber/openchamber/pull/5700)).
 - **Russian localization** is declined because of Russia's war against Ukraine; close with **russian-locale** below.
 - **A composer action that rewrites the user's prompt** with a model is declined: mid-session the agent already sees more than an optimizer would. Say that, without pointing at extensions. The opt-in system-prompt optimizer in Behavior settings is a separate feature ([#3602](https://github.com/openchamber/openchamber/pull/3602)).
@@ -158,6 +160,17 @@ Maintainer decisions that settle a PR without asking again. A PR that contradict
 - **Keep-awake "while working" holds the screen during a permission request**, and lets it sleep while a session waits on a PR, an extension or a background command ([#6913](https://github.com/openchamber/openchamber/pull/6913)).
 - **Turning on repository storage for project notes and todos moves the existing entries there**; the user never lands on an empty list ([#6940](https://github.com/openchamber/openchamber/pull/6940)).
 - **Workflow run data is not read while workflows are off** ([#6998](https://github.com/openchamber/openchamber/pull/6998)).
+- **A tagged web notification that replaces an older one alerts again**, whatever its kind: a new question or permission request in the same session must not swap in silently ([#7151](https://github.com/openchamber/openchamber/pull/7151)).
+- **A terminal tab started from a command in a reply never closes on its own**; the terminal auto-close setting is for project actions and plain terminals ([#7160](https://github.com/openchamber/openchamber/pull/7160)).
+- **Marking a session read, or opening it, also clears its subagents' pushes**: their requests surface in the parent anyway ([#7274](https://github.com/openchamber/openchamber/pull/7274)).
+- **A Walkthrough base an extension opens with becomes the remembered base**, the same as a manual pick ([#7144](https://github.com/openchamber/openchamber/pull/7144)).
+- **Inside an isolated space, secret.run offers only one-run and ten-minute keeping**; persistent saving is host-only ([#7101](https://github.com/openchamber/openchamber/pull/7101)).
+- **Unsent answers in a question or form card survive a reload**, as long as a retried send can't answer twice ([#7182](https://github.com/openchamber/openchamber/pull/7182)).
+- **Long lists in pickers scroll continuously with search**, rendering only visible rows; no page buttons ([#7072](https://github.com/openchamber/openchamber/pull/7072)).
+- **Activity stays open while its text is being commented on**, on the phone too ([#7250](https://github.com/openchamber/openchamber/pull/7250)).
+- **Office files from outside the project offer "Attach as is" or "Convert to text"**; a file dragged from the Files panel stays an @-mention ([#7163](https://github.com/openchamber/openchamber/pull/7163)).
+- **Extension folder limits hide the extension's UI in other projects**; its service and agent tools stay global for now ([#7191](https://github.com/openchamber/openchamber/pull/7191)).
+- **An agent's keyboard action in the desktop browser may take real focus for that one action**, until the browser moves to its own `WebContentsView` ([#7074](https://github.com/openchamber/openchamber/pull/7074)).
 - **No automatic "start Build?" prompt after a Plan turn**: a plan is rarely done in one turn, so the question after every turn is noise ([#6910](https://github.com/openchamber/openchamber/pull/6910)).
 
 ## Message templates

@@ -82,6 +82,16 @@ raw non-ASCII header values.
 
 ## Decisions
 
+### Why message fields are checked where they are read
+
+A stored message can have a content array or legacy top-level text. A string
+message ID is enough to read the response as a message record; it does not prove
+any part or tool input has the expected shape. Each reader checks the fields it
+uses so one malformed part does not discard references from other parts.
+
+When comparing a tool result path, a failed percent decode leaves the literal
+path intact. A filename can contain a stray `%`.
+
 ### Why a weight budget per page and not a count
 
 A page named 19 posters and showed 12: a count says nothing about memory, and

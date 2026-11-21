@@ -6,6 +6,7 @@ import { hasOpenBackLayer, subscribeBackLayers } from '@/lib/mobileBackLayers';
 import { KEYBOARD_EASING_CSS, KEYBOARD_HIDE_MS, KEYBOARD_SHOW_MS, keyboardKeyframes } from '@/lib/mobileKeyboardTiming';
 import { writeMobileKeyboardVar } from '@/lib/mobileKeyboardInsets';
 import { isBackGuardEntry, pushBackGuard } from '@/lib/router/backGuard';
+import { useUIStore } from '@/stores/useUIStore';
 
 export const isCapacitorMobileApp = (): boolean => {
   if (typeof window === 'undefined') return false;
@@ -440,7 +441,28 @@ export const useNativeMobileLifecycle = (onResume: () => void): void => {
   }, [onResume]);
 };
 
-export const useNativeAndroidBackButton = (onBack: () => boolean): void => {
+export const handleAndroidParentBack = (overviewOpen: boolean, returnToParent: (() => void) | null): boolean => {
+  if (overviewOpen || !returnToParent) return false;
+  returnToParent();
+  return true;
+};
+
+export const useMobileBackHandlers = () => {
+  const settingsBackRef = React.useRef<(() => boolean) | null>(null);
+  const previewBackRef = React.useRef<(() => boolean) | null>(null);
+  const parentSessionBackRef = React.useRef<(() => void) | null>(null);
+  const registerSettingsBackHandler = React.useCallback((handler: (() => boolean) | null) => { settingsBackRef.current = handler; }, []);
+  const registerPreviewBackHandler = React.useCallback((handler: (() => boolean) | null) => { previewBackRef.current = handler; }, []);
+  const registerParentSessionBack = React.useCallback((handler: (() => void) | null) => { parentSessionBackRef.current = handler; }, []);
+  return { settingsBackRef, previewBackRef, parentSessionBackRef, registerSettingsBackHandler, registerPreviewBackHandler, registerParentSessionBack };
+};
+
+export const useAndroidParentSessionBack = (onBack: () => boolean, parentRef: React.RefObject<(() => void) | null>): void => {
+  const handleBack = React.useCallback(() => onBack() || handleAndroidParentBack(useUIStore.getState().runOverviewKey !== null, parentRef.current), [onBack, parentRef]);
+  useNativeAndroidBackButton(handleBack);
+};
+
+const useNativeAndroidBackButton = (onBack: () => boolean): void => {
   React.useEffect(() => {
     if (!isCapacitorMobileApp()) return;
 

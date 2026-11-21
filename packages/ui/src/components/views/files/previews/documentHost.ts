@@ -183,9 +183,9 @@ const handlers: Handlers = {
   },
 
   'delimited.read': async ({ bytes, delimiter, rowCap }, emit) => {
-    const { header, rows, totalRows, columnCount } = parseDelimitedText(new TextDecoder().decode(bytes), delimiter, rowCap);
+    const { header, rows, totalRows, columnCount, dataColumnCount } = parseDelimitedText(new TextDecoder().decode(bytes), delimiter, rowCap);
     streamRows(rows, (chunk) => emit({ rows: chunk }));
-    return { columns: header, totalRows, columnCount };
+    return { columns: header, totalRows, columnCount, dataColumnCount };
   },
 };
 

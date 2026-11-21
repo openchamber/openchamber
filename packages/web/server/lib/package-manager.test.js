@@ -1,15 +1,35 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 // Mock child_process to prevent real spawnSync calls that would hang in tests
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
   spawnSync: vi.fn(() => ({ status: 0, stdout: '/usr/local/bin', stderr: '' })),
 }));
+
+// Windows probes run a quoted absolute shim path through the shell; other
+// shell strings are install commands.
+function splitProbe(command, args) {
+  if (Array.isArray(args)) return [command, args];
+  const match = /^"([^"]+)"((?: \S+)*)$/.exec(command);
+  if (!match) return [command, null];
+  return [path.win32.basename(match[1]).replace(/\.[^.]+$/, ''), match[2].trim().split(' ').filter(Boolean)];
+}
+
+// The mocked spawnSync sees Windows probes only for managers a PATH directory holds.
+const windowsShimDir = process.platform === 'win32' ? fs.mkdtempSync(path.join(os.tmpdir(), 'oc-pm-shims-')) : null;
+if (windowsShimDir) {
+  for (const manager of ['npm', 'pnpm', 'yarn']) fs.writeFileSync(path.join(windowsShimDir, `${manager}.cmd`), '');
+}
+beforeEach(() => {
+  if (windowsShimDir) vi.stubEnv('PATH', windowsShimDir);
+});
+afterAll(() => {
+  if (windowsShimDir) fs.rmSync(windowsShimDir, { recursive: true, force: true });
+});
 
 const {
   checkForUpdates,
@@ -457,6 +477,26 @@ describe('checkForUpdates', () => {
 
     expect(result.available).toBe(false);
   });
+
+  it.each([7, true, ['2.7.2'], { version: '2.7.2' }])('preserves a truthy registry tag %j in the fallback result', async (latest) => {
+    fetchMock
+      .when('api.openchamber.dev', { ok: false })
+      .when('registry.npmjs.org', { ok: true, json: async () => ({ 'dist-tags': { latest } }) });
+    const result = await checkForUpdates({ currentVersion: '1.0.0' });
+    expect(result.version).toEqual(latest);
+  });
+
+  it.each([7, true, ['2.7.2-canary.1.2'], { version: '2.7.2' }])('retains the unchecked current version %j in the API payload', async (currentVersion) => {
+    fetchMock.when('api.openchamber.dev', {
+      ok: true,
+      json: async () => ({ latestVersion: '1.0.0', updateAvailable: false }),
+    });
+    const result = await checkForUpdates({ appType: 'desktop-electron', currentVersion });
+    expect(result.currentVersion).toEqual(currentVersion);
+    const payload = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(payload.currentVersion).toEqual(currentVersion);
+    expect(payload.channel).toBe(/-canary\./.test(currentVersion) ? 'canary' : 'stable');
+  });
 });
 
 describe('checkForUpdates on the update channels', () => {
@@ -565,6 +605,18 @@ describe('getCurrentVersion', () => {
     expect(typeof getCurrentVersion).toBe('function');
     expect(getCurrentVersion()).toMatch(/^\d+\.\d+\.\d+|unknown$/);
   });
+
+  it.each([7, true, ['2.7.2'], { version: '2.7.2' }])('passes through a truthy unchecked manifest version %j', (version) => {
+    const readFile = fs.readFileSync;
+    const manifest = path.resolve(import.meta.dirname, '../../package.json');
+    const spy = vi.spyOn(fs, 'readFileSync').mockImplementation((file, ...args) =>
+      file === manifest ? JSON.stringify({ version }) : readFile(file, ...args));
+    try {
+      expect(getCurrentVersion()).toEqual(version);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 describe('fetchRequiredOpenCodeVersion', () => {
@@ -602,7 +654,7 @@ describe('getUpdateCommand', () => {
   describe('pnpm build approvals', () => {
     function stubPnpmVersion(stdout, status = 0) {
       spawnSync.mockImplementation((command, args) => (
-        Array.isArray(args) && args[0] === '--version'
+        (Array.isArray(args) ? args[0] === '--version' : command.endsWith(' --version'))
           ? { status, stdout, stderr: '' }
           : { status: 0, stdout: '', stderr: '' }
       ));
@@ -642,8 +694,9 @@ describe('getUpdateCommand', () => {
 
 describe('executeUpdate', () => {
   function stubSpawnSync({ installStatus = 0, listingStdout = '', listingStatus = 0 } = {}) {
-    spawnSync.mockImplementation((command, args) => {
-      if (!Array.isArray(args)) {
+    spawnSync.mockImplementation((rawCommand, rawArgs) => {
+      const [, args] = splitProbe(rawCommand, rawArgs);
+      if (!args) {
         return { status: installStatus, stdout: '', stderr: '' };
       }
       if (args.includes('--version')) {
@@ -704,6 +757,44 @@ describe('detectPackageManagerDetails', () => {
     vi.unstubAllEnvs();
   });
 
+  it.skipIf(process.platform === 'win32')('finds global-bin ownership when the CLI is nested under build', async () => {
+    const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'oc-global-bin-owner-')));
+    const root = path.join(directory, 'package');
+    const bin = path.join(directory, 'bin');
+    fs.mkdirSync(path.join(root, 'build/bin'), { recursive: true });
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({
+      name: '@openchamber/web',
+      main: './build/server/index.js',
+      bin: { openchamber: './build/bin/cli.js' },
+    }));
+    fs.writeFileSync(path.join(root, 'build/bin/cli.js'), '');
+    fs.symlinkSync(path.join(root, 'build/bin/cli.js'), path.join(bin, 'openchamber'));
+    try {
+      vi.stubEnv('OPENCHAMBER_RUNTIME', '');
+      vi.stubEnv('OPENCHAMBER_PACKAGE_MANAGER', '');
+      spawnSync.mockImplementation((command, args) => {
+        if (command !== 'npm') return { status: 1, stdout: '', stderr: '' };
+        if (args[0] === '--version') return { status: 0, stdout: '10.0.0', stderr: '' };
+        if (args[0] === 'prefix') return { status: 0, stdout: directory, stderr: '' };
+        return { status: 1, stdout: '', stderr: '' };
+      });
+      vi.resetModules();
+      const { detectPackageManagerDetails } = await import('./package-manager.js');
+      const packagePaths = await import('./web-package-paths.js');
+      const resolvePaths = packagePaths.getWebPackagePaths;
+      vi.spyOn(packagePaths, 'getWebPackagePaths').mockImplementation((url) =>
+        url ? resolvePaths(url) : { ...packagePaths.webPackagePaths, root });
+      expect(detectPackageManagerDetails()).toMatchObject({
+        packageManager: 'npm',
+        packagePath: root,
+        reason: 'global-root-owner',
+      });
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     ['Windows pnpm store', String.raw`D:\pnpm-store\v11\links\@openchamber\web\2.5.1\hash\node_modules\@openchamber\web`, 'pnpm'],
     ['POSIX pnpm store', '/home/user/.local/share/pnpm-store/v11/links/@openchamber/web/2.5.1/hash/node_modules/@openchamber/web', 'pnpm'],
@@ -716,8 +807,9 @@ describe('detectPackageManagerDetails', () => {
     vi.stubEnv('OPENCHAMBER_PACKAGE_MANAGER', '');
     vi.stubEnv('npm_config_user_agent', '');
     vi.stubEnv('npm_execpath', '');
-    spawnSync.mockImplementation((command, args) => {
-      if (command !== 'npm' && command !== 'pnpm') {
+    spawnSync.mockImplementation((rawCommand, rawArgs) => {
+      const [command, args] = splitProbe(rawCommand, rawArgs);
+      if (!args || (command !== 'npm' && command !== 'pnpm')) {
         return { status: 1, stdout: '', stderr: '' };
       }
       if (args[0] === '--version') {
@@ -730,13 +822,11 @@ describe('detectPackageManagerDetails', () => {
     });
     vi.resetModules();
     const { detectPackageManagerDetails, getUpdateCommand } = await import('./package-manager.js');
-    const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-    const resolve = path.resolve;
-    vi.spyOn(path, 'resolve').mockImplementation((...parts) => (
-      parts.length === 3 && parts[0] === moduleDir && parts[1] === '..' && parts[2] === '..'
-        ? packagePath
-        : resolve(...parts)
-    ));
+    const packagePaths = await import('./web-package-paths.js');
+    vi.spyOn(packagePaths, 'getWebPackagePaths').mockReturnValue({
+      ...packagePaths.webPackagePaths,
+      root: packagePath,
+    });
 
     expect(detectPackageManagerDetails()).toMatchObject({
       packageManager,

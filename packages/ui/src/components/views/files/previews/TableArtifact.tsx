@@ -959,7 +959,7 @@ export const TableArtifact: React.FC<{
       rows={rows}
       rowLabels={rowLabels}
       columnCount={onContentChange ? table.columnCount + 1 : table.columnCount}
-      dataColumnCount={table.columnCount}
+      dataColumnCount={table.dataColumnCount}
       totalRows={table.totalRows}
       sizeBytes={sizeBytes}
       editing={editing}

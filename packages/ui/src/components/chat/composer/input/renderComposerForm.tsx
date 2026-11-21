@@ -46,7 +46,7 @@ import { hasOpenDropdown } from '@/hooks/keyboard-shortcut-dom';
 import { ComposerEditor } from '../../composer/editor/ComposerEditor';
 import { composerAutoCorrect } from '../../composer/editor/autocorrect';
 import { MobileCommentComposer } from '../../composer/comment/MobileCommentComposer';
-import { DraftTargetSelectors, MobileDraftTargetTriggers } from '../../composer/ui/DraftTargetSelectors';
+import { ComposerDraftTargets } from '../../composer/ui/ComposerDraftTargets';
 import { ComposerAutocompletePopups } from '../../composer/ui/ComposerAutocompletePopups';
 import { ComposerFooter } from '../../composer/ui/ComposerFooter';
 import { MobilePillComposer } from '../../composer/ui/MobilePillComposer';
@@ -192,16 +192,12 @@ export function renderComposerForm({
             data-prompt-history-search-owner="true"
             data-btw-composer={isBtwActive ? 'true' : undefined}
             onContextMenuCapture={() => largeTextPasteGesture.invalidate()}
-            // Whichever composer the user works in holds the selected
-            // attachment slot, so its paste, drop, picker and remove act on
-            // its own files when a second chat is open beside it.
             onPointerDownCapture={claimAttachmentSlot}
             onFocusCapture={claimAttachmentSlot}
             onDragEnterCapture={claimAttachmentSlot}
             onKeyDownCapture={(event) => {
                 if (!isBtwActive || event.key !== 'Escape' || isIMECompositionEvent(event) || hasOpenDropdown()) return;
                 if (!(event.target instanceof Element) || !event.target.closest('[data-chat-input-footer]')) return;
-                // Footer tooltips must not consume the only exit key for a pending BTW.
                 event.preventDefault();
                 event.stopPropagation();
                 handleExitBtw();
@@ -209,8 +205,6 @@ export function renderComposerForm({
             onSubmit={(e) => {
                 e.preventDefault();
                 if (isPromptHistorySearchOpen) return;
-                // Comment mode owns the form: submit attaches the comment and
-                // must never reach the send path.
                 if (mobileCommentActive) {
                     attachMobileCommentRef.current();
                     return;
@@ -233,13 +227,14 @@ export function renderComposerForm({
                 </div>
             ) : null}
             <div className={cn('chat-input-column relative overflow-visible', isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
-                {/* Comment mode shows only its own shell: the normal composer's
-                    furniture (chips, banners, draft selectors) stays in state
-                    and returns unchanged when the comment exits. */}
                 {!mobileCommentActive ? (<>
-                {!isMobile && (showDraftTargetSelectors || draftPresentationExiting) && selectedDraftProject ? (
-                    <div className={draftPresentationClassName}>
-                        <DraftTargetSelectors
+                <ComposerDraftTargets
+                            isVSCode={isVSCode}
+                            isMobile={isMobile}
+                            showSelectors={showDraftTargetSelectors}
+                            exiting={draftPresentationExiting ?? false}
+                            presentationClassName={draftPresentationClassName}
+                            onOpenPicker={handleMobileDraftPickerChange}
                             projects={draftProjects}
                             selectedProject={selectedDraftProject}
                             selectedDirectory={selectedDraftDirectory}
@@ -257,22 +252,9 @@ export function renderComposerForm({
                             onCreateSpace={handleCreateSpace}
                             onCreateCustomWorktree={handleCreateCustomWorktree}
                             theme={currentTheme}
-                        />
-                    </div>
-                ) : null}
-                {isMobile && showDraftTargetSelectors && selectedDraftProject ? (
-                    <MobileDraftTargetTriggers
-                        selectedProject={selectedDraftProject}
-                        selectedBranchLabel={selectedDraftBranchLabel}
-                        showBranchSelector={shouldShowDraftBranchSelector}
-                        theme={currentTheme}
-                        onOpenPicker={handleMobileDraftPickerChange}
-                    />
-                ) : null}
+                />
                 </>) : null}
                 <div
-                    // Desktop: layout-transparent. Mobile: positioning host for
-                    // the wrapper-level dictation overlay across pill/full states.
                     data-dictation-host="true"
                     className={cn(
                         !isMobile && 'contents',
@@ -288,9 +270,6 @@ export function renderComposerForm({
                         radius={chatInputRadius}
                     />
                 ) : mobileCommentActive && mobileComment.draft.status === 'open' ? (
-                    // Keyed by generation: a replaced open remounts the shell
-                    // so its dictation callbacks can never target the
-                    // previous quote.
                     <MobileCommentComposer
                         key={mobileComment.draft.generation}
                         draft={mobileComment.draft}
@@ -327,14 +306,13 @@ export function renderComposerForm({
                     />
                 ) : (
                 <>
-                {/* The autocomplete popups anchor to this wrapper, not to the
-                    box, which clips its contents. */}
                 <div
                     className={cn('relative', isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}
                 >
                     {largeTextPasteOffer ? (
                         <LargeTextPasteChoice
                             key={largeTextPasteOffer.id}
+                            kind={largeTextPasteOffer.kind}
                             takeFocus={!isMobile}
                             expanded={isComposerExpanded}
                             onChoose={(action, explicitlyChosen) => largeTextPasteOffer.resolve(action, explicitlyChosen)}
@@ -357,7 +335,6 @@ export function renderComposerForm({
                         onSnippetDraftSaved={handleSnippetDraftSaved}
                         onFileSelect={handleFileSelect}
                         onAgentSelect={handleAgentSelect}
-                        // VS Code shows no reference chips, so it cannot hold one.
                         onSessionSelect={isVSCode ? undefined : handleSessionSelect}
                         onExtensionMentionSelect={isVSCode || isBtwActive ? undefined : handleExtensionMentionSelect}
                         currentSessionId={currentSessionId}
@@ -371,9 +348,6 @@ export function renderComposerForm({
                     )}
                     style={{ borderRadius: chatInputRadius }}
                 >
-                {/* Normal: zero-height row above the composer box. Expanded: the
-                    box grows to fill the column, so the anchor is pinned to the
-                    box's bottom edge instead of flowing before it. */}
                 <div
                     className={cn(isComposerExpanded ? 'absolute inset-s-0 inset-e-0 bottom-0 h-0' : 'relative h-0')}
                     data-prompt-history-search-anchor
@@ -392,20 +366,12 @@ export function renderComposerForm({
                     className={cn(
                         "flex flex-col relative overflow-visible",
                         isComposerExpanded && 'flex-1 min-h-0',
-                        // Opaque: always on screen over the moving transcript
-                        // (see .oc-surface-floating in design-system.css).
                         'oc-surface-floating oc-composer-surface',
-                        // Lit like a dropdown (top edge, hairline, shadow). Its
-                        // box-shadow would hide the drag ring, so it steps aside
-                        // while a file is dragged over.
                         isDragging ? "ring-2 ring-primary ring-offset-2" : 'oc-glass-floating oc-composer-sheen',
                     )}
                     style={{ borderRadius: chatInputRadius }}
                     ref={dropZoneRef}
-                    // The mobile pill morph measures and animates this box.
                     data-composer-box={isMobile ? 'true' : undefined}
-                    // The desktop dictation overlay is up: the box hides its
-                    // other contents (see design-system.css).
                     data-dictating={desktopDictating && !isMobile && !isBtwActive ? 'true' : undefined}
                     onDropCapture={handleDropCapture}
                     onDragEnter={handleDragEnter}
@@ -435,8 +401,6 @@ export function renderComposerForm({
                         </div>
                     )}
 
-                    {/* Positioning context for the dictation overlay: covers the
-                        text area + footer exactly. */}
                     <div className={cn('relative flex flex-col', isComposerExpanded && 'flex-1 min-h-0')} data-dictation-chain="true">
                     <div className={cn("overflow-hidden", isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
                         {parallel.isActive ? <ParallelComposerStrip parallel={parallel} project={parallelProjectRef} /> : null}
@@ -450,8 +414,6 @@ export function renderComposerForm({
                         <div
                             ref={dictationHeightHostRef}
                             className={cn("relative overflow-hidden", isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}
-                            // The mobile pill morph moves this block from the
-                            // pill's text line and unfurls it.
                             data-composer-morph-prompt={isMobile ? 'true' : undefined}
                             onDragEnter={handleDragEnter}
                             onDragOver={handleDragOver}
@@ -471,8 +433,6 @@ export function renderComposerForm({
                                 ref={composerRef}
                                 viewStore={composerViewStore}
                                 data-testid="chat-input"
-                                // Read at render: the editor's own text, unless the app
-                                // just put new text in (see `setMessage`).
                                 value={composerText.get()}
                                 valueRevision={editorValueRevision}
                                 languageContext={languageContext}
@@ -569,14 +529,6 @@ export function renderComposerForm({
                 </div>
                 </>
                 )}
-                {/* Wrapper-level dictation engine + overlay: stays mounted across
-                    the pill ↔ composer swap so a recording started from the pill
-                    survives the morph. Its absolute overlay covers whichever
-                    shape the wrapper currently has. NOT mounted during comment
-                    mode: the comment shell runs its own comment-scoped engine,
-                    so the form's dictation events belong to that engine.
-                    An in-flight recording is discarded by the swap:
-                    its transcript must never reach the normal draft. */}
                 {isMobile && !isBtwActive && !mobileCommentActive && !messageSelectionActive ? (
                     <MemoComposerDictation
                         radius={chatInputRadius}
@@ -595,9 +547,6 @@ export function renderComposerForm({
                     />
                 ) : null}
                 </div>
-                {/* Hidden host for the model/agent/variant bottom sheets. Kept
-                    outside the pill conditional so an open panel survives (and
-                    stays visible over) the collapsed composer. */}
                 {isMobile && !isBtwActive ? (
                     <MemoModelControls
                         className="hidden"
@@ -606,17 +555,12 @@ export function renderComposerForm({
                     />
                 ) : null}
             </div>
-            {/* Starters act on a project ("Explore the codebase"), so they wait
-                until the draft has one: without a project the target is the
-                chat stand-in, shown as "Choose project". */}
             {showDesktopDraftPresentation && selectedDraftProject && selectedDraftProject.kind !== 'chat' ? (
                 <DraftPresetChips
                     onSubmit={handlePresetChipSubmit}
                     className={cn('chat-input-column mt-4', draftPresentationClassName)}
                 />
             ) : null}
-            {/* One floating panel at a time: an open BTW, then a permission,
-                then the form, then a collapsed BTW strip. */}
             <PermissionDock
                 sessionId={currentSessionId}
                 directory={currentSessionDirectoryForSync ?? currentDirectory ?? undefined}

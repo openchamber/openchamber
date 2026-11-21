@@ -1,3 +1,22 @@
+## [2.7.3] - 2026-11-19
+
+### New
+
+- Chat: rename the session from the chat header (thanks to @cemarta7).
+- Chat: a waiting question stays answerable after you send a message of your own (thanks to @sergiopadure).
+
+### Improvements
+
+- Chat: a question folds to its header while you scroll up to read (thanks to @yulia-ivashko).
+
+### Fixes
+
+- Startup: the extension failed to start with "Configured OpenCode binary not found" when OpenChamber's settings still pointed at the OpenCode the desktop app used to carry.
+- Settings: opening Settings from a command without context failed (thanks to @Cyneric).
+- Chat: subagent rows crashed the chat on some cached sessions.
+- Chat: backslashes before a period or a question mark disappeared from your message (thanks to @denishsharma).
+- Chat: a collapsed tool card shows a preview of structured output (thanks to @Cyneric).
+
 ## [2.7.2] - 2026-11-15
 
 ### New

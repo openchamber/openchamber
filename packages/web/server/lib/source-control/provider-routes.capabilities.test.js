@@ -223,6 +223,37 @@ describe('provider routes for change hosts', () => {
     expect(missing.body).toEqual({ error: 'Branch nope does not exist' });
   });
 
+  it('calls an issue read on the provider resources it belongs to', async () => {
+    const { app, impl } = routesWith(acme);
+    impl.resources = {
+      label: 'from the provider',
+      listIssues() { return Promise.resolve({ items: [this.label] }); },
+      getIssue() { return Promise.resolve({ title: this.label }); },
+    };
+    const list = await request(app).get('/api/source-control/acme/issues/list').query({ instance, directory: '/repo' }).expect(200);
+    expect(list.body).toEqual({ items: ['from the provider'] });
+    const issue = await request(app).get('/api/source-control/acme/issues/get').query({ instance, directory: '/repo', number: '5' }).expect(200);
+    expect(issue.body).toEqual({ title: 'from the provider' });
+  });
+
+  it('answers a mutation body the injected validator refuses with that validator\'s own status', async () => {
+    const impl = fakeImplementation();
+    const providers = createSourceControlProviders({
+      descriptors: createProviderDescriptors([acme]),
+      loaders: { acme: async () => ({ createProvider: () => impl }) },
+    });
+    const app = express();
+    app.use(express.json());
+    const validateMutationContext = vi.fn(async () => {
+      throw Object.assign(new Error('Mutation request must be an object'), { code: 'SOURCE_CONTROL_CUSTOM_REFUSAL', status: 422 });
+    });
+    registerProviderRoutes(app, { providers, validateMutationContext, mutationExecutor: { read: vi.fn(), execute: vi.fn() } });
+    const response = await request(app).post('/api/source-control/acme/pr/create').send([1, 2]).expect(422);
+    expect(response.body).toEqual({ error: 'Mutation request must be an object', code: 'SOURCE_CONTROL_CUSTOM_REFUSAL' });
+    expect(validateMutationContext).toHaveBeenCalledWith([1, 2]);
+    expect(impl.mutations.prepare).not.toHaveBeenCalled();
+  });
+
   it('lists submit as the merge method of a submit host', async () => {
     const { app } = routesWith(changeHost);
     const response = await request(app).get('/api/source-control/review/capabilities').query({ instance }).expect(200);

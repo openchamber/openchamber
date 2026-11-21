@@ -61,9 +61,13 @@ import {
   desktopSshStatus,
   type DesktopSshInstanceStatus,
 } from '@/lib/desktopSsh';
-
-const SSH_CONNECT_TIMEOUT_MS = 90_000;
-const SSH_CONNECT_CANCELLED_ERROR = 'SSH connection cancelled';
+import {
+  connectDesktopSshHost,
+  SSH_CONNECT_CANCELLED_ERROR,
+  SSH_CONNECT_TIMEOUT_MS,
+  waitForSshReady,
+} from './desktopSshConnection';
+import { finishSshWindowConnect, finishWindowOpen, hasPendingSshWindowConnect, isWindowOpenPending, startWindowOpen, usePendingWindowOpens } from './desktopWindowOpens';
 
 type HostStatus = DesktopHostStatus;
 
@@ -139,8 +143,6 @@ const statusLabelKey = (status: HostDisplayStatus):
   return 'desktopHostSwitcher.status.unknown';
 };
 
-const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
-
 const sshPhaseLabelKey = (phase: DesktopSshInstanceStatus['phase'] | undefined):
   | 'desktopHostSwitcher.sshPhase.ready'
   | 'desktopHostSwitcher.sshPhase.error'
@@ -203,39 +205,6 @@ const getSshStatusById = async (): Promise<Record<string, DesktopSshInstanceStat
   return next;
 };
 
-const waitForSshReady = async (
-  id: string,
-  timeoutMs: number,
-  onUpdate: (status: DesktopSshInstanceStatus) => void,
-  shouldCancel?: () => boolean,
-): Promise<DesktopSshInstanceStatus> => {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (shouldCancel?.()) {
-      throw new Error(SSH_CONNECT_CANCELLED_ERROR);
-    }
-
-    const statuses = await desktopSshStatus(id).catch(() => []);
-    const status = statuses.find((item) => item.id === id);
-    if (status) {
-      onUpdate(status);
-      if (status.phase === 'ready') {
-        return status;
-      }
-      if (status.phase === 'error') {
-        throw new Error(status.detail || 'SSH connection failed');
-      }
-    }
-    await sleep(700);
-  }
-
-  if (shouldCancel?.()) {
-    throw new Error(SSH_CONNECT_CANCELLED_ERROR);
-  }
-
-  throw new Error('Timed out waiting for SSH connection');
-};
-
 type DesktopHostSwitcherDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -262,6 +231,8 @@ export function DesktopHostSwitcherDialog({
   const [isLoading, setIsLoading] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
   const [switchingHostId, setSwitchingHostId] = React.useState<string | null>(null);
+  const openingHostIds = usePendingWindowOpens(setConfigHosts);
+  const sshWindowConnectPending = hasPendingSshWindowConnect(openingHostIds);
   const [sshHostIds, setSshHostIds] = React.useState<Record<string, true>>({});
   const [sshStatusesById, setSshStatusesById] = React.useState<Record<string, DesktopSshInstanceStatus>>({});
   const [switchModal, setSwitchModal] = React.useState<{
@@ -319,6 +290,7 @@ export function DesktopHostSwitcherDialog({
 
   const persist = React.useCallback(async (nextHosts: DesktopHost[], nextDefaultHostId: string | null) => {
     if (!isDesktopShell()) return;
+    if (hasPendingSshWindowConnect()) return;
     setIsSaving(true);
     setError('');
     try {
@@ -421,6 +393,11 @@ export function DesktopHostSwitcherDialog({
     };
   }, [open]);
 
+  const connectSshHost = React.useCallback((host: DesktopHost) => connectDesktopSshHost(host, {
+    ready: sshStatusesById[host.id]?.phase === 'ready',
+    onStatus: (status) => setSshStatusesById((prev) => ({ ...prev, [status.id]: status })),
+  }), [sshStatusesById]);
+
   const handleSwitch = React.useCallback(async (selectedHost: DesktopHost) => {
     const selectionToken = ++selectionTokenRef.current;
     switchTokenRef.current += 1;
@@ -441,16 +418,9 @@ export function DesktopHostSwitcherDialog({
     if (isElectronShell() && host.id !== LOCAL_HOST_ID && sshHostIds[host.id]) {
       setSwitchingHostId(host.id);
       try {
-        if (sshStatusesById[host.id]?.phase !== 'ready') {
-          await desktopSshConnect(host.id);
-          await waitForSshReady(host.id, SSH_CONNECT_TIMEOUT_MS, (status) => {
-            setSshStatusesById((prev) => ({ ...prev, [status.id]: status }));
-          });
-        }
-        const refreshed = (await desktopHostsGet()).hosts.find((entry) => entry.id === host.id);
+        const connectedHost = await connectSshHost(host);
         if (selectionToken !== selectionTokenRef.current) return;
-        if (!refreshed) throw new Error('SSH host is no longer available');
-        host = refreshed;
+        host = connectedHost;
       } catch (err) {
         if (selectionToken !== selectionTokenRef.current) return;
         const message = err instanceof Error ? err.message : String(err);
@@ -671,7 +641,7 @@ export function DesktopHostSwitcherDialog({
     } catch {
       window.location.href = target;
     }
-  }, [current.id, isRuntimeConnected, localOrigin, onHostSwitched, sshHostIds, sshStatusesById, statusById, t]);
+  }, [connectSshHost, current.id, isRuntimeConnected, localOrigin, onHostSwitched, sshHostIds, sshStatusesById, statusById, t]);
 
   const cancelEdit = React.useCallback(() => {
     setEditingId(null);
@@ -711,21 +681,41 @@ export function DesktopHostSwitcherDialog({
     await persist(configHosts, next);
   }, [configHosts, persist]);
 
-  const openInNewWindow = React.useCallback((host: DesktopHost) => {
+  const openInNewWindow = React.useCallback(async (selectedHost: DesktopHost) => {
     const reportFailure = (err: unknown) => {
       toast.error(t('desktopHostSwitcher.error.failedToOpenNewWindow'), {
         description: err instanceof Error ? err.message : String(err),
       });
     };
-    if (host.relay && host.id !== LOCAL_HOST_ID) {
-      desktopOpenNewWindowForHost(host.id).catch(reportFailure);
-      return;
+    const hostId = selectedHost.id;
+    if (isWindowOpenPending(hostId)) return;
+    const connectsSsh = isElectronShell() && hostId !== LOCAL_HOST_ID && Boolean(sshHostIds[hostId]);
+    startWindowOpen(hostId, connectsSsh);
+    try {
+      let host = selectedHost;
+      if (connectsSsh) {
+        try {
+          host = await connectSshHost(host);
+        } catch (err) {
+          toast.error(t('desktopHostSwitcher.toast.sshFailedToConnect', { host: redactSensitiveUrl(host.label) }), {
+            description: err instanceof Error ? err.message : String(err),
+          });
+          return;
+        }
+        finishSshWindowConnect(host);
+      }
+      if (host.relay && host.id !== LOCAL_HOST_ID) {
+        await desktopOpenNewWindowForHost(host.id).catch(reportFailure);
+        return;
+      }
+      const origin = host.id === LOCAL_HOST_ID ? localOrigin : getDesktopHostApiUrl(host);
+      if (!origin) return;
+      const target = toNavigationUrl(origin);
+      await desktopOpenNewWindowAtUrl(target, { clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null }).catch(reportFailure);
+    } finally {
+      finishWindowOpen(hostId);
     }
-    const origin = host.id === LOCAL_HOST_ID ? localOrigin : getDesktopHostApiUrl(host);
-    if (!origin) return;
-    const target = toNavigationUrl(origin);
-    desktopOpenNewWindowAtUrl(target, { clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null }).catch(reportFailure);
-  }, [localOrigin, t]);
+  }, [connectSshHost, localOrigin, sshHostIds, t]);
 
   const switchToLocal = React.useCallback(async () => {
     switchTokenRef.current += 1;
@@ -1006,7 +996,7 @@ export function DesktopHostSwitcherDialog({
                             )}
                             onClick={() => void setDefault(host.id)}
                             aria-label={isDefault ? t('desktopHostSwitcher.actions.defaultInstanceAria') : t('desktopHostSwitcher.actions.setAsDefaultAria')}
-                            disabled={isSaving || (!isDefault && isBlockedDisplayStatus(statusKind))}
+                            disabled={isSaving || sshWindowConnectPending || (!isDefault && isBlockedDisplayStatus(statusKind))}
                           >
                             {isDefault ? <Icon name="star-fill" className="h-4 w-4" /> : <Icon name="star" className="h-4 w-4" />}
                           </button>
@@ -1028,12 +1018,12 @@ export function DesktopHostSwitcherDialog({
                               )}
                             onClick={(e) => {
                               e.stopPropagation();
-                              openInNewWindow(host);
+                              void openInNewWindow(host);
                             }}
-                            disabled={isBlockedDisplayStatus(statusKind)}
+                            disabled={isBlockedDisplayStatus(statusKind) || switchingHostId === host.id || openingHostIds.has(host.id)}
                             aria-label={t('desktopHostSwitcher.actions.openInNewWindowAria')}
                           >
-                            <Icon name="window" className="h-4 w-4" />
+                            {openingHostIds.has(host.id) ? <Spinner className="h-4 w-4" /> : <Icon name="window" className="h-4 w-4" />}
                           </button>
                         </TooltipTrigger>
                         <TooltipContent sideOffset={6}>
@@ -1058,7 +1048,7 @@ export function DesktopHostSwitcherDialog({
                 <Button type="button" variant="outline" size="sm" onClick={cancelEdit} disabled={isSaving}>
                   {t('desktopHostSwitcher.actions.cancel')}
                 </Button>
-                <Button type="button" size="sm" onClick={() => void commitEdit()} disabled={isSaving}>
+                <Button type="button" size="sm" onClick={() => void commitEdit()} disabled={isSaving || sshWindowConnectPending}>
                   {isSaving ? <Icon name="loader-4" className="h-4 w-4 animate-spin" /> : null}
                   {t('desktopHostSwitcher.actions.save')}
                 </Button>

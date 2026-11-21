@@ -42,6 +42,7 @@ import type { GuestFileProxyResult, GuestFileRequest } from '@/lib/guests/files'
 import type { GuestGenerateProxyResult } from '@/lib/guests/generate';
 import type { GuestOpenCommitResult } from '@/lib/guests/open-commit';
 import type { GuestOpenSurfaceResult } from '@/lib/guests/open-surface';
+import type { GuestOpenWalkthroughResult } from '@/lib/guests/open-walkthrough';
 import type { GuestRequestProxyResult } from '@/lib/guests/oauth';
 
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
@@ -91,6 +92,7 @@ type HostBridgeEffects = {
   generate: (request: GenerateRequest) => Promise<GuestGenerateProxyResult>;
   setBadge: (count: number | null) => void;
   openCommit: (sha: string) => Promise<GuestOpenCommitResult>;
+  openWalkthrough: (base: string) => Promise<GuestOpenWalkthroughResult>;
   resize: (height: number) => void;
   answerBlock: (text: string) => Promise<void>;
   resolveResult: (id: string, payload: ResolveResultPayload) => void;
@@ -399,6 +401,10 @@ export const answerGuestMessage = async (
       return okResult(message.id);
     case 'open-commit': {
       const opened = await effects.openCommit(message.payload.sha);
+      return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
+    }
+    case 'open-walkthrough': {
+      const opened = await effects.openWalkthrough(message.payload.base);
       return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
     }
     case 'resize':

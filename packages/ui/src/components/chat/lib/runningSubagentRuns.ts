@@ -1,11 +1,12 @@
 
 import React from 'react';
 
-import { isFinalToolStatus, type Message, type Part, type Session, type SyntheticMessage } from '@/lib/opencode/model';
+import { isFinalToolStatus, type Message, type Part, type SyntheticMessage } from '@/lib/opencode/model';
 import { readSubagentRun, runningSubagentRunMessage } from '@/lib/opencode/subagent-run';
 import { isSubagentTool, subagentSessionId } from '@/lib/opencode/tools';
 import { useSessionWorkflowRuns } from '@/lib/workflows/store';
 import { useDirectorySync } from '@/sync/sync-context';
+import { readChildSessions } from '@/sync/scoped-blocking-requests';
 import type { State } from '@/sync/types';
 
 import type { ChatMessageEntry } from './turns/types';
@@ -47,10 +48,8 @@ export const selectRunningSubagentRuns = (
     parentSessionID: string,
     excluded: ReadonlySet<string> = NO_EXCLUDED,
 ): SyntheticMessage[] => {
-    const busyChildren: Session[] = [];
-    for (const session of state.session) {
-        if (session.parentID === parentSessionID && !excluded.has(session.id) && isBusy(state, session.id)) busyChildren.push(session);
-    }
+    const busyChildren = readChildSessions(state.session, parentSessionID)
+        .filter((session) => !excluded.has(session.id) && isBusy(state, session.id));
     if (busyChildren.length === 0) return EMPTY_RUNS;
 
     const { known, unjoinedCallSince } = accountedChildren(state, state.message[parentSessionID] ?? []);

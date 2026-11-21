@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test, vi } from 'bun:test';
 
-import { createGitHubResources } from './resources.js';
+import { createGitHubResources, gitHubRefusalMessage, responseError } from './resources.js';
 import { isGitHubRateLimitError } from './rate-limit.js';
 
 const openPull = {
@@ -22,6 +22,24 @@ const openPull = {
 const httpError = (status, message) => Object.assign(new Error(message), {
   status,
   response: { status, data: { message } },
+});
+
+describe('resource error boundaries', () => {
+  test('refusal messages retain inherited fields and unchecked fallback values', () => {
+    const refusal = Object.create({ response: { data: { message: 'Provider refused' } } });
+    expect(gitHubRefusalMessage(refusal)).toBe('Provider refused');
+    expect(gitHubRefusalMessage({ response: { data: { message: ' ' } }, message: 17 })).toBe(17);
+    expect(gitHubRefusalMessage(null)).toBeUndefined();
+  });
+
+  test('response errors preserve the original body while Error coerces its message', () => {
+    const body = { error: 17, code: 'PROVIDER_FAILURE' };
+    const failure = responseError(403, body);
+    expect(failure.message).toBe('17');
+    expect(failure.sourceControlResponse).toEqual({ status: 403, body });
+    expect(failure.sourceControlResponse.body).toBe(body);
+    expect(responseError(403, { error: undefined }).message).toBe('');
+  });
 });
 
 const makeResources = (permission) => createGitHubResources({
@@ -202,6 +220,38 @@ describe('changeRequestStatus merge permission', () => {
       clock.mockRestore();
     }
   });
+});
+
+test('the GitHub picker looks up a pasted Enterprise PR URL in its named repository', async () => {
+  const host = 'git.example.com';
+  const repo = { owner: 'acme', repo: 'app', host };
+  const url = `https://${host}/acme/app/pull/42`;
+  const pull = {
+    __typename: 'PullRequest', number: 42, title: 'Update the app', url, body: '',
+    createdAt: openPull.created_at, updatedAt: openPull.updated_at,
+    author: null, labels: null, comments: { totalCount: 0 }, headRepository: null,
+    repository: { name: 'app', owner: { login: 'acme' } },
+    state: 'OPEN', isDraft: false, headRefName: 'feature', baseRefName: 'main', headRefOid: 'abc',
+  };
+  const graphql = vi.fn(async (document) => document.includes('ReferenceLookup')
+    ? { a0: { issueOrPullRequest: pull } }
+    : { search: { issueCount: 0, nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } });
+  const resources = createGitHubResources({
+    load: async () => ({ rateLimit: { isGitHubRateLimited: () => false } }),
+    accountOf: () => ({ octokit: { graphql } }),
+    resolveRepo: async () => ({ repo }),
+    resolveNetwork: async () => [{ ...repo, source: 'origin' }, { owner: 'upstream', repo: 'app', source: 'upstream' }],
+  });
+  const read = (query) => resources.references({ session, directory: '/repo', kind: 'pull', state: 'open', query });
+
+  const result = await read(`${url}/files`);
+  expect(result.items).toMatchObject([{ kind: 'pull', number: 42, url }]);
+  expect(graphql).toHaveBeenCalledTimes(1);
+  expect(graphql).toHaveBeenCalledWith(expect.stringContaining('ReferenceLookup'), { number: 42, o0: 'acme', n0: 'app' });
+
+  graphql.mockClear();
+  await read(`https://${host}/unrelated/app/pull/42`);
+  expect(graphql).not.toHaveBeenCalled();
 });
 
 describe('listChangeRequests filters', () => {

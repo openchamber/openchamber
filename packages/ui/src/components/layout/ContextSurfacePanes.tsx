@@ -6,6 +6,7 @@ import { BrowserPane } from '@/components/browser/BrowserPane';
 import { ChatView } from '@/components/views/ChatView';
 import { Icon } from '@/components/icon/Icon';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useGuestTabsInScope } from '@/hooks/useGuestSurfaces';
 import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
@@ -41,6 +42,7 @@ import { useZoneHostsStore } from './zoneHosts';
 import { useRightSlotStore } from './rightSlot';
 import { useOpenUntilSettled, useOpenWhenSettled } from './useOpenUntilSettled';
 import { useClosingZoneTab } from './useClosingZoneTab';
+import { isZoneDisplaced } from './zoneFitWatch';
 import { isZoneExposed, ZoneInteractiveContext } from './zoneInteractiveContext';
 import { PauseClock } from '@/components/ui/pause-clock';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
@@ -209,7 +211,7 @@ export const ContextSurfacePanes: React.FC = () => {
     () => (effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : ''),
     [effectiveDirectory],
   );
-  const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
+  const panelState = useGuestTabsInScope(useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined)));
   const draftSpace = useDraftSpaceTarget();
   const spacePreparing = draftSpace?.kind === 'preparing';
   const draftSpaceDirectory = draftSpace?.kind === 'ready' ? draftSpace.directory : null;
@@ -515,7 +517,7 @@ export const ContextSurfacePanes: React.FC = () => {
           ) : hasOpenEditorFile || !contextEditorTreeVisible ? (
             <div className={cn('h-full min-w-0 flex-1', hasOpenEditorFile && !showsEditor && 'hidden')}>
               {hasOpenEditorFile ? (
-                <React.Suspense fallback={null}><FilesView mode="editor-only" visible={!contentHidden(fileZone.zone) && isFileTabActive && showsEditor} onCloseFile={handleCloseEditorFile} /></React.Suspense>
+                <React.Suspense fallback={null}><FilesView visible={!contentHidden(fileZone.zone) && isFileTabActive && showsEditor} onCloseFile={handleCloseEditorFile} /></React.Suspense>
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
                   <Icon name="file-code" className="h-12 w-12 text-muted-foreground/50" />
@@ -671,7 +673,7 @@ export const ContextSurfacePanes: React.FC = () => {
             className={cn('absolute inset-0', shown ? 'block' : 'hidden')}
           >
             <React.Suspense fallback={null}>
-              <GuestPanelContent mode={tab.mode} sharedSurface={sharedSurface} docking={docking ?? null} surfaceMounted={surfaceMounted} />
+              <GuestPanelContent mode={tab.mode} sharedSurface={sharedSurface} docking={docking ?? null} surfaceMounted={surfaceMounted} panelOpen={Boolean(panelState && getZoneView(panelState, pluginZone.zone).isOpen) || isZoneDisplaced(directoryKey, pluginZone.zone)} />
             </React.Suspense>
           </ZonePane>
         );

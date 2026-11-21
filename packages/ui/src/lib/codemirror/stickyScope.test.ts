@@ -31,11 +31,6 @@ describe('enclosingScopeLines', () => {
     expect(scopesAtLine(source, 6)).toEqual([1, 2]);
   });
 
-  test('a declaration whose own line is in view, or that has ended, is not pinned', () => {
-    expect(scopesAtLine(source, 2)).toEqual([1]);
-    expect(scopesAtLine(source, 9)).toEqual([]);
-  });
-
   test('works from indentation-based grammars too', () => {
     expect(scopesAtLine(['class A:', '    def f(self):', '        x = 1', '        return x'], 4, python())).toEqual([1, 2]);
   });

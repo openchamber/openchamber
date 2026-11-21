@@ -196,13 +196,19 @@ O tym, z jakich dostawców modeli w ogóle można korzystać, decyduje OpenCode,
 }
 ```
 
-Zabroniony dostawca znika, nawet jeśli ktoś doda do niego klucz. Umieść polityki w globalnym `~/.config/opencode/opencode.jsonc`, gdzie projekt nie może ich znieść, albo dostarczaj je z workspace’u OpenCode Console, który ma ostatnie słowo. Tryb enterprise obejmuje ponad to, co wysyła sam OpenChamber.
+Zabroniony dostawca znika, nawet jeśli ktoś doda do niego klucz. Umieść polityki w systemowej konfiguracji OpenCode (`/etc/opencode/opencode.jsonc` w Linuksie, `%ProgramData%\opencode\opencode.jsonc` w Windowsie, `/Library/Application Support/opencode/opencode.jsonc` w macOS) i pozwól pisać do jej folderu tylko administratorom, jak w przykładzie dla Windowsa powyżej, albo dostarczaj je z workspace’u OpenCode Console. Ścieżka konfiguracji systemowej dotyczy maszyny, na której działa OpenCode. W konfiguracji Dockera powyżej OpenCode działa w kontenerze, więc zamontuj tam plik tylko do odczytu, w `volumes` w `docker-compose.yml`: `- ./opencode-policy.jsonc:/etc/opencode/opencode.jsonc:ro`. Oba sposoby mają pierwszeństwo przed globalnym `~/.config/opencode/opencode.jsonc` użytkownika i plikami projektu, a konfiguracja systemowa ma też pierwszeństwo przed Console. Polityki z Console działają tylko, dopóki workspace jest połączony, i znikają po rozłączeniu, więc ograniczenia, które mają obowiązywać także po rozłączeniu, umieść w konfiguracji systemowej. Plik globalny nie pozwala projektowi ich znieść, ale użytkownik może go edytować. Tryb enterprise obejmuje ponad to, co wysyła sam OpenChamber.
 
-Wyszukiwania w sieci i pobieranie stron przez agenta też idą przez OpenCode, do usługi wyszukiwania i do samych stron. Jeśli nie powinny wychodzić poza Twoją sieć, zabroń ich tym samym rodzajem polityki:
+Wyszukiwania w sieci i pobieranie stron przez agenta też idą przez OpenCode, do usługi wyszukiwania i do samych stron. Jeśli nie powinny wychodzić poza Twoją sieć, zabroń ich tym samym rodzajem polityki. Jeśli konfiguracja ma już polityki, dodaj dwa wpisy `tool.use` na końcu ich listy i zostaw wpisy dostawców oraz pozostałe polityki. Jeśli plik ma zarówno tablicę `policies` najwyższego poziomu, jak i `experimental.policies`, dodaj je do tej najwyższego poziomu: OpenCode czyta `experimental.policies` najpierw, a wygrywa ostatni pasujący wpis. W nowej konfiguracji przykład działa samodzielnie:
 
 ```jsonc
-{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
-{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+{
+  "experimental": {
+    "policies": [
+      { "action": "tool.use", "resource": "websearch:*", "effect": "deny" },
+      { "action": "tool.use", "resource": "webfetch:*", "effect": "deny" }
+    ]
+  }
+}
 ```
 
 ## Powiązane

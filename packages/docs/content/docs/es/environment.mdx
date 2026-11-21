@@ -50,6 +50,10 @@ Inicia OpenChamber en modo headless cuando vale `true` o `1`. Las rutas API sigu
 
 Orígenes que pueden mostrar OpenChamber dentro de un frame en su propia página, separados por espacios, por ejemplo `https://dash.example.com`. `*` permite cualquier sitio. Por defecto solo OpenChamber y sus apps de escritorio y móvil pueden incrustarlo, para que ningún otro sitio pueda superponer sus botones.
 
+### `OPENCHAMBER_TRUSTED_PROXIES`
+
+Direcciones de proxies inversos que se ejecutan en otra máquina o en otro contenedor, separadas por comas, como `192.168.1.10` o `172.18.0.0/16`. OpenChamber limita los intentos de inicio de sesión fallidos por cliente y solo lee la dirección del cliente de `X-Forwarded-For` cuando la petición llega desde esta máquina o desde una dirección de esta lista. Un proxy que no está en la lista cuenta como un único cliente, así que los intentos fallidos de una persona pueden impedir durante un rato que todos los que están detrás inicien sesión.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 Cambia el directorio de datos de OpenChamber. Por defecto es `~/.config/openchamber`.

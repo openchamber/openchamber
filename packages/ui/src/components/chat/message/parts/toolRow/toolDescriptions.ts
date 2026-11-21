@@ -71,6 +71,7 @@ export const describeOpenChamberRow = (
     const run = secretRowView(envelope);
     if (summary && run) {
         const verb = translate(run.key, run.code === undefined ? undefined : { code: String(run.code) });
+        if (run.notSaved) return `${verb} · ${translate('chat.toolPart.openchamber.secretRun.notSaved', { names: run.notSaved.join(', ') })}`;
         return summary.detail ? `${verb} · ${summary.detail.slice(0, 120)}` : verb;
     }
     const key = openChamberVerbKey(envelope?.action);

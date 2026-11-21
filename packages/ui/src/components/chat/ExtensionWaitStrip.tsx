@@ -11,13 +11,6 @@ import { timerMinutesLeft, waitOrigin, waitSubject } from './waitPresentation';
 
 const NO_WAITS: readonly ExtensionWait[] = [];
 
-/**
- * The agent ended its turn to wait on a timer or on something an extension
- * follows; the server wakes it when the time is up or the extension says it
- * fired. The row names the wait
- * (the one waking first, else the oldest) and how many more there are, and
- * lets the user stop them all, after which nothing wakes the session.
- */
 export const ExtensionWaitStrip = memo(({ sessionId }: { sessionId: string | null }) => {
   const { t } = useI18n();
   const waits = useExtensionWaitsStore(React.useCallback((state) => (sessionId ? state.bySession.get(sessionId) ?? NO_WAITS : NO_WAITS), [sessionId]));

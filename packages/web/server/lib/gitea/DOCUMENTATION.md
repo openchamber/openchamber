@@ -93,6 +93,37 @@ gt exits 4 for every authentication failure: no login, but also a keyring it can
 
 gt puts its configuration under `GITEA_CLI_CONFIG_DIR`, else the platform's configuration directory as its XDG library sees it (`~/Library/Application Support` on macOS, the local application data folder on Windows). Rebuilding that rule here would drift with gt; `gt config path` answers it, once per process, and the file is then read without starting gt on every listing. `gt auth status --json` would answer the same hosts, at the cost of a process per listing.
 
+### Why gt keeps validation at its process and file boundaries
+
+The injected process runner can return text or bytes; only string output supplies a token or a configuration path. Thrown values need not be `Error` instances. The failure guard establishes only non-nullness, leaving `code`, `killed` and `stderr` unchecked until their existing comparisons or string checks run. The YAML schemas remain nullable and passthrough: an active account's `auth_method` is checked by the schema, while unrelated file fields remain unknown. An invalid instance origin is skipped without preventing other hosts from being listed.
+
+### Why the client leaves JSON unchecked
+
+JSON syntax and pagination-container checks do not establish a Gitea payload
+schema. JSON reads and writes return `JsonValue`, and pages and collections
+contain unchecked JSON entries. Text and byte reads also admit `null` for a
+204. Resource checks still validate the fields they consume: a mapped
+repository establishes a numeric id, but its parent and pull request branches
+remain unchecked. Verification narrows version and user payloads with the
+existing checks before publishing their fields. User ids still accept every
+nonnegative integer, including values outside the safe-integer range.
+
+Failure shapes leave fields unchecked until the existing string and status
+comparisons run. Their non-nullness guards preserve property reads on thrown
+primitives. The optional request-error status uses an erased declaration, so
+constructing an error without a status leaves that own property absent.
+
+The injected fetch contract permits the explicitly undefined request body that
+the client sends. Manual redirects include both Node's 3xx response and the
+browser-like `opaqueredirect` response defined by the Fetch standard; neither
+response is followed.
+
+### Why remote resolution can be typed separately
+
+The Git remote reader supplies names and URLs, and its status reader supplies optional tracking text. The folder-local contracts describe those inputs and the resolver's repository results. The string predicate is restricted to `string | null | undefined`, where the existing shared check establishes a string without claiming anything about unchecked JSON.
+
+`sshHostReaches` accepts the nullable user returned by `sshUserOf`, preserving rejection of a malformed encoded SSH user. Array and regular-expression capture checks expose occupancy to the compiler; successful repository splits and SCP matches always populate the checked slots. Remote ranking, accepted protocols, ports, aliases and failure propagation stay unchanged.
+
 ### Why reviewers are numeric ids and not usernames
 
 GitLab's reviewer contract is numeric ids, and the board compares the ids of current reviewers with the ids of candidates. Gitea's API takes usernames, so the provider maps ids to usernames at the moment it writes. Keeping usernames on the wire would make Gitea's reviewers the one set the board could not match.

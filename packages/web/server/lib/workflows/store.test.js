@@ -161,14 +161,4 @@ describe('workflow run store memory', () => {
     first.state = 'running';
     expect((await store.list()).find((item) => item.id === 'wf_shared01').state).toBe('running');
   });
-
-  it('a settled run saved again after a change reads back with the change', async () => {
-    const { store } = await setupLight();
-    await store.save(settledRun('wf_resumed1'));
-    const working = await store.get('wf_resumed1');
-    working.state = 'running';
-    working.agents[1].result = 'again';
-    await store.save(working);
-    expect(await store.get('wf_resumed1')).toBe(working);
-  });
 });

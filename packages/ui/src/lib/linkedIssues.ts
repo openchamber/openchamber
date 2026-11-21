@@ -332,7 +332,7 @@ export type LinkedSidebarChange = {
   repository?: RepositoryThreadRef;
 };
 
-export const getLinkedSidebarChanges = (session: Session | null | undefined, matcher: RepositoryUrlMatcher): LinkedSidebarChange[] => {
+const buildLinkedSidebarChanges = (session: Session | null | undefined, matcher: RepositoryUrlMatcher): LinkedSidebarChange[] => {
   const seen = new Set<string>();
   return getLinkedIssues(session).flatMap((entry): LinkedSidebarChange[] => {
     if (!isLinkedChange(entry)) return [];
@@ -355,7 +355,7 @@ export type LinkedSidebarIssue =
   | { source: 'tracker'; provider: string; key: string; identifier: string; url: string; title: string }
   | { source: 'guest' | 'external'; key: string; identifier: string; url: string; title: string };
 
-export const getLinkedSidebarIssues = (session: Session | null | undefined, matcher: RepositoryUrlMatcher): LinkedSidebarIssue[] => {
+const buildLinkedSidebarIssues = (session: Session | null | undefined, matcher: RepositoryUrlMatcher): LinkedSidebarIssue[] => {
   const seen = new Set<string>();
   return getLinkedIssues(session).flatMap((entry): LinkedSidebarIssue[] => {
     const ref = getRepositoryThreadRef(entry, matcher);
@@ -380,6 +380,41 @@ export const getLinkedSidebarIssues = (session: Session | null | undefined, matc
     }
     return [];
   });
+};
+
+type SidebarLinks = {
+  changes?: LinkedSidebarChange[];
+  issues?: LinkedSidebarIssue[];
+};
+
+const sidebarLinksBySession = new WeakMap<Session, WeakMap<RepositoryUrlMatcher, SidebarLinks>>();
+
+const sidebarLinksOf = (session: Session, matcher: RepositoryUrlMatcher): SidebarLinks => {
+  let byMatcher = sidebarLinksBySession.get(session);
+  if (!byMatcher) {
+    byMatcher = new WeakMap();
+    sidebarLinksBySession.set(session, byMatcher);
+  }
+  let links = byMatcher.get(matcher);
+  if (!links) {
+    links = {};
+    byMatcher.set(matcher, links);
+  }
+  return links;
+};
+
+export const getLinkedSidebarChanges = (session: Session | null | undefined, matcher: RepositoryUrlMatcher): LinkedSidebarChange[] => {
+  if (!session) return buildLinkedSidebarChanges(session, matcher);
+  const links = sidebarLinksOf(session, matcher);
+  links.changes ??= buildLinkedSidebarChanges(session, matcher);
+  return links.changes;
+};
+
+export const getLinkedSidebarIssues = (session: Session | null | undefined, matcher: RepositoryUrlMatcher): LinkedSidebarIssue[] => {
+  if (!session) return buildLinkedSidebarIssues(session, matcher);
+  const links = sidebarLinksOf(session, matcher);
+  links.issues ??= buildLinkedSidebarIssues(session, matcher);
+  return links.issues;
 };
 
 const normalizedThreadUrl = (url: string): string => url.trim().replace(/\/+$/, '').toLowerCase();

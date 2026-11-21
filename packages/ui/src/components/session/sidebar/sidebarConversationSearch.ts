@@ -13,6 +13,7 @@ type ScopeInput = {
 };
 
 export function resolveSidebarSearchScope({ projects, worktrees, knownDirectories, isVSCode }: ScopeInput) {
+  const knownDirectoryKeys = new Set([...knownDirectories].map((directory) => normalizePath(directory)));
   const roots = new Set<string>();
   for (const project of projects) {
     roots.add(project.normalizedPath);
@@ -21,7 +22,7 @@ export function resolveSidebarSearchScope({ projects, worktrees, knownDirectorie
   const isAdmitted = (directory: string | null): boolean => {
     const normalized = normalizePath(directory);
     if (!normalized) return false;
-    if (knownDirectories.has(normalized)) return true;
+    if (knownDirectoryKeys.has(normalized)) return true;
     if (isVSCode) return false;
     let candidate: string | null = normalized;
     while (candidate) {

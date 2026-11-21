@@ -41,7 +41,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -69,7 +68,7 @@ import type { WorktreeMetadata } from '@/types/worktree';
 import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
 import { MobileProjectEditSurface } from './MobileProjectEditSurface';
 import { MobileProjectIcon } from './MobileProjectIcon';
-import { getSessionDirectory } from './mobileSessionFields';
+import { selectHasChats } from './mobileSessionFields';
 import { getProjectLabel, normalizePath } from './mobilePaths';
 import { MobileSessionList } from './mobileSidebar/MobileSessionList';
 import { MobileSidebarActionsProvider, useMobileSidebarRowsStore, type MobileSidebarActions } from './mobileSidebar/mobileSidebarState';
@@ -190,7 +189,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const customSections = React.useMemo(() => savedSections.filter((entry) => entry.kind === 'custom'), [savedSections]);
   const hiddenSections = useSessionDisplayStore((state) => state.hiddenSections);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  const hasChats = useGlobalSessionsStore((state) => state.activeSessions.some((session) => isChatDirectoryPath(getSessionDirectory(session))));
+  const hasChats = useGlobalSessionsStore(selectHasChats);
   const [searchText, setSearchTextState] = React.useState('');
   const [searchScope, setSearchScope] = React.useState<SearchScope>('everything');
   const [searchStatus, setSearchStatus] = React.useState<ContentSearchStatus>(IDLE_SEARCH_STATUS);

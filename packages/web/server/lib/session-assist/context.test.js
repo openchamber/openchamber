@@ -110,9 +110,16 @@ describe('session assist context', () => {
     expect(context.last.text.length).toBeLessThanOrEqual(16_000);
   });
 
-  it('fails explicitly on malformed annotation text instead of losing the comment', async () => {
+  it.each(['quote', 'text', 'fileLabel', 'label', 'pageUrl', 'terminalLabel'])('fails explicitly on malformed attachment %s', async (field) => {
     const attachment = synthetic('s', 'attachment', {
-      metadata: { openchamberContext: { kind: 'chat-quote', quote: 'source', text: 42 } },
+      metadata: { openchamberContext: { kind: 'chat-quote', quote: 'source', [field]: 42 } },
+    });
+    await expect(load(async () => page([attachment, user('u', 'Fix'), assistant('a', 'done')]))).rejects.toThrow();
+  });
+
+  it.each(['comment', 'preview', 'path'])('fails explicitly on malformed OpenCode comment %s', async (field) => {
+    const attachment = synthetic('s', 'attachment', {
+      metadata: { opencodeComment: { comment: 'Fix this', [field]: 42 } },
     });
     await expect(load(async () => page([attachment, user('u', 'Fix'), assistant('a', 'done')]))).rejects.toThrow();
   });
