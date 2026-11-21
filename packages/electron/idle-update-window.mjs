@@ -14,31 +14,18 @@ export const createDesktopIdleUpdate = ({
   let idleUpdateWindowSuppressClose = false;
   let controller = null;
 
-  const windowRuntimeUnverified = (browserWindow) => {
-    if (!browserWindow || browserWindow.isDestroyed() || browserWindow.__ocIdleUpdate) return false;
-    const config = browserWindow.__ocRuntimeConfig;
-    if (config?.relayHostId) return true;
-    const api = typeof config?.apiBaseUrl === 'string' ? config.apiBaseUrl : (state.apiBaseUrl || '');
-    if (!api) return false;
-    return !isLocalRuntimeUrl(api);
+  const windowRuntimeUnverified = (window) => {
+    if (!window || window.isDestroyed() || window.__ocIdleUpdate) return false;
+    const config = window.__ocRuntimeConfig;
+    const url = typeof config?.apiBaseUrl === 'string' ? config.apiBaseUrl : state.apiBaseUrl;
+    return Boolean(config?.relayHostId || (url && !isLocalRuntimeUrl(url)));
   };
 
   const readIdle = async () => {
-    try {
-      const status = typeof state.serverHandle?.getUpdateIdleStatus === 'function'
-        ? await state.serverHandle.getUpdateIdleStatus()
-        : { state: 'unknown', reason: 'unreadable' };
-      if (!status || (status.state !== 'idle' && status.state !== 'busy' && status.state !== 'unknown')) {
-        return { state: 'unknown', reason: 'unreadable' };
-      }
-      if (status.state !== 'idle') return status;
-      if (BrowserWindow.getAllWindows().some(windowRuntimeUnverified)) {
-        return { state: 'unknown', reason: 'other-runtime' };
-      }
-      return status;
-    } catch {
-      return { state: 'unknown', reason: 'unreadable' };
-    }
+    const status = await state.serverHandle?.getUpdateIdleStatus?.();
+    return status?.state === 'idle' && BrowserWindow.getAllWindows().some(windowRuntimeUnverified)
+      ? { state: 'unknown' }
+      : status;
   };
 
   const closeCountdown = () => {
@@ -117,13 +104,7 @@ export const createDesktopIdleUpdate = ({
 
   controller = createIdleUpdateQueue({
     readIdle,
-    onChange: (snapshot) => emitToAllWindows('openchamber:idle-update', {
-      phase: snapshot.phase,
-      reason: snapshot.reason,
-      remainingMs: snapshot.remainingMs,
-      version: snapshot.version,
-      channel: snapshot.channel,
-    }),
+    onChange: (snapshot) => emitToAllWindows('openchamber:idle-update', snapshot),
     openCountdown,
     updateCountdown: paint,
     closeCountdown,

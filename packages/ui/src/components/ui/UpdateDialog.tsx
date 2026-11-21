@@ -33,7 +33,7 @@ interface UpdateDialogProps {
   error: string | null;
   onDownload: () => void;
   onRestart: () => void;
-  onInstallWhenIdle?: () => void;
+  onInstallWhenIdle?: () => Promise<boolean>;
   onCancelIdleInstall?: () => void;
   idlePhase?: 'idle' | 'waiting' | 'counting' | 'installing';
   idleReason?: string | null;
@@ -532,7 +532,9 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
             {offersIdleInstall && downloaded && !installing && !idleQueued && onInstallWhenIdle && (
               <button
-                onClick={onInstallWhenIdle}
+                onClick={() => {
+                  void onInstallWhenIdle().then((queued) => { if (queued) onOpenChange(false); });
+                }}
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium border border-[var(--border)] text-foreground hover:bg-[var(--interactive-hover)] transition-colors"
               >
                 {t('updateDialog.actions.installWhenIdle')}

@@ -43,7 +43,7 @@ interface UpdateStore extends UpdateState {
   checkForUpdates: () => Promise<number | null>;
   downloadUpdate: () => Promise<void>;
   restartToUpdate: () => Promise<void>;
-  queueIdleInstall: () => Promise<void>;
+  queueIdleInstall: () => Promise<boolean>;
   cancelIdleInstall: () => Promise<void>;
   applyIdleUpdate: (status: IdleDesktopUpdate) => void;
   dismiss: () => void;
@@ -415,8 +415,8 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
 
   queueIdleInstall: async () => {
     const { downloaded, installing, runtimeType, idlePhase } = get();
-    if (runtimeType !== 'desktop' || !downloaded || installing) return;
-    if (idlePhase === 'waiting' || idlePhase === 'counting' || idlePhase === 'installing') return;
+    if (runtimeType !== 'desktop' || !downloaded || installing) return false;
+    if (idlePhase === 'waiting' || idlePhase === 'counting' || idlePhase === 'installing') return false;
     set({ error: null });
     try {
       const status = await queueIdleDesktopUpdate();
@@ -424,8 +424,10 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
         throw new Error(formatMessage(useI18nStore.getState().dictionary, 'updateDialog.error.restartUnavailable'));
       }
       get().applyIdleUpdate(status);
+      return status.phase === 'waiting' || status.phase === 'counting';
     } catch (error) {
       set({ error: getUpdateInstallErrorMessage(error instanceof Error ? error : new Error(String(error))) });
+      return false;
     }
   },
 

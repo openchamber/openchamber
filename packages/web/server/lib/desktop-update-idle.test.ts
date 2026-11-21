@@ -13,78 +13,44 @@ const idleInput = (overrides: Partial<DesktopUpdateIdleInput> = {}): DesktopUpda
   queueLive: false,
   waitLive: false,
   reviewLive: false,
-  tunnelActive: false,
   ...overrides,
 });
 
 describe('decideDesktopUpdateIdle', () => {
-  it('is idle when every read is empty', () => {
-    expect(decideDesktopUpdateIdle(idleInput())).toEqual({ state: 'idle', reason: null });
+  const state = (overrides: Partial<DesktopUpdateIdleInput> = {}) => decideDesktopUpdateIdle(idleInput(overrides)).state;
+
+  it('accepts verified empty or idle session state', () => {
+    expect(state()).toBe('idle');
+    expect(state({ sessions: { s: { type: 'idle' } } })).toBe('idle');
   });
 
-  it('treats a running or retrying session as busy and leaves an idle session alone', () => {
-    expect(decideDesktopUpdateIdle(idleInput({ sessions: { a: { type: 'running' } } })).reason).toBe('session');
-    expect(decideDesktopUpdateIdle(idleInput({ sessions: { a: { type: 'retrying' } } })).reason).toBe('session');
-    expect(decideDesktopUpdateIdle(idleInput({ sessions: { a: { type: 'retry' } } })).reason).toBe('session');
-    expect(decideDesktopUpdateIdle(idleInput({ sessions: { a: { type: 'idle' } } })).state).toBe('idle');
+  it('blocks running, retrying, or unknown sessions and unreadable session lists', () => {
+    for (const type of ['running', 'retry', 'retrying']) {
+      expect(state({ sessions: { s: { type } } })).toBe('busy');
+    }
+    for (const type of ['paused', '']) {
+      expect(state({ sessions: { s: { type } } })).toBe('unknown');
+    }
+    expect(state({ sessions: null })).toBe('unknown');
   });
 
-  it('stays unknown when a session read fails or a status is not one this check understands', () => {
-    expect(decideDesktopUpdateIdle(idleInput({ sessions: null }))).toEqual({ state: 'unknown', reason: 'unreadable' });
-    expect(decideDesktopUpdateIdle(idleInput({ sessions: { a: { type: 'paused' } } })).reason).toBe('unreadable');
-    expect(decideDesktopUpdateIdle(idleInput({ sessions: { a: { type: '' } } })).reason).toBe('unreadable');
+  it('blocks running terminals, regardless of whether an interactive shell is at its prompt', () => {
+    for (const mode of ['command', 'interactive', '']) {
+      expect(state({ terminals: [{ status: 'running', mode }] })).toBe('busy');
+    }
+    expect(state({ terminals: [{ status: 'running' }] })).toBe('busy');
+    expect(state({ terminals: [{ status: 'exited', mode: 'interactive' }] })).toBe('idle');
+    expect(state({ terminals: null })).toBe('unknown');
+    expect(state({ terminals: [{ status: 'running', mode: 'unknown' }] })).toBe('unknown');
   });
 
-  it('names the tunnel when that read fails while a tunnel is open', () => {
-    expect(decideDesktopUpdateIdle(idleInput({ sessions: null, tunnelActive: true })).reason).toBe('tunnel');
-    expect(decideDesktopUpdateIdle(idleInput({ sessions: { a: { type: 'running' } }, tunnelActive: true })).reason).toBe('session');
-    expect(decideDesktopUpdateIdle(idleInput({ tunnelActive: true })).state).toBe('idle');
-  });
-
-  it('blocks a running interactive terminal because nothing shows it is at a prompt', () => {
-    expect(decideDesktopUpdateIdle(idleInput({
-      terminals: [{ status: 'running', mode: 'interactive' }],
-    })).reason).toBe('interactive-shell');
-    expect(decideDesktopUpdateIdle(idleInput({
-      terminals: [{ status: 'running' }],
-    })).reason).toBe('interactive-shell');
-  });
-
-  it('blocks a running command and ignores a terminal that has exited', () => {
-    expect(decideDesktopUpdateIdle(idleInput({
-      terminals: [{ status: 'running', mode: 'command' }],
-    })).reason).toBe('command');
-    expect(decideDesktopUpdateIdle(idleInput({
-      terminals: [{ status: 'exited', mode: 'interactive' }, { status: 'exited', mode: 'command' }],
-    })).state).toBe('idle');
-  });
-
-  it('prefers the interactive terminal when a command is also running', () => {
-    expect(decideDesktopUpdateIdle(idleInput({
-      terminals: [
-        { status: 'running', mode: 'command' },
-        { status: 'running', mode: 'interactive' },
-      ],
-    })).reason).toBe('interactive-shell');
-  });
-
-  it('blocks a scheduled task that is running or already queued, and not one that is only enabled', () => {
-    expect(decideDesktopUpdateIdle(idleInput({ scheduledRunning: 1 })).reason).toBe('scheduled-task');
-    expect(decideDesktopUpdateIdle(idleInput({ scheduledQueued: 1 })).reason).toBe('scheduled-task');
-    expect(decideDesktopUpdateIdle(idleInput()).state).toBe('idle');
-  });
-
-  it('blocks each kind of OpenChamber-owned work', () => {
-    expect(decideDesktopUpdateIdle(idleInput({ workflowLive: true })).reason).toBe('workflow');
-    expect(decideDesktopUpdateIdle(idleInput({ goalLive: true })).reason).toBe('goal');
-    expect(decideDesktopUpdateIdle(idleInput({ queueLive: true })).reason).toBe('message-queue');
-    expect(decideDesktopUpdateIdle(idleInput({ waitLive: true })).reason).toBe('wait');
-    expect(decideDesktopUpdateIdle(idleInput({ reviewLive: true })).reason).toBe('review');
-  });
-
-  it('stays unknown when the terminal list or the schedule counts did not arrive', () => {
-    expect(decideDesktopUpdateIdle(idleInput({ terminals: null })).reason).toBe('unreadable');
-    expect(decideDesktopUpdateIdle(idleInput({ scheduledRunning: Number.NaN })).reason).toBe('unreadable');
+  it('blocks scheduled tasks and every kind of tracked background work', () => {
+    expect(state({ scheduledRunning: 1 })).toBe('busy');
+    expect(state({ scheduledQueued: 1 })).toBe('busy');
+    expect(state({ scheduledRunning: Number.NaN })).toBe('unknown');
+    for (const key of ['workflowLive', 'goalLive', 'queueLive', 'waitLive', 'reviewLive'] as const) {
+      expect(state({ [key]: true })).toBe('busy');
+    }
   });
 });
 
@@ -92,7 +58,6 @@ const quiet = (live = false) => ({ load: async () => undefined, hasLiveWork: () 
 
 const owners = (overrides: Partial<DesktopUpdateIdleParts> = {}): DesktopUpdateIdleParts => ({
   canReadSessions: () => true,
-  tunnelService: { getPublicUrl: () => null },
   sessionRuntime: {
     getSessionStateSnapshot: () => ({}),
     getSessionActivitySnapshot: () => ({}),
@@ -157,7 +122,7 @@ describe('desktop update active-session reconciliation', () => {
 describe('collectDesktopUpdateIdle', () => {
   it('cannot authorize an install on an empty disconnected session snapshot', async () => {
     expect(await collectDesktopUpdateIdle(owners({ canReadSessions: () => false })))
-      .toEqual({ state: 'unknown', reason: 'unreadable' });
+      .toEqual({ state: 'unknown' });
   });
   it('samples live sessions after the catalog loads, and counts session assists', async () => {
     let running = false;
@@ -168,10 +133,10 @@ describe('collectDesktopUpdateIdle', () => {
         getSessionStateSnapshot: () => ({ s: { status: running ? 'busy' : 'idle' } }),
       },
     });
-    expect(await collectDesktopUpdateIdle(parts)).toEqual({ state: 'busy', reason: 'session' });
+    expect(await collectDesktopUpdateIdle(parts)).toEqual({ state: 'busy' });
     expect(await collectDesktopUpdateIdle(owners({
       sessionAssistRuntime: { hasLiveWork: () => true },
-    }))).toEqual({ state: 'busy', reason: 'session' });
+    }))).toEqual({ state: 'busy' });
   });
   it('counts a pending blocking request as a running session', async () => {
     const status = await collectDesktopUpdateIdle(owners({
@@ -181,14 +146,14 @@ describe('collectDesktopUpdateIdle', () => {
         getPendingBlockingRequestsSnapshot: () => ({ s: { permissions: [{}], forms: [], pages: [] } }),
       },
     }));
-    expect(status).toEqual({ state: 'busy', reason: 'session' });
+    expect(status).toEqual({ state: 'busy' });
   });
 
   it('stays unknown when a catalog load fails, and sees work that arrives with that load', async () => {
     const failed = await collectDesktopUpdateIdle(owners({
       messageQueueRuntime: { load: async () => { throw new Error('unreadable'); }, hasLiveWork: () => false },
     }));
-    expect(failed).toEqual({ state: 'unknown', reason: 'unreadable' });
+    expect(failed).toEqual({ state: 'unknown' });
 
     let loaded = false;
     const queued = await collectDesktopUpdateIdle(owners({
@@ -197,6 +162,6 @@ describe('collectDesktopUpdateIdle', () => {
         hasLiveWork: () => loaded,
       },
     }));
-    expect(queued).toEqual({ state: 'busy', reason: 'message-queue' });
+    expect(queued).toEqual({ state: 'busy' });
   });
 });

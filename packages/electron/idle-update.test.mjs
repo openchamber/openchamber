@@ -72,7 +72,6 @@ test('work admitted by the last read cancels the install and waits', async () =>
   await fire(1_000);
   assert.equal(events.includes('install'), false);
   assert.equal(queue.snapshot().phase, 'waiting');
-  assert.equal(queue.snapshot().reason, 'session');
   assert.ok(events.includes('close'));
 });
 
@@ -116,49 +115,43 @@ test('cancel, and a different release, drop the queue and keep the watcher off',
   assert.equal(timers.length, 0);
 });
 
-test('a resume during the final idle read starts a fresh countdown', async () => {
-  const idle = { state: 'idle', reason: null };
-  const readStarted = Promise.withResolvers();
-  const finalRead = Promise.withResolvers();
+const finalReadHarness = (install) => {
+  const started = Promise.withResolvers();
+  const answer = Promise.withResolvers();
   let reads = 0;
-  const { queue, events, fire } = harness({
-    readIdle: async () => {
-      if (++reads !== 2) return idle;
-      readStarted.resolve();
-      return finalRead.promise;
-    },
-  });
+  return {
+    ...harness({
+      readIdle: () => ++reads === 2 ? (started.resolve(), answer.promise) : Promise.resolve({ state: 'idle' }),
+      install,
+    }),
+    started,
+    answer,
+  };
+};
+
+test('a resume during the final idle read starts a fresh countdown', async () => {
+  const { queue, events, fire, started, answer } = finalReadHarness();
   await queue.queue({ version: '2.0.0', channel: 'stable' });
-  const timer = fire(1_000);
-  await readStarted.promise;
+  const countdown = fire(1_000);
+  await started.promise;
   const resume = queue.noteResume();
-  finalRead.resolve(idle);
-  await Promise.all([timer, resume]);
+  answer.resolve({ state: 'idle' });
+  await Promise.all([countdown, resume]);
   assert.equal(events.includes('install'), false);
   assert.equal(queue.snapshot().remainingMs, 1_000);
 });
 
 test('an explicit restart during the final idle read reserves one installer handoff', async () => {
-  const readStarted = Promise.withResolvers();
-  const finalRead = Promise.withResolvers();
-  let reads = 0;
   let attempts = 0;
-  const { queue, fire } = harness({
-    readIdle: async () => {
-      if (++reads !== 2) return { state: 'idle', reason: null };
-      readStarted.resolve();
-      return finalRead.promise;
-    },
-    install: () => {
-      attempts += 1;
-      throw new Error('installer failed');
-    },
+  const { queue, fire, started, answer } = finalReadHarness(() => {
+    attempts += 1;
+    throw new Error('installer failed');
   });
   await queue.queue({ version: '2.0.0', channel: 'stable' });
   const countdown = fire(1_000);
-  await readStarted.promise;
+  await started.promise;
   const restart = queue.beginInstall();
-  finalRead.resolve({ state: 'idle', reason: null });
+  answer.resolve({ state: 'idle' });
   await countdown;
   await assert.rejects(restart, /installer failed/);
   assert.equal(attempts, 1);
@@ -166,23 +159,13 @@ test('an explicit restart during the final idle read reserves one installer hand
 });
 
 test('confirmed quit during the final idle read prevents any installer handoff', async () => {
-  const readStarted = Promise.withResolvers();
-  const finalRead = Promise.withResolvers();
-  let reads = 0;
   let attempts = 0;
-  const { queue, fire } = harness({
-    readIdle: async () => {
-      if (++reads !== 2) return { state: 'idle', reason: null };
-      readStarted.resolve();
-      return finalRead.promise;
-    },
-    install: async () => { attempts += 1; },
-  });
+  const { queue, fire, started, answer } = finalReadHarness(async () => { attempts += 1; });
   await queue.queue({ version: '2.0.0', channel: 'stable' });
   const countdown = fire(1_000);
-  await readStarted.promise;
+  await started.promise;
   const quit = queue.stop();
-  finalRead.resolve({ state: 'idle', reason: null });
+  answer.resolve({ state: 'idle' });
   await Promise.all([countdown, quit]);
   assert.equal(attempts, 0);
   assert.equal(queue.snapshot().phase, 'idle');

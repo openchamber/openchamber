@@ -6,6 +6,7 @@ let restartOutcome: 'pending' | 'reject' | 'success' = 'pending'
 let desktopCheckResult: UpdateInfo | null = null
 let desktopCheckError: Error | null = null
 let downloadHandler: () => Promise<boolean> = async () => true
+let idleQueueResult: 'waiting' | 'unavailable' | 'failure' = 'waiting'
 
 mock.module('@/lib/runtime-fetch', () => ({
   runtimeFetch: async () => new Response(JSON.stringify({ nextSuggestedCheckInSec: 3600 })),
@@ -20,6 +21,13 @@ mock.module('@/lib/desktop', () => ({
   isWebRuntime: () => false,
   isElectronShell: () => true,
   isDesktopLocalOriginActive: () => true,
+  hasDesktopInvoke: () => true,
+  invokeDesktop: async (command: string) => {
+    if (command !== 'desktop_queue_idle_update') return null
+    if (idleQueueResult === 'failure') throw new Error('The command is disabled and cannot be executed')
+    if (idleQueueResult === 'unavailable') return null
+    return { phase: 'waiting', reason: null, remainingMs: 0, version: '2.0.0', channel: 'stable' }
+  },
   checkForDesktopUpdates: () => desktopCheckError ? Promise.reject(desktopCheckError) : Promise.resolve(desktopCheckResult),
   downloadDesktopUpdate: () => downloadHandler(),
   restartToApplyUpdate: () => {
@@ -108,6 +116,23 @@ describe('useUpdateStore restartToUpdate', () => {
 })
 
 describe('useUpdateStore idle install', () => {
+  test('queues in the background only after a successful desktop response', async () => {
+    useUpdateStore.setState({ downloaded: true, installing: false, runtimeType: 'desktop', idlePhase: 'idle', error: null })
+    idleQueueResult = 'waiting'
+    expect(await useUpdateStore.getState().queueIdleInstall()).toBe(true)
+    expect(useUpdateStore.getState().idlePhase).toBe('waiting')
+
+    useUpdateStore.setState({ idlePhase: 'idle' })
+    idleQueueResult = 'failure'
+    expect(await useUpdateStore.getState().queueIdleInstall()).toBe(false)
+    expect(useUpdateStore.getState().error).toBe(updaterDisabledError())
+
+    idleQueueResult = 'unavailable'
+    expect(await useUpdateStore.getState().queueIdleInstall()).toBe(false)
+    expect(useUpdateStore.getState().idlePhase).toBe('idle')
+    idleQueueResult = 'waiting'
+  })
+
   test('native waiting state remains cancellable after renderer reload and a failed feed check', async () => {
     useUpdateStore.setState({
       runtimeType: null,

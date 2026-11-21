@@ -59,12 +59,10 @@ export type DesktopUpdateIdleParts = {
   extensionWaitsRuntime: LiveWork;
   prWatchRuntime: LiveWork;
   autoReviewRuntime: LiveWork;
-  tunnelService: { getPublicUrl: () => string | null | undefined };
 };
 
 export const collectDesktopUpdateIdle = async (parts: DesktopUpdateIdleParts): Promise<DesktopUpdateIdle> => {
-  const tunnelActive = Boolean(parts.tunnelService.getPublicUrl());
-  const unreadable: DesktopUpdateIdle = { state: 'unknown', reason: tunnelActive ? 'tunnel' : 'unreadable' };
+  const unreadable: DesktopUpdateIdle = { state: 'unknown' };
   try {
     const { messageQueueRuntime, extensionWaitsRuntime, prWatchRuntime, autoReviewRuntime } = parts;
     await Promise.all([messageQueueRuntime, extensionWaitsRuntime, prWatchRuntime, autoReviewRuntime].map((owner) => owner.load()));
@@ -83,7 +81,7 @@ export const collectDesktopUpdateIdle = async (parts: DesktopUpdateIdleParts): P
         sessions[sessionId] = { type: 'running' };
       }
     }
-    if (parts.sessionAssistRuntime.hasLiveWork()) return { state: 'busy', reason: 'session' };
+    if (parts.sessionAssistRuntime.hasLiveWork()) return { state: 'busy' };
     const scheduled = parts.scheduledTasksRuntime.getStatus();
     return decideDesktopUpdateIdle({
       sessions,
@@ -95,7 +93,6 @@ export const collectDesktopUpdateIdle = async (parts: DesktopUpdateIdleParts): P
       queueLive: messageQueueRuntime.hasLiveWork(),
       waitLive: extensionWaitsRuntime.hasLiveWork() || prWatchRuntime.hasLiveWork(),
       reviewLive: autoReviewRuntime.hasLiveWork(),
-      tunnelActive,
     });
   } catch {
     return unreadable;

@@ -3133,7 +3133,7 @@ async function main(options: WebUiServerOptions = {}) {
       tunnel: { active: Boolean(tunnelService.getPublicUrl()) },
       scheduledTasks: scheduledTasksRuntime.getStatus(),
     }),
-    getUpdateIdleStatus: () => collectDesktopUpdateIdle({ canReadSessions: () => isOpenCodeReady && !isRestartingOpenCode && globalMessageStreamHub.isConnected() && desktopUpdateSessions.isReady(), tunnelService, sessionRuntime, terminalRuntime, messageQueueRuntime, extensionWaitsRuntime, prWatchRuntime, scheduledTasksRuntime, workflowRuntime, sessionGoalRuntime, sessionAssistRuntime, autoReviewRuntime }),
+    getUpdateIdleStatus: () => collectDesktopUpdateIdle({ canReadSessions: () => isOpenCodeReady && !isRestartingOpenCode && globalMessageStreamHub.isConnected() && desktopUpdateSessions.isReady(), sessionRuntime, terminalRuntime, messageQueueRuntime, extensionWaitsRuntime, prWatchRuntime, scheduledTasksRuntime, workflowRuntime, sessionGoalRuntime, sessionAssistRuntime, autoReviewRuntime }),
     isReady: () => isOpenCodeReady,
     getManagedOpenCodePreflight: () => openCodeLifecycleRuntime.getManagedOpenCodePreflight(),
     restartOpenCode: () => restartOpenCode(),

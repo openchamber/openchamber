@@ -471,7 +471,7 @@ name.
 
 ### Why an unfinished idle read stays unknown
 
-The message queue, extension waits, and pull-request watches keep an empty catalog until `load()` finishes. Reading that catalog early would look idle while work is still on disk. A thrown read is the same answer: unknown, so the desktop update keeps waiting. An open tunnel changes the reason only when that read did not finish, because a finished read already includes the clients using the tunnel.
+The message queue, extension waits, and pull-request watches keep an empty catalog until `load()` finishes. Reading that catalog early would look idle while work is still on disk. A thrown read is the same answer: unknown, so the desktop update keeps waiting. The wire status is only idle, busy, or unknown; identifying a particular blocking activity is unnecessary for the waiting UI, and connected tunnel clients are already represented by the activity snapshots.
 
 ### Why a running interactive terminal blocks a desktop update
 

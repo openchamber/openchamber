@@ -1,8 +1,6 @@
 const IDLE_UPDATE_COUNTDOWN_MS = 30_000;
 const IDLE_UPDATE_POLL_MS = 2_000;
 
-const idleFailure = { state: 'unknown', reason: 'unreadable' };
-
 export const createIdleUpdateQueue = ({
   readIdle,
   onChange,
@@ -36,9 +34,7 @@ export const createIdleUpdateQueue = ({
     channel: queued?.channel ?? null,
   });
 
-  const emit = () => {
-    onChange?.(snapshot());
-  };
+  const emit = () => onChange?.(snapshot());
 
   const later = (fn) => {
     const run = chain.then(fn, fn);
@@ -46,47 +42,38 @@ export const createIdleUpdateQueue = ({
     return run;
   };
 
-  const clearPoll = () => {
-    if (pollTimer === null) return;
-    clearTimer(pollTimer);
-    pollTimer = null;
-  };
+  const clearPoll = () => { if (pollTimer !== null) clearTimer(pollTimer); pollTimer = null; };
+  const clearCount = () => { if (countTimer !== null) clearTimer(countTimer); countTimer = null; };
 
-  const clearCount = () => {
-    if (countTimer === null) return;
-    clearTimer(countTimer);
-    countTimer = null;
+  const clearQueueTimers = () => {
+    clearPoll();
+    clearCount();
+    if (phase === 'counting') closeCountdown();
+    reason = null;
+    remainingMs = 0;
   };
 
   const schedulePoll = (gen) => {
     clearPoll();
-    pollTimer = setTimer(() => {
-      void later(() => tick(gen));
-    }, pollMs);
+    pollTimer = setTimer(() => { void later(() => tick(gen)); }, pollMs);
   };
 
   const scheduleCount = (gen) => {
     clearCount();
     const step = Math.min(1_000, remainingMs);
-    countTimer = setTimer(() => {
-      void later(() => onSecond(gen, step));
-    }, step);
+    countTimer = setTimer(() => { void later(() => onSecond(gen, step)); }, step);
   };
 
-  const read = async () => {
-    try {
-      const status = await readIdle();
-      if (status?.state === 'idle' || status?.state === 'busy' || status?.state === 'unknown') return status;
-    } catch {
-    }
-    return idleFailure;
+  const isIdle = async () => {
+    try { return (await readIdle())?.state === 'idle'; }
+    catch { return false; }
   };
 
-  const becomeWaiting = (gen, nextReason) => {
+  const becomeWaiting = (gen) => {
     clearCount();
     if (phase === 'counting') closeCountdown();
     phase = 'waiting';
-    reason = nextReason || 'unreadable';
+    reason = null;
     remainingMs = 0;
     emit();
     schedulePoll(gen);
@@ -94,13 +81,12 @@ export const createIdleUpdateQueue = ({
 
   const tick = async (gen) => {
     if (gen !== generation || suspended || !queued || phase === 'installing') return;
-    const status = await read();
+    const idle = await isIdle();
     if (gen !== generation || !queued || phase === 'installing') return;
-    if (status.state !== 'idle') {
-      becomeWaiting(gen, status.reason);
+    if (!idle) {
+      becomeWaiting(gen);
       return;
     }
-    reason = null;
     if (phase !== 'counting') {
       phase = 'counting';
       remainingMs = countdownMs;
@@ -114,30 +100,14 @@ export const createIdleUpdateQueue = ({
   const startInstall = () => {
     if (installPromise) return installPromise;
     generation += 1;
-    clearPoll();
-    clearCount();
-    if (phase === 'counting') closeCountdown();
+    clearQueueTimers();
     queued = null;
     phase = 'installing';
-    reason = null;
-    remainingMs = 0;
     emit();
-    installPromise = Promise.resolve()
-      .then(() => install())
-      .then(() => {
-        phase = 'idle';
-        emit();
-      })
-      .catch((error) => {
-        phase = 'idle';
-        reason = 'install-failed';
-        remainingMs = 0;
-        emit();
-        throw error;
-      })
-      .finally(() => {
-        installPromise = null;
-      });
+    installPromise = Promise.resolve().then(install).then(
+      () => { phase = 'idle'; emit(); },
+      (error) => { phase = 'idle'; reason = 'install-failed'; emit(); throw error; },
+    ).finally(() => { installPromise = null; });
     return installPromise;
   };
 
@@ -150,23 +120,19 @@ export const createIdleUpdateQueue = ({
       scheduleCount(gen);
       return;
     }
-    const status = await read();
+    const idle = await isIdle();
     if (gen !== generation || !queued) return;
-    if (status.state !== 'idle') {
-      becomeWaiting(gen, status.reason);
+    if (!idle) {
+      becomeWaiting(gen);
       return;
     }
     await startInstall();
   };
 
   const drop = (gen) => {
-    clearPoll();
-    clearCount();
-    if (phase === 'counting') closeCountdown();
+    clearQueueTimers();
     queued = null;
     phase = 'idle';
-    reason = null;
-    remainingMs = 0;
     generation = gen;
     emit();
   };
@@ -181,13 +147,9 @@ export const createIdleUpdateQueue = ({
     }
     generation += 1;
     const gen = generation;
-    clearPoll();
-    clearCount();
-    if (phase === 'counting') closeCountdown();
+    clearQueueTimers();
     queued = { version, channel };
     phase = 'waiting';
-    reason = null;
-    remainingMs = 0;
     emit();
     await tick(gen);
     return snapshot();
@@ -206,7 +168,7 @@ export const createIdleUpdateQueue = ({
     const gen = ++generation;
     return later(async () => {
       if (gen !== generation || !queued || phase === 'installing') return snapshot();
-      becomeWaiting(gen, 'unreadable');
+      becomeWaiting(gen);
       if (!suspended) await tick(gen);
       return snapshot();
     });
