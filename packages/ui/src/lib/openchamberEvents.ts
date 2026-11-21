@@ -7,6 +7,7 @@ import { isRelayModeActive } from './relay/runtime-tunnel';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 import { isVSCodeRuntime } from './desktop';
 import { canDriveBrowserPage } from './browser/hostCapability';
+import { parseBrowserControlEvent, type BrowserControlEvent } from './browser/controlEvents';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
 import { autoReviewUpdatedEventSchema, type AutoReviewUpdatedEvent } from '@/stores/useAutoReviewStore';
 import { prWatchUpdatedEventSchema, type PrWatchUpdatedEvent } from '@/sync/pr-watch';
@@ -44,21 +45,6 @@ type WorktreeChangedEvent = {
   directories: string[];
   changedAt: number;
 };
-
-type BrowserControlRequestEvent = {
-  type: 'browser-control-request';
-  requestId: string;
-  action: string;
-  parameters: Record<string, unknown>;
-  context: BrowserControlRequestContext;
-};
-
-const browserControlRequestContextSchema = z.object({
-  directory: z.string().min(1).nullable().catch(null),
-  sessionId: z.string().min(1).nullable().catch(null),
-});
-export type BrowserControlRequestContext = z.infer<typeof browserControlRequestContextSchema>;
-const UNKNOWN_BROWSER_CONTROL_CONTEXT: BrowserControlRequestContext = { directory: null, sessionId: null };
 
 const fileOpenRequestSchema = z.object({
   path: z.string().min(1),
@@ -242,7 +228,7 @@ type OpenChamberEvent =
   | ScheduledTaskRanEvent
   | SessionCreatedEvent
   | WorktreeChangedEvent
-  | BrowserControlRequestEvent
+  | BrowserControlEvent
   | FileOpenRequestEvent
   | PlanOpenRequestEvent
   | BrowserProviderResetEvent
@@ -714,27 +700,9 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
-  if (envelope.type === 'openchamber:browser-control-request') {
-    const properties = getEventProperties(envelope.properties);
-    const requestId = typeof properties?.requestId === 'string' ? properties.requestId : '';
-    const action = typeof properties?.action === 'string' ? properties.action : '';
-    if (!requestId || !action) {
-      return;
-    }
-
-    const rawParameters = properties?.parameters;
-    const nextEvent: BrowserControlRequestEvent = {
-      type: 'browser-control-request',
-      requestId,
-      action,
-      parameters: rawParameters && typeof rawParameters === 'object' && !Array.isArray(rawParameters)
-        ? rawParameters as Record<string, unknown>
-        : {},
-      context: browserControlRequestContextSchema.safeParse(properties?.context).data ?? UNKNOWN_BROWSER_CONTROL_CONTEXT,
-    };
-    for (const listener of listeners) {
-      listener(nextEvent);
-    }
+  const browserControlEvent = parseBrowserControlEvent(envelope);
+  if (browserControlEvent) {
+    for (const listener of listeners) listener(browserControlEvent);
     return;
   }
 

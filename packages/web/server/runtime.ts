@@ -202,6 +202,7 @@ import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createRelayKeyStore } from './lib/relay/key-store.js';
 import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
 import { createBrowserControlBroker } from './lib/browser-control/broker.js';
+import { createBrowserClientEvents } from './lib/browser-control/client-events.js';
 import { createBrowserControlRouter } from './lib/browser-control/provider.js';
 import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
@@ -2086,30 +2087,10 @@ const openChamberSessionService = createOpenChamberSessionService({
   isAutoReady: async () => (await routingRuntime.describe()).autoReady,
   readProjectSetup: (projectID) => projectConfigRuntime.readProjectSetup(projectID),
 });
+const browserClientEvents = createBrowserClientEvents({ clients: uiOpenChamberEventClients, writeEvent: writeSseEvent });
 const browserControlBroker = createBrowserControlBroker({
   createId: () => `browser-${crypto.randomUUID()}`,
-  emitRequest: (request) => {
-    const needsBrowserView = request.action !== 'browser.open';
-    let delivered = 0;
-    for (const client of uiOpenChamberEventClients) {
-      if (needsBrowserView && client.openchamberBrowserCapable !== true) continue;
-      try {
-        writeSseEvent(client, {
-          type: 'openchamber:browser-control-request',
-          properties: {
-            requestId: request.requestId,
-            action: request.action,
-            parameters: request.parameters,
-            context: request.context,
-          },
-        });
-        delivered += 1;
-      } catch {
-        uiOpenChamberEventClients.delete(client);
-      }
-    }
-    return delivered;
-  },
+  emitRequest: browserClientEvents.emitRequest,
 });
 
 const emitBrowserProviderResetEvent = ({ guestId, guestName }: BrowserProviderReset) => {
@@ -2902,7 +2883,7 @@ async function main(options: WebUiServerOptions = {}) {
   registerSharePageRoutes(app, sharePagesRuntime);
   registerReceivedPageRoutes(app, receivedPagesRuntime);
 
-  registerBrowserControlRoutes(app, { express, broker: browserControlBroker });
+  registerBrowserControlRoutes(app, { express, broker: browserControlBroker, preferredClient: browserClientEvents.preferredClient });
   registerUploadRoute(app, { store: browserUploadStore });
 
   const devServerScanner = createDevServerScanner({ spawn, platform: process.platform });
