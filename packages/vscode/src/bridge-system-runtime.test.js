@@ -374,3 +374,31 @@ describe('VS Code system bridge api:sessions/metadata:set', () => {
     expect(response).toEqual({ id: 'meta', type: 'api:sessions/metadata:set', success: false, error: 'OpenCode is down' });
   });
 });
+
+describe('VS Code system bridge vscode:command', () => {
+  beforeEach(() => {
+    executeCommand.mockClear();
+  });
+
+  test('refuses a command the webview is not allowed to run', async () => {
+    const response = await handleSystemBridgeMessage({
+      id: 'cmd-blocked',
+      type: 'vscode:command',
+      payload: { command: 'workbench.action.terminal.sendSequence', args: [{ text: 'id\n' }] },
+    }, undefined, deps);
+
+    expect(executeCommand).not.toHaveBeenCalled();
+    expect(response.success).toBe(false);
+  });
+
+  test('runs the commands the interface asks for', async () => {
+    const response = await handleSystemBridgeMessage({
+      id: 'cmd-allowed',
+      type: 'vscode:command',
+      payload: { command: 'openchamber.updateSessionEditorTitle', args: ['ses_1', 'Title'] },
+    }, undefined, deps);
+
+    expect(executeCommand).toHaveBeenCalledWith('openchamber.updateSessionEditorTitle', 'ses_1', 'Title');
+    expect(response.success).toBe(true);
+  });
+});

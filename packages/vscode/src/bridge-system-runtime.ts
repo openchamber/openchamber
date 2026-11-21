@@ -22,6 +22,15 @@ import { ENTERPRISE_MODE_ERROR, isEnterpriseMode, publicEnterprisePolicy } from 
 import { discoverProviderModels } from './model-discovery';
 import { openCodeTrust } from './opencodeTrust';
 
+const WEBVIEW_COMMANDS = new Set([
+  'openchamber.showSettings',
+  'openchamber.closeSettings',
+  'openchamber.settingsReady',
+  'openchamber.openSessionInEditor',
+  'openchamber.setActiveSession',
+  'openchamber.updateSessionEditorTitle',
+]);
+
 const readStoredProviderBaseURL = (providerID: string): string | undefined => {
   const provider = readConfig().provider;
   if (!provider || typeof provider !== 'object') return undefined;
@@ -665,6 +674,9 @@ export async function handleSystemBridgeMessage(
       const { command, args } = (payload || {}) as { command?: string; args?: unknown[] };
       if (!command) {
         return { id, type, success: false, error: 'Command is required' };
+      }
+      if (!WEBVIEW_COMMANDS.has(command)) {
+        return { id, type, success: false, error: `Command is not available: ${command}` };
       }
       try {
         const result = await vscode.commands.executeCommand(command, ...(args || []));
