@@ -8,6 +8,7 @@ import { startReceiver, type Receiver } from '../examples/notification-webhook/r
 import { notificationsProviderSchemasV1 as schemas } from '../src/service-provider-schemas';
 import {
   NOTIFICATIONS_OUTBOUND_PATH,
+  NOTIFICATIONS_PROVIDER_ERROR_MESSAGE_MAX,
   NOTIFICATIONS_PROVIDER_PATH,
   OPENCHAMBER_HOST_CALLBACK_URL,
   type GuestNotification,
@@ -40,6 +41,11 @@ beforeAll(async () => {
       }
       const outbound = schemas.outboundRequest.safeParse(await request.json());
       if (!outbound.success) return Response.json({ error: { message: 'Malformed request', code: 'BAD_REQUEST' } }, { status: 400 });
+      // A relayed refusal carries whatever message the outbound call reports;
+      // one token asks for an oversized message, so the bound can be exercised.
+      if (grant.token === 'oversized-error') {
+        return Response.json({ error: { message: 'x'.repeat(8_000), code: 'OVERSIZED' } }, { status: 502 });
+      }
       const url = new URL(outbound.data.path, grant.origin);
       if (url.origin !== grant.origin) return Response.json({ error: { message: 'Off the instance', code: 'OFF_ORIGIN' } }, { status: 403 });
       const headers = new Headers(outbound.data.headers);
@@ -110,5 +116,31 @@ describe('webhook notifier example', () => {
     expect(junk.status).toBe(400);
     const anonymous = await fetch(`http://127.0.0.1:${servicePort}${NOTIFICATIONS_PROVIDER_PATH}`, { method: 'POST', body: '{}' });
     expect(anonymous.status).toBe(401);
+  });
+
+  // OpenChamber validates the error message against the 2,000-character cap in
+  // the provider schema and turns a longer one into "not a notifications
+  // answer", losing the real failure. The service has to bound it itself.
+  test('bounds a long relayed error to the message the schema accepts', async () => {
+    const handle = randomBytes(16).toString('base64url');
+    handles.set(handle, { origin: receiver.origin, token: 'oversized-error' });
+    try {
+      const response = await fetch(`http://127.0.0.1:${servicePort}${NOTIFICATIONS_PROVIDER_PATH}`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${serviceToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          v: 1, requestId: 'req-oversized', method: 'auth.verify', provider: PROVIDER,
+          session: { instance: receiver.origin, handle, account: null }, input: {},
+        }),
+      });
+      expect(response.status).toBe(200);
+      const answer = schemas.envelope.parse(await response.json());
+      expect(answer).toMatchObject({ ok: false });
+      // The relayed wording is kept, only its length is bounded.
+      expect(answer.ok === false && answer.error.message.startsWith('OpenChamber refused the request:')).toBe(true);
+      expect(answer.ok === false && answer.error.message).toHaveLength(NOTIFICATIONS_PROVIDER_ERROR_MESSAGE_MAX);
+    } finally {
+      handles.delete(handle);
+    }
   });
 });
