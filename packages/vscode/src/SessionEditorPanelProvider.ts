@@ -12,6 +12,7 @@ import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { pickActivePanelId } from './activePanelRouting';
 import { broadcastRemoval, drainPending } from './inlineCommentSelection';
+import type { LineCommentMessage } from './InlineCommentThreads';
 import type { VSCodeSettingsNavigation } from '../../ui/src/lib/settings/vscodeNavigation';
 import { clearSettingsShortcutFocus, handleSettingsShortcutFocus } from './settingsShortcutFocus';
 
@@ -430,18 +431,7 @@ export class SessionEditorPanelProvider {
     return true;
   }
 
-  public addLineCommentToActivePanel(payload: {
-    draftId?: string;
-    filePath: string;
-    relativePath: string;
-    source: 'diff' | 'file';
-    side?: 'original' | 'modified';
-    startLine: number;
-    endLine: number;
-    code: string;
-    language: string;
-    comment: string;
-  }): string | null {
+  public addLineCommentToActivePanel(payload: LineCommentMessage): string | null {
     if (!payload.relativePath.trim()) {
       return null;
     }
@@ -451,7 +441,7 @@ export class SessionEditorPanelProvider {
       return null;
     }
 
-    entry.panel.reveal(entry.panel.viewColumn ?? vscode.ViewColumn.Active, true);
+    entry.panel.reveal(entry.panel.viewColumn ?? vscode.ViewColumn.Active, !payload.openInComposer);
 
     if (!entry.webviewReady) {
       entry.pendingLineComments.push(payload);

@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useChatViewReveal } from '@/hooks/useChatViewReveal';
 import { getVSCodeBootstrapConfig, getVSCodeBootstrapWorkspaceFolder } from '@/lib/vscodeBootstrap';
 import { cn } from '@/lib/utils';
 import { normalizePath } from '@/lib/pathNormalization';
@@ -225,9 +226,7 @@ export const VSCodeLayout: React.FC = () => {
   }, []);
 
   const runOverviewKey = useUIStore((state) => state.runOverviewKey);
-  React.useEffect(() => {
-    if (runOverviewKey) setCurrentView((view) => (view === 'sessions' ? 'chat' : view));
-  }, [runOverviewKey]);
+  useChatViewReveal(setCurrentView, runOverviewKey);
   React.useEffect(() => useSessionUIStore.subscribe((state, prev) => {
     if (state.currentSessionId && state.currentSessionId !== prev.currentSessionId) {
       useUIStore.getState().setRunOverviewKey(null);
