@@ -99,6 +99,23 @@ const readFileContent = async (
   return response.text();
 };
 
+export const readContextFileExistence = async (
+  files: FilesAPI,
+  path: string,
+  options?: ContextFileOpenOptions,
+): Promise<'present' | 'missing' | 'unknown'> => {
+  if (!files.statFile) return 'unknown';
+  try {
+    await files.statFile(path, {
+      directory: options?.directory,
+      allowOutsideWorkspace: isOutsideWorkspace(path, options),
+    });
+    return 'present';
+  } catch (error) {
+    return classifyReadError(error).reason === 'missing' ? 'missing' : 'unknown';
+  }
+};
+
 export const validateContextFileOpen = async (
   files: FilesAPI,
   path: string,

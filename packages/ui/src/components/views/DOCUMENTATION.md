@@ -629,15 +629,27 @@ current state the view shows loading; a failed read keeps its error and retry.
 A file that is there is expanded and scrolled to, on every click, since the
 chip's absolute path only matches the relative list through this request.
 A file that is not there opens Changed instead, in the repository holding the
-file, read afresh, expanded. A repository the picker drops again ends the
-attempt on the repository left on screen. Picking Last turn by hand asks
-nothing and stays there, empty or not. The phone's Changes surface
-(`apps/MobileChangesSurface.tsx`) answers the same way and opens the file's own
-diff screen, since it has no expanded list to scroll. VS Code has no Diff view
-panel: the chip reads the turn's diff once and opens the file's patch in the
-editor's own diff (`editor.openDiff` with `patch`; a file the turn deleted shows
-its old content against an empty side). A file the list does not hold opens as
-it is, and a failed read shows an error toast.
+file, read afresh, expanded. Only a file inside a project that is not a
+repository, once discovery found no repository in the project holding it,
+opens in the editor instead (`files/openChangedFileWithoutRepository.ts`):
+there is no working-tree diff for it. Unknown or failed discovery, a file
+outside the project and a repository-owned file the list misses (a staged-only
+entry) keep the Changed path. The open checks the file with a stat first,
+since the optional read answers a deleted file with an empty success: a
+deleted file shows the not-found toast, an empty one opens. The read belongs to
+the click that started it, from the click through discovery to the read: a
+newer chip click, leaving the session or the runtime (even to return) drops it
+without a tab, focus change or toast.
+A repository the picker drops
+again ends the attempt on the repository left on screen. Picking Last turn by
+hand asks nothing and stays there, empty or not. The phone's Changes surface
+(`apps/MobileChangesSurface.tsx`) answers the same way when a repository holds
+the file and opens its own diff screen, since it has no expanded list to
+scroll; when no repository holds it, the phone stays on the Changes list. VS
+Code has no Diff view panel: the chip reads the turn's diff once and opens the
+file's patch in the editor's own diff (`editor.openDiff` with `patch`; a file
+the turn deleted shows its old content against an empty side). A file the list
+does not hold opens as it is, and a failed read shows an error toast.
 
 ### Why the click is a one-shot request and not derived from the tab
 
