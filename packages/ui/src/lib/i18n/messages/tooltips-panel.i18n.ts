@@ -150,4 +150,14 @@ export const tooltipsPanelI18n = {
     'contextTooltips.panel.chooseWalkthroughModel': '選擇此導讀使用的模型',
     'contextTooltips.panel.chooseEffort': '選擇思考強度',
   },
+  gl: {
+    'contextTooltips.panel.showFileTree': 'Amosar a árbore de ficheiros',
+    'contextTooltips.panel.hideFileTree': 'Ocultar a árbore de ficheiros',
+    'contextTooltips.panel.showFileEditor': 'Amosar o editor de ficheiros',
+    'contextTooltips.panel.hideFileEditor': 'Ocultar o editor de ficheiros',
+    'contextTooltips.panel.releaseSurface': 'Deixar de controlar a superficie',
+    'contextTooltips.panel.reconnectSurface': 'Reconectar coa superficie',
+    'contextTooltips.panel.chooseWalkthroughModel': 'Elixir o modelo deste percorrido',
+    'contextTooltips.panel.chooseEffort': 'Elixir o esforzo de razoamento',
+  },
 };

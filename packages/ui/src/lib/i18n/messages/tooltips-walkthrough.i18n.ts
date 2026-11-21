@@ -135,4 +135,13 @@ export const tooltipsWalkthroughI18n = {
     'contextTooltips.walkthrough.openChanges': '開啟所有變更',
     'contextTooltips.walkthrough.checkAgain': '重新檢查',
   },
+  gl: {
+    'contextTooltips.walkthrough.generate': 'Explicar estes cambios paso a paso',
+    'contextTooltips.walkthrough.regenerate': 'Xerar un novo percorrido',
+    'contextTooltips.walkthrough.stop': 'Deter a xeración do percorrido',
+    'contextTooltips.walkthrough.generateRequested': 'Xerar para este idioma e modelo',
+    'contextTooltips.walkthrough.regenerateStale': 'Rexerar para o código actual',
+    'contextTooltips.walkthrough.openChanges': 'Abrir todos os cambios',
+    'contextTooltips.walkthrough.checkAgain': 'Comprobar de novo',
+  },
 };

@@ -105,4 +105,11 @@ export const questionsInChatI18n = {
     'settings.openchamber.visual.option.questionsPlacement.chat.label': 'في المحادثة',
     'chat.formDock.showInChatAria': 'عرض السؤال في المحادثة',
   },
+  gl: {
+    'settings.openchamber.visual.field.questionsPlacement': 'Preguntas',
+    'settings.openchamber.visual.field.questionsPlacementInfo': 'Onde aparece a pregunta dun axente: nunha ventá emerxente sobre o cadro de mensaxe ou como tarxeta no chat despois da mensaxe do axente. Aplícase a este dispositivo.',
+    'settings.openchamber.visual.option.questionsPlacement.popup.label': 'Ventá emerxente',
+    'settings.openchamber.visual.option.questionsPlacement.chat.label': 'No chat',
+    'chat.formDock.showInChatAria': 'Amosar a pregunta no chat',
+  },
 } as const;

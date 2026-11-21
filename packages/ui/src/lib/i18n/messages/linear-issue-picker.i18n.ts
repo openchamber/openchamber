@@ -75,4 +75,9 @@ export const linearIssuePickerI18n = {
     'chat.workStatus.linkedIssues.openTrackerItem': 'פתח את {identifier} ב-{provider}',
     'session.newWorktree.actions.startFromTrackerItem': 'Issue מ-{provider}',
   },
+  gl: {
+    'chat.chatInput.actions.linkTrackerItem': 'Vincular incidencia de {provider}',
+    'chat.workStatus.linkedIssues.openTrackerItem': 'Abrir {identifier} en {provider}',
+    'session.newWorktree.actions.startFromTrackerItem': 'Unha incidencia de {provider}',
+  },
 } as const;

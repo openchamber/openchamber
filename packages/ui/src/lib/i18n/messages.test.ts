@@ -16,6 +16,7 @@ import { dict as zhTwDict } from './messages/zh-TW';
 import { dict as trDict } from './messages/tr';
 import { dict as arDict } from './messages/ar';
 import { dict as heDict } from './messages/he';
+import { dict as glDict } from './messages/gl';
 
 const localeDictionaries = {
   en: enDict,
@@ -33,6 +34,7 @@ const localeDictionaries = {
   tr: trDict,
   ar: arDict,
   he: heDict,
+  gl: glDict,
 } as const;
 
 describe('i18n dictionaries', () => {
@@ -159,6 +161,7 @@ describe('i18n dictionaries', () => {
       expect(dictionary['common.language.japanese']).toBeTruthy();
       expect(dictionary['common.language.arabic']).toBeTruthy();
       expect(dictionary['common.language.hebrew']).toBeTruthy();
+      expect(dictionary['common.language.galician']).toBeTruthy();
     }
   });
 

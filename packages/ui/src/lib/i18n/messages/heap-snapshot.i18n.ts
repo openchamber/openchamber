@@ -180,4 +180,16 @@ export const heapSnapshotI18n = {
     'openCodeStatusDialog.heapSnapshot.pathCopied': 'הנתיב הועתק',
     'openCodeStatusDialog.heapSnapshot.copyFailed': 'לא ניתן להעתיק את הנתיב',
   },
+  gl: {
+    'openCodeStatusDialog.heapSnapshot.action': 'Gardar a instantánea de memoria de OpenCode',
+    'openCodeStatusDialog.heapSnapshot.hint': 'Para informes de memoria. O ficheiro pode conter chaves de API, indicacións e contido de ficheiros, polo que compárteo en privado.',
+    'openCodeStatusDialog.heapSnapshot.writing': 'Escribindo a instantánea. OpenCode deterase ata que remate.',
+    'openCodeStatusDialog.heapSnapshot.written': 'Gardouse en {path}',
+    'openCodeStatusDialog.heapSnapshot.failed': 'OpenCode non puido escribir a instantánea.',
+    'openCodeStatusDialog.heapSnapshot.reveal': 'Amosar no cartafol',
+    'openCodeStatusDialog.heapSnapshot.revealFailed': 'Non se puido abrir o cartafol',
+    'openCodeStatusDialog.heapSnapshot.copyPath': 'Copiar a ruta',
+    'openCodeStatusDialog.heapSnapshot.pathCopied': 'Ruta copiada',
+    'openCodeStatusDialog.heapSnapshot.copyFailed': 'Non se puido copiar a ruta',
+  },
 } as const;

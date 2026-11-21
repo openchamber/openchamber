@@ -18,6 +18,7 @@ const LANGUAGE_NAMES = {
   tr: 'Turkish',
   ar: 'Arabic',
   he: 'Hebrew',
+  gl: 'Galician',
 };
 
 const isLanguageTag = (value: unknown): value is string => typeof value === 'string';

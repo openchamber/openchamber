@@ -210,4 +210,18 @@ export const thirdPartyIntegrationI18n = {
     'settings.integrations.thirdParty.toast.removed': '{name} הוסר',
     'settings.integrations.thirdParty.toast.actionFailed': 'לא ניתן היה לעדכן את השילוב',
   },
+  gl: {
+    'settings.integrations.thirdParty.actions.install': 'Instalar',
+    'settings.integrations.thirdParty.actions.update': 'Actualizar',
+    'settings.integrations.thirdParty.actions.remove': 'Eliminar',
+    'settings.integrations.thirdParty.actions.docs': 'Documentación',
+    'settings.integrations.thirdParty.status.notInstalled': 'Non instalado',
+    'settings.integrations.thirdParty.status.installed': 'Instalado',
+    'settings.integrations.thirdParty.status.installedVersion': 'Instalada a versión {version}',
+    'settings.integrations.thirdParty.status.updateAvailable': 'Actualización dispoñible: {version}',
+    'settings.integrations.thirdParty.toast.installed': 'Instalouse {name}',
+    'settings.integrations.thirdParty.toast.updated': 'Actualizouse {name}',
+    'settings.integrations.thirdParty.toast.removed': 'Eliminouse {name}',
+    'settings.integrations.thirdParty.toast.actionFailed': 'Non se puido actualizar a integración',
+  },
 } as const;

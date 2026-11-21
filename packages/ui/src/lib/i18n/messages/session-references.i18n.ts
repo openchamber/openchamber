@@ -60,4 +60,8 @@ export const sessionReferencesI18n = {
     'chat.fileMentionAutocomplete.sessionArchived': "בארכיון",
     'chat.sessionReference.unavailable': "השיחה או ההודעה הזו אינה בשרת זה, או שלא ניתן היה לקרוא אותה. הקישור נשאר כטקסט.",
   },
+  gl: {
+    'chat.fileMentionAutocomplete.sessionArchived': 'arquivada',
+    'chat.sessionReference.unavailable': 'Esa sesión ou mensaxe non está neste servidor ou non se puido ler. A ligazón queda como texto.',
+  },
 } as const;

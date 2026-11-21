@@ -20,6 +20,7 @@ const LOADERS = {
   tr: () => import('./copy/tr'),
   ar: () => import('./copy/ar'),
   he: () => import('./copy/he'),
+  gl: () => import('./copy/gl'),
 } satisfies Record<Exclude<Locale, 'en'>, () => Promise<{ copy: EasterEggCopy }>>;
 
 const useCopyStore = create<{ byLocale: Partial<Record<Locale, EasterEggCopy>> }>(() => ({ byLocale: { en: enCopy } }));

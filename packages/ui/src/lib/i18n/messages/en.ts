@@ -327,6 +327,7 @@ export const dict = {
   'common.language.arabic': 'Arabic',
   'common.language.hebrew': 'Hebrew',
   'common.language.dutch': 'Dutch',
+  'common.language.galician': 'Galician',
   'common.revealPath.finder': 'Reveal in Finder',
   'common.revealPath.fileExplorer': 'Open in File Explorer',
   'common.revealPath.fileManager': 'Open in File Manager',

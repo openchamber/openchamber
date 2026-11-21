@@ -75,4 +75,9 @@ export const updateCheckErrorsI18n = {
     'updateDialog.error.checkOffline': 'אין גישה ל-GitHub לבדיקת עדכונים. יש לבדוק את החיבור לאינטרנט ולנסות שוב.',
     'updateDialog.error.checkFailed': 'לא ניתן לבדוק עדכונים: {detail}',
   },
+  gl: {
+    'updateDialog.error.checkServerError': 'GitHub non entregou os ficheiros da actualización (HTTP {status}). O problema está no lado de GitHub; comproba de novo nuns minutos.',
+    'updateDialog.error.checkOffline': 'Non se puido conectar con GitHub para buscar actualizacións. Revisa a túa conexión á internet e téntao de novo.',
+    'updateDialog.error.checkFailed': 'Non se puideron buscar actualizacións: {detail}',
+  },
 } as const;

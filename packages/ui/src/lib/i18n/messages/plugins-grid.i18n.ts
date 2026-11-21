@@ -180,4 +180,16 @@ export const pluginsGridI18n = {
     'settings.plugins.grid.scope.project': 'פרויקט',
     'settings.plugins.page.back': 'כל התוספים',
   },
+  gl: {
+    'settings.plugins.grid.actionsAria': 'Accións para {name}',
+    'settings.common.sidebar.searchPlaceholder': 'Buscar',
+    'settings.common.sidebar.noMatches': 'Nada coincide con «{query}».',
+    'settings.plugins.grid.description': 'Engadidos de OpenCode desde npm, rutas locais e ficheiros de engadidos. Abre un para editalo. O interruptor nunha tarxeta pertence a OpenChamber e aplícase a todos os teus proxectos. A aplicación de terminal de OpenCode e outros servidores de OpenCode seguen cargando o engadido.',
+    'settings.plugins.grid.searchPlaceholder': 'Buscar engadidos',
+    'settings.plugins.grid.addHint': 'Paquete npm ou ruta local',
+    'settings.plugins.grid.noMatches': 'Ningún engadido coincide con «{query}».',
+    'settings.plugins.grid.empty': 'Aínda non hai engadidos.',
+    'settings.plugins.grid.scope.project': 'Proxecto',
+    'settings.plugins.page.back': 'Todos os engadidos',
+  },
 } as const;

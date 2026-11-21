@@ -246,6 +246,7 @@ export const dict: Record<I18nKey, string> = {
   'common.language.arabic': 'العربية',
   'common.language.hebrew': 'العبرية',
   'common.language.dutch': 'الهولندية',
+  'common.language.galician': 'الجاليكية',
   'common.revealPath.finder': 'إظهار في Finder',
   'common.revealPath.fileExplorer': 'فتح في مستكشف الملفات',
   'common.revealPath.fileManager': 'فتح في مدير الملفات',

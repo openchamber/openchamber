@@ -54,7 +54,9 @@ async function loadDictionary(locale: Locale): Promise<I18nDictionary> {
                         ? await import('./messages/ar')
                         : locale === 'he'
                           ? await import('./messages/he')
-                          : { dict: enDict };
+                          : locale === 'gl'
+                            ? await import('./messages/gl') as { dict: I18nDictionary }
+                            : { dict: enDict };
   dictionaries.set(locale, mod.dict);
   return mod.dict;
 }

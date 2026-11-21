@@ -90,4 +90,10 @@ export const markdownOutlineI18n = {
     'filesView.preview.outline.noHeadings': 'אין כותרות במסמך זה',
     'filesView.preview.outline.noMatches': 'אין כותרות תואמות',
   },
+  gl: {
+    'filesView.preview.outline.label': 'Índice',
+    'filesView.preview.outline.placeholder': 'Ir ao encabezamento…',
+    'filesView.preview.outline.noHeadings': 'Non hai encabezamentos neste documento',
+    'filesView.preview.outline.noMatches': 'Non hai encabezamentos coincidentes',
+  },
 };

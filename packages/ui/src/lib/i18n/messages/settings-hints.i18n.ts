@@ -169,4 +169,15 @@ export const settingsHintsI18n = {
     'settings.remoteInstances.clientAuth.addDevice.transport.lanNeedsDesktopAccess': '設定桌面 UI 密碼，並允許本機網路中的其他裝置開啟此應用程式。',
     'settings.remoteInstances.clientAuth.addDevice.transport.openNetworkSettings': '開啟網路設定',
   },
+  gl: {
+    'chat.auto.toast.unavailable.title': 'Automático non está dispoñible',
+    'chat.auto.toast.unavailable.description': 'Ningún provedor de clasificación responde, polo que o chat cambiou a outro modelo.',
+    'chat.auto.toast.unavailable.action': 'Abrir os axustes',
+    'smallModel.toast.unavailable.action': 'Abrir os axustes',
+    'settings.skills.catalog.add.toast.privateRepoNoIdentity': 'Este repositorio é privado. Engade unha identidade de Git con acceso a el e analiza de novo.',
+    'settings.skills.catalog.add.toast.setUpIdentity': 'Configurar a identidade',
+    'settings.skills.catalog.shared.auth.identitiesHint': 'Configura as identidades en Axustes → Git → Identidades.',
+    'settings.remoteInstances.clientAuth.addDevice.transport.lanNeedsDesktopAccess': 'Define un contrasinal para a interface de escritorio e permite que outros dispositivos da túa rede local abran esta aplicación.',
+    'settings.remoteInstances.clientAuth.addDevice.transport.openNetworkSettings': 'Abrir os axustes de rede',
+  },
 } as const;

@@ -135,4 +135,13 @@ export const guestStatusViewI18n = {
     'chat.workStatus.guestView.pointNow': '{value} · עכשיו',
     'chat.workStatus.guestView.pointAgo': '{value} · לפני {seconds} שנ׳',
   },
+  gl: {
+    'chat.workStatus.guestView.reading': 'Lendo',
+    'chat.workStatus.guestView.empty': 'Nada que amosar polo de agora',
+    'chat.workStatus.guestView.unreachable': 'O servizo da extensión non respondeu.',
+    'chat.workStatus.guestView.invalid': 'O servizo da extensión enviou algo que a aplicación non pode amosar.',
+    'chat.workStatus.guestView.actionFailed': 'A extensión non puido facer iso.',
+    'chat.workStatus.guestView.pointNow': '{value} · agora',
+    'chat.workStatus.guestView.pointAgo': '{value} · hai {seconds} s',
+  },
 } as const;

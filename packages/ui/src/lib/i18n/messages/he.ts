@@ -245,6 +245,7 @@ export const dict = {
   'common.language.arabic': 'ערבית',
   'common.language.hebrew': 'עברית',
   'common.language.dutch': 'הולנדית',
+  'common.language.galician': 'גליסיאנית',
   'common.revealPath.finder': 'הצג ב-Finder',
   'common.revealPath.fileExplorer': 'פתח בסייר הקבצים',
   'common.revealPath.fileManager': 'פתח במנהל הקבצים',

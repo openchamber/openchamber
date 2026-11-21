@@ -75,4 +75,9 @@ export const selectionApprovalI18n = {
     'settings.openchamber.visual.field.selectionApprovalText': '選取文字贊同文案',
     'settings.openchamber.visual.field.selectionApprovalTextInfo': '選取助手文字後，贊同快捷操作使用的自訂回饋。留空使用預設文案。',
   },
+  gl: {
+    'chat.textSelection.title.approveSelection': 'Aprobar selección',
+    'settings.openchamber.visual.field.selectionApprovalText': 'Texto de aprobación da selección',
+    'settings.openchamber.visual.field.selectionApprovalTextInfo': 'Resposta personalizada para o atallo de aprobación ao seleccionar texto do asistente. Déixao baleiro para empregar o texto predeterminado.',
+  },
 };

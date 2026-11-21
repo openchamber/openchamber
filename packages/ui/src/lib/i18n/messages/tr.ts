@@ -251,6 +251,7 @@ export const dict = {
   'common.language.arabic': 'Arapça',
   'common.language.hebrew': 'İbranice',
   'common.language.dutch': 'Felemenkçe',
+  'common.language.galician': 'Galiçyaca',
   'common.revealPath.finder': 'Finder\'da göster',
   'common.revealPath.fileExplorer': 'Dosya Gezgini\'nde aç',
   'common.revealPath.fileManager': 'Dosya Yöneticisi\'nde aç',

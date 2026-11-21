@@ -75,4 +75,9 @@ export const connectionHeartbeatI18n = {
     'mobile.instances.heartbeat.latencyAria': 'זמן תגובה {ms} אלפיות שנייה',
     'mobile.instances.heartbeat.noAnswer': 'אין תשובה',
   },
+  gl: {
+    'mobile.instances.heartbeat.latency': '{ms} ms',
+    'mobile.instances.heartbeat.latencyAria': 'Tempo de resposta {ms} ms',
+    'mobile.instances.heartbeat.noAnswer': 'Sen resposta',
+  },
 } as const;

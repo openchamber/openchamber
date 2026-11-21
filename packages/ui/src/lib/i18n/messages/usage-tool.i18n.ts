@@ -75,4 +75,9 @@ export const usageToolI18n = {
     'settings.openchamber.tools.field.agentUsageToolSummary': 'סוכנים בודקים את המגבלות של הספקים שלך ומתי הן מתאפסות.',
     'settings.openchamber.tools.field.agentUsageToolAria': 'הפעלת כלי השימוש לסוכנים',
   },
+  gl: {
+    'settings.openchamber.tools.field.agentUsageTool': 'Ferramenta de uso para axentes',
+    'settings.openchamber.tools.field.agentUsageToolSummary': 'Os axentes consultan os límites dos teus provedores e cando se restablecen.',
+    'settings.openchamber.tools.field.agentUsageToolAria': 'Activar a ferramenta de uso para axentes',
+  },
 } as const;

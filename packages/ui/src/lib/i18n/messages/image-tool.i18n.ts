@@ -195,4 +195,17 @@ export const imageToolI18n = {
     'chat.image.download': 'הורדת התמונה',
     'chat.image.downloadFailed': 'לא ניתן לשמור את התמונה.',
   },
+  gl: {
+    'settings.openchamber.tools.field.agentImageTool': 'Ferramenta de imaxes para axentes',
+    'settings.openchamber.tools.field.agentImageToolSummary': 'Os axentes xeran e editan imaxes co modelo que elixas, facturado polo seu provedor.',
+    'settings.openchamber.tools.field.agentImageToolAria': 'Activar a ferramenta de imaxes para axentes',
+    'settings.openchamber.tools.imageModel.label': 'Modelo de imaxes',
+    'settings.openchamber.tools.imageModel.aria': 'Modelo de imaxes',
+    'settings.openchamber.tools.imageModel.placeholder': 'Elixe un modelo',
+    'settings.openchamber.tools.imageModel.empty': 'Os teus provedores non teñen modelos de imaxes',
+    'settings.openchamber.tools.imageModel.loadFailed': 'Non se puideron cargar os modelos',
+    'settings.openchamber.tools.imageModel.unavailable': '{model} (non dispoñible)',
+    'chat.image.download': 'Descargar imaxe',
+    'chat.image.downloadFailed': 'Non se puido gardar a imaxe.',
+  },
 } as const;

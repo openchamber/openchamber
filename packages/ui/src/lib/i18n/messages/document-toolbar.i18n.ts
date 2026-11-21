@@ -120,4 +120,12 @@ export const documentToolbarI18n = {
     'documentToolbar.wrapLines': '自動換行',
     'documentToolbar.autoSave': '自動儲存',
   },
+  gl: {
+    'documentToolbar.moreActions': 'Máis accións',
+    'documentToolbar.preview': 'Vista previa',
+    'documentToolbar.tableView': 'Vista de táboa',
+    'documentToolbar.treeView': 'Vista de árbore',
+    'documentToolbar.wrapLines': 'Axustar liñas',
+    'documentToolbar.autoSave': 'Gardado automático',
+  },
 } as const;

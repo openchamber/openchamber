@@ -105,4 +105,11 @@ export const fileEditorAidsI18n = {
     'filesView.editor.importNotFound': 'לא נמצא קובץ עבור {path}',
     'filesView.editor.importLookupFailed': 'לא ניתן לחפש את {path}',
   },
+  gl: {
+    'filesView.editor.gitHunk.revert': 'Reverter',
+    'filesView.editor.gitHunk.close': 'Pechar',
+    'filesView.editor.jsonSyntaxError': 'O JSON deixa de ser válido aquí',
+    'filesView.editor.importNotFound': 'Non se atopou ningún ficheiro para {path}',
+    'filesView.editor.importLookupFailed': 'Non se puido buscar {path}',
+  },
 } as const;

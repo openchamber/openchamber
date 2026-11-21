@@ -90,4 +90,10 @@ export const linearPanelI18n = {
     'tracker.priority.medium': 'בינונית',
     'tracker.priority.low': 'נמוכה',
   },
+  gl: {
+    'tracker.priority.urgent': 'Urxente',
+    'tracker.priority.high': 'Alta',
+    'tracker.priority.medium': 'Media',
+    'tracker.priority.low': 'Baixa',
+  },
 } as const;

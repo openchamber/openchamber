@@ -105,4 +105,11 @@ export const autocompleteScopeI18n = {
     'chat.autocomplete.scope.openchamber': 'openchamber',
     'chat.autocomplete.skillsEmpty': 'לא נמצאו מיומנויות',
   },
+  gl: {
+    'chat.autocomplete.scope.user': 'usuario',
+    'chat.autocomplete.scope.project': 'proxecto',
+    'chat.autocomplete.scope.opencode': 'opencode',
+    'chat.autocomplete.scope.openchamber': 'openchamber',
+    'chat.autocomplete.skillsEmpty': 'Non se atoparon habilidades',
+  },
 } as const;

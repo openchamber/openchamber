@@ -135,4 +135,13 @@ export const tooltipsTerminalBrowserI18n = {
     'contextTooltips.terminalBrowser.device.schemeLight': '以淺色模式顯示頁面',
     'contextTooltips.terminalBrowser.device.schemeDark': '以深色模式顯示頁面',
   },
+  gl: {
+    'contextTooltips.terminalBrowser.terminal.newTab': 'Nova lapela de terminal',
+    'contextTooltips.terminalBrowser.quickKeys.escape': 'Enviar a tecla Escape',
+    'contextTooltips.terminalBrowser.quickKeys.holdModifier': 'Manter {key} para a seguinte tecla',
+    'contextTooltips.terminalBrowser.quickKeys.releaseModifier': 'Soltar {key}',
+    'contextTooltips.terminalBrowser.device.schemeSystem': 'Empregar a aparencia do sistema',
+    'contextTooltips.terminalBrowser.device.schemeLight': 'Amosar a páxina en modo claro',
+    'contextTooltips.terminalBrowser.device.schemeDark': 'Amosar a páxina en modo escuro',
+  },
 };
