@@ -4,6 +4,7 @@ import { createUpstreamSseReader } from './upstream-reader.js';
 import { serializeMessageStreamWsEvent } from './protocol.js';
 import { translateWireEvent } from './translate-v2.js';
 import { createDeltaCoalescer, DELTA_COALESCE_WINDOW_MS } from './delta-coalescer.js';
+import { createTurnBoundaryOrder } from './turn-boundary-order.js';
 import type { JsonValue, StreamEvent, UpstreamConnection } from './contracts.js';
 import type { UpstreamDisconnect, UpstreamError } from './upstream-reader.js';
 import type { TranslatedEvent } from './translate-v2.js';
@@ -61,6 +62,7 @@ export function createGlobalMessageStreamHub({
   const spaceSubscribers = new Set<Subscriber<GlobalStreamEvent>>();
   const statusSubscribers = new Set<Subscriber<GlobalStreamStatus>>();
   const replay: ReplayEntry[] = [];
+  const isStaleTurnBoundary = createTurnBoundaryOrder();
   let replayBytes = 0;
   let latestEventId: string | undefined;
   let upstreamConnectedBefore = false;
@@ -189,7 +191,7 @@ export function createGlobalMessageStreamHub({
         notifyStatus({ type: 'disconnect', reason });
       },
       onEvent(event) {
-        if (isHiddenPayload(event?.payload)) return;
+        if (isHiddenPayload(event?.payload) || isStaleTurnBoundary(event.payload)) return;
         coalescer.push(event);
       },
       onError(error) {
@@ -240,6 +242,7 @@ export function createGlobalMessageStreamHub({
       };
     },
     injectEvent({ payload, directory, spaceId }: { payload: JsonValue; directory: string; spaceId: string | null }) {
+      if (isStaleTurnBoundary(payload)) return;
       coalescer.push({ envelope: { directory, spaceId }, payload });
     },
     subscribeStatus(subscriber: Subscriber<GlobalStreamStatus>) {

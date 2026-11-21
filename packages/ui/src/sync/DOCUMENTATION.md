@@ -15,6 +15,7 @@ Bootstrap disposal, stream reconnect and the watchdog share recovery state for t
 ## Invariants
 
 - The event pipeline translates and coalesces wire events without consulting store state. The reducer owns decisions about whether a snapshot already contains a delta, because it sees the state produced by all preceding events.
+- A turn start or end (`session.execution.started|succeeded|failed|interrupted`) reaches the store only when its `durable.seq` is newer than every durable event the pipeline has received for that session. A copy or an earlier turn's end never settles, fails or restarts the current turn, and never shows its error under it.
 - A full part snapshot separates the deltas queued before it from those queued after it. Merging across that boundary lets the snapshot overwrite text received later. A text snapshot that extends or repeats streamed text marks the next delta for overlap removal.
 - An ended text or reasoning snapshot retains the start time already streamed. Its own `start` value names the ending timestamp and cannot replace the real start.
 - A repeated session-create event preserves title and usage learned since creation. An inbox delivery alone may move a synthetic message's creation time.
@@ -36,6 +37,10 @@ Bootstrap disposal, stream reconnect and the watchdog share recovery state for t
 ### Why transcript order follows server sequence
 
 OpenCode pages are ordered by insertion sequence, while message timestamps can contain clock skew and sortable ID prefixes can roll over. The loader reverses descending pages into transcript order, merges overlapping windows by identity, and decides which held records survive a replacing window from the read itself, never from their clocks. Live messages append in event order; a delivery moves a pending record to its admission position, and same-millisecond synthetic context is inserted before an already optimistic prompt.
+
+### Why turn boundaries follow OpenCode's sequence and not the client clock
+
+A failure can reach the client again long after its turn: a replay after a reconnect, an upstream reconnect that resends, a second stream. Its `session.error` sets the session idle, closes the open assistant message and stops its tools, and its notice is stamped on arrival, so a late copy failed the turn running now and showed an old error under it (#6837). OpenCode numbers every durable event of a session in one sequence it stores, so `createTurnBoundaryOrder` (`lib/opencode/wire-admission.ts`, one per event pipeline) drops a turn boundary that is not newer than the newest event seen for its session, before any consumer runs. Comparing times was rejected: the error notice and message times come from different clocks, and an event time cannot tell a copy from the original. Every durable event advances the record, so a client that joined mid-turn and missed its start still refuses an older failure. Only boundaries are dropped; other durable copies stay idempotent in the reducer. The record lives as long as the pipeline, so it survives reconnects and transport switches and resets with the runtime; `session.deleted` drops a session's entry, since OpenCode drops its sequence then and an import can bring the id back with lower numbers. An event moves only the count of the session its `data.sessionID` names, so an isolated space cannot move a host session's count. The server's global hub applies the same rule at its entrance, because it derives its own status frames from each upstream event (`packages/web/server/lib/event-stream/DOCUMENTATION.md`).
 
 ### Why live aggregates share immutable arrays and not serialized signatures
 
