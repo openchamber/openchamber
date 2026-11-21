@@ -153,7 +153,7 @@ export const LeadDigestRow: React.FC<{ sessionId: string | null; directory: stri
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner side="bottom" align="center" sideOffset={2} className="z-50">
-          <Popover.Popup className={cn(dropdownMenuPopupClass, 'flex max-h-[min(60vh,var(--available-height))] w-[calc(var(--anchor-width)-1.5rem)] flex-col gap-3 overflow-y-auto px-4 py-3')}>
+          <Popover.Popup className={cn(dropdownMenuPopupClass, 'data-[starting-style]:scale-[0.98] data-[ending-style]:scale-[0.98] [&:not([data-ending-style])]:duration-150 flex max-h-[min(60vh,var(--available-height))] w-[calc(var(--anchor-width)-1.5rem)] flex-col gap-3 overflow-y-auto px-4 py-3')}>
             {digest.needsYou.length > 0 ? (
               <section className="flex flex-col gap-1">
                 <SectionTitle waiting={waiting > 0}>{t('chat.leadDigest.needsYou')}</SectionTitle>
