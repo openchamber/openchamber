@@ -44,6 +44,16 @@ const restoreGlobals = () => {
 
 const STORAGE_KEY = 'openchamber.mobile.connections.v1';
 
+// Every request these tests spy on carries an absolute URL. Compare its origin,
+// not a string prefix: https://protected.example.attacker.test shares the prefix.
+const requestOrigin = (raw: string): string | undefined => {
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return undefined;
+  }
+};
+
 const testRelay: MobileRelayConfig = {
   relayUrl: 'wss://relay.example/tunnel',
   serverId: 'srv_test123',
@@ -86,7 +96,7 @@ describe('mobile HTTP headers', () => {
       const requestUrl = input instanceof Request ? input.url : String(input);
       const headers = new Headers(init?.headers);
       requests.push({ url: requestUrl, headers });
-      if (requestUrl.startsWith(url) && headers.get('CF-Access-Client-Secret') !== 'client-secret') return new Response(null, { status: 403 });
+      if (requestOrigin(requestUrl) === url && headers.get('CF-Access-Client-Secret') !== 'client-secret') return new Response(null, { status: 403 });
       if (requestUrl.endsWith('/health')) return Response.json({ status: 'ok' });
       if (requestUrl.endsWith('/auth/session')) return Response.json({ authenticated: true });
       return Response.json({ ok: true });
@@ -101,12 +111,12 @@ describe('mobile HTTP headers', () => {
       const session = requests.find((request) => request.url === `${url}/auth/session`);
       expect(session?.headers.get('Authorization')).toBe('Bearer client-token');
       expect(requests[0].headers.has('Authorization')).toBe(false);
-      expect(requests.filter((request) => request.url.startsWith(url)).every((request) => request.headers.get('CF-Access-Client-Id') === 'client-id')).toBe(true);
+      expect(requests.filter((request) => requestOrigin(request.url) === url).every((request) => request.headers.get('CF-Access-Client-Id') === 'client-id')).toBe(true);
 
       await upsertMobileConnection({ label: 'Other', candidates: [{ kind: 'direct', url: 'https://other.example' }] });
       expect(await autoConnectLastInstance({ fast: false })).toEqual({ status: 'connected' });
       expect(getRuntimeExtraHeadersSync()).toEqual({});
-      expect(requests.filter((request) => request.url.startsWith('https://other.example')).every((request) => !request.headers.has('CF-Access-Client-Secret'))).toBe(true);
+      expect(requests.filter((request) => requestOrigin(request.url) === 'https://other.example').every((request) => !request.headers.has('CF-Access-Client-Secret'))).toBe(true);
     } finally {
       switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null });
       fetchSpy.mockRestore();
@@ -119,7 +129,7 @@ describe('mobile HTTP headers', () => {
     const fallbackHeaders: Headers[] = [];
     const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const target = String(input);
-      if (target.startsWith(url)) return new Response(null, { status: 503 });
+      if (requestOrigin(target) === url) return new Response(null, { status: 503 });
       fallbackHeaders.push(new Headers(init?.headers));
       return Response.json(target.endsWith('/health') ? { status: 'ok' } : { authenticated: true });
     });
