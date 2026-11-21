@@ -687,6 +687,59 @@ describe('custom provider config persistence', () => {
     });
   });
 
+  test('a saved empty capability list reloads empty', () => {
+    const providerId = 'empty-llm';
+    upsertProviderConfig(providerId, {
+      name: 'Empty LLM',
+      package: 'aisdk:@ai-sdk/openai-compatible',
+      settings: { baseURL: 'https://empty.example.com/v1' },
+      models: { m: { modelID: 'm', name: 'M', capabilities: { tools: true, input: [], output: [] } } },
+    }, projectDir, 'project', { hasStoredAuth: true });
+
+    expect(getProviderSources(providerId, projectDir).config.models.m.capabilities)
+      .toEqual({ tools: true, input: [], output: [] });
+  });
+
+  test('a save maps MIME modalities and keeps stored entries the form cannot edit', () => {
+    const providerId = 'mime-llm';
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    writeJson(configPath, {
+      providers: {
+        [providerId]: {
+          name: 'Mime',
+          package: 'aisdk:@ai-sdk/openai-compatible',
+          settings: { baseURL: 'https://mime.example.com/v1' },
+          models: {
+            m: { modelID: 'm', name: 'M', capabilities: { tools: true, input: ['text', 'image/png', 'application/json'], output: ['text'] } },
+            j: { modelID: 'j', name: 'J', capabilities: { tools: true, input: ['  application/json  '], output: ['text'] } },
+          },
+        },
+      },
+    });
+
+    const { config } = getProviderSources(providerId, projectDir);
+    expect(config.models.m.capabilities.input).toEqual(['text', 'image', 'application/json']);
+    expect(config.models.j.capabilities.input).toEqual(['  application/json  ']);
+
+    upsertProviderConfig(providerId, { ...config, name: 'Mime renamed' }, projectDir, 'project', { hasStoredAuth: true });
+    const saved = readJson(configPath).providers[providerId];
+    expect(saved.name).toBe('Mime renamed');
+    expect(saved.models.m.capabilities.input).toEqual(['text', 'image', 'application/json']);
+    expect(saved.models.j.capabilities.input).toEqual(['  application/json  ']);
+
+    expect(() => upsertProviderConfig(providerId, {
+      ...config,
+      models: { m: { ...config.models.m, capabilities: { tools: true, input: ['text', 'font/woff'], output: ['text'] } } },
+    }, projectDir, 'project', { hasStoredAuth: true })).toThrow('Model "m" input capabilities are invalid');
+    for (const entry of ['image/not a MIME', '   ']) {
+      expect(() => upsertProviderConfig(providerId, {
+        ...config,
+        models: { n: { modelID: 'n', name: 'N', capabilities: { tools: true, input: [entry], output: ['text'] } } },
+      }, projectDir, 'project', { hasStoredAuth: true })).toThrow('Model "n" input capabilities are invalid');
+    }
+    expect(readJson(configPath).providers[providerId]).toEqual(saved);
+  });
+
   test('custom-scope edit updates custom layer without creating a user entry', () => {
     const providerId = `custom-scope-${Date.now()}`;
     const customPath = path.join(projectDir, 'custom-opencode.json');

@@ -260,6 +260,25 @@ in that user's sessions. On the fallback path the same rules are merged into
 - `packages/web/server/lib/ui-auth/ui-auth.js`: UI session authentication runtime (outside OpenCode module).
 - `packages/web/server/lib/ui-auth/ui-passkeys.js`: UI passkey storage and WebAuthn registration/authentication helpers (outside OpenCode module).
 
+### Why unrecognized model modalities are kept
+
+Model discovery (`model-discovery.ts`), provider config projection
+(`config-v2.ts`) and the custom-provider validator (`providers.ts`) use
+`model-modalities.ts` to map MIME types to the categories the form edits:
+`text`, `image`, `audio`, `video`, and `pdf`. A MIME type maps by its top-level
+type, with `application/pdf` mapping to `pdf`. Entries keep their first-seen
+order without repeats.
+
+An entry that names no category, such as `application/json`, stays as written,
+the way OpenCode's own catalog keeps it, and an explicit empty list stays empty.
+Defaults apply only to a missing list. Dropping or defaulting either one would
+change the capabilities a provider declared on an unrelated edit, or show an
+all-unknown list as Text and Image support. A save accepts such an entry only
+when the stored model already lists it, so the form round-trips what it cannot
+edit and a request cannot add a new one. For the same reason the form adds a
+newly discovered model with only the categories it edits. Normalizing only
+decides the category: an unrecognized entry is written back exactly as stored.
+
 ### Why worktree discovery has a separate config reader
 
 Worktree placement must include ancestor configs above the repository and every checkout-local config. The Settings reader keeps its existing editable layers and write targets; broadening that reader would change unrelated configuration editing. The worktree reader shares `getFolderConfigPaths` with the other ancestor-aware readers and is used directly by both runtimes.

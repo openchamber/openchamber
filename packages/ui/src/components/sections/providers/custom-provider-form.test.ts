@@ -228,6 +228,17 @@ describe('validateCustomProvider', () => {
     expect(row.metadataSource).toBe('provider-api');
   });
 
+  test('a discovered model keeps only the categories the form saves', () => {
+    const row = modelRowFromDiscovery({
+      id: 'gw',
+      name: 'gw',
+      capabilities: { tools: true, input: ['text', 'image', 'application/json'], output: ['embedding'] },
+    });
+    expect(row.inputCapabilities).toEqual(['text', 'image']);
+    // All unrecognized stays an empty list, not Text support.
+    expect(row.outputCapabilities).toEqual([]);
+  });
+
   test('a discovered model nothing describes gets text in and out with tool calls', () => {
     const row = modelRowFromDiscovery({ id: 'plain', name: 'plain' });
     expect(row.contextWindow).toBe('');
