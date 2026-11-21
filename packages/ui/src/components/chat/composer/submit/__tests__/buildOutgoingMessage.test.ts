@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
-import { CONTEXT_METADATA_KEY, contextPayloadFromDraft } from '@/lib/messages/contextParts';
+import { CONTEXT_METADATA_KEY, contextPayloadFromDraft, readContextPart } from '@/lib/messages/contextParts';
 import type { QueuedContextPart, QueuedMessage } from '@/stores/messageQueueStore';
 import {
     buildComposerContext,
@@ -482,6 +482,17 @@ describe('capturing composer context for the queue', () => {
             metadata: { [CONTEXT_METADATA_KEY]: { kind: 'change-request', provider: 'github', number: 7, title: 'PR', url: 'https://x/pr/7' } },
         });
         expect(context.at(-1)).toEqual({ kind: 'instruction', text: 'use: deploy' });
+    });
+
+    test('change request source links survive queue capture and read-back without changing model text', () => {
+        const sourceLinks = ['https://portal.example/review/42', 'https://portal.example/changes/42'];
+        const reference = { kind: 'change-request' as const, provider: 'gitlab' as const, number: 42, title: 'MR', url: 'https://gitlab.com/group/app/-/merge_requests/42', context: 'body and diff', sourceLinks };
+        const captured = buildComposerContext(contextInput({ references: [reference] }), null);
+        const [part] = queuedContextToParts(captured);
+        expect(part.text).toBe('body and diff');
+        expect(readContextPart(part)).toEqual({ kind: 'change-request', provider: 'gitlab', number: 42, title: 'MR', url: reference.url, sourceLinks });
+        const direct = buildOutgoingMessage(input({ composerText: sourceLinks.join(' '), references: [reference] }), deps());
+        expect(direct.additionalParts).toEqual([part]);
     });
 
     test('a message queued with instructions before they were dropped still delivers them first', () => {

@@ -63,7 +63,6 @@ import {
   isOpenCodeProviderId,
   SOURCE_CONTROL_DEFAULT_INSTANCES_MAX,
   SOURCE_CONTROL_GUEST_ID_MAX,
-  SOURCE_CONTROL_URL_TEMPLATES_MAX,
   SOURCE_CONTROL_URL_TEMPLATE_MAX,
   SOURCE_CONTROL_URL_TOKENS,
   type SourceControlContribution,
@@ -80,6 +79,7 @@ import {
   isBuildableLinkTemplate,
 } from './manifest.ts';
 import { isGuestRequestPath } from './contract.ts';
+import { sourceControlUrlsSchema } from './source-control-urls.ts';
 import { GUEST_SESSION_EVENT_TYPES } from './session-events.ts';
 import { SERVICE_SCHEDULE_MAX, SERVICE_SCHEDULE_TIMEZONE_MAX, isServiceScheduleCron } from './service-host.ts';
 import {
@@ -340,8 +340,6 @@ const sourceControlCapabilitiesSchema = z.object({
 
 const FIXED_USERNAME = /^[A-Za-z0-9._-]{1,64}$/;
 
-const urlTemplatesSchema = z.array(z.string().trim().min(1)).max(SOURCE_CONTROL_URL_TEMPLATES_MAX);
-
 export const sourceControlServiceLoginSchema = z.object({
   kind: z.literal('service'),
   hint: z.string().min(1).max(2_000),
@@ -404,7 +402,7 @@ const sourceControlSchema = z.object({
     promptNoun: literalSchema,
     sharedNumberSpace: z.boolean(),
     iconPath: z.string().max(8192).regex(SVG_PATH_DATA).optional(),
-    urls: z.object({ changeRequest: urlTemplatesSchema, issue: urlTemplatesSchema }).strict(),
+    urls: sourceControlUrlsSchema,
     features: z.object({
       authorCanReview: z.boolean().default(false),
       issueCloseReason: z.boolean().default(false),

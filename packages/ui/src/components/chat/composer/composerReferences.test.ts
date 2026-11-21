@@ -5,6 +5,7 @@ import {
     toContextReference,
     toLinkedIssue,
     withComposerReferences,
+    withReferenceSourceLinks,
     withoutComposerReference,
     type ComposerReference,
 } from './composerReferences';
@@ -17,7 +18,7 @@ const issue = (number: number, title = `Issue ${number}`): ComposerReference => 
     contextText: `issue ${number}`,
 });
 
-const pull: ComposerReference = {
+const pull: Extract<ComposerReference, { kind: 'change-request' }> = {
     kind: 'change-request',
     provider: 'github',
     number: 7,
@@ -59,6 +60,24 @@ test('attaching an item again replaces it where it stands', () => {
     expect(list).toHaveLength(3);
     expect(list[1]).toEqual(withDiff);
     expect(list[0]).toMatchObject({ title: 'Renamed' });
+});
+
+test('change request source links merge without the canonical URL and survive picker replacement', () => {
+    const first = 'https://portal.example/review/42';
+    const second = 'https://portal.example/changes/42';
+    const resolved = withReferenceSourceLinks(pull, [first, pull.url, first]);
+    expect(resolved).toEqual({ ...pull, sourceLinks: [first] });
+    expect(withReferenceSourceLinks(resolved, [second, first])).toEqual({ ...pull, sourceLinks: [first, second] });
+    expect(withReferenceSourceLinks(issue(1), [first])).toEqual(issue(1));
+    const updated = { ...pull, includeDiff: true, contextText: 'picker body and diff', sourceLinks: [second] };
+    const [result] = withComposerReferences([resolved], [updated]);
+    if (result.kind !== 'change-request') throw new Error('Expected a change request');
+    expect(result).toEqual({ ...updated, sourceLinks: result.sourceLinks });
+    expect(result.sourceLinks && [...result.sourceLinks].sort()).toEqual([first, second].sort());
+    expect(toContextReference(result)).toEqual({
+        kind: 'change-request', provider: 'github', number: 7, title: 'Fix login', url: pull.url,
+        context: 'picker body and diff', sourceLinks: result.sourceLinks,
+    });
 });
 
 test('removing one keeps the rest', () => {
