@@ -371,9 +371,9 @@ Settings has its own URL, so a reload can restore the open Settings page. The MC
 
 Saving a timeout reloads the server definition and can close Advanced after the file has changed. The scenario reloads the page and reopens the server before changing Code mode, so callbacks from the earlier save cannot remove the next selector. The summary and field both have to show the saved timeout.
 
-### Why workflows wait for the saved switches
+### Why workflows wait for the saved settings
 
-The Workflow tool and approval switches change visually before their settings request finishes. A prompt from another client can reach the server while the tool is still disabled there. The scenarios read back the saved flags before sending that prompt. `settings expect` is read-only; `settings values` still refuses global fields.
+The Workflow tool switch and the approval choice change visually before their settings request finishes. A prompt from another client can reach the server while the tool is still disabled there. The scenarios read back the saved flags before sending that prompt. `settings expect` is read-only; `settings values` still refuses global fields.
 
 ### Why clipboard refusal changes the browser permission
 

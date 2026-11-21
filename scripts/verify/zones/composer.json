@@ -635,7 +635,7 @@
         {
           "id": "document-ask",
           "kind": "path",
-          "title": "An office document dropped under Ask each time offers Attach as is first, and Enter links the saved original",
+          "title": "An office document dropped under Ask each time offers Attach as is first, Enter keeps the original attached in the draft, and Send delivers it",
           "steps": [
             {"do": "session.create", "as": "s", "title": "Composer document ask"},
             {"do": "open", "session": "s"},
@@ -646,14 +646,21 @@
             {"do": "see", "on": "composer.choiceButton", "text": "Attach as is"},
             {"do": "press", "key": "Enter"},
             {"do": "gone", "on": "composer.choiceButton"},
-            {"do": "see", "on": "composer.savedFileChip", "name": "brief.docx"},
+            {"do": "see", "on": "composer.attachmentChip", "name": "brief.docx"},
+            {"do": "see", "on": "composer.savedFileChip", "name": "brief.docx", "count": 0},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "press", "key": "End", "mods": ["mod"]},
+            {"do": "type", "text": " read this"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.userBubble", "text": "read this"},
+            {"do": "see", "on": "chat.userBubble", "text": "brief.docx"},
             {"do": "gone", "on": "composer.attachmentChip", "name": "brief.docx"}
           ]
         },
         {
           "id": "document-save",
           "kind": "path",
-          "title": "With Attach as is chosen, a picked office document is linked by path without asking and goes with the prompt",
+          "title": "With Attach as is chosen, a picked office document stays attached in the draft without asking and goes with the prompt",
           "steps": [
             {"do": "settings", "values": {"documentAttachBehavior": "save"}},
             {"do": "session.create", "as": "s", "title": "Composer document save"},
@@ -661,14 +668,16 @@
             {"do": "chooseFiles", "files": [{"name": "deck.pptx", "content": "original bytes"}]},
             {"do": "click", "on": "composer.attach"},
             {"do": "click", "on": "menu.item", "text": "Attach files"},
-            {"do": "see", "on": "composer.savedFileChip", "name": "deck.pptx"},
+            {"do": "see", "on": "composer.attachmentChip", "name": "deck.pptx"},
             {"do": "see", "on": "composer.choiceButton", "count": 0},
+            {"do": "see", "on": "composer.savedFileChip", "name": "deck.pptx", "count": 0},
             {"do": "click", "on": "composer.editor"},
             {"do": "press", "key": "End", "mods": ["mod"]},
             {"do": "type", "text": " read this"},
             {"do": "press", "key": "Enter"},
             {"do": "see", "on": "chat.userBubble", "text": "read this"},
-            {"do": "see", "on": "chat.userBubble", "text": "deck.pptx"}
+            {"do": "see", "on": "chat.userBubble", "text": "deck.pptx"},
+            {"do": "gone", "on": "composer.attachmentChip", "name": "deck.pptx"}
           ]
         }
       ]
