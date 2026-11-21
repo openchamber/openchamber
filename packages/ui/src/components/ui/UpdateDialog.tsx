@@ -187,25 +187,9 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   const offersIdleInstall = runtimeType === 'desktop';
   const idleQueued = offersIdleInstall && (idlePhase === 'waiting' || idlePhase === 'counting');
   const idleSeconds = Math.max(0, Math.ceil(idleRemainingMs / 1000));
-  const idleReasonText = (reason: string) => {
-    switch (reason) {
-      case 'session': return t('updateDialog.idle.reason.session');
-      case 'command': return t('updateDialog.idle.reason.command');
-      case 'interactive-shell': return t('updateDialog.idle.reason.interactive-shell');
-      case 'scheduled-task': return t('updateDialog.idle.reason.scheduled-task');
-      case 'workflow': return t('updateDialog.idle.reason.workflow');
-      case 'goal': return t('updateDialog.idle.reason.goal');
-      case 'message-queue': return t('updateDialog.idle.reason.message-queue');
-      case 'wait': return t('updateDialog.idle.reason.wait');
-      case 'review': return t('updateDialog.idle.reason.review');
-      case 'tunnel': return t('updateDialog.idle.reason.tunnel');
-      case 'other-runtime': return t('updateDialog.idle.reason.other-runtime');
-      case 'install-failed': return t('updateDialog.idle.reason.install-failed');
-      default: return t('updateDialog.idle.reason.unreadable');
-    }
-  };
-
-  const idleFailure = !idleQueued && idleReason === 'install-failed' ? idleReasonText(idleReason) : null;
+  const idleFailure = !idleQueued && idleReason === 'install-failed'
+    ? t('updateDialog.idle.reason.install-failed')
+    : null;
 
   const isWebRuntime = runtimeType === 'web';
   const desktopHostInstall = isWebRuntime && info?.installBlocked === 'desktop-host';
@@ -536,7 +520,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                   {idlePhase === 'counting'
                     ? t(idleSeconds === 1 ? 'updateDialog.idle.countingOne' : 'updateDialog.idle.counting', { seconds: idleSeconds })
                     : t('updateDialog.idle.waiting')}
-                  {idleReason ? ` · ${idleReasonText(idleReason)}` : ''}
                 </p>
                 <button
                   onClick={onCancelIdleInstall}

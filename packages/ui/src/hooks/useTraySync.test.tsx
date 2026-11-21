@@ -61,7 +61,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     if (args?.dockUnreadSessions) unreadLists.push(args.dockUnreadSessions);
     return null;
   };
-  const listen = async () => { listenerCount += 1; return () => {}; };
+  const listen = async (event: string) => { if (event === 'openchamber:tray-action') listenerCount += 1; return () => {}; };
   const intervals = () => { intervalCount += 1; return 1; };
   let clock = 1;
   const patchSession = (id: string, patch: (time: Session['time']) => Session['time']) => useGlobalSessionsStore.setState((state) => ({

@@ -57,16 +57,15 @@ export const createDesktopIdleUpdate = ({
     const seconds = Math.max(0, Math.ceil(Number(snapshot?.remainingMs || 0) / 1000));
     const countKey = seconds === 1 ? 'countdownOne' : 'countdown';
     const body = idleUpdateText(locale(), countKey, { seconds });
-    const detail = snapshot?.reason ? idleUpdateText(locale(), snapshot.reason) : '';
     if (reload || idleUpdateWindow.webContents.isLoading()) {
-      const html = idleUpdateWindowHtml({ locale: locale(), seconds, reason: snapshot?.reason || null });
+      const html = idleUpdateWindowHtml({ locale: locale(), seconds });
       void idleUpdateWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
       return;
     }
     void idleUpdateWindow.webContents.executeJavaScript(
-      `(() => { const countdown = document.getElementById('countdown'); const detail = document.getElementById('detail'); if (countdown) countdown.textContent = ${JSON.stringify(body)}; if (detail) detail.textContent = ${JSON.stringify(detail)}; })()`,
+      `document.getElementById('countdown').textContent = ${JSON.stringify(body)}`,
     ).catch(() => {
-      const html = idleUpdateWindowHtml({ locale: locale(), seconds, reason: snapshot?.reason || null });
+      const html = idleUpdateWindowHtml({ locale: locale(), seconds });
       void idleUpdateWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
     });
   };

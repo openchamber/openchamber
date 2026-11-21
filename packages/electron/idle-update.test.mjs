@@ -227,9 +227,9 @@ test('countdown copy exists in every locale and the window escapes its text', ()
     assert.match(translated.countdown, /\{seconds\}/);
     assert.match(translated.countdownOne, /\{seconds\}/);
   }
-  const html = idleUpdateWindowHtml({ locale: 'en', seconds: 1, reason: 'session' });
+  const html = idleUpdateWindowHtml({ locale: 'en', seconds: 1 });
   assert.match(html, /Installing in 1 second/);
   assert.match(html, /idle-update\.invalid\/cancel/);
-  const escaped = idleUpdateWindowHtml({ locale: 'en', seconds: 2, reason: 'x"<script>' });
+  const escaped = idleUpdateWindowHtml({ locale: 'en', seconds: 'x"<script>' });
   assert.equal(escaped.includes('<script>'), false);
 });
