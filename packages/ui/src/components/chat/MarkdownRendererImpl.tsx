@@ -31,6 +31,7 @@ import { parseMarkdownBlocksWithMath } from './markdown/mathBlocks';
 import { remarkEmojiShortcodes } from './markdown/remarkEmojiShortcodes';
 import { remarkRepositoryReferences } from './markdown/remarkRepositoryReferences';
 import { fenceUiBlocks } from './uiBlocks/taggedBlocks';
+import { useProgramCheck } from './uiBlocks/useUiBlockComponent';
 import type { EmojiShortcodes } from '@/lib/emoji/shortcodes';
 import type { RepositoryLinkContext } from '@/lib/source-control/repositoryLinks';
 import { guestLinksVersion, type GuestLinkRule } from '@/lib/guests/links';
@@ -554,6 +555,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
   if (renderMode.identity !== identity) {
     setRenderMode({ identity, mode: initialMode });
   }
+  useProgramCheck(variant === 'assistant' ? content : '');
   const body = (
     <MarkdownContent
       key={identity}
