@@ -17,6 +17,7 @@ This module fetches quota and usage signals for supported providers in the web s
 - Decoded Codex CLI profile claims identify the displayed account only. The claims are unverified and grant no authority.
 - Codex usage requests reject redirects because the bearer credential belongs to the fixed usage origin.
 - Unreadable API-key file or environment references resolve to no credential. Sending the unresolved reference as a bearer token would misreport missing configuration as an authentication failure.
+- Google quota accepts the direct login methods `oauth` and `gemini-cli` (what OpenCode stores for "OAuth with Google (Gemini CLI)") and legacy credentials without a method ID. Other methods belong to their plugins and are not sent to Google quota endpoints.
 
 Node server entrypoints apply `../network-defaults.js` before serving requests,
 including the daemon launched directly through `server/index.js`. Connection

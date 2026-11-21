@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 export type LegacyAuthEntry =
   | { type: 'api'; key: string; metadata?: { [key: string]: JsonValue } }
-  | { type: 'oauth'; access: string | undefined; refresh: string | undefined; expires: number | undefined; accountId?: string; enterpriseUrl?: string; server?: string; orgID?: string };
+  | { type: 'oauth'; access: string | undefined; refresh: string | undefined; expires: number | undefined; methodID?: string; accountId?: string; enterpriseUrl?: string; server?: string; orgID?: string };
 export type LegacyAuthFile = Record<string, LegacyAuthEntry>;
 
 type Metadata = NonNullable<CredentialOAuth['metadata']>;
@@ -91,6 +91,7 @@ const projectCredentialValue = (value: ProjectableCredential): LegacyAuthEntry =
     return value.metadata ? { type: 'api', key: value.key, metadata: value.metadata } : { type: 'api', key: value.key };
   }
   const entry: Extract<LegacyAuthEntry, { type: 'oauth' }> = { type: 'oauth', access: value.access, refresh: value.refresh, expires: value.expires };
+  if (value.type === 'oauth') entry.methodID = value.methodID;
   const accountId = metadataString.safeParse(value.metadata?.accountID).data;
   const enterpriseUrl = metadataString.safeParse(value.metadata?.enterpriseUrl).data;
   const server = metadataString.safeParse(value.metadata?.server).data;

@@ -9,6 +9,8 @@ import {
 import { parseGoogleRefreshToken } from './transforms.js';
 import type { JsonObject } from '../../utils/contracts.js';
 
+const DIRECT_GOOGLE_LOGIN_METHODS = new Set(['oauth', 'gemini-cli']);
+
 export const DEFAULT_PROJECT_ID = 'rising-fact-p41fc';
 
 export interface GoogleAuthSource {
@@ -28,6 +30,7 @@ const resolveGeminiCliAuth = (auth: JsonObject): GoogleAuthSource | null => {
   }
 
   const oauthObject = asObject('oauth' in entryObject ? entryObject.oauth : undefined) ?? entryObject;
+  if ('methodID' in oauthObject && oauthObject.methodID !== undefined && !DIRECT_GOOGLE_LOGIN_METHODS.has(String(oauthObject.methodID))) return null;
   const accessToken = asNonEmptyString('access' in oauthObject ? oauthObject.access : undefined)
     ?? asNonEmptyString('token' in oauthObject ? oauthObject.token : undefined);
   const refreshParts = parseGoogleRefreshToken('refresh' in oauthObject ? oauthObject.refresh : undefined);
