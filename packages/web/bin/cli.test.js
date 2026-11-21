@@ -395,7 +395,15 @@ describe('cli args', () => {
       prompt: 'Investigate cache invalidation',
     })).toEqual({
       directory: '.',
+      newWorktree: false,
       prompt: 'Investigate cache invalidation',
+    });
+  });
+
+  it('keeps a session create with an explicit directory in that directory', () => {
+    expect(buildSessionCreatePayload({ directory: '/prepared-worktree' })).toEqual({
+      directory: '/prepared-worktree',
+      newWorktree: false,
     });
   });
 
@@ -414,6 +422,7 @@ describe('cli args', () => {
 
     expect(buildSessionCreatePayload(parsed.options)).toEqual({
       directory: '/repo',
+      newWorktree: false,
       prompt: 'Finish and verify the migration',
       goal: true,
       goalTokenBudget: 200000,
@@ -450,6 +459,7 @@ describe('cli args', () => {
     expect(parsed.options.subagentModels).toBe('openai/gpt-5.5, anthropic/claude-sonnet-5');
     expect(buildSessionCreatePayload(parsed.options)).toEqual({
       directory: '/repo',
+      newWorktree: false,
       subagentPolicy: { models: ['openai/gpt-5.5', 'anthropic/claude-sonnet-5'] },
     });
   });

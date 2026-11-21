@@ -135,6 +135,25 @@ describe('OpenChamber control service', () => {
     expect(generateWorktreeName).not.toHaveBeenCalled();
   });
 
+  it('honors an explicit directory as the session location when newWorktree is false', async () => {
+    const isGitRepository = vi.fn(async () => true);
+    const { service, sessionService } = createService({
+      isGitRepository,
+      generateWorktreeName: vi.fn(),
+      randomWorktreeName: vi.fn(),
+    });
+
+    await service.execute('session.create', {
+      directory: '/prepared-worktree',
+      newWorktree: false,
+    });
+
+    expect(sessionService.create).toHaveBeenCalledWith(expect.objectContaining({ directory: '/prepared-worktree' }));
+    expect(sessionService.create.mock.calls[0][0]).not.toHaveProperty('worktree');
+    expect(sessionService.create.mock.calls[0][0].directory).toBe('/prepared-worktree');
+    expect(isGitRepository).not.toHaveBeenCalled();
+  });
+
   it('session.create names a new branch from a pull request from the prompt, and leaves a checkout to its branch', async () => {
     const generateWorktreeName = vi.fn(async () => 'csv-export');
     const { service, sessionService } = createService({ generateWorktreeName });
