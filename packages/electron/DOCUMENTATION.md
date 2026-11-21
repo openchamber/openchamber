@@ -81,6 +81,7 @@ Electron owns native windows, privileged IPC, desktop host credentials, browser-
 - Checks preserve downloaded state for the same version and preserve pending state on feed failure. Only authoritative no-update clears it. The pending record is assigned before fetching notes because download completion can arrive during that await. Cached download completion is authoritative even without an event; an older download never marks a newer record ready.
 - Channel switches wait for the entire prior check, including GitHub fallback, before changing the shared feed. A mirror failure backs off for subsequent checks and downloads, and each running check keeps its own source identity. A missing Stable mirror feed is failure; an unpublished platform feed with no pending package remains no-update.
 - Canary defaults to its own feed unless the user chooses another channel. Stable after Canary permits the explicit downgrade, including package-manager downgrade flags; release builds do not downgrade. Changing channel discards the other channel's pending record.
+- A downloaded update can be queued until the embedded server reports this process is idle. The dialog closes after the native queue confirms the request, and the user can reopen it to cancel. The queue lives in memory for this app run and for that downloaded version and channel; quit, cancel, Escape, or closing the countdown drops it and keeps the download. One watcher runs only while it is queued. The first idle period opens one 30-second countdown, including from the tray. Work that starts during it, or a wake from sleep, closes the window and waits for the next idle period before a new countdown. Reaching zero reads idle once more, then uses the same install handoff as Restart to Update. A failed install stays available for an explicit retry and is not queued again. Queue, cancel, and status stay on local pages. Web, VS Code, hosted mobile, and Capacitor keep their own update behavior. `autoInstallOnAppQuit` stays false.
 - SSH setup searches home-installed tools and nvm explicitly because login shells omit interactive PATH setup. Installs use a user-owned prefix to avoid root-owned global directories. Existing OpenChamber installs are selected by version because an older PATH entry can shadow a fresh user-prefix install; nvm npm needs its sibling Node on PATH.
 - SSH commands that do not consume stdin close it because Windows ssh.exe can hang with an open pipe. Askpass delegates prompts it cannot show to the user's configured helper. Raw SSH history stays in main and is classified before IPC; password-bearing probes are never logged because the remote shell can echo them.
 - The remote CLI registry is authoritative for running servers. Registry failure is not an empty result. Reuse requires the intended password policy, version, and bind address; public system information alone proves no authentication. A responding server with another password remains untouched. Only CLI-owned daemons may be replaced, and an adopted daemon follows the instance's keep-running policy.
@@ -116,6 +117,14 @@ Streaming turns create short-lived objects, and macOS compression keeps the rend
 ### Why a reduced tray animation cadence
 
 Tray image changes cost CPU in both the main process and WindowServer throughout long-running work. Six eased frames at five changes per second preserve the roughly two-second cycle with fewer native image updates. Linux tray images stay panel-sized because StatusNotifier hosts can drop oversized images; monochrome geometric glyphs follow native menu-bar tinting.
+
+### Why a downloaded update waits in the desktop process
+
+The countdown and the installer handoff exist only in the desktop app. The embedded server is the place that already sees every client's sessions, terminals, and scheduled work, so it answers whether this process is idle and the desktop process keeps the queue. The queue is memory for this run and this downloaded release. Quit drops it. `autoInstallOnAppQuit` stays off, so closing the app does not install on its own.
+
+### Why the countdown is its own window
+
+The tray has no page. One always-on-top window stays visible from there. Cancel, Escape, and closing that window drop the queue and leave the download in place.
 
 ### Why native menu refresh follows content signatures
 

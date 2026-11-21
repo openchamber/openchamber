@@ -912,7 +912,7 @@ export function createExtensionWaitsRuntime({
     processPayload,
     runChecks,
     start,
-    stop,
+    stop, hasLiveWork: () => waits.size > 0 || delivering.size > 0 || checking.size > 0 || reservations.size > 0,
     flush: () => writePromise,
   };
 }

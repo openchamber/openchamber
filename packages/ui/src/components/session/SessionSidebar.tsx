@@ -200,11 +200,11 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     info: s.info,
     downloading: s.downloading,
     downloaded: s.downloaded,
-    installing: s.installing,
+    installing: s.installing, idlePhase: s.idlePhase, idleReason: s.idleReason, idleRemainingMs: s.idleRemainingMs,
     progress: s.progress,
     error: s.error,
     downloadUpdate: s.downloadUpdate,
-    restartToUpdate: s.restartToUpdate,
+    restartToUpdate: s.restartToUpdate, queueIdleInstall: s.queueIdleInstall, cancelIdleInstall: s.cancelIdleInstall,
   })));
 
   const runtimeKey = getRuntimeKey();
@@ -394,7 +394,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
   const handleOpenUpdateDialog = React.useCallback(() => {
     const current = useUpdateStore.getState();
-    if (current.available && current.info) {
+    if ((current.available && current.info) || current.idlePhase === 'waiting' || current.idlePhase === 'counting') {
       setUpdateDialogOpen(true);
       return;
     }
@@ -421,8 +421,8 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   }, [mobileVariant, setSessionSwitcherOpen, setSettingsDialogOpen]);
 
   const showSidebarUpdateButton =
-    updateStore.available &&
-    (updateStore.runtimeType === 'desktop' || updateStore.runtimeType === 'web');
+    (updateStore.available && (updateStore.runtimeType === 'desktop' || updateStore.runtimeType === 'web')) ||
+    updateStore.idlePhase === 'waiting' || updateStore.idlePhase === 'counting';
 
 
   const normalizedProjects = React.useMemo(() => {
@@ -787,11 +787,11 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         info={updateStore.info}
         downloading={updateStore.downloading}
         downloaded={updateStore.downloaded}
-        installing={updateStore.installing}
+        installing={updateStore.installing} idlePhase={updateStore.idlePhase} idleReason={updateStore.idleReason} idleRemainingMs={updateStore.idleRemainingMs}
         progress={updateStore.progress}
         error={updateStore.error}
         onDownload={updateStore.downloadUpdate}
-        onRestart={updateStore.restartToUpdate}
+        onRestart={updateStore.restartToUpdate} onInstallWhenIdle={updateStore.queueIdleInstall} onCancelIdleInstall={updateStore.cancelIdleInstall}
         runtimeType={updateStore.runtimeType}
       />
 

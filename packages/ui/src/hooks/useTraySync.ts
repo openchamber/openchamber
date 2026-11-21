@@ -1,4 +1,5 @@
 import React from 'react';
+import { useIdleDesktopUpdate } from '@/hooks/useIdleDesktopUpdate';
 import type { Session } from '@/lib/opencode/model';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive } from '@/lib/desktop';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
@@ -386,6 +387,7 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
 };
 
 export const useTraySync = (): void => {
+  useIdleDesktopUpdate();
   React.useEffect(() => {
     if (!isTrayPlatform() || !canUseElectronDesktopIPC()) return;
     const trayEnabled = isTrayEnabled();

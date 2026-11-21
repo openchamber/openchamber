@@ -33,6 +33,11 @@ interface UpdateDialogProps {
   error: string | null;
   onDownload: () => void;
   onRestart: () => void;
+  onInstallWhenIdle?: () => Promise<boolean>;
+  onCancelIdleInstall?: () => void;
+  idlePhase?: 'idle' | 'waiting' | 'counting' | 'installing';
+  idleReason?: string | null;
+  idleRemainingMs?: number;
   runtimeType?: 'desktop' | 'web' | 'vscode' | 'mobile' | null;
 }
 
@@ -150,6 +155,11 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   error,
   onDownload,
   onRestart,
+  onInstallWhenIdle,
+  onCancelIdleInstall,
+  idlePhase = 'idle',
+  idleReason = null,
+  idleRemainingMs = 0,
   runtimeType = 'desktop',
 }) => {
   const { t } = useI18n();
@@ -174,6 +184,12 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   const mobileUpdateUrl = info?.downloadUrl || releaseUrl;
 
   const progressPercent = updateProgressPercent(progress);
+  const offersIdleInstall = runtimeType === 'desktop';
+  const idleQueued = offersIdleInstall && (idlePhase === 'waiting' || idlePhase === 'counting');
+  const idleSeconds = Math.max(0, Math.ceil(idleRemainingMs / 1000));
+  const idleFailure = !idleQueued && idleReason === 'install-failed'
+    ? t('updateDialog.idle.reason.install-failed')
+    : null;
 
   const isWebRuntime = runtimeType === 'web';
   const desktopHostInstall = isWebRuntime && info?.installBlocked === 'desktop-host';
@@ -449,9 +465,9 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             </p>
           )}
 
-          {(error || webError) && (
+          {(error || webError || idleFailure) && (
             <div className="p-3 mt-4 bg-[var(--status-error-background)] border border-[var(--status-error-border)] rounded-lg">
-              <p className="text-sm text-[var(--status-error)]">{error || webError}</p>
+              <p className="text-sm text-[var(--status-error)]">{error || webError || idleFailure}</p>
             </div>
           )}
         </div>
@@ -467,8 +483,8 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             GitHub
           </a>
 
-          <div className="flex-1 flex justify-end">
-            {!isWebRuntime && !isMobileRuntime && !downloaded && !downloading && (
+          <div className="flex-1 flex flex-wrap items-center justify-end gap-2">
+            {!isWebRuntime && !isMobileRuntime && !downloaded && !downloading && !idleQueued && (
               <button
                 onClick={onDownload}
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity"
@@ -498,7 +514,34 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
               </button>
             )}
 
-            {!isWebRuntime && !isMobileRuntime && downloaded && !installing && (
+            {idleQueued && !installing && (
+              <div className="flex items-center justify-end gap-3">
+                <p className="text-sm text-muted-foreground text-end">
+                  {idlePhase === 'counting'
+                    ? t(idleSeconds === 1 ? 'updateDialog.idle.countingOne' : 'updateDialog.idle.counting', { seconds: idleSeconds })
+                    : t('updateDialog.idle.waiting')}
+                </p>
+                <button
+                  onClick={onCancelIdleInstall}
+                  className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium border border-[var(--border)] text-foreground hover:bg-[var(--interactive-hover)] transition-colors"
+                >
+                  {t('updateDialog.actions.cancelIdleInstall')}
+                </button>
+              </div>
+            )}
+
+            {offersIdleInstall && downloaded && !installing && !idleQueued && onInstallWhenIdle && (
+              <button
+                onClick={() => {
+                  void onInstallWhenIdle().then((queued) => { if (queued) onOpenChange(false); });
+                }}
+                className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium border border-[var(--border)] text-foreground hover:bg-[var(--interactive-hover)] transition-colors"
+              >
+                {t('updateDialog.actions.installWhenIdle')}
+              </button>
+            )}
+
+            {!isWebRuntime && !isMobileRuntime && downloaded && !installing && !idleQueued && (
               <button
                 onClick={onRestart}
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--status-success)] text-white hover:opacity-90 transition-opacity"

@@ -15,7 +15,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -212,7 +212,7 @@ export const dict: Record<I18nKey, string> = {
   ...htmlRenderI18n.pl,
   ...documentToolbarI18n.pl,
   ...uiBlocksI18n.pl,
-  ...updateDialogCanaryI18n.pl,
+  ...updateDialogCanaryI18n.pl, ...updateIdleI18n.pl,
   ...aboutReleaseNotesI18n.pl,
   ...updateCheckErrorsI18n.pl,
   ...secretRequestI18n.pl,

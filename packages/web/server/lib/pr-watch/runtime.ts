@@ -716,6 +716,7 @@ export function createPrWatchRuntime({
     processPayload,
     start,
     stop,
+    hasLiveWork: () => watches.size > 0 || delivering.size > 0,
     flush: () => writePromise,
   };
 }
