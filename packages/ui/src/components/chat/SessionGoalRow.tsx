@@ -71,7 +71,7 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
           {t('chat.goal.status.evaluating')}
         </span>
       ) : paused ? (
-        <span className="min-w-0 truncate typography-meta text-muted-foreground" title={t('chat.goal.row.pausedHint')}>
+        <span className="shrink-0 whitespace-nowrap typography-meta text-muted-foreground">
           {t('chat.goal.row.pausedHint')}
         </span>
       ) : (
