@@ -310,9 +310,10 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       }
       response.setHeader('content-type', 'application/json');
       response.end(JSON.stringify(answer.body));
-    }, (error: Error) => {
+    }, () => {
       response.statusCode = 500;
-      response.end(JSON.stringify({ message: error.message }));
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ message: 'The fake forge could not handle this request.' }));
     });
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
