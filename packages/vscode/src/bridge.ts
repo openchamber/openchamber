@@ -86,6 +86,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
     const smallModelResponse = await handleSmallModelBridgeMessage(
       { id, type, payload },
       (directory) => readOpenCodeSmallModelCatalog(ctx?.manager, directory),
+      openCodeTrust,
     );
     if (smallModelResponse) {
       return smallModelResponse;

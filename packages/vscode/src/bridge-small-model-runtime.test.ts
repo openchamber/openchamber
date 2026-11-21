@@ -138,6 +138,52 @@ describe('GET /api/small-model in VS Code', () => {
     await assert.rejects(readOpenCodeSmallModelCatalog(undefined, '/proj'), /OpenCode API unavailable/);
   });
 
+  test('refuses a folder whose OpenCode configuration needs approval', async () => {
+    let catalogReads = 0;
+    const response = await handleSmallModelBridgeMessage(
+      { id: '1', type: 'api:small-model:get', payload: { directory: '/untrusted' } },
+      () => {
+        catalogReads += 1;
+        return Promise.resolve({ providers: [], models: [] });
+      },
+      {
+        refusalFor: async (request) => {
+          assert.equal(request.headers['x-opencode-directory'], '/untrusted');
+          return {
+            status: 403,
+            body: {
+              error: 'OpenCode configuration for this folder is not approved',
+              code: 'opencode_trust_required',
+              directory: '/untrusted',
+            },
+          };
+        },
+      },
+    );
+
+    assert.equal(catalogReads, 0);
+    assert.deepEqual(response, {
+      id: '1',
+      type: 'api:small-model:get',
+      success: false,
+      error: 'OpenCode configuration for this folder is not approved',
+      code: 'opencode_trust_required',
+    });
+  });
+
+  test('reads the catalog once the folder is trusted', async () => {
+    providers = [{ id: 'openai', name: 'OpenAI' }];
+    models = [MODEL('openai', 'gpt-5-nano')];
+
+    const response = await handleSmallModelBridgeMessage(
+      { id: '1', type: 'api:small-model:get', payload: { directory: '/proj' } },
+      (directory) => readOpenCodeSmallModelCatalog(connection, directory),
+      { refusalFor: async () => null },
+    );
+
+    assert.deepEqual(response?.data, { authenticatedProviders: ['openai'] });
+  });
+
   test('other message types are left to the next handler', async () => {
     const response = await handleSmallModelBridgeMessage(
       { id: '2', type: 'api:git/commit-message', payload: {} },
