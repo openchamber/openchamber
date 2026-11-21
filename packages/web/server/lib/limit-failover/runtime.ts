@@ -65,18 +65,11 @@ const PLUGIN_PACKAGE_JSON = `${JSON.stringify({
   exports: { '.': './index.js' },
 }, null, 2)}\n`;
 
-const PLUGIN_SOURCE = `const LIMIT_ERROR_TYPES = new Set(["provider.quota", "provider.free-limit", "provider.budget-limit", "provider.model-budget-limit", "provider.rate-limit"])
-const ROUTE = ${JSON.stringify(ROUTE)}
-
-const callback = () => {
-  const base = process.env.OPENCHAMBER_AGENT_TOOL_URL
-  const token = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN
-  if (!base || !token || !URL.canParse(base)) return null
-  return { url: new URL(ROUTE, base).href, token }
-}
+export const LIMIT_FAILOVER_PLUGIN_HELPERS = `const LIMIT_ERROR_TYPES = new Set(["provider.quota", "provider.free-limit", "provider.budget-limit", "provider.model-budget-limit", "provider.rate-limit"])
+const LIMIT_FAILOVER_ROUTE = ${JSON.stringify(ROUTE)}
 
 // Location-scoped reads answer { location, data }.
-const accounts = async (ctx, providerID) => {
+const failoverAccounts = async (ctx, providerID) => {
   const provider = (await ctx.provider.get({ providerID }).catch(() => undefined))?.data
   const integrationID = provider?.integrationID ?? providerID
   const integration = (await ctx.integration.get({ integrationID }).catch(() => undefined))?.data
@@ -88,13 +81,11 @@ const accounts = async (ctx, providerID) => {
     activeCredentialID: active?.type === "credential" ? active.id : undefined,
   }
 }
+`;
 
-export default {
-  id: ${JSON.stringify(PLUGIN_ID)},
-  setup: async (ctx) => {
-    await ctx.session.hook("retry", async (event) => {
+export const createLimitFailoverSetupCode = ({ callbackExpr }: { callbackExpr: string }) => `    await ctx.session.hook("retry", async (event) => {
       if (!LIMIT_ERROR_TYPES.has(event.error?.type)) return
-      const target = callback()
+      const target = (${callbackExpr})
       if (!target) return
       try {
         const response = await fetch(target.url, {
@@ -111,7 +102,7 @@ export default {
               retryAfterMs: event.error.retryAfterMs,
             },
             proposed: event.decision,
-            ...(await accounts(ctx, event.model.providerID)),
+            ...(await failoverAccounts(ctx, event.model.providerID)),
           }),
           signal: AbortSignal.timeout(10_000),
         })
@@ -146,7 +137,20 @@ export default {
       } catch {
         // OpenCode's own decision stands when the server cannot be reached.
       }
-    })
+    })`;
+
+const PLUGIN_SOURCE = `${LIMIT_FAILOVER_PLUGIN_HELPERS}
+const callback = () => {
+  const base = process.env.OPENCHAMBER_AGENT_TOOL_URL
+  const token = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN
+  if (!base || !token || !URL.canParse(base)) return null
+  return { url: new URL(LIMIT_FAILOVER_ROUTE, base).href, token }
+}
+
+export default {
+  id: ${JSON.stringify(PLUGIN_ID)},
+  setup: async (ctx) => {
+${createLimitFailoverSetupCode({ callbackExpr: 'callback()' })}
   },
 }
 `;

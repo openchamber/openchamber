@@ -1801,7 +1801,7 @@ const openCodeLifecycleState = {
   get openCodeNotReadySince() { return openCodeNotReadySince; },
   set openCodeNotReadySince(value: typeof openCodeNotReadySince) { openCodeNotReadySince = value; },
   get isExternalOpenCode() { return isExternalOpenCode; },
-  set isExternalOpenCode(value: typeof isExternalOpenCode) { isExternalOpenCode = value; },
+  set isExternalOpenCode(value: typeof isExternalOpenCode) { if (isExternalOpenCode !== value) { isExternalOpenCode = value; void managedConfigRuntime?.syncExternalBridge().catch(() => {}); } },
   get isShuttingDown() { return isShuttingDown; },
   set isShuttingDown(value: typeof isShuttingDown) { isShuttingDown = value; },
   get healthCheckInterval() { return healthCheckInterval; },
@@ -2383,10 +2383,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   getRelayService: () => relayServiceInstance,
   getRelayReconcileTimer: () => relayReconcileTimer,
   getSpacesHost: () => spacesHost,
-  stopFolderWatches: () => {
-    stopEnterprisePolicyWatch();
-    featureRoutesRuntime.stopFolderWatches();
-  },
+  stopFolderWatches: async () => { stopEnterprisePolicyWatch(); featureRoutesRuntime.stopFolderWatches(); await managedConfigRuntime?.cleanupExternalBridge(); },
 });
 
 const gracefulShutdown: typeof gracefulShutdownRuntime.gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
@@ -2429,10 +2426,12 @@ async function main(options: WebUiServerOptions = {}) {
     },
     broadcastUiEvent: (event) => broadcastOpenChamberUiEvent(event),
   });
+  const getOpenCodePluginDelivery = () => openCodePluginDelivery({ external: isExternalOpenCode || ENV_SKIP_OPENCODE_START, origin: ENV_CONFIGURED_OPENCODE_HOST?.origin || openCodeBaseUrl || null, ownsConfigFile: managedConfigRuntime?.ownsConfigFile() ?? true });
   managedConfigRuntime = createManagedConfigRuntime({
     fsPromises,
     path,
     instanceDir,
+    dataDir: OPENCHAMBER_DATA_DIR,
     env: process.env,
     agentToolRuntime,
     limitFailoverRuntime,
@@ -2441,6 +2440,7 @@ async function main(options: WebUiServerOptions = {}) {
     listExtensionPluginDirectories: guestAgentContext.pluginDirectories,
     openchamberVersion: OPENCHAMBER_VERSION,
     readPluginDenials: () => pluginSwitchStore.denials(),
+    getOpenCodePluginDelivery,
   });
   stopEnterprisePolicyWatch = watchEnterprisePolicy({
     onChange: () => {
@@ -2789,6 +2789,7 @@ async function main(options: WebUiServerOptions = {}) {
     isLocalOnlyPushRequest: (req, uiSessionToken) => clientPushAccess.isLocalOnlyRequest(req, uiSessionToken),
     agentToolRuntime,
     limitFailoverRuntime,
+    registerExternalBridgeRoutes: (expressApp) => managedConfigRuntime?.registerExternalBridgeRoutes(expressApp),
     desktopUpdater,
     getOpenCodeCompatibility,
     skipBodyParsing: (req) => spacesHost?.skipsBodyParsing(req) === true,
@@ -2936,11 +2937,7 @@ async function main(options: WebUiServerOptions = {}) {
       ]);
     },
     onExtensionWaitsChanged: () => extensionWaitsRuntime.reconcile(),
-    getOpenCodePluginDelivery: () => openCodePluginDelivery({
-      external: isExternalOpenCode || ENV_SKIP_OPENCODE_START,
-      origin: ENV_CONFIGURED_OPENCODE_HOST?.origin || openCodeBaseUrl || null,
-      ownsConfigFile: managedConfigRuntime?.ownsConfigFile() ?? true,
-    }),
+    getOpenCodePluginDelivery,
     extensionNotificationChannels,
     surfaceViewerHeaders: (guestId, viewerId) => guestSurfaceRuntime?.viewerHeaders(guestId, viewerId) ?? null,
     builtInExtensionsDir: options.builtInExtensionsDir,
@@ -3094,6 +3091,7 @@ async function main(options: WebUiServerOptions = {}) {
   terminalRuntime = startupPipelineResult.terminalRuntime;
   dictationRuntime = startupPipelineResult.dictationRuntime;
   messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
+  await managedConfigRuntime.syncExternalBridge().catch((error) => console.warn('[ExternalOpenCodePlugin] Failed to sync runtime bridge:', (isRecord(error) && error.message) || error));
 
   try {
     await scheduledTasksRuntime.start();

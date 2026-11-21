@@ -1548,6 +1548,43 @@ under a running child.
   harmless. The card's delivery state (`guests/opencode-plugin.js`) tells the
   user, and the same button is the way in.
 
+### External local OpenCode plugin bridge (`external-plugin-bridge.ts`)
+
+When OpenChamber connects to an externally started local OpenCode server (such
+as `opencode serve --service` or an enterprise-managed local daemon), OpenChamber
+does not spawn OpenCode and cannot pass `OPENCODE_CONFIG` or callback env vars.
+
+- **Ownership:** `external-plugin-bridge.ts` materializes one stable plugin
+  folder at `<dataDir>/plugins/openchamber/` combining OpenChamber's agent tools,
+  limit-failover `retry` hook, `prompt`/compaction hooks, and `session-title`
+  transforms, plus an atomic `<dataDir>/runtime-bridge.json` file (mode `0600`)
+  holding `{ version, pid, url, token, failoverEnabled, tools }`.
+- **Invariants:**
+  - The external plugin stays completely dormant (`ctx.tool.transform`,
+    `ctx.agent.transform`, and hooks are no-ops) whenever
+    `OPENCHAMBER_AGENT_TOOL_URL` is set in the OpenCode process env (managed
+    child), when `runtime-bridge.json` is absent, or when the recorded `pid` is
+    not alive.
+  - While active, `ctx.tool.transform` registers enabled OpenChamber tools and
+    removes replaced built-in OpenCode tools (`browser.*`,
+    `experimental_image_generate`, `automation_*`, `opencode_worktree_create`,
+    `opencode_models`) dynamically without writing `-opencode.*` entries into
+    the user's global `opencode.json`.
+  - Watching `<dataDir>` for `runtime-bridge.json` changes and checking `pid`
+    liveness triggers `ctx.tool.reload()` and `ctx.agent.reload()` when
+    OpenChamber starts, updates tool settings, or exits, so built-in OpenCode
+    tools and native session titles return when OpenChamber closes.
+  - OpenChamber never silently edits the user's global `opencode.json`:
+    `GET/POST/DELETE /api/config/external-opencode-plugin(/global-config)` and
+    `ExternalOpenCodePluginBanner` in Settings let the user explicitly add or
+    remove the plugin path or copy it for enterprise-managed configs.
+- **Why one bridge file + dynamic `tools.remove` instead of per-message metadata
+  isolation:** Filtering per turn via message metadata breaks Code Mode catalog
+  hiding and requires tagging every background prompt sender. Treating the
+  external local OpenCode as shared while OpenChamber is running and restoring
+  native behavior as soon as OpenChamber exits keeps the contract simple and
+  reliable.
+
 ### Session title prompt
 
 OpenCode names a new session with its hidden `title` agent. Its built-in prompt

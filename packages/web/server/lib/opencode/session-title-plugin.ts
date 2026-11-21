@@ -14,7 +14,7 @@ const TITLE_SYSTEM_PROMPT = [
 const SHORT_MESSAGE_LENGTH = 20;
 const MAX_ATTACHED_CONTEXT_LENGTH = 2000;
 
-const PLUGIN_SOURCE = `const TITLE_SYSTEM_PROMPT = ${JSON.stringify(TITLE_SYSTEM_PROMPT)}
+export const SESSION_TITLE_PLUGIN_HELPERS = `const TITLE_SYSTEM_PROMPT = ${JSON.stringify(TITLE_SYSTEM_PROMPT)}
 const SHORT_MESSAGE_LENGTH = ${SHORT_MESSAGE_LENGTH}
 const MAX_ATTACHED_CONTEXT_LENGTH = ${MAX_ATTACHED_CONTEXT_LENGTH}
 
@@ -31,12 +31,11 @@ const attachedContextOfShortFirstMessage = (messages) => {
     .join("\\n\\n")
     .slice(0, MAX_ATTACHED_CONTEXT_LENGTH)
 }
+`;
 
-export default {
-  id: ${JSON.stringify(PLUGIN_ID)},
-  setup: async (ctx) => {
-    let originalTitleSystem
+export const createSessionTitleSetupCode = ({ isActiveExpr = 'true' }: { isActiveExpr?: string } = {}) => `    let originalTitleSystem
     await ctx.agent.transform((editor) => {
+      if (!(${isActiveExpr})) return
       if (!editor.get("title")) return
       if (editor.get("title").system !== TITLE_SYSTEM_PROMPT) originalTitleSystem = editor.get("title").system
       editor.update("title", (agent) => {
@@ -44,6 +43,7 @@ export default {
       })
     })
     await ctx.session.hook("title", async (draft) => {
+      if (!(${isActiveExpr})) return
       const request = draft.messages.at(-1)
       // Free OpenCode models failed to generate titles with a replaced system
       // prompt. Keep the native prompt and give the same style in the input.
@@ -74,7 +74,13 @@ export default {
           ],
         },
       ]
-    })
+    })`;
+
+const PLUGIN_SOURCE = `${SESSION_TITLE_PLUGIN_HELPERS}
+export default {
+  id: ${JSON.stringify(PLUGIN_ID)},
+  setup: async (ctx) => {
+${createSessionTitleSetupCode()}
   },
 }
 `;

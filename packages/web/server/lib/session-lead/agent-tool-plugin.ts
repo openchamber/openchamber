@@ -1,13 +1,12 @@
 export const LEAD_COMPACTION_HOOK = `
     await ctx.session.hook("compaction", async (draft) => {
       if (draft.result) return
-      const endpoint = process.env.OPENCHAMBER_AGENT_TOOL_URL
-      const token = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN
-      if (!endpoint || !token) return
+      const connection = resolveConnection()
+      if (!connection || (connection.tools && !connection.tools.control)) return
       try {
-        const response = await fetch(endpoint + "/lead-compaction", {
+        const response = await fetch(connection.url + "/lead-compaction", {
           method: "POST",
-          headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+          headers: { authorization: "Bearer " + connection.token, "content-type": "application/json" },
           body: JSON.stringify({ sessionID: draft.sessionID }),
           signal: AbortSignal.timeout(10000),
         })

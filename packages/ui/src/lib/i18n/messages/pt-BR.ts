@@ -34,6 +34,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -240,6 +241,7 @@ export const dict: Record<I18nKey, string> = {
   ...receivedPagesI18n['pt-BR'],
   ...memoryDreamingI18n['pt-BR'],
   ...usageToolI18n['pt-BR'],
+  ...externalOpenCodePluginI18n['pt-BR'],
   ...openchamberToolsLayoutI18n['pt-BR'],
   ...openchamberToolOutputI18n['pt-BR'],
   ...opencodeToolOutputI18n['pt-BR'],
