@@ -5228,15 +5228,15 @@ const BROWSER_PANEL_POPUP_WEB_PREFERENCES = {
   nodeIntegration: false,
 };
 
-const openBrowserPanelTab = (contents, url, background) => {
+const openBrowserPanelTab = (contents, { url, background, referrer }) => {
   const host = contents.hostWebContents;
   if (!host || host.isDestroyed()) {
-    loadUrlInsideWebContents(contents, url);
+    loadUrlInsideWebContents(contents, url, { httpReferrer: referrer });
     return;
   }
   host.send('openchamber:emit', {
     event: 'openchamber:browser-panel-open-tab',
-    detail: { webContentsId: contents.id, url, background },
+    detail: { webContentsId: contents.id, url, background, referrer },
   });
 };
 
@@ -5321,9 +5321,9 @@ app.on('web-contents-created', (_event, contents) => {
       };
     }
     if (target === 'tab' || target === 'background-tab') {
-      openBrowserPanelTab(contents, url, target === 'background-tab');
+      openBrowserPanelTab(contents, { url, background: target === 'background-tab', referrer });
     } else if (target === 'in-place') {
-      loadUrlInsideWebContents(contents, url);
+      loadUrlInsideWebContents(contents, url, { httpReferrer: referrer });
     }
     return { action: 'deny' };
   });

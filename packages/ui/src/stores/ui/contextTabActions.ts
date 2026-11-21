@@ -1,7 +1,7 @@
 import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/useTerminalStore';
 import { useFilesViewTabsStore } from '../useFilesViewTabsStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
+import { forgetBrowserTabOpenedWithAddress, noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
 import { getZoneView, resolveZoneActiveTabId, withZoneView, zoneOfMode } from '@/lib/workspace/zones';
 import type { ContextPanelTab, ContextPanelDirectoryState, UIStore, UIStoreSlice } from './types';
 import {
@@ -501,6 +501,7 @@ export const createContextTabActions: UIStoreSlice<
     });
 
     for (const tab of closedTabs) {
+      if (tab.mode === 'browser') forgetBrowserTabOpenedWithAddress(normalizedDirectory, tab.id);
       if (tab.mode === 'file' && tab.targetPath) {
         useFilesViewTabsStore.getState().removeOpenPath(normalizedDirectory, tab.targetPath);
       }

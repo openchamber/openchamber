@@ -27,7 +27,7 @@ Cross-origin iframe pages are opaque to the app. Inspection, console and page an
 
 ### Why the webview mounts with its resolved source
 
-A background view can lose an imperative initial navigation or ignore a later source mutation. Tunnel resolution completes before the element mounts; a failed resolution supplies a blank source with an explicit error so the panel can finish mounting without loading the wrong machine's page.
+A background view can lose an imperative initial navigation or ignore a later source mutation. Tunnel resolution completes before the element mounts; a failed resolution supplies a blank source with an explicit error so the panel can finish mounting without loading the wrong machine's page. A tab opened from a page's link is the one exception: `src` cannot carry a referrer policy, so it mounts at `about:blank` and loads its address with the page's referrer once the guest is ready ([why](../../lib/browser/DOCUMENTATION.md#why-a-tab-opened-from-a-link-loads-after-dom-ready)).
 
 ### Why opening waits for both loading and rendering
 
