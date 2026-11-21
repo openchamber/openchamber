@@ -13,6 +13,7 @@ import { getSessionPinList } from '@/lib/sessionPins';
 import { DEFAULT_PIN_LIST } from '@/lib/sidebarSections';
 import { requestPinTo } from '@/components/session/sidebar/sections/sectionActions';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { nestedLineageProject } from '@/sync/session-admission';
 import { getSessionDirectory } from '../mobileSessionFields';
 
 type Translate = (key: I18nKey, params?: I18nParams) => string;
@@ -28,8 +29,9 @@ const childrenOfActiveSessions = (): Map<string, Session[]> => {
 
 export const selectMobileSession = (session: Session, projectId: string | null, close: () => void): void => {
   useUIStore.getState().closeMainSurfaces();
-  if (projectId) useProjectsStore.getState().setActiveProjectIdOnly(projectId);
-  void useSessionUIStore.getState().setCurrentSession(session.id, getSessionDirectory(session) || null);
+  const directory = getSessionDirectory(session) || null;
+  if (projectId && !(directory && nestedLineageProject(session.id, directory))) useProjectsStore.getState().setActiveProjectIdOnly(projectId);
+  void useSessionUIStore.getState().setCurrentSession(session.id, directory);
   close();
 };
 

@@ -13,7 +13,7 @@ export type ConversationResult = { sessionId: string; title: string; titleRanges
 export type ContentSearchStatus =
   | { kind: 'idle' } | { kind: 'off' } | { kind: 'unsupported' } | { kind: 'failed' } | { kind: 'too-short' } | { kind: 'loading' } | { kind: 'ready'; indexing: { done: number; total: number } | null; lifecycleComplete: boolean; hasMore: boolean; pageError?: boolean } | { kind: 'error' };
 
-type Options = { enabled: boolean; text: string; lifecycle: OmniLifecycle; searchIn: OmniSearchIn; author: OmniAuthor; metadataItems: ReadonlyArray<ConversationMetadata>; directories?: readonly string[]; isAdmitted: (directory: string | null) => boolean;   branchOnly?: boolean; contentDebounceMs?: number; pageSize?: number };
+type Options = { enabled: boolean; text: string; lifecycle: OmniLifecycle; searchIn: OmniSearchIn; author: OmniAuthor; metadataItems: ReadonlyArray<ConversationMetadata>; directories?: readonly string[]; isAdmitted: (directory: string | null, sessionId?: string) => boolean;   branchOnly?: boolean; contentDebounceMs?: number; pageSize?: number };
 type ContentState = { key: string; hits: ConversationContentHit[]; totals: { sessions: number; byDirectory: Record<string, number> } | null; next: string | null; status: ContentSearchStatus };
 const idle: ContentState = { key: '', hits: [], totals: null, next: null, status: { kind: 'idle' } };
 const EMPTY_MATCHES: MetadataMatch[] = [];
@@ -109,7 +109,7 @@ export function useConversationSearch({ enabled, text, lifecycle, searchIn, auth
     });
     const contentOnly = new Map<string, ConversationContentHit>();
     for (const hit of shown.hits) {
-      if (metadataById.has(hit.sessionId) || contentOnly.has(hit.sessionId) || !isAdmitted(hit.directory)) continue;
+      if (metadataById.has(hit.sessionId) || contentOnly.has(hit.sessionId) || !isAdmitted(hit.directory, hit.sessionId)) continue;
       contentOnly.set(hit.sessionId, hit);
     }
     const contentRows = [...contentOnly.values()].map((hit) => ({ sessionId: hit.sessionId, title: hit.sessionTitle, titleRanges: [], directory: hit.directory, archived: hit.archived, updatedAt: hit.createdAt, metadata: null, excerpt: { messageId: hit.messageId, role: hit.role, snippet: hit.snippet, createdAt: hit.createdAt }, moreMatches: Math.max(0, hit.matchCount - 1) }));
@@ -147,7 +147,12 @@ export function useConversationSearch({ enabled, text, lifecycle, searchIn, auth
   }, [content, lifecycle, normalizedAuthor, pageSize, reasoningAvailable, text]);
 
   const contentReady = shown.status.kind === 'ready';
-  const admittedContentTotals = contentReady && canCount && shown.totals
+  const exactDirectoryTotals = React.useMemo(() => {
+    const totals = shown.totals;
+    return !totals || !metadataItems.some((item) => item.directory && totals.byDirectory[item.directory]
+      && !isAdmitted(item.directory) && isAdmitted(item.directory, item.sessionId));
+  }, [shown.totals, metadataItems, isAdmitted]);
+  const admittedContentTotals = contentReady && canCount && exactDirectoryTotals && shown.totals
     ? Object.entries(shown.totals.byDirectory).filter(([directory]) => isAdmitted(directory))
     : null;
   const totalCount = !enabled ? 0 : contentReady

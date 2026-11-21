@@ -529,6 +529,13 @@ it. Sidebar projections, the switcher and tray never use pins or work state as
 admission. Pinned chat columns gate their rendered session identity and
 directory and never admit: pins persist across launches, so admitting from a
 column would register folders nobody opened.
+
+A root in a linked checkout of a repository inside a registered non-Git folder
+can be opened through its session association. Selection checks the checkout's
+own configuration trust and keeps the session's recorded directory. This does
+not register the checkout or grant directory-wide admission. If a session URL
+opens before discovery finishes, Git can identify the linked checkout; the open
+waits for its association instead of adopting a third project.
 A subsession in a folder that is not admitted (an agent's worker in a worktree
 that was removed, or in a folder outside every project) is read through its
 nearest admitted ancestor's folder (`resolveAdmittedLineageDirectory` in

@@ -11,6 +11,9 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { WorktreeMetadata } from '@/types/worktree';
 
+export const getProjectWorktreeDiscovery = (projects: ReadonlyArray<ProjectRef>, runtimeKey: string) =>
+  `${runtimeKey}|${projects.map((project) => `${project.id}:${normalizePath(project.path) ?? ''}`).join('|')}`;
+
 export const resolveProjectsForWorktreeChange = (directories: readonly string[]): ProjectRef[] => {
   const byId = new Map<string, ProjectRef>();
   for (const directory of directories) {
