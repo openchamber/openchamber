@@ -419,13 +419,19 @@ export async function handleSystemBridgeMessage(
       }
     }
 
-    case 'api:sessions/metadata:set': {
-      const body = (payload || {}) as { sessionId?: JsonValue; patch?: JsonValue };
+    case 'api:sessions/metadata:set':
+    case 'api:sessions/metadata:compare-and-set': {
+      const body = (payload || {}) as { sessionId?: JsonValue; patch?: JsonValue; expected?: JsonValue };
       const sessionId = asSessionId(body.sessionId);
       if (!sessionId) return { id, type, success: false, error: 'a session id is required' };
       const patch = asSessionMetadata(body.patch);
       if (!patch) return { id, type, success: false, error: 'patch must be an object' };
       try {
+        if (type === 'api:sessions/metadata:compare-and-set') {
+          const expected = asSessionMetadata(body.expected);
+          if (!expected) return { id, type, success: false, error: 'expected must be an object' };
+          return { id, type, success: true, data: await deps.sessionState.compareAndSetMetadata(sessionId, expected, patch, sessionMetadataOnOpenCode(ctx?.manager)) };
+        }
         return { id, type, success: true, data: { metadata: await deps.sessionState.setMetadata(sessionId, patch, sessionMetadataOnOpenCode(ctx?.manager)) } };
       } catch (error) {
         return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };

@@ -634,6 +634,9 @@ features sharing the `openchamber` namespace do not erase each other. An entry
 an older version left in `sessions-metadata.json` is laid over the record on
 reads and pushed to OpenCode on that session's next write, then dropped from
 the file; the web server sweeps the rest.
+The extension serializes metadata writes per session. A conditional write
+compares the expected metadata within that queue and returns the current value
+on conflict. This queue does not serialize writes from another process.
 
 The webview answers `POST /api/openchamber/sessions/archive|unarchive` and
 `GET|POST /api/openchamber/sessions/:id/metadata` through the

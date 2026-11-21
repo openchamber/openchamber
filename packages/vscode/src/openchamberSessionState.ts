@@ -2,6 +2,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { isDeepStrictEqual } from 'node:util';
 
 const ARCHIVE_FILE_NAME = 'sessions-archive.json';
 const METADATA_FILE_NAME = 'sessions-metadata.json';
@@ -129,6 +130,7 @@ export const createSessionStateStore = ({
   const metadataPath = path.join(dataDir, METADATA_FILE_NAME);
   const unreadBaselinePath = path.join(dataDir, UNREAD_BASELINE_FILE_NAME);
   let writeChain: Promise<unknown> = Promise.resolve();
+  const metadataWrites = new Map<string, Promise<unknown>>();
   let unreadBaseline: number | null = null;
 
   const readJsonObjectFile = async (filePath: string): Promise<JsonObject | null> => {
@@ -239,6 +241,37 @@ export const createSessionStateStore = ({
     return { applied: onOpenCode.filter((id) => !stale.includes(id)), failedIds: [...stale, ...refused] };
   };
 
+  const updateMetadata = (sessionID: string, patch: SessionMetadata, openCode: SessionMetadataOnOpenCode, expected?: SessionMetadata) => {
+    const run = async () => {
+      const stored = await readMetadata();
+      if (!stored) throw new Error('session metadata is unavailable: its file could not be read');
+      const upstream = await openCode.read(sessionID);
+      if (!upstream) throw new Error(`session ${sessionID} was not found`);
+      const legacy = stored[sessionID];
+      const current = legacy ? { ...upstream, ...legacy } : upstream;
+      if (expected && !isDeepStrictEqual(current, expected)) return { metadata: current, conflict: true };
+      const merged = mergeMetadataPatch(current, patch);
+      await openCode.write(sessionID, merged);
+      if (legacy) {
+        const latest = await readMetadata();
+        if (latest && latest[sessionID]) {
+          const next = { ...latest };
+          delete next[sessionID];
+          await writeJsonObjectFile(metadataPath, next).catch((error) => {
+            console.warn('[openchamber-sessions] could not update the legacy metadata file:', describeError(error));
+          });
+        }
+      }
+      return { metadata: merged, conflict: false };
+    };
+    const next = (metadataWrites.get(sessionID) ?? Promise.resolve()).then(run, run);
+    metadataWrites.set(sessionID, next);
+    void next.finally(() => {
+      if (metadataWrites.get(sessionID) === next) metadataWrites.delete(sessionID);
+    }).catch(() => undefined);
+    return next;
+  };
+
   return {
     archivePath,
     metadataPath,
@@ -262,25 +295,10 @@ export const createSessionStateStore = ({
       return legacy ? { ...(upstream ?? {}), ...legacy } : upstream ?? {};
     },
     setMetadata: async (sessionID: string, patch: SessionMetadata, openCode: SessionMetadataOnOpenCode): Promise<SessionMetadata> => {
-      const stored = await readMetadata();
-      if (!stored) throw new Error('session metadata is unavailable: its file could not be read');
-      const upstream = await openCode.read(sessionID);
-      if (!upstream) throw new Error(`session ${sessionID} was not found`);
-      const legacy = stored[sessionID];
-      const merged = mergeMetadataPatch(legacy ? { ...upstream, ...legacy } : upstream, patch);
-      await openCode.write(sessionID, merged);
-      if (legacy) {
-        const latest = await readMetadata();
-        if (latest && latest[sessionID]) {
-          const next = { ...latest };
-          delete next[sessionID];
-          await writeJsonObjectFile(metadataPath, next).catch((error) => {
-            console.warn('[openchamber-sessions] could not update the legacy metadata file:', describeError(error));
-          });
-        }
-      }
-      return merged;
+      return (await updateMetadata(sessionID, patch, openCode)).metadata;
     },
+    compareAndSetMetadata: (sessionID: string, expected: SessionMetadata, patch: SessionMetadata, openCode: SessionMetadataOnOpenCode) =>
+      updateMetadata(sessionID, patch, openCode, expected),
   };
 };
 

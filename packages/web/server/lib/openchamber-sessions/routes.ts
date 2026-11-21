@@ -28,9 +28,10 @@ import { readObjective, writeObjective } from '../session-goal/objectives.js';
 import { worktreeSetupOf } from '../projects/worktree-setup.js';
 import { createArchiveStore } from './archive-store.js';
 import { createOpenCodeSessionArchive, createSessionArchive } from './session-archive.js';
-import { applyForkInheritance } from './fork-inheritance.js';
+import { applyForkInheritance, listForkMessages } from './fork-inheritance.js';
 import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
+import { compareAndSetSessionMetadata, registerConditionalMetadataRoute, setSessionMetadata } from './session-metadata-route.js';
 import { createSession } from './create-session.js';
 import { fetchSelectionInputs } from './selection-inputs.js';
 import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
@@ -68,6 +69,7 @@ export interface SessionPayload {
   worktree?: unknown;
   setUpstream?: unknown;
   patch?: unknown;
+  expected?: unknown;
   title?: unknown;
   prompt?: unknown;
   agent?: unknown;
@@ -238,7 +240,6 @@ const worktreeFields = ({ worktree }: Pick<SessionPayload, 'worktree'>) => hasWo
 const isSafeInteger = (value: unknown): value is number => Number.isSafeInteger(value);
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
 const isText = (value: unknown): value is string => typeof value === 'string';
-const isMetadata = (value: unknown): value is SessionMetadata => !!value && typeof value === 'object' && !Array.isArray(value);
 const isGoalError = (value: unknown): value is { goalConfigured?: unknown } => !!value && typeof value === 'object';
 const isList = (value: unknown): value is unknown[] => Array.isArray(value);
 const asList = <T>(value: readonly T[] | null | undefined): readonly T[] => Array.isArray(value) ? value : [];
@@ -1123,16 +1124,10 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     return metadata;
   };
 
-  const setMetadata = async (sessionID: string | undefined, payload: SessionPayload = {}) => {
-    const id = asNonEmptyString(sessionID);
-    if (!id) throw new OpenChamberControlError('a session id is required', 400);
-    const patch = payload?.patch;
-    if (!isMetadata(patch)) {
-      throw new OpenChamberControlError('patch must be an object', 400);
-    }
-
-    return { metadata: await writeMetadata(id, patch, asNonEmptyString(payload?.directory) || '') };
-  };
+  const setMetadata = (sessionID: string | undefined, payload: SessionPayload = {}) =>
+    setSessionMetadata(sessionID, payload, writeMetadata);
+  const compareAndSetMetadata = (sessionID: string | undefined, payload: SessionPayload = {}) =>
+    compareAndSetSessionMetadata(sessionID, payload, updateMetadata);
 
   const getMetadata = async (sessionID: string | undefined, directory = '') => {
     const id = asNonEmptyString(sessionID);
@@ -1457,6 +1452,8 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
           writeObjective,
           writeMetadata: (sessionID, patch) => writeMetadata(sessionID, patch, resolvedDirectory.directory),
           writePermissions: (sessionID, permissions) => client.session.update({ sessionID, permissions }),
+          readMessages: (sessionID) => listForkMessages(client, sessionID),
+          updatePins: async (sessionID, decide) => { await updateMetadata(sessionID, decide, resolvedDirectory.directory); },
         });
       }
 
@@ -1604,6 +1601,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     sessionArchive,
     sessionMetadataStore,
     setMetadata,
+    compareAndSetMetadata,
     getMetadata,
     setSessionLinks,
     send: (sessionID: string | undefined, payload: SessionPayload | null | undefined) => runExisting('send', sessionID, payload),
@@ -1673,6 +1671,8 @@ export const registerOpenChamberSessionRoutes = (app: Application, dependencies:
       return sendServiceError(res, error, 'Failed to store session metadata');
     }
   });
+
+  registerConditionalMetadataRoute(app, service.compareAndSetMetadata, sendServiceError);
 
   app.post('/api/openchamber/sessions/unarchive', express.json({ limit: '1mb' }), async (req, res) => {
     try {

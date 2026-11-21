@@ -107,24 +107,28 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 
 const metadataResponseSchema = z.object({
   metadata: z.record(z.string(), jsonValueSchema),
+  conflict: z.boolean().optional(),
 });
 
 export type SessionMetadataUpdateResult =
   | { outcome: 'updated'; metadata: Metadata }
-  | { outcome: 'unavailable'; reason: string };
+  | { outcome: 'conflict'; metadata: Metadata; reason: string }
+  | { outcome: 'unavailable'; reason: string; status?: number };
 
 // external: https://www.rfc-editor.org/rfc/rfc7386 The host merges metadata objects recursively and deletes keys assigned null.
 export async function requestSessionMetadataUpdate(
   sessionID: string,
   patch: Metadata,
   directory?: string | null,
+  expected?: Metadata,
 ): Promise<SessionMetadataUpdateResult> {
   let response: Response;
   try {
-    response = await runtimeFetch(`/api/openchamber/sessions/${encodeURIComponent(sessionID)}/metadata`, {
+    const suffix = expected === undefined ? 'metadata' : 'metadata/compare-and-set';
+    response = await runtimeFetch(`/api/openchamber/sessions/${encodeURIComponent(sessionID)}/${suffix}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ patch }),
+      body: JSON.stringify({ patch, expected }),
       directory,
     });
   } catch (error) {
@@ -132,7 +136,7 @@ export async function requestSessionMetadataUpdate(
   }
 
   if (!response.ok) {
-    return { outcome: 'unavailable', reason: `metadata request failed with ${response.status}` };
+    return { outcome: 'unavailable', reason: `metadata request failed with ${response.status}`, status: response.status };
   }
 
   let body: unknown;
@@ -147,6 +151,10 @@ export async function requestSessionMetadataUpdate(
     return { outcome: 'unavailable', reason: `malformed metadata response: ${parsed.error.issues[0]?.message ?? 'unknown shape'}` };
   }
 
+  if (expected !== undefined && parsed.data.conflict === undefined) {
+    return { outcome: 'unavailable', reason: 'server did not confirm conditional metadata update' };
+  }
+  if (parsed.data.conflict) return { outcome: 'conflict', metadata: parsed.data.metadata, reason: 'metadata changed' };
   return { outcome: 'updated', metadata: parsed.data.metadata };
 }
 
