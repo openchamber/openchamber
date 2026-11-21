@@ -1,5 +1,7 @@
 import React from 'react';
+import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { z } from 'zod';
@@ -7,6 +9,7 @@ import { PROJECTS_CAPTION_COLLAPSE_KEY, SIDEBAR_ACTIVITY_KEYS, sidebarSectionAct
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
+const PENDING_PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse.pending';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
 const ACTIVITY_COLLAPSE_STORAGE_KEY = 'oc.sessions.activityCollapse';
 const WORK_EXPAND_STORAGE_KEY = 'oc.sessions.workExpand';
@@ -29,11 +32,12 @@ export const isWorkExpanded = (expansion: WorkExpansion, key: string): boolean =
   expansion.expandedByDefault !== expansion.toggled.has(key)
 );
 
-type Project = { id: string };
+type Project = { id: string; sidebarCollapsed?: boolean };
 
 type SessionProjectViewStateArgs = {
   isVSCode: boolean;
   projects: readonly Project[];
+  writeSettings?: (changes: Partial<DesktopSettings>) => Promise<{ ok: boolean }>;
 };
 
 const parseStringSet = (raw: string | null): Set<string> => {
@@ -46,9 +50,37 @@ const parseStringSet = (raw: string | null): Set<string> => {
   }
 };
 
+type ProjectCollapseChoices = { bulk: boolean | null; byProject: Map<string, boolean> };
+
+const emptyProjectCollapseChoices = (): ProjectCollapseChoices => ({ bulk: null, byProject: new Map() });
+
+const pendingChoicesKey = () => `${PENDING_PROJECT_COLLAPSE_STORAGE_KEY}:${encodeURIComponent(getRuntimeKey())}`;
+
+const pendingChoicesSchema = z.object({ bulk: z.boolean().nullable(), byProject: z.array(z.tuple([z.string(), z.boolean()])) });
+
+const readPendingChoices = (raw: string | null): ProjectCollapseChoices => {
+  try {
+    const parsed = raw ? pendingChoicesSchema.safeParse(JSON.parse(raw)) : null;
+    if (parsed?.success) return { bulk: parsed.data.bulk, byProject: new Map(parsed.data.byProject) };
+  } catch {
+    // A broken record holds no choices.
+  }
+  return emptyProjectCollapseChoices();
+};
+
+const applyProjectCollapseChoices = (projects: readonly Project[], choices: ProjectCollapseChoices): Set<string> => {
+  const collapsed = new Set<string>();
+  for (const project of projects) {
+    const choice = choices.byProject.get(project.id) ?? choices.bulk ?? project.sidebarCollapsed === true;
+    if (choice) collapsed.add(project.id);
+  }
+  return collapsed;
+};
+
 export const useSessionProjectViewState = ({
   isVSCode,
   projects,
+  writeSettings = updateDesktopSettings,
 }: SessionProjectViewStateArgs) => {
   const safeStorage = React.useMemo(() => getDeferredSafeStorage(), []);
   const [collapsedProjects, setCollapsedProjects] = React.useState<Set<string>>(() => (
@@ -67,44 +99,58 @@ export const useSessionProjectViewState = ({
   const ignoreIntersectionUntil = React.useRef<number>(0);
   const groupCollapseDirty = React.useRef(false);
   const activityCollapseDirty = React.useRef(false);
-  const persistCollapsedProjectsTimer = React.useRef<number | null>(null);
-  const pendingCollapsedProjects = React.useRef<Set<string> | null>(null);
+  const latestCollapsedProjects = React.useRef(collapsedProjects);
+  const awaitingServerProjects = React.useRef(!isVSCode && !useProjectsStore.getState().hasServerSnapshot);
+  const [initialChoices] = React.useState(() => {
+    if (awaitingServerProjects.current) return readPendingChoices(safeStorage.getItem(pendingChoicesKey()));
+    safeStorage.removeItem(pendingChoicesKey());
+    return emptyProjectCollapseChoices();
+  });
+  const choicesWhileAwaiting = React.useRef<ProjectCollapseChoices>(initialChoices);
+  const hasServerSnapshot = useProjectsStore((store) => store.hasServerSnapshot);
 
-  const flushCollapsedProjectsPersist = React.useCallback(() => {
-    if (isVSCode) return;
-    const collapsed = pendingCollapsedProjects.current;
-    pendingCollapsedProjects.current = null;
-    persistCollapsedProjectsTimer.current = null;
-    if (!collapsed) return;
-
-    const { projects: storedProjects } = useProjectsStore.getState();
-    const updatedProjects = storedProjects.map((project) => ({
-      ...project,
-      sidebarCollapsed: collapsed.has(project.id),
-    }));
-    void updateDesktopSettings({ projects: updatedProjects }).catch(() => {});
-  }, [isVSCode]);
-
-  const scheduleCollapsedProjectsPersist = React.useCallback((collapsed: Set<string>) => {
-    if (!globalThis.window || isVSCode) return;
-    pendingCollapsedProjects.current = collapsed;
-    if (persistCollapsedProjectsTimer.current !== null) {
-      window.clearTimeout(persistCollapsedProjectsTimer.current);
+  const rememberChoiceWhileAwaiting = React.useCallback((update: (choices: ProjectCollapseChoices) => ProjectCollapseChoices) => {
+    if (!awaitingServerProjects.current) return;
+    const choices = update(choicesWhileAwaiting.current);
+    choicesWhileAwaiting.current = choices;
+    try {
+      safeStorage.setItem(pendingChoicesKey(), JSON.stringify({ bulk: choices.bulk, byProject: [...choices.byProject] }));
+    } catch {
+      // ignored
     }
-    persistCollapsedProjectsTimer.current = window.setTimeout(() => {
-      flushCollapsedProjectsPersist();
-    }, 700);
-  }, [flushCollapsedProjectsPersist, isVSCode]);
+  }, [safeStorage]);
 
-  React.useEffect(() => {
-    return () => {
-      if (globalThis.window && persistCollapsedProjectsTimer.current !== null) {
-        window.clearTimeout(persistCollapsedProjectsTimer.current);
-      }
-      persistCollapsedProjectsTimer.current = null;
-      pendingCollapsedProjects.current = null;
-    };
-  }, []);
+  const saveCollapsedProjects = React.useCallback((collapsed: ReadonlySet<string>) => {
+    try {
+      safeStorage.setItem(PROJECT_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(collapsed)));
+    } catch {
+      // ignored
+    }
+    if (isVSCode || awaitingServerProjects.current) return;
+    const nextProjects = useProjectsStore.getState().projects.map((project) => (
+      project.sidebarCollapsed === collapsed.has(project.id) ? project : { ...project, sidebarCollapsed: collapsed.has(project.id) }
+    ));
+    useProjectsStore.setState({ projects: nextProjects });
+    void writeSettings({ projects: nextProjects }).catch(() => {});
+  }, [isVSCode, safeStorage, writeSettings]);
+
+  const commitCollapsedProjects = React.useCallback((next: Set<string>) => {
+    latestCollapsedProjects.current = next;
+    setCollapsedProjects(next);
+    saveCollapsedProjects(next);
+  }, [saveCollapsedProjects]);
+
+  React.useLayoutEffect(() => {
+    if (!hasServerSnapshot || !awaitingServerProjects.current) return;
+    awaitingServerProjects.current = false;
+    const choices = choicesWhileAwaiting.current;
+    choicesWhileAwaiting.current = emptyProjectCollapseChoices();
+    safeStorage.removeItem(pendingChoicesKey());
+    const adopted = applyProjectCollapseChoices(projects, choices);
+    latestCollapsedProjects.current = adopted;
+    setCollapsedProjects(adopted);
+    if (choices.bulk !== null || choices.byProject.size > 0) saveCollapsedProjects(adopted);
+  }, [hasServerSnapshot, projects, safeStorage, saveCollapsedProjects]);
 
   React.useEffect(() => {
     if (!groupCollapseDirty.current) return;
@@ -149,17 +195,9 @@ export const useSessionProjectViewState = ({
       entry.kind === 'custom' && entry.grouping === 'time' ? [sidebarSectionActivityKey(entry.id)] : []
     ));
     setCollapsedActivities((current) => new Set([...current, ...SIDEBAR_ACTIVITY_KEYS, ...customZoneKeys]));
-    setCollapsedProjects(() => {
-      const allIds = new Set(projects.map((project) => project.id));
-      try {
-        safeStorage.setItem(PROJECT_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(allIds)));
-      } catch {
-        // ignored
-      }
-      scheduleCollapsedProjectsPersist(allIds);
-      return allIds;
-    });
-  }, [projects, safeStorage, scheduleCollapsedProjectsPersist]);
+    rememberChoiceWhileAwaiting(() => ({ bulk: true, byProject: new Map() }));
+    commitCollapsedProjects(new Set(projects.map((project) => project.id)));
+  }, [commitCollapsedProjects, projects, rememberChoiceWhileAwaiting]);
 
   const expandAll = React.useCallback(() => {
     ignoreIntersectionUntil.current = Date.now() + 150;
@@ -175,33 +213,19 @@ export const useSessionProjectViewState = ({
       next.delete(PROJECTS_CAPTION_COLLAPSE_KEY);
       return next;
     });
-    setCollapsedProjects(() => {
-      const empty = new Set<string>();
-      try {
-        safeStorage.setItem(PROJECT_COLLAPSE_STORAGE_KEY, JSON.stringify([]));
-      } catch {
-        // ignored
-      }
-      scheduleCollapsedProjectsPersist(empty);
-      return empty;
-    });
-  }, [safeStorage, scheduleCollapsedProjectsPersist]);
+    rememberChoiceWhileAwaiting(() => ({ bulk: false, byProject: new Map() }));
+    commitCollapsedProjects(new Set());
+  }, [commitCollapsedProjects, rememberChoiceWhileAwaiting]);
 
   const toggleProject = React.useCallback((projectId: string) => {
     ignoreIntersectionUntil.current = Date.now() + 150;
-    setCollapsedProjects((previous) => {
-      const next = new Set(previous);
-      if (next.has(projectId)) next.delete(projectId);
-      else next.add(projectId);
-      try {
-        safeStorage.setItem(PROJECT_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(next)));
-      } catch {
-        // ignored
-      }
-      scheduleCollapsedProjectsPersist(next);
-      return next;
-    });
-  }, [safeStorage, scheduleCollapsedProjectsPersist]);
+    const next = new Set(latestCollapsedProjects.current);
+    const collapsed = !next.has(projectId);
+    if (collapsed) next.add(projectId);
+    else next.delete(projectId);
+    rememberChoiceWhileAwaiting((choices) => ({ bulk: choices.bulk, byProject: new Map(choices.byProject).set(projectId, collapsed) }));
+    commitCollapsedProjects(next);
+  }, [commitCollapsedProjects, rememberChoiceWhileAwaiting]);
 
   const toggleGroup = React.useCallback((key: string) => {
     groupCollapseDirty.current = true;
@@ -228,16 +252,14 @@ export const useSessionProjectViewState = ({
     workExpansion,
   }), [collapsedActivities, collapsedGroups, collapsedProjects, workExpansion]);
   const actions = React.useMemo(() => ({
-    setCollapsedProjects,
     toggleProject,
     collapseAll,
     expandAll,
-    scheduleCollapsedProjectsPersist,
     setCollapsedGroups,
     setCollapsedActivities: updateCollapsedActivities,
     toggleGroup,
     toggleWork,
-  }), [collapseAll, expandAll, scheduleCollapsedProjectsPersist, toggleGroup, toggleProject, toggleWork, updateCollapsedActivities]);
+  }), [collapseAll, expandAll, toggleGroup, toggleProject, toggleWork, updateCollapsedActivities]);
 
   return { state, actions };
 };

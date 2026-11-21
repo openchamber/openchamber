@@ -1346,7 +1346,7 @@ export interface SettingsLoadResult {
 
 export interface SettingsAPI {
   load(): Promise<SettingsLoadResult>;
-  save(changes: Partial<SettingsPayload>): Promise<SettingsPayload>;
+  save(changes: Partial<SettingsPayload>, options?: { keepalive?: boolean }): Promise<SettingsPayload>;
 
   restartOpenCode?: () => Promise<{ restarted: boolean }>;
 }
