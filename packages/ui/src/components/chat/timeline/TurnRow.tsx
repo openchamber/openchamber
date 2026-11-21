@@ -3,7 +3,7 @@ import React from 'react';
 import TurnItem from '../components/TurnItem';
 import { TurnFold, TurnPagesRow } from '../components/LiveTurnActivity';
 import { useTurnFoldContexts } from '../components/useTurnFold';
-import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from '../components/liveActivityContext';
+import { LiveFinalActivityContext, LiveTurnHoistedPagesContext, ShownPartStreamPhaseContext } from '../components/liveActivityContext';
 import { MessageSliceContext } from '../message/messageSliceContext';
 import { cn } from '@/lib/utils';
 import type { RenderRow, ToggleTurnActivity, TurnEntry } from './types';
@@ -24,7 +24,7 @@ export const TurnRow = React.memo(({
     ...rendererInput
 }: TurnRowProps) => {
     const { turn } = entry;
-    const renderMessage = useTurnMessageRenderer({
+    const { renderMessage, streamPhaseOf } = useTurnMessageRenderer({
         ...rendererInput,
         turn,
         isLastTurn: entry.isLastTurn,
@@ -66,10 +66,12 @@ export const TurnRow = React.memo(({
 
     const underFold = row.underFold;
     return (
-        <div className={cn('relative w-full', row.gapBelow && 'pb-2')} data-turn-row={turn.turnId}>
-            {underFold ? (
-                <LiveTurnHoistedPagesContext.Provider value={foldContexts.hoistedPages}>{content}</LiveTurnHoistedPagesContext.Provider>
-            ) : content}
+        <div className={cn('relative w-full', row.gapBelow && 'pb-2')} data-turn-row={turn.turnId} data-row-key={row.key}>
+            <ShownPartStreamPhaseContext.Provider value={streamPhaseOf}>
+                {underFold ? (
+                    <LiveTurnHoistedPagesContext.Provider value={foldContexts.hoistedPages}>{content}</LiveTurnHoistedPagesContext.Provider>
+                ) : content}
+            </ShownPartStreamPhaseContext.Provider>
         </div>
     );
 });

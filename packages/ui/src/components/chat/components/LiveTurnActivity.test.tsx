@@ -266,6 +266,36 @@ describe('live Activity with the real message body', () => {
         expect([...container.querySelectorAll('[data-fixture-message="later"]')].filter((step) => !step.closest('[inert]'))).toHaveLength(0);
     });
 
+    test('Show notes keeps a stopped turn\'s later steps under the closed fold after a form answered below a note', async () => {
+        const note: Part = { type: 'text', id: 'note', text: 'Asking which layout', sessionID: 'session', messageID: 'progress', time: { start: 1, end: 2 } };
+        const form: Part = {
+            type: 'tool', tool: 'openchamber_render', id: 'form', callID: 'form', sessionID: 'session', messageID: 'progress',
+            state: {
+                status: 'completed', input: { action: 'render.page', html: '<p>pick</p>', title: 'Pick a layout', awaitAnswer: true },
+                output: '{}', metadata: { openchamber: { ok: true, answer: { answered: true, summary: 'Layout B', data: null } } }, time: { start: 1, end: 2 },
+            },
+        };
+        const record = turn([
+            assistant('progress', [note, form], 'tool-calls'),
+            assistant('later', [{ ...readPart, id: 'later-read', callID: 'later-read', messageID: 'later' }], 'tool-calls'),
+        ]);
+        await act(async () => root.render(<Harness record={record} retired keepText />));
+        expect(container.textContent).toContain('Asking which layout');
+        expect(container.querySelector('[data-html-render-status]')?.textContent).toContain('Layout B');
+        expect([...container.querySelectorAll('[data-fixture-message="later"]')].filter((step) => !step.closest('[inert]'))).toHaveLength(0);
+    });
+
+    test('Show notes draws a finished step\'s note whose part never got an end time', async () => {
+        // A short note with no trailing blank line has nothing to show while it streams.
+        const note: Part = { type: 'text', id: 'note', text: 'Reading the helper first', sessionID: 'session', messageID: 'progress', time: { start: 1 } };
+        const record = turn([
+            assistant('progress', [note, readPart], 'tool-calls'),
+            assistant('final', [text('answer', 'All done')], 'stop'),
+        ]);
+        await act(async () => root.render(<Harness record={record} keepText />));
+        expect(container.querySelector('[data-message-hoisted="note"]')?.textContent).toContain('Reading the helper first');
+    });
+
     test('keeps both proposed workflow cards outside Activity while approval is pending', async () => {
         useUIStore.setState({ agentWorkflowFeatureAvailable: true, agentWorkflowToolEnabled: true });
         const proposal = (id: string, messageID: string): Part => ({

@@ -57,13 +57,33 @@ height estimates.
   each text to the step that wrote it, so an open fold reads as the steps ran.
   The latest-rows window counts only rows it draws; a part shown below the
   window takes no slot in it.
-  Kept text never splits the steps around it the way a page does, so a turn
-  that stops without an answer leaves no tool row outside its closed fold.
+  Kept text never splits the steps around it the way a page does, and neither
+  does the answered-summary line of a form kept after it: only what Collapsed
+  would show splits them, so a turn that stops without an answer leaves no tool
+  row outside its closed fold.
+- Kept text streams as long as the message that wrote it streams (the phase
+  `ChatMessage` gives that message, `ShownPartStreamPhaseContext`); the part's
+  own end time only finishes it earlier. A finished step's part can lack an end
+  time, and a short note read as still streaming draws nothing.
 - Text shown outside the message that wrote it, kept text and text holding a
   UI block alike, carries that message's id and a quote root of its own. A
   selection in it is quoted and commented as that message's text, also while
   it is drawn inside the answer's body, and the comment resolves again when
-  the text returns to its step.
+  the text returns to its step. A quote root's stream leaves out the quote
+  roots nested in it, so the answer's stream is the same with the fold closed
+  and open. Kept text is drawn one root per part, so its roots are pieces of
+  the message's stream with the step's tool rows missing between them: a quote
+  taken there reads context only inside its own piece, a selection across two
+  pieces takes no anchor, and a quote resolved there compares context only as
+  far as its piece reaches, the match nearest where it was taken winning
+  (`lib/chatQuoteAnchor.ts`).
+- With no message in the viewport (a prompt stuck to the top edge or a message
+  mounted below it does not count), kept text is the scroll anchor, named by
+  the row that draws it and its part (`MessageViewportAnchor.kept`), so leaving
+  the session and coming back returns to it. Restoring finds the part wherever
+  it is drawn now (the answer may have arrived and taken it) and gives up once
+  the saved row is mounted without it; it never opens the fold around the step
+  that wrote it, as navigating to that step does.
 - Answered forms normally fold like completed steps, but a form after retained
   text keeps its answered-summary line so the question still separates that
   passage from the reply. Settled secret cards have no such summary and fold.

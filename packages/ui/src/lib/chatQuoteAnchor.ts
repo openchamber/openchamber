@@ -36,28 +36,62 @@ export function findUiRenderQuoteRoot(scope: ParentNode, messageId: string, part
     return scope.querySelector(`[data-ui-render-message="${CSS.escape(messageId)}"][data-ui-render-part="${CSS.escape(partId)}"]`);
 }
 
-function hasContextAt(stream: string, anchor: ChatQuoteAnchor, index: number): boolean {
+type StreamPieces = readonly number[] | undefined;
+
+function contextBounds(stream: string, pieces: StreamPieces, start: number, end: number): [number, number] {
+    if (!pieces) return [0, stream.length];
+    let low = 0;
+    for (const base of pieces) if (base <= start) low = base;
+    return [low, pieces.find((base) => base >= end) ?? stream.length];
+}
+
+function hasContextAt(stream: string, anchor: ChatQuoteAnchor, index: number, pieces?: StreamPieces): boolean {
     const end = index + anchor.text.length;
-    const before = stream.slice(Math.max(0, index - anchor.prefix.length), index);
-    const after = stream.slice(end, end + anchor.suffix.length);
+    const [low, high] = contextBounds(stream, pieces, index, end);
+    const before = stream.slice(Math.max(low, index - anchor.prefix.length), index);
+    const after = stream.slice(end, Math.min(high, end + anchor.suffix.length));
     return anchor.prefix.endsWith(before) && anchor.suffix.startsWith(after);
 }
 
-function streamOffset(root: Node, container: Node, offset: number): number {
-    const probe = root.ownerDocument!.createRange();
+function collectTextNodes(node: Node, into: Text[]): Text[] {
+    for (let child = node.firstChild; child; child = child.nextSibling) {
+        if (child.nodeType === 3) {
+            // SAFETY: nodeType 3 is TEXT_NODE.
+            into.push(child as Text);
+            continue;
+        }
+        // SAFETY: nodeType 1 is ELEMENT_NODE.
+        const nestedQuoteRoot = child.nodeType === 1 && (child as Element).matches(CHAT_QUOTE_ROOT_SELECTOR);
+        if (!nestedQuoteRoot) collectTextNodes(child, into);
+    }
+    return into;
+}
+
+const rootText = (root: Element): string => collectTextNodes(root, []).map((node) => node.data).join('');
+
+function streamOffset(root: Element, container: Node, offset: number): number {
+    const probe = root.ownerDocument.createRange();
     probe.setStart(root, 0);
     probe.setEnd(container, offset);
-    return probe.toString().length;
+    let length = 0;
+    for (const node of collectTextNodes(root, [])) {
+        if (node === container) return length + offset;
+        if (!probe.intersectsNode(node)) break;
+        length += node.data.length;
+    }
+    return length;
 }
+
+const isKeptText = (root: Element): boolean => root.closest('[data-message-id]')?.hasAttribute('data-message-hoisted') === true;
 
 function joinStreams(roots: readonly Element[]) {
     const bases: number[] = [];
     let stream = '';
     for (const root of roots) {
         bases.push(stream.length);
-        stream += root.textContent ?? '';
+        stream += rootText(root);
     }
-    return { stream, bases };
+    return { stream, bases, pieces: roots.some(isKeptText) ? bases : undefined };
 }
 
 export function captureChatQuoteAnchor(roots: Element | readonly Element[], range: Range): ChatQuoteAnchor | null {
@@ -65,20 +99,22 @@ export function captureChatQuoteAnchor(roots: Element | readonly Element[], rang
     const startIndex = list.findIndex((root) => root.contains(range.startContainer));
     const endIndex = list.findIndex((root) => root.contains(range.endContainer));
     if (startIndex < 0 || endIndex < startIndex) return null;
-    const { stream, bases } = joinStreams(list);
+    const { stream, bases, pieces } = joinStreams(list);
+    if (pieces && startIndex !== endIndex) return null;
     const start = bases[startIndex] + streamOffset(list[startIndex], range.startContainer, range.startOffset);
     const end = bases[endIndex] + streamOffset(list[endIndex], range.endContainer, range.endOffset);
     const text = stream.slice(start, end);
     if (!text.trim()) return null;
+    const [low, high] = contextBounds(stream, pieces, start, end);
     return {
         text,
-        prefix: stream.slice(Math.max(0, start - CONTEXT_LENGTH), start),
-        suffix: stream.slice(end, end + CONTEXT_LENGTH),
+        prefix: stream.slice(Math.max(low, start - CONTEXT_LENGTH), start),
+        suffix: stream.slice(end, Math.min(high, end + CONTEXT_LENGTH)),
         start,
     };
 }
 
-export function locateChatQuote(stream: string, anchor: ChatQuoteAnchor): number | null {
+export function locateChatQuote(stream: string, anchor: ChatQuoteAnchor, pieces?: StreamPieces): number | null {
     if (!anchor.text) return null;
     const occurrences: number[] = [];
     for (let index = stream.indexOf(anchor.text); index !== -1 && occurrences.length < MAX_OCCURRENCES; index = stream.indexOf(anchor.text, index + 1)) {
@@ -87,23 +123,11 @@ export function locateChatQuote(stream: string, anchor: ChatQuoteAnchor): number
     if (occurrences.length <= 1) return occurrences[0] ?? null;
     if (!anchor.prefix && !anchor.suffix) return null;
 
-    const inContext = occurrences.filter((index) => hasContextAt(stream, anchor, index));
+    const inContext = occurrences.filter((index) => hasContextAt(stream, anchor, index, pieces));
     if (inContext.length === 0) return null;
     return inContext.reduce((best, index) => (
         Math.abs(index - anchor.start) < Math.abs(best - anchor.start) ? index : best
     ));
-}
-
-function collectTextNodes(node: Node, into: Text[]): Text[] {
-    for (let child = node.firstChild; child; child = child.nextSibling) {
-        if (child.nodeType === 3) {
-            // SAFETY: nodeType 3 is TEXT_NODE.
-            into.push(child as Text);
-        } else {
-            collectTextNodes(child, into);
-        }
-    }
-    return into;
 }
 
 function isWholeMessage(roots: readonly Element[]): boolean {
@@ -158,11 +182,11 @@ function locateInPartialStream(stream: string, anchor: ChatQuoteAnchor): { start
 }
 
 export function resolveChatQuoteRanges(roots: readonly Element[], anchor: ChatQuoteAnchor): Range[] | null {
-    const { stream } = joinStreams(roots);
+    const { stream, pieces } = joinStreams(roots);
     let start: number | null;
     let end: number;
-    if (isWholeMessage(roots)) {
-        start = locateChatQuote(stream, anchor);
+    if (pieces || isWholeMessage(roots)) {
+        start = locateChatQuote(stream, anchor, pieces);
         end = (start ?? 0) + anchor.text.length;
     } else {
         const span = locateInPartialStream(stream, anchor);

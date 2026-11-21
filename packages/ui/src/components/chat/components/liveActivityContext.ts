@@ -1,6 +1,7 @@
 import { createContext } from 'react';
 
 import type { ShownPart } from '../lib/turns/liveActivity';
+import type { StreamPhase } from '../message/types';
 
 export const LiveFinalActivityContext = createContext<{
     messageId: string;
@@ -11,6 +12,8 @@ export const LiveFinalActivityContext = createContext<{
 } | null>(null);
 
 export const LiveTurnHoistedPagesContext = createContext<ReadonlySet<string> | null>(null);
+
+export const ShownPartStreamPhaseContext = createContext<(messageId: string) => StreamPhase>(() => 'completed');
 
 export const LiveActivityInteractionContext = createContext<{
     hold: () => void;

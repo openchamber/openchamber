@@ -5,6 +5,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useChatSurfaceMode } from '../../useChatSurfaceMode';
 import { TextSelectionMenu } from '../TextSelectionMenu';
 import { isSettledAsk, type ShownPart } from '../../lib/turns/liveActivity';
+import { ShownPartStreamPhaseContext } from '../../components/liveActivityContext';
 import AssistantTextPart from './AssistantTextPart';
 import { PageAskStatus } from './PageAskStatus';
 import { generatedImagePaths, proposedWorkflowRunId, renderedPage, requestedSecret, requestedSecretForget, requestedSecretRun } from '@/lib/opencode/tools';
@@ -50,15 +51,16 @@ function ShownText({ part, onShowPopup }: { part: TextPart; onShowPopup?: (conte
   const rootRef = React.useRef<HTMLDivElement>(null);
   const surface = useChatSurfaceMode();
   const showTTS = useConfigStore((state) => state.showMessageTTSButtons);
+  const streamPhaseOf = React.useContext(ShownPartStreamPhaseContext);
   return (
-    <div data-message-id={part.messageID} data-message-hoisted="">
+    <div data-message-id={part.messageID} data-message-hoisted={part.id}>
       <div ref={rootRef} data-chat-quote-root="true" className="relative">
         <TextSelectionMenu containerRef={rootRef} readingKey={part.messageID} canReadAloud={surface !== 'mini-chat' && showTTS} />
         <AssistantTextPart
           part={part}
           sessionId={part.sessionID}
           messageId={part.messageID}
-          streamPhase={part.time?.end === undefined ? 'streaming' : 'completed'}
+          streamPhase={streamPhaseOf(part.messageID)}
           onShowPopup={onShowPopup}
         />
       </div>

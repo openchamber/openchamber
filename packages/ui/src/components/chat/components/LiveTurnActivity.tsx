@@ -10,7 +10,7 @@ import {
     planActivityTrim,
 } from '../lib/turns/activityRows';
 import type { ChatMessageEntry, TurnRecord } from '../lib/turns/types';
-import { getShownPages, hasUiBlock } from '../lib/turns/liveActivity';
+import { getShownPages } from '../lib/turns/liveActivity';
 import { summarizeLiveActivity } from '../lib/turns/liveActivitySummary';
 import { LiveActivityCollapse } from './LiveActivityCollapse';
 import { ShownPartCard } from '../message/parts/ShownToolCard';
@@ -73,7 +73,10 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, ke
     const previewRef = React.useRef<HTMLDivElement>(null);
     useActivityRowGlide(rowsRef, hiddenRows, !settled && !expanded);
     useLiveRowsFloor(previewFloorRef, previewRef, !expanded && (held || !settled));
-    const livePageMessageId = finalMessage ? undefined : pages.filter((part) => part.type === 'tool' || hasUiBlock(part.text)).at(-1)?.messageID;
+    const livePageMessageId = React.useMemo(() => {
+        if (finalMessage) return undefined;
+        return (keepText ? getShownPages(turn.assistantMessages) : pages).at(-1)?.messageID;
+    }, [finalMessage, keepText, pages, turn.assistantMessages]);
     const pageMessageIdRef = React.useRef(livePageMessageId);
     if (!held) pageMessageIdRef.current = livePageMessageId;
     const lastPageMessageId = held ? pageMessageIdRef.current : livePageMessageId;
