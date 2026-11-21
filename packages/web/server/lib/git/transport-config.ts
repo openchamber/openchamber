@@ -24,6 +24,43 @@ const TRANSPORT_CONFIG_PATTERN = [
 
 const digest = (value: Buffer) => crypto.createHash('sha256').update(value).digest('base64url');
 
+const NUL = 0;
+const NUL_BYTES = Buffer.from([NUL]);
+const COMMAND_SCOPE = Buffer.from('command');
+const COMMAND_LINE_ORIGIN = Buffer.from('command line:');
+const EXTRA_HEADER_KEY = /^http(\..+)?\.extraheader$/;
+const TRACE_HEADER = /^(traceparent|tracestate)[ \t]*:/i;
+const normalizedTraceMetadata = (scope: Buffer, origin: Buffer, entry: Buffer) => {
+  if (!scope.equals(COMMAND_SCOPE) || !origin.equals(COMMAND_LINE_ORIGIN)) return null;
+  const text = entry.toString('utf8');
+  const separator = text.indexOf('\n');
+  if (separator < 0) return null;
+  const key = text.slice(0, separator);
+  const header = TRACE_HEADER.exec(text.slice(separator + 1));
+  if (!EXTRA_HEADER_KEY.test(key) || !header?.[1]) return null;
+  return Buffer.from(`${key}\n${header[1].toLowerCase()}:`);
+};
+const withNormalizedTraceMetadata = (output: Buffer) => {
+  const fields: Buffer[] = [];
+  let start = 0;
+  for (let index = 0; index < output.length; index += 1) {
+    if (output[index] !== NUL) continue;
+    fields.push(output.subarray(start, index));
+    start = index + 1;
+  }
+  if (start < output.length) fields.push(output.subarray(start));
+  if (fields.length % 3 !== 0) return output;
+  const kept: Buffer[] = [];
+  for (let index = 0; index < fields.length; index += 3) {
+    const scope = fields[index];
+    const origin = fields[index + 1];
+    const entry = fields[index + 2];
+    if (scope === undefined || origin === undefined || entry === undefined) return output;
+    kept.push(scope, NUL_BYTES, origin, NUL_BYTES, normalizedTraceMetadata(scope, origin, entry) ?? entry, NUL_BYTES);
+  }
+  return Buffer.concat(kept);
+};
+
 export interface TransportRevisionOptions {
   gitBinary?: string;
   execFileImpl?: (file: string, args: string[], options: ExecFileOptionsWithBufferEncoding) => Promise<{ stdout: Buffer }>;
@@ -77,7 +114,7 @@ export async function readEffectiveGitTransportRevision(directory: string, {
         throw error;
       }
     }
-    return digest(Buffer.concat([Buffer.from(configOutput), Buffer.from([0]), Buffer.from(checkoutConfigObjects)]));
+    return digest(Buffer.concat([withNormalizedTraceMetadata(configOutput), Buffer.from([0]), Buffer.from(checkoutConfigObjects)]));
   } catch {
     throw Object.assign(new Error('Effective Git transport configuration is unavailable'), {
       code: 'STALE_CONFIG',
