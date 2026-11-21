@@ -19,7 +19,7 @@ export interface LeadChild {
 }
 
 export interface SessionLeadRuntimeOptions {
-  briefs: Pick<LeadBriefStore, 'remove'>;
+  briefs: Pick<LeadBriefStore, 'read' | 'remove'>;
   readSessionMetadata: (sessionId: string, options: { directory: string }) => Promise<SessionMetadata | null | undefined>;
   buildOpenCodeUrl: (route: string, directory: string) => string | URL;
   getOpenCodeAuthHeaders: () => Record<string, string>;
@@ -146,10 +146,15 @@ export const createSessionLeadRuntime = ({
   const sleep = async (sessionId: string, directory: string, cacheLifetimeMs: number, generation: number) => {
     if (await contextTokens(sessionId, directory) < SLEEP_COMPACTION_MIN_TOKENS) return;
     if (!isCurrent(sessionId, generation) || isSessionWarm?.(sessionId, cacheLifetimeMs)) return;
-    if (await hasStagedRevert(sessionId, directory) || await isBusy(sessionId)) return;
     const lead = readLead(await readSessionMetadata(sessionId, { directory }));
-    if (!lead || !isCurrent(sessionId, generation)) return;
-    pending.set(sessionId, { at: now(), digest: lead.digest });
+    if (!lead) return;
+    const hasBrief = await briefs.read(sessionId).then((brief) => brief !== null, (error: Error) => {
+      warn('[session-lead] could not read the brief before sleeping; the model writes the summary:', error.message);
+      return false;
+    });
+    if (await hasStagedRevert(sessionId, directory) || await isBusy(sessionId)) return;
+    if (!isCurrent(sessionId, generation)) return;
+    if (hasBrief) pending.set(sessionId, { at: now(), digest: lead.digest });
     try {
       await request(`/api/session/${encodeURIComponent(sessionId)}/compact`, directory, { method: 'POST', body: JSON.stringify({}) });
     } catch (error) {

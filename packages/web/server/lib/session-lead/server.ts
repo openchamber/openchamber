@@ -104,9 +104,12 @@ export const createSessionLeadServer = ({
       if (!authorize(req)) return res.status(401).json({ error: 'Unauthorized' });
       const sessionID = asNonEmptyString(req.body?.sessionID);
       if (!sessionID) return res.json({ summary: null });
-      await refreshBriefEntry(sessionID)
-        .catch((error: Error) => console.warn('[session-lead] brief entry refresh failed:', error.message));
-      return res.json({ summary: await runtime.sleepSummary(sessionID).catch(() => null) });
+      const refreshed = await refreshBriefEntry(sessionID).then(() => true, (error: Error) => {
+        console.warn('[session-lead] brief entry refresh failed:', error.message);
+        return false;
+      });
+      const summary = await runtime.sleepSummary(sessionID).catch(() => null);
+      return res.json({ summary: refreshed ? summary : null });
     });
   };
 

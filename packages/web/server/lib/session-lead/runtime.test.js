@@ -107,14 +107,22 @@ describe('lead actions', () => {
     expect(handOver).toHaveBeenCalledWith('ses_old', 'ses_lead');
   });
 
-  it('replaces the whole digest with the time it was written', async () => {
+  it('refuses a digest until the lead wrote its brief', async () => {
     const { actions, writes } = await setup();
+    await expect(actions.execute('lead.digest', { now: ['git: green'] }, 'ses_lead')).rejects.toMatchObject({ status: 409, message: expect.stringContaining('lead.brief first') });
+    expect(writes).toEqual([]);
+  });
+
+  it('replaces the whole digest with the time it was written', async () => {
+    const { actions, briefs, writes } = await setup();
+    await briefs.write('ses_lead', '# Goal\n');
     await actions.execute('lead.digest', { now: ['git: green'] }, 'ses_lead');
     expect(writes).toEqual([{ openchamber: { lead: { digest: { needsYou: [], now: ['git: green'], news: [], suggestions: [], updatedAt: 42 } } } }]);
   });
 
   it('filters what the user dismissed by the time the digest is written, not when the call began', async () => {
-    const { actions, writes } = await setup(LEAD, { openchamber: { lead: { at: 1, dismissed: ['Speed up CI'] } } });
+    const { actions, briefs, writes } = await setup(LEAD, { openchamber: { lead: { at: 1, dismissed: ['Speed up CI'] } } });
+    await briefs.write('ses_lead', '# Goal\n');
     const result = await actions.execute('lead.digest', { suggestions: ['Speed up CI', 'Drop v1'] }, 'ses_lead');
     expect(writes[0].openchamber.lead.digest.suggestions).toEqual(['Drop v1']);
     expect(result.droppedFromSuggestions).toEqual(['Speed up CI']);
@@ -132,7 +140,8 @@ describe('lead actions', () => {
 
   it('writes no digest once the user turned the lead back, or marked it again since', async () => {
     for (const stored of [{}, { openchamber: { lead: { at: 2 } } }]) {
-      const { actions, writes } = await setup(LEAD, stored);
+      const { actions, briefs, writes } = await setup(LEAD, stored);
+      await briefs.write('ses_lead', '# Goal\n');
       await expect(actions.execute('lead.digest', { now: ['x'] }, 'ses_lead')).rejects.toMatchObject({ status: 409 });
       expect(writes).toEqual([]);
     }
@@ -140,7 +149,7 @@ describe('lead actions', () => {
 });
 
 describe('sleep compaction', () => {
-  const setup = ({ metadata = LEAD, tokens = SLEEP_COMPACTION_MIN_TOKENS, busy = false, warm = false, revert = undefined, onContext = () => {} } = {}) => {
+  const setup = ({ metadata = LEAD, tokens = SLEEP_COMPACTION_MIN_TOKENS, busy = false, warm = false, revert = undefined, brief = '# Goal\n', onContext = () => {} } = {}) => {
     const timers = [];
     const requests = [];
     const fetchImpl = vi.fn(async (url, init = {}) => {
@@ -154,7 +163,7 @@ describe('sleep compaction', () => {
       if (route.endsWith('/compact')) return json({ id: 'msg_1' });
       return new Response('{}', { status: 404 });
     });
-    const briefs = { remove: vi.fn(async () => undefined) };
+    const briefs = { read: async () => (brief instanceof Error ? Promise.reject(brief) : brief), remove: vi.fn(async () => undefined) };
     let clock = 1_000;
     let reads = 0;
     const runtime = createSessionLeadRuntime({
@@ -193,6 +202,16 @@ describe('sleep compaction', () => {
     expect(summary).toContain('Keep it? Yes');
     expect(summary).toContain('Migrate git (ses_child): busy');
     expect(await runtime.sleepSummary('ses_lead')).toBeNull();
+  });
+
+  it('leaves the summary to the model when the lead has no brief to wake up with, or it cannot be read', async () => {
+    for (const brief of [null, Object.assign(new Error('EACCES'), { code: 'EACCES' })]) {
+      const { runtime, requests, idle, fire } = setup({ brief });
+      await idle();
+      await fire();
+      expect(requests).toContainEqual({ route: '/api/session/ses_lead/compact', method: 'POST' });
+      expect(await runtime.sleepSummary('ses_lead')).toBeNull();
+    }
   });
 
   it('leaves a small context, a warm session, a running one, a staged undo and a plain session to the model', async () => {

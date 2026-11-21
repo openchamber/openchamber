@@ -97,6 +97,9 @@ export const createLeadActions = ({ getSession, updateMetadata, briefs, handOver
     const fields = digestInputSchema.safeParse(input);
     if (!fields.success) throw createError('needsYou, now, news and suggestions are lists. Nothing was saved.', 400);
     const session = await requireLead(sessionId);
+    if (await briefs.read(session.id) === null) {
+      throw createError('This lead has no brief yet. Write the brief with lead.brief first, then send the digest again. Nothing was saved.', 409);
+    }
     const markedAt = readLead(session.metadata)?.at;
     const parsed = parseDigestInput(fields.data, now());
     if ('error' in parsed) throw createError(`${parsed.error}. Nothing was saved.`, 400);

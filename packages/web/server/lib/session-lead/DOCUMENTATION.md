@@ -44,6 +44,8 @@ entries (`../session-knowledge/`), the control service routes the actions
   recommendation one of them; `now` at most 8; `news` at most 5; `suggestions` at
   most 3; each line at most 300 characters) and stamps `updatedAt`. It is
   session metadata, so every client gets it through the metadata broadcast.
+  A lead without a brief file gets `409` and nothing is written, so the
+  context a lead wakes up with never rests on the digest alone.
   The server never asks the lead to update it. suggestions the user
   dismissed (`lead.dismissed`, written by the UI) are left out, and the answer
   tells the lead which.
@@ -71,8 +73,9 @@ entries (`../session-knowledge/`), the control service routes the actions
   a turn stays with the model.
 - The compaction hook in our OpenCode plugin asks
   `POST /api/openchamber/agent-tool/lead-compaction` on every compaction. Only a
-  compaction this runtime started within the last 2 minutes gets a note; every
-  other one, and any failure to ask, falls back to the model's summary.
+  compaction this runtime started within the last 2 minutes, for a lead that
+  has a brief, gets a note; every other one, and any failure to ask, falls
+  back to the model's summary.
 - Workflow runs start without approval when `agentWorkflowAutoApprove` is on
   (every session), or when `agentWorkflowAutoApproveLeads` is on and the
   proposing session is a lead.
@@ -94,7 +97,9 @@ well as money, and a model summary costs one more full read. What a lead
 needs after sleeping is already written down: the brief (an entry, kept
 through compaction), the digest, and its children's states. The note says
 where the full history is (`session.messages`); OpenCode keeps the recent
-tail verbatim beside it.
+tail verbatim beside it. A lead with no brief still sleeps, with the model's
+summary: the digest is a few lines for the user and cannot stand in for the
+conversation, and one summary read now saves the same cold read at waking.
 
 ### Why the brief entry changes only at compaction and not on every lead.brief
 
