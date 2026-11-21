@@ -5480,7 +5480,7 @@ describe("deferQuestionsAfterSend", () => {
     ])
     expect(store.getState().form["session-a"]).toBe(undefined)
     // A local dismissal would veto the card; a deferral must not.
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("q-ask")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("session-a\u0000q-ask")).toBe(false)
   })
 
   test("a failed cancel leaves the question pending", async () => {
@@ -5492,7 +5492,7 @@ describe("deferQuestionsAfterSend", () => {
     await deferQuestionsAfterSend([question], promptToSessionA)
 
     expect(store.getState().form["session-a"]).toEqual([question])
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("q-ask")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("session-a\u0000q-ask")).toBe(false)
   })
 
   // Only a plain prompt to the question's own session is the message the note announces.
@@ -5870,7 +5870,7 @@ describe("sendRecoveredFormAnswer", () => {
       target: { runtimeKey: "default-runtime", sessionId: "session-a", directory: "/test/project" },
     }])
     // The card is done only after the send was accepted.
-    expect(useRecoverableQuestionsStore.getState().outcomes.get("frm_recovered")).toBe("answered")
+    expect(useRecoverableQuestionsStore.getState().outcomes.get("session-a\u0000frm_recovered")).toBe("answered")
   })
 
   test("the new turn carries the serialized answer payload", async () => {
@@ -5897,7 +5897,7 @@ describe("sendRecoveredFormAnswer", () => {
     expect(sendMessageCalls.map((call) => [call.content, call.metadata])).toEqual([
       [`${DEFERRED_ANSWER_LEAD_IN}\n\nthe answer`, { openchamber: { deferredAnswer: { formID: "frm_recovered" } } }],
     ])
-    expect(useRecoverableQuestionsStore.getState().outcomes.get("frm_recovered")).toBe("answered")
+    expect(useRecoverableQuestionsStore.getState().outcomes.get("session-a\u0000frm_recovered")).toBe("answered")
   })
 
   test("a rejected send keeps the question recoverable", async () => {
@@ -5910,7 +5910,7 @@ describe("sendRecoveredFormAnswer", () => {
     await expect(sendRecoveredFormAnswer(question, "the answer")).rejects.toThrow("send failed")
 
     // No tombstone: the card and the draft the surface keeps stay for a retry.
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_recovered")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("session-a\u0000frm_recovered")).toBe(false)
   })
 
   test("a duplicate submission reuses the first send", async () => {
@@ -5943,7 +5943,7 @@ describe("sendRecoveredFormAnswer", () => {
     await sendRecoveredFormAnswer(question, "the answer")
 
     expect(sendMessageCalls).toHaveLength(1)
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_recovered")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("session-a\u0000frm_recovered")).toBe(false)
   })
 })
 

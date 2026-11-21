@@ -36,16 +36,17 @@ interface FormCardProps {
     form: FormRequest;
     recovered?: RecoveredQuestion;
     inChat?: boolean;
+    keepDraft?: boolean;
     directory?: string;
 }
 
-export const FormCard: React.FC<FormCardProps> = ({ form, recovered, inChat, directory }) => {
+export const FormCard: React.FC<FormCardProps> = ({ form, recovered, inChat, keepDraft, directory }) => {
     const webSearchConsent = readWebSearchConsent(form);
     if (webSearchConsent) return <WebSearchConsentCard form={form} consent={webSearchConsent} />;
-    return <GenericFormCard form={form} recovered={recovered} inChat={inChat} directory={directory} />;
+    return <GenericFormCard form={form} recovered={recovered} inChat={inChat} keepDraft={keepDraft} directory={directory} />;
 };
 
-const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered, inChat = false, directory }) => {
+const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered, inChat = false, keepDraft = false, directory }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
     const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
@@ -61,8 +62,8 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered, inChat = fa
     const fieldsSignature = fields.map((field) => `${field.key}:${field.type}`).join('|');
     const recoveryDirectory = recovered?.directory;
     const draftScope = React.useMemo(
-        () => (recoveryDirectory !== undefined || inChat ? formDraftScope(form, recoveryDirectory ?? directory) : null),
-        [directory, form, inChat, recoveryDirectory],
+        () => (recoveryDirectory !== undefined || keepDraft || inChat ? formDraftScope(form, recoveryDirectory ?? directory) : null),
+        [directory, form, inChat, keepDraft, recoveryDirectory],
     );
     const [restored] = React.useState(() => {
         const draft = draftScope ? loadFormDraft(draftScope) : null;
@@ -100,7 +101,8 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered, inChat = fa
 
     React.useEffect(() => {
         if (!draftScope) return;
-        saveFormDraft(draftScope, { fieldsSignature, values, step: 0 });
+        const stored = loadFormDraft(draftScope);
+        saveFormDraft(draftScope, { fieldsSignature, values, step: stored?.fieldsSignature === fieldsSignature ? stored.step : 0 });
         savedValuesRef.current = values;
     }, [draftScope, fieldsSignature, values]);
 

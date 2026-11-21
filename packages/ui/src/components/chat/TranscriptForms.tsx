@@ -2,6 +2,7 @@ import React from 'react';
 import { useRecoveredQuestions, useScopedBlockingForms } from '@/sync/sync-context';
 import { dispatchPageWaiting } from './lib/scroll/timelineScrollIntent';
 import { FormCard } from './FormCard';
+import { formWaitingBlockId } from './formsInChat';
 
 export const TranscriptForms: React.FC<{ sessionId: string; directory?: string }> = ({ sessionId, directory }) => {
     const forms = useScopedBlockingForms(sessionId, directory);
@@ -9,12 +10,12 @@ export const TranscriptForms: React.FC<{ sessionId: string; directory?: string }
     return (
         <>
             {forms.map((form) => (
-                <WaitingBlock key={form.id} id={form.id}>
+                <WaitingBlock key={formWaitingBlockId(form)} id={formWaitingBlockId(form)}>
                     <FormCard form={form} inChat directory={directory} />
                 </WaitingBlock>
             ))}
             {recovered.map((question) => (
-                <WaitingBlock key={question.form.id} id={question.form.id}>
+                <WaitingBlock key={formWaitingBlockId(question.form)} id={formWaitingBlockId(question.form)}>
                     <FormCard form={question.form} recovered={question} inChat directory={directory} />
                 </WaitingBlock>
             ))}
