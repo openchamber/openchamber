@@ -50,6 +50,37 @@ const createRuntime = async ({
 };
 
 describe('settings runtime', () => {
+  it('serializes a feature update with a user save through one write lock', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+    });
+    try {
+      // A relay demand flip or a first push subscribe has to add one field
+      // without dropping what the user saved at the same moment.
+      const update = runtime.updateSettingsFromDisk((settings) => ({
+        ...settings,
+        privateRelay: { enabled: true, relayUrl: 'wss://relay.example/ws' },
+      }));
+      const save = runtime.persistSettings({ projects: [] });
+      await Promise.all([update, save]);
+
+      const onDisk = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      expect(onDisk.privateRelay).toEqual({ enabled: true, relayUrl: 'wss://relay.example/ws' });
+      expect(onDisk.projects).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('refuses a feature update without a mutation', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      await expect(runtime.updateSettingsFromDisk()).rejects.toThrow(TypeError);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('serializes session project registration with settings writes without changing navigation', async () => {
     const { runtime, settingsFilePath, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
     try {
