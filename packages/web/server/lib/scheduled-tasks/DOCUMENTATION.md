@@ -258,8 +258,17 @@ and rejoining tokens would discard line breaks and collapse argument spacing.
 A task either pins them (`execution.providerID`, `modelID`, `variant`, `agent`)
 or sets `execution.useDefaults: true`. Such a task reads the session defaults
 when each run starts (`session-defaults.js`: the project's `defaultModel` /
-`defaultVariant` / `defaultAgent`, then the global ones), so changing a default
-reaches it on its next run without editing it. With nothing set, the session is
+`defaultVariant` / `defaultAgent`, then the global ones; a Chats-scope task
+reads the Chats defaults from `readChatsDefaults` in `chats-scope.js` in the
+project's place; `createReadSessionDefaults` matches the Chats storage id, the
+one runs carry, not `CHATS_SCOPE_PUBLIC_ID`), so changing a default
+reaches it on its next run without editing it. Each such run reads the run
+directory's model list first: a default model that list lacks or disables is
+skipped for the next one, and a thinking level the chosen model doesn't offer
+is dropped. A failed or empty read keeps the configured model, because only a
+catalog that was read proves a model gone. Auto is OpenChamber's routing
+choice and never in that list, so it passes the check and the run routes. An empty project or Chats level on
+the global model takes the global level. With nothing set, the session is
 created without a model or agent and OpenCode applies its own. A pinned value
 stored next to `useDefaults` is kept only for when the task is pinned again.
 

@@ -15,7 +15,7 @@ import { controlErrorFields } from '../openchamber-control/error.js';
 import type { ExistingSessionDependencies, ExistingSessionTaskRunEvent } from './existing-session.js';
 import type { ScheduledTask, ScheduledTaskInput, ScheduledTaskStore, ScheduledWorktreeCleanup, ScheduledTaskStateResult } from '../projects/contracts.js';
 import type { ScheduledWorktree, ScheduledWorktreeBridge, RemoveScheduledWorktreeInput } from './worktree-bridge.js';
-import type { resolveSessionDefaults } from './session-defaults.js';
+import { readModelCatalog, type resolveSessionDefaults } from './session-defaults.js';
 import type { createRoutingRuntime } from '../routing/runtime.js';
 import type { SessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
 import { isString } from '../shared/object-guards.js';
@@ -32,7 +32,7 @@ export interface ScheduledTasksDependencies extends Omit<ExistingSessionDependen
   setSessionAutoAccept?: ReturnType<typeof createPermissionAutoAcceptRuntime>['setSessionPolicy'] | null;
   sessionKnowledgeRuntime?: { sync: (sessionID: string, directory: string, prompt: string) => Promise<boolean> } | null;
   persistSessionGoal?: Parameters<typeof createSessionGoal>[0]['persistSessionGoal'];
-  readSessionDefaults?: ((projectID: string) => Promise<ReturnType<typeof resolveSessionDefaults> | null>) | null;
+  readSessionDefaults?: ((projectID: string, catalog: Awaited<ReturnType<typeof readModelCatalog>>) => Promise<ReturnType<typeof resolveSessionDefaults> | null>) | null;
   resolveAutoSelection?: ReturnType<typeof createRoutingRuntime>['resolveAutoSelection'] | null;
   readSessionMetadata: (sessionID: string, options: { signal: AbortSignal }) => Promise<SessionMetadata | null | undefined>;
   readProcessInstance?: typeof readProcessInstanceDefault;
@@ -411,7 +411,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
     existingSessionTasks = createExistingSessionTasks(existingDependencies);
   }
 
-  const resolveRunSelection = async (projectID: string, task: ScheduledTask) => {
+  const resolveRunSelection = async (projectID: string, task: ScheduledTask, client: ReturnType<typeof createScopedClient>) => {
     const execution = task.execution;
     if (!execution.useDefaults) {
       return {
@@ -422,7 +422,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
       };
     }
     try {
-      const defaults = readSessionDefaults ? await readSessionDefaults(projectID) : null;
+      const defaults = readSessionDefaults ? await readSessionDefaults(projectID, await readModelCatalog(client)) : null;
       return {
         providerID: defaults?.providerID ?? null,
         modelID: defaults?.modelID ?? null,
@@ -847,7 +847,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
     const baseUrl = openCodeOrigin();
     const authHeaders = getOpenCodeAuthHeaders();
     const client = createScopedClient(runDirectory);
-    let selection = await resolveRunSelection(projectID, task);
+    let selection = await resolveRunSelection(projectID, task, client);
     const autoRun = isAutoModel(selection);
 
     let sessionID;

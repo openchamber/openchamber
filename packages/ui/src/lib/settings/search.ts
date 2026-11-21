@@ -11,6 +11,7 @@ import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta } from './metadata';
 import { OPENCHAMBER_TOOLS_SEARCH_ITEMS } from './search-openchamber-tools';
 import { CHAT_SENDING_SEARCH_ITEMS } from './search-chat-sending';
+import { SESSION_DEFAULTS_SEARCH_ITEMS } from './search-session-defaults';
 
 type SettingsSearchTitle =
   | { titleKey: I18nKey; titleParams?: I18nParams; literalTitle?: never }
@@ -587,26 +588,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   ...CHAT_SENDING_SEARCH_ITEMS,
-  {
-    id: 'sessions.default-model',
-    page: 'sessions',
-    titleKey: 'settings.openchamber.defaults.field.defaultModel',
-    keywords: ['model', 'provider', 'new sessions', 'thinking', 'reasoning', 'variant'],
-  },
-  {
-    id: 'sessions.fallback-model',
-    page: 'sessions',
-    titleKey: 'settings.openchamber.defaults.field.fallbackModel',
-    descriptionKey: 'settings.openchamber.defaults.field.fallbackModelInfo',
-    keywords: ['fallback', 'backup', 'usage limit', 'quota', 'rate limit', 'model', 'thinking'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'sessions.default-agent',
-    page: 'sessions',
-    titleKey: 'settings.openchamber.defaults.field.defaultAgent',
-    keywords: ['agent', 'new sessions'],
-  },
+  ...SESSION_DEFAULTS_SEARCH_ITEMS,
   {
     id: 'sessions.deletion-dialog',
     page: 'sessions',

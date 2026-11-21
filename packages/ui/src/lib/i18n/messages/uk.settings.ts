@@ -2076,6 +2076,8 @@ export const settingsDict = {
   "settings.openchamber.defaults.field.defaultThinking": "Мислення за замовчуванням",
   "settings.openchamber.defaults.field.thinkingPlaceholder": "Мислення",
   "settings.openchamber.defaults.field.defaultAgent": "Агент за замовчуванням",
+  "settings.openchamber.defaults.field.chatsDefaultModel": "Модель за замовчуванням для чатів",
+  "settings.openchamber.defaults.field.chatsDefaultAgent": "Агент за замовчуванням для чатів",
   "settings.openchamber.defaults.field.showDeletionDialogAria": "Показати діалогове вікно видалення",
   "settings.openchamber.defaults.field.sessionWarming": "Тримати неактивні сесії «теплими»",
   "settings.openchamber.defaults.field.sessionWarmingInfo": "Деякі провайдери забувають закешований контекст розмови після кількох хвилин тиші, тому наступне повідомлення йде повільніше й коштує дорожче. Коли це ввімкнено, OpenCode надсилає коротку інструкцію кожні 4 хвилини під час простою сесії, до 30 хвилин після вашого останнього повідомлення. Кожен запит надсилає моделі весь контекст сесії та може коштувати грошей або витрачати квоту підписки. Діє для всіх проєктів.",

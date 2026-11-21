@@ -1960,6 +1960,8 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.defaultThinking': 'Varsayılan Düşünme',
   'settings.openchamber.defaults.field.thinkingPlaceholder': 'Düşünme',
   'settings.openchamber.defaults.field.defaultAgent': 'Varsayılan Agent',
+  'settings.openchamber.defaults.field.chatsDefaultModel': 'Sohbetler için varsayılan model',
+  'settings.openchamber.defaults.field.chatsDefaultAgent': 'Sohbetler için varsayılan agent',
   'settings.openchamber.defaults.field.showDeletionDialogAria': 'Silme iletişim kutusunu göster',
   'settings.openchamber.defaults.field.sessionWarming': 'Boştaki oturumları sıcak tut',
   'settings.openchamber.defaults.field.sessionWarmingInfo': 'Bazı sağlayıcılar birkaç dakikalık sessizlikten sonra konuşmanın önbellekteki bağlamını unutur; sonraki mesaj daha yavaş ve pahalı olur. Bu açıkken OpenCode, oturum boşta kaldığı sürece her 4 dakikada bir kısa bir istem gönderir; son mesajınızdan sonra en fazla 30 dakika. Her istek oturumun tüm bağlamını modele gönderir ve ücret doğurabilir veya abonelik kotanızı tüketebilir. Tüm projelere uygulanır.',

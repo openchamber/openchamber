@@ -656,8 +656,9 @@ The config store owns default selection and discovery-gap behavior, documented
 in `packages/ui/src/stores/DOCUMENTATION.md`.
 
 Changing a draft's project or switching between Project and Chat applies the
-target's agent, model, and effort defaults immediately; a Chat target's are those
-of the managed Chats root. Worktree refinement
+target's agent, model, and effort defaults immediately; a Chat target's are the
+Chats defaults from Settings > Sessions, resolved against the managed Chats
+root's catalog. Worktree refinement
 within the same project preserves manual choices. Activation continuations
 check the runtime, draft identity, target revision, and manual-selection state
 before applying defaults again.

@@ -361,8 +361,9 @@ constructor retains its existing `Object.assign` behavior.
   by session id. The Chats id is a creation destination, not a registered project.
   Chats creation and directory-scoped send/fork do not infer a project or its defaults from Git,
   including when the configured Chats root is inside a registered checkout.
-  Membership compares the canonical directory and root so symlink aliases keep
-  the same projectless behavior.
+  They take the Chats defaults from Settings > Sessions in the project's place,
+  then the global ones. Membership compares the canonical directory and root, so
+  symlink aliases keep the same projectless behavior and the same Chats defaults.
 - Chats creation belongs to the session service. It reuses the directory allocator
   in `../scheduled-tasks/chats-scope.js`, including the configured Chats root.
   Failed creation removes only an empty directory. Once OpenCode creates the
@@ -529,7 +530,8 @@ constructor retains its existing `Object.assign` behavior.
   directory the request names, the project's own folder, as before: a new worktree
   does not exist yet, and its start folder mirrors that one. Git work (carrying
   changes, removal) stays on the worktree root.
-- Default agents resolve from the owning project before global settings and
+- Default agents resolve from the owning project, or for a chat from the Chats
+  defaults, before global settings and
   OpenCode defaults. Directory-based requests identify the project before
   creating a worktree; existing linked worktrees resolve through Git's primary
   worktree root. Send/fork fallback uses that same owner. Configured model IDs

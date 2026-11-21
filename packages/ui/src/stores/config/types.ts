@@ -83,6 +83,9 @@ export interface ConfigStore {
     settingsDefaultsLoaded: boolean;
     settingsDefaultVariant: string | undefined;
     settingsDefaultAgent: string | undefined;
+    chatsDefaultModel: string | undefined;
+    chatsDefaultVariant: string | undefined;
+    chatsDefaultAgent: string | undefined;
     opencodeDefaultAgent: string | undefined;
     opencodeDefaultModel: string | undefined;
     settingsAutoCreateWorktree: boolean;
@@ -179,6 +182,9 @@ export interface ConfigStore {
     setSettingsDefaultModel: (model: string | undefined) => void;
     setSettingsDefaultVariant: (variant: string | undefined) => void;
     setSettingsDefaultAgent: (agent: string | undefined) => void;
+    setChatsDefaultModel: (model: string | undefined) => void;
+    setChatsDefaultVariant: (variant: string | undefined) => void;
+    setChatsDefaultAgent: (agent: string | undefined) => void;
     setSettingsAutoCreateWorktree: (enabled: boolean) => void;
     setSettingsGitmojiEnabled: (enabled: boolean) => void;
     setSettingsDefaultFileViewerPreview: (enabled: boolean) => void;

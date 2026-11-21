@@ -1979,6 +1979,8 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.defaultThinking': 'Pensée par défaut',
   'settings.openchamber.defaults.field.thinkingPlaceholder': 'Pensée',
   'settings.openchamber.defaults.field.defaultAgent': 'Agent par défaut',
+  'settings.openchamber.defaults.field.chatsDefaultModel': 'Modèle par défaut des discussions',
+  'settings.openchamber.defaults.field.chatsDefaultAgent': 'Agent par défaut des discussions',
   'settings.openchamber.defaults.field.showDeletionDialogAria': 'Afficher la boîte de dialogue de suppression',
   'settings.openchamber.defaults.field.sessionWarming': 'Garder les sessions inactives au chaud',
   'settings.openchamber.defaults.field.sessionWarmingInfo': 'Certains fournisseurs oublient le contexte mis en cache après quelques minutes de silence, ce qui rend le message suivant plus lent et plus cher. Avec cette option, OpenCode envoie une courte instruction toutes les 4 minutes pendant que la session est inactive, jusqu\'à 30 minutes après votre dernier message. Chaque requête envoie tout le contexte de la session au modèle et peut entraîner des frais ou compter dans le quota de votre abonnement. S\'applique à tous les projets.',

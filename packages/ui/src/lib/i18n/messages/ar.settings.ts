@@ -2097,6 +2097,8 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.defaultThinking': 'مستوى التفكير الافتراضي',
   'settings.openchamber.defaults.field.thinkingPlaceholder': 'التفكير',
   'settings.openchamber.defaults.field.defaultAgent': 'الوكيل الافتراضي',
+  'settings.openchamber.defaults.field.chatsDefaultModel': 'النموذج الافتراضي للمحادثات',
+  'settings.openchamber.defaults.field.chatsDefaultAgent': 'الوكيل الافتراضي للمحادثات',
   'settings.openchamber.defaults.field.showDeletionDialogAria': 'إظهار نافذة تأكيد الحذف',
   'settings.openchamber.defaults.field.sessionWarming': 'إبقاء الجلسات الخاملة نشطة',
   'settings.openchamber.defaults.field.sessionWarmingInfo': "ينسى بعض الموفرين سياق المحادثة المخزن مؤقتًا بعد بضع دقائق من الصمت، فتصبح الرسالة التالية أبطأ وأعلى تكلفة. عند تفعيل هذا الخيار، يرسل OpenCode تعليمة قصيرة كل 4 دقائق أثناء خمول الجلسة، لمدة تصل إلى 30 دقيقة بعد آخر رسالة لك. يرسل كل طلب سياق الجلسة كاملًا إلى النموذج وقد يترتب عليه تكلفة أو يُحتسب ضمن حصة اشتراكك. ينطبق على جميع المشاريع.",
