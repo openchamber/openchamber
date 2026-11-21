@@ -85,6 +85,69 @@ const isDocsFile = (file) => {
 const isTestFile = (file) =>
   /(^|\/)(__tests__|test|tests)\//.test(file) || /\.(test|spec)\.[^/]+$/.test(file) || /\.snap$/.test(file);
 
+const FENCE_OPEN = /^ {0,3}(`{3,}(?=[^`\n]*$)|~{3,})/;
+
+// The text of a PR description a reader sees: each HTML comment replaced by a
+// space, one pass from left to right, so removing one never joins its
+// neighbours into another comment, number or image. `<!--` inside Markdown
+// code (fenced block or code span) is visible text. An unclosed comment that
+// starts a line hides the rest of the description, as GitHub does; a mid-line
+// one is shown as text.
+const stripComments = (text) => {
+  let out = "";
+  let fence = null;
+  let i = 0;
+  while (i < text.length) {
+    if (i === 0 || text[i - 1] === "\n") {
+      const eol = text.indexOf("\n", i);
+      const end = eol === -1 ? text.length : eol + 1;
+      const line = text.slice(i, end).replace(/\r?\n$/, "");
+      if (fence !== null) {
+        if (new RegExp(`^ {0,3}${fence[0]}{${fence.length},}\\s*$`).test(line)) fence = null;
+        out += text.slice(i, end);
+        i = end;
+        continue;
+      }
+      const open = FENCE_OPEN.exec(line);
+      if (open) {
+        fence = open[1];
+        out += text.slice(i, end);
+        i = end;
+        continue;
+      }
+    }
+    if (text[i] === "\\") {
+      out += text.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    if (text[i] === "`") {
+      const run = /^`+/.exec(text.slice(i))[0];
+      // A code span closes on the same number of backticks within its paragraph,
+      // which a blank line or a line-start comment ends.
+      const closer = new RegExp(`(?<!\`)${run}(?!\`)|\\n[ \\t]*\\n|\\n {0,3}<!--`, "g");
+      closer.lastIndex = i + run.length;
+      const match = closer.exec(text);
+      const spanEnd = match && match[0][0] === "`" ? match.index + run.length : i + run.length;
+      out += text.slice(i, spanEnd);
+      i = spanEnd;
+      continue;
+    }
+    if (text.startsWith("<!--", i)) {
+      // `<!-->` and `<!--->` are complete, empty comments.
+      const close = text.indexOf("-->", i + 2);
+      if (close !== -1 || /^ {0,3}<!--/.test(text.slice(text.lastIndexOf("\n", i - 1) + 1))) {
+        out += " ";
+        i = close === -1 ? text.length : close + 3;
+        continue;
+      }
+    }
+    out += text[i];
+    i += 1;
+  }
+  return out;
+};
+
 const readTrustedContributors = (workspace) => {
   try {
     return fs
@@ -145,7 +208,7 @@ const linkedIssueNumbers = async ({ github, owner, repo, pr }) => {
     `\\bpart of\\s+(?:${owner}/${repo}#|#|https://github\\.com/${owner}/${repo}/issues/)(\\d+)`,
     "gi",
   );
-  for (const match of (pr.body ?? "").matchAll(partOf)) numbers.add(Number(match[1]));
+  for (const match of stripComments(pr.body ?? "").matchAll(partOf)) numbers.add(Number(match[1]));
   return [...numbers];
 };
 
@@ -229,7 +292,7 @@ const evaluateVisualEvidence = ({ pr, files }) => ({
     .filter(({ status }) => status !== "removed")
     .map(({ filename }) => filename)
     .filter(isEvidenceFile),
-  missingScreenshots: !pr.draft && files.some(({ filename }) => isRenderedUiFile(filename)) && !DESCRIPTION_IMAGE.test(pr.body ?? ""),
+  missingScreenshots: !pr.draft && files.some(({ filename }) => isRenderedUiFile(filename)) && !DESCRIPTION_IMAGE.test(stripComments(pr.body ?? "")),
 });
 
 // The runtimes a change has to be run in, by the paths it touches: code that
@@ -258,8 +321,6 @@ const RUNTIME_PATHS = [
 ];
 
 const NOT_RUN = /\b(not\s+(yet\s+)?(run|ran|tested|verified|checked|exercised|applicable|available)\b|same\s+code\b|does\s+not\s+run\s+here|untested|unverified|n\/a|(could|can|did|was|were)\s?(not|n['’]t)\s+(be\s+)?(run|ran|test|tested|verify|verified|check|launch|build)|unable\s+to|no\s+access|no\s+(device|simulator|mac)\b)/i;
-
-const stripComments = (text) => text.replace(/<!--[\s\S]*?-->/g, "");
 
 const runtimeRow = (body, runtime) => {
   const escaped = runtime.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -322,5 +383,6 @@ module.exports = {
   hasMarkerComment,
   isMaintainer,
   isWaived,
+  linkedIssueNumbers,
   listPullFiles,
 };
