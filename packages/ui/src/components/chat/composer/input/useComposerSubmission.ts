@@ -152,7 +152,8 @@ export function useComposerSubmission({
             return;
         }
         if (!options?.queuedOnly) {
-            const held = await saveAttachmentsHeldForSend(chatDraftIdentity, currentDirectory ?? undefined, t);
+            const sent = attachmentsToSend(options?.presetText ?? getCurrentInputSnapshot().message);
+            const held = await saveAttachmentsHeldForSend(chatDraftIdentity, currentDirectory ?? undefined, sent, t);
             if (held === 'stopped') return;
             if (held === 'saved') {
                 void handleSubmitRef.current(options);

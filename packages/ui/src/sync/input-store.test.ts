@@ -7,6 +7,8 @@ import { attachmentWireName } from "@/lib/attachmentIdentity"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { serverAttachmentSchema, toAttachedFile, toServerAttachment, withOriginalAttachment } from "@/stores/messageQueueAttachments"
 import { attachedFilesForModel, filesForModel } from "./model-attachment-paths"
+import { fileReferenceNoteText, savedFileNoteText } from "./attachment-files"
+import { saveAttachmentsHeldForSend as saveHeldForSend } from "@/components/chat/composer/input/saveAttachmentsHeldForSend"
 
 // A HEIC conversion that fails the way the vendored decoder does for Apple's
 // HDR gain-map photos.
@@ -140,59 +142,204 @@ describe("input-store attachments", () => {
     expect(useInputStore.getState().attachedFiles).toEqual([])
   })
 
-  testWithMockFileReader("saves a HEIC the decoder cannot read where OpenCode runs and attaches a note naming it", async () => {
+  testWithMockFileReader("refuses a file held for Send over 20 MB by name without reading it", async () => {
+    const huge = new File([new Uint8Array(20 * 1024 * 1024 + 1)], "deck.pptx")
+
+    await expect(useInputStore.getState().addAttachedFile(huge, undefined, undefined, { saveOnSend: "reference" })).rejects.toThrow("deck.pptx")
+
+    expect(pendingReaders).toHaveLength(0)
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
+  testWithMockFileReader("holds a HEIC the decoder cannot read until Send, writes it once there and Edit gets the photo back", async () => {
     const write = spyOn(opencodeClient, "writeOpenCodeTempFiles").mockImplementation(async (_directory, files) => (
       files.map(({ filename }) => ({ filename, path: `/tmp/opencode/openchamber/abc/${filename}` }))
     ))
     try {
       const adding = useInputStore.getState().addAttachedFile(new File(["heic-data"], "IMG_4015.heic", { type: "image/heic" }))
       await waitForReaderCount(1)
-      resolveReader(pendingReaders[0], "data:text/plain;base64,bm90ZQ==")
+      resolveReader(pendingReaders[0], "data:image/heic;base64,aGVpYy1kYXRh")
       expect(await adding).toBe(true)
 
-      // The original bytes, unconverted, under the original name.
+      expect(write).not.toHaveBeenCalled()
+      const [held] = useInputStore.getState().attachedFiles
+      expect(held?.saveOnSend).toBe(true)
+      expect(held?.mimeType).toBe("image/heic")
+      expect(held?.filename).toBe("IMG_4015.heic")
+
+      const saving = useInputStore.getState().saveAttachmentsHeldForSend(null, "/repo", new Set(useInputStore.getState().attachedFiles.map((file) => file.id)))
+      await waitForReaderCount(2)
+      resolveReader(pendingReaders[1], "data:text/plain;base64,bm90ZQ==")
+      expect(await saving).toEqual([])
+
+      // The original bytes, unconverted, under the original name, written once.
+      expect(write).toHaveBeenCalledTimes(1)
       const [, files] = write.mock.calls[0]
       expect(files.map(({ filename }) => filename)).toEqual(["IMG_4015.heic"])
       const bytes = files[0].bytes
       expect(new TextDecoder().decode(bytes instanceof Uint8Array ? bytes : await bytes())).toBe("heic-data")
-      const [file] = useInputStore.getState().attachedFiles
-      expect(file?.mimeType).toBe("text/plain")
-      expect(file?.filename).toBe("IMG_4015.heic")
-      expect(file?.agentPath).toBe("/tmp/opencode/openchamber/abc/IMG_4015.heic")
-      expect(await file?.file?.text()).toContain("/tmp/opencode/openchamber/abc/IMG_4015.heic")
+      const [reference] = useInputStore.getState().attachedFiles
+      expect(reference?.mimeType).toBe("text/plain")
+      expect(reference?.agentPath).toBe("/tmp/opencode/openchamber/abc/IMG_4015.heic")
+      expect(await reference?.file?.text()).toContain("/tmp/opencode/openchamber/abc/IMG_4015.heic")
+
+      const queued = toAttachedFile(serverAttachmentSchema.parse(JSON.parse(JSON.stringify(toServerAttachment(reference!)))))
+      const edited = withOriginalAttachment(queued)
+      expect(edited.saveOnSend).toBe(true)
+      expect(edited.mimeType).toBe("image/heic")
+      expect(edited.dataUrl).toBe(held?.dataUrl)
+      expect(edited.agentPath).toBeUndefined()
     } finally {
       write.mockRestore()
     }
   })
 
-  testWithMockFileReader("names a HEIC the decoder cannot read when saving it where OpenCode runs fails too", async () => {
-    const write = spyOn(opencodeClient, "writeOpenCodeTempFiles").mockImplementation(async () => {
-      throw new Error("OpenCode is not reachable")
-    })
-    try {
-      await expect(
-        useInputStore.getState().addAttachedFile(new File(["heic-data"], "IMG_4015.heic", { type: "image/heic" })),
-      ).rejects.toThrow("IMG_4015.heic could not be converted from HEIC to JPEG")
-
-      expect(pendingReaders).toHaveLength(0)
-      expect(useInputStore.getState().attachedFiles).toEqual([])
-    } finally {
-      write.mockRestore()
-    }
-  })
-
-  testWithMockFileReader("refuses a shared HEIC the decoder cannot read by name, without writing it anywhere", async () => {
+  testWithMockFileReader("holds a shared HEIC the decoder cannot read the same way, without writing it anywhere", async () => {
     const write = spyOn(opencodeClient, "writeOpenCodeTempFiles")
     const share = { runtimeKey: "runtime", directory: "/repo", sessionId: "draft:share" }
     try {
       useInputStore.getState().selectAttachmentDraft(share)
-      await expect(
-        useInputStore.getState().addAttachedFile(new File(["heic-data"], "IMG_4015.heic", { type: "image/heic" }), share, undefined, { shared: true }),
-      ).rejects.toThrow("IMG_4015.heic")
+      const adding = useInputStore.getState().addAttachedFile(new File(["heic-data"], "IMG_4015.heic", { type: "image/heic" }), share, undefined, { shared: true })
+      await waitForReaderCount(1)
+      resolveReader(pendingReaders[0], "data:image/heic;base64,aGVpYy1kYXRh")
+      expect(await adding).toBe(true)
 
       expect(write).not.toHaveBeenCalled()
-      expect(useInputStore.getState().attachedFiles).toEqual([])
+      expect(useInputStore.getState().attachedFiles.map((file) => [file.filename, file.saveOnSend])).toEqual([["IMG_4015.heic", true]])
     } finally {
+      write.mockRestore()
+    }
+  })
+
+  testWithMockFileReader("an image saved as a file goes with a path note to its copy, written only at Send", async () => {
+    const write = spyOn(opencodeClient, "writeOpenCodeTempFiles").mockImplementation(async (_directory, files) => (
+      files.map(({ filename }) => ({ filename, path: `/tmp/opencode/openchamber/abc/${filename}` }))
+    ))
+    try {
+      const adding = useInputStore.getState().addAttachedFile(new File([pngBytes], "image-1.png", { type: "image/png" }), undefined, undefined, { saveOnSend: "copy" })
+      await waitForReaderCount(1)
+      resolveReader(pendingReaders[0], "data:image/png;base64,iVBORw0KGgo=")
+      expect(await adding).toBe(true)
+
+      expect(write).not.toHaveBeenCalled()
+      const [held] = useInputStore.getState().attachedFiles
+      expect(held?.saveCopyOnSend).toBe(true)
+      expect(held?.mimeType).toBe("image/png")
+
+      // Send and Queue go through the composer's step, which must see a draft holding only a copy.
+      const saving = saveHeldForSend(null, "/repo", useInputStore.getState().attachedFiles, (key) => key)
+      await waitForReaderCount(2)
+      resolveReader(pendingReaders[1], "data:text/plain;base64,bm90ZQ==")
+      expect(await saving).toBe("saved")
+
+      expect(write).toHaveBeenCalledTimes(1)
+      expect(write.mock.calls[0][2]?.isCurrentRuntime?.()).toBe(true)
+      const [image, note] = useInputStore.getState().attachedFiles
+      expect(image?.id).toBe(held?.id)
+      expect(image?.saveCopyOnSend).toBeUndefined()
+      expect(image?.dataUrl).toBe(held?.dataUrl)
+      expect(note?.filename).toBe("image-1.png")
+      expect(note?.agentPath).toBe("/tmp/opencode/openchamber/abc/image-1.png")
+      expect(note?.dataUrl.startsWith("data:text/plain;x-openchamber=path-note;base64,")).toBe(true)
+      expect(await note?.file.text()).toContain("[image-1.png](/tmp/opencode/openchamber/abc/image-1.png)")
+
+      // Queued and taken back by Edit: the image and the note to its copy, so a resend writes nothing again.
+      const edited = useInputStore.getState().attachedFiles.map((file) => (
+        withOriginalAttachment(toAttachedFile(serverAttachmentSchema.parse(JSON.parse(JSON.stringify(toServerAttachment(file))))))
+      ))
+      expect(edited.map((file) => [file.mimeType, file.dataUrl])).toEqual([[image!.mimeType, image!.dataUrl], [note!.mimeType, note!.dataUrl]])
+      const getModelMetadata = useConfigStore.getState().getModelMetadata
+      useConfigStore.setState({ getModelMetadata: () => ({ id: "m", providerId: "p", modalities: { input: ["image"] } }) })
+      try {
+        expect(await attachedFilesForModel({ providerID: "p", modelID: "m" }, edited, "/repo", () => true)).toEqual(edited)
+      } finally {
+        useConfigStore.setState({ getModelMetadata })
+      }
+      expect(write).toHaveBeenCalledTimes(1)
+    } finally {
+      write.mockRestore()
+    }
+  })
+
+  testWithMockFileReader("Send writes only the held files the message cites, once even when Send is pressed twice", async () => {
+    let finishWrite = () => {}
+    let writeStarted = () => {}
+    const started = new Promise<void>((resolve) => { writeStarted = resolve })
+    const write = spyOn(opencodeClient, "writeOpenCodeTempFiles").mockImplementation(async (_directory, files) => {
+      writeStarted()
+      await new Promise<void>((resolve) => { finishWrite = resolve })
+      return files.map(({ filename }) => ({ filename, path: `/tmp/opencode/openchamber/abc/${filename}` }))
+    })
+    try {
+      const input = useInputStore.getState()
+      for (const name of ["cited.docx", "removed.docx"]) {
+        const adding = input.addAttachedFile(new File(["docx"], name), undefined, undefined, { saveOnSend: "reference" })
+        await waitForReaderCount(1)
+        resolveReader(pendingReaders.shift()!, "data:application/octet-stream;base64,ZG9jeA==")
+        await adding
+      }
+      const [cited] = useInputStore.getState().attachedFiles
+      const sent = new Set([cited!.id])
+
+      const first = input.saveAttachmentsHeldForSend(null, "/repo", sent)
+      const second = input.saveAttachmentsHeldForSend(null, "/repo", sent)
+      await started
+      finishWrite()
+      await waitForReaderCount(1)
+      resolveReader(pendingReaders[0], "data:text/plain;base64,bm90ZQ==")
+      expect(await first).toEqual([])
+      expect(await second).toEqual([])
+
+      expect(write).toHaveBeenCalledTimes(1)
+      expect(write.mock.calls[0][1].map(({ filename }) => filename)).toEqual(["cited.docx"])
+      expect(useInputStore.getState().attachedFiles.map((file) => [file.filename, Boolean(file.saveOnSend)])).toEqual([
+        ["cited.docx", false],
+        ["removed.docx", true],
+      ])
+    } finally {
+      write.mockRestore()
+    }
+  })
+
+  testWithMockFileReader("an image over 10 MB saved as a file is held to go as its path, instead of refused", async () => {
+    const write = spyOn(opencodeClient, "writeOpenCodeTempFiles")
+    try {
+      const big = new File([new Uint8Array(10 * 1024 * 1024 + 1)], "scan.png", { type: "image/png" })
+      const adding = useInputStore.getState().addAttachedFile(big, undefined, undefined, { saveOnSend: "copy" })
+      await waitForReaderCount(1)
+      resolveReader(pendingReaders[0], "data:image/png;base64,AAAA")
+      expect(await adding).toBe(true)
+      const [held] = useInputStore.getState().attachedFiles
+      expect(held?.saveOnSend).toBe(true)
+      expect(held?.saveCopyOnSend).toBeUndefined()
+      expect(write).not.toHaveBeenCalled()
+    } finally {
+      write.mockRestore()
+    }
+  })
+
+  test("a path note restored from a sent message is still a path note, so a resend writes nothing", async () => {
+    const write = spyOn(opencodeClient, "writeOpenCodeTempFiles")
+    const getModelMetadata = useConfigStore.getState().getModelMetadata
+    useConfigStore.setState({ getModelMetadata: () => ({ id: "m", providerId: "p", modalities: { input: [] } }) })
+    try {
+      // OpenCode hands sent file parts back as plain text, without the note's media type parameter.
+      const path = "/tmp/opencode/openchamber/abc/plan.docx"
+      const input = useInputStore.getState()
+      input.addRestoredAttachment({ url: `data:text/plain;base64,${btoa(fileReferenceNoteText(path, "10 B"))}`, mimeType: "text/plain", filename: path })
+      input.addRestoredAttachment({ url: `data:text/plain;base64,${btoa(savedFileNoteText("photo.png", "/tmp/opencode/openchamber/def/photo.png", "The model cannot read this attachment directly."))}`, mimeType: "text/plain", filename: "photo.png" })
+      input.addRestoredAttachment({ url: "data:text/plain;base64,aGVsbG8=", mimeType: "text/plain", filename: "hello.txt" })
+
+      const [reference, converted, plain] = useInputStore.getState().attachedFiles
+      expect(reference?.dataUrl.startsWith("data:text/plain;x-openchamber=path-note;base64,")).toBe(true)
+      expect(converted?.dataUrl.startsWith("data:text/plain;x-openchamber=path-note;base64,")).toBe(true)
+      expect(plain?.dataUrl).toBe("data:text/plain;base64,aGVsbG8=")
+
+      const notes = [reference!, converted!]
+      expect(await attachedFilesForModel({ providerID: "p", modelID: "m" }, notes, "/repo", () => true)).toEqual(notes)
+      expect(write).not.toHaveBeenCalled()
+    } finally {
+      useConfigStore.setState({ getModelMetadata })
       write.mockRestore()
     }
   })
@@ -221,7 +368,7 @@ describe("input-store attachments", () => {
     try {
       const input = useInputStore.getState()
       input.selectAttachmentDraft(share)
-      const adding = input.addAttachmentSavedOnSend(new File(["docx-bytes"], "plan.docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }), share)
+      const adding = input.addAttachedFile(new File(["docx-bytes"], "plan.docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }), share, undefined, { shared: true, saveOnSend: "reference" })
       await waitForReaderCount(1)
       resolveReader(pendingReaders[0], "data:application/octet-stream;base64,ZG9jeA==")
       await adding
@@ -231,7 +378,7 @@ describe("input-store attachments", () => {
       expect(held?.saveOnSend).toBe(true)
       expect(held?.filename).toBe("plan.docx")
 
-      const saving = useInputStore.getState().saveAttachmentsHeldForSend(share, "/repo")
+      const saving = useInputStore.getState().saveAttachmentsHeldForSend(share, "/repo", new Set(useInputStore.getState().attachedFiles.map((file) => file.id)))
       await waitForReaderCount(2)
       resolveReader(pendingReaders[1], "data:text/plain;base64,bm90ZQ==")
       expect(await saving).toEqual([])
@@ -283,12 +430,12 @@ describe("input-store attachments", () => {
     try {
       const input = useInputStore.getState()
       input.selectAttachmentDraft(share)
-      const adding = input.addAttachmentSavedOnSend(new File(["docx-bytes"], "plan.docx"), share)
+      const adding = input.addAttachedFile(new File(["docx-bytes"], "plan.docx"), share, undefined, { shared: true, saveOnSend: "reference" })
       await waitForReaderCount(1)
       resolveReader(pendingReaders[0], "data:application/octet-stream;base64,ZG9jeA==")
       await adding
 
-      expect(await useInputStore.getState().saveAttachmentsHeldForSend(share, "/repo")).toEqual(["plan.docx"])
+      expect(await useInputStore.getState().saveAttachmentsHeldForSend(share, "/repo", new Set(useInputStore.getState().attachedFiles.map((file) => file.id)))).toEqual(["plan.docx"])
       expect(useInputStore.getState().attachedFiles[0]?.saveOnSend).toBe(true)
     } finally {
       write.mockRestore()

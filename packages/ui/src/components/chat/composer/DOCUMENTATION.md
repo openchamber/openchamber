@@ -657,7 +657,7 @@ OpenCode only at Send:
 - Every file names the share's draft identity and attaches with
   `addAttachedFile(..., { shared: true })`. It lands in that draft even when the
   user opened something else while it was read, and a HEIC the decoder cannot
-  read is refused by name instead of being written where OpenCode runs. Each
+  read is held for Send like a dropped one (`sync/DOCUMENTATION.md`). Each
   step resolves the draft's current identity by its work draft id
   (`resolveOpenWorkDraftIdentity`), so a destination changed mid-read takes the
   late files and their citations along.
@@ -669,7 +669,8 @@ OpenCode only at Send:
 - Office documents follow the "Attach documents" setting and get the same
   choice a dropped document gets. "Convert to text" attaches them locally.
   "Attach as is" (and the Save setting) keeps the original in the draft with
-  `saveOnSend` (`addAttachmentSavedOnSend`); `saveAttachmentsHeldForSend` writes
+  `saveOnSend` (`addAttachedFile`'s `saveOnSend: 'reference'`), as a dropped
+  document attached as is does; `saveAttachmentsHeldForSend` writes
   it where OpenCode runs when Send or Queue is pressed and swaps it for the same
   path reference a dropped document gets; a message queued that way returns the
   document still held for Send when its row is edited. A write that fails keeps the message
@@ -956,23 +957,26 @@ element takes focus and that can be before the report arrives. The paste handler
 focus as a backstop for that window. Every other runtime pastes images through `handlePaste` unchanged, and an IME
 without content insertion keeps refusing.
 With the profile setting `savePastedImagesAsFiles` on, pasted, dropped and
-picked images (`attachFilesWithCitation`, `attachFiles`) are written into a new
-folder under OpenCode's own temp folder (`opencodeClient.writeOpenCodeTempFiles`:
-`GET /api/info` names the folder, `POST /api/experimental/fs/write` writes it)
-and cited as `[name](absolute path)` (a plain link: a draft starting with `!`
-turns into a shell command), so the model, a subagent or a tool reads the file
-by path; OpenCode's agents may read that folder without asking.
-`imageSaveModeForModel` picks one of three cases. A model whose metadata lists
-no `image` input gets only the link, since it could not read the attachment
-(#5087), and the modality toast says where the images went. Any other model,
-unknown metadata included, also gets the image attached under the link's name,
-with no second `[name]` citation (#5218). An image that could not be saved
-attaches as before, with an error toast. A HEIC the bundled decoder cannot read
-(Apple's HDR gain-map photos) is saved unconverted under its own name and gets
-only its link in both cases: providers refuse HEIC image parts, and the store's
-own fallback for it (`sync/DOCUMENTATION.md`) would write a second copy and add
-a chip that repeats the link. With the setting off nothing is
-saved at paste, and the send step below covers a text-only model.
+picked images (`attachFilesWithCitation`, `attachFiles`) attach with an
+ordinary `[name]` citation and stay in the draft; nothing is written while the
+user composes. Send or Queue writes each into a new folder under OpenCode's own
+temp folder (`saveAttachmentsHeldForSend`, through
+`opencodeClient.writeOpenCodeTempFiles`: `GET /api/info` names the folder,
+`POST /api/experimental/fs/write` writes it), so the model, a subagent or a tool
+reads the file by path; OpenCode's agents may read that folder without asking.
+`imageSaveModeForModel` picks one of three cases when the image lands. A model
+whose metadata lists no `image` input gets only the path note, since it could
+not read the attachment (#5087): the image is held with `saveOnSend:
+'reference'` and swapped for its path note at Send, and the modality notice
+says the images go as paths. Any other model, unknown metadata included, gets
+the image itself plus a path note to the saved copy (`saveOnSend: 'copy'`): the
+note shares the image's name, so the image's one citation sends both (#5218).
+A HEIC the bundled decoder cannot read (Apple's HDR gain-map photos) goes as
+its path note only in both cases, since providers refuse HEIC image parts, and
+so does an image too large to attach inline (over 10 MB). A
+write that fails at Send stops the send with a toast naming the file and keeps
+the draft. With the setting off the image attaches as an image, and the send
+step below covers a text-only model.
 The browser annotation screenshot and comment-field image pastes keep
 attaching. The bytes go through the active runtime's OpenCode route (the
 OpenChamber server's proxy, the VS Code bridge, the relay for a phone), so the
@@ -1032,22 +1036,19 @@ path, where the store extracts their text (`sync/DOCUMENTATION.md`). On the
 desktop a document the store cannot convert (over 10 MB, or unreadable) still
 attaches as its path note, and an info toast says the agent gets the path
 instead of text: refusing it would leave the agent nothing. `save`
-(shown as "Attach as is") writes the original bytes with
-`opencodeClient.writeOpenCodeTempFiles`, as a saved image is written, and
-links each as `[name](absolute path)`, with `<` and `>` in the name replaced by
-`_` so the link's `<path>` destination still parses. A converted file or
-image never reuses a name already in such a link, whatever the image setting,
-so a link's label cannot cite an unrelated attachment. A file that could not be read or written
-is named in an error toast, gets no link and is not converted, and the rest of
-the batch keeps its links. A document over the 20 MB send limit
-(`MAX_ATTACHMENT_BYTES`) is refused by name before anything is read, and the
-writer reads each file right before its own write, so a batch holds one
-document in memory at a time. No model check applies: the link replaces the
-extraction for every model. The draft and the runtime instance
-(`captureRuntimeInstance`, so switching away and back still counts as a
-change) are captured when the files arrive; the writer stops before its next request once the runtime
-changed, and a draft or runtime that changed before the write answered gets
-no link. `ask` posts one choice for the batch's documents in the large-paste
+(shown as "Attach as is") attaches each document with `[name]` and holds its
+original bytes in the draft (`saveOnSend: 'reference'`), as a share from
+another app does; Send or Queue writes it where OpenCode runs and sends its
+path note, and Edit of a queued message gets the document back still held.
+The desktop holds the bytes too, even for a document with its own path: a
+desktop app can run against an OpenCode on another machine, where that path
+does not exist. A converted file or image never reuses a name
+already in a `[name](path)` link in the draft, so a link's label cannot cite
+an unrelated attachment. A document over the 20 MB send limit
+(`MAX_ATTACHMENT_BYTES`) is refused by name before anything is read. No model
+check applies: the path note replaces the extraction for every model. A draft
+that changed while a document was read drops it, like any attachment read.
+`ask` posts one choice for the batch's documents in the large-paste
 slot (`kind: 'documents'`) with "Attach as is" first. The choice keeps its two
 actions: `attach` keeps the content whole (Attach as is) and `inline` is the
 fallback (Convert to text). Keys, focus, blur and the draft, mode and runtime
@@ -1059,6 +1060,17 @@ A choice for files picked from a phone's collapsed pill expands the composer,
 where the choice shows, and holds the mobile shell expanded until it is
 answered, so a tap outside the editor cannot hide it behind the pill. A path-only drop (a Files panel row, a VS Code
 explorer URI) still becomes an `@` mention and never reaches the setting.
+
+### Why saved images and documents are written at Send and not when they land
+
+The user may remove a pasted image or a document before sending, switch the
+draft to another server, or never send at all. A write at attach time left a
+copy on whichever machine was open then, and a link in the text that pointed
+at it. Holding the bytes in the draft and writing at Send or Queue writes only
+what is sent, on the runtime the send starts on, once (the maintainer's rule:
+nothing is uploaded before Send). The path then reaches the model as a path
+note attachment instead of a link typed into the text, because the path is not
+known until Send.
 
 ### Why office documents ask in the large-paste slot and not a choice of their own
 

@@ -103,7 +103,8 @@ export function useComposerQueueActions({
             void handleQueueMessageRef.current();
             return;
         }
-        const held = await saveAttachmentsHeldForSend(chatDraftIdentity, messageQueueTarget?.directory ?? undefined, t);
+        const sent = attachmentsToSend(getCurrentInputSnapshot().message);
+        const held = await saveAttachmentsHeldForSend(chatDraftIdentity, messageQueueTarget?.directory ?? undefined, sent, t);
         if (held === 'stopped') return;
         if (held === 'saved') {
             void handleQueueMessageRef.current();

@@ -111,7 +111,7 @@ own display.
 
 An attachment's `original` (`{ mimeType, dataUrl, saveOnSend? }`) is the file
 the user picked when the UI queued a path note in its place, for a model that
-cannot read it or for a document held to be written at Send (`saveOnSend`). The UI sends it only while the request stays within its 40 MiB budget, so it may be absent. The server stores it and never delivers it; `take` hands it back so Edit
+cannot read it or for a file held to be written at Send (`saveOnSend`). The UI sends it only while the request stays within its 40 MiB budget, so it may be absent. The server stores it and never delivers it; `take` hands it back so Edit
 restores the picked file.
 
 `parseQueuedItemInput` rejects anything the server could not deliver later

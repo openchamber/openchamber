@@ -12,6 +12,32 @@ export const PATH_NOTE_MEDIA_TYPE = "text/plain;x-openchamber=path-note"
 
 export const isPathNoteDataUrl = (url: string): boolean => url.startsWith(`data:${PATH_NOTE_MEDIA_TYPE};`)
 
+const REFERENCE_NOTE_OPENING = "File on disk: "
+const SAVED_NOTE_OPENING = "File saved on disk: "
+const PLAIN_TEXT_BASE64 = "data:text/plain;base64,"
+
+export const fileReferenceNoteText = (path: string, size: string): string => (
+  `${REFERENCE_NOTE_OPENING}${path} (${size}). Its content is not in this message. Read what you need from it with your tools.\n`
+)
+
+export const savedFileNoteText = (filename: string, path: string, detail: string): string => {
+  const target = path.replace(/\\/g, "/")
+  return `${SAVED_NOTE_OPENING}[${filename}](${/[\s()]/.test(target) ? `<${target}>` : target})\n${detail}\n`
+}
+
+export const withRestoredPathNoteMarker = (url: string): string => {
+  if (!url.startsWith(PLAIN_TEXT_BASE64)) return url
+  const payload = url.slice(PLAIN_TEXT_BASE64.length)
+  let opening: string
+  try {
+    opening = atob(payload.slice(0, 28))
+  } catch {
+    return url
+  }
+  if (!opening.startsWith(REFERENCE_NOTE_OPENING) && !opening.startsWith(SAVED_NOTE_OPENING)) return url
+  return `data:${PATH_NOTE_MEDIA_TYPE};base64,${payload}`
+}
+
 export const getAttachmentInputModality = (mimeType: string): AttachmentInputModality | undefined => {
   const normalizedMimeType = mimeType.toLowerCase().split(";", 1)[0]?.trim() ?? ""
   if (normalizedMimeType.startsWith("image/")) return "image"
