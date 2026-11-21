@@ -35,6 +35,12 @@ OpenChamber's own server features live beside it: settings persistence in `../se
 
 ## Decisions
 
+### Why the retired opencode-claude plugin is removed, and Bun is not shimmed
+
+`@openchamber/opencode-claude` served Claude as the `claude-code` provider until OpenCode 2.2.3 shipped the same provider as `claude-agent`. It calls `Bun.serve` when it loads, so the desktop's bundled OpenCode, which runs on Node, fails every Claude turn with "Bun is not defined" while it is listed. Before each managed start, `retired-plugins.ts` removes it from the global config files. Once OpenCode answers, it connects Claude Agent through the Claude Code login, unless Claude Agent already has a connection, and the UI shows a toast that says which of the two happened (`opencode-claude-retired`, `opencode-claude-retired-unconnected`).
+
+Saved `claude-code/...` selections are not carried over. The plugin stored concrete model IDs that Claude Agent mostly lists under aliases, and mapping them would change model resolution for every user, so the toast asks the user to pick Claude models again. A folder config is left as written, because it may be someone else's repository; a policy deny there loses to an earlier allow and would add a parse of `OPENCODE_CONFIG_CONTENT` to every launch, so none is added. An external OpenCode runs on Bun, where the plugin still works, so it is left alone. A partial `globalThis.Bun` would make other Bun-only plugins fail later and less clearly, so it stays out.
+
 ### Why config and wire fields stay unchecked until use
 
 Markdown frontmatter can be any YAML value. `MarkdownDocument.frontmatter`

@@ -3,6 +3,7 @@ import { managedPermissionRules } from '../agent-tool/runtime.js';
 import { isLimitFailoverConfigured } from '../limit-failover/policy.js';
 import { isSharingAvailable } from '../share-pages/relay-client.js';
 import { materializeSessionTitlePlugin } from './session-title-plugin.js';
+export { retireClaudePlugin } from './retired-plugins.js';
 import { collectSkillEntriesFromRoots, createExternalPluginBridgeRuntime, registerExternalPluginBridgeRoutes } from './external-plugin-bridge.js';
 import { EXTENSION_AUTHORING_COMMAND, materializeAuthoringSkill } from '../guests/agent-context.js';
 import type { OpenCodePluginDelivery } from '../guests/opencode-plugin.js';
