@@ -10,7 +10,7 @@ import { openWorkflowRunInPanel } from '@/lib/workflows/panel';
 import { useWorkflowRun } from '@/lib/workflows/store';
 import { workflowRunLook } from '../../workflows/workflowRunPresentation';
 import { useI18n } from '@/lib/i18n';
-import { formatQuotaResetLabel, formatWindowLabel } from '@/lib/quota';
+import { formatQuotaResetLabel, formatQuotaRowValue, formatWindowLabel } from '@/lib/quota';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useChatColumnActions } from '../../chatColumnSession';
@@ -262,9 +262,9 @@ const UsageBody: React.FC<{ data: unknown }> = ({ data }) => {
                     return (
                         <React.Fragment key={provider.providerId}>
                             <span className="truncate text-foreground">{name}</span>
-                            <UsageProgressBar percent={percent} tonePercent={window.usedPercent} className="h-1.5" />
+                            {percent === null ? <span aria-hidden className="h-1.5" /> : <UsageProgressBar percent={percent} tonePercent={window.usedPercent} className="h-1.5" />}
                             <span className="text-end tabular-nums text-foreground">
-                                {percent === null ? '' : `${Math.round(percent)}%`}
+                                {formatQuotaRowValue(window, percent, t)}
                             </span>
                             <span className="truncate text-muted-foreground" title={caption}>{reset}</span>
                         </React.Fragment>

@@ -323,6 +323,7 @@ Tracker links differ widely: a key in the path, a key in a query parameter (Jira
 - The contribution is `.strict()`: `providers`, up to `QUOTA_PROVIDERS_MAX` unique OpenCode provider ids by shape, an empty list allowed. `toPublicQuota` is what the catalog row and the approval dialog carry.
 - `readQuotaProviderRequest` checks the envelope and that `credentials` is a map of objects; the host built each entry from OpenCode's store. There is no session and no handle: the service reaches its provider's API itself.
 - `quotaUsageDataSchema` is a built-in's result before the host derives the remaining share and the formatted strings, asserted both ways against `QuotaProviderUsageData`. Window and model names that would reach `Object.prototype` are refused, and zod leaves a `__proto__` key out of the record it builds.
+- `QuotaProviderWindowValue` keeps `spent: number` in v1. A service's spend amount is always a number, and the strict schema rejects `spent: null`. The built-in OpenRouter provider carries `spent: null` internally for an unreadable month; that internal representation is not part of the public extension contract.
 
 ### Why the service receives the credential and does not go through a proxy
 

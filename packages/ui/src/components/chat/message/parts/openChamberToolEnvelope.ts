@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { ToolInput } from '@/lib/opencode/model';
+import { openRouterSpendSelection } from '@/lib/quota/windowKeys';
 import { workflowRunSchema, workflowRunStateSchema } from '@/lib/workflows/model';
 import { waitArgsSchema } from '@/sync/extension-waits';
 
@@ -174,6 +175,11 @@ const windowSchema = z.object({
   resetAt: z.number().nullable().catch(null),
   resetAtFormatted: z.string().nullable().optional().catch(null),
   resetAfterFormatted: z.string().nullable().optional().catch(null),
+  valueLabel: z.string().nullable().optional().catch(undefined),
+  value: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('requests'), count: z.number().finite().nonnegative() }),
+    z.object({ kind: z.literal('spend'), spent: z.number().finite().nonnegative().nullable(), limit: z.number().finite().positive().nullable() }),
+  ]).optional().catch(undefined),
 }).passthrough();
 
 export const usageSchema = z.object({
@@ -191,11 +197,16 @@ type UsageWindowRow = z.infer<typeof windowSchema>;
 
 export const tightestWindow = (provider: UsageProviderRow): { key: string; window: UsageWindowRow } | null => {
   let best: { key: string; window: UsageWindowRow } | null = null;
-  for (const [key, window] of Object.entries(provider.usage?.windows ?? {})) {
+  const windows = provider.usage?.windows ?? {};
+  for (const [key, window] of Object.entries(windows)) {
     if (window.usedPercent === null) continue;
     if (!best || window.usedPercent > (best.window.usedPercent ?? -1)) best = { key, window };
   }
-  return best;
+  if (best) return best;
+  const openRouter = openRouterSpendSelection(provider.providerId, windows);
+  if (!openRouter) return null;
+  const key = openRouter.capKeys[0] ?? openRouter.fallbackKey;
+  return { key, window: windows[key] };
 };
 
 export const memoryReadSchema = z.object({

@@ -31,12 +31,12 @@ const percentWindow: UsageWindow = {
 };
 
 const containers: HTMLElement[] = [];
-const render = (window: UsageWindow, providerId?: QuotaProviderId) => {
+const render = (window: UsageWindow, providerId?: QuotaProviderId, title = 'credits_balance') => {
   const container = document.createElement('div');
   document.body.appendChild(container);
   containers.push(container);
   flushSync(() => createRoot(container).render(
-    <I18nProvider><UsageCard title="credits_balance" window={window} providerId={providerId} /></I18nProvider>,
+    <I18nProvider><UsageCard title={title} window={window} providerId={providerId} /></I18nProvider>,
   ));
   return container;
 };
@@ -107,4 +107,31 @@ test('Claude reset labels stay stable across second-level drift at a minute boun
     expect(resets(resetAt + 60_000, 'claude')).not.toBe(onMinute);
     expect(resets(resetAt - 1_000, 'codex')).not.toBe(resets(resetAt, 'codex'));
   }
+});
+
+test('a monthly spending row shows its money without a quota bar and marks an unreadable amount', () => {
+  const total = render(
+    { ...balanceWindow, valueLabel: undefined, value: { kind: 'spend', spent: 226.64374512, limit: null } },
+    undefined,
+    'monthly_total',
+  );
+  expect(total.textContent).toContain('Monthly Total');
+  expect(total.textContent).toContain('$226.64');
+  expect(total.textContent).toContain('spent');
+  expect(total.querySelector('[role="progressbar"]')).toBeNull();
+
+  const unknown = render(
+    { ...balanceWindow, valueLabel: undefined, value: { kind: 'spend', spent: null, limit: null } },
+    undefined,
+    'monthly_byok',
+  );
+  expect(unknown.textContent).toContain('Monthly BYOK');
+  expect(unknown.textContent).toContain('Unknown');
+
+  const zero = render(
+    { ...balanceWindow, valueLabel: undefined, value: { kind: 'spend', spent: 0, limit: null } },
+    undefined,
+    'monthly_total',
+  );
+  expect(zero.textContent).toContain('$0.00');
 });

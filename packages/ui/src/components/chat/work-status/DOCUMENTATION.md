@@ -82,6 +82,12 @@ own data fetching and reconciliation; the layout's right slot owns column width.
 - Quota aliases identify the same billed account. `claude-agent` and
   `claude-code` use the Claude subscription reported by `claude`; `kilocode` and
   `kilo-code` use the Kilo Gateway account reported by `kilo`.
+- A compact usage summary prefers the provider's cap rows. When OpenRouter
+  reports a monthly total and no cap, the total is the summary, so monthly
+  spending cannot displace a lifetime or monthly cap. When the total is unknown
+  because one counter is unreadable, a readable counter is the summary under its
+  own label; the total is never replaced by a guess. Other providers keep the
+  generic shortest-window rule even when a window is named `monthly_total`.
 - Built-in section ids stay stable because saved order and visibility use them.
   Hidden-state checks test membership of available sections because stale ids
   from removed sections can inflate a count.
@@ -99,6 +105,15 @@ own data fetching and reconciliation; the layout's right slot owns column width.
   the transcript.
 
 ## Decisions
+
+### Why the monthly total is found by its window key and not by row order
+
+The Usage page shows the monthly total and its category rows beside a cap, so a
+compact summary has extra spend rows to ignore. The selector finds the total by
+its `monthly_total` window key and treats a row with a share or a value label as
+a cap, so a monthly or lifetime cap wins even when the total has the same
+duration. Following the provider's insertion order would let a category row
+become the summary.
 
 ### Why guest meters jump and not glide
 

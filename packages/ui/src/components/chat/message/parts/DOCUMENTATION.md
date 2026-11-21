@@ -132,6 +132,20 @@ Passive empty reports cannot dismiss siblings: clearing a frame can itself fire
 the frame that just took focus. The existing forced mouse-up report and a
 `focusin` report cover mouse and keyboard entry without hover heuristics.
 
+### Why the agent usage card falls back to monthly money
+
+The card shows the tightest percentage window because that is the cap that can
+stop the work. An uncapped OpenRouter key has no percentage anywhere, so the
+monthly total would disappear. For OpenRouter only, the card therefore falls
+back to the `monthly_total` window, shows its structured spend amount, and keeps
+a threshold-zero cap ahead of it. When the total is unknown because one counter
+is unreadable, it shows a readable counter under its own label instead; with no
+readable counter it shows the total as unknown. Another provider's window named
+`monthly_total` keeps the generic rule, since the quota SDK does not reserve
+that name. Every provider keeps the
+same four grid cells: a spending row puts a hidden empty element in the bar cell
+so names, values, and resets stay in their columns for the providers below it.
+
 ### Why buttons in message rows use HoverTooltip
 
 A button that repeats in the transcript (a tool row's open action, a code

@@ -19,7 +19,7 @@ import { QuotaRouteError } from './route-error.js';
 import { buildResult, toUsageWindow } from './utils/formatters.js';
 import type { GuestRecord } from '../guests/contracts.js';
 import type { LegacyAuthFile } from '../opencode/auth.js';
-import type { ProviderUsage, UsageWindow } from './utils/contracts.js';
+import type { ProviderUsage } from './utils/contracts.js';
 
 export type QuotaGuest = GuestRecord & Required<Pick<GuestRecord, 'quota' | 'service' | 'capabilityGrants'>>;
 type WireUsage = NonNullable<ReturnType<typeof schemas.usage.parse>['usage']>;
@@ -56,7 +56,7 @@ export const pickCredentials = (auth: LegacyAuthFile, providerIds: string[]) => 
 );
 
 const toWindow = (wire: WireWindow) => {
-  const window: UsageWindow & Pick<WireWindow, 'value'> = toUsageWindow({
+  const window = toUsageWindow({
     usedPercent: wire.usedPercent,
     windowSeconds: wire.windowSeconds ?? null,
     resetAt: wire.resetAt ?? null,

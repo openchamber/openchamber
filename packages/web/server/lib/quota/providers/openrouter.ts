@@ -13,6 +13,7 @@ import {
   asNonEmptyString,
   formatMoney
 } from '../utils/index.js';
+import type { UsageWindow } from '../utils/contracts.js';
 
 interface OpenRouterFields {
   key?: unknown;
@@ -22,6 +23,7 @@ interface OpenRouterFields {
   limit?: unknown;
   limit_remaining?: unknown;
   usage_monthly?: unknown;
+  byok_usage_monthly?: unknown;
   limit_reset?: unknown;
 }
 
@@ -70,6 +72,20 @@ export const isConfigured = (auth: LegacyAuthFile) => {
   const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   return Boolean(entry?.key || entry?.token);
 };
+
+const toAmount = z.unknown().transform((value) => (String(value).trim() === '' ? null : toNumber(value))).parse;
+
+const toSpendAmount = z.unknown().transform((value) => {
+  const amount = toAmount(value);
+  return amount !== null && amount >= 0 ? amount : null;
+}).parse;
+
+const spendWindow = (spent: number | null) => toUsageWindow({
+  usedPercent: null,
+  windowSeconds: null,
+  resetAt: null,
+  value: { kind: 'spend', spent, limit: null }
+});
 
 export const fetchQuota = async () => {
   const auth = await readOpenCodeCredentials();
@@ -133,20 +149,11 @@ export const fetchQuota = async () => {
       });
     }
 
-    const limit = toNumber(data.limit);
-    const limitRemaining = toNumber(data.limit_remaining);
-    if (limit !== null && limitRemaining === null) {
-      return buildResult({
-        providerId,
-        providerName,
-        ok: false,
-        configured: true,
-        error: 'No quota data in response'
-      });
-    }
-
-    const usageMonthly = toNumber(data.usage_monthly);
-    if (limit === null && usageMonthly === null) {
+    const limit = toAmount(data.limit);
+    const limitRemaining = toAmount(data.limit_remaining);
+    const usageMonthly = toSpendAmount(data.usage_monthly);
+    const byokMonthly = toSpendAmount(data.byok_usage_monthly);
+    if ((limit === null || limitRemaining === null) && usageMonthly === null && byokMonthly === null) {
       return buildResult({
         providerId,
         providerName,
@@ -157,51 +164,62 @@ export const fetchQuota = async () => {
     }
 
     const nowMs = Date.now();
-    let windowKey;
-    let windowSeconds;
-    let resetAt;
-    let usedPercent;
-    let valueLabel;
+    const windows: Record<string, UsageWindow> = {};
 
-    if (limit === null) {
-      windowKey = 'monthly';
-      windowSeconds = PERIOD_SECONDS.monthly;
-      resetAt = resolveResetAt('monthly', nowMs);
-      usedPercent = null;
-      valueLabel = `$${formatMoney(usageMonthly)} spent`;
-    } else {
-      const used = Math.max(0, limit - Number(limitRemaining));
-      const percent = limit > 0 ? (used / limit) * 100 : null;
-      usedPercent = percent === null ? null : Math.min(100, percent);
-      valueLabel = `$${formatMoney(used)} / $${formatMoney(limit)}`;
+    if (limit !== null && (limitRemaining !== null || limit > 0)) {
+      let windowKey: string;
+      let windowSeconds: number | null;
+      let resetAt: number | null;
 
       const periodKey = String(data.limit_reset);
       if (isPeriodKey(periodKey)) {
         windowKey = periodKey;
         windowSeconds = PERIOD_SECONDS[periodKey];
-        resetAt = resolveResetAt(data.limit_reset, nowMs);
+        resetAt = resolveResetAt(periodKey, nowMs);
       } else {
         windowKey = 'key_limit';
         windowSeconds = null;
         resetAt = null;
       }
+
+      if (limitRemaining === null) {
+        windows[windowKey] = toUsageWindow({
+          usedPercent: null,
+          windowSeconds,
+          resetAt,
+          value: { kind: 'spend', spent: null, limit }
+        });
+      } else {
+        const used = Math.max(0, limit - limitRemaining);
+        const percent = limit > 0 ? (used / limit) * 100 : null;
+        windows[windowKey] = toUsageWindow({
+          usedPercent: percent === null ? null : Math.min(100, percent),
+          windowSeconds,
+          resetAt,
+          valueLabel: `$${formatMoney(used)} / $${formatMoney(limit)}`
+        });
+      }
     }
+
+    windows.monthly_total = toUsageWindow({
+      usedPercent: null,
+      windowSeconds: PERIOD_SECONDS.monthly,
+      resetAt: resolveResetAt('monthly', nowMs),
+      value: {
+        kind: 'spend',
+        spent: usageMonthly !== null && byokMonthly !== null ? usageMonthly + byokMonthly : null,
+        limit: null
+      }
+    });
+    if (usageMonthly !== 0) windows.monthly_credits = spendWindow(usageMonthly);
+    if (byokMonthly !== 0) windows.monthly_byok = spendWindow(byokMonthly);
 
     return buildResult({
       providerId,
       providerName,
       ok: true,
       configured: true,
-      usage: {
-        windows: {
-          [windowKey]: toUsageWindow({
-            usedPercent,
-            windowSeconds,
-            resetAt,
-            valueLabel
-          })
-        }
-      }
+      usage: { windows }
     });
   } catch (error) {
     const isTimeout = error instanceof DOMException && (
