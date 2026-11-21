@@ -73,6 +73,42 @@ describe('OpenAICompatibleTranscriptionSession endpoint path', () => {
     expect((await unrelated).status).toBe(404);
   });
 
+  it.each([
+    ['sends the prompt with every committed segment', 'Español e inglés.\nTérminos: OpenChamber, 東京'],
+    ['sends no prompt field without a prompt', undefined],
+  ])('%s', async (_name, prompt) => {
+    const requests = [];
+    server = createServer(async (request, response) => {
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      const form = await new Response(Buffer.concat(chunks), {
+        headers: { 'Content-Type': request.headers['content-type'] },
+      }).formData();
+      requests.push({ hasPrompt: form.has('prompt'), prompt: form.get('prompt'), language: form.get('language') });
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ text: `segment ${requests.length}` }));
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+
+    const session = new OpenAICompatibleTranscriptionSession({
+      baseURL: `http://127.0.0.1:${server.address().port}/v1`, model: 'whisper-1', language: 'es', prompt,
+    });
+    await session.connect();
+    for (const expected of ['segment 1', 'segment 2']) {
+      session.appendPcm16(Buffer.alloc(3200, 1));
+      const transcript = once(session, 'transcript');
+      session.commit();
+      expect((await transcript)[0].transcript).toBe(expected);
+    }
+
+    // Multipart form encoding writes line breaks as CRLF.
+    const expected = prompt
+      ? { hasPrompt: true, prompt: prompt.replaceAll('\n', '\r\n'), language: 'es' }
+      : { hasPrompt: false, prompt: null, language: 'es' };
+    expect(requests).toEqual([expected, expected]);
+  });
+
   it('refuses an invalid endpoint path before recording', async () => {
     const session = new OpenAICompatibleTranscriptionSession({
       baseURL: 'http://127.0.0.1:9/v1', model: 'whisper-1', endpointPath: 'https://example.com/x',

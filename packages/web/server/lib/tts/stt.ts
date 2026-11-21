@@ -12,10 +12,11 @@ export interface TranscribeAudioOptions {
   baseURL?: Parameters<typeof normalizeCustomOpenAIBaseURL>[0];
   apiKey?: unknown;
   language?: unknown;
+  prompt?: string | undefined;
   endpointPath?: Parameters<typeof normalizeEndpointPath>[0];
 }
 
-export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language, endpointPath }: TranscribeAudioOptions) {
+export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language, prompt, endpointPath }: TranscribeAudioOptions) {
   const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
   if (normalizedBaseURLResult.error) {
     throw new Error(normalizedBaseURLResult.error);
@@ -58,6 +59,7 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
     response_format: 'json',
   };
   if (language) params.language = language;
+  if (prompt) params.prompt = prompt;
   const result = await client.audio.transcriptions.create(params);
 
   return result.text ?? '';

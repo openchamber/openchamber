@@ -78,11 +78,14 @@ Server → client: `ready`, `ack {ackSeq}`, `partial {text}`,
 
 `options` in `start` carries the client-selected provider config:
 `{ provider: 'local' | 'openai-compatible', language?, localModel?,
-openaiCompatible?: { baseUrl, model, apiKey, endpointPath }, correct? }`. With
+openaiCompatible?: { baseUrl, model, apiKey, endpointPath, prompt }, correct? }`. With
 `correct: true` the final text goes through the correction pass first, and
 `finish_accepted.timeoutMs` includes its budget (`CORRECTION_TIMEOUT_MS`).
 An empty or
-absent `endpointPath` keeps the OpenAI `/v1/audio/transcriptions` path.
+absent `endpointPath` keeps the OpenAI `/v1/audio/transcriptions` path. A
+non-empty `prompt` goes out as the multipart `prompt` field on every committed
+segment; an empty or absent one sends no field. The local provider takes no
+prompt.
 
 ## Segmentation
 
@@ -265,6 +268,15 @@ failure, a missing Small Model or the 10 s cap returns the text as heard, so
 the pass never costs the user the dictation. The prompt names colloquial
 forms ("шо", "gonna") as speech to keep, because small models otherwise
 "correct" them into the literary form.
+
+### Why the transcription prompt is sent to any model and not gated by model name
+
+The server model is free text, and the same name can mean different engines on
+different servers, so OpenChamber cannot tell which models accept a prompt.
+The prompt goes out whenever the user filled it; a model without prompt
+support ignores it or the server rejects the request, and that error reaches
+the user like any other transcription error. A model catalog or an automatic
+retry without the prompt would guess and hide what the server answered.
 
 ### Why the language hint is part of the engine key
 
