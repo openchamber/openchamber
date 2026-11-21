@@ -3,7 +3,9 @@ import { useShallow } from 'zustand/react/shallow';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { SETTINGS_DESCRIPTION_CLASS } from '@/components/sections/shared/SettingsSection';
 import {
   SETTINGS_CARD_GRID_CLASS,
   SettingsAddCard,
@@ -11,12 +13,15 @@ import {
   SettingsCardChip,
   SettingsCardIcon,
   SettingsCardPill,
-  SettingsCardSearch,
+  SettingsCardToolbar,
   type SettingsCardAction,
 } from '@/components/sections/shared/SettingsCards';
 import { useI18n } from '@/lib/i18n';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { cn } from '@/lib/utils';
+import { Switch } from '@/components/ui/switch';
+import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
+import { useIntegrationPolicyState } from '@/components/sections/shared/useIntegrationPolicyBlock';
 import {
   getPluginsConfigDirectory,
   getPluginsScopeKey,
@@ -36,8 +41,7 @@ import {
 import { pluginDisplayName } from './pluginDisplayName';
 import { usePluginPackageUpdate, usePluginRuntimeStatus } from './usePluginRuntimeStatus';
 
-/** How a plugin spec is loaded, as the card shows it. */
-const PARSED_KIND_ICON: Record<PluginParsedKind, 'equalizer-2' | 'code-box' | 'folder' | 'git-branch'> = {
+const PARSED_KIND_ICON: Record<PluginParsedKind, IconName> = {
   control: 'equalizer-2',
   npm: 'code-box',
   path: 'folder',
@@ -55,10 +59,6 @@ const entryKindLabelKey = (entry: PluginEntry) => {
   return entry.spec.startsWith('-') ? 'settings.plugins.sidebar.kind.disableRule' : 'settings.plugins.sidebar.kind.enableRule';
 };
 
-/**
- * Status pills for one plugin: how OpenCode loaded it, whether a newer release
- * is out, and whether the registry could not resolve the spec at all.
- */
 const PluginPills: React.FC<{ target: PluginRuntimeTarget | null; spec?: string }> = ({ target, spec }) => {
   const { t } = useI18n();
   const status = usePluginRuntimeStatus(target);
@@ -101,7 +101,6 @@ type GridItem =
   | { kind: 'entry'; entry: PluginEntry }
   | { kind: 'file'; file: PluginFile };
 
-/** Browse view of the Plugins page: config entries and plugin files as cards. */
 export const PluginsGrid: React.FC<{
   onAdd: () => void;
   onDelete: (target: PluginDeleteTarget) => void;
@@ -122,19 +121,88 @@ export const PluginsGrid: React.FC<{
   const packageUpdates = usePluginsStore((state) => state.packageUpdates);
   const updateToLatest = usePluginsStore((state) => state.updateToLatest);
   const updatePackage = usePluginsStore((state) => state.updatePackage);
+  const setEntryEnabled = usePluginsStore((state) => state.setEntryEnabled);
+  const setFileEnabled = usePluginsStore((state) => state.setFileEnabled);
   const runtimeScope = getPluginsScopeKey(getPluginsConfigDirectory());
   const runtimeUnavailable = runtime.kind === 'failed' && runtime.scope === runtimeScope;
   const runtimePlugins = runtime.kind === 'ready' && runtime.scope === runtimeScope ? runtime.plugins : null;
   const [query, setQuery] = React.useState('');
+  const policyRevision = usePluginsStore((state) => state.policyRevision);
+  const bumpPolicyRevision = usePluginsStore((state) => state.bumpPolicyRevision);
+  const [pendingSwitchIds, setPendingSwitchIds] = React.useState<ReadonlySet<string>>(() => new Set());
+  const setSwitchPending = (id: string, pending: boolean) => {
+    setPendingSwitchIds((previous) => {
+      if (previous.has(id) === pending) return previous;
+      const next = new Set(previous);
+      if (pending) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+  const policy = useIntegrationPolicyState(getPluginsConfigDirectory(), policyRevision);
+
+  const toggleSwitch = (id: string, enabled: boolean, setEnabled: typeof setEntryEnabled) => {
+    setSwitchPending(id, true);
+    void setEnabled(id, enabled).then((result) => {
+      setSwitchPending(id, false);
+      if (result.switchOverridden) {
+        toast.error(t('settings.plugins.switch.overriddenByConfig'));
+        void loadPlugins({ force: true });
+      } else if (!result.ok) {
+        toast.error(t('settings.plugins.switch.toast.failed'));
+      } else {
+        if (result.requiresManualRestart) toast.info(t('settings.openchamber.opencodeCli.restart.manualRequired'));
+        bumpPolicyRevision();
+      }
+    });
+  };
+
+  const pluginSwitch = (
+    item: Pick<PluginEntry, 'id' | 'policyResource' | 'switchState'>,
+    name: string,
+    setEnabled: typeof setEntryEnabled,
+  ) => {
+    const resource = item.policyResource;
+    const switchOff = item.switchState === 'off';
+    const blocked = resource
+      ? policy.hasRead
+        ? switchOff || item.switchState === 'unreadable' ? policy.isBlocked(resource) : policy.isBlockedByRule(resource)
+        : switchOff
+      : false;
+    const overridden = item.switchState === 'overridden'
+      || (switchOff && resource !== undefined && policy.status === 'ready' && policy.isAllowedByRule(resource));
+    const hint = (() => {
+      if (policy.status === 'error') return t('settings.plugins.status.unknown.description');
+      if (!resource) return t('settings.plugins.switch.unavailable');
+      if (item.switchState === 'unavailable') return t('settings.plugins.switch.notAvailable');
+      if (item.switchState === 'unreadable') return t('settings.plugins.switch.unreadable');
+      if (overridden) return t('settings.plugins.switch.overriddenByConfig');
+      if (policy.status === 'ready' && blocked && !switchOff) return t('settings.plugins.switch.blockedByConfig');
+      return null;
+    })();
+    return {
+      blocked,
+      control: (
+        <div className="flex items-center gap-1">
+          {hint ? <SettingsInfoHint contentClassName="max-w-64">{hint}</SettingsInfoHint> : null}
+          <Switch
+            checked={overridden || (!blocked && !switchOff)}
+            disabled={pendingSwitchIds.has(item.id) || !resource || policy.status !== 'ready' || item.switchState === 'unavailable' || item.switchState === 'unreadable' || overridden || (blocked && !switchOff)}
+            onCheckedChange={() => toggleSwitch(item.id, switchOff, setEnabled)}
+            aria-label={`${name}: ${t('settings.plugins.switch.label')}`}
+          />
+        </div>
+      ),
+    };
+  };
 
   React.useEffect(() => {
     void loadPlugins();
   }, [loadPlugins]);
 
-  // The npm registry answers for exact pins (rewritten in config), OpenCode
-  // for everything it can reinstall in place (names, ranges, tags, Git).
   const handleRefresh = async () => {
     toast.info(t('settings.plugins.toast.refreshing'));
+    bumpPolicyRevision();
     const [registryOk, checkOk] = await Promise.all([
       loadRegistryInfo({ force: true }),
       checkUpdates(),
@@ -143,19 +211,15 @@ export const PluginsGrid: React.FC<{
     if (!checkOk) toast.error(t('settings.plugins.toast.checkFailed'));
   };
 
-  // One stable target per card, so each card's status hook memoizes.
   const runtimeTargets = React.useMemo(() => {
     const targets = new Map<string, PluginRuntimeTarget | null>();
     for (const entry of entries) {
-      // A control entry is never loaded, so OpenCode reports nothing for it.
       targets.set(entry.id, entry.parsedKind === 'control' ? null : configEntryRuntimeTarget(entry.spec, entry.sourcePath));
     }
     for (const file of files) targets.set(file.id, pluginFileRuntimeTarget(file.absolutePath));
     return targets;
   }, [entries, files]);
 
-  // The package OpenCode can reinstall in place for this entry, when a newer
-  // release matches its spec and no update is already running.
   const openCodeUpdateTarget = (entryId: string): string | null => {
     const target = runtimeTargets.get(entryId);
     if (!runtimePlugins || target?.kind !== 'package') return null;
@@ -163,8 +227,6 @@ export const PluginsGrid: React.FC<{
     return resolveUpdateFlag(findRuntimeMatches(target, runtimePlugins)) === 'available' ? target.target : null;
   };
 
-  // The npm registry answers for exact pins (rewritten in config), OpenCode
-  // for everything it can reinstall in place (names, ranges, tags, Git).
   const entryActions = (entry: PluginEntry): SettingsCardAction[] => {
     const actions: SettingsCardAction[] = [];
     const info = registryInfo[entry.spec];
@@ -202,18 +264,22 @@ export const PluginsGrid: React.FC<{
     return actions;
   };
 
-  const seenPaths = new Set<string>();
+  const declaredResources = new Map<string, Set<string | undefined>>();
   for (const entry of entries) {
     const target = entry.resolvedPath ? pluginFileRuntimeTarget(entry.resolvedPath) : runtimeTargets.get(entry.id);
-    if (target?.kind === 'local') seenPaths.add(target.path);
+    if (target?.kind !== 'local') continue;
+    const resources = declaredResources.get(target.path) ?? new Set();
+    resources.add(entry.policyResource);
+    declaredResources.set(target.path, resources);
   }
   const visibleFiles = files.filter((file) => {
     if (file.kind !== 'package') return true;
     const target = pluginFileRuntimeTarget(file.resolvedPath ?? file.absolutePath);
     if (target?.kind !== 'local') return true;
-    if (seenPaths.has(target.path)) return false;
-    seenPaths.add(target.path);
-    return true;
+    const resources = declaredResources.get(target.path);
+    if (!resources) return true;
+    const sameSwitch = !file.policyResource || resources.has(undefined) || resources.has(file.policyResource);
+    return !sameSwitch;
   });
   const items: GridItem[] = [
     ...entries.map((entry): GridItem => ({ kind: 'entry', entry })),
@@ -228,32 +294,33 @@ export const PluginsGrid: React.FC<{
   return (
     <SettingsPageLayout
       title={t('settings.page.plugins.title')}
-      description={t('settings.plugins.grid.description')}
-      headerEnd={(
-        <div className="flex items-center gap-2">
-          {runtimeUnavailable ? (
-            <span className="inline-flex items-center gap-1 typography-meta text-muted-foreground">
-              <Icon name="question" className="size-3.5" />
-              {t('settings.plugins.status.sidebar.unavailable')}
-            </span>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 shrink-0 text-muted-foreground"
-            onClick={() => void handleRefresh()}
-            disabled={refreshing}
-            aria-label={t('settings.plugins.sidebar.actions.refresh')}
-            title={t('settings.plugins.sidebar.actions.refresh')}
-          >
-            <Icon name="refresh" className={cn('size-4', refreshing && 'animate-spin')} />
-          </Button>
-        </div>
-      )}
+      namedBySidebar
     >
-      {items.length > 0 ? (
-        <SettingsCardSearch value={query} onChange={setQuery} placeholder={t('settings.plugins.grid.searchPlaceholder')} />
-      ) : null}
+      <SettingsCardToolbar
+        search={items.length > 0 ? { value: query, onChange: setQuery, placeholder: t('settings.plugins.grid.searchPlaceholder') } : null}
+        actions={(
+          <>
+            {runtimeUnavailable ? (
+              <span className="inline-flex items-center gap-1 typography-meta text-muted-foreground">
+                <Icon name="question" className="size-3.5" />
+                {t('settings.plugins.status.sidebar.unavailable')}
+              </span>
+            ) : null}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-7 shrink-0 px-0 text-muted-foreground"
+              onClick={() => void handleRefresh()}
+              disabled={refreshing}
+              aria-label={t('settings.plugins.sidebar.actions.refresh')}
+              title={t('settings.plugins.sidebar.actions.refresh')}
+            >
+              <Icon name="refresh" className={cn('size-4', refreshing && 'animate-spin')} />
+            </Button>
+          </>
+        )}
+      />
+      <p className={cn(SETTINGS_DESCRIPTION_CLASS, 'mb-4')}>{t('settings.plugins.grid.description')}</p>
 
       {items.length === 0 ? (
         <p className="py-6 typography-meta text-muted-foreground">{t('settings.plugins.grid.empty')}</p>
@@ -274,12 +341,14 @@ export const PluginsGrid: React.FC<{
           if (item.kind === 'entry') {
             const { entry } = item;
             const name = pluginDisplayName(entry.spec);
+            const switchControl = pluginSwitch(entry, name, setEntryEnabled);
             return (
               <SettingsCard
                 key={entry.id}
                 icon={<SettingsCardIcon name={PARSED_KIND_ICON[entry.parsedKind]} />}
                 title={name}
                 subtitle={name === entry.spec ? undefined : entry.spec}
+                muted={switchControl.blocked}
                 badges={<PluginPills target={runtimeTargets.get(entry.id) ?? null} spec={entry.spec} />}
                 footer={(
                   <>
@@ -287,23 +356,22 @@ export const PluginsGrid: React.FC<{
                     {entry.scope === 'project' ? <SettingsCardChip>{t('settings.plugins.grid.scope.project')}</SettingsCardChip> : null}
                   </>
                 )}
-                // A control entry has nothing to edit, and options would turn it
-                // into a package for OpenCode to install.
                 onOpen={entry.parsedKind === 'control' ? undefined : () => setSelected(entry.id)}
                 actionsLabel={t('settings.plugins.grid.actionsAria', { name: entry.spec })}
                 actions={entryActions(entry)}
+                control={entry.parsedKind !== 'control' ? switchControl.control : undefined}
               />
             );
           }
           const { file } = item;
-          // A plugin package directory is OpenCode's to load and ours only to
-          // show: nothing to open or delete here.
           const displayOnly = file.kind === 'package';
+          const switchControl = pluginSwitch(file, file.fileName, setFileEnabled);
           return (
             <SettingsCard
               key={file.id}
               icon={<SettingsCardIcon name={displayOnly ? 'folder' : 'file-text'} />}
               title={file.fileName}
+              muted={switchControl.blocked}
               badges={<PluginPills target={runtimeTargets.get(file.id) ?? null} />}
               footer={(
                 <>
@@ -319,6 +387,7 @@ export const PluginsGrid: React.FC<{
                 destructive: true,
                 onSelect: () => onDelete({ kind: 'file', id: file.id, label: file.fileName }),
               }]}
+              control={switchControl.control}
             />
           );
         })}

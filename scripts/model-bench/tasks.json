@@ -1,0 +1,122 @@
+[
+  {
+    "id": "selection-menu-draft",
+    "type": "ui-logic",
+    "level": 2,
+    "commit": "f2726418e4",
+    "testsAdvisory": "The commit's test flips the draft flag on a bare render; a fix through the chat's KeepAlive, which closes the menu in the real app, fails it. Grade by the judge.",
+    "prompt": "Bug: I select text in an agent reply and the Comment / By the way / Add to notes bar appears. Without clicking anything I open a new session draft (or switch to another session), and the bar stays on screen. It should go away. Fix it and add a test.",
+    "hiddenTests": ["packages/ui/src/components/chat/message/TextSelectionMenu.render.test.tsx"],
+    "testCommands": [
+      { "cwd": "packages/ui", "cmd": "bun test src/components/chat/message/TextSelectionMenu.render.test.tsx" }
+    ]
+  },
+  {
+    "id": "archive-copy-id",
+    "type": "feature",
+    "level": 2,
+    "commit": "a7fc513700",
+    "prompt": "Feature: on the Archive page I want to copy a session's ID. Right-clicking an archived session row opens a context menu with Copy session ID, Restore, Delete, in that order. Copy session ID puts the ID on the clipboard and confirms with a toast; the Archive page stays open. A plain click on the row still opens the session, as now. Add a test.",
+    "hiddenTests": ["packages/ui/src/components/views/ArchiveView.test.tsx"],
+    "testCommands": [
+      { "cwd": "packages/ui", "cmd": "bun test src/components/views/ArchiveView.test.tsx" }
+    ]
+  },
+  {
+    "id": "git-detached-tag",
+    "type": "server-logic",
+    "level": 3,
+    "commit": "71758dd1b7",
+    "prompt": "Bug: when a repository has a tag checked out (detached HEAD, e.g. `git checkout v2.1.3`), the Git panel's branch selector lists v2.1.3 as a branch. Picking it checks out the same tag again, so I can never get back onto a branch through it. The Sync button also shows counts like ↓2 ↑1 although there is no branch. A detached HEAD must not appear as a branch, and without a branch there should be no counts. Fix it and add tests.",
+    "hiddenTests": [
+      "packages/web/server/lib/git/service.test.js",
+      "packages/ui/src/components/views/git/SyncActions.test.tsx"
+    ],
+    "testCommands": [
+      { "cwd": "packages/web", "cmd": "npx vitest run server/lib/git/service.test.js -t getBranches" },
+      { "cwd": "packages/ui", "cmd": "bun test src/components/views/git/SyncActions.test.tsx" }
+    ]
+  },
+  {
+    "id": "git-config-lock",
+    "type": "server-logic",
+    "level": 3,
+    "commit": "7716b6bead",
+    "prompt": "Bug: when I create a worktree for an issue in the New worktree dialog, the agent is supposed to rename the generated branch (like issue-180-merry-salamander) after the task. Often it never does: the session is not asked to rename it, as if I had named the branch myself. The server log shows, right when the worktree is created:\n\nFailed to write branch.issue-180-merry-salamander.openchamberGeneratedName: error: could not lock config file .git/config: File exists\n\nFind the cause and fix it, with a test.",
+    "hiddenTests": ["packages/web/server/lib/git/service.test.js"],
+    "hiddenTestsFrom": "59e3cbf963",
+    "testCommands": [
+      { "cwd": "packages/web", "cmd": "npx vitest run server/lib/git/service.test.js -t 'records a generated name even while another git process holds the config lock'" }
+    ]
+  },
+  {
+    "id": "settings-write-chain",
+    "type": "server-logic",
+    "level": 3,
+    "commit": "a606c73faa",
+    "prompt": "Bug: my disk ran full once, and OpenChamber stopped saving settings. After I freed space, every change in Settings still failed with ENOSPC until I restarted the server. One failed save must not break the saves after it. Fix it, and check whether other server state that is saved the same way has the same problem. Add tests.",
+    "hiddenTests": [
+      "packages/web/server/lib/opencode/settings-runtime.test.js",
+      "packages/web/server/lib/permission-auto-accept/runtime.test.js",
+      "packages/web/server/lib/tunnels/managed-config.test.js"
+    ],
+    "testCommands": [
+      { "cwd": "packages/web", "cmd": "npx vitest run server/lib/opencode/settings-runtime.test.js server/lib/permission-auto-accept/runtime.test.js server/lib/tunnels/managed-config.test.js" }
+    ]
+  },
+  {
+    "id": "diff-hide-whitespace",
+    "type": "ui-logic",
+    "level": 3,
+    "commit": "b28b857874",
+    "prompt": "Bug: in a pull request diff with Hide whitespace changes turned on, the lines are wrong. After a hunk that only re-indents code, the diff shows text from the wrong lines, the last lines go missing, and sometimes it crashes with \"deletionLine and additionLine are null\". It happens only in pull request diffs built from a patch; diffs of local files are fine. Fix it with a test.",
+    "hiddenTests": ["packages/ui/src/lib/diff/hideWhitespaceChanges.test.ts"],
+    "testCommands": [
+      { "cwd": "packages/ui", "cmd": "bun test src/lib/diff/hideWhitespaceChanges.test.ts" }
+    ]
+  },
+  {
+    "id": "composer-agent-drift",
+    "type": "ui-logic",
+    "level": 3,
+    "commit": "db519f846a",
+    "testsAdvisory": "The commit's test expects ModelControls to pull the app-wide agent back; a fix that sends the session's agent from the composer, which every model chose, fails it. Grade by the judge.",
+    "prompt": "Bug: sometimes I come back to a session, the composer's agent picker shows Build, I send, and the message goes out as Plan or one of my custom agents. The message must go out with the agent the picker shows. Fix it and add a test.",
+    "hiddenTests": ["packages/ui/src/components/chat/ModelControls.variant.behavior.test.tsx"],
+    "testCommands": [
+      { "cwd": "packages/ui", "cmd": "bun test src/components/chat/ModelControls.variant.behavior.test.tsx" }
+    ]
+  },
+  {
+    "id": "url-token-clock",
+    "type": "server-logic",
+    "level": 3,
+    "commit": "eb3fc500da",
+    "testsAdvisory": "The commit's tests expect an `expiresIn` field in the mint response; a fix that corrects the clock another way fails them. Grade by the judge.",
+    "prompt": "Bug: on my phone the terminal and live updates never connect. The server answers 401 to the terminal and event sockets forever, while ordinary API requests work. The phone's clock is about two minutes ahead of the server's. Fix it with a test.",
+    "hiddenTests": [
+      "packages/ui/src/lib/runtime-auth.test.ts",
+      "packages/web/server/lib/ui-auth/ui-auth.test.js"
+    ],
+    "testCommands": [
+      { "cwd": "packages/ui", "cmd": "bun test src/lib/runtime-auth.test.ts" },
+      { "cwd": "packages/web", "cmd": "npx vitest run server/lib/ui-auth/ui-auth.test.js" }
+    ]
+  },
+  {
+    "id": "review-fold-height",
+    "type": "review",
+    "level": 3,
+    "commit": "5e1f39cf42",
+    "fixCommit": "9c7bb38e72",
+    "prompt": "Review the change in REVIEW.diff, the last commit in this folder (its message is at the top of the file). Report correctness bugs it introduces: for each, the file and line, what goes wrong for the user, and why. Leave out style remarks. Do not edit any file."
+  },
+  {
+    "id": "review-drafts-cross",
+    "type": "review",
+    "level": 3,
+    "commit": "60e9617eba",
+    "fixCommit": "e0f32771e7",
+    "prompt": "Review the change in REVIEW.diff, the last commit in this folder (its message is at the top of the file). Report correctness bugs it introduces: for each, the file and line, what goes wrong for the user, and why. Leave out style remarks. Do not edit any file."
+  }
+]

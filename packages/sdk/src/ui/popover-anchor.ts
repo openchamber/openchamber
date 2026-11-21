@@ -17,7 +17,6 @@ let nextPopoverAnchorId = 0;
 
 const isKeyboardEvent = (event: Event): event is KeyboardEvent => 'key' in event;
 
-/** Adds a bounded host popover preview to an extension-owned element. */
 export const mountPopoverAnchor = (element: HTMLElement, options: PopoverAnchorOptions): PopoverAnchorHandle => {
   const document = element.ownerDocument;
   const window = document.defaultView;
@@ -27,6 +26,7 @@ export const mountPopoverAnchor = (element: HTMLElement, options: PopoverAnchorO
   let ignoreNextFocus = false;
   let pointerActive = false;
   let focusActive = false;
+  let touchPointerDown = false;
   let observer: MutationObserver | null = null;
   const previousExpanded = element.getAttribute('aria-expanded');
   const previousPopup = element.getAttribute('aria-haspopup');
@@ -117,6 +117,20 @@ export const mountPopoverAnchor = (element: HTMLElement, options: PopoverAnchorO
     clearTimer();
     reportAnchorActivity();
   };
+  const onPointerDown = (event: Event): void => {
+    touchPointerDown = 'pointerType' in event && typeof event.pointerType === 'string'
+      && event.pointerType !== '' && event.pointerType !== 'mouse';
+  };
+  const onPointerCancel = (): void => { touchPointerDown = false; };
+  const onClick = (event: Event): void => {
+    const tapped = touchPointerDown;
+    touchPointerDown = false;
+    if (!tapped || ('detail' in event && event.detail === 0)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (activeId) close();
+    else open(false);
+  };
   const onFocus = (): void => {
     focusActive = true;
     if (activeId) reportAnchorActivity();
@@ -155,10 +169,11 @@ export const mountPopoverAnchor = (element: HTMLElement, options: PopoverAnchorO
   if (ownsExpanded) element.setAttribute('aria-expanded', 'false');
   if (options.label) element.setAttribute('aria-label', options.label);
   element.addEventListener('pointerenter', onPointerEnter);
-  // Crossing opaque iframe documents can omit an enter transition. A real
-  // pointer move over this element still establishes a new hover intent.
   element.addEventListener('pointermove', onPointerEnter);
   element.addEventListener('pointerleave', onPointerLeave);
+  element.addEventListener('pointerdown', onPointerDown);
+  element.addEventListener('pointercancel', onPointerCancel);
+  element.addEventListener('click', onClick, true);
   element.addEventListener('focus', onFocus);
   element.addEventListener('focusout', onFocusOut);
   element.addEventListener('keydown', onKeyDown);
@@ -180,6 +195,9 @@ export const mountPopoverAnchor = (element: HTMLElement, options: PopoverAnchorO
     element.removeEventListener('pointerenter', onPointerEnter);
     element.removeEventListener('pointermove', onPointerEnter);
     element.removeEventListener('pointerleave', onPointerLeave);
+    element.removeEventListener('pointerdown', onPointerDown);
+    element.removeEventListener('pointercancel', onPointerCancel);
+    element.removeEventListener('click', onClick, true);
     element.removeEventListener('focus', onFocus);
     element.removeEventListener('focusout', onFocusOut);
     element.removeEventListener('keydown', onKeyDown);

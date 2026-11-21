@@ -74,8 +74,8 @@ describe('new settings badge', () => {
     expect(storedBaseline()).not.toContain('appearance.dock-badge');
 
     const macCtx = { ...runtimeCtx, isDesktop: true, isWeb: false, isMac: true };
-    expect(getPages(macCtx)).toEqual(['appearance']);
-    acknowledgePage('appearance', macCtx);
+    expect(getPages(macCtx)).toEqual(['general']);
+    acknowledgePage('general', macCtx);
     expect(getPages(macCtx)).toEqual([]);
     resetNewSettingsBadgeCacheForTests();
     expect(getPages(macCtx)).toEqual([]);
@@ -84,10 +84,10 @@ describe('new settings badge', () => {
   test('a page with only unavailable new controls has no badge and cannot acknowledge them', () => {
     startFromBaseline(baselineWithout('appearance.dock-badge'));
     expect(getPages(runtimeCtx)).toEqual([]);
-    acknowledgePage('appearance', runtimeCtx);
+    acknowledgePage('general', runtimeCtx);
     expect(storedBaseline()).not.toContain('appearance.dock-badge');
     resetNewSettingsBadgeCacheForTests();
-    expect(getPages({ ...runtimeCtx, isDesktop: true, isMac: true })).toEqual(['appearance']);
+    expect(getPages({ ...runtimeCtx, isDesktop: true, isMac: true })).toEqual(['general']);
   });
 
   test('VS Code cannot announce or acknowledge controls from an unavailable page', () => {

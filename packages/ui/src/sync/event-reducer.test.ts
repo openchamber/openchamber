@@ -245,6 +245,13 @@ describe("message events", () => {
     expect(draft.message.ses_1.map((m) => m.id)).toEqual(["msg_a", "msg_u"])
   })
 
+  test("inbox delivery clears the pending mark of a synthetic message", () => {
+    const report: Message = { id: "msg_s", sessionID: "ses_1", role: "synthetic", time: { created: 5 }, text: "result", pending: true }
+    const draft = state({ message: { ses_1: [report] } })
+    apply(draft, { type: "message.patched", properties: { sessionID: "ses_1", messageID: "msg_s", patch: { time: { created: 30 } } } })
+    expect(draft.message.ses_1[0]).toEqual({ id: "msg_s", sessionID: "ses_1", role: "synthetic", time: { created: 30 }, text: "result" })
+  })
+
   test("a shell message is patched by shell id", () => {
     const shell: Message = {
       id: "msg_s",

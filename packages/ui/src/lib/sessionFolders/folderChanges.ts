@@ -1,29 +1,25 @@
 import { z } from 'zod';
 import type { SessionFolder, SessionFoldersMap } from '@/stores/useSessionFoldersStore';
 
-/**
- * One user action on the shared folders. The client applies it to its own copy
- * at once and sends it to the server, which applies it to the stored folders
- * (`packages/web/server/lib/session-folders/folder-changes.js`); both sides
- * keep the same semantics, so a change still pending is laid over every newer
- * server copy the same way the server will apply it.
- */
 export type FolderChange =
   | { type: 'create'; scopeKey: string; folder: { id: string; name: string; parentId: string | null; createdAt: number } }
   | { type: 'rename'; scopeKey: string; folderId: string; name: string }
   | { type: 'delete'; scopeKey: string; folderIds: string[] }
-  | { type: 'assign'; scopeKey: string; folderId: string; sessionIds: string[] }
-  | { type: 'unassign'; scopeKey: string; sessionIds: string[] }
+  | { type: 'assign'; scopeKey: string; folderId: string; sessionIds: string[]; from?: ChatPlacement }
+  | { type: 'unassign'; scopeKey: string; sessionIds: string[]; from?: ChatPlacement }
   | { type: 'forget-sessions'; sessionIds: string[] }
   | { type: 'forget-scopes'; scopeKeys: string[] };
 
+export type ChatPlacement = Record<string, string | null>;
+
 const id = z.string().min(1);
+const chatPlacementSchema = z.record(z.string(), id.nullable());
 export const folderChangeSchema: z.ZodType<FolderChange> = z.discriminatedUnion('type', [
   z.object({ type: z.literal('create'), scopeKey: id, folder: z.object({ id, name: id, parentId: id.nullable(), createdAt: z.number() }) }),
   z.object({ type: z.literal('rename'), scopeKey: id, folderId: id, name: id }),
   z.object({ type: z.literal('delete'), scopeKey: id, folderIds: z.array(id).min(1) }),
-  z.object({ type: z.literal('assign'), scopeKey: id, folderId: id, sessionIds: z.array(id).min(1) }),
-  z.object({ type: z.literal('unassign'), scopeKey: id, sessionIds: z.array(id).min(1) }),
+  z.object({ type: z.literal('assign'), scopeKey: id, folderId: id, sessionIds: z.array(id).min(1), from: chatPlacementSchema.optional() }),
+  z.object({ type: z.literal('unassign'), scopeKey: id, sessionIds: z.array(id).min(1), from: chatPlacementSchema.optional() }),
   z.object({ type: z.literal('forget-sessions'), sessionIds: z.array(id).min(1) }),
   z.object({ type: z.literal('forget-scopes'), scopeKeys: z.array(id).min(1) }),
 ]);
@@ -36,7 +32,6 @@ const storedFolderSchema = z.object({
   parentId: z.string().nullable().optional().transform((value) => value ?? null),
 });
 
-/** The server's answer to a read or a write of the shared folders. */
 export const folderSnapshotSchema = z.object({
   exists: z.boolean().optional(),
   foldersMap: z.record(z.string(), z.array(storedFolderSchema)).default({}),
@@ -55,7 +50,23 @@ const withoutSessions = (folders: SessionFolder[], sessionIds: ReadonlySet<strin
   return changed ? next : folders;
 };
 
-/** A folder and every folder under it. */
+const folderHolding = (folders: readonly SessionFolder[], sessionId: string): string | null => (
+  folders.find((folder) => folder.sessionIds.includes(sessionId))?.id ?? null
+);
+
+export const chatPlacement = (folders: readonly SessionFolder[] | undefined, sessionIds: readonly string[]): ChatPlacement => (
+  Object.fromEntries(sessionIds.map((sessionId) => [sessionId, folderHolding(folders ?? [], sessionId)]))
+);
+
+const chatsStillInPlace = (folders: readonly SessionFolder[], sessionIds: readonly string[], from: ChatPlacement | undefined): string[] => (
+  sessionIds.filter((sessionId) => {
+    const expected = from?.[sessionId];
+    if (expected === undefined) return true;
+    const holding = folderHolding(folders, sessionId);
+    return holding === expected || (holding === null && !folders.some((folder) => folder.id === expected));
+  })
+);
+
 export const collectFolderSubtree = (folders: readonly SessionFolder[], rootId: string): Set<string> => {
   const result = new Set([rootId]);
   let grew = true;
@@ -76,17 +87,12 @@ const withScope = (map: SessionFoldersMap, scopeKey: string, folders: SessionFol
   return { ...map, [scopeKey]: folders };
 };
 
-/**
- * Apply one change. Returns the same map when nothing changes, so a caller can
- * skip the write, and keeps every untouched scope and folder by reference.
- */
 export const applyFolderChange = (map: SessionFoldersMap, change: FolderChange): SessionFoldersMap => {
   switch (change.type) {
     case 'create': {
       const folders = map[change.scopeKey] ?? [];
       if (folders.some((folder) => folder.id === change.folder.id)) return map;
       const parentId = change.folder.parentId && folders.some((folder) => folder.id === change.folder.parentId) ? change.folder.parentId : null;
-      // Field order matches a parsed server answer, so laying this over one compares equal.
       const { id, name, createdAt } = change.folder;
       return withScope(map, change.scopeKey, [...folders, { id, name, sessionIds: [], createdAt, parentId }]);
     }
@@ -107,8 +113,8 @@ export const applyFolderChange = (map: SessionFoldersMap, change: FolderChange):
       const folders = map[change.scopeKey];
       const target = folders?.find((folder) => folder.id === change.folderId);
       if (!folders || !target) return map;
-      const moving = new Set(change.sessionIds);
-      const settled = change.sessionIds.every((sessionId) => target.sessionIds.includes(sessionId))
+      const moving = new Set(chatsStillInPlace(folders, change.sessionIds, change.from));
+      const settled = [...moving].every((sessionId) => target.sessionIds.includes(sessionId))
         && folders.every((folder) => folder === target || !folder.sessionIds.some((sessionId) => moving.has(sessionId)));
       if (settled) return map;
       return withScope(map, change.scopeKey, withoutSessions(folders, moving).map((folder) => (
@@ -117,7 +123,7 @@ export const applyFolderChange = (map: SessionFoldersMap, change: FolderChange):
     }
     case 'unassign': {
       const folders = map[change.scopeKey];
-      return folders ? withScope(map, change.scopeKey, withoutSessions(folders, new Set(change.sessionIds))) : map;
+      return folders ? withScope(map, change.scopeKey, withoutSessions(folders, new Set(chatsStillInPlace(folders, change.sessionIds, change.from)))) : map;
     }
     case 'forget-sessions': {
       const forgotten = new Set(change.sessionIds);

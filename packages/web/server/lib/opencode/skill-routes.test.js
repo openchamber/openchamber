@@ -14,13 +14,8 @@ import {
   renameSkill,
   updateSkill,
 } from './skills.js';
-import {
-  SKILL_DIR,
-  SKILL_SCOPE,
-  deleteSkillSupportingFile,
-  readSkillSupportingFile,
-  writeSkillSupportingFile,
-} from './shared.js';
+import { SKILL_DIR, SKILL_SCOPE } from './config-files.js';
+import { deleteSkillSupportingFile, readSkillSupportingFile, writeSkillSupportingFile } from './skill-files.js';
 
 const createTempProject = () => {
   const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-skill-routes-'));
@@ -28,7 +23,7 @@ const createTempProject = () => {
   return projectRoot;
 };
 
-const startSkillsApp = ({ projectRoot, overrides = {} }) => {
+const startSkillsApp = async ({ projectRoot, overrides = {} }) => {
   const app = express();
   app.use(express.json());
 
@@ -79,7 +74,11 @@ const startSkillsApp = ({ projectRoot, overrides = {} }) => {
     ...overrides,
   });
 
-  const server = app.listen(0);
+  const server = await new Promise((resolve, reject) => {
+    const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
+    listening.once('error', reject);
+  });
+  expect(server.address().address).toBe('127.0.0.1');
   const { port } = server.address();
   return {
     baseUrl: `http://127.0.0.1:${port}`,
@@ -109,7 +108,7 @@ describe('skill-routes directory soft fallback', () => {
 
   it('lists repository-local .agents skills after create even when list omits directory', async () => {
     projectRoot = createTempProject();
-    appHandle = startSkillsApp({ projectRoot });
+    appHandle = await startSkillsApp({ projectRoot });
 
     const createResponse = await fetch(`${appHandle.baseUrl}/api/config/skills/repo-local-skill`, {
       method: 'POST',
@@ -151,7 +150,7 @@ describe('skill-routes directory soft fallback', () => {
       'utf8',
     );
 
-    appHandle = startSkillsApp({ projectRoot });
+    appHandle = await startSkillsApp({ projectRoot });
     const listResponse = await fetch(`${appHandle.baseUrl}/api/config/skills`);
     expect(listResponse.status).toBe(200);
     const payload = await listResponse.json();
@@ -194,7 +193,7 @@ describe('skill-routes directory soft fallback', () => {
     );
 
     try {
-      appHandle = startSkillsApp({ projectRoot });
+      appHandle = await startSkillsApp({ projectRoot });
       const listResponse = await fetch(
         `${appHandle.baseUrl}/api/config/skills?directory=${encodeURIComponent(projectRoot)}`,
       );
@@ -247,6 +246,13 @@ describe('skill-routes directory soft fallback', () => {
             description: 'v2 built-in skill with a synthetic path',
           },
           {
+            id: 'report',
+            name: 'Report',
+            path: 'skill://report/SKILL.md',
+            description: 'Built-in skill as OpenCode 2.2.7 reports it',
+            content: '# Report\n\nCollect diagnostics.',
+          },
+          {
             id: 'unlocated-skill',
             name: 'unlocated-skill',
             description: 'Has neither field; must be dropped',
@@ -260,7 +266,7 @@ describe('skill-routes directory soft fallback', () => {
     const stubPort = stubServer.address().port;
 
     try {
-      appHandle = startSkillsApp({
+      appHandle = await startSkillsApp({
         projectRoot,
         overrides: {
           buildOpenCodeUrl: () => `http://127.0.0.1:${stubPort}/`,
@@ -285,6 +291,16 @@ describe('skill-routes directory soft fallback', () => {
       expect(byName.get('OpenCode')?.path).toBe('<built-in>');
       expect(byName.get('OpenCode')?.renamable).toBe(false);
 
+      // A `skill://` built-in has no file: it is marked built-in, so Settings
+      // shows the content OpenCode sent, read-only.
+      expect(byName.get('Report')).toMatchObject({ id: 'report', path: '<built-in>', renamable: false });
+      const detailResponse = await fetch(
+        `${appHandle.baseUrl}/api/config/skills/Report?directory=${encodeURIComponent(projectRoot)}`,
+      );
+      expect(detailResponse.status).toBe(200);
+      const detail = await detailResponse.json();
+      expect(detail.sources.md).toMatchObject({ exists: true, path: null, instructions: '# Report\n\nCollect diagnostics.' });
+
       expect(byName.has('unlocated-skill')).toBe(false);
     } finally {
       stubServer.close();
@@ -293,7 +309,7 @@ describe('skill-routes directory soft fallback', () => {
   it('hides a curated source\'s excluded skills from its catalog listing', async () => {
     projectRoot = createTempProject();
     const scanItem = (skillName) => ({ repoSource: 'acme/skills', skillDir: `skills/${skillName}`, skillName, installable: true });
-    appHandle = startSkillsApp({
+    appHandle = await startSkillsApp({
       projectRoot,
       overrides: {
         getCuratedSkillsSources: () => [
@@ -333,7 +349,7 @@ describe('skill-routes directory soft fallback', () => {
       }));
 
       const scanItem = (repoSource) => ({ repoSource, skillDir: 'skills/skill-creator', skillName: 'skill-creator', installable: true });
-      appHandle = startSkillsApp({
+      appHandle = await startSkillsApp({
         projectRoot,
         overrides: {
           getCuratedSkillsSources: () => [
@@ -376,7 +392,7 @@ describe('skill-routes directory soft fallback', () => {
     const previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
     process.env.OPENCHAMBER_DATA_DIR = dataDir;
     try {
-      appHandle = startSkillsApp({
+      appHandle = await startSkillsApp({
         projectRoot,
         overrides: {
           resolveCatalogGitIdentity: async () => ({ ok: true, identity: { transport: 'https', credentialId: 'ref', endpoint: 'https://github.com/owner/repo.git' } }),
@@ -445,7 +461,7 @@ describe('skill-routes directory soft fallback', () => {
       fs.writeFileSync(skillPath, `---\nname: ${name}\ndescription: Read once\n---\nBody\n`);
       paths.push(skillPath);
     }
-    appHandle = startSkillsApp({ projectRoot });
+    appHandle = await startSkillsApp({ projectRoot });
     const read = vi.spyOn(fs.promises, 'readFile');
     const url = `${appHandle.baseUrl}/api/config/skills?directory=${encodeURIComponent(projectRoot)}`;
     const response = await fetch(url);
@@ -474,7 +490,7 @@ describe('skill-routes directory soft fallback', () => {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, `---\nname: ${name}\ndescription: ${description}\ndisable-model-invocation: true\n---\n${description} body\n`);
     }
-    appHandle = startSkillsApp({
+    appHandle = await startSkillsApp({
       projectRoot,
       overrides: {
         discoverSkills: async (directory, options) => (await discoverSkills(directory, options))
@@ -546,7 +562,7 @@ describe('skill-routes directory soft fallback', () => {
     );
     fs.writeFileSync(path.join(skillDir, 'references', 'guide.md'), '# Guide\n');
 
-    appHandle = startSkillsApp({ projectRoot });
+    appHandle = await startSkillsApp({ projectRoot });
     const query = `?directory=${encodeURIComponent(projectRoot)}`;
 
     const list = await (await fetch(`${appHandle.baseUrl}/api/config/skills${query}`)).json();
@@ -585,7 +601,7 @@ describe('skill-routes directory soft fallback', () => {
     const stubPort = stubServer.address().port;
 
     try {
-      appHandle = startSkillsApp({
+      appHandle = await startSkillsApp({
         projectRoot,
         overrides: {
           buildOpenCodeUrl: () => `http://127.0.0.1:${stubPort}/`,
@@ -609,13 +625,13 @@ describe('skill-routes directory soft fallback', () => {
 
   it('resolves account-token identities for scan and install', async () => {
     projectRoot = createTempProject();
-    const account = { provider: 'github', instance: 'github.com', accountId: 'account-one' };
+    const account = { provider: 'github', instance: 'github.com', accountId: 'account-one', credentialRevision: 2 };
     const profile = { id: 'work', transport: 'account', account };
     const credentialResolver = { resolve: async () => ({}) };
     const resolved = [];
     const scanResponse = { ok: true, items: [] };
     const installResponse = { ok: true, installed: [], skipped: [] };
-    appHandle = startSkillsApp({
+    appHandle = await startSkillsApp({
       projectRoot,
       overrides: {
         getProfile: () => profile,
@@ -688,7 +704,7 @@ describe('skill-routes directory soft fallback', () => {
   it('uses the managed SSH identity and endpoint for catalog scans', async () => {
     projectRoot = createTempProject();
     let scanInput;
-    appHandle = startSkillsApp({
+    appHandle = await startSkillsApp({
       projectRoot,
       overrides: {
         getProfile: () => ({
@@ -725,7 +741,7 @@ describe('skill-routes directory soft fallback', () => {
   it('keeps the System identity on the server Git configuration', async () => {
     projectRoot = createTempProject();
     let scanInput;
-    appHandle = startSkillsApp({
+    appHandle = await startSkillsApp({
       projectRoot,
       overrides: {
         parseSkillRepoSource: () => ({
@@ -752,7 +768,7 @@ describe('skill-routes directory soft fallback', () => {
   it('refuses to fall back when the selected account identity is unavailable', async () => {
     projectRoot = createTempProject();
     let scanned = false;
-    appHandle = startSkillsApp({
+    appHandle = await startSkillsApp({
       projectRoot,
       overrides: {
         getProfile: () => ({
@@ -809,7 +825,7 @@ describe('skill-routes delete location', () => {
 
   it('deletes only the copy at the given scope and source', async () => {
     projectRoot = createTempProject();
-    appHandle = startSkillsApp({ projectRoot });
+    appHandle = await startSkillsApp({ projectRoot });
     const agentsCopy = writeProjectSkill(projectRoot, '.agents', 'located-skill');
     const claudeCopy = writeProjectSkill(projectRoot, '.claude', 'located-skill');
     const query = `directory=${encodeURIComponent(projectRoot)}`;
@@ -823,7 +839,7 @@ describe('skill-routes delete location', () => {
 
   it('fails without touching other copies when the given location has none', async () => {
     projectRoot = createTempProject();
-    appHandle = startSkillsApp({ projectRoot });
+    appHandle = await startSkillsApp({ projectRoot });
     const claudeCopy = writeProjectSkill(projectRoot, '.claude', 'elsewhere-skill');
     const query = `directory=${encodeURIComponent(projectRoot)}`;
 
@@ -835,7 +851,7 @@ describe('skill-routes delete location', () => {
 
   it('rejects an unknown location', async () => {
     projectRoot = createTempProject();
-    appHandle = startSkillsApp({ projectRoot });
+    appHandle = await startSkillsApp({ projectRoot });
 
     const response = await fetch(`${appHandle.baseUrl}/api/config/skills/any-skill?scope=user&source=elsewhere`, { method: 'DELETE' });
 

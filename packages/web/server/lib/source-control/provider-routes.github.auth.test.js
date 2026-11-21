@@ -1326,7 +1326,7 @@ describe('gh CLI account consent', () => {
       // through gh once the user switches that host on.
       expect(before.body).toMatchObject({
         connected: false,
-        accounts: [{ id: 'github.example.com#cli:0', current: false, status: 'valid', user: { id: '0', username: 'ghe-user' } }],
+        accounts: [{ id: 'github.example.com#cli:0', current: false, status: 'valid', usable: false, user: { id: '0', username: 'ghe-user' } }],
       });
       expect(before.body.cli).toMatchObject({ available: true, active: false, user: { id: '0', username: 'ghe-user' } });
       expect(await fs.access(ghInvokedFile).then(() => true, () => false)).toBe(false);
@@ -1339,7 +1339,7 @@ describe('gh CLI account consent', () => {
       expect(response.body).toMatchObject({
         connected: true,
         user: { id: '42', username: 'ghe-user' },
-        accounts: [{ id: 'github.example.com#cli:42', providerUserId: 'github.example.com#42', current: true, status: 'valid' }],
+        accounts: [{ id: 'github.example.com#cli:42', providerUserId: 'github.example.com#42', current: true, status: 'valid', usable: true }],
       });
       expect(response.body.cli).toMatchObject({ available: true, active: true });
       // The activation belongs to that instance: its own switch is on, and
@@ -1350,6 +1350,36 @@ describe('gh CLI account consent', () => {
     } finally {
       if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
       else process.env.GH_CONFIG_DIR = previousConfigDir;
+    }
+  });
+
+  it('never runs gh for github.com while its switch is off and keeps the row that turns it back on', async () => {
+    const ghConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-gh-hosts-'));
+    const hostsFile = path.join(ghConfigDir, 'hosts.yml');
+    await fs.writeFile(hostsFile, 'github.com:\n  user: cli-user\n  oauth_token: gho_cli\n');
+    const previous = { GH_CONFIG_DIR: process.env.GH_CONFIG_DIR, GH_TOKEN: process.env.GH_TOKEN, GITHUB_TOKEN: process.env.GITHUB_TOKEN };
+    process.env.GH_CONFIG_DIR = ghConfigDir;
+    delete process.env.GH_TOKEN;
+    delete process.env.GITHUB_TOKEN;
+    const fetch = stubGitHubUsers();
+    auth.setGhCliDisabled(true);
+    const cliStatus = async () => (await request(makeApp()).get('/api/source-control/github/auth/status').expect(200)).body.cli;
+    try {
+      expect(await cliStatus()).toEqual({ available: true, disabled: true, active: false });
+
+      // A gh signed in only through GH_TOKEN has no hosts.yml entry.
+      await fs.rm(hostsFile);
+      expect(await cliStatus()).toEqual({ available: false, disabled: true, active: false });
+      process.env.GH_TOKEN = 'env-token';
+      expect(await cliStatus()).toEqual({ available: true, disabled: true, active: false });
+
+      expect(await fs.access(path.join(directory, 'invoked-hosts.txt')).then(() => true, () => false)).toBe(false);
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
     }
   });
 
@@ -1402,7 +1432,7 @@ describe('gh CLI account consent', () => {
       expect(response.body).toMatchObject({
         connected: true,
         user: { id: '42', username: 'ghe-user' },
-        accounts: [{ id: 'github.example.com#cli:42', providerUserId: 'github.example.com#42', current: true, status: 'valid' }],
+        accounts: [{ id: 'github.example.com#cli:42', providerUserId: 'github.example.com#42', current: true, status: 'valid', usable: true }],
       });
       expect(response.body.cli).toMatchObject({ available: true, active: true });
     } finally {
@@ -1472,10 +1502,132 @@ describe('gh CLI account consent', () => {
 
     const before = await request(makeApp()).get('/api/source-control/github/auth/status').expect(200);
     expect(before.body).toMatchObject({ connected: false, cli: { available: true, active: false } });
+    // While the switch is off no gh row is usable: the server would refuse an
+    // exact lookup, so a binding offer must not be made from this listing.
+    const beforeCliRows = (before.body.accounts ?? []).filter((account) => account.source === 'cli');
+    expect(beforeCliRows.every((account) => account.usable === false)).toBe(true);
 
     const response = await request(makeApp()).post('/api/source-control/github/auth/activate')
       .send({ accountId: 'github.com#cli:9' }).expect(200);
 
     expect(response.body).toMatchObject({ connected: true, user: { username: 'cli-user' }, cli: { active: true } });
+  });
+});
+
+describe('gh logins on github.com', () => {
+  // A fake gh: the unnamed lookup answers gh's active login (or `GH_TOKEN`),
+  // `--user work-user` answers the second login, and FAKE_GH_USER_FLAG=unsupported
+  // plays a gh release from before `--user`, which rejects the flag. Every run's
+  // arguments are recorded, so a test can prove gh's own active account was
+  // never switched.
+  let previousPath;
+  let previousConfigDir;
+  let ghConfigDir;
+  let ghArgsFile;
+
+  beforeEach(async () => {
+    const bin = path.join(directory, 'bin');
+    ghArgsFile = path.join(directory, 'gh-args.txt');
+    await fs.mkdir(bin);
+    await fs.writeFile(path.join(bin, 'gh'), [
+      '#!/bin/sh',
+      `printf '%s\\n' "$*" >> '${ghArgsFile}'`,
+      'case "$*" in',
+      '  *--user*) if [ "$FAKE_GH_USER_FLAG" = unsupported ]; then echo "unknown flag: --user" >&2; exit 1; fi ;;',
+      'esac',
+      'case "$*" in',
+      '  *"--user work-user"*) echo token-work ;;',
+      '  *"--user cli-user"*) echo cli-token ;;',
+      '  *--user*) exit 1 ;;',
+      '  *) echo cli-token ;;',
+      'esac',
+      '',
+    ].join('\n'), { mode: 0o755 });
+    previousPath = process.env.PATH;
+    process.env.PATH = `${bin}${path.delimiter}${previousPath}`;
+    previousConfigDir = process.env.GH_CONFIG_DIR;
+    ghConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-gh-logins-'));
+    process.env.GH_CONFIG_DIR = ghConfigDir;
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      const authorization = new Headers(init?.headers).get('authorization');
+      if (String(url) === 'https://api.github.com/user' && authorization === 'token cli-token') {
+        return Response.json({ id: 9, login: 'cli-user' });
+      }
+      if (String(url) === 'https://api.github.com/user' && authorization === 'token token-work') {
+        return Response.json({ id: 10, login: 'work-user' });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+  });
+
+  afterEach(async () => {
+    process.env.PATH = previousPath;
+    if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
+    else process.env.GH_CONFIG_DIR = previousConfigDir;
+    delete process.env.FAKE_GH_USER_FLAG;
+    await fs.rm(ghConfigDir, { recursive: true, force: true });
+  });
+
+  const ghArgs = async () => (await fs.readFile(ghArgsFile, 'utf8').catch(() => '')).split('\n').filter(Boolean);
+  const settings = async () => JSON.parse(await fs.readFile(path.join(directory, 'settings.json'), 'utf8'));
+  const cliRows = (body) => (body.accounts ?? []).filter((account) => account.source === 'cli')
+    .map(({ id, current, usable }) => ({ id, current, usable }));
+
+  it('lists both logins as usable with only one current once the switch is on', async () => {
+    await fs.writeFile(path.join(ghConfigDir, 'hosts.yml'), 'github.com:\n  user: cli-user\n  users:\n    cli-user: {}\n    work-user: {}\n');
+    auth.setGhCliActive(true);
+
+    const before = await request(makeApp()).get('/api/source-control/github/auth/status').expect(200);
+    expect(cliRows(before.body)).toEqual([
+      { id: 'github.com#cli:9', current: true, usable: true },
+      { id: 'github.com#cli:10', current: false, usable: true },
+    ]);
+
+    // Use on the second login moves the instance to it and pins it by name.
+    const after = await request(makeApp()).post('/api/source-control/github/auth/activate')
+      .send({ accountId: 'github.com#cli:10' }).expect(200);
+    expect(after.body).toMatchObject({ connected: true, user: { username: 'work-user' } });
+    expect(cliRows(after.body)).toEqual([
+      { id: 'github.com#cli:9', current: false, usable: true },
+      { id: 'github.com#cli:10', current: true, usable: true },
+    ]);
+    expect((await settings()).ghCliLogin).toBe('work-user');
+
+    // Use on gh's active login goes back to it: the unnamed lookup it was
+    // verified with, so the pin is cleared rather than kept on work-user.
+    await request(makeApp()).post('/api/source-control/github/auth/activate')
+      .send({ accountId: 'github.com#cli:9' }).expect(200);
+    expect((await settings()).ghCliLogin).toBeNull();
+    expect((await ghArgs()).some((args) => args.includes('switch'))).toBe(false);
+  });
+
+  it.each([
+    ['gh signed in only through GH_TOKEN', 'other.example.com:\n  user: someone\n', undefined],
+    ['a gh release without --user', 'github.com:\n  user: cli-user\n', 'unsupported'],
+  ])('keeps the account working with %s', async (_label, hostsYaml, userFlag) => {
+    await fs.writeFile(path.join(ghConfigDir, 'hosts.yml'), hostsYaml);
+    if (userFlag) process.env.FAKE_GH_USER_FLAG = userFlag;
+    const { getGitHubCliCredential, getOctokitForAccountId } = await import('../github/octokit.js');
+
+    const activated = await request(makeApp()).post('/api/source-control/github/auth/activate')
+      .send({ accountId: 'github.com#cli:9' }).expect(200);
+    expect(activated.body).toMatchObject({ connected: true, user: { username: 'cli-user' }, cli: { active: true } });
+    // No name is pinned that gh could only answer with `--user`.
+    expect((await settings()).ghCliLogin ?? null).toBeNull();
+
+    const status = await request(makeApp()).get('/api/source-control/github/auth/status').expect(200);
+    expect(cliRows(status.body)).toEqual([{ id: 'github.com#cli:9', current: true, usable: true }]);
+    expect(await auth.isGhCliActiveForHost('github.com')).toBe(true);
+
+    // Both exact resolvers answer through the lookup the listing verified.
+    await expect(getGitHubCliCredential('github.com#cli:9')).resolves.toMatchObject({
+      accountId: 'github.com#cli:9', providerUserId: 'github.com#9', accessToken: 'cli-token',
+    });
+    await expect(getOctokitForAccountId('github.com#cli:9')).resolves.toMatchObject({ accountId: 'github.com#cli:9', source: 'cli' });
+    // Another account id is never answered with this token.
+    await expect(getGitHubCliCredential('github.com#cli:10')).resolves.toBeNull();
+    await expect(getOctokitForAccountId('github.com#cli:10')).resolves.toBeNull();
+    // Nothing asked gh by name, and gh's own active account was left alone.
+    expect((await ghArgs()).every((args) => args === 'auth token')).toBe(true);
   });
 });

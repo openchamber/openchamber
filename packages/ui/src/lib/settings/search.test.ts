@@ -1,4 +1,6 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
+import { opencodeClient } from '@/lib/opencode/client';
 import type { I18nKey, I18nParams } from '@/lib/i18n/store';
 import { acmeTrackerDescriptor, linearLikeTrackerDescriptor } from '@/lib/trackers/descriptor.fixture';
 import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
@@ -26,6 +28,21 @@ const runtimeCtx = {
 };
 
 describe('settings search', () => {
+  test('finds the Chats defaults outside VS Code once the Chats root is known', async () => {
+    const homeInfo = spyOn(opencodeClient, 'getFilesystemHomeInfo').mockResolvedValue({ home: '/home/me', chatsRoot: '/home/me/.config/openchamber/chats' });
+    try {
+      await ensureChatsRootDirectory();
+      const ids = (query: string, ctx: typeof runtimeCtx) => buildSettingsSearchResults({ query, runtimeCtx: ctx, t, getPageTitle: (page) => page })
+        .map((result) => result.id);
+      expect(ids('chats model', runtimeCtx)).toContain('sessions.chats-default-model');
+      expect(ids('chats agent', runtimeCtx)).toContain('sessions.chats-default-agent');
+      expect(ids('chats model', { ...runtimeCtx, isVSCode: true })).not.toContain('sessions.chats-default-model');
+      expect(ids('default model', runtimeCtx)).toContain('sessions.default-model');
+    } finally {
+      homeInfo.mockRestore();
+    }
+  });
+
   test('uses the subscribed voice settings snapshot when one is supplied', () => {
     const voiceSettings = {
       showMessageTTSButtons: true,
@@ -114,9 +131,26 @@ describe('settings search', () => {
         t,
         getPageTitle: (page) => page,
       });
-      expect(results.find((result) => result.id === 'appearance.scrollbars')?.page).toBe('appearance');
+      // General's Panels section holds it; VS Code has no such section and keeps it on Appearance.
+      const expected = context.isVSCode
+        ? { id: 'appearance.scrollbars-vscode', page: 'appearance' }
+        : { id: 'appearance.scrollbars', page: 'general' };
+      expect(results.find((result) => result.id === expected.id)?.page).toBe(expected.page);
     }
   });
+
+  test('finds the provider logo wherever it can be uploaded', () => {
+    for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isMobile: true }, { ...runtimeCtx, isVSCode: true }]) {
+      const results = buildSettingsSearchResults({
+        query: 'logo',
+        runtimeCtx: context,
+        t,
+        getPageTitle: (page) => page,
+      });
+      expect(results.find((result) => result.id === 'providers.logo')?.page).toBe(context.isVSCode ? undefined : 'providers');
+    }
+  });
+
   test('finds Linear connect on the integrations page when the server serves Linear', () => {
     const results = buildSettingsSearchResults({
       query: 'linear',

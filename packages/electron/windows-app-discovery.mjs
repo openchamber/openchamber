@@ -3,14 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-// Windows "Open in" discovery runs in the Electron main process, so every
-// child-process wait here must be async: a spawnSync per candidate app froze
-// the window for the whole scan (about 36 where.exe runs plus PowerShell).
 
 const execFileAsync = promisify(execFile);
 
-// A lookup that never exits would hold the shared scan open until restart and
-// leave the "Open in" list empty; a timed-out lookup counts as not found.
 const WHERE_TIMEOUT_MS = 10_000;
 const POWERSHELL_TIMEOUT_MS = 15_000;
 
@@ -78,8 +73,6 @@ const imageFileToDataUrl = (filePath) => {
   }
 };
 
-// `run` is execFile's promise form and `getFileIcon` is Electron's
-// app.getFileIcon; tests pass their own.
 export const createWindowsAppDiscovery = ({ run = execFileAsync, getFileIcon, env = process.env }) => {
   const runWhere = async (program) => {
     try {
@@ -147,8 +140,6 @@ export const createWindowsAppDiscovery = ({ run = execFileAsync, getFileIcon, en
     return null;
   };
 
-  // One lookup per app run. Holding the promise lets a scan that starts while
-  // another is still waiting on PowerShell share its answer.
   let windowsTerminalPackagePath;
   const resolveWindowsTerminalPackagePath = () => {
     windowsTerminalPackagePath ??= readWindowsTerminalPackagePath();

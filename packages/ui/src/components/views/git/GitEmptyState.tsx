@@ -10,7 +10,6 @@ interface GitEmptyStateProps {
 
 export const GitEmptyState: React.FC<GitEmptyStateProps> = ({ onOpenStashes }) => {
   const { t } = useI18n();
-  // GitView remounts this on every opening of the panel, so each opening gets a new line.
   const description = useGitCleanLine(t('gitView.empty.cleanDescription'));
   return (
     <div className="flex flex-col items-center justify-center py-10 px-4 text-center">

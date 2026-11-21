@@ -34,7 +34,7 @@ Some sides belong to the screen. The lint rule `openchamber/no-physical-sides` f
 
 ## Mixed-direction text
 
-User content (session titles, run names, file names in lists) gets `dir="auto"` so it shows its own start when truncated. Text whose direction differs from the UI aligns with the interface through `oc-ui-start-align`, so it lines up with the rows around it. Values made of numbers and units ("~41 tok/s", "6.6K ↑ · 242 ↓") also take `dir="auto"`. Markdown already resolves direction per block; see `components/chat/message/parts/DOCUMENTATION.md` before touching it.
+User content (session titles, run names, file names in lists) gets `dir="auto"` so it shows its own start when truncated. Text whose direction differs from the UI aligns with the interface through `oc-ui-start-align`, so it lines up with the rows around it. Values made of numbers and units ("~41 tok/s", "6.6K ↑ · 242 ↓") also take `dir="auto"`. `dir="auto"` goes by the first letter, so a block assembled from several texts (a question with its options) takes `dominantTextDirection` from `lib/i18n/textDirection.ts` on its container instead. A shared primitive that also receives translated strings gets no `dir="auto"` of its own (a Hebrew string opening with "rebase" would flip); its callers opt in, as `WorkStatusRow`'s `labelDir` does. Inputs and textareas need no `dir`: a rule in `index.css` resolves typed text per line and leaves an empty field in the interface's direction. Markdown already resolves direction per block; see `components/chat/message/parts/DOCUMENTATION.md` before touching it.
 
 ## Icons
 

@@ -1,5 +1,6 @@
-import type { Message, Part } from "@/lib/opencode/model"
+import type { Message, Part, Session } from "@/lib/opencode/model"
 import { isQuestionTool } from "@/lib/opencode/tools"
+import { normalizePath } from "@/lib/pathNormalization"
 
 type MessageRecord = {
   info: Message
@@ -8,21 +9,17 @@ type MessageRecord = {
 
 const RECOVERY_DELAYS_MS = [0, 500, 1500] as const
 
-/**
- * v2 has no `form` tool: a form is raised by the tool that blocks on it, which
- * today is `question`.
- */
+export const resolveRecoveryDirectory = (
+  session: Pick<Session, "directory"> | null,
+  fallback: string | null,
+): string | null => normalizePath(session?.directory ?? null) ?? normalizePath(fallback)
+
 const isActiveFormTool = (part: Part): boolean => {
   if (part.type !== "tool" || !isQuestionTool(part.tool)) return false
   const status = part.state.status
   return status === "pending" || status === "running"
 }
 
-/**
- * A persisted running form tool without a matching pending-request record
- * is the cold-start recovery signal. Only inspect the current turn so an old,
- * stale tool cannot trigger network work after the user has continued chatting.
- */
 export function hasActiveFormToolInCurrentTurn(messages: readonly MessageRecord[]): boolean {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]

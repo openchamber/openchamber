@@ -52,6 +52,19 @@ per session object (records are replaced on update), so the index can be
 rebuilt on every session-list change. Lanes sort by variant then creation;
 fusions come first.
 
+### Why the index resolves the legacy scope lazily and keeps its last result
+
+`RunAutoFusion` rebuilds the index on every streamed step of any session,
+because each step changes the deferred spend and the live records. Resolving
+every session's project scope (a worktree lookup and a path normalization) per
+step cost more than the rest of the index together, and only a session whose
+title names a run without membership metadata reads that scope.
+`readMultiRunIdentityWith` therefore asks for the scope only in that case and
+caches whether the identity read it. The index itself reads only the sessions
+that carry an identity, so `buildMultiRunIndex` returns the index it built last
+when those members are the same records with the same identities in the same
+order.
+
 Consumers: the sidebar row model and mobile sheet (see the sidebar
 DOCUMENTATION), the overview (`useMultiRun`), the header title
 (`useMultiRunTitle`) and the header tabs (`useMultiRunMemberIds`: the lanes of a
@@ -65,6 +78,11 @@ The composer's parallel mode (`components/chat/composer/parallel/`) and the
 overview's "Ask another model" launch lanes; `useMultiRunStore.createMultiRun`
 creates them and `dispatchRunPrompt` sends each lane its prompt with the
 project's session knowledge. The Auto routing model is never a lane.
+With `goal` set, `dispatchRunPrompt` writes the lane's own goal before its
+prompt, the order of an ordinary send. A lane whose goal cannot be written is
+not sent and shows as not started. A rejected prompt clears the goal again: with
+no turn to audit the server would keep it active, and the lane would stay
+working and hold auto-fusion. "Ask another model" adds plain lanes.
 `runActions.askOtherModels` turns a chat into a run by writing membership onto
 it and adding lanes that re-send its first prompt; it refuses any turn but the
 first, because new lanes would start without the conversation that followed.
@@ -121,7 +139,9 @@ Fusion results keep the group identity with role `fusion`, so they join the run
 as its first card. `autoFusion.ts` starts the configured fusion exactly once, on
 the page that launched the run (`RUN_LAUNCHER_ID`), when every lane was seen
 running on this page and has since left the live busy set with an outcome,
-with no running subagent below it. The descendant check uses the same merged
+with no running subagent below it and no active goal. An active goal idles
+between turns with an outcome already recorded, so only its settling (complete,
+blocked, paused, out of budget) ends the lane. The descendant check uses the same merged
 session map as run membership, so it covers nested children across directories.
 An idle lane with a running descendant must record a newer `time.idle` before
 it can finish, so a gap between the child settling and the parent resuming
@@ -154,11 +174,13 @@ A run left with one active member stops being a run on its own.
 
 Each card's state comes from `laneStatus.resolveLaneStatus`, over live and
 recorded facts only: a pending permission or question (the global blocking
-index) wins over busy, then the live busy set, then OpenCode's recorded outcome
+index) wins over busy, then the live busy set or an active goal, then OpenCode's recorded outcome
 (`failed`, `interrupted` as stopped), a lane that never ended a turn, and a
 normal end with or without answer text. A normal end is grey, never green: it
 says the turn ended, not that the work is good; an unread dot marks replies
-the user has not opened. A failed card shows the error recorded on the newest
+the user has not opened. A lane with a goal shows the sidebar's goal mark beside
+its name, coloured by the goal's status, so a blocked goal reads as blocked on a
+card whose turn ended normally. A failed card shows the error recorded on the newest
 assistant message (`laneData.loadLaneLastTurn`) or says to open the chat. The
 header counts lanes per state, and the bottom bar names lanes waiting for the
 user, because they block the run and auto-fusion. Each variant's prompt is one
@@ -190,3 +212,10 @@ Old titles ending in `/2` or `/fusion` are inherently ambiguous. Preserve their
 previous suffix interpretation; do not write guessed membership back to them.
 Legacy names can still collide or lose recognition after renaming. Only new
 ID-bound records provide exact membership.
+
+## Invariants
+
+- Fusion reads prompt overrides before creating worktrees so a failed read leaves no checkout behind. Each fusion has its own branch, and detaching also clears a legacy lane title so it cannot rejoin through title parsing.
+- Lane prompt lookup walks beyond a fixed oldest page because plumbing records can fill it without a user message. Summary caches use runtime, session and latest idle time, and request identity rejects stale reads while busy lanes retain previous results.
+- Lane creation never cleans up through a switched runtime, leaving an unbound marker ineligible. Membership serialization omits undefined optional values so the record remains plain JSON.
+- The launcher ID is page-local and tolerates insecure contexts because module initialization must not fail when `randomUUID` is absent. Legacy title parsing caches include project scope because title-only membership depends on it.

@@ -3,9 +3,13 @@ import { Window } from 'happy-dom';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
+import { EditorView } from '@codemirror/view';
+
 import { I18nProvider } from '@/lib/i18n';
 
-import { LargeTextPasteChoice, type LargeTextPasteChoiceAction } from './LargeTextPasteChoice';
+import { createComposerInputRedirect } from '../editor/inputRedirect';
+
+import { LargeTextPasteChoice, type LargeTextPasteChoiceAction, type LargeTextPasteChoiceKind } from './LargeTextPasteChoice';
 
 describe('LargeTextPasteChoice', () => {
     let windowInstance: Window;
@@ -23,6 +27,14 @@ describe('LargeTextPasteChoice', () => {
             navigator: windowInstance.navigator,
             localStorage: windowInstance.localStorage,
             KeyboardEvent: windowInstance.KeyboardEvent,
+            HTMLElement: windowInstance.HTMLElement,
+            Element: windowInstance.Element,
+            Node: windowInstance.Node,
+            MutationObserver: windowInstance.MutationObserver,
+            ResizeObserver: windowInstance.ResizeObserver,
+            requestAnimationFrame: windowInstance.requestAnimationFrame.bind(windowInstance),
+            cancelAnimationFrame: windowInstance.cancelAnimationFrame.bind(windowInstance),
+            getComputedStyle: windowInstance.getComputedStyle.bind(windowInstance),
             IS_REACT_ACT_ENVIRONMENT: true,
         });
         host = document.createElement('div');
@@ -38,10 +50,11 @@ describe('LargeTextPasteChoice', () => {
         windowInstance.close();
     });
 
-    const render = async (takeFocus = true, expanded = false) => {
+    const render = async (takeFocus = true, expanded = false, kind: LargeTextPasteChoiceKind = 'text') => {
         await act(async () => root.render(
             <I18nProvider>
                 <LargeTextPasteChoice
+                    kind={kind}
                     takeFocus={takeFocus}
                     expanded={expanded}
                     onChoose={(action, explicitlyChosen) => chosen.push([action, explicitlyChosen])}
@@ -106,6 +119,38 @@ describe('LargeTextPasteChoice', () => {
         outside.focus();
         await render(false);
         expect(document.activeElement).toBe(outside);
+    });
+
+    test('for office documents it offers Attach as is first and Convert as the fallback', async () => {
+        await render(true, false, 'documents');
+        expect(host.querySelector('[role="group"]')?.getAttribute('aria-label')).toBe('Office document detected');
+        expect(buttons().map((button) => button.textContent)).toEqual(['Attach as is', 'Convert to text']);
+        expect(document.activeElement).toBe(buttons()[0]);
+        await press('Escape');
+        expect(chosen).toEqual([['inline', true]]);
+    });
+
+    test('coming back to the window keeps the choice and its focus; moving focus elsewhere still answers', async () => {
+        const column = document.createElement('div');
+        column.dataset.chatColumn = 'main';
+        const input = document.createElement('div');
+        input.dataset.chatInput = 'true';
+        column.append(input);
+        document.body.append(column);
+        const view = new EditorView({ doc: 'Please review ', parent: input });
+        try {
+            await render(true, false, 'documents');
+            expect(document.activeElement).toBe(buttons()[0]);
+            // A file dialog closing gives the window its focus back, and the
+            // app's window-focus refocus runs while the choice is waiting.
+            await act(async () => createComposerInputRedirect().refocusAfterWindowFocus());
+            expect(document.activeElement).toBe(buttons()[0]);
+            expect(chosen).toEqual([]);
+            await act(async () => view.focus());
+            expect(chosen).toEqual([['inline', false]]);
+        } finally {
+            view.destroy();
+        }
     });
 
     test('an expanded composer anchors the pill inside its top edge', async () => {

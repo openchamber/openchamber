@@ -3,10 +3,6 @@ import { beforeEach, describe, expect, it, mock } from 'bun:test';
 const gitService = {
   stageGitFiles: mock(),
   unstageGitFiles: mock(),
-  checkoutCommit: mock(),
-  cherryPick: mock(),
-  revertCommit: mock(),
-  resetToCommit: mock(),
   createWorktree: mock(),
   getWorktreeBootstrapStatus: mock(),
   removeWorktree: mock(),
@@ -52,10 +48,6 @@ describe('bridge git runtime index mutations', () => {
   beforeEach(() => {
     gitService.stageGitFiles.mockReset();
     gitService.unstageGitFiles.mockReset();
-    gitService.checkoutCommit.mockReset();
-    gitService.cherryPick.mockReset();
-    gitService.revertCommit.mockReset();
-    gitService.resetToCommit.mockReset();
     gitService.createWorktree.mockReset();
     gitService.getWorktreeBootstrapStatus.mockReset();
     gitService.removeWorktree.mockReset();
@@ -117,38 +109,6 @@ describe('bridge git runtime index mutations', () => {
     expect(gitService.stageGitFiles).not.toHaveBeenCalled();
   });
 
-  it('rejects invalid commit hashes before commit actions reach git service', async () => {
-    const checkoutResponse = await handleStandardGitBridgeMessage({
-      id: '1',
-      type: 'api:git/checkout-commit',
-      payload: { directory: '/repo', hash: 'HEAD' },
-    });
-    const cherryPickResponse = await handleStandardGitBridgeMessage({
-      id: '2',
-      type: 'api:git/cherry-pick',
-      payload: { directory: '/repo', hash: '--abort' },
-    });
-    const revertResponse = await handleStandardGitBridgeMessage({
-      id: '3',
-      type: 'api:git/revert-commit',
-      payload: { directory: '/repo', hash: '--continue' },
-    });
-    const resetResponse = await handleStandardGitBridgeMessage({
-      id: '4',
-      type: 'api:git/reset-to-commit',
-      payload: { directory: '/repo', hash: '--hard', mode: 'mixed' },
-    });
-
-    expect(checkoutResponse).toEqual({ id: '1', type: 'api:git/checkout-commit', success: false, error: 'Invalid commit hash' });
-    expect(cherryPickResponse).toEqual({ id: '2', type: 'api:git/cherry-pick', success: false, error: 'Invalid commit hash' });
-    expect(revertResponse).toEqual({ id: '3', type: 'api:git/revert-commit', success: false, error: 'Invalid commit hash' });
-    expect(resetResponse).toEqual({ id: '4', type: 'api:git/reset-to-commit', success: false, error: 'Invalid commit hash' });
-    expect(gitService.checkoutCommit).not.toHaveBeenCalled();
-    expect(gitService.cherryPick).not.toHaveBeenCalled();
-    expect(gitService.revertCommit).not.toHaveBeenCalled();
-    expect(gitService.resetToCommit).not.toHaveBeenCalled();
-  });
-
   it('preserves bootstrap phases in status responses', async () => {
     const bootstrapStatus = {
       status: 'pending',
@@ -171,6 +131,25 @@ describe('bridge git runtime index mutations', () => {
       data: bootstrapStatus,
     });
     expect(gitService.getWorktreeBootstrapStatus).toHaveBeenCalledWith('/repo-worktree');
+  });
+
+  it('passes a branch name conflict and its sentence through the status response', async () => {
+    const bootstrapStatus = {
+      status: 'failed',
+      phase: 'directory-created',
+      error: 'Git could not create the worktree branch: its name clashes with an existing branch.',
+      errorCode: 'BRANCH_NAME_CONFLICT',
+      updatedAt: 123,
+    };
+    gitService.getWorktreeBootstrapStatus.mockResolvedValue(bootstrapStatus);
+
+    const response = await handleStandardGitBridgeMessage({
+      id: 'bootstrap-status',
+      type: 'api:git/worktrees/bootstrap-status',
+      payload: { directory: '/repo-worktree' },
+    });
+
+    expect(response?.data).toEqual(bootstrapStatus);
   });
 
   it('preserves the directory-created phase in fast create responses', async () => {

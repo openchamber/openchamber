@@ -2,6 +2,7 @@ import type { Element, Root, ElementContent } from 'hast';
 import { z } from 'zod';
 import { isAppLinkUrl } from '@/lib/url';
 import { isSessionDeepLink } from '@/lib/sessionLinks';
+import { parseExtensionInstallLink } from '@/lib/guests/install-link';
 
 const allowedAttributes = new Set(['align', 'alt', 'checked', 'colSpan', 'controls', 'disabled', 'height', 'href', 'media', 'open', 'playsInline', 'preload', 'rel', 'rowSpan', 'src', 'srcSet', 'start', 'target', 'title', 'type', 'width']);
 const urlAttribute = z.string();
@@ -23,7 +24,7 @@ function safeLink(value: string, vscode: boolean): boolean {
   if (value !== value.trim() || /\s/.test(value)) return false;
   return relativeOrHttp(value) || localFile(value) || isAppLinkUrl(value)
     || /^(?:mailto|tel|sms|callto|cid|xmpp|irc|ircs|news|nntp|feed|webcal):/i.test(value)
-    || (!vscode && isSessionDeepLink(value));
+    || (!vscode && (isSessionDeepLink(value) || parseExtensionInstallLink(value) !== null));
 }
 
 export function rehypeMarkdownPolicy({ isVSCode }: { isVSCode: boolean }) {
@@ -37,11 +38,8 @@ export function rehypeMarkdownPolicy({ isVSCode }: { isVSCode: boolean }) {
         if (['script', 'style', 'iframe', 'object', 'embed', 'svg', 'math', 'form'].includes(node.tagName)) continue;
         const start = node.position?.start?.offset;
         const authored = start !== undefined && source[start] === '<';
-        // Only checkboxes survive, and the sanitizer disables them.
         if (node.tagName === 'input' && node.properties.type !== 'checkbox') continue;
         for (const key of Object.keys(node.properties)) {
-          // A document's own `<code class="language-x">` keeps its language;
-          // every other author class could reach the app's utility classes.
           const authoredLanguage = authored && key === 'className' && node.tagName === 'code'
             && Array.isArray(node.properties.className)
             && node.properties.className.every((name) => /^language-[\w#+.-]+$/.test(String(name)));
@@ -51,6 +49,7 @@ export function rehypeMarkdownPolicy({ isVSCode }: { isVSCode: boolean }) {
             || ['id', 'ariaDescribedBy', 'ariaLabel', 'dataFootnoteRef', 'dataFootnoteBackref', 'dataFootnotes'].includes(key)
             || (key === 'dataOcAlert' && node.tagName === 'blockquote')
             || (key === 'dataOcReference' && node.tagName === 'a')
+            || (key === 'dataOcGuestLink' && node.tagName === 'a')
           );
           if (!allowedAttributes.has(key) && !generated) delete node.properties[key];
         }
@@ -97,8 +96,6 @@ export function rehypeMarkdownPolicy({ isVSCode }: { isVSCode: boolean }) {
   };
 }
 
-// Harden may normalize or remove custom schemes. Only validated generated
-// values survive the sanitizer and can restore the application navigation URL.
 export function rehypeRestoreMarkdownLinks() {
   return (tree: Root) => {
     function walk(parent: Root | Element): void {

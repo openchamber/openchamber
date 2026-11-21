@@ -24,6 +24,14 @@ const accepts = (presentation) => {
 };
 
 describe('binding credential presentation', () => {
+  it('accepts bounded extension user IDs without changing built-in numeric identity checks', () => {
+    const instance = 'https://forge.example';
+    const presentation = { ...httpsPresentation(instance), provider: 'ext-forge', providerUserId: `${instance}#member:mona` };
+    expect(accepts(presentation)).toBe(true);
+    expect(accepts({ ...presentation, provider: 'gerrit' })).toBe(false);
+    expect(accepts({ ...presentation, providerUserId: `${instance}#${'x'.repeat(257)}` })).toBe(false);
+    expect(accepts({ ...presentation, providerUserId: 'https://other.example#member:mona' })).toBe(false);
+  });
   it('takes every username sign-in takes, an LDAP-style one included', () => {
     expect(accepts(httpsPresentation('https://review.example.com', 'jane@corp.com'))).toBe(true);
     expect(accepts(httpsPresentation('https://review.example.com', 'first+tag'))).toBe(true);

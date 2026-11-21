@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ConnectionInfo } from '@opencode/client';
+import type { IntegrationConnection as ConnectionInfo } from '@/lib/opencode/model';
 import { SETTINGS_ICON_BUTTON_CLASS } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
@@ -17,22 +18,10 @@ import { cn } from '@/lib/utils';
 import { connectionNeedsAuth, type CredentialConnection } from './providerAuth';
 
 interface ProviderAccountsProps {
-  /** Stored credentials first, then environment variables the server can see. */
   connections: readonly ConnectionInfo[];
-  /** The one credential requests go through, when a stored credential is in use. */
   activeId: string | null;
-  /**
-   * Credentials stored under an integration the provider does not use right now
-   * (OpenCode Go keys while the Console sign-in serves Go). Removable, never switchable.
-   */
   unusedIds: ReadonlySet<string>;
-  /** Credential id with a write in flight; every account action waits for it. */
   busyId: string | null;
-  /**
-   * Judged over all of the provider's accounts, which may be split across
-   * several lists: whether an idle account offers Use, and whether the active
-   * one carries its Active mark.
-   */
   canSwitch: boolean;
   showActive: boolean;
   onActivate: (account: CredentialConnection) => void;
@@ -46,10 +35,6 @@ const AccountTile: React.FC<{ icon: IconName }> = ({ icon }) => (
   </span>
 );
 
-/**
- * The line under an account: what OpenCode reported when the connection needs
- * a new sign-in, otherwise how the account connects.
- */
 const AccountSubtitle: React.FC<{ connection: ConnectionInfo; fallback: string }> = ({ connection, fallback }) => (
   connectionNeedsAuth(connection) && connection.status ? (
     <div className="typography-micro text-[var(--status-warning)] break-words">{connection.status.message}</div>
@@ -58,7 +43,6 @@ const AccountSubtitle: React.FC<{ connection: ConnectionInfo; fallback: string }
   )
 );
 
-/** Opens the page OpenCode named for signing in again (an SSO login, for one). */
 const SignInAgainButton: React.FC<{ connection: ConnectionInfo; account: string }> = ({ connection, account }) => {
   const { t } = useI18n();
   const url = connectionNeedsAuth(connection) ? connection.status?.url : undefined;
@@ -121,7 +105,6 @@ const RenameField: React.FC<{
   );
 };
 
-/** Stored accounts and environment connections for one provider. */
 export const ProviderAccounts: React.FC<ProviderAccountsProps> = ({
   connections,
   activeId,
@@ -160,11 +143,11 @@ export const ProviderAccounts: React.FC<ProviderAccountsProps> = ({
           : connection.method === 'external'
             ? (unused ? t('settings.providers.accounts.method.externalUnused') : t('settings.providers.accounts.method.external'))
             : (unused ? t('settings.providers.accounts.method.keyUnused') : t('settings.providers.accounts.method.key'));
-        // An external credential (a cloud CLI login or profile) lives outside OpenCode's store.
         const methodIcon = connection.method === 'oauth' ? 'user-3' : connection.method === 'external' ? 'terminal-box' : 'key';
 
         return (
-          <div key={connection.id} className={cn('flex min-w-0 items-center gap-3 py-2.5', unused && 'opacity-60')}>
+          <ContextMenu key={connection.id} disabled={busy || renamingId === connection.id}>
+          <ContextMenuTrigger render={<div className={cn('flex min-w-0 items-center gap-3 py-2.5', unused && 'opacity-60')} />}>
             <AccountTile icon={methodIcon} />
             {renamingId === connection.id ? (
               <RenameField
@@ -179,7 +162,7 @@ export const ProviderAccounts: React.FC<ProviderAccountsProps> = ({
               <>
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className="truncate typography-ui-label font-medium text-foreground">{connection.label}</span>
+                    <span dir="auto" className="truncate typography-ui-label font-medium text-foreground">{connection.label}</span>
                     {showActive && active ? (
                       <span className="shrink-0 rounded-full bg-[var(--interactive-selection)] px-2 py-px text-[0.625rem] font-medium text-[var(--interactive-selection-foreground)]">
                         {t('settings.providers.accounts.active')}
@@ -210,7 +193,7 @@ export const ProviderAccounts: React.FC<ProviderAccountsProps> = ({
                       className={cn(SETTINGS_ICON_BUTTON_CLASS, 'shrink-0')}
                       aria-label={t('settings.providers.accounts.menuAria', { account: connection.label })}
                     >
-                      <Icon name="more-2" className="size-4" />
+                      <Icon name="more" className="size-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
@@ -229,7 +212,18 @@ export const ProviderAccounts: React.FC<ProviderAccountsProps> = ({
                 </DropdownMenu>
               </>
             )}
-          </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem onClick={() => setRenamingId(connection.id)}>
+              <Icon name="pencil" className="size-4" />
+              {t('settings.providers.accounts.rename')}
+            </ContextMenuItem>
+            <ContextMenuItem className="text-destructive focus:text-destructive" onClick={() => onRemove(connection)}>
+              <Icon name="delete-bin" className="size-4" />
+              {t('settings.providers.accounts.remove')}
+            </ContextMenuItem>
+          </ContextMenuContent>
+          </ContextMenu>
         );
       })}
     </div>

@@ -206,6 +206,36 @@ describe('session folders routes', () => {
     expect(saved.updatedAt).toBeGreaterThan(20);
   });
 
+  it('saves a scope named like an inherited object property', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    let persisted = JSON.stringify({
+      ...folderPayload(20),
+      foldersMap: { a: [folder('f1', 'One', ['s1'])] },
+    });
+    const fsPromises = {
+      readFile: vi.fn(async () => persisted),
+      mkdir: vi.fn(async () => {}),
+      writeFile: vi.fn(async (_tempPath, value) => {
+        persisted = value;
+      }),
+      rename: vi.fn(async () => {}),
+      unlink: vi.fn(async () => {}),
+    };
+    registerSessionFoldersRoutes(app, {
+      fsPromises,
+      path,
+      openchamberDataDir: '/tmp/openchamber-test',
+    });
+
+    const response = createMockResponse();
+    await getRoute('POST', '/api/session-folders')({
+      body: { ...folderPayload(30), foldersMap: { constructor: [folder('f2', 'Two', ['s2'])] } },
+    }, response);
+
+    expect(response.body).toEqual({ success: true });
+    expect(Object.keys(JSON.parse(persisted).foldersMap).sort()).toEqual(['a', 'constructor']);
+  });
+
   it('announces an older client\'s change with a revision past the stored one', async () => {
     const onChanged = vi.fn();
     const routes = createPersistingRoutes({
@@ -400,6 +430,58 @@ describe('session folders routes', () => {
       expect(response.body.foldersMap['/repo'].map((entry) => [entry.id, entry.sessionIds])).toEqual([['a', ['s2']], ['b', ['s1']]]);
       // The server clock is behind the stored revision; the revision still grows.
       expect(response.body.updatedAt).toBe(5_001);
+    });
+
+    describe('a move with the place it started from', () => {
+      const stored = (holding) => ({
+        ...folderPayload(20),
+        foldersMap: { '/repo': Object.entries(holding).map(([id, sessionIds]) => folder(id, id, sessionIds)) },
+      });
+      const holding = (response) => Object.fromEntries(response.body.foldersMap['/repo'].map((entry) => [entry.id, entry.sessionIds]));
+
+      it('applies while the chat is still there', async () => {
+        const routes = createPersistingRoutes(stored({ p: ['s1'], x: [] }), { now: () => 1_000 });
+        const response = await routes.patch([{ type: 'assign', scopeKey: '/repo', folderId: 'x', sessionIds: ['s1'], from: { s1: 'p' } }]);
+        expect(holding(response)).toEqual({ p: [], x: ['s1'] });
+      });
+
+      it('leaves a chat another client moved since, writes nothing and announces nothing', async () => {
+        const onChanged = vi.fn();
+        const routes = createPersistingRoutes(stored({ p: [], x: [], y: ['s1'] }), { onChanged });
+        const response = await routes.patch([
+          { type: 'assign', scopeKey: '/repo', folderId: 'x', sessionIds: ['s1'], from: { s1: 'p' } },
+          { type: 'unassign', scopeKey: '/repo', sessionIds: ['s1'], from: { s1: 'x' } },
+        ]);
+        expect(holding(response)).toEqual({ p: [], x: [], y: ['s1'] });
+        expect(onChanged).not.toHaveBeenCalled();
+      });
+
+      it('sent twice, the second one changes nothing', async () => {
+        const onChanged = vi.fn();
+        const routes = createPersistingRoutes(stored({ p: [], x: ['s1'] }), { onChanged });
+        await routes.patch([{ type: 'assign', scopeKey: '/repo', folderId: 'x', sessionIds: ['s1'], from: { s1: 'p' } }]);
+        expect(onChanged).not.toHaveBeenCalled();
+      });
+
+      it('moves only the chats of a batch that are still in place', async () => {
+        const routes = createPersistingRoutes(stored({ p: ['s1'], x: [], y: ['s2'] }), { now: () => 1_000 });
+        const response = await routes.patch([{ type: 'assign', scopeKey: '/repo', folderId: 'x', sessionIds: ['s1', 's2'], from: { s1: 'p', s2: 'p' } }]);
+        expect(holding(response)).toEqual({ p: [], x: ['s1'], y: ['s2'] });
+      });
+
+      it('moves a chat whose folder another client deleted', async () => {
+        const routes = createPersistingRoutes(stored({ x: [] }), { now: () => 1_000 });
+        const response = await routes.patch([{ type: 'assign', scopeKey: '/repo', folderId: 'x', sessionIds: ['s1'], from: { s1: 'deleted' } }]);
+        expect(holding(response)).toEqual({ x: ['s1'] });
+      });
+
+      it('takes a chat that was in no folder only while it is in none', async () => {
+        const routes = createPersistingRoutes(stored({ x: [], y: ['s1'] }), { now: () => 1_000 });
+        const response = await routes.patch([
+          { type: 'assign', scopeKey: '/repo', folderId: 'x', sessionIds: ['s1', 's2'], from: { s1: null, s2: null } },
+        ]);
+        expect(holding(response)).toEqual({ x: ['s2'], y: ['s1'] });
+      });
     });
 
     it('writes nothing and announces nothing for a change that is already in place', async () => {
@@ -659,6 +741,26 @@ describe('session folders routes', () => {
     expect(response.body).toEqual({ success: true });
     const saved = JSON.parse(persisted);
     expect(saved.foldersMap['/home/ai']).toEqual([folder('f1', 'New name', ['s1', 's4'])]);
+  });
+
+  it.each([undefined, null, 'old', 0, -10])('preserves stored revision acceptance for %s', async (updatedAt) => {
+    const initial = {
+      ...folderPayload(updatedAt),
+      foldersMap: { '/repo': [folder('f', 'Before', [])] },
+    };
+    const routes = createPersistingRoutes(initial, { now: () => 100 });
+
+    expect(await routes.get()).toEqual({ error: 'Stored session folders have an invalid shape' });
+
+    const unchanged = await routes.patch([{ type: 'rename', scopeKey: '/repo', folderId: 'f', name: 'Before' }]);
+    expect(unchanged.statusCode).toBe(200);
+    expect(unchanged.body.updatedAt).toBe(updatedAt);
+    expect(routes.fsPromises.writeFile).not.toHaveBeenCalled();
+
+    const changed = await routes.patch([{ type: 'rename', scopeKey: '/repo', folderId: 'f', name: 'After' }]);
+    expect(changed.statusCode).toBe(200);
+    expect(changed.body.updatedAt).toBe(100);
+    expect((await routes.get()).updatedAt).toBe(100);
   });
 
   it('unions session lists of same-name folders created independently', async () => {

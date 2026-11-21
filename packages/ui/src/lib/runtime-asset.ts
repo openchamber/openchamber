@@ -1,10 +1,10 @@
 import { isCapacitorApp } from './platform';
 import { getRuntimeExtraHeadersSync } from './runtime-auth';
+import { isRelayModeActive } from './relay/runtime-tunnel';
 
-export const runtimeAssetsNeedHeaders = (): boolean =>
-  isCapacitorApp() && Object.keys(getRuntimeExtraHeadersSync()).length > 0;
+export const runtimeAssetsNeedFetch = (): boolean =>
+  isRelayModeActive() || (isCapacitorApp() && Object.keys(getRuntimeExtraHeadersSync()).length > 0);
 
-/** Bounds retained bytes even when Content-Length is absent or inaccurate. */
 export const readAssetBlob = async (response: Response, maxBytes: number, signal: AbortSignal): Promise<Blob> => {
   const reader = response.body?.getReader();
   if (!reader) return new Blob([], { type: response.headers.get('content-type') || '' });

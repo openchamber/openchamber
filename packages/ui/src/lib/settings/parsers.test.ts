@@ -1,5 +1,25 @@
 import { describe, expect, test } from 'bun:test';
-import { parseProjects } from './parsers';
+import { parseCustomProviderLogos, parseProjects } from './parsers';
+
+describe('parseCustomProviderLogos', () => {
+  test('keeps well-formed entries and drops the rest one by one', () => {
+    const raw = {
+      acme: { mime: 'image/png', updatedAt: 1794114747809 },
+      ' campus-llm ': { mime: 'image/svg+xml', updatedAt: 2 },
+      gif: { mime: 'image/gif', updatedAt: 3 },
+      stale: { mime: 'image/webp', updatedAt: 0 },
+      '  ': { mime: 'image/png', updatedAt: 4 },
+      broken: 'image/png',
+    };
+
+    expect(parseCustomProviderLogos(raw, {})).toEqual({
+      acme: { mime: 'image/png', updatedAt: 1794114747809 },
+      'campus-llm': { mime: 'image/svg+xml', updatedAt: 2 },
+    });
+    expect(parseCustomProviderLogos(['acme'], {})).toBeUndefined();
+    expect(parseCustomProviderLogos(null, {})).toBeUndefined();
+  });
+});
 
 describe('parseProjects', () => {
   test('keeps per-project agent, model and thinking defaults across a settings round trip', () => {

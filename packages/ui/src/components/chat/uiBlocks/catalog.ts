@@ -1,15 +1,6 @@
 import { z } from 'zod';
-import { createLibrary, createParser, defineComponent, evaluateRoot, type ElementNode, type OpenUIError } from '@openuidev/lang-core';
+import { createLibrary, createParser, defineComponent, evaluateRoot, tokenize, type ElementNode, type OpenUIError, type ParseResult } from '@openuidev/lang-core';
 
-/**
- * The fixed component catalog an agent writes UI blocks against.
- *
- * `blockProps` is what the renderer and the finished-block check read: each
- * component's props, with child slots as lists of nodes that their own entry
- * checks. The `lang-core` definitions below reuse those schemas and replace
- * the child slots with typed references, which is what the parser checks and
- * what the agent's signatures print.
- */
 
 export const tones = ['neutral', 'info', 'success', 'warning', 'error'] as const;
 const tone = z.enum(tones);
@@ -18,7 +9,6 @@ export type BlockValue = z.infer<typeof json>;
 const nodes = z.array(json);
 
 const choiceOptionObject = z.object({ label: z.string(), description: z.string().optional() });
-/** A Choice option read as its label and description, whichever way the agent wrote it. */
 export const choiceOption = z.union([
   z.string().transform((label) => ({ label, description: undefined })),
   choiceOptionObject,
@@ -27,8 +17,6 @@ export const choiceOption = z.union([
 export const blockProps = {
   Stack: z.object({ children: nodes }),
   Row: z.object({ children: nodes }),
-  // The title comes first and is required: a skipped first argument cannot
-  // be written positionally, so an empty title stands for none.
   Card: z.object({ title: z.string(), children: nodes }),
   Tabs: z.object({ tabs: nodes }),
   Tab: z.object({ label: z.string(), children: nodes }),
@@ -52,13 +40,11 @@ export const blockProps = {
   }),
   BarChart: z.object({ labels: z.array(z.string()), series: nodes, unit: z.string().optional(), whole: z.boolean().optional() }),
   LineChart: z.object({ labels: z.array(z.string()), series: nodes, unit: z.string().optional() }),
-  // null is a point with no data: the line breaks there, the bar is left out.
   Series: z.object({ name: z.string(), values: z.array(z.number().nullable()) }),
   Stat: z.object({ label: z.string(), value: z.union([z.string(), z.number()]), delta: z.string().optional(), tone: tone.optional() }),
   Progress: z.object({ label: z.string(), value: z.number(), max: z.number().positive().optional() }),
   Choice: z.object({
     name: z.string(),
-    // An option is its label, or a label with a line saying what choosing it means.
     options: z.array(z.union([z.string(), choiceOptionObject])),
     label: z.string().optional(),
     multiple: z.boolean().optional(),
@@ -69,7 +55,6 @@ export const blockProps = {
     placeholder: z.string().optional(),
     multiline: z.boolean().optional(),
   }),
-  // A local date, with a time when asked: YYYY-MM-DD or YYYY-MM-DDTHH:mm.
   DateInput: z.object({
     name: z.string(),
     label: z.string().optional(),
@@ -94,7 +79,6 @@ export type BlockName = keyof typeof blockProps;
 const blockNames = Object.keys(blockProps) as [BlockName, ...BlockName[]];
 export const blockName = z.enum(blockNames);
 
-/** A node as the parser emits it; its props are read through `blockProps`. */
 export const blockNode = z.object({
   type: z.literal('element'),
   typeName: z.string(),
@@ -111,7 +95,7 @@ const Stat = defineComponent({ name: 'Stat', description: 'a key number; delta l
 const Progress = defineComponent({ name: 'Progress', description: 'max defaults to 100', props: blockProps.Progress, component: null });
 const Steps = defineComponent({
   name: 'Steps',
-  description: 'flow joined by arrows',
+  description: 'steps joined by a line; status marks execution progress',
   props: blockProps.Steps,
   component: null,
 });
@@ -165,8 +149,7 @@ const leaf = z.union([
   Stat.ref, Progress.ref, Choice.ref, Input.ref, DateInput.ref, Slider.ref, Button.ref,
 ]);
 
-// The guidance names what nests where (guidance.ts); these unions only feed
-// the parser's references, which it does not check against a parent.
+// external: https://github.com/thesysdev/openui/tree/main/packages/lang-core Child references do not enforce parent nesting; guidance defines it.
 const Row = defineComponent({
   name: 'Row',
   description: 'side by side, wraps',
@@ -211,41 +194,86 @@ const components = [
 
 export const uiBlockLibrary = createLibrary({ components, root: 'Stack' });
 
-// Evaluation needs only the language's built-in functions, not the components.
 const evaluationLibrary = createLibrary({ components: [] });
 
 const parser = createParser(uiBlockLibrary.toJSONSchema(), 'Stack');
 
+export type ExtensionBlock = {
+  guestId: string;
+  name: string;
+  description: string;
+  args: string[];
+  entry: string;
+  height?: number;
+  answers?: boolean;
+};
+
+export type ExtensionBlocks = ReadonlyMap<string, ExtensionBlock>;
+export const NO_EXTENSION_BLOCKS: ExtensionBlocks = new Map();
+
+export const collectExtensionBlocks = (blocks: readonly ExtensionBlock[]): ExtensionBlocks => {
+  const collected = new Map<string, ExtensionBlock>();
+  for (const block of blocks) {
+    if (block.name in blockProps || collected.has(block.name)) {
+      console.warn(`[ui-blocks] ${block.guestId}: the block "${block.name}" is already taken and was left out`);
+      continue;
+    }
+    collected.set(block.name, block);
+  }
+  return collected.size > 0 ? collected : NO_EXTENSION_BLOCKS;
+};
+
+const extensionBlockProps = (block: ExtensionBlock) => z.object(Object.fromEntries(block.args.map((arg) => [arg, z.string().optional()])));
+
+let extendedParser: { blocks: ExtensionBlocks; parser: typeof parser } | null = null;
+
+const parserFor = (blocks: ExtensionBlocks): typeof parser => {
+  if (blocks.size === 0) return parser;
+  if (extendedParser?.blocks !== blocks) {
+    const extra = [...blocks.values()].map((block) => defineComponent({
+      name: block.name,
+      description: block.description,
+      props: extensionBlockProps(block),
+      component: null,
+    }));
+    extendedParser = { blocks, parser: createParser(createLibrary({ components: [...components, ...extra], root: 'Stack' }).toJSONSchema(), 'Stack') };
+  }
+  return extendedParser.parser;
+};
+
 export type UiBlockParse =
   | { kind: 'empty' }
-  | { kind: 'ready'; root: BlockValue }
+  | { kind: 'ready'; root: BlockValue; dropped: string[] }
   | { kind: 'invalid'; errors: string[] };
 
-/**
- * Parses one block. While it streams, a partial tree renders as far as it has
- * arrived; once complete, any error makes the whole block invalid, so a
- * finished reply never shows a block with parts silently dropped.
- */
-export function parseUiBlock(source: string, complete: boolean): UiBlockParse {
-  const result = parser.parse(source);
-  const errors = result.meta.errors.map((error) => (
-    [error.component, error.path].filter(Boolean).join(' ') + `: ${error.message}`
-  ));
+// external: https://github.com/thesysdev/openui/tree/main/packages/lang-core Broken parents lose their children in the parsed tree, so salvage checks the source for fields.
+const asksSomething = /\b(?:Choice|Input|DateInput|Slider|Button)\s*\(/;
+
+const canDropParts = (source: string, kept: BlockValue): boolean => (
+  !asksSomething.test(source) && (childSlots.safeParse(blockNode.safeParse(kept).data?.props).data?.children?.length ?? 0) > 0
+);
+
+export function parseUiBlock(source: string, complete: boolean, salvage = false, extensions: ExtensionBlocks = NO_EXTENSION_BLOCKS): UiBlockParse {
+  const result = parserFor(extensions).parse(source);
+  const errors = result.meta.errors
+    .filter((error) => !(error.component === 'Details' && error.path === '/children' && error.code === 'missing-required'))
+    .map((error) => [error.component, error.path].filter(Boolean).join(' ') + `: ${error.message}`);
+  const namedError = complete ? namedArgumentError(source, result.meta) : null;
   if (complete) {
-    if (result.meta.incomplete) errors.push('The block ends in the middle of a statement');
     if (result.meta.unresolved.length) errors.push(`Undefined names: ${result.meta.unresolved.join(', ')}`);
     if (result.meta.orphaned.length) errors.push(`Defined but never used: ${result.meta.orphaned.join(', ')}`);
+    const unusable: string[] = [];
+    if (result.meta.incomplete) unusable.push('The block ends in the middle of a statement');
     if (Object.keys(result.stateDeclarations).length || result.queryStatements.length || result.mutationStatements.length) {
-      errors.push('State, queries and mutations are not supported');
+      unusable.push('State, queries and mutations are not supported');
     }
-    if (result.root?.typeName !== 'Stack') errors.push('The block needs root = Stack([...])');
-    if (errors.length) return { kind: 'invalid', errors };
+    if (result.root?.typeName !== 'Stack') unusable.push('The block needs root = Stack([...])');
+    if (namedError) errors.splice(0, errors.length, namedError);
+    if (unusable.length || (errors.length && !salvage)) return { kind: 'invalid', errors: [...errors, ...unusable] };
   }
   if (!result.root || result.root.typeName !== 'Stack') return { kind: 'empty' };
   if (!complete) {
-    // Expressions such as "a" + "b" are evaluated by the language's own
-    // built-ins once the block is complete; until then the block waits.
-    return result.root.hasDynamicProps ? { kind: 'empty' } : { kind: 'ready', root: toBlockValue(result.root) };
+    return result.root.hasDynamicProps ? { kind: 'empty' } : { kind: 'ready', root: toBlockValue(result.root), dropped: [] };
   }
   let root = result.root;
   if (root.hasDynamicProps) {
@@ -261,11 +289,50 @@ export function parseUiBlock(source: string, complete: boolean): UiBlockParse {
   }
   const tree = toBlockValue(root);
   const treeErrors: string[] = [];
-  checkFinishedNode(tree, treeErrors);
-  return treeErrors.length ? { kind: 'invalid', errors: treeErrors } : { kind: 'ready', root: tree };
+  const kept = soundNode(tree, treeErrors, extensions);
+  const problems = namedError ? errors : [...errors, ...treeErrors];
+  if (!problems.length) return { kind: 'ready', root: tree, dropped: [] };
+  // external: https://github.com/thesysdev/openui/tree/main/packages/lang-core Expressions over broken names can evaluate to invented values, so expression blocks cannot be salvaged.
+  if (!salvage || !kept || result.root.hasDynamicProps || !canDropParts(source, kept)) return { kind: 'invalid', errors: problems };
+  return { kind: 'ready', root: kept, dropped: problems };
 }
 
-/** The parser's tree as plain JSON: absent optional fields drop out. */
+// external: https://github.com/thesysdev/openui/tree/main/packages/lang-core Token kinds are not exported; derive them with the tokenizer.
+const tokenKind = (text: string) => tokenize(text)[0].t;
+const NEWLINE = tokenKind('\n');
+const CALL_OPEN = tokenKind('(');
+const COMMA = tokenKind(',');
+const COLON = tokenKind(':');
+const IDENTIFIER = tokenKind('name');
+const ARRAY_OPEN = tokenKind('[');
+const OBJECT_OPEN = tokenKind('{');
+const OPENERS = new Set([CALL_OPEN, ARRAY_OPEN, OBJECT_OPEN]);
+const OPENER_OF = new Map([[tokenKind(')'), CALL_OPEN], [tokenKind(']'), ARRAY_OPEN], [tokenKind('}'), OBJECT_OPEN]]);
+
+function namedArguments(source: string): string[] {
+  const tokens = tokenize(source).filter((token) => token.t !== NEWLINE);
+  const open: (typeof CALL_OPEN)[] = [];
+  const names = new Set<string>();
+  tokens.forEach((token, index) => {
+    if (OPENERS.has(token.t)) open.push(token.t);
+    else if (OPENER_OF.has(token.t)) {
+      if (OPENER_OF.get(token.t) === open.at(-1)) open.pop();
+    } else if (token.t === COLON && open.at(-1) === CALL_OPEN && tokens[index - 1]?.t === IDENTIFIER) {
+      const before = tokens[index - 2]?.t;
+      if (before === CALL_OPEN || before === COMMA) names.add(String(tokens[index - 1].v));
+    }
+  });
+  return [...names];
+}
+
+function namedArgumentError(source: string, meta: ParseResult['meta']): string | null {
+  const excess = meta.errors.some((error) => error.code === 'excess-args');
+  if (!excess && !meta.unresolved.length) return null;
+  const named = namedArguments(source);
+  if (!excess && !named.some((name) => meta.unresolved.includes(name))) return null;
+  return named.length ? `Named arguments aren't supported: pass ${named.join(', ')} by position` : null;
+}
+
 function toBlockValue(root: ElementNode): BlockValue {
   return json.parse(JSON.parse(JSON.stringify(root)));
 }
@@ -273,25 +340,26 @@ function toBlockValue(root: ElementNode): BlockValue {
 const childSlots = z.object({ children: nodes.optional(), tabs: nodes.optional(), series: nodes.optional() });
 const chart = z.object({ labels: z.array(z.string()), series: nodes });
 
-/**
- * What the parser lets through but a finished block must not show: a node it
- * kept as partial, a node whose props do not match its component (an element
- * written as an object literal), and a chart whose series do not have one
- * value per label.
- */
-function checkFinishedNode(value: BlockValue, errors: string[]): void {
+function soundNode(value: BlockValue, errors: string[], extensions: ExtensionBlocks): BlockValue | null {
   const node = blockNode.safeParse(value);
+  const extension = node.data ? extensions.get(node.data.typeName) : undefined;
+  if (extension) {
+    if (node.data?.partial) errors.push(`${extension.name} is incomplete`);
+    if (!extensionBlockProps(extension).safeParse(node.data?.props).success) errors.push(`${extension.name} has arguments that do not match its signature`);
+    return node.data?.partial ? null : value;
+  }
   const name = blockName.safeParse(node.data?.typeName);
   if (!node.success || !name.success) {
     errors.push('A component in the block is not one of the catalog');
-    return;
+    return null;
   }
+  const errorsBefore = errors.length;
   if (node.data.partial) errors.push(`${name.data} is incomplete`);
   if (!blockProps[name.data].safeParse(node.data.props).success) errors.push(`${name.data} has arguments that do not match its signature`);
   const slots = childSlots.safeParse(node.data.props);
   if (!slots.success) {
     errors.push(`${name.data} has child slots that are not lists of components`);
-    return;
+    return null;
   }
   const chartProps = name.data === 'BarChart' || name.data === 'LineChart' ? chart.safeParse(node.data.props) : null;
   if (chartProps?.success) {
@@ -302,13 +370,16 @@ function checkFinishedNode(value: BlockValue, errors: string[]): void {
       }
     }
   }
-  for (const child of [...slots.data.children ?? [], ...slots.data.tabs ?? [], ...slots.data.series ?? []]) checkFinishedNode(child, errors);
+  const broken = errors.length > errorsBefore;
+  const props = { ...node.data.props };
+  for (const [slot, children] of Object.entries(slots.data)) {
+    props[slot] = (children ?? []).flatMap((child) => soundNode(child, errors, extensions) ?? []);
+  }
+  return broken ? null : { ...node.data, props };
 }
 
-/** A field of a block; `initial` is the value it starts with, which an answer carries unless the user changes it. */
 export type BlockField = { name: string; label: string; initial?: string };
 
-/** Every node of a block, parent before children, in reading order, with the title of the card it sits in. */
 function eachNode(root: BlockValue, visit: (node: z.infer<typeof blockNode>, cardTitle: string) => void, cardTitle = ''): void {
   const node = blockNode.safeParse(root);
   if (!node.success) return;
@@ -335,30 +406,22 @@ const fieldOf = (node: z.infer<typeof blockNode>): BlockField | null => {
   }
 };
 
-/** The time a date field shows before the user picks one. */
 export const DEFAULT_TIME = '09:00';
 
-/** What a prefilled date field holds, in the shape its answer takes: a time only when the field asks for one. */
 const dateStart = (field: z.infer<typeof blockProps.DateInput>): string | undefined => {
   if (!field.value) return undefined;
   const date = field.value.slice(0, 10);
   return field.time ? `${date}T${field.value.slice(11, 16) || DEFAULT_TIME}` : date;
 };
 
-/**
- * Where a slider starts: its value, else the middle, on the nearest step the
- * slider can stand on, so the label and the answer match the thumb.
- */
 export function sliderStart(slider: z.infer<typeof blockProps.Slider>): number {
   const step = slider.step ?? 1;
   const wanted = slider.value ?? slider.min + (slider.max - slider.min) / 2;
   const lastStep = Math.floor((slider.max - slider.min) / step);
   const steps = Math.min(lastStep, Math.max(0, Math.round((wanted - slider.min) / step)));
-  // Rounded to clear float noise such as 0.30000000000000004.
   return Number((slider.min + steps * step).toFixed(10));
 }
 
-/** The fields of a block, in reading order; their values make up an answer. */
 export function blockFields(root: BlockValue): BlockField[] {
   const fields: BlockField[] = [];
   eachNode(root, (node) => {
@@ -368,7 +431,26 @@ export function blockFields(root: BlockValue): BlockField[] {
   return fields;
 }
 
-/** Where a node's children sit: the child indexes that lead to it from the root. */
+export function blockQuestions(root: BlockValue): string[] {
+  const questions: string[] = [];
+  const seen = new Set<string>();
+  eachNode(root, (node, cardTitle) => {
+    const field = fieldOf(node);
+    if (!field || seen.has(field.name)) return;
+    seen.add(field.name);
+    questions.push(field.label !== field.name ? field.label : cardTitle.trim() || field.name);
+  });
+  return questions;
+}
+
+export function answeringFrame(root: BlockValue, extensions: ExtensionBlocks): string | null {
+  let found: string | null = null;
+  eachNode(root, (node) => {
+    if (!found && extensions.get(node.typeName)?.answers) found = node.typeName;
+  });
+  return found;
+}
+
 export type BlockPath = string;
 export const blockPath = (parent: BlockPath, index: number): BlockPath => (parent ? `${parent}/${index}` : String(index));
 
@@ -376,17 +458,10 @@ const isButtonRun = (value: BlockValue) => {
   const node = blockNode.safeParse(value);
   if (!node.success) return false;
   if (node.data.typeName === 'Button') return true;
-  // A row of buttons moves as one; the note never lands inside a row.
   return node.data.typeName === 'Row'
     && (childSlots.safeParse(node.data.props).data?.children ?? []).some((child) => blockNode.safeParse(child).data?.typeName === 'Button');
 };
 
-/**
- * Where a waiting form's note goes: before the last run of buttons in reading
- * order, outside tabs, so the user writes it before pressing one. `parent` is
- * the path of the node whose children hold the run, `index` the run's first
- * child. null when the block has no such run.
- */
 export function noteSlot(root: BlockValue): { parent: BlockPath; index: number } | null {
   let found: { parent: BlockPath; index: number } | null = null;
   const walk = (value: BlockValue, path: BlockPath) => {
@@ -404,12 +479,6 @@ export function noteSlot(root: BlockValue): { parent: BlockPath; index: number }
   return found;
 }
 
-/**
- * Titles of the cards that name their decision: those no other card in the
- * block shares. A card is one item, so all its buttons are one decision named
- * by its title, whatever values they carry: agents often give each option its
- * own value. Two cards with one title would merge, so they fall back to values.
- */
 export function decisionTitles(root: BlockValue): ReadonlySet<string> {
   const counts = new Map<string, number>();
   eachNode(root, (node) => {
@@ -419,11 +488,6 @@ export function decisionTitles(root: BlockValue): ReadonlySet<string> {
   return new Set([...counts].flatMap(([title, count]) => (count === 1 ? [title] : [])));
 }
 
-/**
- * Which decision a button of a reply answers: its card's title when that
- * names a decision (`decisionTitles`), else its value. Buttons that share a
- * value are one decision.
- */
 export const decisionOf = (titles: ReadonlySet<string>, cardTitle: string, buttonValue: string | undefined): string => (
   titles.has(cardTitle) ? cardTitle : buttonValue ?? ''
 );
@@ -440,15 +504,9 @@ const decisionsIn = (root: BlockValue, titles: ReadonlySet<string>) => {
   return { decisions, fields };
 };
 
-/**
- * The one decision a card in a reply asks for, when it holds no fields. Once
- * answered the card folds to one line; a card with fields stays open so they
- * stay readable. null for a card with no buttons, several decisions, or fields.
- */
 export function cardDecision(card: BlockValue, titles: ReadonlySet<string>): string | null {
   const { decisions, fields } = decisionsIn(card, titles);
   return !fields && decisions.length === 1 ? decisions[0] : null;
 }
 
-/** The decisions a reply's block asks for, in reading order (`decisionOf`). */
 export const blockDecisions = (root: BlockValue): string[] => decisionsIn(root, decisionTitles(root)).decisions;

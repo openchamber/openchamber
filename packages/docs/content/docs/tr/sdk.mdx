@@ -7,7 +7,9 @@ description: "@openchamber/sdk ile OpenChamber'a kendi panelinizi ekleyin, bir k
 
 OpenChamber'a kendi panelinizi eklemek için `@openchamber/sdk` kullanın. Eklenti, OpenChamber'ın sağ şeritte gösterdiği küçük bir web sayfasıdır. Uygulamayla `connectHost()` üzerinden konuşur: geçerli projeyi ve oturumu okuyabilir, bildirim gösterebilir, sohbet kutusuna metin koyabilir, bir oturuma görev iliştirebilir ve kullanıcının onayıyla oturum başlatıp istem gönderebilir.
 
-Eklentiler OpenChamber web ve masaüstünde çalışır. VS Code ve mobil henüz eklenti yüklemiyor.
+Eklentiler OpenChamber web, masaüstü ve mobil uygulamada çalışır. Telefonda paneliniz ve sayfanız yalnızca telefona uyduklarını belirttiğinizde görünür; bkz. [Telefonda](#telefonda). VS Code eklenti yüklemez.
+
+Bir uzantının bir şey ekleyebildiği tüm yerler web sitesindeki [haritada](https://openchamber.dev/tr/extensions/build/) yer alır.
 
 ## Eklenti nedir
 
@@ -38,7 +40,7 @@ Paketleme komutu Bun üzerinde çalışır. Bun yoksa esbuild'i ya da başka bir
 
 OpenChamber manifesti okur ve eklentinin ne istediğini listeleyen bir pencere gösterir (bkz. [Yetenekler](#yetenekler)). Onaylayın, simgeniz şeritte belirir. Tıklayın, sayfanız yüklenir.
 
-Yerel bir `.zip` dosyası ya da bir git deposuna veya zip dosyasına giden https bağlantısı da ekleyebilirsiniz. Yalnızca git kurulumu güncellenebilir: `package.json` içindeki `version` değerini yükseltip push edin; kullanıcı Ayarlar → Uzantılar sayfasını bir sonraki açışında OpenChamber güncellemeyi sunar. URL'deki `#tag` ya da `#branch` neyi izleyeceğini sabitler. Bunlar OpenChamber'ın veri klasörüne kopyalanır ve o kopyadan çalışır; bu yüzden `node_modules` veya TypeScript kaynaklarını değil, derlenmiş dosyaları yayınlayın. Eklentiyi kaldırmak kopyayı siler. Klasörden kurulum doğrudan sizin klasörünüzden çalışır; düzenleyip yeniden derleyip yeniden yükleyebilirsiniz.
+Yerel bir `.zip` dosyası ya da bir git deposuna veya zip dosyasına giden https bağlantısı da ekleyebilirsiniz. Yalnızca git kurulumu güncellenebilir: `package.json` içindeki `version` değerini yükseltip push edin; OpenChamber açıldıktan kısa süre sonra ve birkaç saatte bir denetler, kullanıcıya bir kez haber verir ve güncellemeyi Ayarlar → Uzantılar sayfasında sunar. Herhangi bir sayfadaki `openchamber://extensions/install?url=<encoded repository URL>` bağlantısı, masaüstü uygulamasını bu depo ekleme iletişim kutusunda hazır olacak şekilde açar; böylece bir kurulum düğmesi sunabilirsiniz. URL'deki `#tag` ya da `#branch` neyi izleyeceğini sabitler. Bunlar OpenChamber'ın veri klasörüne kopyalanır ve o kopyadan çalışır; bu yüzden `node_modules` veya TypeScript kaynaklarını değil, derlenmiş dosyaları yayınlayın. Eklentiyi kaldırmak kopyayı siler. Klasörden kurulum doğrudan sizin klasörünüzden çalışır; düzenleyip yeniden derleyip yeniden yükleyebilirsiniz.
 
 ## Manifest
 
@@ -49,13 +51,11 @@ Yerel bir `.zip` dosyası ya da bir git deposuna veya zip dosyasına giden https
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +80,7 @@ Yerel bir `.zip` dosyası ya da bir git deposuna veya zip dosyasına giden https
 
 `engines.openchamber` isteğe bağlıdır. Eklentinizin çalıştığı en eski OpenChamber sürümünü `1.24.0` veya `>=1.24.0` biçiminde yazın. Daha eski sürümler sonradan hata vermek yerine kurulumu reddeder.
 
-`contributes.panel` şerit girişini tanımlar. `id` kebab-case olmalı ve kurulu eklentiler arasında benzersiz olmalıdır. `icon` bir Remixicon adı (`RiWindowLine` için `window`) ya da klasörünüzdeki bir SVG dosyasıdır, örneğin `icon.svg`. `entry` klasörünüzdeki HTML dosyasıdır; yalnızca `tools` tanımlayan bir eklentide bunu atlayın (bkz. [Sohbetteki araçlarınız](#sohbetteki-araçlarınız)).
+`id`, `name` ve `icon` eklentiyi adlandırır. `id` kebab-case olmalı ve kurulu eklentiler arasında benzersiz olmalıdır. `icon` bir Remixicon adı (`RiWindowLine` için `window`) ya da klasörünüzdeki bir SVG dosyasıdır, örneğin `icon.svg`. `contributes.panel` eklentinin şeritteki panelidir: `entry` değeri klasörünüzdeki HTML dosyasıdır. Şeritte paneli olmayan bir eklenti `panel` alanını atlar. Eski paketler `id`, `name` ve `icon` alanlarını `panel` içinde tutar ve bu çalışmaya devam eder.
 
 `contributes.attach` isteğe bağlıdır. Eklentinizi sohbet kutusunun yanındaki + menüsüne ekler; kullanıcı buradan bir görev seçip oturuma iliştirebilir.
 
@@ -89,15 +89,15 @@ Yerel bir `.zip` dosyası ya da bir git deposuna veya zip dosyasına giden https
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` pencerede size ait ayrı bir sayfa açar; böylece seçicinin şerit paneliyle kod paylaşması gerekmez
 - atlarsanız eklenti o menüde görünmez
 
-`ctx.surface`, `panel`, `dialog`, `page` veya `status` olur. İliştirilmiş bir öğeye tıklanınca verileri `ctx.item` içinde gelir; diğer durumlarda değer `null` olur.
+`ctx.surface`, `panel`, `dialog`, `page`, `status` veya `block` olur. İliştirilmiş bir öğeye tıklanınca verileri `ctx.item` içinde gelir; diğer durumlarda değer `null` olur.
 
-`contributes.page: true`, paneli oturum listesinin üstündeki Uzantı sayfaları menüsünden tam ekran açılabilir yapar. `{ "entry": "panel/page.html", "title": "Board" }` ayrı HTML ve isteğe bağlı başlık kullanır. `panel.entry` zorunludur; yalıtım ve izinler aynıdır. Sayfayı yalnızca kullanıcı açar. Yenileme, duraklatma, kaldırma veya sunucu değiştirme sayfayı kapatır.
+`contributes.page: true`, paneli kenar çubuğunun Sayfalar bölümündeki kendi satırından tam ekran açılabilir yapar. `{ "entry": "panel/page.html", "title": "Board" }` ayrı HTML ve isteğe bağlı başlık kullanır. `true`, `panel.entry` sayfasını kullanır; kendi `entry` değeri olan bir sayfa için şeritte panel gerekmez, yani eklenti yalnızca tam ekran bir sayfadan oluşabilir. Yalıtım ve izinler aynıdır. Sayfayı yalnızca kullanıcı açar. Yenileme, duraklatma, kaldırma veya sunucu değiştirme sayfayı kapatır.
 
 Panolar `host.storage` ile proje, worktree ve oturum listelerini ve canlı durumları kullanabilir. `startSession`, panoyu kapatmadan başka bir projeyi hedefleyebilir. Bkz. [Host API](/sdk/host/).
 
 `contributes.integration` isteğe bağlıdır. Ayarlar → Entegrasyonlar sayfasına kullanıcının hesap bağladığı bir kart ekler. Bkz. [Hesaplar ve ağ](#hesaplar-ve-ağ).
 
-`contributes.service` isteğe bağlıdır. OpenChamber'ın eklentinin yanında başlattığı yerel bir süreç tanımlar; bir web sayfasının ulaşamadığı şeyler için, örneğin bir Docker soketi. Bu süreç kullanıcının tam erişimiyle ve sandbox olmadan çalışır, bu yüzden onay iletişim kutusu bunu uyarır; sayfa işi yapamadığında bir tane tanımlayın. Paket dosyası `GUEST_SERVICES.md` dosyasına bakın. `provides: ["browser"]` içeren bir hizmet ajanın tarayıcısının yerine de geçebilir: `browser.*` eylemlerini sunucuda yanıtlar, böylece ajanlar açık bir masaüstü uygulaması olmadan gezinir; kullanıcı bunu Ayarlar → OpenChamber Araçları'ndan seçer. Böyle bir hizmetin panele ihtiyacı yoktur. Bir hizmete kullanıcının oturumlarında olanlar da bildirilebilir: yanına `contributes.sessionEvents` tanımlayın, OpenChamber biten ya da başarısız olan her turu ve ajanın sorduğu her izni ya da soruyu, her projeden ve açık bir pencere olmadan hizmete gönderir. Bkz. [Oturum olayları](/sdk/host/#oturum-olayları). `provides: ["notifications"]` içeren bir hizmet ise kullanıcının bildirimlerini masaüstü ve telefonun yanında Slack'e, Matrix'e ya da kendi sunucunuza iletir; kullanıcı hesabı Ayarlar → Entegrasyonlar'da bağlar ve token OpenChamber'da kalır. Bkz. [Bildirim kanalları](/sdk/host/#bildirim-kanalları).
+`contributes.service` isteğe bağlıdır. OpenChamber'ın eklentinin yanında başlattığı yerel bir süreç tanımlar; bir web sayfasının ulaşamadığı şeyler için, örneğin bir Docker soketi. Bu süreç kullanıcının tam erişimiyle ve sandbox olmadan çalışır, bu yüzden onay iletişim kutusu bunu uyarır; sayfa işi yapamadığında bir tane tanımlayın. Paket dosyası `GUEST_SERVICES.md` dosyasına bakın. `provides: ["browser"]` içeren bir hizmet ajanın tarayıcısının yerine de geçebilir: `browser.*` eylemlerini sunucuda yanıtlar, böylece ajanlar açık bir masaüstü uygulaması olmadan gezinir; kullanıcı bunu Ayarlar → OpenChamber Araçları'ndan seçer. Böyle bir hizmetin panele ihtiyacı yoktur. Bir hizmete kullanıcının oturumlarında olanlar da bildirilebilir: yanına `contributes.sessionEvents` tanımlayın, OpenChamber biten ya da başarısız olan her turu ve ajanın sorduğu her izni ya da soruyu, her projeden ve açık bir pencere olmadan hizmete gönderir. Bkz. [Oturum olayları](/sdk/host/#oturum-olayları). `provides: ["notifications"]` içeren bir hizmet ise kullanıcının bildirimlerini masaüstü ve telefonun yanında Slack'e, Matrix'e ya da kendi sunucunuza iletir; kullanıcı hesabı Ayarlar → Entegrasyonlar'da bağlar ve token OpenChamber'da kalır. Bkz. [Bildirim kanalları](/sdk/host/#bildirim-kanalları). `provides: ["tracker"]` olan bir servis, Linear'ın yanında bir iş öğesi izleyicisidir ve hesap kartı Uzantı hesapları altında durur; bkz. [İzleyiciler](/sdk/host/#i̇zleyiciler). `provides: ["quota"]` olan bir servis ise yerleşik sağlayıcıların yanında kullanımı bildirir ve bunun için OpenCode'un manifestte listelenen sağlayıcılar için sakladığı kimlik bilgilerini okur; bkz. [Kullanım sağlayıcıları](/sdk/host/#kullanım-sağlayıcıları). Bir servis `contributes.marks` ile kenar çubuğu satırlarına küçük simgeler de koyabilir; bkz. [Kenar çubuğu satırlarındaki işaretler](/sdk/host/#kenar-çubuğu-satırlarındaki-işaretler).
 
 ## Yetenekler
 
@@ -110,9 +110,47 @@ Panel çizmek ve geçerli oturumu okumak izin gerektirmez. Kullanıcı adına bi
 | `files` | açık projedeki dosyaları okuyup yazmak (göreli yol ile `readFile`, `writeFile`, `listDir`, `stat`) |
 | `model` | kullanıcının Small Model'iyle tek seferlik metin üretimi (`generate`), herhangi bir oturumun dışında |
 
-Altı tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `filesystem` desenleri tanımladığınızda `filesystem`, `origins` tanımladığınızda `origins`, bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)) ve `sessionEvents` `content` istediğinde `transcript` (bkz. [Oturum olayları](/sdk/host/#oturum-olayları)).
+On üç tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `filesystem` desenleri tanımladığınızda `filesystem`, `origins` tanımladığınızda `origins`, bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)), `sessionEvents` veya `sessionControl` `content` istediğinde `transcript` (bkz. [Oturum olayları](/sdk/host/#oturum-olayları)), servisiniz oturumlar üzerinde işlem yaptığında `sessionControl` (bkz. [OpenChamber'ı çağırma](/sdk/host/#openchamberı-servisinizden-çağırma)), servisiniz kullanıcı adına ajanın izin isteklerini ve formlarını yanıtladığında `sessionAnswers` (`sessionControl: { answers: true }`), ajanların okuduklarına ekleme yaptığında `instructions` ve `contributes.skills` tanımladığınızda `skills`. `contributes.skills`, eklenti açıkken her ajana ulaşan skill'lerin bulunduğu bir paket klasörüdür. `contributes.opencodePlugin` tanımladığınızda `opencodePlugin` (aşağıya bakın), `contributes.links` tanımladığınızda da `links` eklenir (bkz. [Sohbet mesajlarındaki bağlantılar](#sohbet-mesajlarındaki-bağlantılar)). `contributes.marks` tanımladığınızda `marks` eklenir (bkz. [Kenar çubuğu satırlarındaki işaretler](/sdk/host/#kenar-çubuğu-satırlarındaki-işaretler)).
 
 Kullanıcı tam listeyi bir kez, eklentiyi kurarken görür ve ya onaylar ya da eklentiyi kaldırır. Yeni bir sürüm daha fazlasını isterse pencere yeniden görünür. Kullanıcının onaylamadığı bir yeteneği gerektiren çağrı `NOT_GRANTED` ile başarısız olur.
+
+## Paketinizde bir OpenCode eklentisi
+
+Bir uzantı bir OpenCode eklentisi getirebilir; böylece insanlar iki şey yerine tek şey kurar. `"opencodePlugin": "plugin"` tanımlayın: paketin içinde, kökünde `index.js` veya `server.js` bulunan bir klasör. OpenCode `main` alanını okumaz, bu yüzden giriş dosyası başka bir yerdeyse klasörün `package.json` dosyasında `name` ve `exports` tanımlayın. Giriş dosyası, OpenCode'un yüklediği biçim olan `{ id, setup }` nesnesini varsayılan olarak dışa aktarır; hiçbir şey içe aktarmaz, çünkü OpenCode onu hiçbir şeyin kurulu olmadığı klasörünüzden düz bir `import()` ile yükler. Bir aracın `input` alanı düz JSON Schema'dır ve `execute` işlevi `{ content }` döndürür.
+
+```json
+{
+  "contributes": {
+    "panel": { "id": "teapot-tools", "name": "Teapot Tools", "icon": "cup" },
+    "opencodePlugin": "plugin"
+  }
+}
+```
+
+Onay iletişim kutusuna bir satır daha gelir: **OpenCode'a eklenti ekleme**. Bu satır, eklenti kodunun kullanıcının tüm erişimiyle OpenCode'un içinde çalıştığını açıkça söyler. İzin verildikten sonra OpenChamber, klasörünüzü yönettiği OpenCode yapılandırmasına, yani `contributes.skills` ile aynı dosyaya ekler; OpenChamber'ın çalıştırdığı OpenCode bu dosyayı izler ve eklentiyi birkaç saniye içinde yükler. Uzantıyı kapatmak veya kaldırmak eklentiyi aynı yoldan çıkarır. Kullanıcının kendi `opencode.json` dosyasına hiçbir şey yazılmaz: o dosya kullanıcıya aittir ve oradaki bir eklenti uzantınızdan uzun yaşar, makinedeki her OpenCode'da çalışırdı.
+
+Bu dosyanın OpenCode'a ulaşmadığı yerde uzantının ekranı bunu söyler ve **Genel yapılandırmaya ekle** seçeneğini sunar; bu, klasörünüzü kullanıcının genel OpenCode yapılandırmasına, o andan itibaren kullanıcıya ait bir kayıt olarak yazar. Bu durum, OpenChamber konuştuğu OpenCode'u başlatmadığında ya da sunucunun ortamı kendi `OPENCODE_CONFIG` değerini ayarladığında olur (eklenti o zaman OpenCode'un bir sonraki başlatılışında yüklenir). Başka bir makinedeki OpenCode bu makinedeki bir klasörü yükleyemez; ekran bunu söyler ve hiçbir şey sunmaz. Yüklenemeyen bir eklentiyi, orada bir kaydı varsa OpenCode Ayarlar → Eklentiler altında bildirir; uzantınız her durumda çalışmaya devam eder. Kurulum, eklenti klasörü olmayan ya da `package.json` dosyası bir giriş dosyası belirtmeyen paketi reddeder.
+
+VS Code uzantı yüklemez, bu yüzden çalıştırdığı OpenCode'a hiçbir eklenti ulaşmaz. Telefon bir OpenChamber sunucusuna bağlanır ve eklenti o sunucunun OpenCode'unda çalışır. Yalıtılmış bir alandaki oturum kendi OpenCode'unu çalıştırır ve ana makinenin yapılandırmasını hiç okumaz. Kurumsal mod eklentiyi yerel bir servis gibi ele alır: yalnızca yöneticinin listelediği bir depodan kurulur. SDK'da çalışan bir örnek vardır: `examples/opencode-plugin`.
+
+## Sohbet mesajlarındaki bağlantılar
+
+Bir uzantı, sohbet mesajlarındaki kendi tanımlayıcılarını ve bağlantılarını tıklanabilir yapabilir; böylece bir ajan yanıtındaki `DEMO-12`, o görevi tarayıcı sekmesi yerine uzantınızda açar. Neyin tanınacağını ve tıklamanın ne yapacağını tanımlayın:
+
+```json
+"links": {
+  "action": "open",
+  "identifier": { "keys": ["DEMO"] },
+  "urls": { "origin": "https://tasks.example.com", "identifier": "key-number", "item": ["/tasks/{id}"] }
+}
+```
+
+- `identifier.keys`, büyük harfle yazılmış en fazla 8 sabit anahtardır. `DEMO`, `DEMO-12` ifadesini yalnızca tam bir sözcük olarak tanır; kod, bağlantılar, yollar, `XDEMO-1` gibi sözcükler ve `DEMO-1.5` gibi sürümler metin olarak kalır.
+- `urls`, tek bir https kaynağındaki bağlantıları tam eşleşmeyle tanır. `item`, izleyicinin kendi kullandığı biçimdeki bağlantı şablonlarıdır: `{id}` bir kez, yolun içinde ya da `?name={id}` olarak; değişen kısımlar için de `{segment}` veya `{segments+}`. `identifier`, `{id}` değerinin neye benzediğini söyler: `key-number`, `number` veya `short-code`. Hiçbir zaman düzenli ifade yazmazsınız; şablonları OpenChamber derler.
+- `action: "open"`, uzantınızı `ready.item` (veya `onItem`) değeri `{ kind: "link", identifier, url? }` olacak şekilde açar: `attach` değeri `"dialog"` ise kendi iletişim kutunuzda, değilse şerit panelinde. Türü `isGuestLinkItem` ile daraltın. Bunun için `panel.entry` gerekir. `url`, tıklanan bağlantıdan `#` sonrası kısmın ve şablonun kendi parametreleri dışındaki sorgu parametrelerinin çıkarılmış hâlidir; metindeki bir tanımlayıcı için, `{segment}` içermeyen bir şablonunuz varsa ve tanımlayıcı `urls.identifier` ile tanımlanan biçimdeyse, bu türden ilk şablonunuzun oluşturduğu bağlantıdır (`DEMO-12` hiçbir zaman bir `number` yerine geçmez).
+- `action: "attach"` bunun yerine sohbet kutusuna tanımlayıcıyı taşıyan bir etiket ekler ve etiketin kendi bağlantısını gösterebilmesi için `{segment}` veya `{segments+}` içermeyen bir şablon gerektirir; `identifier.keys` ile `urls.identifier` değeri `number` olamaz.
+
+Tanıma, ajan yanıtlarında ve kullanıcının kendi mesajlarında çalışır; akıl yürütmede, araç çıktısında ve Files görünümünde çalışmaz. Bir mesajı kopyalamak metni yazıldığı gibi korur. OpenChamber'ın kendisinin okuduğu bir bağlantı, yani bir izleyici öğesi, bir deponun issue'su veya pull request'i ya da bir commit, her zamanki gibi davranır; değiştirici tuşla yapılan tıklama da tarayıcının olağan davranışını korur. `links` tanımlamak `links` yeteneğini ekler: onay iletişim kutusu anahtarlarınızı ve kaynağınızı listeler ve tıklamanın ne yaptığını söyler; bunlardan herhangi birini değiştiren bir sürüm yeniden onay ister. `examples/tasks-demo`, `DEMO-2` ve `https://example.com/tasks/DEMO-2` bağlantılarını tanır.
 
 ## Metin üretme
 
@@ -156,7 +194,7 @@ Her `scheme` ne gönderir:
 | `"bearer"` | `Authorization: Bearer <token>` | API bearer veya personal access token belgeliyorsa |
 | `"basic"` | `Authorization: Basic base64(username:token)` | API kullanıcı adı (çoğunlukla e-posta) ve API token'ı ile HTTP Basic auth belgeliyorsa; kart ikisini de sorar ve `usernameLabel` ilk alanı adlandırır |
 
-`settings` karta düz metin alanları ekler. Değerleri `ctx.settings` içinde gelir.
+`settings` karta düz metin alanları ekler. Değerleri `ctx.settings` içinde gelir. `"secret": true` olan bir alan kartta maskelenir ve hiçbir sayfaya ulaşmaz; servisiniz onu `readSettings()` ile okur.
 
 ## Dosyalar
 
@@ -190,9 +228,9 @@ Yazmalar atomiktir: OpenChamber geçici bir dosya yazıp yeniden adlandırır, b
 - `true`, `panel.entry` sayfasını kullanır.
 - `entry`, klasörünüzdeki ayrı bir HTML sayfasıdır. Bununla `panel.entry` gerekmez, yani eklenti şeritte simgesi olmadan yalnızca bu bölümden oluşabilir.
 - `title`, bölüm başlığındaki panel adının yerini alır, en fazla 60 karakter.
-- `height`, piksel cinsinden başlangıç yüksekliğidir, 24 ile 320 arası (varsayılan 120). İçeriğinizin boyutu değişince [`host.setHeight()`](/sdk/host/) çağırın.
+- `height`, piksel cinsinden başlangıç yüksekliğidir, 24 ile 480 arası (varsayılan 120). İçeriğinizin boyutu değişince [`host.setHeight()`](/sdk/host/) çağırın.
 
-Sayfanız `ctx.surface` değerini `status` olarak görür. OpenChamber sayfayı yalnızca Work Status paneli görünürken ve bölümünüz açıkken yükler, kullanıcı bölümü kapatınca kaldırır. Bu yüzden orada yeniden kuramayacağınız bir şey tutmayın. Yalnızca bölümden oluşan bir eklenti izinleri, bir servisi, bir entegrasyonu ve dosyaları kullanabilir, ama `page`, `attach`, `actions` veya `commands` kullanamaz. Yalnızca web ve masaüstü. `git-graph-status` örneği eksiksiz bir bölümdür.
+Sayfanız `ctx.surface` değerini `status` olarak görür. OpenChamber sayfayı yalnızca Work Status paneli görünürken ve bölümünüz açıkken yükler, kullanıcı bölümü kapatınca kaldırır. Bu yüzden orada yeniden kuramayacağınız bir şey tutmayın. Yalnızca bölümden oluşan bir eklenti izinleri, bir servisi, bir entegrasyonu, dosyaları ve kendi `entry` değeri olan bir sayfayı kullanabilir, ama `page: true`, `attach`, `actions` veya `commands` kullanamaz. Bölüm web'de, masaüstünde ve telefonun Çalışma durumu sekmesinde görünür; telefonda etkinleştirme gerekmez ve telefonun genişliğini alır. `git-graph-status` örneği eksiksiz bir bölümdür.
 
 ## Dosya türünüz için bir düzenleyici
 
@@ -249,7 +287,7 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
 
 İkili bir düzenleyici, desenlerinin eşleştiği her dosyayı üstlenebilir; görseller ve PDF'ler gibi OpenChamber'ın kendisinin önizlediği dosyalar da buna dahildir. Kaynak görünümü yoktur ve kullanıcı onu kaydedilmemiş değişikliklerle tam ekrana aldığında veya tam ekrandan çıkardığında OpenChamber önce değişiklikleri kaydeder. Biçimi okumak ve yazmak düzenleyicinizin işidir: OpenChamber döndürdüğünüz baytları olduğu gibi geri yazar.
 
-Sayfanız `ctx.surface` değerini `file` olarak görür. Dosya diskte değiştiğinde, kullanıcı değişiklikleri attığında ya da düzenleyici tam ekrana geçtiğinde veya tam ekrandan çıktığında OpenChamber sayfayı yeniden yükler ve dosyayı tekrar verir. Deseni eşleşen ilk etkin eklenti kazanır ve OpenChamber'ın kendi önizlemelerinden önce gelir. Yalnızca düzenleyiciden oluşan bir eklenti izinleri, bir servisi, bir entegrasyonu ve dosyaları kullanabilir, ama `page`, `attach`, `actions` veya `commands` kullanamaz. Yalnızca web ve masaüstü. `checklist-editor` örneği eksiksiz bir düzenleyicidir.
+Sayfanız `ctx.surface` değerini `file` olarak görür. Dosya diskte değiştiğinde, kullanıcı değişiklikleri attığında ya da düzenleyici tam ekrana geçtiğinde veya tam ekrandan çıktığında OpenChamber sayfayı yeniden yükler ve dosyayı tekrar verir. Deseni eşleşen ilk etkin eklenti kazanır ve OpenChamber'ın kendi önizlemelerinden önce gelir. Yalnızca düzenleyiciden oluşan bir eklenti izinleri, bir servisi, bir entegrasyonu, dosyaları ve kendi `entry` değeri olan bir sayfayı kullanabilir, ama `page: true`, `attach`, `actions` veya `commands` kullanamaz. Düzenleyici web'de, masaüstünde ve telefonun Dosyalar sekmesinde açılır; telefonda tüm ekranı kaplar ve etkinleştirme gerekmez. `checklist-editor` örneği eksiksiz bir düzenleyicidir.
 
 ## Eylemler, komutlar ve rozet
 
@@ -263,6 +301,8 @@ Sayfanız `ctx.surface` değerini `file` olarak görür. Dosya diskte değişti�
   { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
 ]
 ```
+
+`where` ayrıca `selection` (bir mesajda seçilen metin), `file` (Files içindeki bir satır) ve `diff` (bir dosyanın veya diff'in seçili satırları) değerlerini de alır. Bunların öğeleri aynı adda bir `kind` taşır: `selection` metni, `file` yolu, `diff` yolu ve satır aralığını içerir. Seçimde, `display` eylemin nasıl görüneceğini belirler: `label` (varsayılan), `label` metni ipucu olan `icon` veya `both`.
 
 Bir mesaj eylemi, eklentinizi `kind: "message"` olan bir `ctx.item` ile açar: oturum id'si ve başlığı, proje dizini, mesaj id'si, rolü ve metni. Bir oturum eylemi ise `kind: "session"` ile, oturum id'si, başlığı ve dizini ile açar. `"payload": ["messages"]` ekleyin, öğe tüm konuşmayı da taşır, en eskisi önce olmak üzere, Markdown dışa aktarmanın ürettiği metnin aynısı. Bu, kullanıcının onay iletişim kutusunda ayrı bir satır olarak gördüğü `conversation` yeteneğini gerektirir. `item.action` hangi girdiye tıklandığını söyler.
 
@@ -281,6 +321,8 @@ host.onResolve(async ({ command, args }) => {
 
 Kullanıcı sohbet kutusuna `/task ABC-12` yazdığında OpenChamber eklentinizden bunu çözmesini ister ve döndürdüğünüzü, hiçbir şey açmadan, etiket olarak iliştirir. "Bir şey bulunamadı" için `null` döndürün. Paneliniz kapalıysa OpenChamber bu çağrı için onu arka planda yükler. OpenChamber'ın veya OpenCode'un zaten kullandığı bir ad yok sayılır.
 
+Oturum eylemleri ve eğik çizgi komutları, kullanıcı etiketlerini, komutu ya da uzantınızın adını aradığında komut paletinde (⌘P veya Ctrl+P) de çıkar. Oradaki bir oturum eylemi açık oturumda çalışır. Bir komut sohbet kutusunun başına gelir, kullanıcının zaten yazdığı metin argümanı olur ve kullanıcı gönderdiğinde çalışır. Mesaj, seçim, dosya ve diff eylemleri kendi menülerinde kalır.
+
 **Şerit simgesindeki rozet.** `host.setBadge(3)` simgenize bir nokta koyar ve sayıyı ipucunda gösterir, örneğin açık görevler; `host.setBadge(null)` onu temizler. Paneli açmak da temizler.
 
 ## Sohbetteki araçlarınız
@@ -290,7 +332,7 @@ OpenCode eklentiniz veya MCP sunucunuz bir araç eklediğinde sohbet, çağrıla
 ```json
 "tools": [
   {
-    "match": "mcp.jira.*",
+    "match": "jira_*",
     "name": "Jira",
     "icon": "task-line",
     "title": "{input.key}",
@@ -301,9 +343,105 @@ OpenCode eklentiniz veya MCP sunucunuz bir araç eklediğinde sohbet, çağrıla
 ]
 ```
 
-`match`, OpenCode'un bildirdiği haliyle aracın adıdır; sondaki `*` bir öneki eşleştirir. `icon`, `panel.icon` gibi bir Remixicon adı ya da paketinizdeki bir `.svg` dosyasıdır. `title` ve `subtitle`, çağrının `input`, `output` ve `metadata` değerleri üzerinde çalışan şablonlardır. `output`, gövdenin nasıl çizileceğini seçer: `text`, `json` (ağaç), `markdown`, `language` ile `code`, `columns` ile `table` (satırlar çıktı dizisinden veya `output.items` içinden gelir) ya da varsayılan için `auto`. Tam bir `match` joker karakteri yener; eşitlikte ilk yüklenen eklenti kazanır. İzin gerekmez: bu yalnızca sohbette zaten bulunan verilerin nasıl çizildiğini değiştirir.
+`match`, OpenCode'un bildirdiği haliyle aracın adıdır; sondaki `*` bir öneki eşleştirir. `icon`, `panel.icon` gibi bir Remixicon adı ya da paketinizdeki bir `.svg` dosyasıdır. `title` ve `subtitle`, çağrının `input`, `output` ve `metadata` değerleri üzerinde çalışan şablonlardır. `output`, gövdenin nasıl çizileceğini seçer: `text`, `json` (ağaç), `markdown`, `language` ile `code`, `columns` ile `table` (satırlar çıktı dizisinden veya `output.items` içinden gelir), `card` ile `card` (kart olarak tek bir öğe, aşağıya bakın) ya da varsayılan için `auto`. Tam bir `match` joker karakteri yener; eşitlikte ilk yüklenen eklenti kazanır. İzin gerekmez: bu yalnızca sohbette zaten bulunan verilerin nasıl çizildiğini değiştirir.
 
-Yalnızca araçları biçimlendiren bir eklentinin sayfaya hiç ihtiyacı yoktur: `panel.entry` öğesini atlayın, şeritte simgesi olmaz, sadece Ayarlar → Uzantılar içinde bir kart görünür. Sayfası olmadan yalnızca `tools` tanımlayabilir, başka bir şey tanımlamaz. Diğer istisna, kendi `entry` sayfası olan bir Work Status bölümü veya dosya düzenleyicisidir, yukarıya bakın.
+OpenCode'un Code Mode özelliği açıkken ajan, araçları tek tek değil kısa bir betikten çağırır. Tek bir çağrı yapan betik o aracın satırı olarak gösterilir ve `output`, betiğin döndürdüğü değerdir. `match` içinde, betikte nokta olan yere `_` yazın: betikteki `tools.github.list_issues`, `github_list_issues` olur. Birden fazla çağrı yapan betik kendi satırını korur.
+
+Yalnızca araçları biçimlendiren bir eklentinin sayfaya hiç ihtiyacı yoktur: `panel.entry` öğesini atlayın, şeritte simgesi olmaz, sadece Ayarlar → Uzantılar içinde bir kart görünür. Sayfası olmadan yalnızca `tools` ve `providerLogos` tanımlayabilir, başka bir şey tanımlamaz. Diğer istisna, kendi `entry` sayfası olan bir Work Status bölümü, dosya düzenleyicisi veya tam ekran sayfadır, yukarıya bakın.
+
+### Tek bir öğe için kart
+
+Bir araç tek bir nesneyle, örneğin bir issue ile yanıt verdiğinde `output: "card"` onu ham JSON yerine bir kart olarak çizer. `card`, çıktının hangi kısmının nereye gideceğini söyler:
+
+```json
+"tools": [
+  {
+    "match": "jira_get_issue",
+    "name": "Jira issue",
+    "title": "{input.key}",
+    "output": "card",
+    "card": {
+      "label": "{output.key} · {output.fields.issuetype.name}",
+      "title": "{output.fields.summary}",
+      "status": {
+        "value": "{output.fields.status.name}",
+        "tones": { "In Progress": "info", "Blocked": "error", "Done": "success" }
+      },
+      "fields": [
+        { "label": "Assignee", "value": "{output.fields.assignee.displayName}" },
+        { "label": "Priority", "value": "{output.fields.priority.name}" }
+      ],
+      "link": { "label": "Open in Jira", "url": "{output.url}" }
+    }
+  }
+]
+```
+
+`label` en üstteki küçük satır, `title` başlık, `status` bir rozet, `fields` en fazla sekiz etiketli değer, `link` ise en alttaki bağlantıdır. İlk dördünden en az birini tanımlayın. Her değer, aracın `output` değerini okuyan bir şablondur. `tones`, rozeti tam metnine göre `info`, `success`, `warning`, `error` veya `neutral` olarak renklendirir. Listelemediğiniz bir durum nötr olur.
+
+Çıktı bir diziyse ya da bir `items` dizisi içeriyorsa aynı `card` kompakt bir liste çizer: her öğe için etiketi, başlığı, ilk alanı ve durumuyla bir satır. Burada `{output.…}` o öğeyi okur. İlk 200 öğe gösterilir ve satırlarda bağlantı olmaz.
+
+Değeri çıktıda bulunmayan bir kısım atlanır. Adını verdiğiniz hiçbir şey çıktıda yoksa ya da çıktı JSON değilse sohbet, çıktıyı kural olmasaydı göstereceği gibi gösterir.
+
+Bağlantı yalnızca bir `https` adresini açar. `"{output.url}"`, adresi çıktıdan olduğu gibi alır. Adresi değerlerin çevresine kendiniz de yazabilirsiniz, örneğin `"https://tracker.example.com/browse/{output.key}"`. O zaman her değer yüzde kodlamasından geçer, bu yüzden yazdığınız ana makineyi veya yolu değiştiremez. Entegrasyon `settings` alanları olan bir eklenti (yukarıdaki Hesaplar ve ağ bölümüne bakın) gizli olmayan bir ayarı da okuyabilir: `"https://{settings.site}/browse/{output.key}"`. Burada kullanıcı `acme.atlassian.net` gibi bir ana makine adını `site` olarak kaydetmiştir. Tam bir adres, bir port veya bir yol içeren bir ayar bağlantı vermez; eksik bir değer de vermez.
+
+`card`, 2.7.0'dan yeni bir OpenChamber sürümü gerektirir. Daha eski bir sürüm eklentiyi geçersiz sayıp reddeder ve `engines.openchamber` bunu değiştirmez.
+
+## Sağlayıcınızın logosu
+
+OpenCode eklentiniz bir model sağlayıcısı kaydettiğinde, model seçiciler ve Ayarlar genellikle genel bir işaret çizer. Logoyu paketinize koyun ve sağlayıcıyı adlandırın, kod gerekmez:
+
+```json
+"providerLogos": {
+  "acme-cloud": "assets/acme-cloud.svg"
+}
+```
+
+Anahtar, OpenCode'un bildirdiği sağlayıcı kimliğidir. Değer, paketinizdeki en fazla 1 MB boyutunda bir `.svg` veya `.png` dosyasıdır. Eksik, boş veya daha büyük bir dosya kurulumu başarısız kılar. Bir paket en fazla 256 sağlayıcı adlandırır ve iki kimlik aynı dosyayı gösterebilir. Logo kendi renklerini korur ve SVG içindeki `currentColor` açık veya koyu temayı izler. Uygulamanın bu kimlik için getirdiği logonun yerine geçer. Kullanıcının bu sağlayıcı için ayarladıkları önce gelir, eşitlikte ilk kurulan eklenti kazanır. İzin gerekmez. Telefon da bu logoları gösterir; VS Code eklenti yüklemediği için göstermez.
+
+## Telefonda
+
+Mobil uygulama ve bir telefonun tarayıcısında açılan OpenChamber, bağlandıkları sunucuda kurulu uzantıları yükler. OpenChamber'ın manifestinizden çizdiği şeyler orada değişmeden çalışır: sohbet mesajlarındaki bağlantılar, araçlarınızın düzeni, sağlayıcı logoları, `@` menüsündeki satırlar, kenar çubuğu satırlarındaki işaretler ve hesap kartları. `panel.mobile` ayarladığınızda bir işarete dokunmak, o satırın oturumunda çalışma alanındaki sekmenizi açar; masaüstünde bir tıklamanın panelinizi açması gibi. Ayarlamazsanız dokunuş işaretin metnini gösterir ve varsa `url`'sini açar.
+
+Dar çerçeveler, sizden ek bir şey gerekmeden telefonun genişliğinde görünür:
+
+- sohbetteki bloklar
+- çalışma alanının Çalışma durumu sekmesindeki Work Status bölümünüz
+- Dosyalar sekmesini dolduran dosya düzenleyiciniz
+- alt sayfada açılan açılır pencereler (aşağıda)
+
+Eğik çizgi komutları orada çalışır, `"mode": "background"` olan işlemler de. Arka plan işlemleri telefonun kendi menülerinde görünür: bir mesajın Diğer işlemler sayfası, seçili metnin sayfası, bir oturum satırına uzun basınca açılan menü, Dosyalar'daki bir satıra uzun basma ve bir diff'te seçili satırların yorum alanının altındaki etiketli düğmeler.
+
+Paneliniz ve sayfanız etkinleştirme ister, çünkü masaüstü bölmesi için tasarlanmış bir sayfa 390px'te genellikle bozulur:
+
+```json
+"contributes": {
+  "panel": { "entry": "panel/index.html", "mobile": true },
+  "page": { "entry": "panel/page.html", "mobile": true }
+}
+```
+
+- `panel.mobile: true` panelinizi, rozetinizle birlikte telefonun çalışma alanında bir sekme yapar. Panele yerleşik canlı görüntüyü, + menüsündeki girdinizi (`attach: "dialog"` orada tam ekran açılır), `"mode": "background"` olmayan işlemleri, `action: "open"` bağlantılarını, çip dokunuşlarını ve `openSurface("plugin:<id>")` çağrısını da kapsar.
+- `page: true` panelin HTML'sini yeniden kullanır, bu yüzden `panel.mobile`'ı izler. Kendi `entry`'si olan bir sayfa nesnesi yalnızca kendi `mobile: true` değerini izler: `panel.mobile` onu açmaz ve telefona hazır bir panel gerektirmez, böylece bir paket yalnızca telefona hazır bir sayfadan oluşabilir. Sayfa telefonun oturum listesinde Daha fazla altında listelenir ve geri okuyla tam ekran açılır.
+
+Etkinleştirme olmadan bunların hiçbiri telefonda açılmaz: menüler paneli açacak işlemlerinizi göstermez, bir çipe dokunmak uzantınızın telefonda açılmadığını söyler, bir bağlantı her zamanki anlamını korur ve `openSurface` `UNSUPPORTED` ile reddedilir.
+
+Etkinleştirilmiş bir sayfayı yaklaşık 360px genişlik ve dokunma için tasarlayın. `ready.device` çerçevenin nerede olduğunu söyler:
+
+| Alan | Ne olduğu |
+| --- | --- |
+| `formFactor` | `phone`, `tablet` veya `desktop` |
+| `pointer` | parmak için `coarse`, fare için `fine` |
+| `insets` | px cinsinden `{ top, right, bottom, left }`: çentikli bir telefonda uygulamanın kendi ekranını içeri çektiği güvenli alan, başka yerlerde sıfırlar |
+| `keyboard` | ekran klavyesinin kapladığı px, klavye kapalıyken `0` |
+
+Bu değerlerden biri değiştiğinde, örneğin döndürmede veya klavye açıldığında, OpenChamber yeni bir `ready` gönderir; bu yüzden onu temayla birlikte `onReady` içinde okuyun.
+
+[UI kiti](/sdk/ui/) `pointer: coarse` altında denetimlerini dokunma boyutlarına büyütür: liste satırları ve seçim seçenekleri en az 44px yükseklikte, düğmeler ve giriş alanları 40px, küçük düğmeler, tetikleyiciler ve sekmeler 36px. Giriş alanları en az 16px metin tutar, çünkü iOS odaklanan daha küçük bir alana yakınlaştırır. Boyutlar kullanıcının arayüz boyutuyla ölçeklenir ve uzantınızı güncel SDK ile yeniden derlediğinizde ona ulaşır.
+
+Telefonda bir açılır pencere uygulamanın alt sayfasında açılır; sayfanın genişliğinde ve istediğiniz yükseklikte, sayfanın sınırına kadar. Kullanıcı kapatana kadar kalır, bunu `outside` olarak alırsınız. `mountPopoverAnchor` onu parmak veya kalem dokunuşuyla açar ve bu dokunuş öğenin kendi tıklamasının yerini alır: tıklama işleyiciniz onun için çalışmaz. Dokunmatik kullanıcının ihtiyacı varsa tıklamanın yaptığını açılır pencereye koyun. Fare veya klavye tıklaması değişmez. Açılır pencere çağrıları SDK paketindeki `API.md` içindedir.
+
+Daha eski OpenChamber sürümleri `mobile`'ı yok sayar ve paketi eskisi gibi kurar, `ready` içinde de `device`'ı göndermez; bu yüzden eksik bir `device`'ı fareli bir masaüstü olarak ele alın.
 
 ## Paneldeki ilk satırlar
 

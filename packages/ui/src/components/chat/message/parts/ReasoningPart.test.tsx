@@ -1,7 +1,5 @@
 import React, { act } from 'react';
-import { describe, expect, test } from 'bun:test';
-import { plugin } from 'bun';
-import { pathToFileURL } from 'node:url';
+import { describe, expect, jest, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -16,18 +14,9 @@ import { I18nProvider } from '@/lib/i18n';
 import ReasoningPart, { ReasoningTimelineBlock } from './ReasoningPart';
 import type { StreamPhase } from '../types';
 import { onRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
+import { loadMarkdownRendererModule } from '../../markdownRendererLoader';
 
-// Bun does not implement Vite's asset-query imports. Preserve the real asset
-// URL while keeping the renderer and worker client modules unchanged.
-plugin({
-  name: 'reasoning-worker-url',
-  setup(build) {
-    build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, ({ path }) => ({
-      contents: `export default ${JSON.stringify(pathToFileURL(path.split('?')[0]).href)};`,
-      loader: 'js',
-    }));
-  },
-});
+const { TimelineNotice } = await import('../TimelineNotice');
 
 const unavailable = (): never => { throw new Error('Reasoning scrolling must not call runtime APIs'); };
 const runtimeApis: RuntimeAPIs = {
@@ -53,6 +42,34 @@ const TestProviders = ({ children }: { children: React.ReactNode }) => (
 );
 
 type ReasoningPartFixture = Extract<Part, { type: 'reasoning' }>;
+
+describe('compaction model attribution', () => {
+  const message = {
+    id: 'compact', sessionID: 'ses_1', role: 'compaction' as const, time: { created: 1 },
+    status: 'completed' as const, reason: 'auto' as const, summary: 'Summary',
+    model: { providerID: 'summary-provider', id: 'summary-model' },
+  };
+
+  test('shows the recorded model on summary and empty-summary headers', () => {
+    for (const summary of ['Summary', '']) {
+      const html = renderToStaticMarkup(<TestProviders><TimelineNotice message={{ ...message, summary }} /></TestProviders>);
+      const window = new Window();
+      window.document.body.innerHTML = html;
+      expect(window.document.body.textContent).toContain('Conversation compacted');
+      expect(window.document.body.textContent).toContain(' · summary-provider/summary-model');
+    }
+  });
+
+  test('keeps running, failed and older model-less compactions unattributed', () => {
+    for (const status of ['running', 'failed'] as const) {
+      const html = renderToStaticMarkup(<TestProviders><TimelineNotice message={{ ...message, status }} /></TestProviders>);
+      expect(html).not.toContain('summary-provider/summary-model');
+    }
+    const html = renderToStaticMarkup(<TestProviders><TimelineNotice message={{ ...message, model: undefined }} /></TestProviders>);
+    expect(html).toContain('Conversation compacted');
+    expect(html).not.toContain('summary-provider/summary-model');
+  });
+});
 
 /**
  * Mounts a real client root against a happy-dom document so mount/unmount
@@ -144,12 +161,13 @@ const installDomStub = () => {
   };
 };
 
-// A reasoning text whose summary (first 120 chars) fits in the header but
-// whose expanded body content should only appear when the disclosure is open.
+// A reasoning text whose summary is cut by the header bound but whose tail
+// should only appear when the disclosure is open.
 const LONG_REASONING =
   'First thought about the task at hand and how to approach it carefully.\n' +
-  'This second line goes into much deeper detail about the internal reasoning ' +
-  'process that should remain hidden in the collapsed header view.';
+  'This second line goes into much deeper detail about the internal reasoning. ' +
+  'Padding sentence so the summary passes the header bound. '.repeat(8) +
+  'UNIQUE_TAIL_MARKER that must stay out of the collapsed header.';
 
 describe('ReasoningTimelineBlock', () => {
   test('renders reasoning traces behind an accessible collapsed disclosure by default', () => {
@@ -217,10 +235,25 @@ describe('ReasoningTimelineBlock', () => {
       </TestProviders>,
     );
 
-    // Deep body content beyond 120 chars should be cut from the summary span
-    expect(markup).not.toContain('remain hidden in the collapsed header view');
+    // Text beyond the header bound is cut from the summary span
+    expect(markup).not.toContain('UNIQUE_TAIL_MARKER');
     // The ellipsis character marks that the text was truncated
     expect(markup).toContain('…');
+  });
+
+  test('keeps a summary that fits the new bound whole', () => {
+    const markup = renderToStaticMarkup(
+      <TestProviders>
+        <ReasoningTimelineBlock
+          text={`Checking the cache path before the wide layout change and confirming the header keeps the whole line ${'word '.repeat(20)}MEDIUMTAILMARKER.`}
+          blockId="reasoning-medium"
+        />
+      </TestProviders>,
+    );
+
+    // Longer than the old 80-character bound, shorter than the header bound.
+    expect(markup).toContain('MEDIUMTAILMARKER');
+    expect(markup).not.toContain('…');
   });
 
   test('omits trailing empty HTML comments from the header summary', () => {
@@ -235,6 +268,22 @@ describe('ReasoningTimelineBlock', () => {
 
     expect(markup).toContain('Planning accessible icon labels with translations');
     expect(markup).not.toContain('&lt;!-- --&gt;');
+  });
+
+  test('a long trace is summarized from its start, without the fence a cut left open', () => {
+    const text = `\`\`\`ts\nconst first = 1;\n${'const next = [value_of * 2;\n'.repeat(20_000)}\`\`\`\n`;
+    const started = performance.now();
+    const markup = renderToStaticMarkup(
+      <TestProviders>
+        <ReasoningTimelineBlock text={text} blockId="reasoning-long-test" />
+      </TestProviders>,
+    );
+    const title = /title="([^"]*)"/.exec(markup)?.[1] ?? '';
+
+    expect(title.startsWith('const first = 1;')).toBe(true);
+    expect(title.endsWith('…')).toBe(true);
+    // Stripping all 560,000 characters took seconds.
+    expect(performance.now() - started).toBeLessThan(500);
   });
 });
 
@@ -318,6 +367,28 @@ describe('ReasoningPart streaming gating (issue #2020)', () => {
     expect(markup).toContain('aria-expanded="false"');
   });
 
+  test('shows an incomplete reasoning paragraph while it streams', async () => {
+    // The throttle clock does not settle the lazy Markdown module import.
+    await loadMarkdownRendererModule();
+    jest.useFakeTimers();
+    const dom = installDomStub();
+    const root = createRoot(dom.container);
+    const render = (text: string) => (
+      <TestProviders><ReasoningPart part={makeReasoningPart({ start: 1_000 }, text)} messageId="msg_2020" streamPhase="streaming" /></TestProviders>
+    );
+    try {
+      await act(async () => { root.render(render('A thought')); });
+      await act(async () => { dom.container.querySelector<HTMLElement>('[role="button"][aria-expanded]')?.click(); });
+      await act(async () => { root.render(render('A thought still in progress')); });
+      await act(async () => { jest.advanceTimersByTime(150); });
+      expect(dom.container.textContent).toContain('A thought still in progress');
+    } finally {
+      await act(async () => { root.unmount(); });
+      dom.restore();
+      jest.useRealTimers();
+    }
+  });
+
   test('live in-progress reasoning opens while it streams when the setting asks for it', () => {
     const markup = renderExpandingWhileStreaming();
 
@@ -335,10 +406,7 @@ describe('ReasoningPart streaming gating (issue #2020)', () => {
     expect(markup).toContain('data-scrollable="true"');
   });
 
-  test('a live part with no committed text yet shows the busy header and no empty summary', () => {
-    // The streaming early-return keeps the block mounted before the block-level
-    // reveal commits a first line. The header must read as busy and must not
-    // paint an empty summary row.
+  test('a live part with no text yet shows the busy header and no empty summary', () => {
     const markup = renderPart(makeReasoningPart({ start: 1_000 }, ''), 'streaming');
     const withText = renderPart(makeReasoningPart({ start: 1_000 }), undefined);
 

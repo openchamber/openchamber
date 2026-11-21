@@ -180,6 +180,12 @@
     "agentRenderToolEnabled": {
       "scope": "instance"
     },
+    "agentUsageToolEnabled": {
+      "scope": "instance"
+    },
+    "agentTerminalToolEnabled": {
+      "scope": "instance"
+    },
     "agentImageToolEnabled": {
       "scope": "instance"
     },
@@ -189,16 +195,28 @@
     "agentSecretToolEnabled": {
       "scope": "instance"
     },
-    "agentToolsCodeMode": {
+    "agentMemoryToolEnabled": {
       "scope": "instance"
     },
-    "agentMemoryToolEnabled": {
+    "agentMemoryDreamingEnabled": {
+      "scope": "instance"
+    },
+    "agentMemoryDreamingModel": {
+      "scope": "instance"
+    },
+    "agentMemoryDreamingVariant": {
       "scope": "instance"
     },
     "agentKnowledgeToolEnabled": {
       "scope": "instance"
     },
     "agentWorkflowToolEnabled": {
+      "scope": "instance"
+    },
+    "agentWorkflowAutoApprove": {
+      "scope": "instance"
+    },
+    "agentWorkflowAutoApproveLeads": {
       "scope": "instance"
     },
     "isolatedSpacesEnabled": {
@@ -229,9 +247,6 @@
     "openCodeUpdateToastDismissedVersion": {
       "scope": "instance"
     },
-    "openCodeProjectImportCompleted": {
-      "scope": "instance"
-    },
     "autoDeleteEnabled": {
       "scope": "instance"
     },
@@ -239,6 +254,9 @@
       "scope": "instance"
     },
     "sessionRetentionOnlyArchived": {
+      "scope": "instance"
+    },
+    "sessionRetentionIncludeInWork": {
       "scope": "instance"
     },
     "sessionRetentionAction": {
@@ -281,6 +299,9 @@
       "scope": "instance"
     },
     "sttLanguage": {
+      "scope": "profile"
+    },
+    "sttPrompt": {
       "scope": "profile"
     },
     "sttCorrectTranscript": {
@@ -344,6 +365,13 @@
       "scope": "profile",
       "perSurface": true
     },
+    "sidebarKeepPinnedInPlace": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "sidebarSessionBatchSize": {
+      "scope": "profile"
+    },
     "sidebarProjectSortOrder": {
       "scope": "profile"
     },
@@ -377,6 +405,9 @@
       "perSurface": true
     },
     "workStatusSectionOrder": {
+      "scope": "profile"
+    },
+    "workStatusSectionOrderExplicit": {
       "scope": "profile"
     },
     "workStatusPanelEnabled": {
@@ -427,6 +458,10 @@
       "scope": "profile",
       "perSurface": true
     },
+    "chatWidth": {
+      "scope": "profile",
+      "perSurface": true
+    },
     "wideChatLayoutEnabled": {
       "scope": "profile",
       "perSurface": true
@@ -444,6 +479,9 @@
       "scope": "profile"
     },
     "copyMessagesAsPlainText": {
+      "scope": "profile"
+    },
+    "selectionApprovalText": {
       "scope": "profile"
     },
     "showTurnChangedFiles": {
@@ -526,6 +564,12 @@
         "desktop"
       ]
     },
+    "agentBrowserSharesLogins": {
+      "scope": "profile",
+      "surfaces": [
+        "desktop"
+      ]
+    },
     "openTrackerLinksOnBoard": {
       "scope": "profile",
       "surfaces": [
@@ -540,6 +584,13 @@
         "web",
         "desktop",
         "mobile"
+      ]
+    },
+    "terminalOpenOnProjectAction": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop"
       ]
     },
     "autoCreateWorktree": {
@@ -578,6 +629,9 @@
     "largeTextPasteBehavior": {
       "scope": "profile"
     },
+    "documentAttachBehavior": {
+      "scope": "profile"
+    },
     "savePastedImagesAsFiles": {
       "scope": "profile"
     },
@@ -606,6 +660,10 @@
       "scope": "profile"
     },
     "fontSize": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "chatFontSize": {
       "scope": "profile",
       "perSurface": true
     },
@@ -652,6 +710,15 @@
     "defaultAgent": {
       "scope": "profile"
     },
+    "chatsDefaultModel": {
+      "scope": "profile"
+    },
+    "chatsDefaultVariant": {
+      "scope": "profile"
+    },
+    "chatsDefaultAgent": {
+      "scope": "profile"
+    },
     "smallModelUseDefault": {
       "scope": "profile"
     },
@@ -689,6 +756,9 @@
       "scope": "profile"
     },
     "customProviderIcons": {
+      "scope": "profile"
+    },
+    "customProviderLogos": {
       "scope": "profile"
     },
     "recentModels": {
@@ -779,6 +849,9 @@
       "scope": "profile"
     },
     "notifyOnCompletion": {
+      "scope": "profile"
+    },
+    "notifyOnPullRequests": {
       "scope": "profile"
     },
     "notifyOnError": {
@@ -996,6 +1069,14 @@
       "local": true
     },
     "alwaysShowScrollbars": {
+      "scope": "device",
+      "local": true
+    },
+    "mobileKeepScreenAwake": {
+      "scope": "device",
+      "local": true
+    },
+    "questionsInChat": {
       "scope": "device",
       "local": true
     },

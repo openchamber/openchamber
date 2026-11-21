@@ -35,7 +35,7 @@ async function createSurface(userAgent: string, platform?: string) {
   });
   Object.assign(globalThis, {
     window: happyWindow,
-    document: happyWindow.document,
+    document: happyWindow.document, Event: happyWindow.Event, CustomEvent: happyWindow.CustomEvent,
     navigator: happyWindow.navigator,
     ResizeObserver: happyWindow.ResizeObserver,
     KeyboardEvent: happyWindow.KeyboardEvent,
@@ -72,8 +72,9 @@ async function createSurface(userAgent: string, platform?: string) {
     field.setSelectionRange(caret, caret);
     field.dispatchEvent(new InputEvent('input', init));
   };
-  const composition = (type: 'compositionstart' | 'compositionend', data: string) => {
-    field.dispatchEvent(new CompositionEvent(type, { data }));
+  const composition = (type: 'compositionstart' | 'compositionupdate' | 'compositionend', data: string) => {
+    // happy-dom's CompositionEvent is a bare Event that drops its init.
+    field.dispatchEvent(Object.assign(new CompositionEvent(type), { data }));
   };
   return { sent, field, key, edited, composition, terminal: surface, write: (data: string) => surface?.write(data) };
 }
@@ -221,6 +222,90 @@ describe('Backspace elsewhere', () => {
   });
 });
 
+describe('text being composed', () => {
+  const shown = (terminal: GhosttyTerminalSurface) => (terminal.preedit.hidden ? null : terminal.preedit.textContent);
+
+  test('shows every update and sends the chosen word once on commit', async () => {
+    const { sent, edited, composition, terminal } = await createSurface(MAC_UA);
+    expect(shown(terminal)).toBeNull();
+    composition('compositionstart', '');
+    composition('compositionupdate', 'nihaoya');
+    edited('nihaoya', { inputType: 'insertCompositionText', data: 'nihaoya', isComposing: true });
+    expect(shown(terminal)).toBe('nihaoya');
+    composition('compositionupdate', 'nihaoy');
+    expect(shown(terminal)).toBe('nihaoy');
+    expect(sent).toEqual([]);
+    composition('compositionupdate', '你好呀');
+    edited('你好呀', { inputType: 'insertCompositionText', data: '你好呀', isComposing: true });
+    composition('compositionend', '你好呀');
+    edited('你好呀', { inputType: 'insertFromComposition', data: '你好呀' });
+    expect(shown(terminal)).toBeNull();
+    expect(sent).toEqual(['你好呀']);
+  });
+
+  test('a cancelled composition clears the display and sends nothing', async () => {
+    const { sent, edited, composition, terminal } = await createSurface(MAC_UA);
+    composition('compositionstart', '');
+    composition('compositionupdate', 'ni');
+    edited('ni', { inputType: 'insertCompositionText', data: 'ni', isComposing: true });
+    expect(shown(terminal)).toBe('ni');
+    composition('compositionupdate', '');
+    edited('', { inputType: 'deleteCompositionText', data: null, isComposing: true });
+    composition('compositionend', '');
+    expect(shown(terminal)).toBeNull();
+    expect(sent).toEqual([]);
+  });
+
+  test('deleting every letter hides the display while composition is still open', async () => {
+    const { composition, terminal } = await createSurface(MAC_UA);
+    composition('compositionstart', '');
+    composition('compositionupdate', 'n');
+    composition('compositionupdate', '');
+    expect(shown(terminal)).toBeNull();
+  });
+
+  test('Android shows the composed text without its resting space', async () => {
+    const { sent, edited, composition, terminal } = await createSurface(ANDROID_UA);
+    composition('compositionstart', '');
+    composition('compositionupdate', 'ni');
+    edited(' ni', { inputType: 'insertCompositionText', data: 'ni', isComposing: true });
+    expect(shown(terminal)).toBe('ni');
+    edited(' 你', { inputType: 'insertCompositionText', data: '你', isComposing: true });
+    composition('compositionend', '你');
+    expect(shown(terminal)).toBeNull();
+    expect(sent).toEqual(['你']);
+  });
+
+  test('uses the terminal colors and follows a theme switch', async () => {
+    const { terminal } = await createSurface(MAC_UA);
+    expect(terminal.preedit.style.color).toBe('rgb(255, 255, 255)');
+    expect(terminal.preedit.style.backgroundColor).toBe('rgb(0, 0, 0)');
+    terminal.setTheme({
+      foreground: { r: 20, g: 20, b: 20 },
+      background: { r: 250, g: 250, b: 250 },
+      cursor: { r: 20, g: 20, b: 20 },
+    });
+    expect(terminal.preedit.style.color).toBe('rgb(20, 20, 20)');
+    expect(terminal.preedit.style.backgroundColor).toBe('rgb(250, 250, 250)');
+  });
+
+  test('a copy during composition leaves the composed text in its field', async () => {
+    const { field, edited, composition, terminal } = await createSurface(MAC_UA);
+    composition('compositionstart', '');
+    composition('compositionupdate', 'ni');
+    edited('ni', { inputType: 'insertCompositionText', data: 'ni', isComposing: true });
+    terminal['primeCopy']('selected text');
+    expect(field.value).toBe('ni');
+  });
+
+  test('dispose removes the display', async () => {
+    const { terminal } = await createSurface(MAC_UA);
+    const { preedit } = terminal;
+    terminal.dispose();
+    expect(preedit.parentElement).toBeNull();
+  });
+});
+
 describe('macOS natural text editing chords', () => {
   test('Cmd+Backspace and Cmd+arrows send line bytes; other Super chords stand down', async () => {
     const { sent, key, write } = await createSurface(MAC_UA, 'MacIntel');
@@ -276,7 +361,7 @@ describe('viewport scroll chords', () => {
 });
 
 describe('shell shortcut boundaries', () => {
-  for (const signal of ['event', 'compositionstart', 'keyCode']) {
+  for (const signal of ['compositionstart', 'keyCode']) {
     for (const platform of ['MacIntel', 'Linux x86_64']) {
       test(`${platform} leaves ${signal} composition keys alone`, async () => {
         const { sent, key, write, composition, terminal } = await createSurface(MAC_UA, platform);
@@ -291,7 +376,7 @@ describe('shell shortcut boundaries', () => {
           ]
           : [{ key: 'PageUp', code: 'PageUp', keyCode: 33, shiftKey: true }];
         for (const chord of chords) {
-          const init = { ...chord, isComposing: signal === 'event', ...(signal === 'keyCode' ? { keyCode: 229 } : {}) };
+          const init = { ...chord, ...(signal === 'keyCode' ? { keyCode: 229 } : {}) };
           expect(key('keydown', init).defaultPrevented).toBe(false);
           key('keyup', init);
         }

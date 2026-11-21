@@ -9,7 +9,8 @@
         "id": "config-editor",
         "name": "Config Studio",
         "icon": "file-edit",
-        "entry": "panel/index.html"
+        "entry": "panel/index.html",
+        "mobile": true
       },
       "page": true,
       "filesystem": [

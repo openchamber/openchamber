@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  buildReferenceSearchQuery, fetchDiscussionDetail, fetchReferenceDetail, parseReferenceLookup, readPullStatusRefs,
+  buildReferenceSearchQuery, fetchDiscussionDetail, fetchReferenceDetail, readPullStatusRefs,
   readReferencePeople, readReferenceState, reviewCommentExcerpt, searchGitHubReferences, searchGitHubReferencesAcross, toReference,
 } from './reference-search.js';
+import { parseReferenceLink, parseReferenceLookup } from './reference-links.js';
 
 const origin = { owner: 'acme', repo: 'app', source: 'origin' };
 const upstream = { owner: 'Upstream', repo: 'App', source: 'upstream' };
@@ -49,6 +50,28 @@ describe('buildReferenceSearchQuery', () => {
       .toBe('repo:acme/app is:issue assignee:@me is:closed sort:created-asc');
   });
 
+  it('leaves the people qualifier to the user when their text names whose items to show', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'open', people: 'assigned', text: 'assignee:octocat' }))
+      .toBe('repo:acme/app is:pr is:open sort:updated-desc assignee:octocat');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'open', people: 'reviewRequested', text: 'review-requested:@me' }))
+      .toBe('repo:acme/app is:pr is:open sort:updated-desc review-requested:@me');
+    // Any of the people qualifiers counts, whatever its case.
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'open', people: 'created', text: 'AUTHOR:@me crash' }))
+      .toBe('repo:acme/app is:pr is:open sort:updated-desc AUTHOR:@me crash');
+  });
+
+  it('adds the people qualifier when the text names no one', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'open', people: 'assigned', text: 'crash' }))
+      .toBe('repo:acme/app is:pr is:open sort:updated-desc assignee:@me crash');
+  });
+
+  it('still skips a people filter that does not apply to the kind', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'reviewRequested', text: 'crash' }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc crash');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'discussion', state: 'open', people: 'assigned', text: '' }))
+      .toBe('repo:acme/app is:open sort:updated-desc');
+  });
+
   it('searches discussions as their own type: no kind, unanswered as open questions, no assignee', () => {
     expect(buildReferenceSearchQuery({ repos: [origin], kind: 'discussion', state: 'unanswered', people: 'assigned', text: '' }))
       .toBe('repo:acme/app is:open is:unanswered sort:updated-desc');
@@ -59,6 +82,37 @@ describe('buildReferenceSearchQuery', () => {
       .toBe('repo:acme/app is:issue is:open sort:updated-desc');
     expect(buildReferenceSearchQuery({ repos: [origin], kind: 'discussion', state: 'open', people: 'any', text: 'is:answered' }))
       .toBe('repo:acme/app sort:updated-desc is:answered');
+  });
+
+  it('narrows a page to every label, quoted so spaces and colons stay one term', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'any', text: '', labels: ['bug'] }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc label:"bug"');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'open', people: 'any', text: '', labels: ['bug', 'good first issue'] }))
+      .toBe('repo:acme/app is:pr is:open sort:updated-desc label:"bug" label:"good first issue"');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'any', text: '', labels: ['area: server'] }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc label:"area: server"');
+  });
+
+  it('escapes a quote in a label and leaves out one the user already names', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'any', text: '', labels: ['say "hi"'] }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc label:"say \\"hi\\""');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'any', text: '', labels: ['a\\b'] }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc label:"a\\\\b"');
+    // A label the text already sets is not set twice, whatever its case.
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'any', text: 'Label:"BUG"', labels: ['bug', 'ui'] }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc label:"ui" Label:"BUG"');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'any', text: 'labels:bug crash', labels: ['bug', 'ui'] }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc label:"ui" labels:bug crash');
+  });
+
+  it('adds no label qualifier for an empty set', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'any', text: '', labels: [] }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc');
+  });
+
+  it('carries no label qualifier on a discussion search', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'discussion', state: 'open', people: 'any', text: '', labels: ['bug', 'good first issue'] }))
+      .toBe('repo:acme/app is:open sort:updated-desc');
   });
 
   it('reads unknown values as open and anyone', () => {
@@ -158,6 +212,26 @@ describe('searchGitHubReferencesAcross', () => {
     expect(url.items).toHaveLength(1);
     expect(calls).toHaveLength(1);
     expect(calls[0].n0).toBe('repo41');
+    calls.length = 0;
+    const enterprise = [{ accountId: 'e', octokit, host: 'ghe.example.com', repos: entries }];
+    const own = await searchGitHubReferencesAcross({ ...options, groups: enterprise, text: 'https://ghe.example.com/acme/repo41/pull/7' });
+    expect(own.items).toHaveLength(1);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].n0).toBe('repo41');
+    const searched = [];
+    const searchOnly = { graphql: async (_query, variables) => {
+      searched.push(variables);
+      return { search: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } };
+    } };
+    await searchGitHubReferencesAcross({ ...options, groups: [{ ...enterprise[0], octokit: searchOnly }], text: 'https://www.github.com/acme/repo41/pull/7' });
+    expect(searched.length).toBeGreaterThan(0);
+    expect(searched.every((call) => typeof call.q === 'string')).toBe(true);
+    searched.length = 0;
+    calls.length = 0;
+    const mixed = [enterprise[0], { accountId: 'p', octokit: searchOnly, host: 'github.com', repos: entries }];
+    const pasted = await searchGitHubReferencesAcross({ ...options, groups: mixed, text: 'https://ghe.example.com/acme/repo41/pull/7' });
+    expect(pasted.items).toHaveLength(1);
+    expect(searched).toHaveLength(0);
   });
 
   it('keeps every page newest first, holding back what a quieter search read until the busier one passes it', async () => {
@@ -197,8 +271,69 @@ describe('searchGitHubReferencesAcross', () => {
     await expect(searchGitHubReferencesAcross({ ...options, groups: [...groups, { accountId: 'b', octokit, repos: entries.slice(1, 2) }], cursor: first.cursor }))
       .rejects.toMatchObject({ status: 400 });
   });
+
+  it('pins the label filter in the cursor, so a later page is never read against another set', async () => {
+    const octokit = { graphql: async (_query, variables) => ({
+      search: variables.after
+        ? { issueCount: 3, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] }
+        : { issueCount: 3, pageInfo: { hasNextPage: true, endCursor: 'c1' }, nodes: [node(1, 'repo0', '2026-03-01')] },
+    }) };
+    const groups = [{ accountId: 'a', octokit, repos: entries.slice(0, 1) }];
+    const first = await searchGitHubReferencesAcross({ ...options, labels: ['bug'], groups });
+    expect(first.cursor).not.toBeNull();
+    await expect(searchGitHubReferencesAcross({ ...options, labels: ['bug', 'ui'], groups, cursor: first.cursor }))
+      .rejects.toMatchObject({ status: 400 });
+    const second = await searchGitHubReferencesAcross({ ...options, labels: ['bug'], groups, cursor: first.cursor });
+    expect(second.items).toEqual([]);
+    expect(second.hasMore).toBe(false);
+  });
 });
 
+describe('searchGitHubReferences', () => {
+  it('reads a pasted number or link as that one item, whatever labels the page is narrowed to', async () => {
+    const queries = [];
+    const octokit = { graphql: async (query, variables) => {
+      queries.push({ query, variables });
+      return { a0: { issueOrPullRequest: { __typename: 'Issue', ...common(7), state: 'OPEN', stateReason: null } } };
+    } };
+    const number = await searchGitHubReferences({ octokit, repos: [origin], kind: 'issue', state: 'open', people: 'any', text: '#7', labels: ['bug', 'ui'], cursor: null });
+    expect(number.items.map((item) => item.number)).toEqual([7]);
+    // A lookup runs one document of its own; the label filter never reaches it.
+    expect(queries).toHaveLength(1);
+    expect(queries[0].query).toContain('ReferenceLookup');
+    expect(queries[0].query).not.toContain('search(');
+    expect(JSON.stringify(queries[0].variables)).not.toContain('label');
+
+    const link = await searchGitHubReferences({
+      octokit, repos, kind: 'issue', state: 'open', people: 'any', text: 'https://github.com/acme/app/issues/7', labels: ['bug'], cursor: null,
+    });
+    expect(link.items.map((item) => item.number)).toEqual([7]);
+    expect(queries).toHaveLength(2);
+    expect(queries[1].query).toContain('ReferenceLookup');
+  });
+});
+
+
+describe('parseReferenceLink', () => {
+  it('names the repository and number of a link on the host', () => {
+    expect(parseReferenceLink('https://github.com/dotnet/runtime/issues/118826', 'github.com')).toEqual({ owner: 'dotnet', repo: 'runtime', number: 118826 });
+    expect(parseReferenceLink('https://www.github.com/dotnet/runtime/pull/7/files', 'github.com')).toEqual({ owner: 'dotnet', repo: 'runtime', number: 7 });
+    expect(parseReferenceLink('https://ghe.example.com/a/b/issues/1', 'ghe.example.com')).toEqual({ owner: 'a', repo: 'b', number: 1 });
+  });
+
+  it('refuses another host and anything that is no link to an item', () => {
+    expect(parseReferenceLink('https://ghe.example.com/a/b/issues/1', 'github.com')).toBeNull();
+    expect(parseReferenceLink('#12', 'github.com')).toBeNull();
+    expect(parseReferenceLink('https://github.com/a/b', 'github.com')).toBeNull();
+  });
+
+  it('matches an Enterprise host by its full name, www prefix included', () => {
+    expect(parseReferenceLink('https://www.ghe.example.com/a/b/pull/3', 'www.ghe.example.com')).toEqual({ owner: 'a', repo: 'b', number: 3 });
+    expect(parseReferenceLink('https://www.ghe.example.com/a/b/pull/3', 'ghe.example.com')).toBeNull();
+    expect(parseReferenceLink('https://other.example.com/a/b/pull/3', 'ghe.example.com')).toBeNull();
+    expect(parseReferenceLink('https://ghe.example.com:443/a/b/pull/3', 'ghe.example.com')).toEqual({ owner: 'a', repo: 'b', number: 3 });
+  });
+});
 
 describe('parseReferenceLookup', () => {
   it('looks a number up in every repo of the network', () => {
@@ -361,11 +496,12 @@ describe('fetchReferenceDetail', () => {
     const detail = await fetchReferenceDetail({ octokit: graphqlReturning({
       __typename: 'Issue',
       number: 3,
-      comments: { totalCount: 80, nodes: [{ author: null, body: 'hi', createdAt: null, url: 'u' }] },
+      comments: { totalCount: 80, nodes: [{ databaseId: 281474976710656, author: null, body: 'hi', createdAt: null, url: 'u', viewerCanUpdate: true, viewerCanDelete: false }] },
     }), owner: 'acme', repo: 'app', number: 3 });
     expect(detail).toEqual({
       number: 3,
-      comments: [{ author: null, body: 'hi', createdAt: null, url: 'u', path: null, line: null, review: null }],
+      // A conversation comment is named by its REST id, not its node id, and says what may be done with it.
+      comments: [{ author: null, body: 'hi', createdAt: null, url: 'u', path: null, line: null, review: null, id: '281474976710656', canUpdate: true, canDelete: false }],
       commentTotal: 80,
       pull: null,
     });
@@ -387,6 +523,10 @@ describe('fetchReferenceDetail', () => {
     expect(detail?.pull).toEqual({
       reviewDecision: 'changes_requested',
       reviewers: [{ id: 'hubot', login: 'hubot', avatarUrl: undefined }],
+      reviewerStates: [
+        { id: 'octo', login: 'octo', avatarUrl: 'https://avatars/octo', state: 'approved' },
+        { id: 'hubot', login: 'hubot', avatarUrl: undefined, state: 'pending' },
+      ],
       checks: expect.objectContaining({ state: 'failure', total: 2, success: 1, failure: 1 }),
       additions: 12,
       deletions: 3,
@@ -402,6 +542,26 @@ describe('fetchReferenceDetail', () => {
       commitTotal: 1,
       stack: null,
     });
+  });
+
+  it('reads one state per reviewer, the latest review deciding and outstanding requests pending', async () => {
+    const ann = { login: 'ann', avatarUrl: 'https://avatars/ann' };
+    const bo = { login: 'bo', avatarUrl: null };
+    const di = { login: 'di', avatarUrl: null };
+    const detail = await fetchReferenceDetail({ octokit: graphqlReturning(pull([
+      { author: ann, body: '', state: 'CHANGES_REQUESTED', createdAt: '2026-10-01T09:00:00Z', url: 'r1' },
+      { author: bo, body: 'nit', state: 'COMMENTED', createdAt: '2026-10-01T09:30:00Z', url: 'r2' },
+      { author: di, body: '', state: 'APPROVED', createdAt: '2026-10-01T10:30:00Z', url: 'r3' },
+      { author: di, body: '', state: 'DISMISSED', createdAt: '2026-10-01T10:45:00Z', url: 'r4' },
+      { author: ann, body: '', state: 'APPROVED', createdAt: '2026-10-01T11:00:00Z', url: 'r5' },
+    ])), owner: 'acme', repo: 'app', number: 9 });
+    // A team request names no person, so it has no state.
+    expect(detail?.pull?.reviewerStates).toEqual([
+      { id: 'ann', login: 'ann', avatarUrl: 'https://avatars/ann', state: 'approved' },
+      { id: 'bo', login: 'bo', avatarUrl: undefined, state: 'commented' },
+      { id: 'di', login: 'di', avatarUrl: undefined, state: 'pending' },
+      { id: 'hubot', login: 'hubot', avatarUrl: undefined, state: 'pending' },
+    ]);
   });
 
   it('reads the stack a PR is a layer of, bottom first, and leaves it unknown where the host has none', async () => {
@@ -451,6 +611,10 @@ describe('fetchReferenceDetail', () => {
       replies: [{ author: null, body: 'done', createdAt: '2026-10-01T10:00:00Z', url: 'c2', path: 'src/a.ts', line: 3, review: 'commented' }],
     });
     expect(detail?.comments.some((comment) => comment.url === 'c2')).toBe(false);
+    // A review comment is no conversation comment: no id, and nothing these routes may do with it.
+    expect(opener).not.toHaveProperty('id');
+    expect(opener).not.toHaveProperty('canUpdate');
+    expect(opener).not.toHaveProperty('canDelete');
   });
 
   it('carries the lines a review comment sits on, read from the end of its hunk', async () => {
@@ -483,13 +647,14 @@ describe('discussions', () => {
   const author = { login: 'octo', avatarUrl: 'https://avatars/octo' };
   const comment = (id, overrides = {}) => ({
     id, author, body: `comment ${id}`, createdAt: '2026-10-01T10:00:00Z', url: `u-${id}`,
-    isAnswer: false, viewerCanMarkAsAnswer: true, viewerCanUnmarkAsAnswer: false, replies: { nodes: [] }, ...overrides,
+    isAnswer: false, viewerCanMarkAsAnswer: true, viewerCanUnmarkAsAnswer: false,
+    viewerCanUpdate: false, viewerCanDelete: false, replies: { nodes: [] }, ...overrides,
   });
   const discussion = (overrides = {}) => ({
     number: 5, locked: false, viewerCanUpdate: false, viewerCanClose: true, viewerCanReopen: true,
     category: { isAnswerable: true },
     comments: { totalCount: 2, nodes: [
-      comment('DC_1', { isAnswer: true, viewerCanMarkAsAnswer: false, viewerCanUnmarkAsAnswer: true, replies: { nodes: [{ author: null, body: 'thanks', createdAt: null, url: 'r1' }] } }),
+      comment('DC_1', { isAnswer: true, viewerCanMarkAsAnswer: false, viewerCanUnmarkAsAnswer: true, viewerCanUpdate: true, viewerCanDelete: true, replies: { nodes: [{ id: 'DC_1r', viewerCanUpdate: false, viewerCanDelete: false, author: null, body: 'thanks', createdAt: null, url: 'r1' }] } }),
       comment('DC_2'),
     ] },
     ...overrides,
@@ -500,16 +665,22 @@ describe('discussions', () => {
     const detail = await fetchDiscussionDetail({ octokit: graphqlReturning(discussion()), owner: 'acme', repo: 'app', number: 5 });
     expect(detail).toEqual({
       number: 5,
+      viewerCanUpdate: false,
       comments: [
         {
           author, body: 'comment DC_1', createdAt: '2026-10-01T10:00:00Z', url: 'u-DC_1', path: null, line: null, review: null,
+          id: 'DC_1', canUpdate: true, canDelete: true,
           thread: { id: 'DC_1', resolved: false, canResolve: false, canReply: true, replies: [
-            { author: null, body: 'thanks', createdAt: null, url: 'r1', path: null, line: null, review: null },
+            {
+              author: null, body: 'thanks', createdAt: null, url: 'r1', path: null, line: null, review: null,
+              id: 'DC_1r', canUpdate: false, canDelete: false,
+            },
           ] },
           answer: { chosen: true, canChange: true },
         },
         {
           author, body: 'comment DC_2', createdAt: '2026-10-01T10:00:00Z', url: 'u-DC_2', path: null, line: null, review: null,
+          id: 'DC_2', canUpdate: false, canDelete: false,
           thread: { id: 'DC_2', resolved: false, canResolve: false, canReply: true, replies: [] },
           answer: { chosen: false, canChange: true },
         },

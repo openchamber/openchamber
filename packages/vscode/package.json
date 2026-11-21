@@ -2,7 +2,7 @@
   "name": "openchamber",
   "displayName": "OpenChamber",
   "description": "%extension.description%",
-  "version": "2.6.0",
+  "version": "2.7.3",
   "publisher": "fedaykindev",
   "private": true,
   "repository": {
@@ -187,6 +187,12 @@
         "key": "ctrl+,",
         "mac": "cmd+,",
         "when": "openchamber.settingsShortcutTarget == settings && !inQuickOpen"
+      },
+      {
+        "command": "openchamber.addLineComment",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
+        "when": "editorTextFocus"
       }
     ],
     "menus": {
@@ -224,6 +230,12 @@
       "editor/context": [
         {
           "submenu": "openchamber.submenu",
+          "group": "navigation"
+        }
+      ],
+      "editor/lineNumber/context": [
+        {
+          "command": "openchamber.addLineComment",
           "group": "navigation"
         }
       ],
@@ -283,12 +295,28 @@
         "openchamber.apiUrl": {
           "type": "string",
           "default": "",
+          "scope": "machine-overridable",
           "description": "%configuration.apiUrl.description%"
         },
         "openchamber.opencodeBinary": {
           "type": "string",
           "default": "",
+          "scope": "machine-overridable",
           "description": "%configuration.opencodeBinary.description%"
+        },
+        "openchamber.lineCommentPlacement": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "chat"
+          ],
+          "enumDescriptions": [
+            "%configuration.lineCommentPlacement.editor%",
+            "%configuration.lineCommentPlacement.chat%"
+          ],
+          "default": "editor",
+          "scope": "window",
+          "description": "%configuration.lineCommentPlacement.description%"
         }
       }
     }
@@ -318,7 +346,7 @@
   },
   "dependencies": {
     "@openchamber/ui": "workspace:*",
-    "@opencode/client": "2.2.5",
+    "@opencode/client": "2.3.2",
     "adm-zip": "^0.6.0",
     "jsonc-parser": "^3.3.1",
     "react": "^19.1.1",

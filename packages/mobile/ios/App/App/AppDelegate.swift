@@ -60,6 +60,36 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
     }
 
+    // A background push from the server that removes notifications whose cause was handled
+    // elsewhere (PushClearing), and sets the icon badge to the count that remains. iOS wakes
+    // the app for it unless the user swiped the app away; those notifications then go with
+    // the next visible push.
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        let entries = PushClearing.entries(in: userInfo)
+        guard !entries.isEmpty else {
+            completionHandler(.noData)
+            return
+        }
+        let badge = userInfo["badge"] as? Int
+        PushClearing.removeDelivered(entries) {
+            DispatchQueue.main.async {
+                // While the app is in front its badge stays cleared (sceneDidBecomeActive).
+                if let badge, application.applicationState != .active {
+                    if #available(iOS 17.0, *) {
+                        UNUserNotificationCenter.current().setBadgeCount(badge)
+                    } else {
+                        UIApplication.shared.applicationIconBadgeNumber = badge
+                    }
+                }
+                completionHandler(.newData)
+            }
+        }
+    }
+
 }
 
 /// APNs environment of this build: "development" for Xcode/dev-signed installs,
@@ -136,6 +166,20 @@ class BridgeViewController: CAPBridgeViewController {
         // App-local plugin: iOS Shortcuts / Siri new-session requests (ShortcutRequests.swift).
         bridge?.registerPluginInstance(ShortcutRequestsPlugin())
         bridge?.registerPluginInstance(RuntimeWebSocketPlugin())
+        bridge?.registerPluginInstance(MobileDevTunnelPlugin())
+        bridge?.registerPluginInstance(KeepAwakePlugin())
+        restrictBridgeToMainFrame()
+    }
+
+    /// Capacitor answers its `bridge` message handler from every frame, and
+    /// WebKit exposes the handler to cross-origin frames too. Extension panels
+    /// and the dev-server preview are such frames, running pages the app does
+    /// not control, so only the app's own document may call native plugins.
+    private func restrictBridgeToMainFrame() {
+        guard let handler = (bridge as? CapacitorBridge)?.webViewDelegationHandler else { return }
+        let controller = handler.contentController
+        controller.removeScriptMessageHandler(forName: "bridge")
+        controller.add(MainFrameBridgeHandler(target: handler), name: "bridge")
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -301,5 +345,19 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
         _ = ApplicationDelegateProxy.shared.application(UIApplication.shared, continue: userActivity) { _ in }
+    }
+}
+
+/// Forwards bridge messages of the main frame to Capacitor and drops the rest.
+private final class MainFrameBridgeHandler: NSObject, WKScriptMessageHandler {
+    private weak var target: WKScriptMessageHandler?
+
+    init(target: WKScriptMessageHandler) {
+        self.target = target
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.frameInfo.isMainFrame else { return }
+        target?.userContentController(userContentController, didReceive: message)
     }
 }

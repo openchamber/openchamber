@@ -376,6 +376,17 @@ describe('provider entity', () => {
       disabled: true,
     });
   });
+
+  it('loads MIME-typed modalities as their categories', () => {
+    expect(toProviderEntity({
+      models: {
+        m: { modalities: { input: ['text', 'image/jpeg', 'image/png'], output: ['text'] } },
+      },
+    }).models.m.capabilities).toEqual({ tools: true, input: ['text', 'image'], output: ['text'] });
+    expect(toProviderEntity({
+      models: { m: { capabilities: { input: ['embedding'], output: [] } } },
+    }).models.m.capabilities).toEqual({ input: ['embedding'], output: [] });
+  });
 });
 
 describe('plugin entity', () => {
@@ -484,7 +495,8 @@ describe('findWebSearchProjectOverride', () => {
 
 
 describe('skill switches', () => {
-  const deny = (id) => ({ action: 'integration.use', resource: `skill:${id}`, effect: 'deny' });
+  const deny = (id) => ({ action: 'skill.use', resource: id, effect: 'deny' });
+  const legacyDeny = (id) => ({ action: 'integration.use', resource: `skill:${id}`, effect: 'deny' });
 
   it('accepts a skill id and refuses wildcards, separators and padding', () => {
     const parse = (id) => skillSwitchRequestSchema.safeParse({ id, enabled: false, scope: 'user' }).success;
@@ -511,6 +523,25 @@ describe('skill switches', () => {
     expect(writeSkillDisabled(config, 'deploy', false)).toBe(false);
   });
 
+  it('counts a deny as off only when no exact allow for the skill follows it', () => {
+    const allow = { action: 'skill.use', resource: 'report', effect: 'allow' };
+    const legacyAllow = { action: 'integration.use', resource: 'skill:report', effect: 'allow' };
+
+    const overridden = { policies: [deny('report'), allow] };
+    expect(writeSkillDisabled(overridden, 'report', true)).toBe(true);
+    expect(overridden.policies).toEqual([deny('report'), allow, deny('report')]);
+
+    const legacyOverridden = { policies: [deny('report'), legacyAllow] };
+    expect(writeSkillDisabled(legacyOverridden, 'report', true)).toBe(true);
+
+    const alreadyOff = { policies: [allow, deny('report'), { action: 'skill.use', resource: 'other', effect: 'allow' }] };
+    expect(writeSkillDisabled(alreadyOff, 'report', true)).toBe(false);
+
+    const deprecatedDeny = { experimental: { policies: [deny('report')] }, policies: [allow] };
+    expect(writeSkillDisabled(deprecatedDeny, 'report', true)).toBe(true);
+    expect(deprecatedDeny.policies).toEqual([allow, deny('report')]);
+  });
+
   it('turns on a deny written by hand, in the deprecated key too, and drops what it empties', () => {
     const config = { policies: [deny('deploy')], experimental: { policies: [deny('deploy')] } };
     expect(writeSkillDisabled(config, 'deploy', true)).toBe(false);
@@ -520,6 +551,32 @@ describe('skill switches', () => {
     const kept = { experimental: { policies: [deny('deploy')], other: true } };
     expect(writeSkillDisabled(kept, 'deploy', false)).toBe(true);
     expect(kept).toEqual({ experimental: { other: true } });
+  });
+
+  it('reads the legacy integration.use deny an older OpenChamber wrote as the same switch', () => {
+    const other = legacyDeny('review');
+    const config = { policies: [legacyDeny('deploy'), other] };
+    expect(writeSkillDisabled(config, 'deploy', true)).toBe(false);
+    expect(config.policies).toEqual([legacyDeny('deploy'), other]);
+
+    expect(writeSkillDisabled(config, 'deploy', false)).toBe(true);
+    expect(config).toEqual({ policies: [other] });
+
+    const both = { policies: [legacyDeny('deploy'), deny('deploy')] };
+    expect(writeSkillDisabled(both, 'deploy', false)).toBe(true);
+    expect(both).toEqual({});
+  });
+
+  it('leaves a skill.use deny for another id, a wildcard or an allow alone', () => {
+    const statements = [
+      { action: 'skill.use', resource: 'deploy-*', effect: 'deny' },
+      { action: 'skill.use', resource: 'deploy', effect: 'allow' },
+      { action: 'mcp.use', resource: 'deploy', effect: 'deny' },
+      deny('review'),
+    ];
+    const config = { policies: [...statements] };
+    expect(writeSkillDisabled(config, 'deploy', false)).toBe(false);
+    expect(config.policies).toEqual(statements);
   });
 });
 
@@ -558,23 +615,30 @@ describe('session warming', () => {
 describe('compaction settings', () => {
   it('sets and clears the buffer, kept tokens and background compaction, keeping other keys', () => {
     const config = { model: 'openai/gpt-5', compaction: { auto: false }, experimental: { todo: true } };
-    expect(writeCompactionSettings(config, { buffer: 64_000, keepTokens: 30_000, background: true })).toBe(true);
+    expect(writeCompactionSettings(config, { buffer: 64_000, keepTokens: 30_000, background: false })).toBe(true);
     expect(config).toEqual({
       model: 'openai/gpt-5',
-      compaction: { auto: false, buffer: 64_000, keep: { tokens: 30_000 } },
-      experimental: { todo: true, background_compaction: true },
+      compaction: { auto: false, background: false, buffer: 64_000, keep: { tokens: 30_000 } },
+      experimental: { todo: true, background_compaction: false },
     });
     expect(writeCompactionSettings(config, { buffer: 64_000 })).toBe(false);
     expect(writeCompactionSettings(config, { auto: true })).toBe(true);
     expect(config.compaction.auto).toBe(true);
     expect(writeCompactionSettings(config, { auto: false })).toBe(true);
 
-    expect(writeCompactionSettings(config, { buffer: null, keepTokens: null, background: false })).toBe(true);
+    expect(writeCompactionSettings(config, { buffer: null, keepTokens: null, background: true })).toBe(true);
     expect(config).toEqual({
       model: 'openai/gpt-5',
-      compaction: { auto: false },
-      experimental: { todo: true, background_compaction: false },
+      compaction: { auto: false, background: true },
+      experimental: { todo: true, background_compaction: true },
     });
+  });
+
+  it('writes background compaction where both older and newer OpenCode read it', () => {
+    const config = { compaction: { background: true }, experimental: { background_compaction: true } };
+    expect(writeCompactionSettings(config, { background: true })).toBe(false);
+    expect(writeCompactionSettings(config, { background: false })).toBe(true);
+    expect(config).toEqual({ compaction: { background: false }, experimental: { background_compaction: false } });
   });
 
   it('removes sections it leaves empty and leaves omitted fields alone', () => {

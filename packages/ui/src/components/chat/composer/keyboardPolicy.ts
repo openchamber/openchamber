@@ -7,7 +7,6 @@ export interface EnterKeyPolicyInput {
     ctrlKey: boolean;
     metaKey: boolean;
     altKey: boolean;
-    /** Mobile return-key send (enterkeyhint="send"); desktop ignores it. */
     returnKeySends?: boolean;
 }
 
@@ -30,6 +29,11 @@ export interface EnterModifierState {
     metaKey: boolean;
     altKey?: boolean;
 }
+
+export const shouldPreserveDeferredEnterShift = (input: {
+    isMobile: boolean;
+    hasHardwareKeyboard: boolean;
+}): boolean => !input.isMobile || input.hasHardwareKeyboard;
 
 export const restoreDeferredEnterModifiers = (
     event: EnterModifierState,

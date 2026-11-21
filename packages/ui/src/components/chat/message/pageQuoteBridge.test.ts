@@ -51,6 +51,19 @@ describe('page quote bridge', () => {
         unregister.forEach((fn) => fn());
     });
 
+    test('editor interaction clears siblings with comment preservation, excluding the exact frame', () => {
+        const calls: { frame: string; dismiss: boolean | undefined }[] = [];
+        const a = { ...handle('same-page', []), clearSelection: (dismiss?: boolean) => { calls.push({ frame: 'a', dismiss }); } };
+        const b = { ...handle('same-page', []), clearSelection: (dismiss?: boolean) => { calls.push({ frame: 'b', dismiss }); } };
+        const unregister = [a, b].map(registerPageFrame);
+        try {
+            clearOtherPageSelections(b, false);
+            expect(calls).toEqual([{ frame: 'a', dismiss: false }]);
+        } finally {
+            unregister.forEach((fn) => fn());
+        }
+    });
+
     test('marks are kept per column and page, and listeners hear only their page change', () => {
         const columnA = Symbol('column A');
         const columnB = Symbol('column B');

@@ -37,7 +37,6 @@ export const copy: EasterEggCopy = {
     newYearsDay: ['התחלה נקייה לשנה.'],
   },
   push: {
-    // Friday evening is already Shabbat.
     fridayEvening: [],
     smallHours: [
       { title: 'נדחף ב-{time}.', description: 'המנוחה מגיעה בצדק.' },

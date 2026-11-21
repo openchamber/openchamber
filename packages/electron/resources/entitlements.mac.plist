@@ -9,7 +9,9 @@
     These entitlements are commonly required for Electron/Chromium JIT behavior
     under hardened runtime, plus access the app already relies on (microphone for
     voice notes / dictation, network client for sidecar + remote hosts, shell
-    probing for PATH inheritance).
+    probing for PATH inheritance, Apple Events for agent and terminal commands
+    that control other apps: macOS attributes those to this app, and without the
+    entitlement denies every sender except osascript with no prompt).
   -->
   <key>com.apple.security.cs.allow-jit</key>
   <true/>
@@ -20,6 +22,8 @@
   <key>com.apple.security.cs.disable-library-validation</key>
   <true/>
   <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+  <key>com.apple.security.automation.apple-events</key>
   <true/>
   <key>com.apple.security.device.audio-input</key>
   <true/>

@@ -46,6 +46,13 @@ const createApp = (overrides = {}) => {
       received.removedId = memoryId;
       return { deleted: true, entries: [] };
     },
+    readDreamState: async (target) => (target.scope === 'project'
+      ? { lastRunAt: 5, record: { finishedAt: 5, status: 'done', merged: 2, removed: 1, rewritten: 3 }, snapshot: [] }
+      : { lastRunAt: null, record: null, snapshot: null }),
+    undoDream: async (target) => {
+      received.undoTarget = target;
+      return { entries: [], record: { finishedAt: 5, status: 'done', merged: 2, removed: 1, rewritten: 3, undone: true } };
+    },
     ...overrides.runtime,
   };
 
@@ -113,6 +120,11 @@ describe('both scopes at once', () => {
     expect(response.status).toBe(200);
     expect(received.readAllProjectId).toBe('path_abc');
     expect(response.body.global).toHaveLength(1);
+    // The last pass of each scope rides along, without its snapshot.
+    expect(response.body.dream).toEqual({
+      global: null,
+      project: { finishedAt: 5, status: 'done', merged: 2, removed: 1, rewritten: 3, canUndo: true },
+    });
   });
 
   it('reads global alone when no project is open', async () => {
@@ -266,5 +278,32 @@ describe('the settings toggle disables the surface, not just its UI', () => {
 
     expect(response.status).toBe(503);
     expect(received.readTarget).toBeUndefined();
+  });
+});
+
+describe('undoing a dreaming pass', () => {
+  it('undoes the pass of the scope it names', async () => {
+    const { app, received } = createApp();
+
+    const response = await request(app).post('/api/agent-memory/dream/undo?scope=project&projectId=path_abc');
+
+    expect(response.status).toBe(200);
+    expect(received.undoTarget).toEqual({ scope: 'project', projectId: 'path_abc' });
+  });
+
+  it('answers 409 when there is nothing to undo', async () => {
+    const { app } = createApp({ runtime: { undoDream: async () => null } });
+
+    const response = await request(app).post('/api/agent-memory/dream/undo?scope=global');
+
+    expect(response.status).toBe(409);
+  });
+
+  it('refuses a request without a scope', async () => {
+    const { app } = createApp();
+
+    const response = await request(app).post('/api/agent-memory/dream/undo');
+
+    expect(response.status).toBe(400);
   });
 });

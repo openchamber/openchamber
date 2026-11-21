@@ -13,8 +13,8 @@ import { GlassRedrawGuard } from "./glass-redraw-guard"
 import { PopupOverlayScrollbar } from "./AttachedOverlayScrollbar";
 import { handleDropdownNavigationKey } from "./dropdown-navigation";
 import { useMenuWindowDismiss } from "./menu-window-dismiss";
+import { openContextMenuFromKeyboard } from "./contextMenuKeyboard";
 
-// The wrapper owns `actionsRef` to close the menu on window blur.
 function ContextMenu({ open, defaultOpen, onOpenChange, ...props }: Omit<React.ComponentProps<typeof BaseContextMenu.Root>, "actionsRef">) {
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
   const actionsRef = useMenuWindowDismiss(open ?? uncontrolledOpen);
@@ -35,8 +35,16 @@ function ContextMenu({ open, defaultOpen, onOpenChange, ...props }: Omit<React.C
   );
 }
 
-function ContextMenuTrigger({ ...props }: React.ComponentProps<typeof BaseContextMenu.Trigger>) {
-  return <BaseContextMenu.Trigger {...props} />;
+function ContextMenuTrigger({ onKeyDown, ...props }: React.ComponentProps<typeof BaseContextMenu.Trigger>) {
+  return (
+    <BaseContextMenu.Trigger
+      {...props}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (!event.defaultPrevented) openContextMenuFromKeyboard(event);
+      }}
+    />
+  );
 }
 
 type ContentProps = {
@@ -75,8 +83,6 @@ function ContextMenuContent({ className, positionerClassName, children, style, o
           {children}
           <GlassRedrawGuard />
         </BaseContextMenu.Popup>
-        {/* A menu scrolls only where its caller gave it overflow; the thumb
-            shows only then. */}
         <PopupOverlayScrollbar scroller={popup} />
       </BaseContextMenu.Positioner>
     </BaseContextMenu.Portal>

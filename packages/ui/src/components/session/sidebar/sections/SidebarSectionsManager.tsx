@@ -6,6 +6,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { NumberInput } from '@/components/ui/number-input';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -21,6 +22,7 @@ import {
 import { SettingsChipGroup } from '@/components/sections/shared/SettingsSection';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { projectPathFromId } from '@/lib/projectId';
 import {
   createSidebarSectionFromTemplate,
   DEFAULT_PIN_LIST,
@@ -33,6 +35,9 @@ import {
   SIDEBAR_SECTION_TEXT_MAX,
   SIDEBAR_SECTION_STATES,
   SIDEBAR_SECTION_WORK_STATES,
+  SIDEBAR_SESSION_BATCH_DEFAULT,
+  SIDEBAR_SESSION_BATCH_MAX,
+  SIDEBAR_SESSION_BATCH_MIN,
   type BuiltinSidebarSectionId,
   type CustomSidebarSection,
   type SidebarSectionActivity,
@@ -41,8 +46,10 @@ import {
   type SidebarSectionTemplate,
 } from '@/lib/sidebarSections';
 import { cn, formatDirectoryName } from '@/lib/utils';
+import { normalizePath } from '@/lib/pathNormalization';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsInSidebarOrder } from '../list/useProjectsInSidebarOrder';
 import { keepRowInList, ROW_DRAG_AUTO_SCROLL, ROW_SORT_TRANSITION, useRowDragSensors } from '../rowDrag';
@@ -62,6 +69,7 @@ import {
 } from './sectionActions';
 
 const BUILTIN_TITLE_KEY = {
+  pages: 'sessions.sidebar.activity.pagesTitle',
   chats: 'sessions.sidebar.activity.chatsTitle',
   pinned: 'sessions.sidebar.activity.pinnedTitle',
   work: 'sessions.sidebar.work.title',
@@ -69,6 +77,7 @@ const BUILTIN_TITLE_KEY = {
 } as const satisfies Record<BuiltinSidebarSectionId, I18nKey>;
 
 const TEMPLATE_KEY = {
+  recent: 'sessions.sidebar.sections.template.recent',
   waiting: 'sessions.sidebar.sections.template.waiting',
   running: 'sessions.sidebar.sections.template.running',
   prs: 'sessions.sidebar.sections.template.prs',
@@ -111,18 +120,17 @@ const ACTIVITY_KEY = {
   stalled: 'sessions.sidebar.sections.activity.stalled',
 } as const satisfies Record<SidebarSectionActivity, I18nKey>;
 
-const SECTIONS_PANEL_CLASS = 'oc-surface-floating oc-glass-floating oc-popup-motion app-region-no-drag rounded-xl origin-[var(--transform-origin)] data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95';
+const SECTIONS_PANEL_CLASS = 'bg-surface-elevated oc-glass-floating oc-popup-motion app-region-no-drag rounded-xl origin-[var(--transform-origin)] data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95';
 
 const toggleIn = <T extends string>(list: readonly T[], value: T): T[] => (
   list.includes(value) ? list.filter((entry) => entry !== value) : [...list, value]
 );
 
-/**
- * The sidebar's sections in the order the user arranges them, with their
- * visibility on this surface, and the editor of one section. It opens beside
- * the sidebar, so the section being edited shows in the list as it stands.
- */
-export const SidebarSectionsManager: React.FC<{ anchor: React.RefObject<HTMLElement | null> }> = ({ anchor }) => {
+export const SidebarSectionsManager: React.FC<{
+  anchor: React.RefObject<HTMLElement | null>;
+  trigger: React.RefObject<HTMLElement | null>;
+  pages: boolean;
+}> = ({ anchor, trigger, pages }) => {
   const { t } = useI18n();
   const open = useSidebarSectionsUiStore((state) => state.managerOpen);
   const draft = useSidebarSectionsUiStore((state) => state.draft);
@@ -131,9 +139,12 @@ export const SidebarSectionsManager: React.FC<{ anchor: React.RefObject<HTMLElem
       open={open}
       onOpenChange={(next, details) => {
         if (next) return;
-        // Escape in one of the panel's menus (Add condition and its lists stay
-        // open while values are picked) closes that menu, not the panel with
-        // the section being edited.
+        const target = details.reason === 'outside-press' ? details.event.target
+          : details.reason === 'focus-out' && details.event instanceof FocusEvent ? details.event.relatedTarget : null;
+        if (target instanceof Node && trigger.current?.contains(target)) {
+          details.cancel();
+          return;
+        }
         if (details.reason === 'escape-key' && document.querySelector('[role="menu"]')) {
           details.cancel();
           details.allowPropagation();
@@ -146,12 +157,10 @@ export const SidebarSectionsManager: React.FC<{ anchor: React.RefObject<HTMLElem
         <Popover.Positioner anchor={anchor} side="inline-end" align="start" sideOffset={8} collisionPadding={8} className="z-50">
           <Popover.Popup
             aria-label={t('sessions.sidebar.sections.title')}
-            // Opaque, with the floating light: the menus it opens are glass, and a
-            // glass surface under them would keep them from blurring what is behind.
             className={cn(SECTIONS_PANEL_CLASS, 'flex max-h-[min(40rem,calc(100vh-4rem))] w-[22rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden')}
             initialFocus={false}
           >
-            {draft ? <SectionEditor key={draft.id} draft={draft} /> : <SectionList />}
+            {draft ? <SectionEditor key={draft.id} draft={draft} /> : <SectionList pages={pages} />}
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>
@@ -159,9 +168,9 @@ export const SidebarSectionsManager: React.FC<{ anchor: React.RefObject<HTMLElem
   );
 };
 
-const SECTION_PRESETS = ['waiting', 'running', 'prs', 'stalled', 'today'] as const satisfies readonly SidebarSectionTemplate[];
+const SECTION_PRESETS = ['recent', 'waiting', 'running', 'prs', 'stalled', 'today'] as const satisfies readonly SidebarSectionTemplate[];
 
-const SectionList: React.FC = () => {
+const SectionList: React.FC<{ pages: boolean }> = ({ pages }) => {
   const { t } = useI18n();
   const sections = useSessionDisplayStore((state) => state.sections);
   const pinLists = useSessionDisplayStore((state) => state.pinLists);
@@ -178,8 +187,6 @@ const SectionList: React.FC = () => {
     <ScrollableOverlay outerClassName="min-h-0" className="flex flex-col gap-3 p-3" disableHorizontal>
       <div className="flex items-center justify-between gap-2">
         <span className="typography-ui-label font-medium text-foreground">{t('sessions.sidebar.sections.title')}</span>
-        {/* A new section starts from a preset: the common ones by name, a group
-            of projects, or one the user builds from nothing and names. */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="xs" disabled={!canAddSidebarSection(sections)}>
@@ -207,11 +214,12 @@ const SectionList: React.FC = () => {
       <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={SECTION_LIST_MODIFIERS} autoScroll={ROW_DRAG_AUTO_SCROLL} onDragEnd={onDragEnd}>
         <SortableContext items={sections.map((entry) => entry.id)} strategy={verticalListSortingStrategy}>
           <div className="flex flex-col gap-0.5">
-            {sections.map((entry) => <SectionRow key={entry.id} entry={entry} />)}
+            {sections.map((entry) => (entry.kind === 'builtin' && entry.id === 'pages' && !pages ? null : <SectionRow key={entry.id} entry={entry} />))}
           </div>
         </SortableContext>
       </DndContext>
       <p className="typography-micro text-muted-foreground">{t('sessions.sidebar.sections.orderHint')}</p>
+      <SessionBatchSizeRow />
       {pinLists.length > 0 ? (
         <div className="flex flex-col gap-0.5">
           <span className="typography-micro text-muted-foreground">{t('sessions.sidebar.sections.pinLists')}</span>
@@ -232,7 +240,29 @@ const SectionList: React.FC = () => {
 
 const SECTION_LIST_MODIFIERS = [keepRowInList];
 
-/** One section in the list: its name and what can be done with it here; the row drags anywhere but its controls. */
+const SessionBatchSizeRow: React.FC = () => {
+  const { t } = useI18n();
+  const size = useSessionDisplayStore((state) => state.sessionBatchSize) ?? SIDEBAR_SESSION_BATCH_DEFAULT;
+  const label = t('sessions.sidebar.sections.batchSize');
+  return (
+    <div className="flex items-center gap-2 ps-2 pe-1">
+      <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">{label}</span>
+      <NumberInput
+        aria-label={label}
+        value={size}
+        min={SIDEBAR_SESSION_BATCH_MIN}
+        max={SIDEBAR_SESSION_BATCH_MAX}
+        containerClassName="h-7 w-24"
+        deferExternalValueWhileFocused
+        onValueChange={(next) => {
+          useSessionDisplayStore.getState().setSessionBatchSize(next);
+          void updateDesktopSettings({ sidebarSessionBatchSize: useSessionDisplayStore.getState().sessionBatchSize ?? next });
+        }}
+      />
+    </div>
+  );
+};
+
 const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
   const { t } = useI18n();
   const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: entry.id, transition: ROW_SORT_TRANSITION });
@@ -241,11 +271,11 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
   const showPinned = useSessionDisplayStore((state) => state.showPinnedSection);
   const showWork = useSessionDisplayStore((state) => state.showWorkSection);
   const keepWorkInPlace = useSessionDisplayStore((state) => state.keepWorkInPlace);
+  const keepPinnedInPlace = useSessionDisplayStore((state) => state.keepPinnedInPlace);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const name = entry.kind === 'builtin' ? t(BUILTIN_TITLE_KEY[entry.id]) : entry.name;
-  // Built-in sections keep the show toggles they always had; Projects is always shown.
   let visibility: { shown: boolean; set: (shown: boolean) => void } | null = null;
-  if (entry.kind === 'custom') {
+  if (entry.kind === 'custom' || entry.id === 'pages') {
     visibility = { shown: !hiddenSections.includes(entry.id), set: (shown) => setSidebarSectionHidden(entry.id, !shown) };
   } else if (entry.id === 'chats') {
     visibility = { shown: showChats, set: (shown) => { useSessionDisplayStore.getState().setShowChatsSection(shown); void updateDesktopSettings({ sidebarShowChatsSection: shown }); } };
@@ -255,6 +285,12 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
     visibility = { shown: showWork, set: (shown) => { useSessionDisplayStore.getState().setShowWorkSection(shown); void updateDesktopSettings({ sidebarShowWorkSection: shown }); } };
   }
   if (entry.kind === 'builtin' && entry.id === 'work' && !sessionWorkEnabled) return null;
+  let inPlace: { keep: boolean; set: (keep: boolean) => void } | null = null;
+  if (entry.kind === 'builtin' && entry.id === 'work' && showWork) {
+    inPlace = { keep: keepWorkInPlace, set: (keep) => { useSessionDisplayStore.getState().setKeepWorkInPlace(keep); void updateDesktopSettings({ sidebarKeepWorkInPlace: keep }); } };
+  } else if (entry.kind === 'builtin' && entry.id === 'pinned' && showPinned) {
+    inPlace = { keep: keepPinnedInPlace, set: (keep) => { useSessionDisplayStore.getState().setKeepPinnedInPlace(keep); void updateDesktopSettings({ sidebarKeepPinnedInPlace: keep }); } };
+  }
   return (
     <div
       ref={setNodeRef}
@@ -274,23 +310,19 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
             </Button>
           </>
         ) : null}
-        {/* In work's one choice stays on its row, as a chip that says it and
-            switches it: a line under the row pushed the sections below it
-            apart, and a menu behind an edit button hid it. */}
-        {entry.kind === 'builtin' && entry.id === 'work' && showWork ? (
+        {inPlace ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-pressed={keepWorkInPlace}
-                onClick={() => { const keep = !keepWorkInPlace; useSessionDisplayStore.getState().setKeepWorkInPlace(keep); void updateDesktopSettings({ sidebarKeepWorkInPlace: keep }); }}
+                aria-pressed={inPlace.keep}
+                onClick={() => inPlace.set(!inPlace.keep)}
                 className={cn(
                   'inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 typography-micro focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-                  keepWorkInPlace ? 'oc-tile-inset text-foreground' : 'oc-tile text-muted-foreground hover:text-foreground',
+                  inPlace.keep ? 'oc-tile-inset text-foreground' : 'oc-tile text-muted-foreground hover:text-foreground',
                 )}
               >
-                {/* The same width either way: a mark that turns from add to check. */}
-                <Icon name={keepWorkInPlace ? 'check' : 'add'} className="size-3" />
+                <Icon name={inPlace.keep ? 'check' : 'add'} className="size-3" />
                 {t('sessions.sidebar.sections.alsoInProjectsShort')}
               </button>
             </TooltipTrigger>
@@ -305,7 +337,7 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
   );
 };
 
-type ConditionCategory = 'text' | 'states' | 'work' | 'pins' | 'kinds' | 'links' | 'projectIds' | 'activity';
+type ConditionCategory = 'text' | 'states' | 'work' | 'pins' | 'kinds' | 'links' | 'projectIds' | 'folders' | 'activity';
 type ConditionOption = { value: string; label: string };
 
 const CATEGORY_KEY = {
@@ -316,19 +348,18 @@ const CATEGORY_KEY = {
   kinds: 'sessions.sidebar.sections.category.kind',
   links: 'sessions.sidebar.sections.category.links',
   projectIds: 'sessions.sidebar.sections.category.projects',
+  folders: 'sessions.sidebar.sections.category.folders',
   activity: 'sessions.sidebar.sections.category.activity',
 } as const satisfies Record<ConditionCategory, I18nKey>;
 
-const TIME_CATEGORIES: readonly ConditionCategory[] = ['text', 'states', 'work', 'pins', 'kinds', 'links', 'projectIds', 'activity'];
+const TIME_CATEGORIES: readonly ConditionCategory[] = ['text', 'states', 'work', 'pins', 'kinds', 'links', 'projectIds', 'folders', 'activity'];
 
-/** The values a condition holds; activity is one choice, "any time" being no condition. */
 const conditionValues = (filter: SidebarSectionFilter, category: ConditionCategory): readonly string[] => {
   if (category === 'activity') return filter.activity === 'any' ? [] : [filter.activity];
   if (category === 'text') return filter.text;
   return filter[category];
 };
 
-/** The filter with one value of a category turned on or off; activity takes one value or none. */
 const toggleCondition = (filter: SidebarSectionFilter, category: Exclude<ConditionCategory, 'text'>, value: string): SidebarSectionFilter => {
   if (category === 'activity') {
     const activity = SIDEBAR_SECTION_ACTIVITY.find((entry) => entry === value) ?? 'any';
@@ -365,8 +396,8 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
   const matchCount = useSidebarSectionsUiStore((state) => state.draftMatchCount);
   const pinLists = useSessionDisplayStore((state) => state.pinLists);
   const projects = useProjectsInSidebarOrder(useProjectsStore((state) => state.projects));
-  // The phrase being typed into Title or branch, or null while no field is
-  // open: Add condition and the row's Add open it empty.
+  const foldersMap = useSessionFoldersStore((state) => state.foldersMap);
+  const projectLabelOf = (project: (typeof projects)[number]): string => project.label?.trim() || formatDirectoryName(project.path, null) || project.path;
   const [phraseDraft, setPhraseDraft] = React.useState<string | null>(null);
   const nameId = React.useId();
   const byProjects = draft.grouping === 'project';
@@ -377,13 +408,14 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
       case 'pins': return [{ value: DEFAULT_PIN_LIST, label: t('sessions.sidebar.activity.pinnedTitle') }, ...pinLists.map((list) => ({ value: list.id, label: list.name }))];
       case 'kinds': return SIDEBAR_SECTION_KINDS.map((value) => ({ value, label: t(KIND_KEY[value]) }));
       case 'links': return SIDEBAR_SECTION_LINKS.map((value) => ({ value, label: t(LINK_KEY[value]) }));
-      case 'projectIds': return projects.map((project) => ({ value: project.id, label: project.label?.trim() || formatDirectoryName(project.path, null) || project.path }));
+      case 'projectIds': return projects.map((project) => ({ value: project.id, label: projectLabelOf(project) }));
+      case 'folders': return projects.flatMap((project) => (foldersMap[normalizePath(project.path) ?? ''] ?? [])
+        .filter((folder) => !folder.parentId)
+        .map((folder) => ({ value: folder.id, label: `${projectLabelOf(project)} / ${folder.name}` })));
       case 'activity': return SIDEBAR_SECTION_ACTIVITY.filter((value) => value !== 'any').map((value) => ({ value, label: t(ACTIVITY_KEY[value]) }));
       case 'text': return [];
     }
   };
-  // Conditions show in the order the user added them, a new one under the
-  // rest; a section opened for editing starts in the menu's order.
   const [order, setOrder] = React.useState<readonly ConditionCategory[]>(() => (
     TIME_CATEGORIES.filter((category) => conditionValues(draft.filter, category).length > 0)
   ));
@@ -401,8 +433,6 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
     if (category === 'text') setPhraseDraft(null);
     updateSectionDraft({ ...draft, filter: clearCondition(draft.filter, category) });
   };
-  // Only the conditions the section asks for are on screen; a group of
-  // projects asks for its projects alone, so that row is always there.
   const categories: readonly ConditionCategory[] = byProjects ? ['projectIds'] : TIME_CATEGORIES;
   const isShown = (category: ConditionCategory): boolean => (
     byProjects || conditionValues(draft.filter, category).length > 0 || (category === 'text' && phraseDraft !== null)
@@ -411,9 +441,8 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
     ...order.filter(isShown),
     ...categories.filter((category) => isShown(category) && !order.includes(category)),
   ];
-  const addable = byProjects ? [] : categories.filter((category) => !isShown(category));
+  const addable = byProjects ? [] : categories.filter((category) => !isShown(category) && (category !== 'folders' || optionsOf(category).length > 0));
   const name = draft.name.trim();
-  // A section with nothing to ask lists nothing, so it is not saved until it asks something.
   const hasConditions = byProjects ? draft.filter.projectIds.length > 0 : hasSidebarSectionConditions(draft.filter);
   let countLabel: string | null = null;
   if (!hasConditions) countLabel = byProjects ? t('sessions.sidebar.sections.needsProjects') : t('sessions.sidebar.sections.needsCondition');
@@ -421,8 +450,6 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
     if (byProjects) countLabel = matchCount === 1 ? t('sessions.sidebar.sections.matchProjectsSingle', { count: matchCount }) : t('sessions.sidebar.sections.matchProjectsPlural', { count: matchCount });
     else countLabel = matchCount === 1 ? t('sessions.sidebar.sections.matchWorksSingle', { count: matchCount }) : t('sessions.sidebar.sections.matchWorksPlural', { count: matchCount });
   }
-  // Title or branch holds phrases, any one of which matches: each is a chip
-  // like another condition's values, and Add types one more.
   const commitPhrase = (): void => {
     const phrase = (phraseDraft ?? '').trim().slice(0, SIDEBAR_SECTION_TEXT_MAX);
     const phrases = phrase && !draft.filter.text.includes(phrase)
@@ -439,7 +466,6 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
   };
   const optionItems = (category: Exclude<ConditionCategory, 'text'>) => {
     const values = conditionValues(draft.filter, category);
-    // Several values of a category can be picked, so the menu stays open; activity is one choice.
     return optionsOf(category).map((option) => (
       <DropdownMenuItem key={option.value} closeOnClick={category === 'activity'} onClick={() => toggle(category, option.value)} className="flex items-center justify-between gap-3">
         <span className="min-w-0 truncate" dir="auto">{option.label}</span>
@@ -476,11 +502,8 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
             { value: 'time', label: t('sessions.sidebar.sections.grouping.time') },
             { value: 'project', label: t('sessions.sidebar.sections.grouping.project') },
           ]}
-          // Switching keeps every condition and the claims choice: a group of
-          // projects reads only its projects, and saving one drops the rest.
           onChange={(grouping) => updateSectionDraft({ ...draft, grouping })}
         />
-        {/* What the chosen kind lists, so the two need no explaining elsewhere. */}
         <p className="-mt-1 typography-micro text-muted-foreground">
           {byProjects ? t('sessions.sidebar.sections.grouping.projectHint') : t('sessions.sidebar.sections.grouping.timeHint')}
         </p>
@@ -515,9 +538,6 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
                         onChange={(event) => setPhraseDraft(event.target.value)}
                         onBlur={commitPhrase}
                         onKeyDown={(event) => {
-                          // Enter adds the phrase rather than saving the section;
-                          // Escape drops it rather than closing the panel. Both
-                          // belong to an input method while it composes.
                           if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                           if (event.key === 'Enter') {
                             event.preventDefault();
@@ -548,20 +568,17 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
             const values = conditionValues(draft.filter, category);
             const options = optionsOf(category);
             const categoryLabel = t(CATEGORY_KEY[category]);
-            // Each value is its own chip and leaves on its own; Add opens the
-            // category's options. Activity holds one value: its chip goes, and
-            // another is picked from Add condition.
             const addLabel = byProjects && values.length === 0
               ? t('sessions.sidebar.sections.chooseProjects')
               : t('sessions.sidebar.sections.addValue');
             return (
-              // Label, chips and the remove button share a first line 24px
-              // high, so one line of chips sits centred and more wrap below.
               <div key={category} className="oc-tile flex items-start gap-2 rounded-md py-1.5 ps-2.5 pe-1">
                 <span className="flex h-6 shrink-0 items-center typography-ui-label text-muted-foreground">{categoryLabel}</span>
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 py-0.5">
                   {values.map((value) => {
-                    const label = options.find((option) => option.value === value)?.label ?? value;
+                    const path = projectPathFromId(value);
+                    const label = options.find((option) => option.value === value)?.label
+                      ?? (path ? formatDirectoryName(path, null) : value);
                     return (
                       <span key={value} className="oc-tile-inset inline-flex h-5 min-w-0 max-w-full items-center gap-0.5 rounded ps-1.5 typography-micro text-foreground">
                         <span className="min-w-0 truncate" dir="auto">{label}</span>
@@ -576,7 +593,6 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
                       </span>
                     );
                   })}
-                  {/* Add only while the category has something left to add. */}
                   {category !== 'activity' && options.some((option) => !values.includes(option.value)) ? (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -623,7 +639,6 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
           ) : null}
         </div>
         <div className="flex flex-col gap-2">
-          {/* A group of projects always takes its projects; only a list of works chooses. */}
           {!byProjects ? (
             <label className="flex items-center gap-2 typography-ui-label">
               <span className="flex-1">{t('sessions.sidebar.sections.alsoInProjects')}</span>
@@ -636,7 +651,6 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
           </label>
         </div>
       </ScrollableOverlay>
-      {/* The count and the actions stay in reach while the conditions scroll. */}
       <div className="flex shrink-0 items-center gap-2 px-3 pb-3 pt-2">
         <span className="min-w-0 flex-1 truncate typography-micro text-muted-foreground">{countLabel}</span>
         <Button type="button" variant="outline" size="sm" onClick={discardSectionDraft}>{t('sessions.sidebar.sections.cancel')}</Button>

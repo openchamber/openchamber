@@ -4,6 +4,14 @@ import {
   BROWSER_CONTROL_ACTIONS,
   NOTIFICATIONS_PROVIDER_METHODS,
   type NotificationsProviderMethod,
+  QUOTA_PROVIDER_ERROR_MESSAGE_MAX,
+  QUOTA_PROVIDER_LABEL_MAX,
+  QUOTA_PROVIDER_METHODS,
+  QUOTA_PROVIDER_MODELS_MAX,
+  QUOTA_PROVIDER_NAME_MAX,
+  QUOTA_PROVIDER_WINDOWS_MAX,
+  type QuotaProviderMethod,
+  type QuotaProviderUsageData,
   SOURCE_CONTROL_OUTBOUND_BODY_MAX,
   SOURCE_CONTROL_OUTBOUND_METHODS,
   SOURCE_CONTROL_OUTBOUND_REQUEST_HEADERS,
@@ -28,21 +36,11 @@ import {
 } from './service-providers.ts';
 import { SESSION_EVENT_ERROR_MAX, type GuestSessionEventResult } from './session-events.ts';
 
-/**
- * Host-side parse of what a browser provider answers. `data` stays whatever
- * the service produced: the host hands it to the agent as is, and only
- * `browser.capture` is read further (the image the host writes to disk).
- */
 export const browserProviderResultSchema = z.union([
   z.object({ ok: z.literal(true), data: z.object({}).passthrough() }),
   z.object({ ok: z.literal(false), error: z.string().min(1).max(2_000) }),
 ]);
 
-/**
- * Host-side parse of what a service answers a session event with. OpenChamber
- * acts on nothing in it beyond logging a failure's `error`; an answer that does
- * not parse is a failed delivery, never a delivered one.
- */
 export const sessionEventResultSchema = z.union([
   z.object({ ok: z.literal(true) }).strict(),
   z.object({ ok: z.literal(false), error: z.string().min(1).max(SESSION_EVENT_ERROR_MAX) }).strict(),
@@ -55,19 +53,12 @@ void assertSessionEventResultParsed; void assertSessionEventResultContract;
 
 export const browserControlActionSchema = z.enum(BROWSER_CONTROL_ACTIONS);
 
-/*
- * Host-side parse of what a source-control provider answers. Every answer is
- * checked as an envelope. Answers OpenChamber acts on (who an account is,
- * where a head lives, what a mutation targets and did) are checked deeply;
- * reads OpenChamber only hands to the UI, which parses those DTOs itself, are
- * checked for being a JSON object or array within the size cap, so the two
- * parsers never drift apart. A failed parse is a malformed answer, never an
- * empty one.
- */
 
 const text = z.string().min(1).max(1_024);
 const optionalText = z.string().max(1_024).optional();
 const positiveInteger = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const stringUserId = z.string().min(1).max(256);
+const forgeUserIdSchema = z.union([positiveInteger, stringUserId]);
 const nonNegativeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const commitSha = z.string().regex(/^[0-9a-fA-F]{40}$/).transform((sha) => sha.toLowerCase());
 
@@ -85,7 +76,7 @@ const envelopeSchema = z.union([
 ]);
 
 const forgeUserSchema = z.object({
-  id: positiveInteger,
+  id: forgeUserIdSchema,
   login: z.string().min(1).max(256),
   name: optionalText,
   email: optionalText,
@@ -107,11 +98,6 @@ const changeRequestHeadSchema = z.object({
   headOwner: text,
 });
 
-/**
- * The shape only; OpenChamber also checks that `endpoint` is https on the
- * instance origin and names `sourceProject`, and that `headSha` is the head it
- * expected.
- */
 const changeRequestSourceSchema = z.object({
   sourceProject: projectRef,
   targetProject: projectRef,
@@ -121,7 +107,6 @@ const changeRequestSourceSchema = z.object({
   endpoint: z.string().min(1).max(2_048),
 });
 
-/** Exactly the target keys OpenChamber's mutation store accepts. */
 const mutationTargetSchema = z.object({
   repositoryId: text,
   bindingRevision: nonNegativeInteger,
@@ -143,7 +128,6 @@ const mutationResolutionSchema = z.object({
   target: mutationTargetSchema,
 }).strict();
 
-/** Exactly the result keys OpenChamber's mutation store accepts. */
 const mutationResultSchema = z.object({
   project: projectRef.optional(),
   number: positiveInteger.optional(),
@@ -155,6 +139,7 @@ const mutationResultSchema = z.object({
   outcome: z.enum(['queued', 'merging']).optional(),
   stacked: z.boolean().optional(),
   ready: z.boolean().optional(),
+  draft: z.boolean().optional(),
   commented: z.boolean().optional(),
   failureStatus: z.number().int().min(400).max(599).optional(),
   failureCode: text.optional(),
@@ -197,9 +182,20 @@ const liveSummariesSchema = z.object({
 const identitySchema = z.object({ provider: text, instance: text }).passthrough();
 const projectSchema = z.object({ provider: text, instance: text, id: text, owner: text, name: text, url: text }).passthrough();
 
+const reviewerStateSchema = z.object({
+  user: z.object({ id: stringUserId, username: z.string().min(1).max(256), avatarUrl: z.string().max(2_048).optional() }).passthrough(),
+  state: z.enum(['pending', 'approved', 'changes_requested', 'commented', 'dismissed']),
+}).passthrough();
+
+const changeRequestContextSchema = z.object({
+  reviewerStates: z.array(reviewerStateSchema).optional(),
+}).passthrough().refine(
+  (value) => JSON.stringify(value).length <= SOURCE_CONTROL_PROVIDER_RESPONSE_MAX,
+  { message: 'answer is larger than the response cap' },
+);
+
 const STACK_LAYERS_MAX = 50;
 
-/** Change requests stacked on one another, bottom layer first (`PullRequestStack` in the UI). */
 const changeRequestStackSchema = z.object({
   number: positiveInteger.nullable(),
   base: text,
@@ -213,18 +209,12 @@ const changeRequestStackSchema = z.object({
   }).passthrough()).max(STACK_LAYERS_MAX),
 }).passthrough();
 
-/**
- * The local branch tip as a change-based host sees it: its sha, the change id
- * its commit message carries (null when none), and the revision number it was
- * uploaded as (null when this commit is not on the host yet).
- */
 const localRevisionSchema = z.object({
   sha: commitSha,
   changeId: z.string().min(1).max(128).nullable(),
   uploadedAs: positiveInteger.nullable(),
 }).strict();
 
-/** The status OpenChamber caches per branch and shows on every badge. */
 const changeRequestStatusSchema = z.object({
   identity: identitySchema,
   fetchedAt: z.number().optional(),
@@ -251,7 +241,6 @@ const changeRequestStatusSchema = z.object({
   stack: changeRequestStackSchema.nullable().optional(),
 }).strict();
 
-/** A read OpenChamber passes on unread: a JSON object or array within the response cap. */
 const passThroughSchema = z.union([jsonObject, z.array(z.json())]).refine(
   (value) => JSON.stringify(value).length <= SOURCE_CONTROL_PROVIDER_RESPONSE_MAX,
   { message: 'answer is larger than the response cap' },
@@ -260,9 +249,10 @@ const passThroughSchema = z.union([jsonObject, z.array(z.json())]).refine(
 const dataSchemas = {
   'auth.verify': verifySchema,
   'auth.probe': probeSchema,
+  'auth.status': z.object({ user: forgeUserSchema.nullable() }),
   changeRequestStatus: changeRequestStatusSchema,
   listChangeRequests: passThroughSchema,
-  changeRequestContext: passThroughSchema,
+  changeRequestContext: changeRequestContextSchema,
   listIssues: passThroughSchema,
   getIssue: passThroughSchema,
   issueComments: passThroughSchema,
@@ -280,7 +270,6 @@ const dataSchemas = {
   'mutation.reconcile': reconcileSchema,
 } satisfies Record<SourceControlProviderMethod, z.ZodType>;
 
-/** What a service sends OpenChamber's outbound proxy; checked before anything reaches the forge. */
 const outboundRequestSchema = z.object({
   method: z.enum(SOURCE_CONTROL_OUTBOUND_METHODS),
   path: z.string().min(1).max(2_048).regex(/^\/(?!\/)/),
@@ -289,7 +278,6 @@ const outboundRequestSchema = z.object({
   body: z.string().max(SOURCE_CONTROL_OUTBOUND_BODY_MAX).optional(),
 }).strict();
 
-/** Wire 1 of the source-control role, as the host parses it. `data[method]` checks an `ok: true` answer's `data`. */
 export const sourceControlProviderSchemasV1 = {
   envelope: envelopeSchema,
   error: errorSchema,
@@ -310,12 +298,6 @@ export const sourceControlProviderSchemasV1 = {
 
 export const sourceControlProviderMethodSchema = z.enum(SOURCE_CONTROL_PROVIDER_METHODS);
 
-/*
- * Host-side parse of what a notifications provider answers. The envelope and
- * the error are the Git host's: `ok: true` with `data`, or `ok: false` with
- * `{ message, status?, code? }`, and a 401 writes the account off only when
- * OpenChamber's proxy saw the channel's server answer it.
- */
 
 const notificationsAccountSchema = z.object({
   account: z.object({
@@ -333,7 +315,6 @@ const notificationsDataSchemas = {
   notify: notificationsNotifySchema,
 } satisfies Record<NotificationsProviderMethod, z.ZodType>;
 
-/** Wire 1 of the notifications role, as the host parses it. `data[method]` checks an `ok: true` answer's `data`. */
 export const notificationsProviderSchemasV1 = {
   envelope: envelopeSchema,
   error: errorSchema,
@@ -346,17 +327,9 @@ export const notificationsProviderSchemasV1 = {
 
 export const notificationsProviderMethodSchema = z.enum(NOTIFICATIONS_PROVIDER_METHODS);
 
-/*
- * Host-side parse of what a tracker answers. The envelope and the error are
- * the Git host's. Every item is checked in the neutral shapes before the host
- * hands it to the UI, bounded in count and length, and asserted against the
- * TypeScript types the service writes against, so the two cannot drift. A
- * failed parse is a malformed answer, never an empty list.
- */
 
 const trackerText = z.string().min(1).max(1_024);
 const trackerTitle = z.string().max(4_096);
-// An item's link is opened and drawn as a link in the app: http(s) only, so an answer cannot hand the UI a `javascript:` URL.
 const trackerUrl = z.string().min(1).max(2_048).refine((value) => /^https?:\/\//i.test(value) && URL.canParse(value), { message: 'must be an http(s) URL' });
 const trackerCategory = z.enum(['triage', 'backlog', 'todo', 'in-progress', 'done', 'canceled']);
 const trackerPriority = z.enum(['none', 'urgent', 'high', 'medium', 'low']);
@@ -378,7 +351,6 @@ const trackerItemFields = {
   updatedAt: z.string().max(64).nullable().optional(),
 };
 
-/** A related item (a parent, a child): one level deep, naming no parent of its own (`null` at most). */
 const trackerRelatedItemSchema = z.object({ ...trackerItemFields, parent: z.null().optional() }).strict();
 const trackerItemSummarySchema = z.object({ ...trackerItemFields, parent: trackerRelatedItemSchema.nullable().optional() }).strict();
 const trackerCommentSchema = z.object({
@@ -421,7 +393,6 @@ const trackerLiveSummariesSchema = z.object({
 const trackerContainersSchema = z.object({ containers: z.array(trackerContainer).max(TRACKER_PROVIDER_CONTAINERS_MAX) }).strict();
 const trackerCommentDataSchema = z.object({ comment: z.object({ id: trackerText }).strict().nullable() }).strict();
 
-// The parsed shapes are exactly the types a service writes against.
 type Parsed<T extends z.ZodType> = z.output<T>;
 const assertTrackerSummary: (value: Parsed<typeof trackerItemSummarySchema>) => TrackerProviderItemSummary = (value) => value;
 const assertTrackerItem: (value: Parsed<typeof trackerItemSchema>) => TrackerProviderItem = (value) => value;
@@ -446,7 +417,6 @@ const trackerDataSchemas = {
   'comments.create': trackerCommentDataSchema,
 } satisfies Record<TrackerProviderMethod, z.ZodType>;
 
-/** Wire 1 of the tracker role, as the host parses it. `data[method]` checks an `ok: true` answer's `data`. */
 export const trackerProviderSchemasV1 = {
   envelope: envelopeSchema,
   error: errorSchema,
@@ -464,3 +434,55 @@ export const trackerProviderSchemasV1 = {
 };
 
 export const trackerProviderMethodSchema = z.enum(TRACKER_PROVIDER_METHODS);
+
+
+const QUOTA_RESERVED_NAMES: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+const quotaName = z.string().min(1).max(QUOTA_PROVIDER_NAME_MAX).refine((name) => !QUOTA_RESERVED_NAMES.has(name), { message: 'reserved name' });
+const quotaLabel = z.string().max(QUOTA_PROVIDER_LABEL_MAX);
+const quotaAmount = z.number().finite().nonnegative();
+const quotaWindowSchema = z.object({
+  usedPercent: quotaAmount.nullable(),
+  windowSeconds: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+  resetAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+  valueLabel: quotaLabel.nullable().optional(),
+  value: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('requests'), count: quotaAmount }).strict(),
+    z.object({ kind: z.literal('spend'), spent: quotaAmount, limit: z.number().finite().positive().nullable() }).strict(),
+  ]).optional(),
+  creditsUsed: quotaAmount.optional(),
+}).strict();
+const quotaWindowsSchema = z.record(quotaName, quotaWindowSchema).refine(
+  (windows) => Object.keys(windows).length <= QUOTA_PROVIDER_WINDOWS_MAX,
+  { message: `at most ${QUOTA_PROVIDER_WINDOWS_MAX} windows` },
+);
+const quotaUsageSchema = z.object({
+  windows: quotaWindowsSchema,
+  models: z.record(quotaName, z.object({ windows: quotaWindowsSchema }).strict()).refine(
+    (models) => Object.keys(models).length <= QUOTA_PROVIDER_MODELS_MAX,
+    { message: `at most ${QUOTA_PROVIDER_MODELS_MAX} models` },
+  ).optional(),
+}).strict();
+const quotaUsageDataSchema = z.object({
+  ok: z.boolean(),
+  configured: z.boolean(),
+  error: z.string().min(1).max(QUOTA_PROVIDER_ERROR_MESSAGE_MAX).optional(),
+  planLabel: quotaLabel.nullable().optional(),
+  usage: quotaUsageSchema.nullable(),
+}).strict();
+
+const assertQuotaUsageParsed: (value: Parsed<typeof quotaUsageDataSchema>) => QuotaProviderUsageData = (value) => value;
+const assertQuotaUsageContract: (value: QuotaProviderUsageData) => Parsed<typeof quotaUsageDataSchema> = (value) => value;
+void assertQuotaUsageParsed; void assertQuotaUsageContract;
+
+const quotaDataSchemas = {
+  'usage.read': quotaUsageDataSchema,
+} satisfies Record<QuotaProviderMethod, z.ZodType>;
+
+export const quotaProviderSchemasV1 = {
+  envelope: envelopeSchema,
+  error: errorSchema,
+  usage: quotaUsageDataSchema,
+  data: quotaDataSchemas,
+};
+
+export const quotaProviderMethodSchema = z.enum(QUOTA_PROVIDER_METHODS);

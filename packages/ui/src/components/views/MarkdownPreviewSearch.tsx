@@ -2,38 +2,44 @@ import React from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { findPreviewRanges, scrollPreviewRangeIntoView } from './markdownPreviewFind';
 import { holdMarkdownBlocks } from '@/components/chat/markdown/markdownWindow';
 
-/**
- * In-preview text search for the rendered Markdown file preview.
- *
- * The preview renders as plain DOM (no iframe/shadow root), so browser-native
- * find works on web — but the Electron desktop shell has no find-in-page
- * implementation at all, and CodeMirror's search only exists in edit mode.
- * This widget provides the find shortcut behavior (Ctrl/Cmd+F) and a compact
- * search bar with match highlighting, navigation, and a live count, scoped to
- * the preview container.
- *
- * React owns the rendered text. Search paints DOM Ranges without changing it,
- * and rebuilds the ranges after renderer content updates.
- */
-/** Keystrokes re-walk the whole preview, so coalesce bursts of typing. */
 const SEARCH_DEBOUNCE_MS = 120;
 
 type MarkdownPreviewSearchProps = {
-  /** The scrollable preview container whose rendered text is searched. */
   containerRef: React.RefObject<HTMLDivElement | null>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Bumped every time the find shortcut is pressed to re-focus the input. */
   focusNonce: number;
-  /** Layout overrides for the floating bar (position, offsets). */
   className?: string;
 };
+
+const FindBarButton: React.FC<{
+  label: string;
+  icon: IconName;
+  onClick: () => void;
+  disabled?: boolean;
+}> = ({ label, icon, onClick, disabled }) => (
+  <ButtonTooltip label={label} side="bottom">
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="size-6 p-0 text-muted-foreground"
+      onClick={onClick}
+      aria-label={label}
+      disabled={disabled}
+    >
+      <Icon name={icon} className="size-3.5" />
+    </Button>
+  </ButtonTooltip>
+);
 
 export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
   containerRef,
@@ -54,14 +60,8 @@ export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
   const queryRef = React.useRef(query);
   queryRef.current = query;
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Focus returns here when the bar closes, so Escape does not strand focus.
   const returnFocusRef = React.useRef<HTMLElement | null>(null);
 
-  /**
-   * `keepIndex` distinguishes a new query (start at match 1) from a re-search
-   * of the same query after the renderer updated the container: a theme
-   * toggle or content refresh must not yank the reader back to match 1.
-   */
   const runSearch = React.useCallback((nextQuery: string, keepIndex = false) => {
     const container = containerRef.current;
     if (!container) {
@@ -107,23 +107,17 @@ export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
     }
   }, [onOpenChange]);
 
-  // Only content mutations trigger a scan. Painting highlights emits none.
   React.useEffect(() => {
     const container = containerRef.current;
     if (!open || !container) {
       return;
     }
-    // A long document mounts only its blocks near the view; the search reads
-    // all of them, mounted while the bar is open (the observer below rescans
-    // once they are).
     const releaseBlocks = holdMarkdownBlocks(container);
     runSearch(queryRef.current, true);
     const observer = new MutationObserver(() => {
       if (!queryRef.current.trim()) {
         return;
       }
-      // Drop ranges immediately so removed text is never kept highlighted
-      // during the debounced content refresh.
       setRanges([]);
       scheduleSearch(queryRef.current, true);
     });
@@ -136,7 +130,6 @@ export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
     };
   }, [containerRef, open, runSearch, scheduleSearch]);
 
-  // Focus the input when the bar opens, remembering what to restore on close.
   React.useEffect(() => {
     if (!open) {
       return;
@@ -148,7 +141,6 @@ export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
     inputRef.current?.focus();
   }, [containerRef, open]);
 
-  // Pressing the find shortcut again re-focuses and re-selects the query.
   React.useEffect(() => {
     if (open && focusNonce > 0) {
       inputRef.current?.focus();
@@ -156,11 +148,9 @@ export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
     }
   }, [open, focusNonce]);
 
-  // Each mounted preview owns its registry names and their stylesheet.
   React.useEffect(() => {
     const container = containerRef.current;
     const view = container?.ownerDocument.defaultView;
-    // Unsupported browsers still get counts and navigation, without painting.
     if (!open || !container || !view || !('Highlight' in view) || !('highlights' in view.CSS)) return;
     const registry = view.CSS.highlights;
     const style = container.ownerDocument.createElement('style');
@@ -242,41 +232,9 @@ export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
             ? `${index + 1}/${total}`
             : ''}
       </span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="size-6 p-0 text-muted-foreground"
-        onClick={goToPrevious}
-        title={t('filesView.preview.find.previousAria')}
-        aria-label={t('filesView.preview.find.previousAria')}
-        disabled={total === 0}
-      >
-        <Icon name="arrow-up" className="size-3.5" />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="size-6 p-0 text-muted-foreground"
-        onClick={goToNext}
-        title={t('filesView.preview.find.nextAria')}
-        aria-label={t('filesView.preview.find.nextAria')}
-        disabled={total === 0}
-      >
-        <Icon name="arrow-down" className="size-3.5" />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="size-6 p-0 text-muted-foreground"
-        onClick={close}
-        title={t('filesView.preview.find.closeAria')}
-        aria-label={t('filesView.preview.find.closeAria')}
-      >
-        <Icon name="close" className="size-3.5" />
-      </Button>
+      <FindBarButton label={t('filesView.preview.find.previousAria')} icon="arrow-up" onClick={goToPrevious} disabled={total === 0} />
+      <FindBarButton label={t('filesView.preview.find.nextAria')} icon="arrow-down" onClick={goToNext} disabled={total === 0} />
+      <FindBarButton label={t('filesView.preview.find.closeAria')} icon="close" onClick={close} />
     </div>
   );
 };

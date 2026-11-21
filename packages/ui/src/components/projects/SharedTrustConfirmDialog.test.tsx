@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, jest, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -16,6 +16,7 @@ const setup: ProjectSetup = {
   trust: { hash: 'sha256:fixture', trusted: false },
   setupWorktree: ['true'],
   setupWorktreeWait: false,
+  teardownWorktree: [],
   projectActions: [],
   projectActionsPrimaryId: null,
   draftStarters: [],
@@ -24,6 +25,7 @@ const setup: ProjectSetup = {
     path: '.openchamber/project.json',
     setupWorktree: ['true'],
     setupWorktreeWait: null,
+    teardownWorktree: [],
     projectActions: [],
     draftStarters: [],
     plansDir: null,
@@ -32,11 +34,14 @@ const setup: ProjectSetup = {
     setupWorktree: [],
     setupWorktreeWait: null,
     setupWorktreeMode: 'append',
+    teardownWorktree: [],
+    createWorktreeCommand: '',
     projectActions: [],
     projectActionsPrimaryId: null,
     draftStarters: [],
     hiddenSharedActionIds: [],
     sharedTrust: null,
+    notesTodosInRepository: false,
   },
 };
 
@@ -46,18 +51,22 @@ let host: HTMLDivElement;
 let previousGlobals: Map<string, PropertyDescriptor | undefined>;
 
 beforeEach(() => {
+  jest.useFakeTimers();
   testWindow = new Window({ url: 'http://localhost' });
+  testWindow.setTimeout = globalThis.setTimeout;
+  testWindow.clearTimeout = globalThis.clearTimeout;
   previousGlobals = new Map(
-    ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT']
+    ['window', 'document', 'Event', 'CustomEvent', 'navigator', 'HTMLElement', 'Element', 'Node', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT']
       .map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]),
   );
   Object.assign(globalThis, {
     window: testWindow,
-    document: testWindow.document,
+    document: testWindow.document, Event: testWindow.Event, CustomEvent: testWindow.CustomEvent,
     navigator: testWindow.navigator,
     HTMLElement: testWindow.HTMLElement,
     Element: testWindow.Element,
     Node: testWindow.Node,
+    getComputedStyle: testWindow.getComputedStyle.bind(testWindow),
     requestAnimationFrame: testWindow.requestAnimationFrame.bind(testWindow),
     cancelAnimationFrame: testWindow.cancelAnimationFrame.bind(testWindow),
     IS_REACT_ACT_ENVIRONMENT: true,
@@ -71,6 +80,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   if (getSharedTrustConfirmationSnapshot()) settleSharedTrustConfirmation('skip');
   testWindow.close();
+  jest.useRealTimers();
   for (const [name, descriptor] of previousGlobals) {
     if (descriptor) Object.defineProperty(globalThis, name, descriptor);
     else Reflect.deleteProperty(globalThis, name);
@@ -88,11 +98,14 @@ test('shared command confirmation layers above an open mobile worktree sheet', a
     </I18nProvider>,
   ));
 
+  await act(async () => { jest.advanceTimersByTime(266); });
+
   const sheet = document.querySelector<HTMLElement>('#mobile-overlay-root > [role="dialog"]');
   const confirmation = document.querySelector<HTMLElement>('[data-slot="dialog-content"]');
   const backdrop = document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]');
 
   expect(sheet?.classList).toContain('z-[60]');
+  expect(sheet?.classList).toContain('opacity-100');
   expect(confirmation?.textContent).toContain('true');
   expect(confirmation?.parentElement?.classList).toContain('z-[70]');
   expect(backdrop?.classList).toContain('z-[70]');
@@ -115,8 +128,8 @@ test('says the commands run inside the space when a space asks, and on this mach
     await forSpace;
   });
 
-  const forMachine = ensureSharedSetupTrusted({ id: 'fixture', path: '/repo' }, setup);
-  await act(async () => { await Promise.resolve(); });
+  let forMachine: ReturnType<typeof ensureSharedSetupTrusted>;
+  await act(async () => { forMachine = ensureSharedSetupTrusted({ id: 'fixture', path: '/repo' }, setup); });
   expect(description()).toContain('on this machine');
   await act(async () => {
     settleSharedTrustConfirmation('skip');

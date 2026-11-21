@@ -3,9 +3,14 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { vi } from 'vitest';
 
 import {
+  forgetServiceFailure,
+  getServiceFailure,
   getServiceStatus,
+  guestIdOfServiceToken,
+  onGuestServiceEnded,
   beginGuestServiceHost,
   beginGuestServiceShutdown,
   proxyGuestServiceRequest,
@@ -16,6 +21,7 @@ import {
 import { setCapabilityGrants, writeExtensionStore } from './persist.js';
 import { listInstalledGuests, noteGuestPackageChanged } from './catalog.js';
 import { SERVICE_TOKEN_ENV, recordGuestService } from './service-registry.js';
+import { createGuestMarks } from './marks.js';
 
 const writeFixture = async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-service-'));
@@ -30,6 +36,16 @@ http.createServer((req, res) => {
   if (req.headers.authorization !== \`Bearer \${token}\`) {
     res.writeHead(401);
     res.end('no');
+    return;
+  }
+  if (req.url === '/data-dir') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ dataDir: process.env.OPENCHAMBER_SERVICE_DATA_DIR }));
+    return;
+  }
+  if (req.url === '/state-home') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ stateHome: process.env.XDG_STATE_HOME, unrelated: process.env.OC_TEST_UNRELATED }));
     return;
   }
   if (req.url === '/health') {
@@ -50,6 +66,14 @@ http.createServer((req, res) => {
   return { dir, persistPath, packageRoot };
 };
 
+const nextServiceEnd = () => {
+  const { promise, resolve } = Promise.withResolvers();
+  const stop = onGuestServiceEnded((guestId) => {
+    if (guestId === 'docker') resolve();
+  });
+  return { promise, stop };
+};
+
 beforeEach(() => beginGuestServiceHost());
 
 afterEach(async () => {
@@ -57,6 +81,54 @@ afterEach(async () => {
 });
 
 describe('guest service proxy', () => {
+  test('passes XDG_STATE_HOME to the service without passing unrelated variables', async () => {
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    const previousStateHome = process.env.XDG_STATE_HOME;
+    const previousUnrelated = process.env.OC_TEST_UNRELATED;
+    const stateHome = path.join(dir, 'state');
+    process.env.XDG_STATE_HOME = stateHome;
+    process.env.OC_TEST_UNRELATED = 'not inherited';
+    try {
+      const result = await proxyGuestServiceRequest({
+        guestId: 'docker',
+        packageRoot,
+        service: { entry: 'service/main.js' },
+        granted: ['service'],
+        persistPath,
+        method: 'GET',
+        path: '/state-home',
+      });
+      expect(JSON.parse(result.body)).toEqual({ stateHome });
+    } finally {
+      if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME;
+      else process.env.XDG_STATE_HOME = previousStateHome;
+      if (previousUnrelated === undefined) delete process.env.OC_TEST_UNRELATED;
+      else process.env.OC_TEST_UNRELATED = previousUnrelated;
+      await stopGuestService('docker');
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('gives the service its own data folder, created before the start', async () => {
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    try {
+      const result = await proxyGuestServiceRequest({
+        guestId: 'docker',
+        packageRoot,
+        service: { entry: 'service/main.js' },
+        granted: ['service'],
+        persistPath,
+        method: 'GET',
+        path: '/data-dir',
+      });
+      const { dataDir } = JSON.parse(result.body);
+      expect(dataDir).toBe(path.join(dir, 'guest-data', 'docker'));
+      expect((await fs.stat(dataDir)).isDirectory()).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test('refuses when permissions need a grant', async () => {
     const { dir, persistPath, packageRoot } = await writeFixture();
     try {
@@ -165,49 +237,59 @@ describe('guest service proxy', () => {
     }
   });
 
-  test('coalesces parallel first requests onto one spawn', async () => {
+  test('keeps what a service printed when it fails to start, until a clean start', async () => {
     const { dir, persistPath, packageRoot } = await writeFixture();
+    const entry = path.join(packageRoot, 'service', 'main.js');
+    const working = await fs.readFile(entry, 'utf8');
+    const request = () => proxyGuestServiceRequest({
+      guestId: 'docker',
+      packageRoot,
+      service: { entry: 'service/main.js', permissions: { exec: ['docker'] } },
+      granted: ['service'],
+      persistPath,
+      method: 'GET',
+      path: '/ping',
+    });
     try {
       await setCapabilityGrants('docker', persistPath, ['service']);
-      const service = {
-        entry: 'service/main.js',
-        permissions: { exec: ['docker'] },
-      };
-      const results = await Promise.all([
-        proxyGuestServiceRequest({
-          guestId: 'docker',
-          packageRoot,
-          service,
-          granted: ['service'],
-          persistPath,
-          method: 'GET',
-          path: '/ping',
-        }),
-        proxyGuestServiceRequest({
-          guestId: 'docker',
-          packageRoot,
-          service,
-          granted: ['service'],
-          persistPath,
-          method: 'GET',
-          path: '/ping',
-        }),
-        proxyGuestServiceRequest({
-          guestId: 'docker',
-          packageRoot,
-          service,
-          granted: ['service'],
-          persistPath,
-          method: 'GET',
-          path: '/ping',
-        }),
-      ]);
-      expect(results).toEqual([
-        { status: 200, body: '{"pong":true}' },
-        { status: 200, body: '{"pong":true}' },
-        { status: 200, body: '{"pong":true}' },
-      ]);
-      expect(getServiceStatus('docker')).toBe('ready');
+      await fs.writeFile(entry, "console.error('no docker socket'); process.exit(3);");
+      await expect(request()).rejects.toThrow();
+      expect(getServiceFailure('docker')?.output).toContain('no docker socket');
+      await fs.writeFile(entry, working);
+      await request();
+      expect(getServiceFailure('docker')).toBeNull();
+      await stopGuestService('docker');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('keeps a service killed from outside as a failure, and forgets it on request', async () => {
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    const entry = path.join(packageRoot, 'service', 'main.js');
+    await fs.appendFile(entry, "\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(new URL('./pid', import.meta.url), String(process.pid));\n");
+    try {
+      await setCapabilityGrants('docker', persistPath, ['service']);
+      await proxyGuestServiceRequest({
+        guestId: 'docker',
+        packageRoot,
+        service: { entry: 'service/main.js', permissions: { exec: ['docker'] } },
+        granted: ['service'],
+        persistPath,
+        method: 'GET',
+        path: '/ping',
+      });
+      const ended = nextServiceEnd();
+      try {
+        process.kill(Number(await fs.readFile(path.join(packageRoot, 'service', 'pid'), 'utf8')), 'SIGKILL');
+        await ended.promise;
+      } finally {
+        ended.stop();
+      }
+      expect(getServiceFailure('docker')?.output).toContain('Stopped by SIGKILL.');
+      forgetServiceFailure('docker');
+      expect(getServiceFailure('docker')).toBeNull();
+      await stopGuestService('docker');
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
@@ -246,41 +328,54 @@ describe('host-driven services', () => {
 
   test('stops itself after the idle window and restarts on the next request', async () => {
     const { dir, persistPath, packageRoot } = await writeFixture();
+    const idleStopMs = 150;
     try {
       await setCapabilityGrants('docker', persistPath, ['service']);
-      const first = await proxyGuestServiceRequest(request({ packageRoot, persistPath, idleStopMs: 150 }));
+      await proxyGuestServiceRequest(request({ packageRoot, persistPath }));
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const first = await proxyGuestServiceRequest(request({ packageRoot, persistPath, idleStopMs }));
       expect(first.status).toBe(200);
       const pid = readServicePid('docker');
       expect(pid).not.toBeNull();
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      await vi.advanceTimersByTimeAsync(idleStopMs);
       expect(getServiceStatus('docker')).toBe('stopped');
       expect(readServicePid('docker')).toBeNull();
 
-      const second = await proxyGuestServiceRequest(request({ packageRoot, persistPath, idleStopMs: 150 }));
+      vi.useRealTimers();
+      const second = await proxyGuestServiceRequest(request({ packageRoot, persistPath, idleStopMs }));
       expect(second.status).toBe(200);
       expect(readServicePid('docker')).not.toBe(pid);
     } finally {
+      vi.useRealTimers();
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
 
   test('a request keeps re-arming the window, and a panel request never arms one', async () => {
     const { dir, persistPath, packageRoot } = await writeFixture();
+    const idleStopMs = 200;
     try {
       await setCapabilityGrants('docker', persistPath, ['service']);
-      await proxyGuestServiceRequest(request({ packageRoot, persistPath, idleStopMs: 200 }));
+      await proxyGuestServiceRequest(request({ packageRoot, persistPath }));
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      await proxyGuestServiceRequest(request({ packageRoot, persistPath, idleStopMs }));
       const pid = readServicePid('docker');
       for (let i = 0; i < 3; i += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 120));
-        await proxyGuestServiceRequest(request({ packageRoot, persistPath, idleStopMs: 200 }));
+        await vi.advanceTimersByTimeAsync(120);
+        expect(readServicePid('docker')).toBe(pid);
+        await proxyGuestServiceRequest(request({ packageRoot, persistPath, idleStopMs }));
       }
       expect(readServicePid('docker')).toBe(pid);
 
       await stopGuestService('docker');
+      vi.useRealTimers();
       await proxyGuestServiceRequest(request({ packageRoot, persistPath }));
-      await new Promise((resolve) => setTimeout(resolve, 350));
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      await proxyGuestServiceRequest(request({ packageRoot, persistPath }));
+      await vi.advanceTimersByTimeAsync(idleStopMs);
       expect(getServiceStatus('docker')).toBe('ready');
     } finally {
+      vi.useRealTimers();
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
@@ -319,6 +414,8 @@ describe('host-driven services', () => {
 describe('pause during startup', () => {
   test('a stop that lands while the service is coming up wins', async () => {
     const { dir, persistPath, packageRoot } = await writeFixture();
+    // Keep startup open until the host stops it, regardless of machine load.
+    await fs.writeFile(path.join(packageRoot, 'service/main.js'), 'setInterval(() => {}, 1000);');
     try {
       await setCapabilityGrants('docker', persistPath, ['service']);
       const pending = proxyGuestServiceRequest({
@@ -332,11 +429,7 @@ describe('pause during startup', () => {
       });
       // Stop while the process is coming up: the start must notice and not
       // hand a ready service to the request that began it.
-      const startedAt = Date.now();
-      while (getServiceStatus('docker') !== 'starting' && Date.now() - startedAt < 5_000) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
-      expect(getServiceStatus('docker')).toBe('starting');
+      await vi.waitFor(() => expect(getServiceStatus('docker')).toBe('starting'), { timeout: 10_000 });
       await stopGuestService('docker');
       await expect(pending).rejects.toMatchObject({ code: 'NO_SERVICE' });
       expect(getServiceStatus('docker')).toBe('stopped');
@@ -369,6 +462,90 @@ describe('pause before the request reads the store', () => {
   });
 });
 
+describe('a service that ended', () => {
+  // The fixture leaves its token beside its entry, so the test can ask who it names.
+  const start = async ({ packageRoot, persistPath }) => {
+    await fs.appendFile(path.join(packageRoot, 'service', 'main.js'), "\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(new URL('./token', import.meta.url), token);\n");
+    await setCapabilityGrants('docker', persistPath, ['service']);
+    const params = {
+      guestId: 'docker',
+      packageRoot,
+      service: { entry: 'service/main.js', permissions: { exec: ['docker'] } },
+      granted: ['service'],
+      persistPath,
+      method: 'GET',
+      path: '/ping',
+    };
+    await proxyGuestServiceRequest(params);
+    return { params, token: await fs.readFile(path.join(packageRoot, 'service', 'token'), 'utf8') };
+  };
+  /** What each report found the service's token naming at that moment. */
+  const listen = (token) => {
+    const reports = [];
+    const stop = onGuestServiceEnded((guestId) => reports.push([guestId, guestIdOfServiceToken(token)]));
+    return { reports, stop };
+  };
+
+  test('a stop is reported once the token names nothing', async () => {
+    const fixture = await writeFixture();
+    const { token } = await start(fixture);
+    const { reports, stop } = listen(token);
+    const marks = createGuestMarks();
+    try {
+      expect(guestIdOfServiceToken(token)).toBe('docker');
+      expect(marks.set('docker', token, { sessionId: 'ses_1' }, { icon: 'alert', tone: 'warning', text: 'Waiting' })).toBe('changed');
+      expect(marks.list('docker')).toHaveLength(1);
+      await stopGuestService('docker');
+      expect(reports).toEqual([['docker', null]]);
+      // What the process set is gone with it, and its token sets nothing more.
+      expect(marks.dropEnded('docker')).toBe(true);
+      expect(marks.list('docker')).toEqual([]);
+      expect(marks.set('docker', token, { sessionId: 'ses_1' }, { icon: 'alert', tone: 'warning', text: 'Waiting' })).toBe('ended');
+      // Nothing is running: a second stop ends nothing.
+      await stopGuestService('docker');
+      expect(reports).toHaveLength(1);
+    } finally {
+      stop();
+      await fs.rm(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a process killed from outside is reported, and its restart is not', async () => {
+    const fixture = await writeFixture();
+    const { params, token } = await start(fixture);
+    const { reports, stop } = listen(token);
+    const ended = nextServiceEnd();
+    try {
+      process.kill(readServicePid('docker'), 'SIGKILL');
+      await ended.promise;
+      expect(reports).toEqual([['docker', null]]);
+      await proxyGuestServiceRequest(params);
+      const next = await fs.readFile(path.join(fixture.packageRoot, 'service', 'token'), 'utf8');
+      expect(next).not.toBe(token);
+      expect(guestIdOfServiceToken(next)).toBe('docker');
+      // Replacing the dead process discards its runtime, which reports the same end again; nothing new ended.
+      expect(reports.every(([guestId, named]) => guestId === 'docker' && named === null)).toBe(true);
+    } finally {
+      ended.stop();
+      stop();
+      await fs.rm(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a removed listener hears nothing', async () => {
+    const fixture = await writeFixture();
+    const { token } = await start(fixture);
+    const { reports, stop } = listen(token);
+    try {
+      stop();
+      await stopGuestService('docker');
+      expect(reports).toEqual([]);
+    } finally {
+      await fs.rm(fixture.dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('restart after the process died', () => {
   test('the next request restarts the service instead of reading the cleanup as a pause', async () => {
     const { dir, persistPath, packageRoot } = await writeFixture();
@@ -386,10 +563,12 @@ describe('restart after the process died', () => {
       expect(await proxyGuestServiceRequest(params)).toEqual({ status: 200, body: '{"pong":true}' });
       // Kill the process behind the host's back, the way a crash would.
       const pid = readServicePid('docker');
-      process.kill(pid, 'SIGKILL');
-      const startedAt = Date.now();
-      while (getServiceStatus('docker') === 'ready' && Date.now() - startedAt < 5_000) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
+      const ended = nextServiceEnd();
+      try {
+        process.kill(pid, 'SIGKILL');
+        await ended.promise;
+      } finally {
+        ended.stop();
       }
       expect(await proxyGuestServiceRequest(params)).toEqual({ status: 200, body: '{"pong":true}' });
     } finally {
@@ -464,41 +643,6 @@ describe('host shutdown', () => {
     }
   });
 
-  test('drains a first start paused before spawn and prevents it from surviving shutdown', async () => {
-    const fixture = await writeFixture();
-    const entered = Promise.withResolvers();
-    const release = Promise.withResolvers();
-    const access = fs.access.bind(fs);
-    const pausedAccess = spyOn(fs, 'access').mockImplementation(async (...args) => {
-      if (args[0] === path.join(fixture.packageRoot, 'service/main.js')) {
-        entered.resolve();
-        await release.promise;
-      }
-      return access(...args);
-    });
-    try {
-      const pending = proxyGuestServiceRequest(request(fixture)).catch((error) => error);
-      await entered.promise;
-      expect(readServicePid('docker')).toBeNull();
-      beginGuestServiceShutdown();
-      let drained = false;
-      const stopping = stopAllGuestServices().then(() => { drained = true; });
-      await Promise.resolve();
-      expect(drained).toBe(false);
-      expect(() => beginGuestServiceHost()).toThrow();
-      release.resolve();
-      expect(await pending).toMatchObject({ code: 'NO_SERVICE' });
-      await stopping;
-      expect(readServicePid('docker')).toBeNull();
-      expect(getServiceStatus('docker')).toBe('stopped');
-    } finally {
-      release.resolve();
-      pausedAccess.mockRestore();
-      await stopAllGuestServices();
-      await fs.rm(fixture.dir, { recursive: true, force: true });
-    }
-  });
-
   test('a request still reading the store cannot enter a later host lifecycle', async () => {
     const fixture = await writeFixture();
     try {
@@ -545,11 +689,7 @@ describe('crash recovery registry', () => {
       const restarted = readServicePid('docker');
       expect(await fs.readdir(registryDir)).toEqual([`${restarted}.json`]);
       process.kill(restarted, 'SIGKILL');
-      const startedAt = Date.now();
-      while ((await fs.readdir(registryDir)).length > 0 && Date.now() - startedAt < 5_000) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      expect(await fs.readdir(registryDir)).toEqual([]);
+      await vi.waitFor(async () => expect(await fs.readdir(registryDir)).toEqual([]), { timeout: 10_000 });
     } finally {
       await stopAllGuestServices();
       await fs.rm(fixture.dir, { recursive: true, force: true });

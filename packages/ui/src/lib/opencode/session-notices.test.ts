@@ -25,6 +25,20 @@ const instructionsUpdate = (sources: string[], text = "updated"): Message => ({
 })
 
 describe("readSessionNotice: shown", () => {
+  test("an answer from a lead's digest and a hand-over read from their metadata, with or without a description", () => {
+    expect(readSessionNotice(synthetic(undefined, { openchamberLeadAnswer: { question: "Which license?", answer: "MIT" } }, "answer text"))).toEqual({
+      kind: "lead-answer",
+      question: "Which license?",
+      answer: "MIT",
+      text: "answer text",
+    })
+    expect(readSessionNotice(synthetic("Handed over: README intro", { source: "openchamber-lead-handover", sessionID: "ses_2", title: "README intro" }))).toEqual({
+      kind: "lead-handover",
+      title: "README intro",
+      text: "model text",
+    })
+  })
+
   test("a move reads the new working folder from the text", () => {
     const text = "The environment you are running in is now:\n<env>\n  Working directory: /repo/.worktrees/fix-login\n</env>"
     expect(readSessionNotice(instructionsUpdate(["core/environment", "core/skill-guidance"], text))).toEqual({
@@ -45,6 +59,67 @@ describe("readSessionNotice: shown", () => {
 
   test("a restart", () => {
     expect(readSessionNotice(synthetic("Continuing after restart", { notice: "restart" }))?.kind).toBe("restart")
+  })
+
+  describe("a pull request wake", () => {
+    const url = "https://github.com/acme/app/pull/7"
+    const text = `<openchamber-pull-request url="${url}" number="7">\nPull request #7: a check failed (lint).\nYou are no longer watching it.\n</openchamber-pull-request>`
+
+    test("reads what changed from the metadata and the number from the envelope", () => {
+      const metadata = { source: "openchamber-pr-watch", url, events: ["checks-failed", "activity"], failedChecks: ["lint"], authors: ["bob"] }
+      expect(readSessionNotice(synthetic("Pull request #7: a check failed (lint)", metadata, text))).toEqual({
+        kind: "pull-request",
+        url,
+        number: 7,
+        events: ["checks-failed", "activity"],
+        failedChecks: ["lint"],
+        authors: ["bob"],
+        text,
+      })
+    })
+
+    test("a message written before the names were in the metadata reads without them", () => {
+      const notice = readSessionNotice(synthetic("Pull request #7: merged", { source: "openchamber-pr-watch", url, events: ["merged"] }, text))
+      expect(notice).toMatchObject({ kind: "pull-request", number: 7, failedChecks: [], authors: [] })
+    })
+
+    test("survives as an Activity row", () => {
+      const message = synthetic("Pull request #7: merged", { source: "openchamber-pr-watch", url, events: ["merged"] }, text)
+      const notice = readSessionNotice(message)!
+      expect(readSessionNoticePart(sessionNoticePart(message, notice, "assistant_1", "after"))).toEqual(notice)
+    })
+
+    test("an event this build does not know stays a plain notice", () => {
+      const metadata = { source: "openchamber-pr-watch", url, events: ["reopened"] }
+      expect(readSessionNotice(synthetic("Pull request #7: reopened", metadata, text))?.kind).toBe("plugin")
+    })
+  })
+
+  describe("an extension wait's wake", () => {
+    const text = `<openchamber-wait source="wait-kit/timer" wait="wait_1" outcome="fired">\nTimer (8 s) fired.\n8 seconds passed\n</openchamber-wait>`
+    const summary = "8 seconds passed\nThe second line the description leaves out"
+    const metadata = { source: "openchamber-wait", waitId: "wait_1", extension: "wait-kit", type: "timer", title: "Timer", label: "8 s", outcome: "fired", subject: "Timer (8 s)", summary }
+
+    test("reads the wait's name and the whole report, and survives as an Activity row", () => {
+      const message = synthetic("Timer (8 s): 8 seconds passed", metadata, text)
+      const notice = readSessionNotice(message)!
+      expect(notice).toEqual({ kind: "extension-wait", subject: "Timer (8 s)", outcome: "fired", summary, text })
+      expect(readSessionNoticePart(sessionNoticePart(message, notice, "assistant_1", "after"))).toEqual(notice)
+    })
+
+    test("marks the built-in timer by its minutes, so the row names it in the user's language", () => {
+      const builtIn = { ...metadata, extension: null, minutes: 6, subject: "Timer (6 min)", summary: "6 minutes passed." }
+      const message = synthetic("Timer (6 min): 6 minutes passed.", builtIn, text)
+      const notice = readSessionNotice(message)!
+      expect(notice).toMatchObject({ kind: "extension-wait", timerMinutes: 6 })
+      expect(readSessionNoticePart(sessionNoticePart(message, notice, "assistant_1", "after"))).toEqual(notice)
+      // An extension's own timer keeps its own words.
+      expect(readSessionNotice(synthetic("Timer (8 s): 8 seconds passed", { ...metadata, minutes: 6 }, text))).not.toHaveProperty("timerMinutes")
+    })
+
+    test("an outcome this build does not know stays a plain notice", () => {
+      expect(readSessionNotice(synthetic("Timer (8 s): snoozed", { ...metadata, outcome: "snoozed" }, text))?.kind).toBe("plugin")
+    })
   })
 
   test("a !command that could not start", () => {

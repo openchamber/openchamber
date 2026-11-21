@@ -9,14 +9,14 @@ Server-owned live state of the change requests, issues, discussions and tracker 
 - `POST /api/tracked-items/presence` `{ connectionId, visible }` is sent when the window's visibility flips; `POST /api/tracked-items/refresh` `{ items }` asks now (manual refresh, our own mutations). Clients never poll.
 - Items (`items.js`): a source-control item `{ provider, instance, kind: 'pull' | 'issue' | 'discussion', owner, repo, number, accountId? }` (`discussion` only on a provider with `capabilities.discussions`; elsewhere it parses as nothing), parsed by its provider's descriptor (`trackedItems.nestedOwners`, `instance.form`; a host-form instance may be missing and means `trackedItems.defaultInstance`, github.com), or a work item `{ provider, kind: 'work-item', identifier }`. The legacy `{ provider: 'linear', identifier }` without `kind` is still accepted and parses to the work-item shape. A work item's provider is any well-formed id that is not a source-control id or a reserved one; whether a tracker answers is decided at read time. An unregistered source-control provider parses as nothing and is dropped, from requests and from the persisted file alike.
 - Item keys (`items.js` `trackedItemKey`) must match `packages/ui/src/lib/trackedItems/model.ts`: `${provider}|${IDENTIFIER}` for a work item, `${provider}|${instance}|${kind}|${owner}/${repo}#${number}[@accountId]` otherwise. A source-control item may name `accountId`, the account its repository is bound to (a branch's request): on GitHub that bound account resolves with its own octokit on github.com and on a trusted enterprise host alike, falling back to the host's current account only when it is absent or no longer resolves; without `accountId` the host's current account reads it (a link). The same request read with two accounts is two items.
-- A server module follows items of its own with `setServerInterest(owner, items)` (an empty map ends it) and hears every moved state through `subscribe(listener)`, which gets the same `{ key, item, state, fetchedAt }` records clients do. `../pr-watch` is the one owner today: the pull requests agents wait on. These items refresh on the usual cadence whether or not any client is visible, and they are never trimmed while followed.
+- A server module follows items of its own with `setServerInterest(owner, items)` (an empty map ends it) and hears every moved state through `subscribe(listener)`, which gets the same `{ key, item, state, fetchedAt }` records clients do, plus the read's `requestedAt`. `../pr-watch` follows the pull requests agents wait on; `../github/merge-follow.js` follows merges users initiated here for system notifications. These items refresh on the usual cadence whether or not any client is visible, and they are never trimmed while followed.
 - A pull or merge request's state carries `activity` where the provider gives it: GitHub's conversation comments plus reviews, GitLab's user notes. It grows when someone writes on it, which is how a waiting agent hears about a comment or review.
 - `openchamber:source-control.activity` `{ directory }` goes to every client 3 s after an agent turn finishes there, so branches without a pull request are looked up again (discovery stays with the `pr/status` routes).
 
 ## Refresh
 
 - Only items shown by at least one visible connection, or followed by a server module, are asked. Cadence by state: open PR/MR 60 s (30 s while checks are pending), issues, discussions and closed PRs 5 min, work items 2 min, settled work items (`state.category` `done` or `canceled`) 5 min, merged never, unknown 60 s. A work item's state read from a file written before categories (only Linear's `state.type`) counts as open until the next answer. A connection turning visible refreshes its items older than 15 s.
-- An agent turn finishing (`session.idle` / idle `session.status` on the global event hub) refreshes open items after a 3 s settle.
+- An agent turn finishing (`session.idle` / idle `session.status` on the global event hub) refreshes open items after a 3 s settle, which coalesces the burst of idle events around a turn boundary.
 - A change made through the app's provider routes (a merge, a comment, a state change, a sign-in) and the board's refresh (`POST <provider>/read-cache/refresh`) refresh that provider's open items at once (`refreshProvider`, reported by `provider-read-cache`'s `onChange`).
 - Batches per provider, instance and reading account, up to the descriptor's `trackedItems.batchLimit` (GitHub 100, GitLab, Gitea and Gerrit 50); work items batch per tracker, up to 50. `readers.js` has two readers. `sourceControl` calls the source-control module's `readLiveSummaries`, which resolves the bound or current account and calls the provider's `resources.liveSummaries` (GitHub: `fetchPrSummaries` with the bound account on github.com or a trusted enterprise host, else the host's current one; GitLab and Gitea: their resources). `workItems` calls the tracker registry's `liveSummaries(identifiers)`; a tracker the registry does not know answers `disconnected`. Both map to `ok` / `disconnected` / `unavailable`. `sourceControl` with `details: true` is never a batch of this service: only `../pr-watch` asks it, for the one pull request it wakes a session about, and GitHub and GitLab then add `failedChecks` and `recentActivity` (`{ author, at }`, newest first) to an open pull request's summary. A GitHub item's instance is its host (missing means github.com), so the same owner/repo on github.com and an enterprise host never shares a batch, a cooldown or a login.
 - A failed or rate-limited provider keeps the last known states and is left alone with exponential backoff (30 s to 15 min); GitHub also honours the per-host rate-limit cooldown, which its `liveSummaries` reports as `{ status: 'unavailable' }` (a refused token as `{ status: 'disconnected' }`). No account on a host waits 2 min before asking again.
@@ -24,11 +24,21 @@ Server-owned live state of the change requests, issues, discussions and tracker 
 
 ## Persistence
 
-`tracked-items.json` in the data directory holds the last known states (12 h retention, at most 500 entries, written 2 s after a change through a temp file and rename). It is a cache: a missing or malformed file restores nothing, and an item a build cannot read (a discussion, to a build older than them) is dropped on its own while the rest restore. Clients also persist what they received (`useTrackedItemsStore`), so a restarted app shows the last known colours at once.
+`tracked-items.json` in the data directory holds the last known states (12 h retention, at most 500 entries, written 2 s after a change through a temp file and rename). It is a cache: a missing or malformed file restores nothing, and an item a build cannot read (a discussion, to a build older than them) is dropped on its own while the rest restore. Clients also persist what they received (`useTrackedItemsStore`), so a restarted app shows the last known colours at once. The temp file sits beside the target, because the rename is atomic only within one directory and filesystem. A restored entry never overwrites one a client asked about after the restart, which is newer.
 
 ## Runtimes
 
 Web, desktop, hosted and native mobile use it over the event stream (relayed on mobile; idle traffic is the stream's existing heartbeat). VS Code has no OpenChamber event stream, so it follows nothing, as before.
+
+## Invariants
+
+- Work-item identifiers are checked only for a sane key and batch request (`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`), because each tracker checks the shape it accepts when it reads. Tightening the pattern to one tracker's format would stop another tracker's items from parsing.
+- A project-path provider (Gerrit) may name a top-level project with no owner; its `repo` is the whole project path, and so is its key.
+- Item keys lowercase provider, instance, kind and project; an `accountId` keeps its own case because account ids are opaque and case-sensitive.
+- A connection announces at most 300 items (`MAX_ITEMS`); a larger request is rejected, never truncated. That is far above what a large workspace's sidebar shows.
+- A server listener that throws is logged, and the other listeners and the refresh keep running.
+- `requestedAt` is when the read behind a state began, so a listener that already has a newer read can drop an answer that was on its way.
+- Trimming to 500 entries drops only what no visible connection or server module follows, oldest first.
 
 ## Decisions
 
@@ -40,3 +50,23 @@ Batching, grouping and backoff are the service's; how an account is chosen and w
 
 Older clients send `{ provider: 'linear', identifier }` and older files hold it. Parsing it into `{ provider, kind: 'work-item', identifier }` keeps the key (`linear|ENG-12`) unchanged, so the same item is followed once whichever shape asked, and nothing needs migrating.
 
+### Why cached state keeps unparsed fields
+
+The persisted cache accepts any plain state object, including a provider's newer fields and a work item's older `state.type`. `CachedTrackedState` names only the fields used for cadence, with unknown values until the cadence guards inspect them. Loading and broadcasting preserve the original object and its extra fields; validating it as a current live summary would discard previously accepted cache entries.
+
+### Why batch accessors enforce invariants
+
+Refresh groups contain one provider, instance and account, and work-item providers cannot also be source-control providers. Every sliced batch is nonempty and homogeneous. The accessors check these invariants without casting a work item to a thread or asserting that an array slot is occupied. Changed keys still belong to retained entries when broadcasting and notifying listeners.
+
+### Route conversion contracts
+
+The request, response and application contracts for `routes.ts` live in
+`../shared/http-contracts.js`. `../shared/express.d.ts` declares the existing
+Express factory and JSON middleware. The request body remains external input
+to validate; the structural contract does not establish its fields.
+
+Route body guards establish only field access on objects, including arrays,
+and leave every field unknown. Routes check the item array before passing it
+to the parser, which retains its array and length checks. Connection errors narrow only their code;
+their message remains unchecked. String-tag checks retain boxed-string
+acceptance before calling `trim`.

@@ -19,11 +19,17 @@ const DIRECTORY = '/repo';
 
 const temporaryDirectories = [];
 const runtimes = [];
+const observers = new Set();
+const notify = () => {
+  for (const observer of observers) observer();
+};
 
 afterEach(async () => {
   const stopping = runtimes.splice(0);
   for (const runtime of stopping) runtime.stop();
   await Promise.all(stopping.map((runtime) => runtime.flush()));
+  vi.useRealTimers();
+  observers.clear();
   await Promise.all(temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
@@ -51,7 +57,17 @@ const createOpenCode = () => {
     synthetic: [],
     seenIds: new Set(),
     failPrompts: 0,
+    // Revert boundaries staged per session; a commit deletes from there on.
+    reverts: {},
+    failSessionReads: 0,
+    failRevertCommits: 0,
     counter: 0,
+  };
+  const commitRevert = (sessionID) => {
+    const boundary = state.reverts[sessionID];
+    if (!boundary) return;
+    delete state.reverts[sessionID];
+    state.records[sessionID].splice(state.records[sessionID].findIndex((record) => record.id === boundary));
   };
   const runTurn = (sessionID) => {
     const scripted = state.replies[sessionID].shift();
@@ -76,6 +92,24 @@ const createOpenCode = () => {
     const method = init.method ?? 'GET';
     if (pathname === '/api/session/active') return json({ data: state.active });
     if (pathname === '/api/session' && method === 'GET') return json({ data: [], cursor: {} });
+    const sessionRecord = pathname.match(/^\/api\/session\/([^/]+)$/);
+    if (sessionRecord && method === 'GET') {
+      if (state.failSessionReads > 0) {
+        state.failSessionReads -= 1;
+        return json({ error: 'boom' }, 500);
+      }
+      const id = decodeURIComponent(sessionRecord[1]);
+      return json({ data: { id, revert: state.reverts[id] ? { messageID: state.reverts[id] } : null } });
+    }
+    const revertCommit = pathname.match(/^\/api\/session\/([^/]+)\/revert\/commit$/);
+    if (revertCommit && method === 'POST') {
+      if (state.failRevertCommits > 0) {
+        state.failRevertCommits -= 1;
+        return json({ error: 'boom' }, 500);
+      }
+      commitRevert(decodeURIComponent(revertCommit[1]));
+      return new Response(null, { status: 204 });
+    }
     const match = pathname.match(/^\/api\/session\/([^/]+)\/(message|prompt|synthetic)$/);
     if (!match) return json({ error: 'not found' }, 404);
     const sessionID = decodeURIComponent(match[1]);
@@ -93,10 +127,18 @@ const createOpenCode = () => {
       state.records[sessionID].push({ type: 'synthetic', id: body.id, text: body.text });
       return json({ data: { id: body.id } });
     }
+    // As OpenCode: a prompt commits a staged revert before it is admitted.
+    commitRevert(sessionID);
     state.prompts.push({ sessionID, ...body });
     state.records[sessionID].push({ type: 'user', id: body.id, text: body.text });
     runTurn(sessionID);
     return json({ data: { id: body.id } });
+  });
+  const handleRequest = fetchImpl.getMockImplementation();
+  fetchImpl.mockImplementation(async (...args) => {
+    const response = await handleRequest(...args);
+    notify();
+    return response;
   });
   return { state, fetchImpl };
 };
@@ -113,9 +155,9 @@ const createRuntime = async ({ dataDir, openCode = createOpenCode(), retryDelayM
     },
     buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
     getOpenCodeAuthHeaders: () => ({}),
-    broadcastUiEvent: (event) => broadcasts.push(event),
-    onRunSettled: (sessionID) => settled.push(sessionID),
-    onRunEnded: (run) => ended.push(run),
+    broadcastUiEvent: (event) => { broadcasts.push(event); notify(); },
+    onRunSettled: (sessionID) => { settled.push(sessionID); notify(); },
+    onRunEnded: (run) => { ended.push(run); notify(); },
     routeSend,
     dataDir: dataDir ?? await makeDataDir(),
     fetchImpl: openCode.fetchImpl,
@@ -151,14 +193,16 @@ const startInput = (extra = {}) => ({
   ...extra,
 });
 
-const until = async (check, timeoutMs = 2_000) => {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (check()) return true;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  return check();
-};
+// Observe runtime callbacks and OpenCode responses, including ones already received.
+const until = (check) => new Promise((resolve) => {
+  const observe = () => {
+    if (!check()) return;
+    observers.delete(observe);
+    resolve(true);
+  };
+  observers.add(observe);
+  observe();
+});
 
 const runOf = (runtime) => runtime.snapshot().runs.find((run) => run.originalSessionID === ORIGINAL) ?? null;
 
@@ -240,21 +284,25 @@ describe('createAutoReviewRuntime', () => {
     runtime.start();
     await runtime.startRun(startInput({ handoff: undefined }));
 
-    expect(await until(() => runOf(runtime)?.status === 'limit', 5_000)).toBe(true);
+    expect(await until(() => runOf(runtime)?.status === 'limit')).toBe(true);
     expect(runOf(runtime).round).toBe(MAX_ROUNDS);
     expect(openCode.state.prompts.filter((prompt) => prompt.sessionID === REVIEW)).toHaveLength(MAX_ROUNDS + 1);
   });
 
   it('waits for a running session before it sends, so nothing steers into a live turn', async () => {
+    vi.useFakeTimers();
     const { runtime, openCode, emit } = await createRuntime();
     openCode.state.active = { [ORIGINAL]: { type: 'running' } };
     runtime.start();
     await runtime.startRun(startInput());
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    await vi.advanceTimersByTimeAsync(0);
+    await runtime.flush();
     expect(openCode.state.prompts).toEqual([]);
 
     openCode.state.active = {};
     emit({ type: 'session.status', properties: { sessionID: ORIGINAL, status: { type: 'idle' } } });
+    await vi.advanceTimersByTimeAsync(0);
+    await runtime.flush();
     expect(await until(() => openCode.state.prompts.length === 1)).toBe(true);
   });
 
@@ -268,7 +316,7 @@ describe('createAutoReviewRuntime', () => {
     expect(await until(() => settled.length > 0)).toBe(true);
     expect(settled).toEqual([ORIGINAL]);
     expect(openCode.state.prompts).toHaveLength(1);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await runtime.flush();
     expect(ended).toEqual([]);
   });
 
@@ -303,27 +351,158 @@ describe('createAutoReviewRuntime', () => {
     expect(openCode.state.synthetic.filter((item) => item.text === 'Handoff rules.')).toHaveLength(1);
   });
 
+  // OpenCode's commit deletes everything admitted past the revert's boundary (#6244).
+  describe('a revert staged on the session it sends to', () => {
+    const syntheticTexts = (openCode, sessionID) => openCode.state.records[sessionID]
+      .filter((record) => record.type === 'synthetic')
+      .map((record) => record.text);
+    const stageRevertOf = (openCode, sessionID) => {
+      openCode.state.records[sessionID].push({ type: 'user', id: 'msg_reverted', text: 'reverted' });
+      openCode.state.reverts[sessionID] = 'msg_reverted';
+    };
+
+    it('is committed before the handoff context goes into the reviewed session', async () => {
+      const { runtime, openCode } = await createRuntime();
+      stageRevertOf(openCode, ORIGINAL);
+      openCode.state.replies[ORIGINAL].push('The handoff.');
+      runtime.start();
+      await runtime.startRun(startInput());
+
+      expect(await until(() => openCode.state.prompts.length === 2)).toBe(true);
+      expect(syntheticTexts(openCode, ORIGINAL)).toEqual(['Handoff rules.']);
+      expect(openCode.state.records[ORIGINAL].map((record) => record.id)).not.toContain('msg_reverted');
+    });
+
+    it('is committed before the rules go into a reused review session', async () => {
+      const { runtime, openCode } = await createRuntime();
+      stageRevertOf(openCode, REVIEW);
+      openCode.state.replies[ORIGINAL].push('The handoff.');
+      openCode.state.replies[REVIEW].push(FINAL_MARKER_CLEAN);
+      runtime.start();
+      await runtime.startRun(startInput());
+
+      expect(await until(() => runOf(runtime)?.status === 'clean')).toBe(true);
+      expect(syntheticTexts(openCode, REVIEW)).toEqual(['Review rules.', LOOP_RULES]);
+    });
+
+    it.each([
+      { failure: 'read', arm: (state) => { state.failSessionReads = 1; } },
+      { failure: 'commit', arm: (state) => { state.failRevertCommits = 1; } },
+    ])('keeps the send pending with nothing admitted when the $failure fails', async ({ arm }) => {
+      const { runtime, openCode } = await createRuntime();
+      stageRevertOf(openCode, ORIGINAL);
+      arm(openCode.state);
+      let admittedDuringFailure = null;
+      const { fetchImpl } = openCode;
+      const original = fetchImpl.getMockImplementation();
+      fetchImpl.mockImplementation(async (url, init) => {
+        const response = await original(url, init);
+        if (response.status === 500) admittedDuringFailure = openCode.state.synthetic.length;
+        return response;
+      });
+      openCode.state.replies[ORIGINAL].push('The handoff.');
+      runtime.start();
+      await runtime.startRun(startInput());
+
+      expect(await until(() => openCode.state.prompts.length === 2)).toBe(true);
+      expect(admittedDuringFailure).toBe(0);
+      expect(syntheticTexts(openCode, ORIGINAL)).toEqual(['Handoff rules.']);
+    });
+
+    it('leaves the commit to the prompt when a send carries no context', async () => {
+      const { runtime, openCode } = await createRuntime();
+      openCode.state.replies[ORIGINAL].push('The handoff.');
+      runtime.start();
+      await runtime.startRun(startInput({ handoff: { text: 'Write a handoff.', instructions: '  ' } }));
+
+      expect(await until(() => openCode.state.prompts.length >= 1)).toBe(true);
+      await runtime.flush();
+      const reads = openCode.fetchImpl.mock.calls.filter(([url]) => new URL(url).pathname === `/api/session/${ORIGINAL}`);
+      expect(reads).toEqual([]);
+    });
+
+    it('reads the session and commits nothing when no revert is staged', async () => {
+      const { runtime, openCode } = await createRuntime();
+      openCode.state.replies[ORIGINAL].push('The handoff.');
+      runtime.start();
+      await runtime.startRun(startInput());
+
+      expect(await until(() => openCode.state.prompts.length === 2)).toBe(true);
+      expect(syntheticTexts(openCode, ORIGINAL)).toEqual(['Handoff rules.']);
+      expect(openCode.fetchImpl.mock.calls.some(([url]) => String(url).endsWith('/revert/commit'))).toBe(false);
+    });
+  });
+
   it('routes a session on Auto before each prompt, and a routing failure sends nothing', async () => {
+    vi.useFakeTimers();
+    const retryDelayMs = 20;
     const routed = [];
     let failRouting = true;
+    let routingFailed = false;
     const routeSend = async (send) => {
-      if (failRouting) throw new Error('no fallback model');
+      if (failRouting) {
+        routingFailed = true;
+        throw new Error('no fallback model');
+      }
       routed.push(send);
     };
-    const { runtime, openCode } = await createRuntime({ routeSend, retryDelayMs: () => 20 });
+    const { runtime, openCode } = await createRuntime({ routeSend, retryDelayMs: () => retryDelayMs });
     openCode.state.replies[ORIGINAL].push('The handoff.');
     runtime.start();
     await runtime.startRun(startInput());
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await vi.advanceTimersByTimeAsync(0);
+    await runtime.flush();
+    expect(routingFailed).toBe(true);
     expect(openCode.state.prompts).toEqual([]);
     expect(openCode.state.synthetic).toEqual([]);
 
     failRouting = false;
+    await vi.advanceTimersByTimeAsync(retryDelayMs);
+    await runtime.flush();
+    // Read the completed handoff, then deliver the review on its immediate timer.
+    await vi.advanceTimersByTimeAsync(0);
+    await runtime.flush();
+    await vi.advanceTimersByTimeAsync(0);
+    await runtime.flush();
     expect(await until(() => openCode.state.prompts.length === 2)).toBe(true);
     expect(routed).toEqual([
       { sessionId: ORIGINAL, directory: DIRECTORY, text: 'Write a handoff.' },
       { sessionId: REVIEW, directory: DIRECTORY, text: 'Review this.\n\nThe handoff.' },
     ]);
+  });
+
+  it('writes nothing once stop and flush return, even with a send still being answered', async () => {
+    const dataDir = await makeDataDir();
+    const openCode = createOpenCode();
+    let answer = () => {};
+    const answered = new Promise((resolve) => { answer = resolve; });
+    const original = openCode.fetchImpl.getMockImplementation();
+    openCode.fetchImpl.mockImplementation(async (url, init) => {
+      const response = await original(url, init);
+      if (new URL(url).pathname.endsWith('/prompt')) await answered;
+      return response;
+    });
+    const { runtime } = await createRuntime({ dataDir, openCode });
+    runtime.start();
+    await runtime.startRun(startInput());
+    expect(await until(() => openCode.state.prompts.length === 1)).toBe(true);
+
+    runtime.stop();
+    let flushReturned = false;
+    const flushed = runtime.flush().then(() => { flushReturned = true; });
+    try {
+      // While the response is held, the saved send must remain pending and
+      // flush must not return, even after a separate disk read completes.
+      const stored = JSON.parse(await fs.readFile(path.join(dataDir, 'auto-review.json'), 'utf8'));
+      expect(stored.runs[0].send.text).toBe('Write a handoff.');
+      expect(flushReturned).toBe(false);
+    } finally {
+      answer();
+      await flushed;
+    }
+    await fs.rm(dataDir, { recursive: true, force: true });
+    await runtime.flush();
+    await expect(fs.stat(dataDir)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('holds the queue until its runs are loaded after a start', async () => {

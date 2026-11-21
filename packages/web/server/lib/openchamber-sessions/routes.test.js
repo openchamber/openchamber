@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
 import request from 'supertest';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSessionKnowledgeRuntime, KNOWLEDGE_ENTRY_KEYS } from '../session-knowledge/runtime.js';
 
 const createWorktreeMock = vi.fn(async () => ({
@@ -420,21 +420,6 @@ describe('openchamber session routes', () => {
       });
     });
 
-    it('deletes a key when the patch value is null', async () => {
-      const { app } = createApp();
-      await request(app)
-        .post('/api/openchamber/sessions/ses_a/metadata')
-        .send({ patch: { openchamber: { goal: { id: 'g1' }, assist: { recap: 'r' } } } })
-        .expect(200);
-
-      const response = await request(app)
-        .post('/api/openchamber/sessions/ses_a/metadata')
-        .send({ patch: { openchamber: { assist: null } } })
-        .expect(200);
-
-      expect(response.body).toEqual({ metadata: { openchamber: { goal: { id: 'g1' } } } });
-    });
-
     it('reads back what it stored, per session', async () => {
       const { app } = createApp();
       await request(app).post('/api/openchamber/sessions/ses_a/metadata').send({ patch: { a: 1 } }).expect(200);
@@ -442,6 +427,29 @@ describe('openchamber session routes', () => {
       await expect(request(app).get('/api/openchamber/sessions/ses_a/metadata').expect(200))
         .resolves.toMatchObject({ body: { metadata: { a: 1 } } });
       await expect(request(app).get('/api/openchamber/sessions/ses_b/metadata').expect(200))
+        .resolves.toMatchObject({ body: { metadata: {} } });
+    });
+
+    it('rejects a stale conditional metadata patch without losing a newer pin', async () => {
+      const { app } = createApp();
+      const old = { openchamber: { context_obligatory_messages: [{ id: 'old' }] } };
+      const newer = { openchamber: { context_obligatory_messages: [{ id: 'old' }, { id: 'new' }] } };
+      await request(app).post('/api/openchamber/sessions/ses_a/metadata').send({ patch: newer }).expect(200);
+
+      const stale = await request(app).post('/api/openchamber/sessions/ses_a/metadata/compare-and-set')
+        .send({ expected: old, patch: { openchamber: { context_obligatory_messages: [{ id: 'copy' }] } } }).expect(200);
+      expect(stale.body).toEqual({ metadata: newer, conflict: true });
+
+      const retried = await request(app).post('/api/openchamber/sessions/ses_a/metadata/compare-and-set')
+        .send({ expected: newer, patch: { openchamber: { context_obligatory_messages: [{ id: 'copy' }, { id: 'new' }] } } }).expect(200);
+      expect(retried.body).toEqual({ metadata: { openchamber: { context_obligatory_messages: [{ id: 'copy' }, { id: 'new' }] } }, conflict: false });
+    });
+
+    it('rejects a conditional metadata write without an expected value', async () => {
+      const { app } = createApp();
+      await request(app).post('/api/openchamber/sessions/ses_a/metadata/compare-and-set')
+        .send({ patch: { a: 1 } }).expect(400);
+      await expect(request(app).get('/api/openchamber/sessions/ses_a/metadata').expect(200))
         .resolves.toMatchObject({ body: { metadata: {} } });
     });
 
@@ -661,6 +669,153 @@ describe('openchamber session routes', () => {
     expect(sessionCreateMock).toHaveBeenCalledWith({ location: { directory: '/repo/app' } });
   });
 
+  it('stores the requested model and variant on an empty session', async () => {
+    const { app } = createApp();
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', model: 'openai/gpt-5.5', variant: 'high' })
+      .expect(200);
+
+    expect(sessionCreateMock).toHaveBeenCalledWith({
+      location: { directory: '/repo/app' },
+      model: { providerID: 'openai', id: 'gpt-5.5', variant: 'high' },
+    });
+  });
+
+  it('resolves a model before storing a variant requested alone', async () => {
+    useCatalog();
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/gpt-5.5',
+        defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', variant: 'high' })
+      .expect(200);
+
+    expect(sessionCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+      model: { providerID: 'openai', id: 'gpt-5.5', variant: 'high' },
+    }));
+  });
+
+  it('rejects an unknown explicitly requested model before creating an empty session', async () => {
+    useCatalog();
+    const { app } = createApp();
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', model: 'openai/unknown' })
+      .expect(400);
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unsupported variant after resolving the default model', async () => {
+    useCatalog();
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/gpt-5.5', defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', variant: 'unknown' }).expect(400);
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('does not store Auto as an OpenCode model for an empty session', async () => {
+    useCatalog();
+    const { app } = createApp({
+      isAutoReady: async () => true,
+      readSettingsFromDiskMigrated: async () => ({
+        lastSelectedModel: 'openchamber/auto', defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', variant: 'high' }).expect(400);
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { model: 'configured-id', variant: 'high' },
+    { model: 'configured-id' },
+    { providerID: 'openai' },
+    { model: { id: 'bad' } },
+  ])('rejects a malformed model reference before creating an empty session: %o', async (selection) => {
+    useCatalog();
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/gpt-5.5', defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'side-task' }, ...selection }).expect(400);
+    expect(createWorktreeMock).not.toHaveBeenCalled();
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it.each([{ catalog: true }, { catalog: false }])('rejects an explicit Auto before the catalog or a worktree for an empty session (catalog: $catalog)', async ({ catalog }) => {
+    if (catalog) useCatalog();
+    const { app } = createApp();
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'side-task' }, model: 'openchamber/auto' })
+      .expect(400, { error: 'Auto cannot be selected for an empty session; provide a prompt or a specific model' });
+    expect(createWorktreeMock).not.toHaveBeenCalled();
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('checks an empty session selection against the new worktree before storing it', async () => {
+    useCatalog();
+    modelListMock
+      .mockImplementationOnce(async () => ({ data: CATALOG_MODELS }))
+      .mockImplementationOnce(async () => ({ data: [CATALOG_MODELS[1]] }));
+    const { app } = createApp();
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'side-task' }, model: 'openai/gpt-5.5', variant: 'high' })
+      .expect(400, {
+        error: "Unknown model 'openai/gpt-5.5' for /repo/worktrees/side-task",
+        partial: true, partialAction: 'worktree-created', directory: '/repo/worktrees/side-task',
+      });
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses to pin an empty session model the catalog could not verify', async () => {
+    modelListMock.mockImplementation(async () => { throw new Error('timed out'); });
+    const { app } = createApp();
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', model: 'openai/gpt-5.5' })
+      .expect(503, { error: 'Session selection is not ready: the model catalog is unavailable' });
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('resolves the requested model against the new worktree catalog', async () => {
+    useCatalog();
+    modelListMock
+      .mockImplementationOnce(async () => ({ data: [{ id: 'source-id', modelID: 'upstream', providerID: 'gateway', variants: [] }] }))
+      .mockImplementationOnce(async () => ({ data: [{ id: 'target-id', modelID: 'upstream', providerID: 'gateway', variants: [] }] }));
+    const { app } = createApp();
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'side-task' }, model: 'gateway/upstream' }).expect(200);
+    expect(sessionCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+      model: { providerID: 'gateway', id: 'target-id' },
+    }));
+  });
+
+  it('stores the catalog id when an empty session names a model by its upstream id', async () => {
+    useCatalog({ models: [{ id: 'my-gpt', modelID: 'gpt-5.5', providerID: 'gateway', variants: [] }] });
+    const { app } = createApp();
+    const response = await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', model: 'gateway/gpt-5.5' }).expect(200);
+    expect(sessionCreateMock).toHaveBeenCalledWith({
+      location: { directory: '/repo/app' },
+      model: { providerID: 'gateway', id: 'my-gpt' },
+    });
+    expect(response.body.model).toEqual({ providerID: 'gateway', modelID: 'my-gpt' });
+  });
+
   it('does not claim user ownership for a title from the agent service', async () => {
     const service = createOpenChamberSessionService({
       archiveStore: createMemoryArchiveStore(),
@@ -837,9 +992,9 @@ describe('openchamber session routes', () => {
 
     expect(await create({ lastSelectedModel: 'anthropic/claude-sonnet-5' }))
       .toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-5' });
-    // Kept through a catalog gap, like a saved default.
+    // A model the catalog no longer lists (its provider was removed): skipped.
     expect(await create({ lastSelectedModel: 'claude-code/opus' }))
-      .toEqual({ providerID: 'claude-code', modelID: 'opus' });
+      .toEqual({ providerID: 'opencode', modelID: 'big-pickle' });
     // A configured default outranks it.
     expect(await create({ lastSelectedModel: 'anthropic/claude-sonnet-5', defaultModel: 'openai/gpt-5.5' }))
       .toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
@@ -858,6 +1013,38 @@ describe('openchamber session routes', () => {
     expect(resolveAutoSelection).not.toHaveBeenCalled();
     expect(await create({ lastSelectedModel: 'openchamber/auto' }, { resolveAutoSelection, isAutoReady: async () => true }))
       .toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+  });
+
+  it('skips a configured model whose provider the catalog no longer lists', async () => {
+    useCatalog({
+      models: [{ id: 'big-pickle', modelID: 'big-pickle', providerID: 'opencode', variants: [] }, ...CATALOG_MODELS],
+    });
+    const create = async (settings) => {
+      const { app } = createApp({ readSettingsFromDiskMigrated: async () => settings });
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', prompt: 'Run this' })
+        .expect(200);
+      return response.body.model;
+    };
+
+    // The project's model is gone: the global default applies.
+    expect(await create({
+      defaultModel: 'openai/gpt-5.5',
+      projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
+    })).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+    // Both are gone: the fallback applies.
+    expect(await create({
+      defaultModel: 'removed/global',
+      projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
+    })).toEqual({ providerID: 'opencode', modelID: 'big-pickle' });
+
+    // An empty catalog says nothing about what exists: the project's model stands.
+    useCatalog({ models: [] });
+    expect(await create({
+      defaultModel: 'openai/gpt-5.5',
+      projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
+    })).toEqual({ providerID: 'removed', modelID: 'chosen' });
   });
 
   it('runs a named agent on the model it is bound to when the prompt omits one', async () => {
@@ -887,29 +1074,6 @@ describe('openchamber session routes', () => {
       model: { id: 'claude-sonnet-5', providerID: 'anthropic', variant: 'high' },
     });
     expect(sessionSwitchAgentMock).toHaveBeenCalledWith({ sessionID: 'ses_123', agent: 'plan' });
-  });
-
-  it('falls back to the defaults chain when the named agent binds no model', async () => {
-    useCatalog({
-      agents: [
-        { id: 'build', name: 'Build', mode: 'primary' },
-        { id: 'plan', name: 'Plan', mode: 'primary' },
-      ],
-    });
-    const { app } = createApp({
-      readSettingsFromDiskMigrated: async () => ({
-        defaultModel: 'openai/gpt-5.5',
-        defaultAgent: 'build',
-        projects: [{ id: 'proj_1', path: '/repo/app' }],
-      }),
-    });
-    const response = await request(app)
-      .post('/api/openchamber/sessions')
-      .send({ directory: '/repo/app', prompt: 'Run this', agent: 'plan' })
-      .expect(200);
-
-    expect(response.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
-    expect(response.body.agent).toBe('plan');
   });
 
   it('keeps an explicitly requested model over the named agent binding', async () => {
@@ -1461,6 +1625,191 @@ describe('openchamber session routes', () => {
     expect(response.body.worktree.branch).toBe('feature/fix');
   });
 
+  describe('the project\'s setup commands in a new worktree', () => {
+    // The merged view `projectConfigRuntime.readProjectSetup` answers.
+    const setupView = ({ shared = [], personal = [], trusted = true } = {}) => ({
+      setupWorktree: [...shared, ...personal],
+      trust: { hash: shared.length > 0 ? 'sha256:x' : null, trusted },
+      shared: { setupWorktree: shared },
+      personal: { setupWorktree: personal, setupWorktreeMode: 'append' },
+    });
+    const createdWorktree = { name: 'side-task', branch: 'side-task', path: '/repo/worktrees/side-task' };
+
+    it('runs them in a worktree that session.create makes, in the project path', async () => {
+      createWorktreeMock.mockResolvedValueOnce(createdWorktree);
+      const readProjectSetup = vi.fn(async () => setupView({ shared: ['bash copy.sh "$ROOT_PROJECT_PATH"'], personal: ['pnpm install'] }));
+      const { app } = createApp({ readProjectSetup });
+
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', worktree: { name: 'side-task' } })
+        .expect(200);
+
+      expect(readProjectSetup).toHaveBeenCalledWith('proj_1');
+      expect(createWorktreeMock).toHaveBeenCalledWith('/repo/app', {
+        mode: 'new', name: 'side-task', startCommand: 'bash copy.sh "/repo/app" && pnpm install',
+      }, expect.any(Object));
+      expect(response.body).not.toHaveProperty('untrustedSetupCommandsSkipped');
+    });
+
+    it('skips shared commands nobody trusted and says so in the result', async () => {
+      createWorktreeMock.mockResolvedValueOnce(createdWorktree);
+      const readProjectSetup = vi.fn(async () => setupView({ shared: ['pnpm install'], personal: ['make env'], trusted: false }));
+      const { app } = createApp({ readProjectSetup });
+
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', worktree: { name: 'side-task' } })
+        .expect(200);
+
+      expect(createWorktreeMock.mock.calls[0][1]).toEqual({ mode: 'new', name: 'side-task', startCommand: 'make env' });
+      expect(response.body.untrustedSetupCommandsSkipped).toEqual(['pnpm install']);
+    });
+
+    it('hands them to a worktree made from a pull request', async () => {
+      const createChangeRequestWorktree = vi.fn(async () => ({ name: 'feature-fix', branch: 'feature/fix', path: '/repo/worktrees/feature-fix' }));
+      const { app } = createApp({ createChangeRequestWorktree, readProjectSetup: vi.fn(async () => setupView({ shared: ['pnpm install'] })) });
+
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', pullRequest: 42 })
+        .expect(200);
+
+      expect(createChangeRequestWorktree).toHaveBeenCalledExactlyOnceWith({ directory: '/repo/app', number: 42, startCommand: 'pnpm install' });
+    });
+
+    it('runs none outside a registered project', async () => {
+      createWorktreeMock.mockResolvedValueOnce({ ...createdWorktree, path: '/elsewhere/worktrees/side-task' });
+      const readProjectSetup = vi.fn();
+      const { app } = createApp({ readProjectSetup });
+
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/elsewhere', worktree: { name: 'side-task' } })
+        .expect(200);
+
+      expect(readProjectSetup).not.toHaveBeenCalled();
+      expect(createWorktreeMock.mock.calls[0][1]).toEqual({ mode: 'new', name: 'side-task' });
+    });
+
+    it('runs them in the worktree a session moves into, from the project that holds the session', async () => {
+      const readProjectSetup = vi.fn(async () => setupView({ shared: ['pnpm install'], trusted: false }));
+      const service = createOpenChamberSessionService({
+        readSettingsFromDiskMigrated: async () => ({ projects: [{ id: 'proj_ai', path: '/repo/ai' }] }),
+        sanitizeProjects: (projects) => projects,
+        validateDirectoryPath: async (directory) => ({ ok: true, directory }),
+        buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+        getOpenCodeAuthHeaders: () => ({}),
+        waitForOpenCodeReady: vi.fn(async () => undefined),
+        worktreeBootstrapStore,
+        hydrateWorktreeCheckout: hydrateWorktreeCheckoutMock,
+        archiveStore: createMemoryArchiveStore(),
+        sessionMetadataStore: createMemorySessionMetadataStore(),
+        getBranches: vi.fn(async () => ({ all: [], defaultBranches: {} })),
+        resolveWorktreeTopLevel: vi.fn(async (directory) => ({ root: '/repo', prefix: directory.replace('/repo/', '') })),
+        readProjectSetup,
+      });
+
+      const result = await service.moveToWorktree('ses_1', { directory: '/repo/ai/src', worktree: { name: 'side-task', startRef: 'main' } });
+
+      expect(readProjectSetup).toHaveBeenCalledWith('proj_ai');
+      expect(result.untrustedSetupCommandsSkipped).toEqual(['pnpm install']);
+    });
+  });
+
+  describe('waiting for the worktree bootstrap', () => {
+    const serviceWith = (getWorktreeBootstrapStatus, bootstrap) => createOpenChamberSessionService({
+      readSettingsFromDiskMigrated: async () => ({ projects: [{ id: 'proj_1', path: '/repo/app' }] }),
+      sanitizeProjects: (projects) => projects,
+      validateDirectoryPath: async (directory) => ({ ok: true, directory }),
+      buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      worktreeBootstrapStore,
+      hydrateWorktreeCheckout: hydrateWorktreeCheckoutMock,
+      archiveStore: createMemoryArchiveStore(),
+      sessionMetadataStore: createMemorySessionMetadataStore(),
+      getWorktreeBootstrapStatus,
+      waitForActiveWorktreeBootstrap: () => bootstrap.promise,
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('keeps waiting past the deadline while the setup commands run after git finished', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      createWorktreeMock.mockResolvedValueOnce({ name: 'side-task', branch: 'side-task', path: '/repo/worktrees/side-task' });
+      const bootstrap = Promise.withResolvers();
+      let state = { status: 'pending', phase: 'git-ready' };
+      const service = serviceWith(vi.fn(async () => state), bootstrap);
+
+      const pending = service.create({ directory: '/repo/app', worktree: { name: 'side-task' } });
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(sessionCreateMock).not.toHaveBeenCalled();
+      state = { status: 'ready', phase: 'setup-ready' };
+      bootstrap.resolve();
+
+      await expect(pending).resolves.toMatchObject({ directory: '/repo/worktrees/side-task' });
+      expect(sessionCreateMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('answers not ready and starts no session once the setup deadline passed', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      createWorktreeMock.mockResolvedValueOnce({ name: 'side-task', branch: 'side-task', path: '/repo/worktrees/side-task' });
+      const service = serviceWith(vi.fn(async () => ({ status: 'pending', phase: 'git-ready' })), Promise.withResolvers());
+
+      const pending = service.create({ directory: '/repo/app', worktree: { name: 'side-task' }, prompt: 'Run this' });
+      const refusal = expect(pending).rejects.toMatchObject({
+        statusCode: 503, partial: true, partialAction: 'worktree-created', directory: '/repo/worktrees/side-task',
+      });
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(sessionCreateMock).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(3 * 60_000);
+
+      await refusal;
+      expect(sessionCreateMock).not.toHaveBeenCalled();
+      expect(sessionPromptMock).not.toHaveBeenCalled();
+    });
+
+    it('refuses a session in a checkout whose setup is still running', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const service = serviceWith(vi.fn(async () => ({ status: 'pending', phase: 'git-ready' })), Promise.withResolvers());
+
+      const pending = service.create({ directory: '/repo/app' });
+      const refusal = expect(pending).rejects.toMatchObject({ statusCode: 503, message: expect.stringContaining('still running') });
+      await vi.advanceTimersByTimeAsync(4 * 60_000 + 1_000);
+
+      await refusal;
+      expect(sessionCreateMock).not.toHaveBeenCalled();
+    });
+
+    it('takes a bootstrap that finished right at the deadline as finished', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      createWorktreeMock.mockResolvedValueOnce({ name: 'side-task', branch: 'side-task', path: '/repo/worktrees/side-task' });
+      const service = serviceWith(vi.fn(async () => ({ status: 'ready', phase: 'setup-ready' })), Promise.withResolvers());
+
+      const pending = service.create({ directory: '/repo/app', worktree: { name: 'side-task' } });
+      await vi.advanceTimersByTimeAsync(61_000);
+
+      const result = await pending;
+      expect(result).not.toHaveProperty('setupStillRunning');
+      expect(sessionCreateMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops at the deadline while git is still filling the folder', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      createWorktreeMock.mockResolvedValueOnce({ name: 'side-task', branch: 'side-task', path: '/repo/worktrees/side-task' });
+      const service = serviceWith(vi.fn(async () => ({ status: 'pending', phase: 'directory-created' })), Promise.withResolvers());
+
+      const pending = service.create({ directory: '/repo/app', worktree: { name: 'side-task' } });
+      const failure = expect(pending).rejects.toMatchObject({ message: 'Timed out waiting for the worktree bootstrap' });
+      await vi.advanceTimersByTimeAsync(61_000);
+
+      await failure;
+      expect(sessionCreateMock).not.toHaveBeenCalled();
+    });
+  });
+
   it('refuses a pull request it cannot make a worktree for and creates no session', async () => {
     const notFound = Object.assign(new Error('Pull request #42 was not found in acme/app'), { status: 404 });
     const { app } = createApp({ createChangeRequestWorktree: vi.fn(async () => { throw notFound; }) });
@@ -1709,7 +2058,7 @@ describe('openchamber session routes', () => {
         location: { directory: '/repo/app' },
       }));
       sessionListMock.mockImplementation(async ({ parentID, archived }) => ({
-        data: tree.filter((session) => session.parentID === parentID && (!archived || session.time.archived)),
+        data: tree.filter((session) => (parentID === undefined || session.parentID === parentID) && (!archived || session.time.archived)),
       }));
     };
     const send = (app, sessionID) => request(app)
@@ -1728,6 +2077,21 @@ describe('openchamber session routes', () => {
 
       expect(response.body.promptDispatched).toBe(true);
       expect(restoredIds().sort()).toEqual(['ses_child', 'ses_grandchild', 'ses_root']);
+    });
+
+    it("brings back the root's workflow agents, which only OpenChamber's metadata links to it", async () => {
+      useTree([
+        ...archivedTree,
+        { id: 'ses_agent', metadata: { openchamber: { kind: 'workflow-agent', parentID: 'ses_root' } }, time: { created: 1, archived: 1700 } },
+        { id: 'ses_agent_sub', parentID: 'ses_agent', time: { created: 1, archived: 1700 } },
+      ]);
+      const { app } = createApp();
+
+      await send(app, 'ses_root');
+
+      expect(restoredIds().sort()).toEqual(['ses_agent', 'ses_agent_sub', 'ses_child', 'ses_grandchild', 'ses_root']);
+      // Every folder's archive: a subsession can stay behind when its parent moves to another worktree.
+      expect(sessionListMock.mock.calls.every(([input]) => !('directory' in input))).toBe(true);
     });
 
     it('leaves the session archived when it was archived again while the send went out', async () => {

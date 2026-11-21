@@ -4,6 +4,9 @@ import { parseSource, sourceKey, loadSourceSections } from './sources.js';
 describe('repository-qualified PR sources', () => {
   it('keeps old cache keys and separates equal PR numbers in different repositories', () => {
     expect(sourceKey(parseSource({ kind: 'pr', number: 42 }))).toBe('pr:42');
+    expect(parseSource({ kind: 'pr', number: 42, sourceRepo: { owner: 'dotnet', repo: 'runtime' }, linked: true }))
+      .toEqual({ kind: 'pr', number: 42, sourceRepo: { owner: 'dotnet', repo: 'runtime' }, linked: true });
+    expect(parseSource({ kind: 'pr', number: 42, linked: 'yes' })).toEqual({ kind: 'pr', number: 42 });
     const upstream = parseSource({ kind: 'pr', number: 42, sourceRepo: { owner: 'upstream', repo: 'project' } });
     const fork = parseSource({ kind: 'pr', number: 42, sourceRepo: { owner: 'fork', repo: 'project' } });
     expect(sourceKey(upstream)).not.toBe(sourceKey(fork));
@@ -87,3 +90,42 @@ describe('top-level project PR sources', () => {
   });
 });
 
+describe('source input compatibility', () => {
+  const HASH = 'A'.repeat(40);
+
+  it('preserves coercion before normalizing commit hashes', () => {
+    expect(parseSource({ kind: 'commit', hash: new String(HASH) }))
+      .toEqual({ kind: 'commit', hash: HASH.toLowerCase() });
+    for (const hash of [[HASH], 1e39, undefined]) {
+      expect(() => parseSource({ kind: 'commit', hash })).toThrow('full commit hash');
+    }
+    expect(() => parseSource({ kind: 'commit', hash: Symbol('hash') })).toThrow(TypeError);
+    const normalized = { unchecked: true };
+    const hash = { toString: () => HASH, toLowerCase: () => normalized };
+    hash.toLowerCase.call = null;
+    expect(parseSource({ kind: 'commit', hash })).toEqual({ kind: 'commit', hash: normalized });
+    let methodReads = 0;
+    let hashReads = 0;
+    const accessorHash = {
+      toString: () => HASH,
+      get toLowerCase() {
+        methodReads += 1;
+        return function () {
+          expect(this).toBe(accessorHash);
+          return normalized;
+        };
+      },
+    };
+    expect(parseSource({ kind: 'commit', get hash() { hashReads += 1; return accessorHash; } }))
+      .toEqual({ kind: 'commit', hash: normalized });
+    expect(hashReads).toBe(2);
+    expect(methodReads).toBe(1);
+  });
+
+  it('keeps invalid reader failures at the dependency boundary', async () => {
+    for (const getPullRequestDiff of [undefined, {}, true]) {
+      await expect(loadSourceSections('/repo', { kind: 'pr', number: 3 }, { getPullRequestDiff }))
+        .rejects.toMatchObject({ statusCode: 500, message: 'Pull request diffs are unavailable' });
+    }
+  });
+});

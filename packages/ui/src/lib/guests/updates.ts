@@ -14,6 +14,7 @@ export type UpdateGuestErrorCode =
   | 'clone-auth-failed'
   | 'invalid-manifest'
   | 'missing-build'
+  | 'invalid-opencode-plugin'
   | 'host-too-old'
   | 'enterprise-mode'
   | 'swap-failed'
@@ -21,7 +22,7 @@ export type UpdateGuestErrorCode =
   | 'failed';
 
 const updateErrorSchema = z.object({
-  error: z.enum(['not-git', 'clone-failed', 'clone-auth-failed', 'invalid-manifest', 'missing-build', 'host-too-old', 'swap-failed', 'not-found', 'enterprise-mode']),
+  error: z.enum(['not-git', 'clone-failed', 'clone-auth-failed', 'invalid-manifest', 'missing-build', 'invalid-opencode-plugin', 'host-too-old', 'swap-failed', 'not-found', 'enterprise-mode']),
   required: z.string().trim().min(1).max(64).optional(),
 });
 
@@ -33,11 +34,6 @@ type UpdateGuestResult =
   | { ok: true; guest: InstalledGuest }
   | { ok: false; code: UpdateGuestErrorCode; required?: string };
 
-/**
- * Ask the server to compare every git install with its origin. The server
- * answers from a one-hour cache unless `force`. Failure is distinct from
- * "nothing to update" so the page never clears badges on a network error.
- */
 export const checkGuestUpdates = async (force: boolean): Promise<CheckGuestUpdatesResult> => {
   try {
     const response = await runtimeFetch('/api/guests/updates/check', {
@@ -69,7 +65,6 @@ const readUpdateError = async (response: Response): Promise<{ code: UpdateGuestE
   }
 };
 
-/** Replace the installed git copy with a fresh clone of its origin. Returns the refreshed catalog row. */
 export const updateGuest = async (id: string): Promise<UpdateGuestResult> => {
   try {
     const response = await runtimeFetch(`/api/guests/${id}/update`, {

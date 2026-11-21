@@ -1,15 +1,6 @@
 import type { SessionSidebarRow } from './sessionSidebarRowModel';
 
-/**
- * Opening and closing a section, project, worktree, folder, multi-run or a
- * session's subsessions in the
- * sidebar. The rows are a flat virtual list, so there is no container to
- * animate: the rows the header shows or hides are revealed above a moving
- * boundary, and the rows after them slide with that boundary, as one block
- * changing height would.
- */
 
-/** Whether a header row is open; null for rows that show or hide nothing, and while search forces every header open. */
 const disclosureOpen = (row: SessionSidebarRow): boolean | null => {
   switch (row.kind) {
     case 'activity-header':
@@ -17,11 +8,11 @@ const disclosureOpen = (row: SessionSidebarRow): boolean | null => {
     case 'project-header':
     case 'group-header':
     case 'folder-header':
-      return row.forceExpanded ? null : !row.collapsed;
+      return !row.collapsed;
     case 'run':
-      return row.forceExpanded ? null : row.expanded;
+      return row.expanded;
     case 'session':
-      return row.expanded === undefined || row.forceExpanded ? null : row.expanded;
+      return row.expanded ?? null;
     default:
       return null;
   }
@@ -29,23 +20,12 @@ const disclosureOpen = (row: SessionSidebarRow): boolean | null => {
 
 type SessionSidebarDisclosure = {
   opened: boolean;
-  /** The toggled header in the previous and in the next rows. */
   previousHeaderIndex: number;
   nextHeaderIndex: number;
-  /**
-   * The rows shown or hidden, `[blockStart, blockEnd)`: indexes into the next
-   * rows when the header opened, into the previous rows when it closed.
-   */
   blockStart: number;
   blockEnd: number;
 };
 
-/**
- * The one header the user just opened or closed between two row lists, with
- * the rows that appeared or went under it. Null when no header changed, when
- * several did at once (Collapse all, search), or when the change is not one
- * block of rows right under the header.
- */
 export const findSessionSidebarDisclosure = (
   previous: readonly SessionSidebarRow[],
   next: readonly SessionSidebarRow[],

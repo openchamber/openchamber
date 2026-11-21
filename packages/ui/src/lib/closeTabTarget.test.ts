@@ -60,6 +60,46 @@ describe('close tab target', () => {
     releaseEditor();
   });
 
+  test('a covering surface wins over a tab the user clicked later', () => {
+    const page = element();
+    const sidebar = element();
+    const closed: string[] = [];
+    const releaseSession = registerCloseTabTarget(() => closed.push('session'), { current: document.body });
+    const releasePage = registerCloseTabTarget(() => closed.push('page'), { current: page }, 1);
+
+    // A click in the sidebar records the session target as used after the page.
+    sidebar.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    closeTab();
+    releasePage();
+    closeTab();
+    releaseSession();
+
+    expect(closed).toEqual(['page', 'session']);
+  });
+
+  test('tells the desktop shell when a target is registered and when it is gone', async () => {
+    const calls: Array<[string, { active: boolean } | undefined]> = [];
+    Object.assign(dom, {
+      __OPENCHAMBER_DESKTOP__: {
+        invoke: async (command: string, args?: { active: boolean }) => {
+          calls.push([command, args]);
+          return null;
+        },
+      },
+    });
+
+    const release = registerCloseTabTarget(() => undefined, { current: null });
+    await Promise.resolve();
+    release();
+    await Promise.resolve();
+    Reflect.deleteProperty(dom, '__OPENCHAMBER_DESKTOP__');
+
+    expect(calls).toEqual([
+      ['desktop_set_close_tab_target', { active: true }],
+      ['desktop_set_close_tab_target', { active: false }],
+    ]);
+  });
+
   test('a target on the whole page takes the clicks outside the zones and leaves the zones theirs', () => {
     const rightZone = element(document.body, 'right');
     const terminal = element(rightZone);

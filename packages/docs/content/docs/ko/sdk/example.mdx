@@ -16,8 +16,11 @@ description: 복사해서 쓸 수 있는, 파일 세 개로 된 완전한 OpenCh
   "private": true,
   "openchamber": {
     "apiVersion": 1,
+    "id": "my-repos",
+    "name": "Repos",
+    "icon": "github",
     "contributes": {
-      "panel": { "id": "my-repos", "name": "Repos", "icon": "github", "entry": "panel/index.html" },
+      "panel": { "entry": "panel/index.html" },
       "attach": "panel",
       "integration": {
         "name": "GitHub (token)",

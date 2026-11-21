@@ -39,6 +39,16 @@ describe('tracked items interest', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
 
+  test('items on screen fill the cap before a background follower declared earlier', async () => {
+    const { interest, posts, ready } = setup();
+    interest.declare(Symbol('cleanup'), Array.from({ length: 300 }, (_, index) => pull(1000 + index)), { background: true });
+    interest.declare(Symbol('panel'), [pull(1)]);
+    ready('c1');
+    await settle(0);
+    expect(posts[0].body.items).toHaveLength(300);
+    expect(posts[0].body.items?.some((item) => item.kind === 'pull' && item.number === 1)).toBe(true);
+  });
+
   test('sends the union once the connection is known, once per change, and again after a reconnect', async () => {
     const { interest, posts, ready } = setup();
     const sidebar = Symbol('sidebar');

@@ -22,23 +22,17 @@ import { useUIStore } from '@/stores/useUIStore';
 
 export const IntegrationsPage: React.FC = () => {
   const { t } = useI18n();
-  // Source-control sign-in is an OpenChamber server feature; VS Code uses the
-  // editor's own Git and GitHub integration instead.
   const sourceControlProviders = useSourceControlProviders();
   const servedSourceControl = isVSCodeRuntime() ? [] : sourceControlProviders;
-  // Trackers exist where the runtime has the API; the server says which. An
-  // extension's tracker (`ext-<id>`) is drawn under Extension accounts instead.
   const trackerDescriptors = useTrackerDescriptors();
   const servedTrackers = getRegisteredRuntimeAPIs()?.trackers ? trackerDescriptors.filter((descriptor) => !isExtensionTrackerId(descriptor.id)) : [];
   const guests = useGuestsStore((state) => state.guests);
   const runtimeKey = useGuestsStore((state) => state.runtimeKey);
-  const builtInGuests = !isVSCodeRuntime() && !isMobileSurfaceRuntime()
+  const builtInGuests = !isVSCodeRuntime()
     ? guests.filter((guest) => guest.source === 'bundled' && guest.integration && isGuestActive(guest))
     : [];
   const hasBuiltIn = servedSourceControl.length > 0 || servedTrackers.length > 0 || builtInGuests.length > 0;
   const enterpriseMode = useEnterpriseMode();
-  // The catalog is a main-window page, opened the way the sidebar opens it;
-  // enterprise mode hides it until administrators can curate its sources.
   const { isMobile } = useDeviceInfo();
   const canBrowseCatalog = !enterpriseMode && !isMobile && !isVSCodeRuntime() && !isMobileSurfaceRuntime();
   const openCatalog = () => {
@@ -50,7 +44,7 @@ export const IntegrationsPage: React.FC = () => {
   return (
     <SettingsPageLayout
       title={t('settings.page.integrations.title')}
-      description={t('settings.page.integrations.description')}
+      namedBySidebar
       showSaveStatus
       headerEnd={canBrowseCatalog ? (
         <Button
@@ -62,7 +56,7 @@ export const IntegrationsPage: React.FC = () => {
           title={t('settings.integrations.browse.hint')}
           onClick={openCatalog}
         >
-          <Icon name="store-2" className="size-4" />
+          <Icon name="apps-2-add" className="size-4" />
           {t('settings.integrations.browse.label')}
         </Button>
       ) : null}
@@ -71,7 +65,6 @@ export const IntegrationsPage: React.FC = () => {
         <SettingsSection
           title={t('settings.integrations.firstParty.title')}
           info={t('settings.integrations.firstParty.info')}
-          divider={false}
           settingsItem="integrations.first-party"
           contentClassName="space-y-3"
         >
@@ -84,7 +77,7 @@ export const IntegrationsPage: React.FC = () => {
           {builtInGuests.map((guest) => <GuestIntegrationCard key={`${runtimeKey}:${guest.id}`} guest={guest} />)}
         </SettingsSection>
       ) : null}
-      <CatalogExtensionsSection divider={hasBuiltIn} />
+      <CatalogExtensionsSection />
       <GuestIntegrationsSection />
     </SettingsPageLayout>
   );

@@ -6,7 +6,7 @@ import { getCurrentIntlLocale } from '@/lib/i18n';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { isFilePathWithinDirectory } from '@/lib/path-utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { isBinaryFile, isImageFile, isPdfFile, looksLikeBinaryText } from '@/lib/toolHelpers';
+import { isBinaryFile, isDelimitedTableFile, isImageFile, isPdfFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
@@ -40,20 +40,14 @@ const classifyReadError = (error: unknown): ContextFileOpenFailure => {
     return { reason: 'missing' };
   }
 
-  // The server's own reason (a permission error, say) tells the user more than the fallback.
   const reason = message.trim();
   return { reason: 'unreadable', message: reason && reason !== READ_FAILED_FALLBACK ? reason : null };
 };
 
-// A referenced file outside the active workspace (a skill, an agent output
-// under /tmp) is a legitimate read. Without the flag the server rejects it
-// and the caller reports the file as unreadable.
 const isOutsideWorkspace = (path: string, options?: ContextFileOpenOptions): boolean => (
   Boolean(options?.directory && !isFilePathWithinDirectory(path, options.directory))
 );
 
-// Null when the runtime has no metadata route or the stat fails: the read
-// below then reports the failure.
 const readFileSize = async (
   files: FilesAPI,
   path: string,
@@ -94,7 +88,6 @@ const readFileContent = async (
     params.set('allowOutsideWorkspace', 'true');
   }
   const response = await runtimeFetch(`/api/fs/read?${params.toString()}`, {
-    // Avoid conditional requests (304 + empty body).
     cache: 'no-store',
     headers: options?.directory ? { 'x-opencode-directory': options.directory } : undefined,
   });
@@ -106,21 +99,32 @@ const readFileContent = async (
   return response.text();
 };
 
-/**
- * Validate whether a context-panel click may open a path in the shared file editor.
- * Previewable/non-text binaries are allowed through so FilesView can show image/PDF
- * preview or the cannot-preview empty state — never by decoding them as editable text here.
- */
+export const readContextFileExistence = async (
+  files: FilesAPI,
+  path: string,
+  options?: ContextFileOpenOptions,
+): Promise<'present' | 'missing' | 'unknown'> => {
+  if (!files.statFile) return 'unknown';
+  try {
+    await files.statFile(path, {
+      directory: options?.directory,
+      allowOutsideWorkspace: isOutsideWorkspace(path, options),
+    });
+    return 'present';
+  } catch (error) {
+    return classifyReadError(error).reason === 'missing' ? 'missing' : 'unknown';
+  }
+};
+
 export const validateContextFileOpen = async (
   files: FilesAPI,
   path: string,
   options?: ContextFileOpenOptions,
 ): Promise<ContextFileOpenValidationResult> => {
-  if (isBinaryFile(path) || isPdfFile(path) || isImageFile(path)) {
+  if (isBinaryFile(path) || isPdfFile(path) || isImageFile(path) || isDelimitedTableFile(path)) {
     return { ok: true };
   }
 
-  // Refused by its size, before a read that would pull the whole file in.
   const size = await readFileSize(files, path, options);
   if (size !== null && size > MAX_OPEN_FILE_BYTES) {
     return { ok: false, reason: 'too-large-size', sizeBytes: size };

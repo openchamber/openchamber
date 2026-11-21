@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import type { Session } from '@/lib/opencode/model';
-import { routeMessage, useSessionUIStore } from '@/sync/session-ui-store';
+import { resolveGoalObjective, routeMessage, useSessionUIStore } from '@/sync/session-ui-store';
 import { devtools } from 'zustand/middleware';
-import type { CreateMultiRunParams, CreateMultiRunResult } from '@/types/multirun';
+import type { CreateMultiRunParams, CreateMultiRunResult, MultiRunGoal } from '@/types/multirun';
 import { opencodeClient } from '@/lib/opencode/client';
+import { clearSessionGoal, sessionGoalIntro, setSessionGoal } from '@/lib/sessionGoalActions';
 import { syncSessionKnowledge } from '@/lib/sessionKnowledgeApi';
 import { getWorktreeSetupWaitEnabled, saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
@@ -81,10 +82,6 @@ export const registerMultiRunSession = (session: Session, directory: string): Se
   return sessionWithDirectory;
 };
 
-/**
- * Sends a lane its prompt. Each lane is a fresh session, so it is owed the
- * project's standing context exactly as a composer send would be.
- */
 export async function dispatchRunPrompt(input: {
   runtimeKey: string;
   assertCurrent: () => void;
@@ -96,24 +93,41 @@ export async function dispatchRunPrompt(input: {
   variant?: string;
   agent?: string;
   files?: Array<{ type: 'file'; mime: string; filename: string; url: string }>;
+  goal?: MultiRunGoal;
 }): Promise<void> {
   input.assertCurrent();
   const expandText = useSnippetsStore.getState().expandText;
   const knowledgeSync = syncSessionKnowledge(input.directory, input.sessionId, null, input.runtimeKey);
   const text = await expandText(input.prompt).catch(() => input.prompt);
   input.assertCurrent();
-  await routeMessage({
-    runtimeKey: input.runtimeKey,
-    sessionId: input.sessionId,
-    directory: input.directory,
-    content: text,
-    providerID: input.providerID,
-    modelID: input.modelID,
-    variant: input.variant,
-    agent: input.agent,
-    files: input.files,
-    ready: knowledgeSync,
-  });
+  if (input.goal) {
+    await setSessionGoal(
+      input.sessionId,
+      input.directory,
+      { objective: resolveGoalObjective(text, input.directory), tokenBudget: input.goal.tokenBudget },
+      null,
+      input.runtimeKey,
+    );
+    input.assertCurrent();
+  }
+  try {
+    await routeMessage({
+      runtimeKey: input.runtimeKey,
+      sessionId: input.sessionId,
+      directory: input.directory,
+      content: text,
+      providerID: input.providerID,
+      modelID: input.modelID,
+      variant: input.variant,
+      agent: input.agent,
+      files: input.files,
+      additionalParts: input.goal ? [{ text: sessionGoalIntro(input.goal.tokenBudget), synthetic: true }] : undefined,
+      ready: knowledgeSync,
+    });
+  } catch (error) {
+    if (input.goal) await clearSessionGoal(input.sessionId, input.directory).catch(() => undefined);
+    throw error;
+  }
 }
 
 const resolveActiveProject = (): ProjectRef | null => {
@@ -207,7 +221,6 @@ export const useMultiRunStore = create<MultiRunStore>()(
 
           const createdRuns: Array<{
             sessionId: string;
-            /** Where the run's session starts: the worktree root, or the project's folder inside it. */
             directory: string;
             providerID: string;
             modelID: string;
@@ -304,7 +317,6 @@ export const useMultiRunStore = create<MultiRunStore>()(
                   assertCurrent();
                 }
 
-                // A checkout that never populated is removed with its branch; the lane counts as failed.
                 const startDirectory = await resolveCreatedWorktreeStartDirectory(project, worktreeMetadata);
                 assertCurrent();
                 const session = await createRun(startDirectory);
@@ -364,6 +376,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
                 variant: run.variant,
                 agent,
                 files: [...(filesForMessage ?? []), ...(run.files ?? []).map((f) => ({ type: 'file' as const, mime: f.mime, filename: f.filename, url: f.url }))],
+                goal: params.goal,
               });
             } catch (err) {
               console.warn('[MultiRun] Failed to start run:', err);

@@ -120,6 +120,7 @@ describe('Gerrit change context', () => {
     expect(result.changeRequest).toMatchObject({ number: 42, revisionNumber: 3, labels: [{ name: 'ui' }] });
     expect(result.voteLabels.map((label) => [label.name, label.status])).toEqual([['Code-Review', 'recommended'], ['Verified', 'approved']]);
     expect(result.submitRequirements).toEqual([{ name: 'Code-Review', status: 'unsatisfied' }]);
+    expect(result.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([['carol', 'pending'], ['bob', 'commented']]);
     expect(result.revisions.map((revision) => revision.number)).toEqual([1, 2, 3]);
     expect(result.issueComments.map((comment) => comment.revision)).toEqual([1, 2, 3, 3, 3]);
     expect(result.reviewComments).toEqual([expect.objectContaining({ path: 'src/login.js', line: 2, revision: 3, body: 'Nit: name this field.' })]);
@@ -148,6 +149,16 @@ describe('Gerrit change context', () => {
     expect(result.changeRequest.headSha).toBe(PS3);
 
     await expect(service.changeRequestContext('/repo', 42, { remote: 'origin', revision: 'd'.repeat(40) })).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('reads a change a link named in another project', async () => {
+    const { service } = setup({
+      'GET /changes/other%2Fapp~7': { ...fixtures.change, _number: 7, project: 'other/app' },
+      'GET /changes/other%2Fapp~7/comments': {},
+      'GET /changes/other%2Fapp~7/revisions/current/related': { changes: [] },
+    });
+    const { changeRequest } = await service.changeRequestContext('/repo', 7, { project: { owner: 'other', name: 'app' }, remote: 'origin', linked: true });
+    expect(changeRequest).toMatchObject({ number: 7 });
   });
 
   it('refuses a selector outside the bound project and a change of another project', async () => {
@@ -244,10 +255,52 @@ describe('Gerrit mutations', () => {
     await expect(service.resolveChangeRequestMutation(context, { ...expected, headSha: PS2 })).rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH' });
   });
 
+  describe('review drafts', () => {
+    const draft = { id: 'd1', patch_set: 3, line: 7, message: 'Mine' };
+    const drafts = { [`GET ${CHANGE}/drafts`]: { 'src/a.ts': [draft] } };
+
+    it('writes a draft on the patchset that was read, on the parent for the old side', async () => {
+      const { service, calls } = setup({ [`PUT ${CHANGE}/revisions/${PS3}/drafts`]: { id: 'd2' } });
+
+      await service.addReviewComment({
+        providerTarget, position: { path: 'src/a.ts', side: 'old', startLine: 5, line: 7 }, body: 'Here', expectedTarget: { headSha: PS3 },
+      });
+
+      expect(calls.at(-1).body).toEqual({
+        path: 'src/a.ts', message: 'Here', side: 'PARENT', line: 7,
+        range: { start_line: 5, start_character: 0, end_line: 8, end_character: 0 },
+      });
+    });
+
+    it('changes only a draft of the viewer, and discards each one', async () => {
+      const { service, calls } = setup({
+        ...drafts,
+        [`PUT ${CHANGE}/revisions/3/drafts/d1`]: { id: 'd1' },
+        [`DELETE ${CHANGE}/revisions/3/drafts/d1`]: {},
+      });
+
+      await service.updateReviewComment({ providerTarget, commentId: 'd1', body: 'New' });
+      await service.discardReview({ providerTarget });
+      await expect(service.deleteReviewComment({ providerTarget, commentId: 'other' })).rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID' });
+
+      expect(calls.filter((call) => call.method === 'PUT').map((call) => call.body)).toEqual([{ message: 'New' }]);
+      expect(calls.filter((call) => call.method === 'DELETE')).toHaveLength(1);
+    });
+
+    it('sends a review of drafts alone, and refuses one with nothing in it', async () => {
+      const withDrafts = setup({ ...drafts, [`POST ${CHANGE}/revisions/${PS3}/review`]: fixtures.reviewResult });
+      await withDrafts.service.vote({ providerTarget, votes: {}, expectedTarget: { headSha: PS3 } });
+      expect(withDrafts.calls.at(-1).body).toEqual({ labels: {}, drafts: 'PUBLISH_ALL_REVISIONS' });
+
+      const empty = setup({ [`GET ${CHANGE}/drafts`]: {} });
+      await expect(empty.service.vote({ providerTarget, votes: {}, expectedTarget: { headSha: PS3 } })).rejects.toMatchObject({ status: 422 });
+    });
+  });
+
   it('posts votes to the patchset that was read, and refuses once a newer one is current', async () => {
     const { service, calls } = setup({ [`POST ${CHANGE}/revisions/${PS3}/review`]: fixtures.reviewResult });
     await expect(service.vote({ providerTarget, votes: { 'Code-Review': 2 }, body: 'LGTM', expectedTarget: { headSha: PS3 } })).resolves.toEqual({ commented: true });
-    expect(calls.at(-1).body).toEqual({ labels: { 'Code-Review': 2 }, message: 'LGTM' });
+    expect(calls.at(-1).body).toEqual({ labels: { 'Code-Review': 2 }, drafts: 'PUBLISH_ALL_REVISIONS', message: 'LGTM' });
 
     await expect(service.vote({ providerTarget, votes: { 'Code-Review': 2 }, expectedTarget: { headSha: PS2 } })).rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH' });
     expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1);
@@ -299,6 +352,26 @@ describe('Gerrit mutations', () => {
     await expect(service.setState({ providerTarget, state: 'closed' })).resolves.toEqual({ state: 'closed' });
     await expect(service.reconcileStateMutation(providerTarget, 'closed')).resolves.toMatchObject({ state: 'succeeded' });
     await expect(service.reconcileStateMutation(providerTarget, 'open')).resolves.toMatchObject({ state: 'failed' });
+  });
+
+  it('marks a change work-in-progress, and reconciles it by the flag', async () => {
+    let workInProgress = false;
+    const { service, calls } = setup({
+      [`GET ${CHANGE}`]: () => ({ ...fixtures.change, work_in_progress: workInProgress }),
+      [`POST ${CHANGE}/wip`]: () => {
+        workInProgress = true;
+        return new Response('', { status: 200 });
+      },
+    });
+
+    await expect(service.draft({ providerTarget })).resolves.toEqual({ draft: true });
+    expect(calls.some((call) => call.method === 'POST' && call.url.pathname.endsWith('/wip'))).toBe(true);
+    await expect(service.reconcileChangeRequestMutation(providerTarget, 'change-request-draft'))
+      .resolves.toEqual({ state: 'succeeded', result: { draft: true } });
+
+    workInProgress = false;
+    await expect(service.reconcileChangeRequestMutation(providerTarget, 'change-request-draft'))
+      .resolves.toMatchObject({ state: 'failed' });
   });
 
   it('reconciles submit by MERGED and ready by the work-in-progress flag', async () => {

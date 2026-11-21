@@ -1,8 +1,9 @@
 import type { QuotaProviderId } from '@/types';
 
-interface QuotaProviderMeta {
+export interface QuotaProviderMeta {
   id: QuotaProviderId;
   name: string;
+  providers?: string[];
 }
 
 export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
@@ -32,4 +33,5 @@ export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'kilo', name: 'Kilo Code' },
   { id: 'zenmux', name: 'ZenMux' },
   { id: 'xai', name: 'xAI' },
+  { id: 'mistral', name: 'Mistral' },
 ];

@@ -15,7 +15,6 @@ export function resolveRecoveryNextStep(
     return { kind: 'remote-form' };
   }
 
-  // action === 'use-local'
   switch (variant) {
     case 'local-unavailable':
       return { kind: 'local-setup' };

@@ -20,6 +20,33 @@ const createProbe = (sessions, { failureId, timeoutMs = 10_000, delayMs = 0 } = 
   return { probe, reads, signals };
 };
 
+describe('direct child activity', () => {
+  const running = { type: 'running' };
+
+  it('needs no history reads when every session is idle', async () => {
+    const { probe, reads } = createProbe({});
+    expect(await probe.hasWorkingChildren('root', {})).toBe(false);
+    expect(reads).toEqual([]);
+  });
+
+  it('checks only active records and keeps direct-child semantics', async () => {
+    const { probe, reads } = createProbe({
+      child: { id: 'child', parentID: 'root' },
+      nested: { id: 'nested', parentID: 'child' },
+      other: { id: 'other' },
+    });
+    expect(await probe.hasWorkingChildren('root', { root: running, nested: running, other: running })).toBe(false);
+    expect(reads).toEqual(['nested', 'child', 'other']);
+    expect(await probe.hasWorkingChildren('root', { child: running })).toBe(true);
+  });
+
+  it('keeps unreadable activity unknown unless a child is proven to be working', async () => {
+    const { probe } = createProbe({ child: { id: 'child', parentID: 'root' } });
+    expect(await probe.hasWorkingChildren('root', { missing: running })).toBeNull();
+    expect(await probe.hasWorkingChildren('root', { missing: running, child: running })).toBe(true);
+  });
+});
+
 describe('queue descendant activity', () => {
   const running = { type: 'running' };
 
@@ -113,5 +140,79 @@ describe('queue descendant activity', () => {
     const { probe, reads } = createProbe({ child: { id: 'child', parentID: 'parent' } }, { timeoutMs: 1, delayMs: 10 });
     expect(await probe.hasWorkingDescendants('root', { child: running })).toBeNull();
     expect(reads).toEqual(['child']);
+  });
+});
+
+describe('working children', () => {
+  const running = { type: 'running' };
+  const link = (parentID) => ({ openchamber: { kind: 'workflow-agent', parentID } });
+  // `children` is what OpenCode lists for `?parentID=root`; `sessions` answers single reads.
+  const probeWith = ({ children = [], sessions = {} }) => createSessionActivityProbe({
+    buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+    getOpenCodeAuthHeaders: () => ({}),
+    fetchImpl: async (url) => {
+      const { pathname, searchParams } = new URL(url);
+      if (pathname === '/api/session') return Response.json({ data: searchParams.get('parentID') === 'root' ? children : [], cursor: {} });
+      const id = decodeURIComponent(pathname.split('/').at(-1));
+      return sessions[id] ? Response.json({ data: sessions[id] }) : new Response(null, { status: 404 });
+    },
+  });
+
+  it('counts a running OpenCode child', async () => {
+    expect(await probeWith({ sessions: { child: { id: 'child', parentID: 'root' } } }).hasWorkingChildren('root', { child: running })).toBe(true);
+  });
+
+  it('counts a running workflow agent, which OpenCode does not list as a child', async () => {
+    const probe = probeWith({ sessions: { agent: { id: 'agent', metadata: link('root') } } });
+    expect(await probe.hasWorkingChildren('root', { agent: running })).toBe(true);
+  });
+
+  it("counts a running subagent of an idle workflow agent", async () => {
+    const probe = probeWith({ sessions: { agent: { id: 'agent', metadata: link('root') }, sub: { id: 'sub', parentID: 'agent' } } });
+    expect(await probe.hasWorkingChildren('root', { sub: running })).toBe(true);
+  });
+
+  it("does not count another session's workflow agent or an unrelated session", async () => {
+    const probe = probeWith({ sessions: { agent: { id: 'agent', metadata: link('other') }, other: { id: 'other' }, plain: { id: 'plain' } } });
+    expect(await probe.hasWorkingChildren('root', { root: running, agent: running, plain: running })).toBe(false);
+  });
+
+  it('is unknown when a running session cannot be read', async () => {
+    expect(await probeWith({}).hasWorkingChildren('root', { gone: running })).toBeNull();
+  });
+});
+
+describe('running background jobs', () => {
+  const probeAnswering = (response) => createSessionActivityProbe({
+    buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+    getOpenCodeAuthHeaders: () => ({}),
+    fetchImpl: async () => response(),
+  });
+
+  it('keeps the running jobs of the tree with their owners', async () => {
+    const probe = probeAnswering(() => Response.json({ data: [
+      { kind: 'shell', sessionID: 'child', status: 'running', command: 'bun test', time: { started: 7 } },
+      { kind: 'subagent', sessionID: 'root', status: 'completed', time: { started: 1, completed: 2 } },
+    ] }));
+    expect(await probe.fetchRunningBackgroundJobs('root')).toEqual([
+      { kind: 'shell', sessionID: 'child', command: 'bun test', startedAt: 7 },
+    ]);
+  });
+
+  it('drops an image job past OpenCode\'s 30-minute image timeout, which nothing generates any more', async () => {
+    const now = Date.now();
+    const probe = probeAnswering(() => Response.json({ data: [
+      { kind: 'image', sessionID: 'root', status: 'running', time: { started: now - 40 * 60 * 1000 } },
+      { kind: 'image', sessionID: 'root', status: 'running', time: { started: now - 60 * 1000 } },
+    ] }));
+    expect((await probe.fetchRunningBackgroundJobs('root')).map((job) => job.startedAt)).toEqual([now - 60 * 1000]);
+  });
+
+  it('tells an OpenCode without the route from one that could not answer', async () => {
+    expect(await probeAnswering(() => new Response(null, { status: 404 })).fetchRunningBackgroundJobs('root')).toBeUndefined();
+    const gone = () => Response.json({ _tag: 'SessionNotFoundError', message: 'Session not found' }, { status: 404 });
+    expect(await probeAnswering(gone).fetchRunningBackgroundJobs('root')).toBeNull();
+    expect(await probeAnswering(() => new Response('down', { status: 503 })).fetchRunningBackgroundJobs('root')).toBeNull();
+    expect(await probeAnswering(() => Response.json({ data: {} })).fetchRunningBackgroundJobs('root')).toBeNull();
   });
 });

@@ -20,11 +20,16 @@ Write the list component (the existing autocompletes are the model) and an `Inli
 
 - A list rises right above the line being typed, starting at its trigger, and stays within the field's width. It drops below the line only when the room above is short of its full height and less than the room below, as near the top of the screen. The room below ends where the user can see: on the phone, at the top of the keyboard, which covers the page without shrinking the window. It may extend past the field vertically, for example over the transcript above the composer.
 - It is anchored at the trigger, so it does not move while the query grows.
-- Every list has the same shape, so they read as one family: 420px wide (the composer's `@` list, which also shows file paths, 560px; emoji, a glyph and a short name per row, 280px), a 4px inset around its rows, rows rounded one step less than the list, the description muted on one line after the name, and the scope at the end edge.
+- Every list has the same shape, so they read as one family: 420px wide (the composer's `@` list, which also shows file paths, and its `/` list, whose command descriptions need the room, 560px; emoji, a glyph and a short name per row, 280px), a 4px inset around its rows, rows rounded one step less than the list, the description muted on one line after the name, and the scope at the end edge.
 - The field's keys are untouched until the list reports results. After that, the list takes only the arrows, Ctrl+N/P, Enter, Tab and Escape, and none of them during an IME composition.
 - A `typedOnly` picker opens only on typing. A paste, a drop or a caret move keeps an open list in step or closes it.
 - The choice is written over the trigger and query that the field holds at that moment. If that text changed from outside while the list was open, nothing is written.
 - On the phone the composer's lists take its whole width, still right above the line being typed.
+- Placement uses viewport coordinates. For an above-line placement, `top` denotes the popup's bottom edge. Below-line placement uses the current caret line's bottom so a wrapped query stays clear of the list.
+- Query changes trigger a fresh measurement because wrapping can move the trigger itself. The horizontal inset aligns the trigger with row text in either text direction.
+- Picker arrays stay stable and their order resolves overlapping matches. A list without `hasResults` takes keys immediately; a host ignores a key when `handleKeyDown` returns true. Replacement leaves the caret after the inserted text.
+- Presses inside a list preserve field focus and stay inside the field's interaction boundary so an enclosing host does not close on an outside press.
+- Textarea listeners follow the current element behind the ref because a field can remount.
 
 ## Decisions
 
@@ -43,3 +48,15 @@ It goes through the browser's own editing path, so the field's React `onChange` 
 ### Why lists are portalled, into a dialog when there is one
 
 Fields sit in glass popovers, where a nested backdrop filter renders transparent, and in panels that clip. A modal dialog treats the rest of the page as outside, so a field inside one portals its list into the dialog.
+
+### Why fixed placement resets the right edge
+
+Lists carry `inset-s-0`, which sets `right: 0` in right-to-left layouts and can override the measured left position. Fixed placement resets `right` to `auto` so the measured anchor controls placement.
+
+### Why viewport limits also read the app's keyboard inset
+
+The iOS app's keyboard overlays a full-height view and the app lifts its UI through `--oc-keyboard-inset`. Visual viewport height alone leaves room behind that keyboard, so the visible bottom also respects the inset owned by `lib/mobileKeyboardInsets.ts`.
+
+### Why textarea measurement includes the rest of the word
+
+A textarea cannot report caret coordinates, so an off-screen copy measures its layout. The copy uses the field's wrapping styles and text width excluding the scrollbar, and its marker includes the rest of the word because wrapping moves a whole word to the next line.

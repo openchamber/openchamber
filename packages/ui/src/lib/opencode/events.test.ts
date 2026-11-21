@@ -40,6 +40,23 @@ describe("translateWireEvent", () => {
     })
   })
 
+  test("session.created of a workflow agent names the session that ran it as the parent", () => {
+    const [event] = translateWireEvent({
+      ...base,
+      type: "session.created",
+      durable,
+      data: {
+        sessionID: "ses_agent",
+        projectID: "proj_1",
+        location: { directory: "/repo" },
+        slug: "agent",
+        version: "2.3.0",
+        metadata: { openchamber: { kind: "workflow-agent", parentID: "ses_parent" } },
+      },
+    })
+    expect(event?.type === "session.created" && event.properties.info.parentID).toBe("ses_parent")
+  })
+
   test("session.forked carries the fork and parent ids (2.x sends no session.created for a fork)", () => {
     const forked = translateWireEvent({
       ...base,
@@ -146,6 +163,40 @@ describe("translateWireEvent", () => {
     })
   })
 
+  test("skills attached to a prompt entering the inbox reach the live user message", () => {
+    const events = translateWireEvent({
+      ...base,
+      type: "session.inbox.enqueued",
+      durable,
+      data: {
+        sessionID: "ses_1",
+        inboxID: "msg_u",
+        item: { type: "user", delivery: "steer", payload: { text: "Follow $demo", skills: [{ id: "demo", name: "Demo" }] } },
+      },
+    })
+    expect(events[0]).toEqual({
+      type: "message.updated",
+      properties: { info: { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 1000 }, skills: [{ id: "demo", name: "Demo" }] } },
+    })
+  })
+
+  test("a synthetic item entering the inbox is pending until it is delivered", () => {
+    const events = translateWireEvent({
+      ...base,
+      type: "session.inbox.enqueued",
+      durable,
+      data: {
+        sessionID: "ses_1",
+        inboxID: "msg_s",
+        item: { type: "synthetic", delivery: "steer", payload: { text: "result" } },
+      },
+    })
+    expect(events).toEqual([{
+      type: "message.updated",
+      properties: { info: { id: "msg_s", sessionID: "ses_1", role: "synthetic", time: { created: 1000 }, text: "result", pending: true } },
+    }])
+  })
+
   test("assistant steps create the message, then patch it on completion", () => {
     const started = translateWireEvent({
       ...base,
@@ -183,6 +234,21 @@ describe("translateWireEvent", () => {
         },
       },
     ])
+  })
+
+  test("completed compaction events retain the model that wrote the summary", () => {
+    const model = { providerID: "summary-provider", id: "summary-model" }
+    const events = translateWireEvent({
+      ...base, type: "session.compaction.ended", durable,
+      data: { sessionID: "ses_1", reason: "auto", text: "Summary", model },
+    })
+    expect(events[0]).toMatchObject({ properties: { info: { role: "compaction", status: "completed", model } } })
+    const legacy = translateWireEvent({
+      ...base, type: "session.compaction.ended", durable,
+      data: { sessionID: "ses_1", reason: "auto", text: "Summary" },
+    })
+    expect(legacy[0]).toMatchObject({ properties: { info: { role: "compaction", status: "completed", summary: "Summary" } } })
+    expect(legacy[0]).not.toHaveProperty("properties.info.model")
   })
 
   test("text streams as a part, deltas, then a final snapshot", () => {
@@ -318,7 +384,7 @@ describe("translateWireEvent", () => {
       [{ ...base, type: "command.updated", data: {} }, "command"],
       [{ ...base, type: "skill.updated", data: {} }, "skill"],
       [{ ...base, type: "plugin.updated", data: {} }, "plugin"],
-      [{ ...base, type: "credential.updated", data: {} }, "credential"],
+      [{ ...base, type: "credential.updated", data: { integrationID: "openai", credentialID: "cred_1" } }, "credential"],
       [{ ...base, type: "credential.switched", data: { integrationID: "openai", credentialID: null } }, "credential"],
       [
         { ...base, type: "project.updated", data: { id: "proj", canonical: "/repo", time: { created: 1, updated: 1, active: 1 }, sandboxes: [] } },

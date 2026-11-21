@@ -14,7 +14,6 @@ export interface MultiRunFileAttachment {
 export interface MultiRunGroup {
   prompt: string;
   models: MultiRunModelSelection[];
-  /** Files that belong to this prompt variant only (for example resolved @mentions). */
   files?: MultiRunFileAttachment[];
 }
 
@@ -25,20 +24,21 @@ export interface MultiRunAutoFusion {
   agent?: string;
 }
 
+export interface MultiRunGoal {
+  tokenBudget: number | null;
+}
+
 export interface CreateMultiRunParams {
-  /** Seed for the group slug, worktree and branch names. */
   name: string;
-  /** Human title shown in the sidebar and overview; defaults to `name`. */
   title?: string;
   groups: MultiRunGroup[];
   agent?: string;
   worktreeBaseBranch?: string;
   isolateRuns?: boolean;
-  /** Files sent with every variant. */
   files?: MultiRunFileAttachment[];
   setupCommands?: string[];
-  /** Fuse the lanes automatically once all of them finish. */
   autoFusion?: MultiRunAutoFusion;
+  goal?: MultiRunGoal;
 }
 
 export interface CreateMultiRunResult {

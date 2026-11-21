@@ -329,3 +329,32 @@ describe('session routes bound their upstream read', () => {
     });
   }, 30_000);
 });
+
+describe('session list metadata', () => {
+  it('drops the retired delivered-knowledge signature from upstream and legacy metadata alike', async () => {
+    const upstream = http.createServer((_req, res) => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ data: [
+        { id: 'ses_upstream', metadata: { openchamber: { knowledge_context_delivered: 'mg:a:1', work: { state: 'done' } } } },
+        { id: 'ses_legacy', metadata: {} },
+      ] }));
+    });
+    await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+    try {
+      const app = createRecordingApp();
+      registerOpenCodeProxy(app, createStubDeps(`http://127.0.0.1:${upstream.address().port}`, {
+        getArchivedSessions: async () => null,
+        getStoredSessionMetadata: async () => ({ ses_legacy: { openchamber: { knowledge_context_delivered: 'mg:b:2', pinned: true } } }),
+      }));
+      const res = createResponseDouble();
+      await app.routes.get('/api/session')(createRequestDouble('/api/session'), res, () => {});
+      expect(res.body.data.map((session) => session.metadata)).toEqual([
+        { openchamber: { work: { state: 'done' } } },
+        { openchamber: { pinned: true } },
+      ]);
+    } finally {
+      await new Promise((resolve) => upstream.close(resolve));
+    }
+  }, 30_000);
+});
+

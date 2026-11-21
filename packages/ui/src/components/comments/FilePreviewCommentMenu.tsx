@@ -1,7 +1,6 @@
 import React from 'react';
-import { createPortal } from 'react-dom';
 
-import { cn } from '@/lib/utils';
+import { toast } from '@/components/ui';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -10,23 +9,15 @@ import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore'
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { collectSelectionOverlayRects } from '@/lib/selectionOverlayRects';
 import { getTypeToCommentText } from '@/lib/typeToComment';
-import { Icon } from '@/components/icon/Icon';
 import { InlineCommentInput } from './InlineCommentInput';
+import { SelectionCommentPopup } from './SelectionCommentPopup';
 
 interface FilePreviewCommentMenuProps {
   containerRef: React.RefObject<HTMLElement | null>;
   filePath: string;
-  /** Raw file source, used to locate the selected fragment's line range. */
   fileContent: string;
 }
 
-/**
- * Comment-on-selection for read-only file previews (rendered markdown and the
- * like). Selecting text shows a small Comment pill above the selection;
- * choosing it opens the shared comment input, and attaching stores a
- * file-quote context draft carrying the selected fragment (with a best-effort
- * source line range) plus the user's comment.
- */
 export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: FilePreviewCommentMenuProps) {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
@@ -41,8 +32,6 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
   const commentModeRef = React.useRef(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
   const selectionRangeRef = React.useRef<Range | null>(null);
-  // The selected fragment stays visibly highlighted while the comment input
-  // owns focus, same as chat quote comments.
   const [highlightRects, setHighlightRects] = React.useState<DOMRect[] | null>(null);
 
   const hide = React.useCallback(() => {
@@ -94,16 +83,8 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
     };
   }, [containerRef, hide]);
 
-  /**
-   * Best-effort mapping of the rendered-text selection back to source lines:
-   * an exact match of the fragment (or its first line) in the raw content
-   * yields a range; markdown syntax usually breaks the match, in which case
-   * the draft simply carries no line numbers.
-   */
   const resolveLineRange = React.useCallback((fragment: string): { start: number; end: number } | null => {
     const lineAt = (index: number): number => fileContent.slice(0, index).split('\n').length;
-    // Inline markdown syntax (emphasis markers and such) breaks long matches,
-    // so each anchor line is tried at decreasing lengths.
     const candidatesFor = (line: string): string[] => {
       const trimmed = line.trim();
       return [trimmed, trimmed.slice(0, 32), trimmed.split(' ').slice(0, 4).join(' ')]
@@ -130,8 +111,6 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
     const start = lineAt(startIndex);
     if (fragmentLines.length === 1) return { start, end: start };
     const endIndex = locate(fragmentLines[fragmentLines.length - 1], startIndex);
-    // A partially located multi-line fragment gets no range rather than a
-    // misleading single-line one.
     if (endIndex < 0) return null;
     return { start, end: Math.max(start, lineAt(endIndex)) };
   }, [fileContent]);
@@ -173,8 +152,6 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
     window.getSelection()?.removeAllRanges();
   }, [selectedText, updateHighlightRects]);
 
-  // Desktop: typing while the Comment pill is up starts the comment with
-  // that keystroke, same as the chat selection bubble.
   React.useEffect(() => {
     if (!anchor || commentMode || isMobile) return;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -190,10 +167,10 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
   const saveComment = React.useCallback((text: string) => {
     if (!selectedText || !target) {
       hide();
-      return;
+      return true;
     }
     const lineRange = resolveLineRange(selectedText);
-    addDraft(target, {
+    const draftId = addDraft(target, {
       source: 'file-quote',
       fileLabel: filePath,
       startLine: lineRange?.start ?? 0,
@@ -202,11 +179,16 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
       language: '',
       text: text.trim(),
     });
+    if (!draftId) {
+      toast.error(t('inlineComment.toast.noRoom'));
+      return false;
+    }
     hide();
     queueMicrotask(() => {
       focusChatInput();
     });
-  }, [addDraft, filePath, hide, resolveLineRange, selectedText, target]);
+    return true;
+  }, [addDraft, filePath, hide, resolveLineRange, selectedText, t, target]);
 
   if (!anchor) return null;
 
@@ -237,98 +219,14 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
     />
   );
 
-  // Mobile: Android and iOS draw their own copy/paste toolbar right above a
-  // text selection, exactly where the desktop pill sits, and cover it (#3894).
-  // So the Comment button and the comment input dock at the bottom of the
-  // screen instead, like the chat selection sheet; the keyboard-inset surface
-  // keeps the input above the soft keyboard in the native app, and the
-  // browser's resizes-content viewport does the same on the web. The
-  // highlight renders inside this layer: on mobile the files panel is itself a
-  // z-50 overlay and would cover a separate body-level highlight.
-  if (isMobile) {
-    return createPortal(
-      <div className="oc-keyboard-inset-surface pointer-events-none fixed inset-x-0 bottom-0 z-50">
-        {highlightOverlay}
-        <div
-          ref={menuRef}
-          // The field rides the keyboard; the highlight beside it stays put.
-          data-keyboard-rider=""
-          className="pointer-events-auto mx-auto max-w-[420px] px-3"
-          style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom, 0px))' }}
-        >
-          {commentMode ? commentInput : (
-            <div
-              className={cn(
-                'mx-auto w-fit',
-                'oc-glass-popover oc-glass-floating rounded-full',
-                'p-1',
-              )}
-            >
-              <button
-                type="button"
-                // Keep the text selection alive through the tap: the
-                // selection is what the comment quotes.
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => openComment('')}
-                className={cn(
-                  'flex min-w-0 items-center gap-2 rounded-full px-4 py-2',
-                  'text-sm font-medium leading-tight text-foreground',
-                  'active:bg-[var(--interactive-hover)]',
-                  'transition-colors duration-150'
-                )}
-                title={t('chat.textSelection.title.commentOnSelection')}
-              >
-                <Icon name="chat-1" className="size-4 flex-shrink-0" />
-                <span className="min-w-0 whitespace-nowrap">{t('chat.textSelection.actions.comment')}</span>
-              </button>
-            </div>
-          )}
-        </div>
-      </div>,
-      document.body,
-    );
-  }
-
-  return createPortal(
-    <div
-      ref={menuRef}
-      className="fixed z-50"
-      style={{
-        left: anchor.x,
-        top: anchor.y,
-        transform: 'translate(-50%, -100%)',
-      }}
-    >
-      {highlightOverlay ? createPortal(highlightOverlay, document.body) : null}
-      {commentMode ? (
-        <div className="w-[min(420px,80vw)]">
-          {commentInput}
-        </div>
-      ) : (
-        <div
-          className={cn(
-            'flex items-center whitespace-nowrap',
-            'oc-glass-popover oc-glass-floating rounded-full',
-            'p-1',
-          )}
-        >
-          <button
-            type="button"
-            onClick={() => openComment('')}
-            className={cn(
-              'px-3.5 py-1.5 rounded-full',
-              'text-sm font-medium',
-              'text-foreground',
-              'hover:bg-[var(--interactive-hover)]',
-              'transition-colors duration-150'
-            )}
-            title={t('chat.textSelection.title.commentOnSelection')}
-          >
-            {t('chat.textSelection.actions.comment')}
-          </button>
-        </div>
-      )}
-    </div>,
-    document.body,
+  return (
+    <SelectionCommentPopup
+      anchor={anchor}
+      commentMode={commentMode}
+      commentInput={commentInput}
+      highlightOverlay={highlightOverlay}
+      menuRef={menuRef}
+      onComment={() => openComment('')}
+    />
   );
 }

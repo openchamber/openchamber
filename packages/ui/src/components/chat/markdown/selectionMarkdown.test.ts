@@ -11,7 +11,7 @@ const bootstrapFetch: typeof fetch = async () => Response.json({
 });
 Object.assign(globalThis, {
   window: dom,
-  document: dom.document,
+  document: dom.document, Event: dom.Event, CustomEvent: dom.CustomEvent,
   HTMLElement: dom.HTMLElement,
   Element: dom.Element,
   Node: dom.Node,
@@ -98,6 +98,18 @@ test('tables, math, mermaid and file links read from what the renderer kept', ()
     'Within $\\pm 5\\%$ of src/app.ts.',
     '```mermaid\ngraph TD; A-->B\n```',
   ].join('\n\n'));
+});
+
+test('an svg figure copies as its fence source, not its data URL', () => {
+  const source = '<svg xmlns="http://www.w3.org/2000/svg"><text>a&b</text></svg>';
+  const html = `<div data-streamdown="svg-block" data-oc-svg-source="${source.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"><img alt="svg" src="data:image/svg+xml;charset=utf-8,x"></div>`;
+  expect(serializeRenderedMarkdown(render(html))).toBe('```svg\n' + source + '\n```');
+  expect(serializeRenderedMarkdown(render(html), 'plain')).toBe(source);
+  const copy = document.createElement('div');
+  copy.innerHTML = html;
+  normalizeMarkdownCopyContent(copy);
+  expect(copy.querySelector('pre code')?.textContent).toBe(source);
+  expect(copy.querySelector('img')).toBeNull();
 });
 
 test('a selection across list items stays a list', () => {
@@ -481,4 +493,14 @@ test('a selection across two separate documents stays native', () => {
   const first = render('<p>One document.</p>');
   const second = render('<p>Another one.</p>');
   expect(getMarkdownSelectionText(selectionOf(textIn(first, 'p'), 0, textIn(second, 'p'), 3))).toBeNull();
+});
+
+test('an image draws a program in a fence without a language for a reply, not for a prompt', async () => {
+  const { renderMarkdownForExport } = await import('./renderMarkdownForExport');
+  const text = '```\nroot = Stack([a])\na = Text("Hello block")\n```';
+  const reply = await renderMarkdownForExport(text, { purpose: 'image' });
+  const prompt = await renderMarkdownForExport(text, { purpose: 'image', prompt: true });
+  expect(reply.querySelector('[data-oc-ui-block]')).not.toBeNull();
+  expect(prompt.querySelector('[data-oc-ui-block]')).toBeNull();
+  expect(prompt.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe('root = Stack([a])\na = Text("Hello block")');
 });

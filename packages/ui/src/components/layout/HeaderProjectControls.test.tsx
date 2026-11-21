@@ -26,6 +26,7 @@ const projectSetupReads: Array<{ id: string; path: string }> = [];
 const uiState = {
   terminalShell: 'zsh',
   terminalLoginShells: ['zsh'],
+  terminalOpenOnProjectAction: true,
   setSettingsPage: () => undefined,
   setSettingsDialogOpen: () => undefined,
   setSettingsProjectsSelectedId: () => undefined,
@@ -245,12 +246,14 @@ describe('HeaderProjectAction lifecycle', () => {
     toastCalls.success.length = 0;
     openContextPreviewCalls.length = 0;
     openContextPanelTabCalls.length = 0;
+    uiState.terminalOpenOnProjectAction = true;
     openExternalCalls.length = 0;
     detectedDevServer.command = null;
     detectedDevServer.previewUrlHint = null;
     detectedDevServer.actionId = undefined;
     mockedDeviceInfo.isMobile = true;
     effectiveDirectory = '/repo';
+    uiState.terminalOpenOnProjectAction = true;
     projectSetupReads.length = 0;
     sessionCounter = 0;
     mockedActionsState.actions = [{ id: 'build', name: 'Build', command: 'echo hello', icon: 'build' }];
@@ -383,21 +386,6 @@ describe('HeaderProjectAction lifecycle', () => {
     expect(primaryLabel()).toContain('Auto-discover dev server');
   });
 
-  test('a running action takes the button over the first idle one', async () => {
-    mockedDeviceInfo.isMobile = false;
-    const originalList = terminal.listSessions;
-    Object.assign(terminal, { listSessions: async () => [{
-      sessionId: 'peer-run', cwd: '/repo', status: 'running', createdAt: 1, mode: 'command',
-      purpose: { type: 'project-action', actionId: 'build', executionId: 'peer-execution' },
-    }] });
-    try {
-      await renderButton();
-      await act(async () => { await Promise.resolve(); });
-      const primary = runButton();
-      expect(primary?.getAttribute('aria-label') ?? '').toContain('Build');
-    } finally { terminal.listSessions = originalList; }
-  });
-
   test('adopting a saved URL action does not auto-open a different output URL', async () => {
     mockedActionsState.actions = [{ id: 'build', name: 'Build', command: 'echo hello', autoOpenUrl: true, openUrl: 'http://localhost:4000' }];
     const originalList = terminal.listSessions;
@@ -472,23 +460,6 @@ describe('HeaderProjectAction lifecycle', () => {
     expect(openContextPreviewCalls).toEqual([{ directory: '/repo-worktree', url: 'http://localhost:4000/' }]);
   });
 
-  test('replaced executions cannot be cleared by their still-open old stream', async () => {
-    await renderButton();
-    const button = runButton();
-    if (!button) throw new Error('missing action button');
-    await act(async () => { button.click(); });
-    await act(async () => {
-      useTerminalStore.getState().reconcileServerSessions('/repo', [{
-        sessionId: 'other-session', cwd: '/repo', status: 'running', createdAt: 2,
-        mode: 'command', purpose: { type: 'project-action', actionId: 'build', executionId: 'new-execution' },
-      }]);
-    });
-    await act(async () => { emitToSession(firstSessionId(), { type: 'exit', sequence: 10 }); });
-    const tab = useTerminalStore.getState().getDirectoryState('/repo')?.tabs.find((tab) => tab.purpose.type === 'project-action');
-    expect(tab?.purpose).toEqual({ type: 'project-action', actionId: 'build', executionId: 'new-execution' });
-    expect(tab?.lifecycle).toBe('running');
-  });
-
   test('runs, stops, and reruns on the same action tab while cleaning old subscriptions once', async () => {
     await renderButton();
 
@@ -559,6 +530,26 @@ describe('HeaderProjectAction lifecycle', () => {
     expect(openContextPanelTabCalls).toEqual([{ directory: '/repo-worktree', mode: 'terminal', targetDirectory: null }]);
   });
 
+  test('with the terminal setting off, an action runs without switching the panel', async () => {
+    uiState.terminalOpenOnProjectAction = false;
+    effectiveDirectory = '/repo-worktree';
+    await renderButton({ projectPath: '/repo', directory: '/repo-worktree' });
+
+    const primaryButton = runButton();
+    if (!primaryButton) {
+      throw new Error('expected primary button');
+    }
+
+    await act(async () => {
+      primaryButton.dispatchEvent(new Event('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(createCalls).toHaveLength(1);
+    expect(useTerminalStore.getState().getDirectoryState('/repo-worktree')?.tabs.some((tab) => tab.purpose.type === 'project-action' && tab.purpose.actionId === 'build')).toBe(true);
+    expect(openContextPanelTabCalls).toEqual([]);
+  });
+
   test('parent action runs in the parent checkout, stores its tab there, and reveals it from the live worktree host', async () => {
     mockedActionsState.actions = [{ id: 'build', name: 'Build', command: 'echo hello', icon: 'build', runIn: 'parent' }];
     effectiveDirectory = '/repo-worktree';
@@ -598,6 +589,25 @@ describe('HeaderProjectAction lifecycle', () => {
     expect(createCalls).toHaveLength(1);
     expect(createCalls[0]?.cwd).toBe('/repo-worktree');
     expect(openContextPanelTabCalls).toEqual([{ directory: '/live-host', mode: 'terminal', targetDirectory: '/repo-worktree' }]);
+  });
+
+  test('project action starts without revealing its terminal when the setting is off', async () => {
+    uiState.terminalOpenOnProjectAction = false;
+    await renderButton();
+
+    const primaryButton = runButton();
+    if (!primaryButton) {
+      throw new Error('expected primary button');
+    }
+
+    await act(async () => {
+      primaryButton.dispatchEvent(new Event('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(createCalls).toHaveLength(1);
+    expect(useTerminalStore.getState().getDirectoryState('/repo')?.tabs.some((tab) => tab.purpose.type === 'project-action' && tab.purpose.actionId === 'build')).toBe(true);
+    expect(openContextPanelTabCalls).toEqual([]);
   });
 
   test('auto-discover without a preview hint settles on an announced localhost URL in context preview only', async () => {

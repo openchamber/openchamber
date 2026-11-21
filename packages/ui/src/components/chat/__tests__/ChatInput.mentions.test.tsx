@@ -1,4 +1,4 @@
-import { afterAll, expect, spyOn, test } from 'bun:test';
+import { afterAll, beforeEach, expect, spyOn, test } from 'bun:test';
 import { plugin } from 'bun';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -25,6 +25,30 @@ Object.assign(globalThis, {
   customElements: browser.customElements, IS_REACT_ACT_ENVIRONMENT: true,
 });
 
+// Timers and frames run on this clock, and only settle() moves it. A test spends no wall time waiting
+// for the picker's debounce, and a slow machine cannot fire that debounce in the middle of typing.
+// Zero-delay timers stay real: they are how the code yields, and settle() yields to them.
+let clockNow = 0;
+let lastClockId = 0;
+const clockTimers = new Map<number, { due: number; run: () => void }>();
+const onClock = (delay: number, run: () => void) => {
+  clockTimers.set(--lastClockId, { due: clockNow + delay, run });
+  return lastClockId;
+};
+const moveTimersToClock = <Id,>(owner: typeof globalThis | Window, realSetTimeout: (run: () => void) => Id, realClearTimeout: (id: never) => void) => Object.assign(owner, {
+  setTimeout: (callback: (...args: unknown[]) => void, delay = 0, ...args: unknown[]) => {
+    const run = () => callback(...args);
+    return delay > 0 ? onClock(delay, run) : realSetTimeout(run);
+  },
+  clearTimeout: (id: never) => {
+    if (!clockTimers.delete(id)) realClearTimeout(id);
+  },
+  requestAnimationFrame: (callback: (time: number) => void) => onClock(16, () => callback(clockNow)),
+  cancelAnimationFrame: (id: number) => { clockTimers.delete(id); },
+});
+moveTimersToClock(globalThis, globalThis.setTimeout.bind(globalThis), globalThis.clearTimeout.bind(globalThis));
+moveTimersToClock(browser, browser.setTimeout.bind(browser), browser.clearTimeout.bind(browser));
+
 const DIRECTORY = '/mention-fixture';
 const skillRequests: string[] = [];
 let liveSessions: Session[] = [];
@@ -48,6 +72,12 @@ const responseFor = (input: RequestInfo | URL) => {
     data: liveSessions.map((record) => ({ ...record, location: { directory: record.directory } })),
     cursor: {},
   });
+  // A send reads the composer's session from the server before it switches the model.
+  const composerSession = /^\/api\/session\/(ses_composer_\d+)$/.exec(path)?.[1];
+  if (composerSession) return Response.json({
+    location,
+    data: { ...session(composerSession, 'Composer session'), model: { providerID: 'provider', id: 'model' }, location: { directory: DIRECTORY } },
+  });
   if (path === '/api/config') return Response.json([]);
   if (path === '/api/project') return Response.json([]);
   if (path.endsWith('/vcs')) return Response.json({ data: { branch: { current: 'main', default: 'main' } } });
@@ -60,7 +90,6 @@ spyOn(globalThis, 'fetch').mockImplementation(async (input) => responseFor(input
 plugin({
   name: 'composer-mentions-vite-modules',
   setup(build) {
-    build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, () => ({ contents: 'export default "";', loader: 'js' }));
     build.onLoad({ filter: /useProviderLogo\.ts$/ }, ({ path }) => {
       const directory = resolve(dirname(path), '../assets/provider-logos');
       const logos = Object.fromEntries(readdirSync(directory).filter((name) => name.endsWith('.svg')).map((name) => [
@@ -110,10 +139,24 @@ const session = (id: string, title: string, archived = false): Session => ({
 const review = session('ses_coder_review', 'coder review');
 const overlap = session('ses_title_match', '清理zencoder/skills废弃文件夹', true);
 
-const settle = async () => act(async () => {
-  // The real picker debounces its external file search by 180ms and animates exit.
-  await new Promise((resolve) => setTimeout(resolve, 260));
-});
+const yieldToEventLoop = () => new Promise((resolve) => setTimeout(resolve, 0));
+// Moves the clock past the picker's 180ms debounce, flushing React after each timer so that a timer
+// or frame scheduled by its result still runs inside the same 260ms.
+const settle = async () => {
+  await act(yieldToEventLoop);
+  const end = clockNow + 260;
+  for (;;) {
+    const next = [...clockTimers].filter(([, timer]) => timer.due <= end).sort(([, a], [, b]) => a.due - b.due)[0];
+    if (!next) break;
+    await act(async () => {
+      clockTimers.delete(next[0]);
+      clockNow = next[1].due;
+      next[1].run();
+      await yieldToEventLoop();
+    });
+  }
+  clockNow = end;
+};
 
 type Composer = {
   sessionId: string;
@@ -125,8 +168,20 @@ type Composer = {
   choose: (text: string) => Promise<void>;
 };
 
+type ComposerOptions = { startDirectory: string | null; pinned?: boolean; column?: boolean };
+
+// Bun starts the next test when one times out, but the timed-out body keeps running. Its act() would
+// overlap the next test's, and React then stops rendering inside act() for the rest of the file, so
+// one timeout fails every later test with "did not mount". The next test waits for that body.
+let lastComposer: Promise<void> = Promise.resolve();
+beforeEach(() => lastComposer.catch(() => {}));
+const withComposer = (run: (composer: Composer) => Promise<void>, options?: ComposerOptions) => {
+  lastComposer = mountComposer(run, options);
+  return lastComposer;
+};
+
 let composerCount = 0;
-const withComposer = async (run: (composer: Composer) => Promise<void>, options?: { startDirectory: string | null; pinned?: boolean; column?: boolean }) => {
+const mountComposer = async (run: (composer: Composer) => Promise<void>, options?: ComposerOptions) => {
   useProjectsStore.setState({ projects: [{ id: 'project', path: DIRECTORY }] });
   const sessionId = `ses_composer_${++composerCount}`;
   useDirectoryStore.setState({ currentDirectory: DIRECTORY });
@@ -276,7 +331,7 @@ test('the queued row Send preserves the newer remembered effort', async () => {
 test('hand-typed @coder review keeps the session selectable even after coder becomes a chip', async () => {
   await withComposer(async ({ container, view, type, rows, choose }) => {
     await type('@coder ');
-    expect(container.querySelector('[title="@coder"]')).not.toBeNull();
+    expect(container.querySelector('[data-mention-name="coder"]')).not.toBeNull();
     await type('review');
     expect(view.state.doc.toString()).toBe('@coder review');
     expect(rows().some((row) => row.textContent?.includes(review.title))).toBe(true);
@@ -292,7 +347,7 @@ test('Enter completes an agent query before the next frame and later s/k cannot 
     await type('@cod');
     await key('Enter');
     expect(view.state.doc.toString()).toBe('@coder ');
-    expect(container.querySelector('[title="@coder"]')).not.toBeNull();
+    expect(container.querySelector('[data-mention-name="coder"]')).not.toBeNull();
     expect(rows().length).toBe(0);
     await type('s');
     expect(rows().length).toBe(0);
@@ -351,11 +406,11 @@ const fileScenario = async (relativePath: string, directory: boolean, selectWith
       await key('Enter');
     } else await choose(name);
     expect(view.state.doc.toString()).toBe(`@${relativePath} `);
-    expect(container.querySelector(`[title="@${relativePath}"]`)).not.toBeNull();
+    expect(container.querySelector(`[data-mention-name="${relativePath}"]`)).not.toBeNull();
     expect(rows().length).toBe(0);
     await type('sk');
     expect(view.state.doc.toString()).toBe(`@${relativePath} sk`);
-    expect(container.querySelector(`[title="@${relativePath}"]`)).not.toBeNull();
+    expect(container.querySelector(`[data-mention-name="${relativePath}"]`)).not.toBeNull();
     expect(rows().length).toBe(0);
   });
 };
@@ -370,6 +425,32 @@ test('Enter on a directory completes its query without changing the reference', 
 
 test('a selected path containing spaces stays one reference after continuing prose', async () => {
   await fileScenario('design notes/overview.md', false, false);
+});
+
+test('file chips use the latest confirmed paths after draft persistence', async () => {
+  await withComposer(async ({ container, view, type, choose }) => {
+    useFileSearchStore.setState({ searchFiles: async (_directory, _query, _limit, options) => (
+      options?.type === 'directory' ? [] : [
+        { name: 'file name.png', path: `${DIRECTORY}/docs/file name.png`, relativePath: 'docs/file name.png' },
+        { name: 'other file.png', path: `${DIRECTORY}/other file.png`, relativePath: 'other file.png' },
+      ]
+    ) });
+    await type('Please ');
+    // Advance the controlled clock past the draft's 500ms persistence debounce.
+    await settle();
+    await type('@file');
+    await choose('docs/file name.png');
+    await type('inspect');
+    expect(container.querySelector('[title^="@docs/file name.png"]')?.textContent).toBe('file name.png');
+    expect(container.querySelector('[title^="@docs/file\n"]')).toBeNull();
+
+    await settle();
+    await type(' and @other');
+    await choose('other file.png');
+    await type('too');
+    expect(container.querySelector('[title^="@other file.png"]')?.textContent).toBe('other file.png');
+    expect(view.state.doc.toString()).toBe('Please @docs/file name.png inspect and @other file.png too');
+  });
 });
 
 test('completion follows text inserted before it and is removed with the reference', async () => {
@@ -407,7 +488,7 @@ test('switching same-text composer documents clears completion without auto-open
   });
 });
 
-test('a pending worktree draft does no discovery, then commands, skills and files use its start folder', async () => {
+const withPendingDraft = async (run: (composer: Composer, discovery: { commandDirectories: () => (string | null | undefined)[]; searches: string[] }) => Promise<void>) => {
   const commands = spyOn(opencodeClient, 'listCommands').mockImplementation(async () => [{ name: 'folder-command', description: 'Fixture command' }]);
   invalidateCommandsLoadCache();
   invalidateSkillsLoadCache(DIRECTORY);
@@ -417,43 +498,53 @@ test('a pending worktree draft does no discovery, then commands, skills and file
   skillRequests.length = 0;
   const searches: string[] = [];
   try {
-    await withComposer(async ({ view, type, key, rows }) => {
+    await withComposer(async (composer) => {
       expect(useSessionUIStore.getState().currentSessionId).toBeNull();
       expect(useSessionUIStore.getState().newSessionDraft.worktreeStartDirectory).toEqual({ worktreeRoot: DIRECTORY, directory: null });
       useFileSearchStore.setState({ searchFiles: async (directory) => { searches.push(directory); return []; } });
-      await type('/folder');
-      expect(rows().some((row) => row.textContent?.includes('folder-command'))).toBe(false);
-      await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '' } }));
-      await type('$root');
-      expect(rows().some((row) => row.textContent?.includes('root-skill'))).toBe(false);
-      await key('Escape');
-      await type(' @file');
-      expect(searches).toEqual([]);
-      expect(commands.mock.calls).toEqual([]);
-      expect(skillRequests).toEqual([]);
-      await key('Escape');
-      await act(async () => {
-        const draft = useSessionUIStore.getState().newSessionDraft;
-        useSessionUIStore.getState().setDraftWorktreeStartDirectory(draft.draftId, DIRECTORY, `${DIRECTORY}/ai`);
-      });
-      await settle();
-      expect(commands.mock.calls.map(([directory]) => directory)).toEqual([`${DIRECTORY}/ai`]);
-      expect(skillRequests).toEqual([`${DIRECTORY}/ai`]);
-      await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '' } }));
-      await type('/folder');
-      expect(rows().some((row) => row.textContent?.includes('folder-command'))).toBe(true);
-      await key('Escape');
-      await type(' @file');
-      expect(searches.length).toBeGreaterThan(0);
-      expect(new Set(searches)).toEqual(new Set([`${DIRECTORY}/ai`]));
-      await key('Escape');
-      await type(' $folder');
-      expect(rows().some((row) => row.textContent?.includes('folder-skill'))).toBe(true);
-      expect(rows().some((row) => row.textContent?.includes('root-skill'))).toBe(false);
+      await run(composer, { commandDirectories: () => commands.mock.calls.map(([directory]) => directory), searches });
     }, { startDirectory: null });
   } finally {
     commands.mockRestore();
   }
+};
+
+test('a pending worktree draft does no discovery', async () => {
+  await withPendingDraft(async ({ view, type, key, rows }, { commandDirectories, searches }) => {
+    await type('/folder');
+    expect(rows().some((row) => row.textContent?.includes('folder-command'))).toBe(false);
+    await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '' } }));
+    await type('$root');
+    expect(rows().some((row) => row.textContent?.includes('root-skill'))).toBe(false);
+    await key('Escape');
+    await type(' @file');
+    expect(searches).toEqual([]);
+    expect(commandDirectories()).toEqual([]);
+    expect(skillRequests).toEqual([]);
+  });
+});
+
+test('once a pending worktree draft has its start folder, commands, skills and files use it', async () => {
+  await withPendingDraft(async ({ view, type, key, rows }, { commandDirectories, searches }) => {
+    await act(async () => {
+      const draft = useSessionUIStore.getState().newSessionDraft;
+      useSessionUIStore.getState().setDraftWorktreeStartDirectory(draft.draftId, DIRECTORY, `${DIRECTORY}/ai`);
+    });
+    await settle();
+    expect(commandDirectories()).toEqual([`${DIRECTORY}/ai`]);
+    expect(skillRequests).toEqual([`${DIRECTORY}/ai`]);
+    await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '' } }));
+    await type('/folder');
+    expect(rows().some((row) => row.textContent?.includes('folder-command'))).toBe(true);
+    await key('Escape');
+    await type(' @file');
+    expect(searches.length).toBeGreaterThan(0);
+    expect(new Set(searches)).toEqual(new Set([`${DIRECTORY}/ai`]));
+    await key('Escape');
+    await type(' $folder');
+    expect(rows().some((row) => row.textContent?.includes('folder-skill'))).toBe(true);
+    expect(rows().some((row) => row.textContent?.includes('root-skill'))).toBe(false);
+  });
 });
 
 for (const pinned of [false, true]) {

@@ -1,14 +1,10 @@
-// The attach dialog page. Opened from the composer + menu (`ctx.item` is
-// null) it is a picker; opened from the chip (`ctx.item` is the attached
-// task) it shows that task's details instead of the whole list; opened from
-// the "Create task from message" or "Summarize session" menu entries it gets
-// that message or session as `ctx.item`.
 import {
   connectHost,
   HostRequestError,
   isGuestMessageItem,
-  isGuestSessionItem,
+  isGuestAttachItem, isGuestLinkItem, isGuestSessionItem,
   type AttachIssueRequest,
+  type GuestLinkItem,
   type GuestMessageItem,
   type GuestSessionItem,
   type JsonValue,
@@ -18,13 +14,10 @@ import { z } from 'zod';
 
 import { TASKS, attachPayload, findTask, loadTasks, saveTask, type TaskData, type Task } from './tasks.ts';
 import { createExample, element, feedback } from '../../shared.ts';
-
 const host = connectHost();
 const root = document.querySelector('#root');
 if (!root) throw new Error('no root');
 
-// `data` is whatever this extension put on `attach`; the host stored it and
-// handed it back untouched. Read it as our own shape, fall back to the list.
 const taskDataSchema = z.object({ status: z.string(), comments: z.array(z.object({ author: z.string(), text: z.string() })), description: z.string().optional() });
 const readTaskData = (data: JsonValue | undefined): TaskData | null => {
   const parsed = taskDataSchema.safeParse(data);
@@ -135,8 +128,6 @@ const closeAfter = async (run: () => Promise<void>, label: string): Promise<void
   }
 };
 
-// "Create task from message": the assistant's text becomes a new task and
-// is attached as a chip, so the next prompt can refer to it.
 const renderMessageAction = (item: GuestMessageItem): void => {
   const page = newPage();
   const head = document.createElement('div');
@@ -174,8 +165,6 @@ const renderMessageAction = (item: GuestMessageItem): void => {
   mountButton(actions, { label: 'Close', variant: 'ghost', onClick: () => void host.close() });
 };
 
-// "Summarize session": `messages` is present because the manifest asked for
-// `payload: ["messages"]` and the user granted `conversation`.
 const renderSessionAction = (item: GuestSessionItem): void => {
   const page = newPage();
   mountBadge(page, { label: item.sessionTitle, tone: 'primary' });
@@ -199,6 +188,18 @@ const renderSessionAction = (item: GuestSessionItem): void => {
   mountButton(actions, { label: 'Close', variant: 'ghost', onClick: () => void host.close() });
 };
 
+const renderLink = (item: GuestLinkItem): void => {
+  const task = findTask(item.identifier);
+  if (task) {
+    renderDetails(attachPayload(task));
+    return;
+  }
+  const page = newPage();
+  mountBadge(page, { label: item.identifier, tone: 'warning' });
+  mountText(page, { text: item.url ? `This board has no task ${item.identifier}. [${item.url}](${item.url})` : `This board has no task ${item.identifier}.`, onOpenUrl: (href) => { void host.openUrl(href); } });
+  mountButton(page, { label: 'Close', variant: 'ghost', onClick: () => void host.close() });
+};
+
 host.onReady((ctx) => {
   applyHostReady(ctx, document.documentElement);
 });
@@ -212,7 +213,9 @@ host.onItem((item) => {
     renderMessageAction(item);
   } else if (isGuestSessionItem(item)) {
     renderSessionAction(item);
-  } else if (item) {
+  } else if (isGuestLinkItem(item)) {
+    renderLink(item);
+  } else if (isGuestAttachItem(item)) {
     renderDetails(item);
   } else {
     renderPicker();

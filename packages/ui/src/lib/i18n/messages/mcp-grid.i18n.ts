@@ -2,7 +2,6 @@
 export const mcpGridI18n = {
   en: {
     'settings.mcp.grid.actionsAria': 'Actions for {name}',
-    'settings.mcp.grid.description': 'Tool servers your agents can call. Open one to see its status and settings.',
     'settings.mcp.grid.searchPlaceholder': 'Search servers',
     'settings.mcp.grid.addHint': 'Local command or remote URL',
     'settings.mcp.grid.noMatches': 'No servers match “{query}”.',
@@ -16,7 +15,6 @@ export const mcpGridI18n = {
   },
   nl: {
     'settings.mcp.grid.actionsAria': 'Acties voor {name}',
-    'settings.mcp.grid.description': 'Toolservers die uw agents kunnen aanroepen. Open er een om de status en instellingen te zien.',
     'settings.mcp.grid.searchPlaceholder': 'Servers zoeken',
     'settings.mcp.grid.addHint': 'Lokale opdracht of remote-URL',
     'settings.mcp.grid.noMatches': 'Geen servers komen overeen met “{query}”.',
@@ -30,7 +28,6 @@ export const mcpGridI18n = {
   },
   uk: {
     'settings.mcp.grid.actionsAria': 'Дії для {name}',
-    'settings.mcp.grid.description': 'Сервери інструментів, які можуть викликати ваші агенти. Відкрийте сервер, щоб побачити його стан і налаштування.',
     'settings.mcp.grid.searchPlaceholder': 'Пошук серверів',
     'settings.mcp.grid.addHint': 'Локальна команда або віддалений URL',
     'settings.mcp.grid.noMatches': 'Немає серверів за запитом «{query}».',
@@ -44,7 +41,6 @@ export const mcpGridI18n = {
   },
   de: {
     'settings.mcp.grid.actionsAria': 'Aktionen für {name}',
-    'settings.mcp.grid.description': 'Tool-Server, die deine Agenten aufrufen können. Öffne einen, um Status und Einstellungen zu sehen.',
     'settings.mcp.grid.searchPlaceholder': 'Server suchen',
     'settings.mcp.grid.addHint': 'Lokaler Befehl oder Remote-URL',
     'settings.mcp.grid.noMatches': 'Keine Server passen zu „{query}“.',
@@ -58,7 +54,6 @@ export const mcpGridI18n = {
   },
   es: {
     'settings.mcp.grid.actionsAria': 'Acciones de {name}',
-    'settings.mcp.grid.description': 'Servidores de herramientas que tus agentes pueden usar. Abre uno para ver su estado y ajustes.',
     'settings.mcp.grid.searchPlaceholder': 'Buscar servidores',
     'settings.mcp.grid.addHint': 'Comando local o URL remota',
     'settings.mcp.grid.noMatches': 'Ningún servidor coincide con «{query}».',
@@ -72,7 +67,6 @@ export const mcpGridI18n = {
   },
   fr: {
     'settings.mcp.grid.actionsAria': 'Actions pour {name}',
-    'settings.mcp.grid.description': 'Les serveurs d’outils que vos agents peuvent appeler. Ouvrez-en un pour voir son état et ses réglages.',
     'settings.mcp.grid.searchPlaceholder': 'Rechercher des serveurs',
     'settings.mcp.grid.addHint': 'Commande locale ou URL distante',
     'settings.mcp.grid.noMatches': 'Aucun serveur ne correspond à « {query} ».',
@@ -86,7 +80,6 @@ export const mcpGridI18n = {
   },
   ja: {
     'settings.mcp.grid.actionsAria': '{name} の操作',
-    'settings.mcp.grid.description': 'エージェントが呼び出せるツールサーバーです。開くと状態と設定を確認できます。',
     'settings.mcp.grid.searchPlaceholder': 'サーバーを検索',
     'settings.mcp.grid.addHint': 'ローカルコマンドまたはリモート URL',
     'settings.mcp.grid.noMatches': '「{query}」に一致するサーバーはありません。',
@@ -100,7 +93,6 @@ export const mcpGridI18n = {
   },
   ko: {
     'settings.mcp.grid.actionsAria': '{name} 작업',
-    'settings.mcp.grid.description': '에이전트가 호출할 수 있는 도구 서버입니다. 열어서 상태와 설정을 확인하세요.',
     'settings.mcp.grid.searchPlaceholder': '서버 검색',
     'settings.mcp.grid.addHint': '로컬 명령 또는 원격 URL',
     'settings.mcp.grid.noMatches': '“{query}”와 일치하는 서버가 없습니다.',
@@ -114,7 +106,6 @@ export const mcpGridI18n = {
   },
   pl: {
     'settings.mcp.grid.actionsAria': 'Działania dla {name}',
-    'settings.mcp.grid.description': 'Serwery narzędzi, z których mogą korzystać agenci. Otwórz serwer, aby zobaczyć jego stan i ustawienia.',
     'settings.mcp.grid.searchPlaceholder': 'Szukaj serwerów',
     'settings.mcp.grid.addHint': 'Polecenie lokalne lub zdalny URL',
     'settings.mcp.grid.noMatches': 'Brak serwerów pasujących do „{query}”.',
@@ -128,7 +119,6 @@ export const mcpGridI18n = {
   },
   'pt-BR': {
     'settings.mcp.grid.actionsAria': 'Ações para {name}',
-    'settings.mcp.grid.description': 'Servidores de ferramentas que seus agentes podem chamar. Abra um para ver o status e as configurações.',
     'settings.mcp.grid.searchPlaceholder': 'Buscar servidores',
     'settings.mcp.grid.addHint': 'Comando local ou URL remota',
     'settings.mcp.grid.noMatches': 'Nenhum servidor corresponde a “{query}”.',
@@ -142,7 +132,6 @@ export const mcpGridI18n = {
   },
   tr: {
     'settings.mcp.grid.actionsAria': '{name} için işlemler',
-    'settings.mcp.grid.description': 'Ajanlarınızın çağırabileceği araç sunucuları. Durumunu ve ayarlarını görmek için birini açın.',
     'settings.mcp.grid.searchPlaceholder': 'Sunucu ara',
     'settings.mcp.grid.addHint': 'Yerel komut veya uzak URL',
     'settings.mcp.grid.noMatches': '“{query}” ile eşleşen sunucu yok.',
@@ -156,7 +145,6 @@ export const mcpGridI18n = {
   },
   'zh-CN': {
     'settings.mcp.grid.actionsAria': '{name} 的操作',
-    'settings.mcp.grid.description': '智能体可以调用的工具服务器。打开一个即可查看状态和设置。',
     'settings.mcp.grid.searchPlaceholder': '搜索服务器',
     'settings.mcp.grid.addHint': '本地命令或远程 URL',
     'settings.mcp.grid.noMatches': '没有与“{query}”匹配的服务器。',
@@ -170,7 +158,6 @@ export const mcpGridI18n = {
   },
   'zh-TW': {
     'settings.mcp.grid.actionsAria': '{name} 的操作',
-    'settings.mcp.grid.description': '代理可以呼叫的工具伺服器。開啟一個即可查看狀態和設定。',
     'settings.mcp.grid.searchPlaceholder': '搜尋伺服器',
     'settings.mcp.grid.addHint': '本機命令或遠端 URL',
     'settings.mcp.grid.noMatches': '沒有符合「{query}」的伺服器。',
@@ -184,7 +171,6 @@ export const mcpGridI18n = {
   },
   ar: {
     'settings.mcp.grid.actionsAria': 'إجراءات {name}',
-    'settings.mcp.grid.description': 'خوادم أدوات يمكن لوكلائك استدعاؤها. افتح أحدها لترى حالته وإعداداته.',
     'settings.mcp.grid.searchPlaceholder': 'البحث في الخوادم',
     'settings.mcp.grid.addHint': 'أمر محلي أو URL بعيد',
     'settings.mcp.grid.noMatches': 'لا توجد خوادم تطابق “{query}”.',
@@ -198,7 +184,6 @@ export const mcpGridI18n = {
   },
   he: {
     'settings.mcp.grid.actionsAria': 'פעולות עבור {name}',
-    'settings.mcp.grid.description': 'שרתי כלים שהסוכנים יכולים לקרוא להם. אפשר לפתוח שרת כדי לראות את הסטטוס וההגדרות שלו.',
     'settings.mcp.grid.searchPlaceholder': 'חיפוש שרתים',
     'settings.mcp.grid.addHint': 'פקודה מקומית או URL מרוחק',
     'settings.mcp.grid.noMatches': 'אין שרתים שתואמים ל-“{query}”.',

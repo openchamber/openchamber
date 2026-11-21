@@ -11,6 +11,7 @@ import {
 } from './runtime.js';
 import { createProjectConfigRuntime } from '../projects/project-config.js';
 import { createChatsScope } from './chats-scope.js';
+import { createReadSessionDefaults } from './session-defaults.js';
 import { loopFingerprint, parseLoopDefinition } from './loops.js';
 import { createOpenCodeSessionMetadata, createSessionMetadataStore } from '../openchamber-sessions/session-metadata-store.js';
 import { readProcessInstance } from './process-instance.js';
@@ -444,6 +445,64 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     expect(dispatch[1].body.resume).toBe(false);
     expect(dispatch[2].body).toMatchObject({ text: 'Review open issues' });
     expect(dispatch[2].body.resume).toBeUndefined();
+  });
+
+  it('routes a run on the Auto default before its first send', async () => {
+    const posts = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST') posts.push({ pathname, body: JSON.parse(init.body) });
+      if (/\/(model|agent)$/.test(pathname)) return new Response(null, { status: 204 });
+      const data = pathname === '/api/session' ? { id: 'ses_auto' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: true,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', useDefaults: true },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const routings = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async () => ({ task, updated: true }),
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      readSessionDefaults: async () => ({ providerID: 'openchamber', modelID: 'auto', variant: null, agent: 'build' }),
+      resolveAutoSelection: async (input) => {
+        routings.push(input);
+        return { model: { providerID: 'openai', id: 'gpt-5', variant: 'high' }, agent: 'plan' };
+      },
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    expect(result.error).toBeUndefined();
+    expect(result).toMatchObject({ ok: true, status: 'sent' });
+    const create = posts.find((post) => post.pathname === '/api/session')?.body;
+    expect(create.model).toBeUndefined();
+    expect(create.agent).toBe('build');
+    expect(routings).toEqual([{
+      sessionId: 'ses_auto',
+      directory: '/repo',
+      model: { providerID: 'openchamber', id: 'auto' },
+      agent: 'build',
+      requestText: 'Review open issues',
+    }]);
+    const dispatch = posts.filter((post) => post.pathname.startsWith('/api/session/ses_auto/'));
+    expect(dispatch.map((post) => post.pathname.split('/').at(-1))).toEqual(['model', 'agent', 'prompt']);
+    expect(dispatch[0].body.model).toEqual({ providerID: 'openai', id: 'gpt-5', variant: 'high' });
+    expect(dispatch[1].body.agent).toBe('plan');
   });
 
   it('points a run that fails after creating its session at that session', async () => {
@@ -1487,7 +1546,7 @@ describe('scheduled-tasks runtime chats scope', () => {
     state: { createdAt: 1, updatedAt: 1 },
   };
 
-  const createChatsRuntime = async ({ sessionStatus = 200 } = {}) => {
+  const createChatsRuntime = async ({ sessionStatus = 200, runTask = task, settings = null, models = null } = {}) => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-runtime-chats-'));
     const chatsScope = createChatsScope(path.join(tempRoot, 'chats'));
     const sessionBodies = [];
@@ -1497,19 +1556,25 @@ describe('scheduled-tasks runtime chats scope', () => {
         sessionBodies.push(JSON.parse(init.body));
         if (sessionStatus !== 200) return new Response(JSON.stringify({ error: 'boom' }), { status: sessionStatus });
       }
-      const data = pathname === '/api/session' ? { id: 'ses_chat' } : pathname === '/api/command' ? [] : {};
+      if (pathname === '/api/model' && models === 'unavailable') return new Response(JSON.stringify({ error: 'down' }), { status: 500 });
+      const data = pathname === '/api/session' ? { id: 'ses_chat' } : pathname === '/api/command' ? [] : pathname === '/api/model' && models ? models : {};
       return new Response(JSON.stringify({ data }), { status: 200, headers: { 'content-type': 'application/json' } });
     }));
     const projectConfigRuntime = {
-      listScheduledTasks: vi.fn(async () => [task]),
-      reconcileLoopTasks: vi.fn(async () => [task]),
-      updateScheduledTaskState: async () => ({ task, updated: true }),
-      updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      listScheduledTasks: vi.fn(async () => [runTask]),
+      reconcileLoopTasks: vi.fn(async () => [runTask]),
+      updateScheduledTaskState: async () => ({ task: runTask, updated: true }),
+      updateScheduledTaskStateIf: async () => ({ task: runTask, updated: true }),
     };
     const runtime = createScheduledTasksRuntime({
       projectConfigRuntime,
       listProjects: async () => [{ id: 'proj', path: '/repo' }],
       chatsScope,
+      readSessionDefaults: createReadSessionDefaults({
+        readSettings: async () => settings,
+        sanitizeProjects: (projects) => projects,
+        chatsScopeID: chatsScope.id,
+      }),
       buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
       getOpenCodeAuthHeaders: () => ({}),
       waitForOpenCodeReady: async () => {},
@@ -1552,6 +1617,65 @@ describe('scheduled-tasks runtime chats scope', () => {
         await expect(stat(result.directory)).resolves.toBeTruthy();
       }
       expect(sessionBodies.map((body) => body.location.directory)).toEqual([first.directory, second.directory]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('starts a run that follows the defaults on the Chats defaults, then the global ones', async () => {
+    const runTask = { ...task, execution: { prompt: 'Summarize the news', useDefaults: true } };
+    const settings = {
+      defaultModel: 'anthropic/claude-sonnet-5', defaultVariant: 'high', defaultAgent: 'build',
+      chatsDefaultModel: 'openai/gpt-6', chatsDefaultVariant: 'low', chatsDefaultAgent: 'plan',
+      projects: [],
+    };
+    const { runtime, chatsScope, sessionBodies, cleanup } = await createChatsRuntime({ runTask, settings });
+    try {
+      await runtime.start();
+      expect((await runtime.runNow(chatsScope.id, 'task-1')).ok).toBe(true);
+      Object.assign(settings, { chatsDefaultModel: '', chatsDefaultVariant: '', chatsDefaultAgent: '' });
+      expect((await runtime.runNow(chatsScope.id, 'task-1')).ok).toBe(true);
+      runtime.stop();
+
+      expect(sessionBodies.map(({ model, agent }) => ({ model, agent }))).toEqual([
+        { model: { providerID: 'openai', id: 'gpt-6', variant: 'low' }, agent: 'plan' },
+        { model: { providerID: 'anthropic', id: 'claude-sonnet-5', variant: 'high' }, agent: 'build' },
+      ]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('starts a Chats run on the New sessions model once the Chats model is gone from the catalog', async () => {
+    const runTask = { ...task, execution: { prompt: 'Summarize the news', useDefaults: true } };
+    const settings = {
+      defaultModel: 'anthropic/claude-sonnet-5', defaultVariant: 'high', defaultAgent: 'build',
+      chatsDefaultModel: 'openai/gone', chatsDefaultVariant: 'low', chatsDefaultAgent: 'plan',
+      projects: [],
+    };
+    const models = [{ providerID: 'anthropic', id: 'claude-sonnet-5', variants: [{ id: 'high' }] }];
+    const { runtime, chatsScope, sessionBodies, cleanup } = await createChatsRuntime({ runTask, settings, models });
+    try {
+      await runtime.start();
+      expect((await runtime.runNow(chatsScope.id, 'task-1')).ok).toBe(true);
+      runtime.stop();
+      expect(sessionBodies.map(({ model, agent }) => ({ model, agent }))).toEqual([
+        { model: { providerID: 'anthropic', id: 'claude-sonnet-5', variant: 'high' }, agent: 'plan' },
+      ]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps the Chats model when the catalog cannot be read', async () => {
+    const runTask = { ...task, execution: { prompt: 'Summarize the news', useDefaults: true } };
+    const settings = { defaultModel: 'anthropic/claude-sonnet-5', chatsDefaultModel: 'openai/gpt-6', projects: [] };
+    const { runtime, chatsScope, sessionBodies, cleanup } = await createChatsRuntime({ runTask, settings, models: 'unavailable' });
+    try {
+      await runtime.start();
+      expect((await runtime.runNow(chatsScope.id, 'task-1')).ok).toBe(true);
+      runtime.stop();
+      expect(sessionBodies.map(({ model }) => model)).toEqual([{ providerID: 'openai', id: 'gpt-6' }]);
     } finally {
       await cleanup();
     }

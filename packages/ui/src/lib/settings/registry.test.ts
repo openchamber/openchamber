@@ -19,11 +19,42 @@ import {
   parseSettingsDocument,
   readAutoSaveSnapshot,
 } from './registry';
+import { STT_PROMPT_MAX_LENGTH, readTranscriptionPrompt, setTranscriptionPrompt } from '@/stores/useTranscriptionPromptStore';
 import { renderSettingsRegistrySnapshot, SETTINGS_REGISTRY_SNAPSHOT_PATHS } from './registry-snapshot';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..');
 
 describe('settings registry', () => {
+  test('round-trips custom selection approval text and clearing it without resetting omitted preferences', async () => {
+    const options = useUIStore.persist.getOptions();
+    const original = useUIStore.getState();
+    let saved: Parameters<NonNullable<typeof options.storage>['setItem']>[1] = { state: original, version: options.version };
+    try {
+      useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
+      for (const text of ['  认可此方案 👍  ', '']) {
+        const parsed = parseSettingsDocument(JSON.parse(JSON.stringify({ selectionApprovalText: text })));
+        expect(parsed).toEqual({ selectionApprovalText: text });
+        if (!parsed) throw new Error('Expected valid settings');
+        applySettingsToStores(parsed);
+        expect(readAutoSaveSnapshot().selectionApprovalText).toBe(text);
+        const persisted = saved;
+        useUIStore.persist.setOptions({ storage: { getItem: () => persisted, setItem: () => undefined, removeItem: () => undefined } });
+        useUIStore.getState().setSelectionApprovalText('other');
+        await useUIStore.persist.rehydrate();
+        expect(useUIStore.getState().selectionApprovalText).toBe(text);
+        useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
+      }
+      useUIStore.getState().setSelectionApprovalText('Keep this');
+      applySettingsToStores({});
+      expect(useUIStore.getState().selectionApprovalText).toBe('Keep this');
+      expect(parseSettingsDocument({ selectionApprovalText: null })).toEqual({});
+      expect(parseSettingsDocument({ selectionApprovalText: 42 })).toEqual({});
+      expect(parseSettingsDocument({ selectionApprovalText: 'x'.repeat(1001) })).toEqual({});
+    } finally {
+      useUIStore.persist.setOptions(options);
+      useUIStore.setState(original, true);
+    }
+  });
   test('dictation auto-send is opt-in and adopts only explicit boolean preferences', () => {
     const dom = installHookTestDom();
     window.__zustand_config_store__ = useConfigStore;
@@ -53,7 +84,7 @@ describe('settings registry', () => {
     }
   });
 
-  test('round-trips all large text paste modes through settings and local persistence', async () => {
+  test('round-trips all large text paste and office document modes through settings and local persistence', async () => {
     const options = useUIStore.persist.getOptions();
     const original = useUIStore.getState();
     let saved: Parameters<NonNullable<typeof options.storage>['setItem']>[1] = { state: original, version: options.version };
@@ -74,6 +105,21 @@ describe('settings registry', () => {
         useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
       }
       expect(parseSettingsDocument({ largeTextPasteBehavior: 'invalid' })).toEqual({});
+      for (const mode of ['ask', 'save', 'convert']) {
+        const parsed = parseSettingsDocument(JSON.parse(JSON.stringify({ documentAttachBehavior: mode })));
+        expect(parsed).toEqual({ documentAttachBehavior: mode });
+        if (!parsed) throw new Error('Expected valid mode');
+        applySettingsToStores(parsed);
+        expect(useUIStore.getState().documentAttachBehavior).toBe(mode);
+        expect(readAutoSaveSnapshot().documentAttachBehavior).toBe(mode);
+        const persisted = saved;
+        useUIStore.persist.setOptions({ storage: { getItem: () => persisted, setItem: () => undefined, removeItem: () => undefined } });
+        useUIStore.getState().setDocumentAttachBehavior('ask');
+        await useUIStore.persist.rehydrate();
+        expect(useUIStore.getState().documentAttachBehavior).toBe(mode);
+        useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
+      }
+      expect(parseSettingsDocument({ documentAttachBehavior: 'attach' })).toEqual({});
     } finally {
       useUIStore.persist.setOptions(options);
       useUIStore.setState(original, true);
@@ -160,6 +206,40 @@ describe('settings registry', () => {
     } finally {
       useUIStore.setState({ workStatusSectionOrder: initial, workStatusHiddenSections: hidden, workStatusHiddenSectionsExplicit: explicit });
     }
+  });
+
+  test('section order: a saved default moves on apply, a dragged order stays', () => {
+    const original = useUIStore.getState();
+    const savedDefault = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    // Sections added after an order was saved land in it: Tasks after Subagents.
+    const savedWithTasks = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'tasks', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    try {
+      applySettingsToStores(parseSettingsDocument({ workStatusSectionOrder: savedDefault }) ?? {});
+      expect(useUIStore.getState().workStatusSectionOrder.slice(0, 4)).toEqual(['session', 'repository', 'usage', 'contextSources']);
+      expect(useUIStore.getState().workStatusSectionOrderExplicit).toBe(false);
+
+      useUIStore.getState().setWorkStatusSectionOrder(savedDefault);
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(savedWithTasks);
+      expect(useUIStore.getState().workStatusSectionOrderExplicit).toBe(true);
+
+      applySettingsToStores(parseSettingsDocument({ workStatusSectionOrder: savedDefault, workStatusSectionOrderExplicit: true }) ?? {});
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(savedWithTasks);
+
+      useUIStore.setState({ workStatusSectionOrderExplicit: false });
+      applySettingsToStores(parseSettingsDocument({ workStatusSectionOrder: savedDefault, workStatusSectionOrderExplicit: true }) ?? {});
+      expect(useUIStore.getState().workStatusSectionOrderExplicit).toBe(true);
+    } finally {
+      useUIStore.setState(original, true);
+    }
+  });
+
+  test('section order: the local store migration moves a saved default', async () => {
+    const migrate = useUIStore.persist.getOptions().migrate;
+    if (!migrate) throw new Error('Expected a migration');
+    const savedDefault = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    expect(await migrate({ workStatusSectionOrder: savedDefault }, 26)).toMatchObject({
+      workStatusSectionOrder: ['session', 'repository', 'usage', 'contextSources', 'telemetry', 'subagents', 'tasks', 'workflows', 'mcp', 'pinned'],
+    });
   });
 
   test('restores section order from the actual local persisted projection', async () => {
@@ -252,6 +332,16 @@ describe('settings registry', () => {
     expect(parseSettingsDocument({ activityRenderMode: 'summary' })).toEqual({ activityRenderMode: 'summary' });
   });
 
+  test('reads the old Wide chat layout switch as the Full chat width until a width is picked', () => {
+    expect(parseSettingsDocument({ wideChatLayoutEnabled: true }))
+      .toEqual({ wideChatLayoutEnabled: true, chatWidth: 'full' });
+    expect(parseSettingsDocument({ wideChatLayoutEnabled: false }))
+      .toEqual({ wideChatLayoutEnabled: false, chatWidth: 'default' });
+    expect(parseSettingsDocument({ wideChatLayoutEnabled: true, chatWidth: 'wider' }))
+      .toEqual({ wideChatLayoutEnabled: true, chatWidth: 'wider' });
+    expect(parseSettingsDocument({ chatWidth: 'wide' })).toEqual({});
+  });
+
   test('applies only the fields a snapshot carries and leaves the rest alone', () => {
     useUIStore.getState().setTerminalShell('fish');
     useUIStore.getState().setShowReasoningTraces(true);
@@ -315,5 +405,41 @@ describe('custom stt endpoint path setting', () => {
     expect(SETTINGS_REGISTRY.sttEndpointPath.scope).toBe('instance');
     expect(parseSettingsDocument({ sttEndpointPath: ' /speech_to_text ' })).toEqual({ sttEndpointPath: '/speech_to_text' });
     expect(parseSettingsDocument({ sttEndpointPath: `/${'a'.repeat(1024)}` })).toEqual({});
+  });
+});
+
+test('the server\'s message search value replaces whatever the client remembered', async () => {
+  const { useUIStore } = await import('@/stores/useUIStore');
+  const { applySettingsToStores } = await import('./registry');
+  const before = useUIStore.getState().messageSearchEnabled;
+  try {
+    // A client that remembered the old default (off) follows a server that resolved it to on.
+    useUIStore.setState({ messageSearchEnabled: false });
+    applySettingsToStores({ messageSearchEnabled: true });
+    expect(useUIStore.getState().messageSearchEnabled).toBe(true);
+    // A settings payload without the key (VS Code) leaves the client's value alone.
+    useUIStore.setState({ messageSearchEnabled: false });
+    applySettingsToStores({});
+    expect(useUIStore.getState().messageSearchEnabled).toBe(false);
+  } finally {
+    useUIStore.setState({ messageSearchEnabled: before });
+  }
+});
+
+describe('transcription prompt setting', () => {
+  test('is a profile setting that keeps multiline Unicode text as typed and treats a missing key as unset', () => {
+    expect(SETTINGS_REGISTRY.sttPrompt.scope).toBe('profile');
+    const typed = 'Español e inglés.\nTérminos: 東京, OpenChamber\n';
+    expect(parseSettingsDocument({ sttPrompt: typed })).toEqual({ sttPrompt: typed });
+    expect(parseSettingsDocument({ sttPrompt: 'x'.repeat(STT_PROMPT_MAX_LENGTH + 1) })).toEqual({});
+    expect(parseSettingsDocument({ sttLanguage: 'es' })).toEqual({ sttLanguage: 'es' });
+  });
+
+  test('applies a synced prompt to the store the dictation reads', () => {
+    applySettingsToStores({ sttPrompt: 'Español e inglés.\n' });
+    expect(readTranscriptionPrompt()).toBe('Español e inglés.\n');
+    applySettingsToStores({});
+    expect(readTranscriptionPrompt()).toBe('Español e inglés.\n');
+    setTranscriptionPrompt('');
   });
 });

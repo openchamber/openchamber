@@ -23,9 +23,11 @@ import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import { guestProject, guestProjectWorktrees } from './workspace';
 import { normalizePath } from '@/lib/pathNormalization';
 import { isAutoModel } from '@/lib/routing/autoModel';
+import { isReviewSession } from '@/lib/sessionReviewMetadata';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useUIStore } from '@/stores/useUIStore';
 import * as sessionActions from '@/sync/session-actions';
@@ -167,7 +169,12 @@ const captureGuestPromptSelection = (sessionId: string, directory: string) => {
   const context = useContextStore.getState();
   const sessions = useSessionUIStore.getState();
   const config = useConfigStore.getState();
-  if (sessions.currentSessionId === sessionId && config.currentProviderId && config.currentModelId) {
+  const record = getDirectoryState(directory)?.session.find((session) => session.id === sessionId)
+    ?? getAllSyncSessions().find((session) => session.id === sessionId)
+    ?? useGlobalSessionsStore.getState().entityById.get(sessionId);
+  // external: #6555 a guest prompt to an open subagent keeps its own record and picks, not the parent composer's.
+  const composerOwnsSession = !record?.parentID || isReviewSession(record);
+  if (sessions.currentSessionId === sessionId && composerOwnsSession && config.currentProviderId && config.currentModelId) {
     return {
       providerID: config.currentProviderId,
       modelID: config.currentModelId,
@@ -177,9 +184,6 @@ const captureGuestPromptSelection = (sessionId: string, directory: string) => {
   }
   const last = sessions.getLastUserChoice(sessionId);
   const fallback = captureDefaultSendSelection();
-  // Match resolveSendSelection's fallback when the panel's path form has no child store.
-  const sessionList = getDirectoryState(directory)?.session ?? getAllSyncSessions();
-  const record = sessionList.find((session) => session.id === sessionId);
   const recordAgent = record?.agent;
   const agentPick = selection.getSessionAgentPick(sessionId);
   const agentSwitched = recordAgent ? selection.followSessionAgent(sessionId, recordAgent) : false;
@@ -408,14 +412,10 @@ export const startGuestSession = async (args: {
       const wait = await getWorktreeSetupWaitEnabled(project);
       assertCurrent();
       if (wait) await waitForWorktreeBootstrap(metadata.path);
-      // Rejects only when the checkout failed to populate: that is `bootstrap-failed`,
-      // and the SDK contract keeps the worktree for the guest to decide on (packages/sdk/API.md).
       directory = await resolveWorktreeStartDirectory(project, metadata.path);
     }
     assertCurrent();
     failure = 'session-create-failed';
-    // v2 creates the session on a selection, so the first prompt runs on the
-    // model the extension asked for without a switch message in the transcript.
     const session = await sessionActions.createSession(
       title,
       directory,

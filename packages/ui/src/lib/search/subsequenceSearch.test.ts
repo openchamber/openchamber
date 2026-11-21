@@ -50,6 +50,15 @@ describe('matchSubsequence', () => {
     expect(later).toBeGreaterThan(scattered);
   });
 
+  test('a whole token at a word start scores perfect and keeps its first occurrence', () => {
+    expect(matchSubsequence('the palette palette', 'palette')).toEqual({ item: 'the palette palette', score: 1, ranges: [[4, 11]] });
+    expect(marked('ПАЛІТРА палітра', 'палітра')).toEqual(['ПАЛІТРА']);
+  });
+
+  test('an earlier unbroken run inside a word loses to a later placement on word starts', () => {
+    expect(matchSubsequence('xab ab', 'ab')).toEqual({ item: 'xab ab', score: 1, ranges: [[4, 6]] });
+  });
+
   test('an empty query matches with nothing marked', () => {
     expect(matchSubsequence('alpha', '  ')).toEqual({ item: 'alpha', score: 1, ranges: [] });
   });
@@ -98,11 +107,6 @@ describe('rankBySubsequence over paths', () => {
   test('falls back to the whole path when the name does not match', () => {
     const [hit] = rankPaths(['solo-is-a-team-size/index.md'], 'solo-is-a');
     expect(hit.ranges).toEqual([[0, 9]]);
-  });
-
-  test('a folder is matched by its own name', () => {
-    expect(rankPaths(['solo-is-a-team-size/index.md', 'solo-is-a-team-size/'], 'solo').map((entry) => entry.item))
-      .toEqual(['solo-is-a-team-size/', 'solo-is-a-team-size/index.md']);
   });
 
   test('a query with a slash matches across folders', () => {

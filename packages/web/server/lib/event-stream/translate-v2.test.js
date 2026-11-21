@@ -30,6 +30,15 @@ describe('translateWireEvent', () => {
     expect(update).toMatchObject({ type: 'installation.update-available', properties: { version: '2.1.0' } });
   });
 
+  test("session.created names a workflow agent's run session as its parent", () => {
+    const [event] = translateWireEvent(wire('session.created', {
+      sessionID: 'agent',
+      metadata: { openchamber: { kind: 'workflow-agent', parentID: 'run' } },
+      location: { directory: '/repo' },
+    }));
+    expect(event.properties.info.parentID).toBe('run');
+  });
+
   test('session.created carries the directory from its location', () => {
     const [event] = translateWireEvent(wire('session.created', {
       sessionID: 's1',
@@ -80,7 +89,10 @@ describe('translateWireEvent', () => {
     expect(event).toMatchObject({ type: 'session.deleted', properties: { sessionID: 's1', info: { id: 's1' } } });
   });
 
-  test('a restore from the archive is its own event, never a session update', () => {
+  test('an archive and a restore are their own events, never a session update', () => {
+    expect(translateWireEvent(wire('session.archived', { sessionID: 's1' }))).toEqual([
+      { type: 'session.archived', id: 'evt_1', created: 1000, properties: { sessionID: 's1', directory: '/repo' } },
+    ]);
     expect(translateWireEvent(wire('session.unarchived', { sessionID: 's1' }))).toEqual([
       { type: 'session.unarchived', id: 'evt_1', created: 1000, properties: { sessionID: 's1', directory: '/repo' } },
     ]);

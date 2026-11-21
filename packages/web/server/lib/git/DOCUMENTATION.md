@@ -25,12 +25,212 @@ This module provides Git repository operations for the web server runtime, inclu
   - `helper-launch.js`: how Git reaches this module's helper scripts through `sh`, telling Electron to run as Node inside the command itself.
   - `repository-credential-runtime.js` and `repository-credential-helper.js`: the credential helper a repository's own `.git/config` names, so `git push` from any shell acts as the identity the repository was given.
 
+## Invariants
+
+- Source TypeScript retains `.js` import specifiers. The Git helper bootstraps
+  register the source resolver before loading their runtime modules; emitted
+  helpers use ordinary JavaScript resolution.
+- Each serial-refresh instance has one request and result type. Runs still
+  share one follow-up per key and preserve the widest requested work.
+- The submodule control-character expression matches UTF-16 code units 0
+  through 31 and 127. Its complement excludes the same units without an inline
+  lint suppression.
+- Redaction accepts arbitrary input and inspects subprocess output only after
+  the existing `Error` check. An error's optional output fields remain
+  unchecked until the existing string filter runs.
+- LFS discovery keeps its canonical filter names as a closed key set. The
+  executable-config check still rejects inherited names such as `constructor`
+  and `__proto__`; duplicate canonical-filter acceptance requires an own name.
+  Its control-character expression excludes the same UTF-16 code units as the
+  submodule parser.
+- `service.ts` passes `spawnOptions: { windowsHide: true }` to simple-git.
+  Simple-git 4.0.2 declares `SimpleGitOptions.spawnOptions` as
+  `Pick<SpawnOptions, 'uid' | 'gid'>`. The folder-local `simple-git.d.ts`
+  adds a factory overload for `windowsHide`, which the spawn plugin accepts at
+  runtime. The runtime import and options remain unchanged.
+  Its log overload also retains explicit `undefined` values for `from`, `to`
+  and `file`: simple-git's parser treats those values as absent and excludes
+  these recognized option names from raw Git arguments.
+- `service-contracts.ts` owns service inputs, injected callbacks and result
+  shapes. Bootstrap error metadata remains unchecked: errors can carry arbitrary
+  `hydration` and `errorCode` values, and the durable bootstrap store owns their
+  validation. An in-memory state must not promise that validation already ran.
+  Rebase-parent JSON likewise retains unchecked fields until the existing
+  truthiness checks and string conversion.
+- Git subprocess output retains its runtime parsing, including numeric exit-code
+  checks, optional upstream fields, quoted patch paths and archive schemas.
+  Dictionary lookups retain their original truthiness and undefined tests;
+  inherited names do not acquire new acceptance or rejection rules.
+- Network planning keeps request fields unchecked until their existing parser
+  validates them. The sync internal target retains the original remote and ref
+  fields rather than substituting the trimmed public target. Those copied fields
+  retain the unchecked JSON domain in its inferred return type.
+- The planner's recursive freeze preserves input types through an overload.
+  Its implementation still copies arrays and plain objects recursively and
+  leaves other values untouched. Matched regex captures and occupied selection
+  slots have invariant accessors because the strict checker also models absent
+  indexed entries.
+- Provider-instance normalization declares a string input but already maps a
+  non-string to `''` before rejecting it. The planner passes that same empty
+  value for unchecked non-string instance fields, preserving its existing
+  provider-account error mapping without changing the neighbouring module.
+- A nonempty integration queue and a matched Git record establish occupied
+  array slots. A missing submodule status field still throws instead of
+  returning an apparently clean submodule.
+- The service's primitive-string predicate and `shared/guards.js` both preserve
+  `typeof value === 'string'`. MIME lookup runs only after the image/office-extension
+  check, so its closed key set excludes inherited object names.
+- Network execution contracts live in `network-execution-contracts.ts`.
+  Sync planning copies the original JSON refs and remote record; execution
+  narrows those copied values without trimming or replacing them with the
+  normalized public target. Contributor-source resolution remains JSON until
+  the existing field comparisons run. Non-null field access establishes no
+  promise about a provider response's individual values.
+- The operation registry keeps in-memory snapshots separate from validated
+  durable snapshots. Runtime identity and transport may be absent before
+  persistence validates them, and progress callbacks can return either shape.
+  Audit result construction copies the current state without establishing that
+  it is terminal; the audit store validates that requirement before writing.
+  Registry completion keeps the state-specific optional `has` call and the
+  existing plain-object, string and exact-key checks. Its checkout-path
+  expression excludes UTF-16 code units 0 through 31 and 127.
+- Execution errors retain unchecked metadata and the original thrown value.
+  Completion validation remains the registry's responsibility. Redaction
+  accepts undefined secret entries because its existing string conversion
+  maps them to empty strings and omits them.
+- Clone binding receives explicit undefined credential, confirmation and
+  provider-account fields. Its owner contract permits these values because
+  the binding implementation checks their values, not property presence.
+- Local integration retains the host line-ending settings and canonical LFS
+  clean filter so a clean checkout stays recognizable during rebase.
+- Credential subprocess options and resolver dependencies are declared in
+  `credential-contracts.ts`; the snapshot implementation exports `SshKeySnapshot`.
+  Endpoint parsing keeps the original prototype-inclusive protocol lookup and
+  validates the resulting port as an integer before accepting it.
+- Credential error metadata remains unchecked until compared with the existing
+  error codes. Membership checks read the error's code once, including when the
+  field is a getter. Missing passphrase dependencies retain their property-access
+  `TypeError` instead of silently omitting passphrase creation, reading or removal.
+  A missing snapshot root still fails after reading the key, with Node's path
+  argument `TypeError` and `ERR_INVALID_ARG_TYPE` code.
+- SSH key verification ignores stdin `EPIPE`: ssh-keygen may close stdin after
+  reading the key, and its exit code and verified output remain authoritative.
+  Async directory iteration closes its directory before inventory cleanup;
+  cleanup ignores only `ERR_DIR_CLOSED` and preserves every other close failure.
+  Import cleanup failures still replace a pending result or failure.
+
+- The 3 process-launched Git helper paths stay JavaScript bootstraps with only
+  Node builtin static imports. They register source resolution before loading
+  their sibling `*-runtime.js` modules. Electron unpacks both halves so helpers
+  launched from `app.asar.unpacked` retain their sibling implementation.
+- The repository credential helper validates an endpoint with `new URL` and
+  still passes the original JSON field to `http.request`. A single-element URL
+  array passes the first step but fails the second with `ERR_INVALID_ARG_TYPE`;
+  the two native calls keep separate boundaries so parsing does not validate
+  the original field's type. A response's username and password likewise
+  remain unchecked JSON until the existing truthiness checks and interpolation.
+- `worktreeBootstrapFailureMessage` performs a prototype-inclusive dictionary
+  lookup on an unchecked code. Its result can be an inherited Object member,
+  so its runtime contract is broader than a string-or-null return. Scrubbing's
+  own-key checks are separate and must remain.
+- The change request's read context comes from source-control authority. It
+  carries the working directory and binding revision. It does not require a
+  config revision; the service-login fetch gets that revision from a separate
+  repository binding read. Worktree hydration retains the explicit `null`
+  authority when there was no binding read.
+
+### Identity and provenance
+
+- Identity records store account references; provider auth stores own the credentials. A disconnected account cannot resolve through a cached secret.
+- VS Code imports `isContributorForkGitDirectory` from its implementation.
+  Provenance storage imports the typed `../shared/object-guards.js` owner
+  directly, so this import does not expose the JavaScript guard entry or
+  unrelated repository-service implementations to VS Code's checker.
+- Provenance validates `sourceSha` with a coercing regular expression. It stays
+  unchecked in the stored record type: a single-element array containing a SHA
+  also passes that expression. The regular-expression overload preserves the
+  native conversion without promising that the original value is a string.
+  The checkout-trust routes narrow it before inspection and before it becomes
+  the trusted operation's `headSha`: a non-string answers the same 409
+  `STALE_CONFIG` the inspection's strict HEAD comparison already gave, and
+  `CheckoutTrustInput.headSha` stays a string.
+- Sparse listing inputs retain their undefined slots. Identity resolvers receive
+  those slots unchanged; the Git-directory probe's overload preserves the native
+  `path.join` argument failure before the filesystem catch.
+- Identity-file validation establishes only `id`, `userName`, and `userEmail`,
+  so `StoredGitIdentityProfile` types every other field, legacy `sshKey`
+  included, as `unknown`. Readers narrow a field before use:
+  `toPublicGitIdentityProfile` drops what it cannot read, and
+  `prepareGuestGitNetwork` in `../guests/clone.ts` treats a non-string `sshKey`
+  as no key, so the clone falls back to the host SSH configuration.
+- A stored state is a fresh `{ profiles }` object holding the validated
+  profile records themselves, so retained migration fields round-trip
+  unchanged.
+- Provisioning accepts partial provider account/user metadata. Legacy stored
+  account fields remain unchecked until their existing equality comparisons.
+  The provider descriptor permits the absent user id passed to `noReplyEmail`.
+- Reading a legacy identity file makes it private. Earlier releases use the host's umask, so refusing an existing permissive file would discard usable identities.
+- Account provisioning skips providers this build cannot describe and accounts without a usable signature. One incomplete account leaves the other accounts available.
+- Provenance listing tolerates an entry whose Git directory no longer resolves; action-time identity reads remain strict. Relative `gitdir:` targets preserve `..` until filesystem resolution so symlink traversal matches Git.
+
+### Route boundary
+
+- Routes parse request strings before the typed service sees them. A query or
+  body field that arrives as a non-string, such as a repeated query
+  parameter, counts as absent: a required one gets the route's existing 400,
+  and an optional one gets the service default.
+- Service inputs that the service validates from raw values keep that
+  validation and are declared unchecked: integrate plans and states, commit
+  summary SHAs, stash refs and options, revert scope, staged paths, commit
+  file lists, snapshot refs, archive ids, titles and session ids, and the
+  commit-files hash. The routes pass those fields through unchanged.
+- The network planner and contributor destination parser take JSON. A body
+  that is not JSON, including a missing one, reaches them as `null`, which
+  both reject exactly as they reject a missing body.
+- `StatusBatchDirectoryResult` distinguishes the non-repository status the
+  batch route returns from a repository's full status.
+
+### Network execution and recovery
+
+- The durable network store exports its validated record and snapshot shapes
+  from `network-storage-contracts.ts`. Snapshot scrubbing and JSON cloning stay
+  unchecked until the existing record parser validates them. Unknown operation
+  names retain their opaque JSON targets instead of acquiring a known-operation
+  target type. Error-message replacement still requires an own dictionary key;
+  state-specific error-code lookup keeps its existing optional method call.
+- Stored nullable timestamps keep JavaScript's numeric-null behavior in
+  expiration and eviction arithmetic. Persisted input still passes the original
+  boolean, integer, endpoint, exact-key and vocabulary checks.
+- Server-generated digests are opaque values, never CLI arguments. Base64url digests may begin with `-`, so option-shaped argument validation does not apply to them.
+- The transport revision ignores one thing: the value of a command-line `http.extraheader` (global or URL-scoped) whose header is `traceparent` or `tracestate`. A wrapper adds a fresh one to every Git run. The entry's key, header name and position still count, and every other command-scope entry, including trace headers a command-line include loads, still moves the revision.
+- Expiring an unstarted operation cancels its durable record before dropping it from memory. Otherwise its persisted `planned` state holds a capacity slot indefinitely.
+- Durable recovery identifies the process that claims an operation. Multiple servers can share the data directory, and another live server's operation is still running.
+- Structured operation codes and statuses override subprocess details. A subprocess `code` can be an exit status and cannot replace the operation's error code.
+- Successful URL-addressed transfers update their local remote-tracking refs explicitly because Git does not update a named remote's refs for those transfers. A bookkeeping failure leaves a stale badge until Fetch and preserves the transfer's success.
+- Sync skips publication when its fetch reads the exact push endpoint and ref and that ref already holds the resulting commit. This avoids an unnecessary authenticated connection.
+- After Sync integrates, push authority refreshes the HEAD-dependent transport revision while preserving every other planned authority check. Changed submodule, LFS and attribute content can be the integration's own result.
+- An existing submodule checkout has its own `.git` entry. Running Git in an uninitialized gitlink's empty directory would resolve the parent's HEAD.
+- LFS evidence excludes staged gitlinks because they have no blob content and are outside the committed submodule manifest. Discovery failure inside a newly cloned child leaves that child incompletely hydrated.
+- LFS upload interruption alone cannot make Git ref publication `outcome-unknown`; uploading objects does not publish a ref.
+
+### Local mutations and checkout state
+
+- A failed project create command still marks any worktree it leaves behind. A tool-created locked checkout remains removable after that failure.
+- Branch metadata writes retry bounded config-lock conflicts because background worktree creation writes the same shared Git configuration concurrently.
+- Stash application first restores the saved index with `--index`, preserving the staged/unstaged split, and falls back to plain application when the index cannot be reinstated.
+- Batch staging retries unmatched paths individually and skips paths already staged by an earlier queued mutation. One stale selection must not abort every other file in the batch.
+- Bootstrap storage persists fixed failure sentences because raw Git messages can contain paths and endpoints. A repaired checkout releases its cached OpenCode location before its failed gate opens, so the next request discovers complete files.
+- The proxy checkout gate loads persisted state once per folder and then reads memory to avoid a cross-process lock on every request. A failed initial store read warns and retains the memory answer; the explicit bootstrap-status read still inspects recovery and fails closed on an unreadable store. A bootstrap started during the load takes precedence over the older persisted state.
+- Rebase continuation checks for an empty commit before conflict hints. Skipping that commit may reach another conflict, and merge continuation can finish with nothing to commit when resolution selects one side entirely.
+
 ## Public API
+
+Extension source-control user IDs may be non-empty strings up to 256 characters. Git identity profiles preserve their exact account references. HTTPS credential references encode and decode the instance-prefixed provider user ID without trimming it; instance, credential ID, key ID and endpoint validation retain their existing rules. This identity metadata grants no CLI credential or managed transport to a service-login account.
 
 The following functions are exported and used by the web server:
 
 ### Repository Operations
-- `isGitRepository(directory, { strict })`: Check if a directory is a Git repository. With `strict: true`, only a confirmed non-repository or an unsupported root answers `false`; a missing/inaccessible directory or an operational Git failure throws. Scheduled tasks use strict mode to prevent an isolation failure from dispatching into the project checkout. Other callers keep the default best-effort probe. A repository whose root is the home directory or a filesystem root (`C:\`, `/`) answers `false` (`unsupportedRepositoryRootReason`): such a repository covers the whole disk, every status read would walk it, and it is nearly always an accidental `git init`. All Git surfaces then show the non-repository state for that directory.
+- `isGitRepository(directory, { strict, failOnGitError })`: Check if a directory is a Git repository. With `failOnGitError: true`, only Git's own "not a git repository", a missing directory or an unsupported root answers `false`; a Git that could not answer (not startable, a refused `safe.directory`, the 30 s timeout) throws `GIT_REPOSITORY_UNREADABLE` with Git's own message (`LC_ALL=C`, so the message is recognised in any locale). `strict: true` implies it and also throws for a missing/inaccessible directory; scheduled tasks use strict mode to prevent an isolation failure from dispatching into the project checkout. `GET /api/git/check`, `GET /api/git/status` (500 `{ error, code }`) and `POST /api/git/projects` (a per-entry `{ directory, error, code }`) use `failOnGitError`, so the client shows "Git couldn't read this folder" with Git's words and a retry instead of "not a repository" and "Initialize Git"; the VS Code bridge's own probe follows the same rule. Other callers keep the default best-effort probe. A repository whose root is the home directory or a filesystem root (`C:\`, `/`) answers `false` (`unsupportedRepositoryRootReason`): such a repository covers the whole disk, every status read would walk it, and it is nearly always an accidental `git init`. All Git surfaces then show the non-repository state for that directory.
 - `repository-root.js` owns that home/disk-root rule (`unsupportedRepositoryRootReason`) and `vcsInitRefusal`, which the OpenCode routes and the VS Code bridge use to refuse OpenCode's `POST /api/vcs/init` in those places. It has no Git dependency so the VS Code extension can import it.
 - `getGlobalIdentity()`: Get global Git user.name, user.email, and core.sshCommand.
 - `getCurrentIdentity(directory)`: Get local Git identity (fallback to global if not set locally).
@@ -45,23 +245,27 @@ Author-profile application never sets or unsets `core.sshCommand` or `credential
 An identity is one repository's complete answer: signature, provider account (`account: { provider, instance, accountId }`), and transport (`account`, `ssh` with `sshCredentialId`, or `anonymous`). A client cannot write an identity without an account or with the `system` transport; records written before identities carried an account are still read (absent transport means `system`) but no repository can choose them. Connecting an account creates its identity on the spot, named after the login and qualified by provider or host when that name is already taken — one person with the same username on GitHub and GitLab gets `ada` and `ada (GitLab)`, not `ada 2`. Connecting again after disconnecting reuses the identity that already carries that person's signature on that instance rather than minting a second one (GitHub without a public address gets its own no-reply address); accounts connected earlier are backfilled once, on the first identities read after startup rather than at route registration, so a slow or locked auth store cannot delay server start. The public profile DTO contains only `id`, `name`, `userName`, `userEmail`, `account`, `transport`, `sshCredentialId`, `signCommits`, `signingKey`, `color`, and `icon`. Renderer Git summary routes expose only author name/email, and remote routes expose redacted display URLs. Raw `core.sshCommand` values and remote credentials, query parameters, and fragments remain server-internal.
 
 ### Status and Diff Operations
-- `getStatus(directory, { mode })`: Get comprehensive Git status including current branch, tracking, ahead/behind, file changes, diff stats, merge/rebase state. `mode: 'light'` skips the diff stats. A read asks Git each question once: in the desktop app every Git process is forked from the Electron main process, which carries Chromium's open profile files into each fork, and endpoint security scanners rescan those files at every fork (#5481). One `rev-parse --git-dir --show-toplevel` answers both whether the directory is a supported repository and where its root is (`isGitRepository` uses the same probe), and one `rev-parse --git-path` locates `MERGE_HEAD`, `MERGE_MSG`, `rebase-merge` and `rebase-apply`, which are then checked as files; `MERGE_HEAD` is resolved only when its file exists. A `rev-parse --verify --quiet` probe through simple-git cannot replace that file check: simple-git reports its silent exit 1 as success. `unborn` is true when the branch has no commit yet (`rev-parse --verify --quiet HEAD` exits 1, probed alongside `git status`); Git otherwise reports such a branch like an empty one, and clients keep repositories nested under such a root reachable. One read runs per directory at a time and at most four run across directories (`serial-refresh.js`): a call made while a read is running waits for one follow-up read that starts after the call, so no caller gets a snapshot older than its request, and every caller that arrives during one read shares that single follow-up at the widest mode any of them asked for. Clients refresh after every completed agent tool call and from several surfaces at once; on a large repository (a status read is half a dozen or more Git processes walking the working tree) this bound is what keeps identical `git status` processes from piling up side by side. A slot is held only while the read is alive: every process the read spawns is killed after two minutes without output (one minute for the untracked-directory listing, thirty seconds for the repository probe), so a Git process that hangs, which happens on Windows, fails that read instead of holding a slot until someone kills it by hand. On Windows the listing is ended with `taskkill /T`, because the spawned `git.exe` is Git for Windows' launcher and killing it alone leaves the real `git` child walking the tree as an orphan. Untracked files are listed with `-unormal` and each new directory is then expanded to its files with a bounded `ls-files` listing (`UNTRACKED_DIRECTORY_EXPANSION_LIMIT`, 1000): up to that many files the result equals `-uall`; beyond it the directory stays one `dir/` entry, because `-uall` would walk a forgotten build or dependency directory in full on every read. A nested repository stays a `dir/` entry as before. A status read never writes the index (#2229): its commands run with `GIT_OPTIONAL_LOCKS=0`, and the working-tree stats come from `git diff-files -M --numstat`, because `git diff` rewrites a stale index even with that variable set. Otherwise each read holds `.git/index.lock` for as long as refreshing the index takes, and a `git commit` the user runs in a terminal at that moment fails with "index.lock: File exists". The cost is that the server never refreshes stale index timestamps itself, so after many files are touched without changes each read compares their contents until a command the user runs refreshes the index.
+
+- `POST /api/git/status/batch` accepts `{ directories, mode? }` with 1 to 200 paths and optional `mode: 'light'`. It streams `application/x-ndjson` entries in completion order: `{ directory, isGitRepository, status }` or `{ directory, error, code }`. Up to four directories run at once, using the shared Git service's global status limit. Disconnecting stops admission of remaining directories; already running shared reads finish normally. Backpressure pauses workers, and no-transform disables response buffering through compression. One failed directory leaves other results valid. The shared HTTP adapter coalesces command-palette and background reads into this route; the single-directory GET remains supported.
+- `getStatus(directory, { mode })`: Get comprehensive Git status including current branch, tracking, ahead/behind, file changes, diff stats, merge/rebase state. A rename or copy row carries the source path as `previousPath`, which the per-file diff reads need. `mode: 'light'` skips the diff stats. A read asks Git each question once: in the desktop app every Git process is forked from the Electron main process, which carries Chromium's open profile files into each fork, and endpoint security scanners rescan those files at every fork (#5481). One `rev-parse --git-dir --show-toplevel` answers both whether the directory is a supported repository and where its root is (`isGitRepository` uses the same probe), and one `rev-parse --git-path` locates `MERGE_HEAD`, `MERGE_MSG`, `rebase-merge` and `rebase-apply`, which are then checked as files; `MERGE_HEAD` is resolved only when its file exists. A `rev-parse --verify --quiet` probe through simple-git cannot replace that file check: simple-git reports its silent exit 1 as success. `unborn` is true when the branch has no commit yet (`rev-parse --verify --quiet HEAD` exits 1, probed alongside `git status`); Git otherwise reports such a branch like an empty one, and clients keep repositories nested under such a root reachable. One read runs per directory at a time and at most four run across directories (`serial-refresh.js`): a call made while a read is running waits for one follow-up read that starts after the call, so no caller gets a snapshot older than its request, and every caller that arrives during one read shares that single follow-up at the widest mode any of them asked for. Clients refresh after every completed agent tool call and from several surfaces at once; on a large repository (a status read is half a dozen or more Git processes walking the working tree) this bound is what keeps identical `git status` processes from piling up side by side. A slot is held only while the read is alive: every process the read spawns is killed after two minutes without output (one minute for the untracked-directory listing, thirty seconds for the repository probe), so a Git process that hangs, which happens on Windows, fails that read instead of holding a slot until someone kills it by hand. On Windows the listing is ended with `taskkill /T`, because the spawned `git.exe` is Git for Windows' launcher and killing it alone leaves the real `git` child walking the tree as an orphan. Untracked files are listed with `-unormal` and each new directory is then expanded to its files with a bounded `ls-files` listing (`UNTRACKED_DIRECTORY_EXPANSION_LIMIT`, 1000): up to that many files the result equals `-uall`; beyond it the directory stays one `dir/` entry, because `-uall` would walk a forgotten build or dependency directory in full on every read. A nested repository stays a `dir/` entry as before. A status read never writes the index (#2229): its commands run with `GIT_OPTIONAL_LOCKS=0`, and the working-tree stats come from `git diff-files -M --numstat`, because `git diff` rewrites a stale index even with that variable set. Otherwise each read holds `.git/index.lock` for as long as refreshing the index takes, and a `git commit` the user runs in a terminal at that moment fails with "index.lock: File exists". The cost is that the server never refreshes stale index timestamps itself, so after many files are touched without changes each read compares their contents until a command the user runs refreshes the index.
 - `getTrackingBranch(directory)`: Upstream of the checked-out branch as `remote/branch` (the same value as `status.tracking`, including an upstream whose remote ref is gone), or `null` when HEAD is detached or unborn or no upstream is configured. Reads refs and config only. Callers that need just the tracking name (GitHub PR status polling, PR creation) use this instead of `getStatus`.
 - `getCheckedOutBranch(directory)`: Short name of the checked-out branch, or `''` when HEAD is detached or the directory is not a repository. Other Git failures throw. One ref read; session knowledge calls it on every message a session sends.
 - `getPathsWithoutChanges(directory, paths)`: Named paths with no uncommitted changes or which Git cannot resolve. Each path is checked literally with `status --porcelain --untracked-files=all` in the supplied directory, including staged, unstaged, deleted and untracked files.
 - `isAncestorOfHead(directory, sha)`: Check whether a commit is reachable from the checked-out `HEAD`.
 - `isPatchEquivalentOfHead(directory, sha)`: Check whether a commit has a patch-equivalent commit reachable from `HEAD`, for terminal PR history after a rebase. It runs a short bounded `git cherry` probe. Missing old objects cannot prove an association.
-- `getDiff(directory, { path, staged, contextLines })`: Get diff output for files or entire working tree with full Git blob identities. Untracked symbolic links are represented as link entries without following their targets.
-- `getPathDiff(directory, { path, staged, contextLines })`: `getDiff` for one path, returning `{ diff, submodule }`. `submodule` is `null` for ordinary paths. For a gitlink it is `{ headCommit, indexCommit, worktreeCommit, hasTrackedChanges, hasUntrackedFiles, hasConflict }`, because a submodule that only gained untracked files shows as modified in status while its patch is empty. `worktreeCommit` is `null` when the submodule is not checked out. An unmerged gitlink has no single index commit, so it reports `hasConflict: true` with `indexCommit: null`. Exposed as `GET /api/git/diff`.
+- `getDiff(directory, { path, staged, contextLines, previousPath })`: Get diff output for files or entire working tree with full Git blob identities. Untracked symbolic links are represented as link entries without following their targets. `previousPath` names a rename's source; see the pathspec note below.
+- `getPathDiff(directory, { path, staged, contextLines, previousPath })`: `getDiff` for one path, returning `{ diff, submodule }`. `submodule` is `null` for ordinary paths. For a gitlink it is `{ headCommit, indexCommit, worktreeCommit, hasTrackedChanges, hasUntrackedFiles, hasConflict }`, because a submodule that only gained untracked files shows as modified in status while its patch is empty. `worktreeCommit` is `null` when the submodule is not checked out. An unmerged gitlink has no single index commit, so it reports `hasConflict: true` with `indexCommit: null`. Exposed as `GET /api/git/diff`.
 - `getPathDiffs(directory, { paths, staged, contextLines, concurrency })`: `getPathDiff` for many paths of one side, resolving the repository once and running a bounded number of reads at a time. Returns one entry per input path in order, `{ path, diff, submodule }` or `{ path, error, code }` with `code` one of the path error codes below or `null`; one failed path never fails the others. Exposed as `POST /api/git/diffs` (body `{ paths, staged, context }`, at most 1000 paths per request), which the Changes find bar uses to read a working-tree changeset in one request.
 - Paths come from an earlier status listing and can stop resolving. Per-path operations reject with `error.code`: `path_not_found` when the path is absent from the working tree, index, and HEAD (for example, a file removed after the listing), `nested_repository` when the path is a directory holding its own `.git` that is not a submodule (status lists it as `dir/`), and `untracked_directory` when the path is a directory status kept as one `dir/` entry because it holds more untracked files than the expansion bound. `GET /api/git/diff` and `GET /api/git/file-diff` answer these with 404, 422 and 422 and a `{ error, code }` body instead of 500. Entry existence is read from `ls-files --stage` and `ls-tree` modes, not `cat-file -e`: a gitlink's commit is not in the parent's object store, and simple-git reports that silent exit 1 as success.
 - `GET /api/git/diff`, `GET /api/git/file-diff`, and `POST /api/git/diffs` answer a non-repository directory with HTTP 409 and `{ code: 'not_repository', error: 'This directory is not a Git repository.' }`, without warnings or errors in the server log. This applies both to plain folders and repositories whose `.git` disappeared. Request validation still runs first; unrelated Git failures remain 500. The HTTP adapter rejects these reads with the server message, which existing desktop/web and mobile diff error views display. A failed batch has no successful per-path entries.
 
-- `getRangeDiff(directory, { base, head, path, contextLines, includeWorkingTree })`: Compare the merge base of the exact selected refs with `head`. With `includeWorkingTree: true`, compare with the checked-out branch's current files instead, including committed, staged, unstaged, and untracked work in one net diff. This mode rejects a head that is not the checked-out branch. Exposed as `GET /api/git/range-diff`; omit `path` for the whole comparison.
+- `getRangeDiff(directory, { base, head, path, contextLines, includeWorkingTree, previousPath })`: Compare the merge base of the exact selected refs with `head`. With `includeWorkingTree: true`, compare with the checked-out branch's current files instead, including committed, staged, unstaged, and untracked work in one net diff. This mode rejects a head that is not the checked-out branch. Exposed as `GET /api/git/range-diff`; omit `path` for the whole comparison.
 - `getRangeFiles(directory, { base, head, includeWorkingTree })`: List changed paths using the same comparison as `getRangeDiff`. A successful empty list means the final files match the merge base, even if staging and working-tree changes cancel each other out. With `includeWorkingTree: true` each entry also carries `revision`: the merge base plus the file's `lstat` signature (size, mtime and ctime in ns, mode, inode; `missing` for a deleted file). It moves exactly when that file's patch can change, so the Changes view re-reads a patch only after the merge base moved or the file was written. A same-size edit with the same line counts still moves it; a status refresh that wrote nothing does not.
+- `getRangeFileVersions(directory, { base, head, path, previousPath, includeWorkingTree })`: Both versions of one file as `data:` URLs, for documents the viewer compares itself. Exposed as `GET /api/git/range-file-versions`. `previousPath` names a renamed file on the base side, as it does in `getCommitFileDiff`.
 - Both range operations honor refs literally. A local `main` is never replaced with `origin/main`, and an unavailable ref fails rather than choosing a different remote. The UI picker sends qualified refs to distinguish local and remote branches with matching display names.
+- A rename is read only when both of its paths are named: Git filters the pathspec first and detects renames among what survives, so the destination alone comes back as a whole new file. Status rows carry the source as `previousPath`; every per-file read above accepts it. Both paths are file names, never patterns: `readDiff` marks each `:(literal)`, and `getRangeDiff` runs every Git command of the read with `--literal-pathspecs` (its temporary-index pass also under `GIT_LITERAL_PATHSPECS`), so a source such as `a[1].txt` never pulls in `a1.txt`. `getFileDiff` takes the old side from where its patch starts: `HEAD:<source>` when staged; otherwise the index entry, which a rename can hold at either path, and `HEAD:<source>` only when the index has no merged entry (a conflict), so an unstaged read never shows what is already staged.
 - Working-tree comparisons use the real index read-only. When untracked paths exist, a temporary copy of the index receives intent-to-add entries so Git computes additions, deletions, recreations, and renames together. Current contents come from the working tree, symlinks remain links, ignored files stay excluded, and temporary files are removed on success or failure.
-- `getFileDiff(directory, { path, staged })`: Get original and modified file contents for a single file (handles images as data URLs and symbolic links as their link-target text). For a submodule, both sides are Git's `Subproject commit <sha>` text (HEAD against the worktree checkout, or against the index when `staged`) and the result carries the same `submodule` state as `getPathDiff`; other paths return no `submodule`, which the route sends as `null`.
+- `getFileDiff(directory, { path, staged, previousPath })`: Get original and modified file contents for a single file (handles images as data URLs and symbolic links as their link-target text). For a submodule, both sides are Git's `Subproject commit <sha>` text (HEAD against the worktree checkout, or against the index when `staged`) and the result carries the same `submodule` state as `getPathDiff`; other paths return no `submodule`, which the route sends as `null`.
 - `listUntrackedPaths(directory)`: List individual untracked file paths honoring ignore rules. Much cheaper than `getStatus` when that is all a caller needs. Deliberately not `--directory`: collapsed directory entries end in a slash and are rejected by the per-file diff helpers, so a caller would silently lose every file inside a new directory.
 - `getUntrackedDiffs(directory, filePaths, { concurrency, contextLines })`: Diffs for untracked files against an empty tree. Resolves the repository context once instead of per file (`getDiff` re-resolves every call, costing an extra `rev-parse` each time) and bounds how many diff processes run at once. Returns one entry per input path in order; unreadable paths yield `''` rather than failing the batch.
 - `collectDiffs(directory, files)`: Collect diff output for multiple files.
@@ -75,8 +279,8 @@ An identity is one repository's complete answer: signature, provider account (`a
 A stale status row can outlive its repository. Returning empty contents would replace a real comparison with an apparently successful empty diff and poison the client cache. A quiet 409 preserves the distinction and lets the existing error views explain why the comparison is unavailable.
 
 ### Branch Operations
-- `getBranchBase(directory, branch)`: The branch's recorded parent, `branch.<name>.gh-merge-base` (the key `gh pr create` also reads as its default base), while it still names a ref; else a named creation source from the reflog. `createWorktree` records the parent when a new branch starts from another branch, so a stacked branch keeps its lower layer as its base through a rebase. After a rebase, the creation source is no longer a current parent record, so return `null` and let the user choose a base. A source that is the branch's own remote copy (`git switch feat` records `Created from refs/remotes/origin/feat`) is not a parent either and also returns `null`. Explicit per-runtime, directory, and branch choices in the shared UI outrank detection.
-- `getBranches(directory, { remote })`: Get local branches and remote branches. The default (`remote: 'live'`, the Git panel's branch list) asks each remote with `ls-remote --heads`, described under the branch list below; `remote: 'local'` (route `?remote=local`) answers from local refs alone, as `git branch -a` does, for callers that need only the checked-out branch and its upstream (publishing, worktree creation). On a detached HEAD, git's `(HEAD detached at <ref>)` line is left out of `all` and `branches`: listed under the tag or commit name, it looked like a branch, and picking it checked out the same ref again. `current` still carries that name.
+- `getBranchBase(directory, branch)`: The branch's recorded parent, `branch.<name>.gh-merge-base` (the key `gh pr create` also reads as its default base), while it still names a ref; else a named creation source from the reflog. `createWorktree` records the parent when a new branch starts from another branch, and `rebase` records the branch it lands on (a local or remote-tracking branch; a commit, the branch's own remote copy or a detached HEAD leave the record alone), so a stacked branch keeps its lower layer as its base through a rebase. Either answer moves up to a nearer stack layer when one exists (see *Why a stale parent moves up to the nearest stack layer*). After a rebase with no such layer, the creation source is no longer a current parent record, so return `null` and let the user choose a base. A source that is the branch's own remote copy (`git switch feat` records `Created from refs/remotes/origin/feat`) is not a parent either and also returns `null`. Explicit per-runtime, directory, and branch choices in the shared UI outrank detection.
+- `getBranches(directory, { remote })`: Get local branches and remote branches. The default answers from local refs alone, as `git branch -a` does. `remote: 'live'` (route `?remote=live`) also asks each remote with `ls-remote --heads`, described under the branch list below, and runs only when the person asks for it. On a detached HEAD, git's `(HEAD detached at <ref>)` line is left out of `all` and `branches`: listed under the tag or commit name, it looked like a branch, and picking it checked out the same ref again. `current` still carries that name.
 - Commit integration is local-only: it may fast-forward to an existing local upstream ref, but never fetches implicitly. Refresh remote-tracking refs through an explicit planned Fetch operation before integration when current remote state is required.
 - Ordinary worktree validation and creation from a remote branch that has no local remote-tracking ref fetch that single branch first (`git fetch <remote> +refs/heads/<branch>:refs/remotes/<remote>/<branch>`), because the branch list offers never-fetched remote branches. A failed fetch reports `Remote branch not found`. Upstream setup is local-only. Contributor worktrees retain their dedicated managed transfer and checkout-hydration operations and never take this fetch.
 - `getUnpushedBranchCounts(directory, branchNames)`: Count commits ahead of each locally known upstream for up to five supplied local branches. This reads local refs only and omits branches without an upstream.
@@ -85,6 +289,12 @@ A stale status row can outlive its repository. Returning empty contents would re
 - `deleteBranch(directory, branch, options)`: Delete a branch (supports force flag). Scheduled cleanup uses `ifExists: true` so recovery after a completed branch deletion succeeds; only a confirmed missing ref is ignored, while operational Git failures still throw.
 - `renameBranch(directory, oldName, newName)`: Rename a branch and preserve upstream tracking.
 - `getRemotes(directory)`: Get list of configured remotes.
+
+#### Why a stale parent moves up to the nearest stack layer
+
+The parent record is written once, when OpenChamber makes or rebases the branch. A stack rearranged by hand (`git rebase` in a terminal, an agent's restack) keeps the old record, and comparing against a lower layer shows the middle layer's commits as the branch's own. Rewriting the record on every terminal rebase is impossible, so `findNearerStackLayer` reads the stack from the commits: the nearest local branch whose tip sits on the branch's first-parent line above the recorded (or created-from) parent. It only looks above a named parent, so a branch made on the default branch never picks up an unrelated branch. A branch merged in from the side is off the first-parent line and does not count. A candidate must itself have been made below the branch. Its recorded parent, or a reflog creation source naming another local or remote-tracking branch, says so. A candidate made from `HEAD` (`git checkout -b` on the layer below, the usual way to stack) or a revision such as `HEAD~1` counts only when the commit it started at, the oldest entry of its reflog, is at or below the lower parent, or is a tip the lower parent's own reflog remembers (the whole stack moved onto a newer base rewrites that tip); a backup or a child of the branch started on the branch's own commits above it. Two such names at the nearest commit answer nothing new, and the record stands. Trusting the record alone was the rejected alternative; it was right until the first manual restack. Reading the topology alone, without the record, was rejected too: after OpenChamber moves a branch onto a sibling stack, no layer sits above the old parent, so only the record knows it.
+
+`rebase` records its destination only once the rebase finishes. A rebase stopped on a conflict keeps the pending parent in a file inside git's own `rebase-merge`/`rebase-apply` folder, which `continueRebase` reads; git deletes that folder on finish or abort, so a rebase finished or aborted in a terminal leaves no stale record behind.
 
 ### Worktree Operations
 - `resolveWorktreeTopLevel(directory)`: `{ root, prefix }` from one `git rev-parse --show-toplevel --show-prefix`: the checkout root and where `directory` sits inside it (`''` at the root, `ai` for `<root>/ai`). When git fails the answer is `{ root: directory }` without `prefix`, so a failed read is never taken for "at the repository root"; `GET /api/git/toplevel` passes that through and callers of `prefix` treat its absence as unknown.
@@ -103,12 +313,150 @@ A stale status row can outlive its repository. Returning empty contents would re
 - `snapshotWorktree(directory, { ref })` (`POST /api/git/worktrees/snapshot`): Record the worktree's complete state (HEAD plus staged, unstaged and untracked-but-not-ignored files) as a commit whose parent is HEAD, stored at `ref`. Only `refs/openchamber/runs/<group>/<session>` refs are accepted, so snapshots never appear as branches or tags. A throwaway index (`GIT_INDEX_FILE`) keeps the real index, HEAD, branch and files untouched; the commit uses a fixed OpenChamber identity. Returns `{ ref, commit, head }`. Used by multi-run Keep and code fusion (`packages/ui/src/lib/multirun/DOCUMENTATION.md`); VS Code implements it in the bridge git runtime.
 - `isLinkedWorktree(directory)`: Check if directory is a linked worktree (not primary).
 
+### Worktree create command
+
+A project's personal `createWorktreeCommand` (`../projects/DOCUMENTATION.md`)
+reaches `createWorktree` as `input.createCommand` and replaces
+`git worktree add --no-checkout` plus the background populate
+(`createWorktreeWithCommand`). The VS Code host mirrors it in
+`packages/vscode/src/gitService.ts`.
+
+- The branch is made first, the way `worktree add -b`/`-B` would make it
+  (`git branch [--no-track] [-f] <branch> <start>`), so every command does one
+  thing: check out the existing `$WORKTREE_BRANCH` at `$WORKTREE_PATH`, which
+  does not exist yet. It runs from the primary checkout through the setup
+  command runner (stdin closed, own process group), stopped after 10 minutes.
+- A failure throws `WORKTREE_CREATE_COMMAND_FAILED` with the end of the
+  command's output. A branch this attempt made and no checkout holds is
+  deleted again; a moved change-request branch goes back to its tip.
+- Success requires a registered worktree of this repository on that branch at
+  the path's real location. A tool that keeps the checkout in its own store and
+  leaves a symlink at the path is adopted at the store path, and that is the
+  path the response, the bootstrap record and the client use.
+- The command populates the checkout itself, hooks and filters included, so
+  the bootstrap skips `populateWorktreeWithLockRecovery` and the post-checkout
+  hook; hydration, upstream setup and setup commands run as usual.
+- Contributor-fork worktrees never use it: their population must run no
+  repository hooks or content filters, which a command cannot promise.
+- The worktree's admin folder (`<common dir>/worktrees/<id>`) gets an
+  `openchamber-created-by-command` mark. `removeWorktree` passes git's second
+  `--force` for a locked worktree only when it carries the mark. The mark holds
+  the path the command was given when the tool left a symlink there; removal
+  deletes that symlink while it still names the removed worktree, so the name
+  is free for the next worktree.
+
+#### Why the request waits for the command
+
+`returnAfterDirectoryCreated` makes the folder before git runs, so the client
+can open the session at once. A command needs the path free, and a tool may put
+the checkout elsewhere, so the path is not known until it finishes. With a
+create command the request waits and answers with the real path; the VS Code
+webview sends that request without the bridge's 30 second timeout.
+
+#### Why the lock is overridden only for marked worktrees
+
+Copy-on-write tools lock their worktrees, and `git worktree remove --force`
+refuses a locked one, so a worktree made this way could not be deleted from
+the app. A lock anyone else set means "do not remove", and removal keeps
+refusing it; the mark tells the two apart without reading the lock reason,
+which every tool words differently.
+
 ### Worktree location
 - New worktrees go under OpenCode's `worktree.directory` when it is set: relative paths resolve against the project's canonical checkout, absolute paths are used as-is, and a leading `~` means the user's home directory. OpenCode appends the worktree name to that folder, so only the name is added.
-- The setting is read from the merged OpenCode configuration on the canonical checkout (`packages/web/server/lib/opencode/worktree-directory.js`, shared with the VS Code extension host through `packages/vscode/src/worktree-directory.ts`) so a linked worktree sees the project's saved value.
+- Both runtimes use `readWorktreeDirectorySetting` in `packages/web/server/lib/opencode/config-files.js` on the canonical checkout, so a linked worktree sees the project's saved value. It merges global configs, `OPENCODE_CONFIG`, then direct and `.opencode` configs from the filesystem root through the checkout, in OpenCode order. Ancestor settings above the repository apply, and relative directories still resolve against the canonical checkout.
 - When the setting is absent, or names no usable directory, worktrees keep landing in OpenChamber's data-dir folder keyed by project ID. Changing the setting only affects worktrees created afterwards; nothing is moved.
 - `removeWorktree` deletes an unregistered leftover only under the data-dir root, so worktrees created before the setting was set stay removable while a shared configured folder such as `".."` can never make a sibling project eligible for deletion; a config read failure there falls back to the data-dir root instead of blocking the removal. Creation still fails loudly on an unreadable config so a worktree is never created in an unchosen folder.
 - Both the web and VS Code readers merge a secondary user config file (`opencode.jsonc` beside `opencode.json`) as an override layer, as OpenCode does, so `worktree.directory` set there applies in every runtime.
+
+#### Why preview and creation resolve the parent after creating it
+
+Preview and creation return the filesystem-resolved path Git lists, including when home, `XDG_DATA_HOME` or `worktree.directory` contains a symlink. The parent can be absent for the first worktree, so these operations create it before calling `realpath`. The resolved parent also owns candidate selection and failed-create cleanup. Context resolution leaves the worktree parent untouched. A resolution failure rejects the operation before a candidate is created.
+
+Existing sessions keep their stored directory. Recover an alias-path session through OpenCode's `POST /api/session/{sessionID}/move` with `{"directory":"<real worktree path>"}` on the same OpenCode server that owns it. This creation rule does not move checkout files or rewrite session history.
+
+### Worktree teardown commands
+
+`DELETE /api/git/worktrees` takes an optional `teardownCommand`: the project's
+`teardownWorktree` list joined with `&&`, after the client's trust prompt
+(`resolveWorktreeTeardownCommands` in
+`packages/ui/src/lib/sharedTrustConfirmation.ts`). `POST
+/api/git/worktrees/teardown` runs it alone and removes nothing
+(`teardownWorktree`). An archive uses that route before it archives any session,
+so a failing teardown leaves the sessions alone, and `POST
+/api/git/worktrees/archives` then snapshots what the teardown left; a delete
+with a remote branch uses it the same way before the remote delete. It runs through the same shell runner as the setup
+commands, with the worktree as working directory, stdin closed, and the
+project's current environment (both routes are user actions). The request
+waits for it, so it is stopped after 5 minutes and the removal fails as for any
+other failing command.
+
+- It runs before anything is touched: before the bootstrap record is cleared,
+  the OpenCode instance released and `git worktree remove` runs.
+- A failing command throws `Worktree teardown command failed, so the worktree
+  was kept: <output>` with `code: 'WORKTREE_TEARDOWN_FAILED'` and leaves the
+  worktree, its instance and its branch as they were; `<output>` keeps only the
+  last 2000 characters. The routes answer 500 with that text and the code. The
+  delete toasts (the delete dialogs, mobile and the overview) then offer
+  "Delete without teardown", which repeats that delete with the same options
+  and no teardown command, and stay until answered or closed. Only that click
+  skips a teardown.
+- A registered worktree whose folder is already gone skips the teardown, so a
+  folder deleted outside the app stays removable. So does a worktree whose
+  bootstrap failed: its setup commands never ran, and the teardown would run
+  against a checkout that may not have landed. An unregistered leftover never
+  runs it.
+- A contributor-fork checkout never runs it: the folder holds the
+  contributor's code, and a "run" checkout-trust decision is a one-time
+  `checkout-actions` operation, not a trust kept on the worktree, so nothing
+  tells an approved checkout from one never approved. Setup that a "run"
+  started is not torn down. The routes inject `isContributorCheckout`, which
+  reads `contributorProvenance`. A read that fails runs nothing and keeps the
+  worktree with `WORKTREE_TEARDOWN_FAILED`, so "Delete without teardown" stays
+  available. The VS Code host makes the same check from the store file
+  (`isContributorForkGitDirectory`).
+- The client asks for no trust where the server runs no teardown: a checkout
+  whose bootstrap state it has as failed, or whose `provenance.kind` is
+  `contributor-fork` (`resolveWorktreeTeardownCommand` in
+  `packages/ui/src/lib/worktrees/worktreeManager.ts`). Concurrent deletes in one
+  project share one prompt and one answer.
+- Only removals the client starts carry it. Server-side cleanups (scheduled-task
+  runs, a failed session move) run no teardown: a scheduled run runs no setup
+  commands, and a failed move stops the ones it started.
+  The client's merged-PR cleanup never opens the trust prompt: untrusted shared
+  teardown commands make its archive fail before any session is archived, and
+  the worktree waits for a removal by hand. A trusted teardown that fails stops
+  that archive at the same point, so the cleanup's retries leave the sessions
+  alone.
+- A delete that also removes the remote branch checks that the remote is
+  ready, then runs the teardown alone, then plans and runs the remote delete,
+  then removes the worktree without a teardown command
+  (`runBoundRemoteBranchDelete`'s `beforePlan`). A remote that refuses stops
+  nothing, and a failing teardown never reaches the remote delete.
+- The VS Code runtime applies the same rules in `removeWorktree` and
+  `teardownWorktree` (`packages/vscode/src/gitService.ts`) and has no archive.
+  It creates no contributor-fork worktree, but one the desktop or web app
+  created can be deleted from it, so it reads the server's store file at the
+  server's path. Its webview sends both requests without the bridge's 30 second timeout, since the host may run
+  the teardown for 5 minutes.
+
+#### Why a failed teardown keeps the worktree
+
+The commands exist to stop what lives in the folder (a Docker stack, a dev
+server). Deleting it anyway leaves that process running against a folder that is
+gone, or fails `git worktree remove` halfway. A failed removal already restores
+the sessions archived for it (`packages/ui/src/lib/worktrees/worktreeRemovalFlow.ts`),
+so keeping the worktree fits the existing failure path. The command list is
+shared with the whole team, so one broken command must not block a delete:
+"Delete without teardown" lets the user go on, and only by hand.
+
+#### Why the client's rollbacks still run teardown
+
+A worktree removed because session creation, a session move or an archive
+restore failed right after creating it has run its setup commands, which may
+have started what the teardown stops. Skipping the teardown there would leave
+that running with nothing on screen; a failing teardown leaves a worktree the
+user sees and can delete. A worktree whose bootstrap failed is the exception
+above.
 
 ### Worktree removal and the folder's OpenCode location
 
@@ -214,7 +562,12 @@ folder is busy; any other leftover is named by its path with the error that
 stopped its deletion.
 Only a linked worktree git registers for this repository is archived, never
 the primary checkout or a stray folder, and one worktree is archived once at a
-time (`WORKTREE_ARCHIVE_IN_PROGRESS` for a second call).
+time (`WORKTREE_ARCHIVE_IN_PROGRESS` for a second call). A worktree whose folder
+was deleted outside the app (git reports it prunable and the folder is absent)
+has nothing to record: its snapshot equals the commit it stood on, the removal
+drops its registration, and restoring it brings back the branch. A folder that
+lost only its `.git` file is prunable too, but its files are still there, so
+that archive fails and leaves no ref.
 
 `listWorktreeArchives` reads the refs (`GET /api/git/worktrees/archives`).
 `restoreWorktreeArchive` runs in a new checkout of the archive's branch (or of
@@ -284,6 +637,8 @@ contributor worktrees and no agent tool, so the parameter does not exist there;
 a server without the pipeline answers 501 and never falls back to a plain
 branch worktree.
 
+Providers with service-only login, such as Codebase, fetch MR heads through the selected primary remote's existing transport using the ordinary network-operation planner and executor. This path accepts only same-repository heads, never requests an exported provider credential, and leaves the managed contributor-transfer path unchanged for providers offering token login. The provider revalidates the requested head after fetch; existing worktree creation verifies the exact revision before attaching the checkout. Hydration uses the primary remote URL that supplied the objects. Public operation snapshots retain the ordinary `fetch` schema.
+
 The agent tool's `session.moveToWorktree` makes a plain branch worktree
 through `createWorktree` for a session that already exists
 (`../openchamber-sessions/worktree-move.js`): a new branch, or with
@@ -310,19 +665,27 @@ when the move made it.
 - `GET /api/git/network-operations/:id` returns the current snapshot.
 - `POST /api/git/network-operations/:id/cancel` accepts an empty body and requests idempotent cancellation.
 
-Public snapshots contain `operationId`, `runtimeIdentity`, transport verification and optional verified actor, the redacted target, completed steps, state, and a stable redacted terminal error when applicable. A manual checkout-hydration plan retains the established parent-source transport shape for client compatibility, but that field proves only the selected source authority and is not child-transfer attribution. The internal automatic checkout-hydration operation uses `null` for operation-level transport because its child transfers use independent auxiliary grants; callers receive its bounded hydration result rather than the operation snapshot. Hydration audit records ignore parent transport metadata and use only exact child grant references. URL display endpoints contain no userinfo, query, or fragment; strict SCP displays remain supported. Endpoint fingerprints still cover the normalized transport authority, including query and fragment data when present in repository configuration, without exposing that data. Raw endpoints, repository and temporary paths, credential IDs, and pinned SHAs stay in the process-local internal plan. The default registry holds at most 256 records, expires unstarted plans after 15 minutes, retains terminal records for one hour, and evicts only terminal records for capacity. Restarting the server drops that process-local registry, but `network-operation-storage.js` keeps a bounded durable copy of each public snapshot, without the optional verified actor, in `git-network-operations.json` under `OPENCHAMBER_DATA_DIR`. After a restart the same-ID read returns the persisted terminal snapshot; a `planned` record recovers as `cancelled`, a `running` record recovers as `outcome-unknown` with a restart message and never expires, and other terminal records expire after the configured durable retention window.
+Public snapshots contain `operationId`, `runtimeIdentity`, transport verification and optional verified actor, the redacted target, completed steps, state, and a stable redacted terminal error when applicable. A manual checkout-hydration plan retains the established parent-source transport shape for client compatibility, but that field proves only the selected source authority and is not child-transfer attribution. The internal automatic checkout-hydration operation uses `null` for operation-level transport because its child transfers use independent auxiliary grants; callers receive its bounded hydration result rather than the operation snapshot. Hydration audit records ignore parent transport metadata and use only exact child grant references. URL display endpoints contain no userinfo, query, or fragment; strict SCP displays remain supported. Endpoint fingerprints still cover the normalized transport authority, including query and fragment data when present in repository configuration, without exposing that data. Raw endpoints, repository and temporary paths, credential IDs, and pinned SHAs stay in the process-local internal plan. The default registry holds at most 256 records, expires unstarted plans after 15 minutes, retains terminal records for one hour, and evicts only terminal records for capacity. Restarting the server drops that process-local registry, but `network-operation-storage.js` keeps a bounded durable copy of each public snapshot, without the optional verified actor, in `git-network-operations.json` under `OPENCHAMBER_DATA_DIR`. After a restart the same-ID read returns the persisted terminal snapshot; a `planned` record recovers as `cancelled`, a `running` record recovers as `outcome-unknown` with a restart message and never expires, and other terminal records expire after the configured durable retention window. A record naming an operation this build does not plan is kept rather than invalidating the file, with one warning per record and store instance, for as long as the record stays in the file, naming what could not be read; the warning prints only the operation, step and error-code names the parser validated as bounded names, never values from the target. Its snapshot envelope, lifecycle state and public-value bounds are still validated. Its completed steps and every terminal error code, including those of ordered sync results, may be bounded names instead of known ones; the ordered sync results themselves still have to be exactly `fetch`, `pull` and `push`. Its target is checked for opaque bounded content rather than for this build's shape rules, so no endpoint, absolute path, credential or process output rides in on a name it does not know. It resolves through the same restart rule and is never resumed. Claiming and updating stay strict, so this build writes no operation, step or error code it does not plan. The local VS Code extension never reads this file or the audit log: its webview sends Git and worktree requests through the extension host bridge (`bridge-git-runtime.ts`) to its own `gitService.ts`.
 
 ### Exact-ref transport authority
 
-Push, fetch, pull, remote-branch deletion, and sync accept only full refs. Sources are `refs/heads/*` or `refs/tags/*` (and a change host's `refs/changes/*` for a single-ref fetch, see *Review refs on a change host*); push destinations are heads or tags, deletion destinations are heads, fetch destinations are remote refs, heads, or tags, and pull destinations are heads. Sync narrows its fetch destination to `refs/remotes/*`, names its checked-out pull destination, and requires that destination to equal the exact push source. Planning accepts authoritative HTTPS, `ssh://`, and strict SCP endpoints only, under the same endpoint rule as Clone. Plain HTTP passes in one case: a loopback host (`localhost`, `127.0.0.0/8`, `::1`) when a registered provider allows loopback HTTP instances (Gitea's and Gerrit's local development sites); a managed credential additionally reaches it only when that loopback origin is its own provider's instance (`endpointIsInstanceOrigin`, `loopback-http.js`). The durable operation store accepts such an endpoint, and the terminal credential helper (`repository-credential-runtime.js`) answers shell Git for it under the same managed-credential rule; plain HTTP to any other host is refused everywhere. Anonymous transport stays HTTPS-only. A refused push's error leads with the remote's `! [remote rejected]` and `remote: error` lines, redacted, without the progress and hints around them. An `ssh://` endpoint may name its login user; HTTPS userinfo, any password, and query or fragment data fail before plan registration or Git argv construction. The SSH user stays in the internal raw endpoint: display URLs and fingerprints drop it, and URL display endpoints with userinfo fail. Planning validates the repository ID, binding and config revisions, remote, redacted endpoint fingerprint and display URL, transport mode, and opaque credential reference against source-control authority before resolving refs. Execution repeats authority validation before any subprocess or credential resolution and again immediately before each transfer Git process starts. It also compares a server-internal transport revision derived from effective system, global, local, worktree, and included Git configuration. The revision covers credential helpers and URL-scoped credential settings, SSH commands, URL rewrites, HTTP settings, and remote proxies. Values and origin paths never enter public plans or errors.
+Push, fetch, pull, remote-branch deletion, and sync accept only full refs. Sources are `refs/heads/*` or `refs/tags/*` (and a change host's `refs/changes/*` for a single-ref fetch, see *Review refs on a change host*); push destinations are heads or tags, deletion destinations are heads, fetch destinations are remote refs, heads, or tags, and pull destinations are heads. Sync narrows its fetch destination to `refs/remotes/*`, names its checked-out pull destination, and requires that destination to equal the exact push source. Planning accepts authoritative HTTPS, `ssh://`, and strict SCP endpoints only, under the same endpoint rule as Clone. Plain HTTP passes in one case: a loopback host (`localhost`, `127.0.0.0/8`, `::1`) when a registered provider allows loopback HTTP instances (Gitea's and Gerrit's local development sites); a managed credential additionally reaches it only when that loopback origin is its own provider's instance (`endpointIsInstanceOrigin`, `loopback-http.js`). The durable operation store accepts such an endpoint, and the terminal credential helper (`repository-credential-runtime.js`) answers shell Git for it under the same managed-credential rule; plain HTTP to any other host is refused everywhere. Anonymous transport stays HTTPS-only. A refused push's error leads with the remote's `! [remote rejected]` and `remote: error` lines, redacted, without the progress and hints around them. An `ssh://` endpoint may name its login user, and so may an HTTP(S) endpoint of a repository on System transport (*Why an HTTPS name passes only on System transport*); any other HTTP(S) userinfo, any password, and query or fragment data fail before plan registration or Git argv construction. A repository remote refused for userinfo on a non-SSH URL answers with its own public code, `REMOTE_URL_USERINFO`, so the client can tell the user to remove the name before `@`; the message never repeats the userinfo, which may be a token. Every other refused endpoint keeps the generic `INVALID_REQUEST` reason. The SSH user stays in the internal raw endpoint: display URLs and fingerprints drop it, and URL display endpoints with userinfo fail. Planning validates the repository ID, binding and config revisions, remote, redacted endpoint fingerprint and display URL, transport mode, and opaque credential reference against source-control authority before resolving refs. Execution repeats authority validation before any subprocess or credential resolution and again immediately before each transfer Git process starts. It also compares a server-internal transport revision derived from effective system, global, local, worktree, and included Git configuration. The revision covers credential helpers and URL-scoped credential settings, SSH commands, URL rewrites, HTTP settings, and remote proxies. Command-scope trace headers are left out (*Why the transport revision leaves trace headers out*). Values and origin paths never enter public plans or errors.
 
 Push resolves and stores the source commit SHA while planning, rechecks it during both execution authority passes, and sends exactly `<pinned-sha>:<destination-ref>`. New-branch publication can request local upstream configuration; only after push success does the executor write the exact branch remote and merge ref, and a local configuration failure returns `partial`. An optional force lease is exactly `--force-with-lease=<destination-ref>:<expected-remote-sha>`. Remote deletion sends exactly `:<destination-ref>` and has the same uncertain-outcome rules as push. Fetch sends exactly `<source-ref>:<destination-ref>` with `--no-tags`. Pull pins the checked-out full HEAD ref and its commit SHA during planning, rechecks both before authentication, before fetch, and before merge, fetches to `refs/openchamber/network/<operationId>`, merges the fetched SHA with `--no-edit --no-verify`, then deletes the temporary ref. Remote names select authority; Git receives only the server-resolved raw endpoint.
 
 Remote-branch deletion never deletes the remote's default branch. Right before the push, the executor asks the remote with `ls-remote --symref <endpoint> HEAD` through the same transport, and refuses with `INVALID_REQUEST` when HEAD names the destination. Some hosts refuse that deletion and some carry it out, so the check cannot be left to the remote. A worktree can end up on `main`, and deleting its branch would then delete main.
 
+### Why the transport revision leaves trace headers out
+
+The revision is compared between planning and execution, so it has to stay the same while the repository does. Some `git` wrappers add a W3C trace context header (`http.extraheader=traceparent: ...`) with a fresh ID to every invocation, through `-c` or `GIT_CONFIG_*`. Hashed as is, that value changes on every read and refuses every planned transfer with `REMOTE_CHANGED` although nothing changed. `git config --null --show-scope --show-origin` puts each record's scope, origin, and key with value in NUL-terminated fields, so the read replaces the header value with nothing in exactly the records whose scope is `command`, whose origin is `command line:` (both `-c` and `GIT_CONFIG_*` report it), whose key is `http.extraheader` or `http.<url>.extraheader`, and whose header name is `traceparent` or `tracestate`. The record itself stays in place with its key and header name: Git picks which extra headers to send by their URL scope and order, so adding, removing or moving even a trace entry can change the other headers and still moves the revision. A trace value only labels the request and moves no authority. Everything else stays in the revision, including command-scope values: a proxy, SSH command, credential helper, other extra header, or any setting a command-line include loads (Git reports those as scope `command` with a `file:` origin, trace headers included) still stops a planned transfer when it changes. Output that does not split into whole records is hashed unfiltered.
+
 ### Why the remote is asked and not `refs/remotes/<remote>/HEAD`
 
 The local symref is written by clone and by fetch on recent git only, and it goes stale when the remote changes its default. A deletion that trusted it could take the real default branch. Worktree removal keeps the local branch on the local symref alone: it runs offline, and a deleted local branch can be fetched back.
+
+### Why an HTTPS name passes only on System transport
+
+Git hands the name before `@` to the credential helper, which picks the stored credential by it. Azure DevOps puts the organization there for that reason, and a person with one token per organization cannot authenticate without it. On System transport the person's own Git and helpers authenticate, so the planner passes the URL as the repository has it: `https://org@host/path`, the name limited to the characters an SSH user may have. Refusing every HTTP(S) name, the earlier rule, made Pull and Sync unusable for such a repository and protected nothing: the URL already sits in the repository's config, display URLs and fingerprints drop the name, and Git's output is redacted before it reaches a client, so a token pasted there does not surface. Managed and anonymous transport keep the refusal: there OpenChamber supplies the credential or none, and a name in the URL would compete with it. A password is refused on every transport. Checkout hydration reads the same remote as the parent of submodules and LFS: discovery (`discovery-endpoint.js`, `ownRemote`) accepts the name on the repository's own remote and drops it, so a relative submodule URL and the derived LFS endpoint never inherit it and a child transfer on managed or anonymous transport stays name-free. A name on an endpoint the checkout's content names is still refused.
 
 Sync is one server-owned execution and one absolute deadline. Its immutable plan has separate fetch and push remote targets, endpoint metadata, transport modes, credentials, source refs, and destination refs. Planning rejects a detached HEAD, a missing target, or a pull destination that differs from the push source. It never reads upstream configuration, chooses `origin`, or chooses the first remote. Execution fetches the exact fetch refspec, merges that fetched commit into the pinned checked-out branch, then resolves and pins the resulting local commit immediately before sending the exact push refspec. It revalidates fetch authority before fetch and push authority before push, so a successful local integration followed by stale or failed push authority remains visible rather than switching targets.
 
@@ -374,6 +737,8 @@ The runtime reads effective `remote.<selected-name>.fetch` values through a boun
 
 Remote Fetch sends the pinned mapping to the authoritative endpoint with `--atomic --no-tags --no-prune --no-prune-tags --no-recurse-submodules --refmap=`. It refreshes advertised heads into only the selected remote's tracking namespace, including new branches and configured forced updates. It does not prune deleted branches, auto-follow tags, recurse into submodules, integrate commits, or configure upstream. Atomicity covers ref updates; existing lifecycle errors, cancellation, cleanup, and terminal metadata remain in force. Menu rendering and branch listing start no transfer. Planning validates local state only; execution starts the remote transfer after the user selects Fetch.
 
+Exact-ref Fetch, like Pull, passes `--no-recurse-submodules` on every transport. System transport keeps the person's Git configuration, where `fetch.recurseSubmodules` would otherwise fetch a populated submodule whose gitlink the fetched commit advances, with no authority check or audit record of its own. Child repositories are transferred by checkout hydration, which validates and audits each endpoint.
+
 Exact-ref Fetch also accepts `fetchScope: 'ref'`. Existing callers that omit the field retain the shipped exact-ref schema and must provide both full refs. Pull, contributor transfers, and Sync retain their existing behavior. Remote Fetch audit targets add only the scope and resolved force boolean to the selected remote name and endpoint fingerprint; they contain no raw URL or configured refspec. Existing version-1 audit records remain readable.
 
 ### Pull integration
@@ -386,15 +751,31 @@ Before replaying, `git rebase` refuses a working tree with unstaged changes, and
 
 ### Clone
 
-Clone is the one parent raw-endpoint input boundary because a new checkout has no repository binding. It accepts HTTPS URLs, SSH URLs, and SCP-style SSH endpoints only. It rejects other protocols, local paths, remote helpers, option-shaped values, control characters, URL query/fragment data, HTTPS userinfo, passwords, and unsafe path components. An HTTPS endpoint on a default instance, or on the instance of the selected credential or provider account, of a provider whose descriptor sets `appendDotGitToHttpsClone` (GitLab: `gitlab.com` and self-managed instances) gains a `.git` suffix when it lacks one: GitLab redirects the bare address, and managed and anonymous transfers never follow redirects. The plan, the transfer, and the `origin` written by the clone all use that address. Planning resolves one absolute destination and an operation-owned sibling temporary directory; both must be absent. Optional auxiliary grants contain only a kind, redacted endpoint metadata, transport mode, and endpoint-specific credential ID. They never contain the discovered raw endpoint.
+Clone is the one parent raw-endpoint input boundary because a new checkout has no repository binding. It accepts HTTPS URLs, SSH URLs, and SCP-style SSH endpoints only. It rejects other protocols, local paths, remote helpers, option-shaped values, control characters, URL query/fragment data, HTTP(S) userinfo other than a name on System transport, passwords, and unsafe path components. An HTTPS endpoint on a default instance, or on the instance of the selected credential or provider account, of a provider whose descriptor sets `appendDotGitToHttpsClone` (GitLab: `gitlab.com` and self-managed instances) gains a `.git` suffix when it lacks one: GitLab redirects the bare address, and managed and anonymous transfers never follow redirects. The plan, the transfer, and the `origin` written by the clone all use that address. Planning resolves one absolute destination and an operation-owned sibling temporary directory; both must be absent. Optional auxiliary grants contain only a kind, redacted endpoint metadata, transport mode, and endpoint-specific credential ID. They never contain the discovered raw endpoint.
 
 Every clone intent chooses `transportMode` explicitly. System requires `unverifiedConfirmed: true`, and managed HTTPS requires an independently selected `credentialAccount` with provider, instance, and exact credential ID. The planner checks the account instance against the approved HTTPS endpoint, reads that exact valid persisted credential without active-account or CLI fallback, and constructs a host-owned `ocgit:v2` reference pinned to its immutable ID and revision. Reauthentication or replacement cannot retarget the plan or the binding created after checkout. Managed SSH requires a selected existing host `sshCredentialId`, validated against the managed inventory and an SSH endpoint before planning. It rejects provider accounts; HTTPS, anonymous and System requests reject SSH references. Execution derives the actual key fingerprint again. Parent `credentialId`, tokens, and key paths are not accepted from clients. Provider associations and author profiles never choose clone transport. Anonymous HTTPS clone selects only `transportMode: 'anonymous'`, with no account or System confirmation. The same exact-endpoint callback persists the chosen grant at revision 1, and binding failure retains the completed checkout as partial.
 
-Git clones with `--no-checkout`, hooks disabled, and `GIT_LFS_SKIP_SMUDGE=1` into the temporary directory. The shared UI requires transport selection before planning and sends no operation on cancellation before planning. Closing during planning cancels the returned plan before execution; closing during execution requests cancellation of that operation ID. The older filesystem route remains an explicitly confirmed System compatibility adapter. A selected commit identity is validated before plan registration or spawn, then applied as repository-local `user.name` and `user.email` in that checkout. The host resolves a global author independently of managed transport's isolated Git configuration. The operation performs a filter-disabled forced checkout, attempts bounded submodule and LFS hydration, and then claims the absent destination with an exclusive `mkdir` and copies checkout entries with no-replace operations. Successful or unnecessary hydration returns success. Incomplete non-cancelled hydration publishes the checked-out repository as `partial` so setup can be repaired in place. This is not an atomic rename or atomic publication. Before each publication filesystem mutation it checks cancellation and the operation deadline, then waits for that mutation to settle and records any new ownership before returning a timeout or cancellation result. Directory ownership identifies a pathname by device and inode, plus creation time where the filesystem keeps a real one. The operation establishes that by changing each directory it creates once on purpose and checking that the reported creation time sits still; Node otherwise fills that field from the change time, which every clone moves as it writes its own checkout. Where creation time holds, a directory removed and recreated in place is detected even though Linux reuses the inode number. Where it does not, ownership falls back to device and inode rather than failing every clone. Cleanup mutations run after terminal intent and are also awaited to settlement.
+Git clones with `--no-checkout`, hooks disabled, and `GIT_LFS_SKIP_SMUDGE=1` into the temporary directory. The shared UI requires transport selection before planning and sends no operation on cancellation before planning. Closing during planning cancels the returned plan before execution; closing during execution requests cancellation of that operation ID. The older filesystem route remains an explicitly confirmed System compatibility adapter. A selected commit identity is validated before plan registration or spawn, then applied as repository-local `user.name` and `user.email` in that checkout. The host resolves a global author independently of managed transport's isolated Git configuration. The operation performs a filter-disabled forced checkout, attempts bounded submodule and LFS hydration, and then claims the absent destination with an exclusive `mkdir` and copies checkout entries with no-replace operations. Successful or unnecessary hydration returns success. Incomplete non-cancelled hydration publishes the checked-out repository as `partial` so setup can be repaired in place. This is not an atomic rename or atomic publication. Before each publication filesystem mutation it checks cancellation and the operation deadline, then waits for that mutation to settle and records any new ownership before returning a timeout or cancellation result. Directory ownership identifies a pathname by device and inode, plus creation time where the filesystem keeps a real one. The operation establishes that by changing each directory it creates on purpose, again up to four times while the change time has not moved yet, and checking that the reported creation time sits still; Node otherwise fills that field from the change time, which every clone moves as it writes its own checkout. Where creation time holds, a directory removed and recreated in place is detected even though Linux reuses the inode number. Where it does not, ownership falls back to device and inode rather than failing every clone. Cleanup mutations run after terminal intent and are also awaited to settlement.
 
 After publication, `bindClonedRepository` resolves the new repository and compares both actual `origin` fetch and push endpoints with the captured approved endpoint, including fingerprints. Only an exact match permits a revision-zero CAS creating binding revision 1 with the selected System grant or exact managed credential reference. The binding also retains only auxiliary grants that matched an endpoint and kind actually discovered during this hydration attempt; unused client grants are discarded. Provider associations remain empty and local authorship stays separate. Persistence is awaited to settlement. Endpoint verification or binding persistence failure returns `partial` with `checked-out`, a redacted finish-setup message, and the completed destination retained. Later cleanup failure also returns partial when checkout is complete. The shared parser rejects partial clone results without `checked-out`; the dialog registers the retained project and opens Git setup with warning feedback, not clone success or full failure. Retry uses setup on that checkout, never another clone into its existing destination. Temporary cleanup still runs, and incomplete publication retains the operation-owned cleanup rules below.
 
 Clone publication creates every directory, file, and symlink exclusively and records each node's identity and content metadata immediately. On failure, cleanup atomically renames the destination root into a fresh same-parent operation-private quarantine before inspection. It recursively deletes only the quarantined tree when the root, complete entry set, identities, and file or link contents match the operation's records. A changed or replacement tree is restored only by an atomic rename from quarantine. If the original path is occupied or rename fails, cleanup leaves the complete tree in quarantine and returns a redacted `UNKNOWN` cleanup failure. Temporary checkout cleanup uses the same rename-first rule and deletes only a quarantined root with the operation-owned identity. No recursive deletion targets the original destination or temporary pathname.
+
+#### Why clone and repository identity share the birthtime probe
+
+`directory-birthtime.js` owns the stability check used by clone ownership and saved repository IDs. Both must reject a positive birthtime that follows ctime, or normal Git writes look like a replaced directory. The probe uses exclusive temporary-directory creation and removes only that empty directory, so existing checkout entries cannot be overwritten or recursively deleted by the check. A probe that leaves ctime unchanged is inconclusive rather than failed: Linux moves ctime on a kernel clock tick, so a probe in the same tick as the last write shows no change. The check then probes again, up to four probes 10 ms apart, and gives up only if ctime still has not moved. Clone ownership falls back to device and inode when the probe fails or stays inconclusive. Source control permits that fallback only without an established identity record; an uncertain replacement must not regain an old credential grant.
+
+### Why failed secret encoding retains earlier variants
+
+URI encoding can reject an unpaired surrogate. Redaction keeps the raw secret
+and every variant encoded before the failure, so a failed encoding cannot
+prevent removal of the original secret.
+
+### Why relative discovery URLs treat repositories as directories
+
+Git's relative submodule URL rule resolves against the repository endpoint
+itself, including its final path component. Filesystem-style parent resolution
+would choose a different repository.
 
 ### Anonymous reads
 
@@ -408,23 +789,39 @@ The loopback HTTPS canary exercises real clone, fetch, pull and an authenticatio
 
 ### Checkout hydration
 
-The operation executor reads `.gitmodules` from the selected commit with `git config --blob --null` and pairs it with mode-`160000` entries from `git ls-tree`. Relative URLs resolve against the exact parent fetch endpoint that produced the checkout. Worktree hydration carries that source from the fetch itself; it never infers one from provider bindings, upstream configuration, `origin`, or remote order. If no exact source can be proved, hydration returns `AUTHENTICATION_REQUIRED` before starting a child process. The executor never invokes `git submodule update`, recursive update, or repository-defined update commands. Children initialize sequentially with `clone --no-checkout`, hooks and LFS smudge disabled, and a forced detached checkout of the exact gitlink. Each child HEAD must equal that gitlink before success is recorded or recursion starts. Recursion, paths, modules, command output, pointer samples, and public results have hard limits.
+The operation executor reads `.gitmodules` from the selected commit with `git config --blob --null` and pairs it with mode-`160000` entries from `git ls-tree`. An entry whose path has no gitlink at that commit is skipped. Relative URLs resolve against the exact parent fetch endpoint that produced the checkout. Worktree hydration carries that source from the fetch itself; it never infers one from provider bindings, upstream configuration, `origin`, or remote order. If no exact source can be proved, hydration returns `AUTHENTICATION_REQUIRED` before starting a child process. The executor never invokes `git submodule update`, recursive update, or repository-defined update commands. Children initialize sequentially with `clone --no-checkout`, hooks and LFS smudge disabled, and a forced detached checkout of the exact gitlink. Each child HEAD must equal that gitlink before success is recorded or recursion starts. Recursion, paths, modules, command output, pointer samples, and public results have hard limits.
 
 `checkout-hydration` is an existing-repository planned operation. Planning pins repository ID, binding and config revisions, exact parent remote and endpoint fingerprint, HEAD, and the bounded transfers found through local inspection. Existing exact submodule checkouts are inspected recursively but do not become transfer requirements. The server resolves each transfer-capable endpoint's auxiliary grant during planning and pins only grants that validate against the discovered raw endpoint; missing grants remain authorization failures and a grant added after planning cannot retarget the operation. A child checkout the run clones itself did not exist during planning, so the submodule and LFS endpoints read inside it cannot be pinned; execution checks each of them against the repository authority planning pinned, binding revision included, so a grant added after planning still cannot authorize one. Planning starts no network process. Execution repeats repository, inspection, and exact auxiliary-grant checks before transfer. Public plans and results contain only repository-relative paths and redacted endpoint metadata. Process-local operation recovery stores the operation ID, but restart reconciliation never executes or resumes hydration automatically.
 
-Each submodule endpoint needs an exact auxiliary grant, including same-host paths. Cross-host children never receive the parent credential. The executor resolves every credential by the child endpoint's own opaque ID, checks the discovered endpoint against the grant before credential resolution and again before spawn, and redacts raw endpoints, paths, credentials, and process errors. One child failure does not erase completed siblings. Cancellation between children prevents later children from starting. Every existing component of a submodule checkout path must be a real directory; symbolic links fail before auxiliary authorization or transfer. After authorization, the executor checks the path components again and creates missing parent directories one level at a time before it creates the child checkout. Repair accepts an already-present child only when its HEAD exactly equals the committed gitlink, then inspects it recursively without another clone. A child directory created by the current failed transfer is quarantined and removed only when its filesystem identity still matches the operation's record.
+Each submodule endpoint needs an auxiliary grant, its own exact record or the one it inherits from the parent remote ([Git transport authority](../source-control/DOCUMENTATION.md#git-transport-authority)). Cross-host children never receive the parent credential. The executor resolves every credential by the child endpoint's own opaque ID, checks the discovered endpoint against the grant before credential resolution and again before spawn, and redacts raw endpoints, paths, credentials, and process errors. One child failure does not erase completed siblings. Cancellation between children prevents later children from starting. Every existing component of a submodule checkout path must be a real directory; symbolic links fail before auxiliary authorization or transfer. After authorization, the executor checks the path components again and creates missing parent directories one level at a time before it creates the child checkout. Repair accepts an already-present child only when its HEAD exactly equals the committed gitlink, then inspects it recursively without another clone. A child directory created by the current failed transfer is quarantined and removed only when its filesystem identity still matches the operation's record.
 
-LFS discovery combines effective attributes, bounded object batches, committed `.lfsconfig`, effective `lfs.url` and remote LFS URLs (Git configuration wins over `.lfsconfig`, and `lfs.url` over `remote.<name>.lfsurl`, as in Git LFS), and executable filter and transfer configuration. It queries attributes and object metadata in batches of at most 1,024 paths, then reads only pointer-sized blobs through `cat-file --batch`. A complete ordinary repository is not rejected merely for exceeding 256 or 1,024 files, LFS files included: every pointer-sized blob is validated, but the scan keeps at most 256 attribute records and 256 pointer samples as evidence, so memory does not grow with the number of LFS files. `discoverLfs` therefore returns `attributePaths` and `pointers` as bounded samples; hydration reads only whether LFS is needed. Listing, query-output, and pointer-byte limits remain enforced. A checkout that exceeds one of them, such as a tracked-file listing over 16 MiB, fails hydration with `CHECKOUT_TOO_LARGE` under the `invalid` status, never as a configuration error. Submodule discovery limits keep `INVALID_REQUEST`. Incomplete or malformed discovery fails closed, never as `not-needed`. Custom transfer agents and non-canonical executable LFS filters fail before LFS execution. The effective HTTPS LFS endpoint gets its own exact auxiliary grant, including for an SSH Git checkout. Hydration runs explicit `git lfs fetch <selected-parent-remote> HEAD` and `git lfs checkout` under registry process ownership. A required missing client returns `GIT_LFS_CLIENT_MISSING` with `client-missing` instead of a generic clone failure.
+LFS discovery combines effective attributes, bounded object batches, committed `.lfsconfig`, effective `lfs.url` and remote LFS URLs (Git configuration wins over `.lfsconfig`, and `lfs.url` over `remote.<name>.lfsurl`, as in Git LFS), and executable filter and transfer configuration. It streams gitlinks from the commit tree and stage-zero index entries for LFS object metadata, so their total output has no byte limit. It holds one incomplete record and one file batch at a time. A listing that is not valid UTF-8 or ends mid-record fails under the `invalid` status with `INVALID_REQUEST`. It queries attributes in batches of at most 1,024 paths and resolves the sizes of those entries' object IDs through `cat-file --batch-check`, then reads only pointer-sized blobs through `cat-file --batch`. A complete ordinary repository is not rejected merely for exceeding 256 or 1,024 files, LFS files included: every pointer-sized blob is validated, but the scan keeps at most 256 attribute records and 256 pointer samples as evidence, so memory does not grow with the number of LFS files. `discoverLfs` therefore returns `attributePaths` and `pointers` as bounded samples; hydration reads only whether LFS is needed. Query-output, record, and pointer-byte limits remain enforced. Submodule discovery limits keep `INVALID_REQUEST`. Incomplete or malformed discovery fails closed, never as `not-needed`. Custom transfer agents and non-canonical executable LFS filters fail before LFS execution. When LFS is needed, an SSH Git remote without an explicit LFS endpoint derives the same-host HTTPS endpoint Git LFS falls back to when the server does not answer `git-lfs-authenticate`: the SSH port is dropped, `.git` is added to a repository path that lacks it, and the result must still pass the HTTPS endpoint checks. A remote that reaches its host through an SSH alias, or a server whose authenticate response names another host or path, still needs an explicit `lfs.url`. The effective HTTPS LFS endpoint needs an auxiliary grant of its own under managed SSH, because the parent's SSH key is never lent to it. Hydration runs explicit `git lfs fetch <selected-parent-remote> HEAD` and `git lfs checkout` under registry process ownership. A required missing client returns `GIT_LFS_CLIENT_MISSING` with `client-missing` instead of a generic clone failure.
 
 Local worktree hydration first inspects local content. Git-route and OpenChamber-session creation both use the server's one durable bootstrap store and always invoke this inspection, including for repositories without a source-control binding. Both pass the repository authority from the binding read, so an unbound repository resolves its checkout remote and submodule endpoints as System grants against the store's tombstone revision, the same way it pushes and fetches. A checkout needing neither submodule nor LFS transfer requires no parent remote; required hydration without an exact source persists path-specific authorization data rather than choosing `origin` or reporting setup ready. Its operation-private durable marker carries no fabricated repository or remote authority and cannot complete a retained-checkout repair blocker. Managed pull and sync integration use a credential-free local execution context with network protocols, lazy fetching, hooks, content filters, fsmonitor, autostash, and recursive submodule operations disabled. Two things come from the person's own Git configuration as their Git reads it in that repository: the line-ending settings (`core.autocrlf`, `core.eol`, `core.safecrlf`, `core.attributesFile`) and the LFS clean filter when it is the canonical `git-lfs clean -- %f`, no `lfs.extension.*` is configured (git-lfs would run an extension's program), and the repository's own configuration sets no `filter.lfs.process`, because any `process` value, an empty one included, keeps Git from running `clean`. Required post-integration hydration uses explicit grants; failure preserves the completed local update and skips sync publication.
 
 Checkout discovery and publication preparation accept repeated effective Git filter entries only when each value is identical and canonical: `filter.lfs.clean=git-lfs clean -- %f`, `filter.lfs.smudge=git-lfs smudge -- %f`, `filter.lfs.process=git-lfs filter-process`, and `filter.lfs.required=true`. Conflicting values, all other duplicate effective keys, and duplicate committed `.lfsconfig` keys remain invalid.
+
+#### Why only submodule URLs allow a trailing slash
+
+Git accepts a single trailing slash in absolute HTTPS and SSH submodule URLs, so submodule discovery and resolution (the `trailingSlash` endpoint option, for the module URL and its parent remote) accept one. The check runs on the original URL before URL parsing can drop empty `?`/`#` delimiters, treat a backslash as a path separator, or resolve literal and encoded dot segments; only then is the slash removed from the pathname, so the endpoint and decoded path share one canonical form. Empty segments, multiple trailing slashes, delimiters, backslashes, and dot segments remain invalid. LFS endpoints and SCP paths keep the stricter rule: widening LFS endpoint policy is a separate decision. Git-relative resolution is unchanged; its join already skips empty segments, including the one after a trailing slash.
+
+#### Why invalid submodule URLs retain their checkout path
+
+The manifest parser attaches the already-validated module path to an unsafe URL error, and resolution attaches it only when the module's own URL fails; a parent endpoint failure stays the parent's. Hydration qualifies the path against the owning checkout and validates it with the operation registry's public checkout-path rule. The existing `submodules[].path` field then identifies the entry in live, saved-operation, and bootstrap results while fixed-message redaction removes unsafe URL and credential details. A manual hydration plan whose inspection fails this way still registers an operation, with no transfer, so Source Control can show the path. A nested manifest failure leaves its parent incomplete and adds a path-specific diagnostic only in the room real modules leave in the public-result bound, so a diagnostic never stops a sibling's transfer. Other failure messages and persisted schemas remain unchanged.
 
 #### Why endpoints inside a freshly cloned child are checked during execution and not planned in a second pass
 
 Planning reads `.gitmodules` and LFS configuration only from checkouts that exist, and a fresh worktree has no submodule checkouts yet. Refusing every endpoint planning did not pin made a submodule of a submodule, or LFS inside a submodule, fail on every fresh worktree (#6003). A second planned pass per nesting level would need the bootstrap and the client to plan again after each level. Execution validates the pinned repository authority and binding revision, then persists a separate bounded audit record for each newly discovered transfer before spawning it. A failed audit plan or start write prevents that transfer; completed siblings remain intact. The record contains the endpoint kind, fingerprint, and exact validated transport reference, and receives a compact terminal result. Authority is checked again after the audit writes. No client replanning is required.
 
 An in-flight audit start write settles before cancellation or timeout closes the record, so a late write cannot leave it running after hydration stops.
+
+#### Why an SSH Git remote derives its HTTPS LFS endpoint
+
+Git LFS already reads an SSH checkout's objects from the same host over HTTPS; `git lfs pull` works in an SSH clone with no `lfs.url`. Refusing to derive that endpoint made worktree hydration fail with `INVALID_REQUEST` for an ordinary SSH clone, even though the person's own Git LFS could hydrate it. Discovery now builds the endpoint Git LFS falls back to when the server does not answer `git-lfs-authenticate`: same host, SSH port dropped, `.git` added when the repository path lacks it, and each decoded path segment encoded again before the URL parser sees it. The result goes through the same HTTPS checks as an explicit `lfs.url`, so plain HTTP, userinfo, query, fragment, and unsafe paths still fail. A remote-specific or committed LFS endpoint still wins, and an SSH checkout that needs no LFS transfer keeps the unresolved state. An SSH host alias or a server authenticate response naming another host or path still needs an explicit `lfs.url`. Deriving the endpoint does not relax the executable checks: custom transfer agents and non-canonical filters still fail before any transfer.
+
+#### Why a `.gitmodules` entry without a gitlink is skipped and not rejected
+
+Git builds submodules from the gitlinks in the tree, so `git submodule` ignores an entry whose path has no gitlink. Replacing a submodule with its own files through `git rm --cached` leaves such an entry behind, and rejecting it failed every worktree setup, Pull, and Sync in that repository with `INVALID_REQUEST` (#7148). The parser looks up the gitlink first and skips an entry without one before any of its values are checked, because nothing reads that entry. An entry with a gitlink keeps every check, and a gitlink without an entry still fails, because there is no URL to clone it from.
 
 ### Managed LFS publication
 
@@ -442,7 +839,7 @@ Operation states are `planned`, `running`, `succeeded`, `partial`, `conflicted`,
 
 Planning and execution each use one absolute five-minute deadline by default; the deadline does not reset between authority, credential, filesystem, fetch, and integration phases or between child processes. The legacy `cloneRepository` adapter starts one deadline before identity validation and carries it through planning and execution. Duplicate execute requests join the first process-local promise and its deadline.
 
-Cancellation before execution becomes terminal without spawning. Cancellation and timeout terminate the attached process tree, with forced escalation after one second by default. Fetch and clone interruption return `cancelled` with `CANCELLED` or `TIMEOUT`. Once push transfer starts, interruption returns `outcome-unknown` because the remote may have accepted the update. Pull interruption during merge returns `conflicted` when `MERGE_HEAD` remains, otherwise `outcome-unknown` because the local result cannot be proved. Terminal cancellation returns the existing snapshot.
+Cancellation before execution becomes terminal without spawning. Cancellation and timeout terminate every attached process tree, with forced escalation after one second by default. Fetch and clone interruption return `cancelled` with `CANCELLED` or `TIMEOUT`. Once push transfer starts, interruption returns `outcome-unknown` because the remote may have accepted the update. Pull interruption during merge returns `conflicted` when `MERGE_HEAD` remains, otherwise `outcome-unknown` because the local result cannot be proved. Terminal cancellation returns the existing snapshot.
 
 A broker lease's nonce reaches the helper only through the `OPENCHAMBER_GIT_CREDENTIAL_NONCE` environment variable the lease returns in `env` (the operation merges it into the Git process environment); the helper command line carries the loopback URL only, because argv is readable by other local users.
 
@@ -458,9 +855,9 @@ Git audit targets copy only operation names, remote names, endpoint fingerprints
 
 `POST /api/git/push`, `POST /api/git/pull`, `POST /api/git/fetch`, and `DELETE /api/git/remote-branches` are fail-closed compatibility routes. They always return `409 GIT_NETWORK_OPERATION_REQUIRED`; a missing binding or tombstone never restores ambient System Git execution. First-party network actions use the planned operation API.
 
-Contributor-fork provenance is stored under `OPENCHAMBER_DATA_DIR`, keyed by the common-repository identity plus the linked worktree Git-directory filesystem identity. The strict bounded store uses atomic mode-`0600` writes and compare-and-swap revisions; malformed, insecure, or unreadable state fails closed. A worktree of an unbound repository records binding revision 0, the revision its change request was read under. Creation persists provenance before reporting success and removes the attached worktree if that write fails. Worktree listing resolves all listed identities against one bounded authoritative store snapshot instead of reparsing the store once per worktree. Public worktree reads expose only `{ kind, revision, trust, push }`, never paths, source SHAs, or raw endpoints.
+Contributor-fork provenance is stored under `OPENCHAMBER_DATA_DIR`, keyed by the common-repository identity plus the linked worktree Git-directory filesystem identity. The strict bounded store uses atomic mode-`0600` writes and compare-and-swap revisions; malformed, insecure, or unreadable state fails closed. A worktree of an unbound repository records binding revision 0, the revision its change request was read under. Creation persists provenance before reporting success and removes the attached worktree if that write fails. Worktree listing reads one bounded authoritative store snapshot instead of reparsing the store once per worktree. Only a contributor-fork record can mark a listed worktree, so a store without one answers the whole listing as no provenance without running Git; otherwise the listing resolves the listed identities at most four at a time, because each identity read starts several Git processes, and does so after releasing the store lock, so a long listing does not hold off a write from another process (#6084). A marking record names its worktree's Git directory, so the listing skips the identity read of a listed worktree whose own `.git` entry, a directory or a regular `gitdir:` file, names a different directory; every other listed worktree, including one whose `.git` entry cannot be read that way, still has its identity read, and that read decides the match. A `.git` file above Git's own 1 MiB limit, or one that grows past the size just checked, counts as unreadable, so the listing never holds more of it in memory than that limit. A record written before `gitDirectory` existed names none, and then the listing reads every listed identity. A record is keyed by the repository and worktree identity alone, so provenance lookups take the ID-only resolver (`resolveRepositoryId`): one `rev-parse` per directory, with no remote or transport-configuration reads. Binding reads such as `GET /api/source-control/binding` still resolve the full repository identity, because they compare its remotes and revisions. Public worktree reads expose only `{ kind, revision, trust, push }`, never paths, source SHAs, or raw endpoints.
 
-Legacy push, pull, fetch, and remote-branch deletion reject contributor worktrees before Git execution. System-credential contributor transfer is also rejected by managed planning. Contributor publish entrypoints first ask the server whether the worktree has contributor provenance. A contributor that is behind runs an exact managed pull against its tracked source, then opens the destination chooser and creates the push selection from the post-merge state; a push-only contributor opens the chooser immediately. Push requires a one-use, 15-minute server-issued destination selection that pins linked-worktree/provenance identity, repository/binding/config revisions, current source SHA, remote endpoint fingerprint, and destination ref. Every current managed remote is eligible, including the contributor fork itself when its push endpoint has an exact managed binding. The server classifies candidates as contributor fork, own fork, bound repository, or other only from provenance, provider binding, and exact account authority; remote names alone do not establish ownership.
+Legacy push, pull, fetch, and remote-branch deletion reject contributor worktrees before Git execution. System-credential contributor transfer is also rejected by managed planning. Same-repository GitHub Enterprise PRs use the ordinary fetch plan when the primary remote names the validated head repository on the connected host. Owner and repository names compare case-insensitively, as GitHub treats them, both when the source resolver classifies the head and when worktree creation matches the remote. A username-only HTTPS remote matches under System Git, which accepts it for its credential helper; an embedded password never does. The plan uses the remote’s configured transport, and worktree creation still checks the fetched commit against the PR head SHA. Contributor publish entrypoints first ask the server whether the worktree has contributor provenance. A contributor that is behind runs an exact managed pull against its tracked source, then opens the destination chooser and creates the push selection from the post-merge state; a push-only contributor opens the chooser immediately. Push requires a one-use, 15-minute server-issued destination selection that pins linked-worktree/provenance identity, repository/binding/config revisions, current source SHA, remote endpoint fingerprint, and destination ref. Every current managed remote is eligible, including the contributor fork itself when its push endpoint has an exact managed binding. The server classifies candidates as contributor fork, own fork, bound repository, or other only from provenance, provider binding, and exact account authority; remote names alone do not establish ownership.
 
 ### Runtime parity
 
@@ -487,7 +884,9 @@ VS Code runs existing-repository network operations as plain Git commands on the
 
 ### Stash Operations
 - `listStashes(directory)`: List stash entries with ref, message, relative time, and hash.
-- `countStashFiles(directory, refs)`: Batch-count changed files for stash refs with bounded concurrency.
+- `countStashFiles(directory, refs)`: Batch-count tracked and untracked files for stash refs with bounded concurrency.
+  `stash show --include-untracked --name-only` includes the third parent's files
+  in the same Git process per ref; the VS Code runtime uses the same command.
 - `stashPush(directory, options)`: Stash changes, always including untracked files, with optional message.
 - `stashApply(directory, options)`: Apply a stash by ref without removing it.
 - `stashPop(directory, options)`: Apply a stash by ref and drop it only after a successful apply.
@@ -564,6 +963,18 @@ The following functions are internal helpers used by exported functions:
 - `buildWorktreePopulateCommand(directory)`: Inspect effective content-filter keys and construct the filter-neutral, hook-neutral, no-network reset command used for initial population.
 - And various other internal helpers for Git command execution and parsing.
 
+### Why helper commands carry Electron mode and not only a server environment variable
+
+Git launches credential and SSH helpers through `sh`, including commands saved in a repository's config and invoked from another shell. The command carries `ELECTRON_RUN_AS_NODE=1` when Electron hosts the server, so the executable runs the helper without opening another app; the launcher omits `exec` because the leading variable assignment would be interpreted as the executable name.
+
+### Why editor-free continuation uses direct Git and not simple-git
+
+Setting `GIT_EDITOR` through simple-git requires an unsafe-editor category that also permits editor configuration arguments. Direct Git supplies the no-op editor while preserving the full Git environment, including PATH, because NixOS cannot find `true` through the default `/bin:/usr/bin` search.
+
+### Why log bases prefer a local ref and not its origin copy
+
+A supplied log base retains the local ref whenever it resolves, so a stale or divergent remote copy cannot change the requested comparison. An absent local ref may use `origin/<from>`; if neither exists, the original request reaches Git and reports its failure.
+
 ### Why an SSH host alias is resolved through `ssh -G` and not compared as written
 
 Gitea and Forgejo accept an SSH alias only when its effective `HostName` directly equals the instance's hostname. `HostKeyAlias` and a shared resolved address do not establish which Git service the remote names, so neither grants a match. `ssh -G` handles `Include`, `Match` and `Host *` rules without opening an SSH connection; parsing the config file directly would miss those rules. Completed answers, including failures, expire after one minute, concurrent callers share a pending read, and the cache holds at most 256 hosts. HTTPS remotes and SSH hosts already equal to the instance's hostname require no lookup. The remote endpoint keeps its original alias. GitHub and GitLab retain exact-host matching because their repository readers do not resolve these aliases.
@@ -584,15 +995,16 @@ Gitea and Forgejo accept an SSH alias only when its effective `HostName` directl
 - `rebaseInProgress`: Object with `{ headName, onto }` if rebase in progress.
 
 ### Branches Response
-- `all`: Local branches plus locally cached remote-tracking branches. Listing performs no remote query. Explicit remote Fetch discovers new heads; without a separate prune operation, deleted remote heads remain cached.
+- `all`: Local branches plus remote-tracking refs, formatted as `remotes/<remote>/<branch>`. Listing performs no remote query, so a branch deleted on the remote stays listed and a branch pushed elsewhere is absent until a Fetch or a live listing.
+- With `remote: 'live'`, `all` is local branches plus every branch each reachable remote reports via `ls-remote --heads`. This is a union: local remote-tracking refs deleted on the remote are pruned, and branches that exist on the remote without a local tracking ref (never fetched) are still included. A remote that fails to answer keeps its locally known branches in the list: "we could not ask" must not be reported as "these branches are gone", because callers use this list to decide whether a base branch exists at all. Each remote's answer is reused for 30 seconds while that remote's local tracking refs are unchanged (a push or fetch from here changes them and reads again), and concurrent listings share one round trip. A remote that did not answer is asked again on the next live listing.
 - `current`: Current branch name.
-- `branches`: Per-branch detail keyed by branch name, as reported by `git branch`.
-- `defaultBranches`: Each remote's locally known default branch, keyed by remote name and read only from the local `remotes/<name>/HEAD` symbolic ref. A remote without that symref is absent rather than triggering an implicit network probe. Omitted entirely by runtimes that do not provide this Git metadata.
-- `all`: Local branches plus every branch each reachable remote reports via `ls-remote --heads`, formatted as `remotes/<remote>/<branch>`. This is a union: local remote-tracking refs deleted on the remote are pruned, and branches that exist on the remote without a local tracking ref (never fetched) are still included, so a freshly pushed branch appears without requiring a fetch. A remote that fails to answer keeps its locally known branches in the list: "we could not ask" must not be reported as "these branches are gone", because callers use this list to decide whether a base branch exists at all. Each remote's answer is reused for 30 seconds while that remote's local tracking refs are unchanged (a push or fetch from here changes them and reads again), and concurrent listings share one round trip: a repository with many remotes otherwise paid every remote's network round trip on each listing.
-- `current`: Current branch name.
-- `branches`: Per-branch detail keyed by branch name, as reported by `git branch`. Remote-only entries in `all` — branches `ls-remote` reported that were never fetched — have **no** entry here, because `git branch` never saw them. Consumers must treat a missing detail entry as normal and read the name from `all`.
+- `branches`: Per-branch detail keyed by branch name, as reported by `git branch`. Remote-only entries in `all`, the branches `ls-remote` reported that were never fetched, have **no** entry here, because `git branch` never saw them. Consumers must treat a missing detail entry as normal and read the name from `all`.
 - Never-fetched remote-only branches also have no local ref, so any operation that resolves one locally has to account for that: `checkoutBranch` fetches the single branch (`git fetch <remote> <branch>`) before creating the tracking branch, and the range helpers (`getRangeDiff`, `getRangeFiles`) do the same for an unresolvable `<remote>/<branch>` on a configured remote (the base of a stacked pull request in a fresh worktree is the usual case). A ref still unresolved after that, or one that names no configured remote, is rejected with `Ref "<ref>" is not available locally. Fetch it before comparing.` instead of surfacing git's "ambiguous argument".
-- `defaultBranches`: Each remote's default branch, keyed by remote name. Read from the local `remotes/<name>/HEAD` symbolic ref; for a remote that has none — clone writes it, a hand-added remote may not — the remote itself is asked once with `ls-remote --symref`. A remote that answers neither is absent rather than guessed, and consumers fall back to conventional branch names. Omitted entirely by runtimes that do not provide this Git metadata.
+- `defaultBranches`: Each remote's locally known default branch, keyed by remote name and read only from the local `remotes/<name>/HEAD` symbolic ref. A remote without that symref is absent rather than triggering an implicit network probe, and consumers fall back to conventional branch names. Omitted entirely by runtimes that do not provide this Git metadata.
+
+### Why listing branches stays local and asks the remotes only on request
+
+The branch list used to ask every remote by default, so a branch a collaborator just pushed showed up without a fetch. Over SSH each ask is a connection the person's key or agent may have to approve: a hardware key asked for its PIN on every new chat and every Git panel open, and again after a cancel, because a failed answer is not cached and closing the PIN window refocuses the app. Reads a person did not ask for now stay local. Live discovery stays on New worktree's "Fetch branches" button, and the Git panel's Fetch updates the refs themselves.
 
 ### Runtime availability of range diffs
 - `GET /api/git/range-diff` is served by the OpenChamber web server, so it is available to web, desktop, and mobile clients. The shared `GitAPI.getGitRangeDiff` is therefore optional: web supplies the HTTP implementation, and VS Code does not implement it because the extension host serves Git through its own bridge rather than these routes. Features built on range diffs (currently the AI diff walkthrough) are not offered in VS Code.
@@ -618,7 +1030,7 @@ Gitea and Forgejo accept an SSH alias only when its effective `HostName` directl
   Commit snapshots never expose hunk mutations. Mobile uses its separate Changes
   surface and VS Code does not mount these controls.
 - Untracked patches from `getDiff` and `getUntrackedDiffs` use `git diff --no-index` with separate stdout, stderr, and process exit status. Exit codes 0 and 1 return stdout only, so line-ending warnings never become patch text or request failures. Other exits and process failures reject the single-file request; the batch keeps an empty entry for the failed path and preserves the other results.
-- Patch-producing calls (`getDiff`, `getPathDiff`, `getRangeDiff`, untracked `--no-index` diffs, conflict summaries, `getCommitDiff`) pass `--no-ext-diff`, so an external diff driver configured by the repository or the session (`diff.external`, `GIT_EXTERNAL_DIFF`, difftastic) cannot replace unified patch text with the driver's own format. The UI parses patches as unified diffs; numstat and name-only queries never run external diffs and need no flag.
+- Patch-producing calls (`getDiff`, `getPathDiff`, `getRangeDiff`, untracked `--no-index` diffs, conflict summaries, `getCommitDiff`) pass `--no-ext-diff` and `--src-prefix=a/ --dst-prefix=b/`, so an external diff driver configured by the repository or the session (`diff.external`, `GIT_EXTERNAL_DIFF`, difftastic) cannot replace unified patch text with the driver's own format, and `diff.mnemonicPrefix` or `diff.noprefix` cannot alter unified diff header prefixes. The UI parses patches as unified diffs; numstat and name-only queries never run external diffs and need no flag.
 - `status.files` exposes both `index` and `working_dir` codes. Shared UI uses these as separate scopes: staged rows are derived from non-empty `index` statuses, while unstaged rows are derived from `working_dir` statuses and untracked files.
 - `status.diffStats` follows the same scopes (`staged`, `working`), so a staged row shows HEAD → index counts and an unstaged row shows index → working-tree counts. A file with edits in both scopes reports each part in its own row instead of one combined total.
 - `status.diffStats` is keyed by the exact path bytes `status.files[].path` reports. Both numstat reads run with `-z`, so Git keeps path bytes verbatim — no `core.quotepath` quoting for non-ASCII names, none for names with quotes or control characters — and a rename's old and new path arrive as their own fields, with the counts landing on the destination path, the one status reports. `core.quotepath=false` alone would cover neither the always-quoted names nor rename records, so the records are read NUL-terminated instead, the same shape `getCommitFiles` uses.
@@ -631,13 +1043,19 @@ Gitea and Forgejo accept an SSH alias only when its effective `HostName` directl
 - `branch`: Local branch name.
 - `path`: Absolute path to worktree directory.
 - `directoryCreated`: Present when create returned after the target directory exists while background Git/bootstrap work continues.
-- `bootstrapStatus`: Background setup state. The legacy `status` remains `pending`, `ready`, or `failed`, while `phase` reports `directory-created`, `git-ready`, or `setup-ready`. Fast create starts at `pending`/`directory-created`; filter-neutral population, explicit checkout hydration, and upstream Git completion advance to `pending`/`git-ready` before setup/start scripts; completed setup is `ready`/`setup-ready`. Failed states retain a stable top-level `errorCode` and bounded per-submodule/LFS `hydration` results. Durable state is authoritative. A directory with no record was never populated by this server and reads as `ready`/`setup-ready`, the same rule the OpenCode proxy's checkout gate applies; the Git panel asks this for every open repository, so treating an absent record as a repair blocker refused every ordinary one. A pending record without a matching active process, a crash mid-population, still becomes an `UNKNOWN` repair blocker, and an unreadable store fails closed the same way rather than reading as absent. A worktree whose record was lost, for example to capacity eviction, therefore reads as ready. Clients continue to accept legacy status responses that omit `phase`.
+- `bootstrapStatus`: Background setup state. The legacy `status` remains `pending`, `ready`, or `failed`, while `phase` reports `directory-created`, `git-ready`, or `setup-ready`. Fast create starts at `pending`/`directory-created`; filter-neutral population, explicit checkout hydration, and upstream Git completion advance to `pending`/`git-ready` before setup/start scripts; completed setup is `ready`/`setup-ready`. Failed states retain a stable top-level `errorCode` and bounded per-submodule/LFS `hydration` results. A `worktree add -b` that fails while the new name clashes with an existing branch (the same name, one it sits inside, or one inside it) records `BRANCH_NAME_CONFLICT` with its fixed sentence. The clash is read from `for-each-ref`, not from Git's message, because Git translates its diagnostics with the user's locale. Durable state is authoritative. A directory with no record was never populated by this server and reads as `ready`/`setup-ready`, the same rule the OpenCode proxy's checkout gate applies; the Git panel asks this for every open repository, so treating an absent record as a repair blocker refused every ordinary one. A pending record without a matching active process, a crash mid-population, still becomes an `UNKNOWN` repair blocker, and an unreadable store fails closed the same way rather than reading as absent. A worktree whose record was lost, for example to capacity eviction, therefore reads as ready. Clients continue to accept legacy status responses that omit `phase`.
 - `bootstrapStatus`: Background setup state. The legacy `status` remains `pending`, `ready`, or `failed`, while `phase` reports `directory-created`, `git-ready`, or `setup-ready`. Fast create starts at `pending`/`directory-created`; population and upstream Git completion advances to `pending`/`git-ready` before setup/start scripts; completed setup is `ready`/`setup-ready`. A missing in-memory state falls back to `ready`/`setup-ready`; clients continue to accept legacy status responses that omit `phase`.
 - `sourceFetchFailed`: Present when the automatic source-branch fetch failed and creation fell back to the tracked local branch.
 - Fast-create background failures remove OpenCode sandbox metadata for directories that never became Git worktrees, and remove the pre-created directory only if it is still empty. User-created files are never recursively deleted by this cleanup.
-- Worktree bootstrap storage fingerprints the canonical checkout identity, so symlink and platform path aliases share one durable record. Removal resolves both the requested and canonical checkout paths, then waits for any active create/bootstrap task before listing or deleting the worktree. After the wait it removes durable bootstrap state before filesystem mutation, so storage failure leaves the checkout intact and later filesystem failure cannot leave a removed checkout recorded as ready. This also prevents aliases from bypassing the wait and stops a background Git or setup task from restoring removed state or racing filesystem cleanup.
+- Worktree bootstrap storage fingerprints the canonical checkout identity, so symlink and platform path aliases share one durable record. Removal resolves both the requested and canonical checkout paths, then waits for any active create/bootstrap task before listing or deleting the worktree. After the wait it removes durable bootstrap state before filesystem mutation, so storage failure leaves the checkout intact and later filesystem failure cannot leave a removed checkout recorded as ready. This also prevents aliases from bypassing the wait and stops a background Git or setup task from restoring removed state or racing filesystem cleanup. A removal with `cancelSetup: true` (server-side code only; the Git route never sets it) first stops the setup commands, so that wait ends even for a command that never exits. Off Windows each command leads its own process group and the whole group gets `SIGKILL`; on Windows `taskkill /T` ends the tree. A process that left the group by itself, a daemon calling `setsid`, is out of reach. The commands no longer stop with a Ctrl+C in the server's terminal, because they are outside its foreground group.
 - Worktree bootstrap retries transient `index.lock` conflicts. If the lock remains byte-for-byte and metadata-identical across the retry window, it is treated as stale, removed, and population continues automatically; changing locks are left untouched and reported as failures.
 - Worktree population enables Git `core.longpaths` (local repo config plus `-c core.longpaths=true` on `git reset --hard`) so deeply nested checkouts under the managed data-dir worktree root do not fail on Windows MAX_PATH with "Filename too long". The reset disables hooks, lazy fetch, network protocols, recursive submodules, LFS smudge, and every effective executable content filter before materializing checkout files. Path-component limits that the filesystem itself rejects still fail bootstrap, with a clearer path-length guidance message.
+
+#### Why missing failed checkouts are pruned by path
+
+Failed records protect incomplete checkouts, so capacity eviction keeps them. Fast-create rollback removes the failed attempt's durable record once its empty directory is gone, but keeps that failure in memory: the attempt's watcher and its git-ready and setup-ready waiters must still read `failed`, with the recorded code and sentence, even when rollback finished before their first poll. Reads never prune such a rolled-back failure; the next bootstrap of the path replaces it, and a restart forgets it. Status reads and the first proxy-gate load prune any other failed record when no local bootstrap is active and `lstat` confirms the path is missing (`ENOENT`, or `ENOTDIR` when a parent became a file). The proxy gate applies the same rule to the failure it answers from memory: it stats that folder once, and a folder that is gone never holds the gate. The store checks the current status and path under its write lock; a newer pending record, an existing entry (including a dangling symlink), or a filesystem error preserves the record. Memory is cleared only after durable cleanup succeeds and only if no newer state replaced it.
+
+The store persists path fingerprints, so it cannot scan old records for missing directories at startup. Old failures are reclaimed when their path is read. A directory recreated before that read keeps its repair blocker because its previous checkout cannot be distinguished safely.
 
 ### Log Response
 - `all`: Array of commit objects with hash, date, message, author info, stats.
@@ -657,7 +1075,11 @@ Gitea and Forgejo accept an SSH alias only when its effective `HostName` directl
 
 ### SSH Key Handling
 - Managed SSH transport owns key validation and operation-local selection as described under Transport authority. Author profiles do not build SSH commands.
-- SSH_AUTH_SOCK is automatically resolved via `resolveSshAuthSock` (checks GPG agent, gpgconf).
+- SSH_AUTH_SOCK is automatically resolved via `resolveSshAuthSock` (`ssh-auth-sock.ts`; checks GPG agent, gpgconf).
+
+### Why a gpg agent launch that leaves no SSH socket is not retried
+
+`buildGitEnv` runs for every Git command. Without `SSH_AUTH_SOCK`, on a machine with GnuPG whose agent does not serve SSH, `gpgconf --launch gpg-agent` took about a second and never produced the socket, so every status, stage and unstage paid it again. The server tries the launch once per socket path; the cheap `--list-dirs` check still runs each time, so an agent the user starts later is found.
 
 ### Working directory (simple-git)
 - Repository operations always pass an explicit `baseDir` (the opened project/directory path) into simple-git. Omitting `baseDir` would default to `process.cwd()`, which breaks when the server was launched from a neutral directory (e.g. `$HOME`) while the opened project lives elsewhere.
@@ -665,11 +1087,13 @@ Gitea and Forgejo accept an SSH alias only when its effective `HostName` directl
 - A `GitError` / non-repository result from status or check must not abort project/session enumeration: routes return a soft non-repo payload and log a warning.
 
 ### Worktree Naming
+- `PUT /api/git/worktrees/title` accepts optional `by`, defaulting to `user` for existing callers. A session move sends `agent` to seed the new worktree from a generated session title; explicit `workTitle.by: 'user'` carries user ownership. Both cases use `setWorktreeTaskTitle` and its ownership protection.
 - Worktree names are slugified via `slugWorktreeName`.
 - Random names use adjectives/nouns from `OPENCODE_ADJECTIVES` and `OPENCODE_NOUNS` lists.
 - Branches created for new worktrees use `openchamber/<worktree-name>` pattern.
 
 ### Cross-Platform Considerations
+- `GIT_BINARY`, then `OPENCHAMBER_GIT_BINARY`, picks the Git executable on every platform when it names an executable file; otherwise Git comes from `PATH`, and on Windows from the Git for Windows install folders after that. Windows caches the first answer because the folder search is slow; elsewhere both resolvers read the override on each call, though the push, pull and fetch runtime asks once when the server starts. `resolveGitBinaryForSpawn` in `../opencode/env-runtime.js` makes the same choice for Git started outside this module (push, pull and fetch, file search, extension installs), so a change to one goes to both.
 - Use `normalizeDirectoryPath` for all directory inputs to handle `~` and path separators.
 - Use `canonicalPath` for path comparisons to handle case-insensitive filesystems (Windows).
 - MSYS2 Git can return `/c/repos/project` on Windows. Pass Git filesystem-path output through `normalizeGitOutputPath` before resolving it or using it with Node filesystem and process APIs. It converts drive mounts to `C:/repos/project` on Windows and preserves other paths, including POSIX paths on Linux and macOS.

@@ -67,7 +67,7 @@ describe('mobile comment composer integration', () => {
 
     afterEach(async () => {
         await act(async () => root.unmount());
-        useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} });
+        useInlineCommentDraftStore.setState({ drafts: {} });
         toast.dismiss();
         restoreGlobals();
     });
@@ -116,7 +116,7 @@ describe('mobile comment composer integration', () => {
         const errorToast = toast.getHistory().at(-1);
         if (!errorToast || !('title' in errorToast)) throw new Error('expected an error toast');
         expect(errorToast.type).toBe('error');
-        expect(errorToast.title).toContain('Could not attach the comment');
+        expect(errorToast.title).toContain("Couldn't save the comment");
         await act(async () => currentMode().handlers.onTextChange('short enough'));
         await act(async () => currentMode().submit());
         expect(currentMode().active).toBe(false);

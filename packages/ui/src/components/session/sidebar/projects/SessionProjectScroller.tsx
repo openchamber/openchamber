@@ -1,4 +1,5 @@
 import React from 'react';
+import { CollapsedSessionActivityIndicator } from '../sessions/collapsedActivityIndicator';
 import {
   DndContext,
   DragOverlay,
@@ -9,7 +10,7 @@ import {
 import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Button } from '@/components/ui/button';
-import { formatPathForDisplay } from '@/lib/utils';
+import { cn, formatPathForDisplay } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -33,14 +34,17 @@ import type { SessionGroup } from '../types';
 import { SessionSidebarRows, type SessionSidebarHeldRow } from '../SessionSidebarRows';
 import { copyDragSource, keepRowInList, ROW_DRAG_AUTO_SCROLL, useRowDragSensors } from '../rowDrag';
 import { RowDragPreview } from '../RowDragPreview';
+import { SidebarConversationRow, SidebarSearchArchivedCaption, SidebarSearchShowMore, SidebarSearchMore, type SidebarSearchPresentation } from '../SidebarConversationRow';
 import { setSidebarBlockDrag, useSidebarBlockDragStore } from '../list/blockDrag';
-import { saveSidebarSections, useSidebarSectionsUiStore } from '../sections/sectionActions';
+import { removeFolderFromSections, saveSidebarSections, useSidebarSectionsUiStore } from '../sections/sectionActions';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { SortableSidebarSection } from './SortableSidebarSection';
 import { sectionDragId, sectionIdOfRow } from './sectionDrag';
 import { sessionDetailedRowPaddingLeft, sessionTreeTextInset } from '../sessions/sessionTreeGeometry';
 import { SessionSidebarActivityHeader, SessionSidebarCaption } from '../sessionSidebarHeaderPresentation';
-import { resolveSessionSidebarStickyHeader, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
+import { useSidebarPages } from '../pages/useSidebarPages';
+import { SidebarPageRow } from '../pages/SidebarPageRow';
+import { isPinnedZoneRowKey, resolveSessionSidebarStickyHeader, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
 import { SortableProjectItem } from './sortableItems';
 import { WorktreeWorkRow } from '../works/WorktreeWorkRow';
 import { SessionDraftRow } from '../works/SessionDraftRow';
@@ -62,6 +66,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { useOpenProjectOnBoard } from '@/components/sourceBoard/openTrackerItem';
 import { useProjectsInSidebarOrder } from '../list/useProjectsInSidebarOrder';
+import { useResumeOpenCodeFolder } from '@/components/projects/useOpenCodeTrustPause';
 
 type SessionProjectScrollerState = Pick<SessionGroupSectionProps,
   | 'editingId'
@@ -76,13 +81,12 @@ type SessionProjectScrollerState = Pick<SessionGroupSectionProps,
 };
 
 type GroupProps = Pick<SessionGroupSectionProps,
-  | 'hasSessionSearchQuery' | 'normalizedSessionSearchQuery' | 'groupSearchDataByGroup'
   | 'collapsedGroups' | 'hideDirectoryControls' | 'mobileVariant' | 'alwaysShowActions'
   | 'activeProjectId' | 'expandedParents' | 'editTitle'
   | 'editingRowKey'
   | 'folderRename' | 'setFolderRenameDraft' | 'clearFolderRename'
   | 'setEditingId' | 'setEditingRowKey' | 'setEditTitle' | 'toggleParent' | 'allowReselect'
-  | 'onSessionSelected' | 'resetSessionSearch' | 'deleteSessionConfirm'
+  | 'onSessionSelected' | 'deleteSessionConfirm'
   | 'setDeleteSessionConfirm' | 'startFolderRename'
   | 'startSessionWorktreeMenuLoad'
 > & { pinnedSessionIds: Set<string>; sessionOrderIndex: Map<string, number> };
@@ -93,6 +97,7 @@ type GroupActions = Pick<SessionGroupSectionProps,
 >;
 
 export type SessionProjectScrollerModel = {
+  search?: SidebarSearchPresentation;
   rowModel: SessionSidebarRowModel;
   sectionsForRender: ProjectSection[];
   projectSections: ProjectSection[];
@@ -110,6 +115,7 @@ export type SessionProjectScrollerView = {
   hideDirectoryControls: boolean;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
+  isVSCode: boolean;
   projectSortOrder: ProjectSortOrder;
 };
 
@@ -118,7 +124,7 @@ export type SessionProjectScrollerActions = {
   toggleProject: (id: string) => void;
   setActiveProjectIdOnly: (id: string) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; preserveDirectoryOverride?: boolean; targetFolderId?: string; target?: 'chat' | 'project' }) => void;
+  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; preserveDirectoryOverride?: boolean; targetFolderId?: string; target?: 'chat' | 'project'; lead?: boolean }) => void;
   openNewWorktreeDialog: () => void;
   openWorktreesPage: (id: string) => void;
   openProjectEditDialog: (id: string) => void;
@@ -128,12 +134,10 @@ export type SessionProjectScrollerActions = {
   setSingleProjectId: (id: string) => void;
 };
 
-/** What draws the list: the desktop's scroller, or the phone's own rows over the same model. */
 export type SessionProjectListProps = { model: SessionProjectScrollerModel; view: SessionProjectScrollerView; actions: SessionProjectScrollerActions };
 
 const FLAT_TEXT_INSET_PX = 10;
 
-/** The sort group of the projects under the Projects caption, or under none. */
 const PROJECTS_SORT_GROUP = 'projects';
 const ROW_DRAG_MODIFIERS = [keepRowInList];
 const ROW_DRAG_MEASURING = { droppable: { strategy: MeasuringStrategy.Always } };
@@ -155,30 +159,23 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
   streamPerfCount('ui.sidebar_projects_list.render');
   const { t } = useI18n();
   const childStores = useChildStoreManager();
+  const resumeFolder = useResumeOpenCodeFolder();
   const { files } = useRuntimeAPIs();
   const toggleFolderCollapse = useSessionFoldersStore((state) => state.toggleFolderCollapse);
   const renameFolder = useSessionFoldersStore((state) => state.renameFolder);
   const deleteFolder = useSessionFoldersStore((state) => state.deleteFolder);
   const addSessionToFolder = useSessionFoldersStore((state) => state.addSessionToFolder);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
-  // A project's isolated spaces page: while the feature's switch is on, and never in VS Code (decision 16).
   const spacesPageAvailable = useUIStore((state) => state.isolatedSpacesEnabled) && !isVSCodeRuntime();
   const openProjectOnBoard = useOpenProjectOnBoard();
   const [folderDeleteConfirm, setFolderDeleteConfirm] = React.useState<DeleteFolderConfirmState>(null);
   const [stickyIdentity, setStickyIdentity] = React.useState<string | null>(null);
   const [focusedRowKey, setFocusedRowKey] = React.useState<string | null>(null);
   const [scrollElement, setScrollElement] = React.useState<HTMLElement | null>(null);
-  // Project headers and section captions sort; a worktree is a work among
-  // the project's works, ordered by activity like the rest, and session rows
-  // drag into folders. While a header is held the list folds to the headers of
-  // its kind (`blockDrag`), and its copy follows the pointer.
   const blockDrag = useSidebarBlockDragStore((state) => state.kind);
   const [dragSource, setDragCopy] = React.useState<Element | null>(null);
-  // The held header stays where it is on screen as the list folds, and where
-  // it was dropped as the list opens again.
   const heldRowRef = React.useRef<SessionSidebarHeldRow | null>(null);
   const foldFrameRef = React.useRef<number | null>(null);
-  // A list that goes away mid-drag leaves the sidebar unfolded.
   React.useEffect(() => () => {
     if (foldFrameRef.current !== null) cancelAnimationFrame(foldFrameRef.current);
     setSidebarBlockDrag(null);
@@ -285,8 +282,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     setStickyIdentity((current) => current === nextIdentity ? current : nextIdentity);
   }, [model.rowModel.stickyHeaders]);
 
-  // A project sorts among the projects under its caption: Projects, or the
-  // group of projects it belongs to, whose own order a drag changes.
   const projectSortGroupById = React.useMemo(() => {
     const groups = new Map<string, string>();
     let caption = PROJECTS_SORT_GROUP;
@@ -297,8 +292,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     return groups;
   }, [model.rowModel.rows]);
   const savedSectionIds = React.useMemo(() => new Set(savedSections.map((entry) => entry.id)), [savedSections]);
-  // Sections sort outside a search and outside the editor, whose section being
-  // made is not in the list yet.
   const sectionsSortable = !view.hasSessionSearchQuery && !editingSection && model.state.editingId === null && !model.singleProjectMode;
   const sortableSection = React.useCallback((row: SessionSidebarRow, header: React.ReactNode): React.ReactNode => {
     const sectionId = sectionIdOfRow(row);
@@ -309,8 +302,13 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
   const renderStatus = React.useCallback((row: Extract<SessionSidebarRow, { kind: 'status' }>) => {
     const retry = () => retryGroupStatus(row, childStores);
     const grant = () => grantGroupAccess(row, childStores);
+    const trustPaused = row.status.state === 'trust-paused';
+    const pausedDirectory = trustPaused ? row.status.directory : null;
     let label: string;
     switch (row.status.state) {
+      case 'trust-paused':
+        label = t('sessions.sidebar.group.empty.trustPaused');
+        break;
       case 'permission-denied':
         label = t('sessions.sidebar.group.empty.permissionDenied');
         break;
@@ -328,23 +326,32 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
         {row.status.state === 'loading' ? <Spinner className="size-3" /> : null}
         {label}
         {row.status.canGrantAccess ? <Button variant="link" size="xs" className="h-auto p-0 typography-micro" onClick={() => void grant()}>{t('sessions.sidebar.group.empty.grantAccess')}</Button> : null}
-        {row.status.state !== 'loading' ? <Button variant="link" size="xs" className="h-auto p-0 typography-micro" onClick={retry}>{t('sessions.sidebar.group.empty.retry')}</Button> : null}
+        {pausedDirectory ? <Button variant="link" size="xs" className="h-auto p-0 typography-micro" onClick={() => void resumeFolder(pausedDirectory)}>{t('sessions.sidebar.group.empty.reviewTrust')}</Button> : null}
+        {row.status.state !== 'loading' && !trustPaused ? <Button variant="link" size="xs" className="h-auto p-0 typography-micro" onClick={retry}>{t('sessions.sidebar.group.empty.retry')}</Button> : null}
       </span>
     </div>;
-  }, [childStores, t]);
+  }, [childStores, resumeFolder, t]);
+
+  const listsPages = React.useMemo(() => model.rowModel.rows.some((row) => row.kind === 'page'), [model.rowModel.rows]);
+  const sidebarPages = useSidebarPages(listsPages);
+  const pageById = React.useMemo(() => new Map(sidebarPages.map((page) => [page.id, page])), [sidebarPages]);
 
   const renderRow = React.useCallback((row: SessionSidebarRow): React.ReactNode => {
+    if (row.kind === 'page') {
+      const page = pageById.get(row.pageId);
+      return page ? <SidebarPageRow page={page} /> : null;
+    }
     if (row.kind === 'activity-header') {
       return sortableSection(row, <CrossfadeZoneHeader
-        className="sticky top-0 z-20 bg-sidebar"
+        className={cn('sticky top-0 z-20', view.mobileVariant ? 'bg-background' : 'bg-sidebar')}
         data-sidebar-sticky-header="true"
       >
         <SessionSidebarActivityHeader
           activityKey={row.activityKey}
           label={row.label}
           preview={row.preview === true}
+          loading={row.loading === true}
           collapsed={row.collapsed}
-          forceExpanded={row.forceExpanded}
           alwaysShowActions={view.alwaysShowActions}
           onToggle={() => toggleActivityZone(row, { model, actions })}
           onNewChat={() => {
@@ -362,9 +369,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       return <SortableProjectItem
         id={project.id}
         sortGroup={sortGroup}
-        // A group of projects keeps the order the user gives it, whatever the
-        // projects' sort; Projects sorts by hand only when sorted manually.
-        disabled={model.singleProjectMode || row.forceExpanded || model.state.editingId !== null
+        disabled={model.singleProjectMode || model.state.editingId !== null
           || (sortGroup === PROJECTS_SORT_GROUP && view.projectSortOrder !== 'manual')}
         projectLabel={label}
         projectDescription={formatPathForDisplay(project.normalizedPath, view.homeDirectory)}
@@ -377,7 +382,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
         openSidebarMenuKey={model.state.openSidebarMenuKey} setOpenSidebarMenuKey={model.state.setOpenSidebarMenuKey}
         projectPickerOptions={model.singleProjectMode ? projectPickerOptions : undefined}
         onProjectSelect={model.singleProjectMode ? actions.setSingleProjectId : undefined}
-        onToggle={() => { if (!row.forceExpanded && !model.singleProjectMode) actions.toggleProject(project.id); }}
+        onToggle={() => { if (!model.singleProjectMode) actions.toggleProject(project.id); }}
         onNewSession={() => {
           prepareSessionProjectAction({
             projectId: project.id,
@@ -387,6 +392,16 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
             setSessionSwitcherOpen: actions.setSessionSwitcherOpen,
           });
           actions.openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: project.normalizedPath });
+        }}
+        onNewLead={isVSCodeRuntime() ? undefined : () => {
+          prepareSessionProjectAction({
+            projectId: project.id,
+            mobileVariant: view.mobileVariant,
+            closeMobileSwitcher: true,
+            setActiveProjectIdOnly: actions.setActiveProjectIdOnly,
+            setSessionSwitcherOpen: actions.setSessionSwitcherOpen,
+          });
+          actions.openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: project.normalizedPath, lead: true });
         }}
         onNewWorktreeSession={() => {
           prepareSessionProjectAction({
@@ -401,6 +416,11 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
         onManageWorktrees={() => actions.openWorktreesPage(project.id)}
         onManageSpaces={spacesPageAvailable ? () => useUIStore.getState().setSpacesPageProjectId(project.id) : undefined}
         onOpenSourceBoard={openProjectOnBoard ? () => openProjectOnBoard(project.id) : undefined}
+        onNewFolder={() => {
+          if (row.collapsed) actions.toggleProject(project.id);
+          const folder = useSessionFoldersStore.getState().createFolder(project.normalizedPath, t('sessions.sidebar.folders.newFolderTitle'));
+          model.groupProps.startFolderRename(project.normalizedPath, folder);
+        }}
         onOpenFolder={project.normalizedPath && files.revealPath ? () => openProjectFolder(project.normalizedPath) : undefined}
         onRenameStart={() => actions.openProjectEditDialog(project.id)}
         onArchiveAll={() => void requestArchiveAll(label, row.section.groups)}
@@ -409,13 +429,10 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       />;
     }
     if (row.kind === 'group-header') {
-      // A worktree or a space is a work of its own and reads like a session
-      // row; the archive keeps its group header.
       return isGroupWork(row.group)
         ? <WorktreeWorkRow
-          group={row.group} groupKey={row.groupKey} projectId={row.projectId} depth={row.depth} detailed={row.detailed} mixed={row.mixed}
-          collapsed={row.collapsed} forceExpanded={row.forceExpanded} empty={row.empty}
-          normalizedSessionSearchQuery={model.groupProps.normalizedSessionSearchQuery}
+          group={row.group} groupKey={row.groupKey} projectId={row.projectId} depth={row.depth} detailed={row.detailed} mixed={row.mixed} inPinnedZone={isPinnedZoneRowKey(row.key)}
+          collapsed={row.collapsed} empty={row.empty}
           alwaysShowActions={view.alwaysShowActions} mobileVariant={view.mobileVariant}
           onToggle={actions.group.onToggleCollapsedGroup}
           setSessionSwitcherOpen={actions.setSessionSwitcherOpen}
@@ -431,19 +448,22 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     }
     if (row.kind === 'folder-header') {
       const renaming = model.groupProps.folderRename?.folderId === row.folder.id && model.groupProps.folderRename.scopeKey === row.scopeKey;
+      const folderProject = row.mixed ? model.projectSections.find((section) => section.project.id === row.projectId)?.project : undefined;
       return <DroppableFolderWrapper folderId={row.folder.id} scopeKey={row.scopeKey} ownerKey={row.ownerKey} disabled={!row.dropEnabled}>
         {(droppableRef, isDropTarget) => <SessionSidebarFolderItem
           activityNodes={row.activityNodes}
-          folder={row.folder} displayName={row.displayName} sessions={row.nodes} depth={row.depth} canExpand={!row.empty}
-          isCollapsed={row.collapsed} onToggle={row.forceExpanded ? () => undefined : () => toggleFolderCollapse(row.folder.id)}
+          folder={row.folder} displayName={row.displayName} sessions={row.nodes} memberCount={row.memberCount} depth={row.depth}
+          projectLabel={folderProject ? getProjectLabel(folderProject, view.homeDirectory) : undefined} canExpand={!row.empty}
+          isCollapsed={row.collapsed} onToggle={() => toggleFolderCollapse(row.folder.id)}
           onRename={(name) => renameFolder(row.scopeKey, row.folder.id, name)}
           onDelete={() => {
             if (row.archived) {
               sessionEvents.requestDelete({ sessions: [...row.deleteSessions], mode: 'session' });
             } else if (!showDeletionDialog) {
               deleteFolder(row.scopeKey, row.folder.id);
+              removeFolderFromSections(row.folder.id);
             } else {
-              setFolderDeleteConfirm({ scopeKey: row.scopeKey, folderId: row.folder.id, folderName: row.folder.name, subFolderCount: row.subFolderCount, sessionCount: row.nodes.length });
+              setFolderDeleteConfirm({ scopeKey: row.scopeKey, folderId: row.folder.id, folderName: row.folder.name, subFolderCount: row.subFolderCount, sessionCount: row.memberCount });
             }
           }}
           renderBody={false} groupDirectory={row.scopeDirectory ?? row.group.directory} projectId={row.projectId}
@@ -475,7 +495,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
           node={row.node} depth={row.depth} ownsWork={row.ownsWork} groupDirectory={row.groupDirectory} projectId={row.projectId}
           ownerProjectId={row.ownerProjectId}
           folderOwnerKey={row.ownerKey} selectionScopeKey={row.selectionScopeKey}
-          archivedBucket={row.archived} renderContext={row.renderContext} detailed={row.detailed} rowKey={row.key} dragKey={row.key}
+          archivedBucket={row.archived} renderContext={row.renderContext} detailed={row.detailed} repeat={row.repeat} rowKey={row.key} dragKey={row.key}
           secondaryMeta={row.secondaryMeta} renderChildren={false}
           editingId={model.state.editingId} openSidebarMenuKey={model.state.openSidebarMenuKey}
           setOpenSidebarMenuKey={model.state.setOpenSidebarMenuKey}
@@ -490,6 +510,16 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
         />
       </div>;
     }
+    if (row.kind === 'search-result') {
+      return <SidebarConversationRow result={row.result} context={row.context} search={model.search} />;
+    }
+    if (row.kind === 'search-archived-caption') {
+      return <CrossfadeZoneHeader className={cn('sticky top-0 z-20', view.mobileVariant ? 'bg-background' : 'bg-sidebar')} data-sidebar-sticky-header="true">
+        <SidebarSearchArchivedCaption />
+      </CrossfadeZoneHeader>;
+    }
+    if (row.kind === 'search-show-more') return <SidebarSearchShowMore section={row.section} hidden={row.hidden} onShow={model.search?.showMore} />;
+    if (row.kind === 'search-more') return <SidebarSearchMore onLoadMore={() => model.search?.loadMore(row.section)} />;
     if (row.kind === 'draft') {
       return <SessionDraftRow
         draft={row.draft} depth={row.depth} detailed={row.detailed} mixed={row.mixed}
@@ -502,25 +532,21 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
         run={row.run} depth={row.depth} laneNodes={row.laneNodes} blockingSessionIds={row.blockingSessionIds}
         detailed={row.detailed} mixed={row.renderContext === 'timeline-mixed' || row.renderContext === 'mixed-compact'}
         projectId={row.projectId} projectLabel={row.projectLabel}
-        expansionKey={row.expansionKey} expanded={row.expanded} forceExpanded={row.forceExpanded}
+        expansionKey={row.expansionKey} expanded={row.expanded}
         alwaysShowActions={view.alwaysShowActions}
         toggleParent={model.groupProps.toggleParent}
       />;
     }
-    // Show more aligns with the text of the rows it closes: 10px in under
-    // gutterless timeline-style rows, the detailed text column under two-line
-    // rows, past the tree level's chevron slot on tree rows. The archive's
-    // empty line keeps the tree column.
     const rowTextInset = row.kind === 'show-control' && row.flat === true
       ? FLAT_TEXT_INSET_PX
       : row.kind === 'show-control' && row.detailed === true
         ? sessionDetailedRowPaddingLeft(row.depth ?? 0)
         : sessionTreeTextInset(row.kind === 'show-control' || row.kind === 'empty' ? row.depth ?? 0 : 0);
     if (row.kind === 'show-control') {
-      // Small and short, so it reads as a control under the list, not a row of it.
       const control = (kind: 'more' | 'fewer') => (
-        <button type="button" className="rounded-md py-0.5 typography-micro text-muted-foreground leading-tight hover:text-foreground hover:underline" onClick={() => applyShowControl(row, kind, { model, actions })}>
+        <button type="button" className="inline-flex items-center gap-1.5 rounded-md py-0.5 typography-micro text-muted-foreground leading-tight hover:text-foreground hover:underline" onClick={() => applyShowControl(row, kind, { model, actions })}>
           {t(kind === 'more' ? 'sessions.sidebar.group.showMore' : 'sessions.sidebar.group.showFewer')}
+          {kind === 'more' ? <CollapsedSessionActivityIndicator nodes={row.hiddenNodes} /> : null}
         </button>
       );
       return (
@@ -537,8 +563,8 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
         label={row.label}
         preview={row.preview === true}
         collapsed={row.collapsed}
-        forceExpanded={row.forceExpanded}
         alwaysShowActions={view.alwaysShowActions}
+        addsProjects={row.caption === 'projects'}
         onToggle={() => toggleProjectsCaption(row, { model })}
       />);
     }
@@ -547,10 +573,8 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     return <div className="py-1 text-start typography-micro text-muted-foreground" style={{ paddingInlineStart: rowTextInset }}>
       {row.emptyKind === 'section' ? t('sessions.sidebar.sections.empty') : t('sessions.sidebar.group.empty.noArchivedSessions')}
     </div>;
-  }, [actions, deleteFolder, files, model, openProjectFolder, openProjectOnBoard, projectPickerOptions, projectSortGroupById, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, sortableSection, spacesPageAvailable, t, toggleFolderCollapse, view]);
+  }, [actions, deleteFolder, files, model, openProjectFolder, openProjectOnBoard, pageById, projectPickerOptions, projectSortGroupById, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, sortableSection, spacesPageAvailable, t, toggleFolderCollapse, view]);
 
-  // Every sortable header while nothing is held; while one is, only those of
-  // its kind, so the others stay put.
   const sortableIds = React.useMemo(() => {
     const projects: string[] = [];
     const sections: string[] = [];
@@ -567,9 +591,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     .map(({ kind, id, rowIndex }) => `${kind}:${id}:${rowIndex}`)
     .join('\u0001'), [model.rowModel.stickyHeaders]);
 
-  // How far below the top of the list a header's top is, to hold it there:
-  // where the drag put it, or else where the row is drawn (a drag that just
-  // started has not measured its row yet).
   const holdRow = (rowKey: string, top: number | undefined): void => {
     const scroller = scrollContainerRef.current;
     const rowTop = top ?? scroller?.querySelector(`[data-sidebar-row-key="${CSS.escape(rowKey)}"]`)?.getBoundingClientRect().top;
@@ -579,9 +600,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     setDragCopy(copyDragSource(active.data.current));
     const data = readDragData(active);
     if ((data.type !== 'project' && data.type !== 'section') || !data.rowKey) return;
-    // A header stuck to the top is drawn there while its place in the list has
-    // scrolled above: bring its place under it first, so the drag starts from
-    // where the user sees the header.
     const scroller = scrollContainerRef.current;
     const placeTop = scroller?.querySelector(`[data-sidebar-row-key="${CSS.escape(data.rowKey)}"]`)?.getBoundingClientRect().top;
     if (scroller && placeTop !== undefined) {
@@ -589,9 +607,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       if (placeTop < listTop) scroller.scrollTop -= listTop - placeTop;
     }
     holdRow(data.rowKey, undefined);
-    // Only once the drag has measured where the header was picked up: the
-    // lifted copy follows the pointer from there, and a list folded before
-    // that would move its starting point.
     const kind = data.type;
     const fold = (): void => {
       foldFrameRef.current = requestAnimationFrame(() => {
@@ -605,13 +620,11 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     };
     fold();
   };
-  // The list opens again with the header where it was let go.
   const endBlockDrag = (active: Active, top: number | undefined): void => {
     setDragCopy(null);
     const data = readDragData(active);
     if ((data.type !== 'project' && data.type !== 'section') || !data.rowKey) return;
     if (foldFrameRef.current !== null) {
-      // Let go before the list folded: nothing moved, nothing to hold.
       cancelAnimationFrame(foldFrameRef.current);
       foldFrameRef.current = null;
       heldRowRef.current = null;
@@ -622,8 +635,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
   };
   const handleDragEnd = (event: DragEndEvent): void => {
     const { active, over } = event;
-    // Moved, the header stays where it was let go; let go in its own place,
-    // the list returns to where it was.
     const moved = over !== null && over.id !== active.id;
     endBlockDrag(active, moved ? active.rect.current.translated?.top : active.rect.current.initial?.top);
     if (!over) return;
@@ -658,7 +669,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     const activeId = String(active.id);
     const overId = String(over.id);
     if (activeData.sortGroup && activeData.sortGroup !== PROJECTS_SORT_GROUP) {
-      // A group of projects: its own order, kept in the section.
       const groupId = activeData.sortGroup.slice('section:'.length);
       const sections = useSessionDisplayStore.getState().sections;
       saveSidebarSections(sections.map((entry) => {
@@ -683,8 +693,8 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       scrollRef={scrollContainerRef}
     >
       <ScrollableOverlay
-        // Sticky zone headers replace the top shadow.
         ref={setScrollContainer} useScrollShadow hideTopScrollShadow scrollShadowSize={40}
+        scrollShadowSurface={view.mobileVariant ? 'var(--background)' : 'var(--sidebar)'}
         outerClassName="flex-1 min-h-0" className="oc-sidebar-scroller pb-1 ps-2.5 pe-2 [overflow-anchor:none]"
       >
         <SessionFolderOwnersProvider ownerKeys={folderDropOwnerKeys}>
@@ -693,17 +703,14 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
           collisionDetection={sessionFolderCollision}
           modifiers={ROW_DRAG_MODIFIERS}
           autoScroll={ROW_DRAG_AUTO_SCROLL}
-          // The list folds as a header lifts, so where the headers are is
-          // measured again on every move rather than once at the start.
           measuring={ROW_DRAG_MEASURING}
           onDragStart={handleDragStart}
           onDragCancel={({ active }) => endBlockDrag(active, active.rect.current.initial?.top)}
           onDragEnd={handleDragEnd}
         >
           <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-            <SessionSidebarRows model={model.rowModel} scrollElement={scrollElement} pinnedRowIndexes={pinnedRowIndexes} renderRow={renderRow} onFirstVisibleIndexChange={handleFirstVisibleIndexChange} getStickyHeaderHeight={getPinnedZoneHeaderHeight} heldRowRef={heldRowRef} />
+            <SessionSidebarRows model={model.rowModel} scrollElement={scrollElement} pinnedRowIndexes={pinnedRowIndexes} renderRow={renderRow} onFirstVisibleIndexChange={handleFirstVisibleIndexChange} getStickyHeaderHeight={getPinnedZoneHeaderHeight} heldRowRef={heldRowRef} projectDivider={!view.isVSCode} />
           </SortableContext>
-          {/* Dropped, the header is where it lands at once: no flight back. */}
           <DragOverlay dropAnimation={null}>{dragSource ? <RowDragPreview copy={dragSource} /> : null}</DragOverlay>
         </DndContext>
         </SessionFolderOwnersProvider>
@@ -712,6 +719,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     <FolderDeleteConfirmDialog value={folderDeleteConfirm} setValue={setFolderDeleteConfirm} onConfirm={() => {
       if (!folderDeleteConfirm) return;
       deleteFolder(folderDeleteConfirm.scopeKey, folderDeleteConfirm.folderId);
+      removeFolderFromSections(folderDeleteConfirm.folderId);
       setFolderDeleteConfirm(null);
     }} />
     {archiveAllConfirm.dialog}

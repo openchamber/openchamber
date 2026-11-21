@@ -1,7 +1,3 @@
-/**
- * The board's scope pickers, drawn like the draft composer's project picker:
- * a quiet trigger with the project's icon and name, and a searchable list.
- */
 
 import * as React from 'react';
 import { Popover } from '@base-ui/react/popover';
@@ -23,8 +19,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import { handleDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
-import { Input } from '@/components/ui/input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow, MobileSheetSearch } from '@/components/ui/MobileSheetList';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { ProjectEntry, TrackerContainer } from '@/lib/api/types';
@@ -40,7 +36,6 @@ import { repositoryLabel } from './boardRepository';
 
 const projectName = (project: ProjectEntry): string => project.label?.trim() || formatDirectoryName(project.path) || project.path;
 
-/** `toolbar`: the board's scope, beside the search. `inline`: a smaller one inside a sentence. */
 type PickerSize = 'toolbar' | 'inline';
 
 const TRIGGER_CLASS = {
@@ -54,7 +49,6 @@ export const SourceBoardProjectPicker: React.FC<{
     onSelect: (projectId: string) => void;
     ariaLabel: string;
     size: PickerSize;
-    /** The phone shell picks from a bottom sheet: a popup there cannot scroll far enough for a long list. */
     sheet?: boolean;
 }> = ({ projects, selected, onSelect, ariaLabel, size, sheet = false }) => {
     const { t } = useI18n();
@@ -176,25 +170,14 @@ export const SourceBoardProjectPicker: React.FC<{
     );
 };
 
-/** One entry of the repository picker: a repository's folder, or null for all of them. */
 type RepositoryEntry = { value: string; repository: string | null; label: string };
 
-/**
- * Which repository under the project's folder the board lists, or all of them
- * together, shown beside the project picker while the folder is not a
- * repository itself.
- */
 export const SourceBoardRepositoryPicker: React.FC<{
     repositories: readonly string[];
-    /** The listed repository's folder; null while the board lists all of them. */
     selected: string | null;
-    /** The project's folder the repository paths are shown relative to. */
     root: string;
-    /** Offers "All repositories" first; not where the runtime cannot list across repositories. */
     allAvailable: boolean;
-    /** A repository's folder, or null for all of them. */
     onSelect: (repository: string | null) => void;
-    /** The phone shell picks from a bottom sheet, like the project picker. */
     sheet?: boolean;
 }> = ({ repositories, selected, root, allAvailable, onSelect, sheet = false }) => {
     const { t } = useI18n();
@@ -219,7 +202,6 @@ export const SourceBoardRepositoryPicker: React.FC<{
         setOpen(false);
         setQuery('');
     };
-    // Not shrink-0 like the project picker: beside it, this is the one that truncates.
     const triggerClass = cn('min-w-0 w-fit justify-start gap-1 normal-case data-[popup-open]:bg-interactive-hover', TRIGGER_CLASS.toolbar);
     const triggerContent = (
         <span className="flex min-w-0 items-center gap-1.5">
@@ -235,25 +217,19 @@ export const SourceBoardRepositoryPicker: React.FC<{
                 <Button variant="ghost" size="sm" aria-label={ariaLabel} aria-haspopup="dialog" onClick={() => setOpen(true)} className={triggerClass}>
                     {triggerContent}
                 </Button>
-                <MobileOverlayPanel open={open} title={ariaLabel} onClose={() => { setOpen(false); setQuery(''); }}>
-                    <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
-                        <Input value={query} onChange={(event) => setQuery(event.target.value)} aria-label={searchLabel} placeholder={searchLabel} className="h-9" />
-                        <div className="flex flex-col">
-                            {entries.length === 0 ? (
-                                <div role="status" className="px-3 py-6 text-center typography-ui-label text-muted-foreground">{t('sourceBoard.repository.noneFound')}</div>
-                            ) : entries.map((entry) => (
-                                <button
-                                    key={entry.value}
-                                    type="button"
-                                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                                    onClick={() => choose(entry)}
-                                >
-                                    <span className="min-w-0 flex-1 truncate">{entry.label}</span>
-                                    {entry.value === selectedValue ? <Icon name="check" className="size-4 shrink-0 text-muted-foreground" /> : null}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+                <MobileOverlayPanel
+                    open={open}
+                    title={ariaLabel}
+                    onClose={() => { setOpen(false); setQuery(''); }}
+                    subheader={<MobileSheetSearch value={query} onChange={setQuery} placeholder={searchLabel} />}
+                >
+                    {entries.length === 0 ? (
+                        <div role="status" className="px-3 py-6 text-center typography-meta text-muted-foreground">{t('sourceBoard.repository.noneFound')}</div>
+                    ) : entries.map((entry) => (
+                        <MobileSheetRow key={entry.value} selected={entry.value === selectedValue} onClick={() => choose(entry)}>
+                            {entry.label}
+                        </MobileSheetRow>
+                    ))}
                 </MobileOverlayPanel>
             </>
         );
@@ -313,12 +289,6 @@ export const SourceBoardRepositoryPicker: React.FC<{
 const ALL_CONTAINERS = '__all__';
 const NO_ACCOUNTS: readonly never[] = [];
 
-/**
- * Which container (a Linear team) a tracker's tab lists, and which account
- * (a Linear workspace) when the tracker connects several: accounts are few
- * and switched rarely, so they share the menu. The containers come from the
- * tracker's project mapping; a tracker without either shows no picker.
- */
 export const SourceBoardContainerPicker: React.FC<{
     provider: string;
     containers: readonly TrackerContainer[];

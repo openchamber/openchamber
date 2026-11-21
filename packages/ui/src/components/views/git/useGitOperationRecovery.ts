@@ -3,6 +3,7 @@ import type { GitAPI, SourceControlAPI } from '@/lib/api/types';
 import { isGitOperationUnresolved, refreshGitOperation, type GitOperationRead } from '@/lib/boundGitNetworkOperation';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { gitOperationRecoveryOwner, type PendingGitReference } from '@/lib/source-control/git-operation-recovery';
+import { useIsGitRepo } from '@/stores/useGitStore';
 
 export type GitActionRecovery = {
   reads: GitOperationRead[];
@@ -69,6 +70,10 @@ export function useGitOperationRecovery(
     }
   }, [directory, key, kind, owner, runtime, sourceControl]);
   React.useEffect(() => { void resolveScope(); }, [resolveScope]);
+  const isGitRepo = useIsGitRepo(kind === 'clone' ? null : directory ?? null);
+  React.useEffect(() => {
+    if (scopeFailed && isGitRepo === true) void resolveScope();
+  }, [isGitRepo, resolveScope, scopeFailed]);
 
   const reconcile = React.useCallback(async (references: PendingGitReference[]) => {
     const capturedRevision = revision.current;
@@ -126,9 +131,6 @@ export function useGitOperationRecovery(
         const latest = currentEntries.current.get(key);
         if (!latest) return;
         action = latest;
-        // A transfer that finished as it should has nothing left to say; the
-        // card stays only for what still needs the person: a failure or an
-        // outcome nobody knows.
         const reads = action.reads.filter((read) => read.availability !== 'available' || read.operation.state !== 'succeeded');
         update({ executing: false, reads });
       },

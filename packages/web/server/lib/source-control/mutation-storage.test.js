@@ -159,6 +159,21 @@ describe('source-control mutation storage', () => {
       .rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_CONFLICT', record: completed });
   });
 
+  it('keeps the ready/draft transition result through completion, replay and reload', async () => {
+    const { filePath, store } = await makeStore({ now: () => 100 });
+    for (const [kind, result] of [['change-request-ready', { ready: true }], ['change-request-draft', { draft: true }]]) {
+      await store.claim(claimFor(kind, `digest-${kind}`, { kind }));
+      const completed = await store.complete(kind, `digest-${kind}`, { state: 'succeeded', result });
+      expect(completed.result).toEqual(result);
+      await expect(store.complete(kind, `digest-${kind}`, { state: 'succeeded', result })).resolves.toEqual(completed);
+    }
+
+    const reopened = createMutationStore({ filePath });
+    for (const [kind, result] of [['change-request-ready', { ready: true }], ['change-request-draft', { draft: true }]]) {
+      await expect(reopened.read(kind)).resolves.toMatchObject({ state: 'succeeded', result });
+    }
+  });
+
   it('stores only compact failed replay metadata', async () => {
     const { store } = await makeStore({ now: () => 100 });
     await store.claim(claimFor('key-one'));

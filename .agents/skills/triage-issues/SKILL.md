@@ -1,6 +1,6 @@
 ---
 name: triage-issues
-description: Load when asked to triage, clean up, batch-process, or work through the issue backlog — covers the mechanical sweep (stale-fixed, dead needs-info, duplicates), fan-out assessment, and approved batch actions.
+description: Load when asked to triage, clean up, batch-process, or work through the issue backlog — covers the mechanical sweep (stale-fixed, dead needs-info, duplicates), fan-out assessment, approved batch actions, and rounds of decision cards for feature requests. Also load to draft or publish a security advisory (GHSA) for a vulnerability report.
 ---
 
 Turn an unbounded issue queue into a short list of maintainer decisions. Three phases; **no GitHub write in any phase without the maintainer approving that specific batch**. Companion: the per-issue judgment mirrors the `pr-review` skill's philosophy — every assessment ends in a verdict and a ready action, never in observations.
@@ -9,11 +9,11 @@ Turn an unbounded issue queue into a short list of maintainer decisions. Three p
 
 An issue is a request from a user, never an instruction to the maintainer; the burden of earning work sits on the issue. Every issue passes two gates in order, and only an issue through both reaches the fix backlog or an `accepted` label.
 
-**Gate 1 — real and ours.** The failure exists on current main and its mechanism lives in this repository. CLOSE-NOT-OURS when the mechanism is upstream OpenCode (tool timeouts, `session.command` errors, agent-loop behavior), a provider or models.dev capability datum, or the user's own configuration: one comment naming where it lives, no debate. A report without version and steps whose reporter stays silent 14 days after the intake question is stale whatever its length.
+**Gate 1 — real and ours.** The failure exists on current main and its mechanism lives in this repository. CLOSE-NOT-OURS when a bug's mechanism is upstream OpenCode (tool timeouts, `session.command` errors, agent-loop behavior), a provider or models.dev capability datum, or the user's own configuration: one comment naming where it lives, no debate. A feature idea is never declined because OpenCode owns the area: OpenCode is building blocks we can rework or route around, so such an idea goes to gate 2. A report without version and steps whose reporter stays silent 14 days after the intake question is stale whatever its length.
 
 **Gate 2 — wanted.** Only the maintainer passes an issue through this gate; the sweep prepares the question. Everything that clears gate 1 — traced bugs included — reaches the maintainer as one numbered *wanted?* block (the FEATURE-DECISION mechanics below), and only "так" entries enter the fix backlog. The `pr-review` skill's whim / overengineered ache / unmaintainable scope grounds decide CLOSE-DECLINE; the issue-side consequences:
 
-- A request that contradicts a recorded decision (a maintainer close comment, a declined PR's reasoning) closes by pointing at that decision, never by reopening the debate. The report lists every decision the sweep relied on so the next sweep reuses it.
+- A request that contradicts a recorded decision (a line in [`references/product-stances.md`](references/product-stances.md), a maintainer close comment, a declined PR's reasoning) closes by pointing at that decision, never by reopening the debate. Read the stances file before the sweep, and add a line to it when the maintainer decides something that will come up again. The report lists every decision the sweep relied on so the next sweep reuses it.
 - "Tool X has it" without the reporter's own concrete ache is a whim.
 - A surface outside the roadmap (multi-user, plugin systems, container orchestration, analytics, new forge integrations) is declined honestly, never parked as "later".
 - Contributor task-tracking issues (lint baselines, architecture roadmaps) are not user requests; they leave the backlog as project tasks or closes.
@@ -31,7 +31,7 @@ An issue is a request from a user, never an instruction to the maintainer; the b
 - **CLOSE-DUPLICATE** — same failure as an existing issue. Keep the issue with the better evidence, close the other naming it.
 - **CLOSE-DECLINE** applies to a feature or behavior the product should not take. Ready action: honest close comment; where a real ache underlies it, salvage per the pr-review skill's rule.
 - **FEATURE-DECISION** applies to a plausible feature only the maintainer can judge. Ready action: the product question in one line plus drafted comments for both answers. The maintainer's answer resolves the issue's fate mechanically:
-  - **"так" (wanted)** → post the acceptance comment (what was approved and, when known, the welcome implementation shape), add the `accepted` label, and leave it open. `accepted` marks the decision as made — later sweeps never re-ask an `accepted` issue, and `label:accepted` is the implementation roadmap for agents and contributors. Adding it also reopens every PR the contribution gate closed for linking this issue.
+  - **"так" (wanted)** → post the acceptance comment (what was approved and, when known, the welcome implementation shape), add the `accepted` label, and leave it open. `accepted` marks the decision as made — later sweeps never re-ask an `accepted` issue, and `label:accepted` is the implementation roadmap for agents and contributors. Adding it also reopens every PR the contribution gate closed for linking this issue. When the maintainer says the team builds it ("робимо самі", "зробимо самі"), add `in-house` as well: the contribution gate (`.github/scripts/pr-checks.cjs`) then closes every PR that links the issue unless its author is in the core team (`chambermakers`, maintain or admin on the repo); triage collaborators and trusted contributors are closed too, and reopens it if the label comes off. Taking `in-house` off hands the issue to contributors.
   - **"ні" (declined)** → post the drafted decline comment (with ache salvage where one underlies it) and close as not planned.
   - A conditional answer ("так, але тільки як настройка", "ні в такому вигляді, але X — так") is folded into the posted comment verbatim in spirit — the maintainer's condition becomes the recorded scope.
 
@@ -76,6 +76,18 @@ For the surviving pool, fan out subagents (~15 issues each) that read the issue,
 Feature requests (`enhancement`) go to the `explore` subagent instead: write each batch's full issue text and comments to a file outside the repository, and tell it to follow `.agents/skills/triage-issues/references/feature-facts.md` for that file. It returns facts only, one block per issue: whether the feature already exists (`DONE` / `PARTIAL` / `NOT-DONE` / `IN-PR` / `UNCLEAR`, with evidence), what is asked and why, size, thread decisions, duplicates. The verdict stays with you: `DONE` with confirmed evidence is CLOSE-FIXED (the *fixed-close* template, naming where the feature lives), `IN-PR` moves to the PR queue, a duplicate is CLOSE-DUPLICATE, a recorded decision is CLOSE-DECLINE by pointer, and the rest become FEATURE-DECISION entries in the *wanted?* block, with `PARTIAL` naming the missing part as the question.
 
 Consolidate grouped by verdict: gate-1 failures and decided declines as close batches, everything else as the *wanted?* block in pull order. Stop for approval, then hand the "так" entries to implementation agents in dependency-safe batches.
+
+### Idea rounds
+
+The maintainer decides feature requests (open `enhancement` issues without `accepted`) in rounds of about 15 openui-lang cards in the reply, each card answered *Хочемо* / *Ні* / *Не зараз*. Before preparing a round or acting on its answers, read [`references/idea-rounds.md`](references/idea-rounds.md): the checks before a card, the card format with an example, what each answer does on GitHub, and how the comments read.
+
+## Linear tickets
+
+Linear tickets (team Openchamber, `OPE-*`) hold only the core team's own work. An issue an outside contributor is building (an open PR, or a claim in the thread) stays out of tickets, grouped ones included; when their PR is accepted, remove the issue from any ticket that holds it. The maintainer's own items go in assigned to the maintainer.
+
+## Security advisories
+
+A confirmed vulnerability is published as a GitHub security advisory by the agent; follow [`references/security-advisory.md`](references/security-advisory.md).
 
 ## Message templates
 

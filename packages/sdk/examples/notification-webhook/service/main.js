@@ -60,12 +60,25 @@ function installGuestScrollbarActivity(doc) {
 }
 var GUEST_SCROLLBAR_SCRIPT = `(${installGuestScrollbarActivity.toString()})(document);`;
 // packages/sdk/src/manifest.ts
+var GUEST_PROVIDER_LOGO_BYTES_MAX = 1024 * 1024;
 var TRACKER_URL_TOKENS = ["{id}", "{segment}", "{segments+}"];
 var TRACKER_URL_TOKEN_SET = new Set(TRACKER_URL_TOKENS);
 // packages/sdk/src/session-events.ts
-var GUEST_SESSION_EVENT_TYPES = ["turn-finished", "turn-failed", "permission-asked", "question-asked"];
+var GUEST_SESSION_EVENT_TYPES = [
+  "turn-finished",
+  "turn-failed",
+  "permission-asked",
+  "question-asked",
+  "turn-started",
+  "session-created",
+  "session-archived",
+  "session-deleted"
+];
 var SESSION_EVENTS_IDLE_MS = 10 * 60000;
 var EVENT_TYPES = new Set(GUEST_SESSION_EVENT_TYPES);
+// packages/sdk/src/service-host.ts
+var SERVICE_SCHEDULE_IDLE_MS = 10 * 60000;
+var MENTIONS_IDLE_MS = 10 * 60000;
 // packages/sdk/src/file-editor.ts
 var patternExpressions = new Map;
 // packages/sdk/src/contract.ts
@@ -110,12 +123,15 @@ var HOST_PUSH_TYPES = new Set([
   "item",
   "resolve",
   "action",
+  "service-event",
   "status-control-event",
   "popover-closed",
   "file-open",
   "file-snapshot",
   "file-saved",
-  "generate-late"
+  "generate-late",
+  "microphone-audio",
+  "microphone-ended"
 ]);
 // packages/sdk/src/service-providers.ts
 var BROWSER_CONTROL_ACTIONS = [
@@ -172,6 +188,7 @@ var postOutbound = async (url, handle, request, timeoutMs, fail) => {
 var NOTIFICATIONS_PROVIDER_PATH = "/notifications";
 var NOTIFICATIONS_PROVIDER_WIRE_VERSION = 1;
 var NOTIFICATIONS_PROVIDER_METHODS = ["auth.verify", "auth.probe", "notify"];
+var NOTIFICATIONS_PROVIDER_ERROR_MESSAGE_MAX = 2000;
 var NOTIFICATIONS_PROVIDER_IDLE_MS = 10 * 60000;
 var NOTIFICATIONS_OUTBOUND_PATH = "/notifications/outbound";
 var NOTIFICATIONS_OUTBOUND_TIMEOUT_MS = 20000;
@@ -240,6 +257,7 @@ var createNotificationsOutbound = ({ env }) => {
   };
 };
 var TRACKER_PROVIDER_IDLE_MS = 10 * 60000;
+var QUOTA_PROVIDER_IDLE_MS = 10 * 60000;
 // packages/sdk/src/service-surface.ts
 var SURFACE_CONTROLLERS = ["none", "agent", "user"];
 var CONTROLLERS = new Set(SURFACE_CONTROLLERS);
@@ -264,7 +282,7 @@ var readBody = (req) => new Promise((resolve, reject) => {
   req.on("error", reject);
 });
 var failure = (message, status) => {
-  const error = { message };
+  const error = { message: message.slice(0, NOTIFICATIONS_PROVIDER_ERROR_MESSAGE_MAX) || "Unexpected failure" };
   if (status !== undefined)
     error.status = status;
   return { ok: false, error };

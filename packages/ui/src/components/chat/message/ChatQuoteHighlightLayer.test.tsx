@@ -46,6 +46,7 @@ test('loads an older quote source before scrolling to it', async () => {
     let finishLoad: ((loaded: boolean) => void) | undefined;
     const emptyMarks: ChatQuoteMark[] = [];
     let revealHandler: ((messageId: string, anchor: ChatQuoteAnchor) => void) | null = null;
+    let pageRowScrolls = 0;
     const store: ChatQuoteHighlightStore = {
         publishMarks: () => undefined,
         focusMark: () => undefined,
@@ -83,6 +84,7 @@ test('loads an older quote source before scrolling to it', async () => {
                         events.push(`scroll:${messageId}`);
                         return true;
                     }}
+                    scrollToUiPageRow={() => { pageRowScrolls += 1; return true; }}
                 />
                 </ChatColumnSessionContext.Provider>,
             );
@@ -149,6 +151,25 @@ test('loads an older quote source before scrolling to it', async () => {
         await act(async () => { await dom.happyDOM.waitUntilComplete(); });
         await frame();
         expect([...highlights.get('oc-chat-quote') ?? []].map((range) => range.toString())).toEqual(['ready text']);
+        highlights.clear();
+
+        // An expanded page row mounts without a message element, then its
+        // renderer replaces the raw program after loading.
+        scrollNode.innerHTML = '';
+        await act(async () => {
+            revealHandler?.('page-source', { text: 'rendered text', prefix: '', suffix: '', start: 0, page: { partId: 'page', kind: 'ui' } });
+        });
+        expect(pageRowScrolls).toBe(1);
+        const pageRow = document.createElement('div');
+        pageRow.innerHTML = '<div data-ui-render-message="page-source" data-ui-render-part="page"><pre data-chat-quote-pending>raw program</pre></div>';
+        scrollNode.append(pageRow);
+        await act(async () => { await new Promise<void>((resolve) => dom.setTimeout(resolve, 0)); });
+        await frame();
+        expect(highlights.size).toBe(0);
+        scrollNode.querySelector('[data-ui-render-part="page"]')!.innerHTML = '<p>rendered text</p>';
+        await act(async () => { await new Promise<void>((resolve) => dom.setTimeout(resolve, 0)); });
+        await frame();
+        expect([...highlights.get('oc-chat-quote') ?? []].map((range) => range.toString())).toEqual(['rendered text']);
         highlights.clear();
 
         // A mounted, finished source cannot resolve an ambiguous or changed quote.

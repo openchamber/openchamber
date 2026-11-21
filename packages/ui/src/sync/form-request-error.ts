@@ -1,8 +1,7 @@
-/**
- * The server no longer has this form. The reply or cancel cannot be retried:
- * the request was already settled, or it was never on this directory.
- * Callers must not present that as "submit failed, try again".
- */
+import { AgentUnavailableError } from '@/lib/opencode/agent-unavailable-error'
+import type { I18nKey, I18nParams } from '@/lib/i18n'
+import { ConnectionLostError } from './connection-lost-error'
+
 export function isFormRequestNotFoundError(error: unknown): boolean {
   if (error && typeof error === "object") {
     const status = (error as { status?: unknown }).status
@@ -17,4 +16,21 @@ export function isFormRequestNotFoundError(error: unknown): boolean {
   }
 
   return /Form(?:\.)?NotFoundError|Form request not found/i.test(message)
+}
+
+export const isFormAlreadySettledError = (error: Error): boolean => "tag" in error && error.tag === "FormAlreadySettledError"
+
+export function agentUnavailableFrom(error: Error | null): string | null {
+  if (error instanceof AgentUnavailableError) return error.agent
+  if (error?.cause instanceof AgentUnavailableError) return error.cause.agent
+  return null
+}
+
+export function connectionLostMessage(
+  error: Error | null,
+  t: (key: I18nKey, params?: I18nParams) => string,
+): string | null {
+  if (!(error instanceof ConnectionLostError)) return null
+  if (error.reason) return t('chat.formCard.connectionLostReason', { reason: error.reason })
+  return error.everConnected ? t('chat.formCard.connectionLost') : t('chat.formCard.notConnected')
 }

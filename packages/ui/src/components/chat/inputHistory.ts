@@ -46,7 +46,7 @@ export function buildChatInputHistorySubmissions({
 
 function materializeHistoryAttachment(attachment: InputHistoryAttachment): AttachedFile | null {
   if (attachment.source === 'file-url') {
-    if (!attachment.reference || attachment.reference.startsWith('data:')) return null;
+    if (!attachment.reference || (attachment.reference.startsWith('data:') && !attachment.path)) return null;
     return {
       id: `history-${attachment.key}`,
       file: new File([], attachment.filename, { type: attachment.mimeType }),
@@ -55,7 +55,8 @@ function materializeHistoryAttachment(attachment: InputHistoryAttachment): Attac
       filename: attachment.filename,
       size: attachment.size,
       source: 'local',
-      serverPath: attachment.reference,
+      serverPath: attachment.path ?? attachment.reference,
+      agentPath: attachment.path,
     };
   }
 
@@ -87,12 +88,6 @@ export function mapInputHistoryEntriesToValues(
   }));
 }
 
-/**
- * Session-scoped recall: the visible transcript's prompts (so sessions older
- * than the persisted store still recall) merged with the persisted bucket
- * (attachments, and prompts a revert hid from the transcript), oldest first.
- * A prompt present in both collapses to the persisted entry.
- */
 export function mergeSessionInputHistory(
   transcript: readonly TranscriptPrompt[],
   entries: readonly InputHistoryEntry[],
@@ -103,7 +98,6 @@ export function mergeSessionInputHistory(
       .filter((prompt) => !persistedTexts.has(prompt.text))
       .map((prompt) => ({ at: prompt.createdAt, value: { text: prompt.text, attachments: [] } })),
     ...mapInputHistoryEntriesToValues(entries)
-      // submittedAt is milliseconds × 1000 plus a sequence number.
       .map((value, index) => ({ at: Math.floor(entries[index]!.submittedAt / 1000), value })),
   ];
   return timed.sort((left, right) => left.at - right.at).map((item) => item.value);

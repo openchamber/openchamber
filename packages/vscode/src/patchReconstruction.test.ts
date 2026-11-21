@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reconstructOriginalContentFromPatch } from './patchReconstruction';
+import { isFileDeletionPatch, reconstructOriginalContentFromPatch } from './patchReconstruction';
 
 const file = (...lines: string[]) => lines.join('\n');
 
@@ -37,6 +37,17 @@ describe('reconstructOriginalContentFromPatch', () => {
     const modified = file('x', '  unrelated', 'z');
     const patch = file('@@ -1,2 +1,2 @@', '-old', '+new', ' other');
     assert.equal(reconstructOriginalContentFromPatch(modified, patch), file('old', 'other', 'z'));
+  });
+
+  test('rebuilds a deleted file from an empty one', () => {
+    const patch = file('--- a.txt', '+++ a.txt', '@@ -1,2 +0,0 @@', '-first', '-second', '');
+    assert.equal(reconstructOriginalContentFromPatch('', patch), file('first', 'second', ''));
+  });
+
+  test('tells a deletion from an edit', () => {
+    assert.equal(isFileDeletionPatch(file('--- a.txt', '+++ /dev/null', '@@ -1,2 +0,0 @@', '-first', '-second')), true);
+    assert.equal(isFileDeletionPatch(file('@@ -1,2 +1,1 @@', '-first', ' second')), false);
+    assert.equal(isFileDeletionPatch('not a diff'), false);
   });
 
   test('returns null when the patch has no hunks', () => {

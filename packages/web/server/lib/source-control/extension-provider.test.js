@@ -88,6 +88,124 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 describe('an extension provider', () => {
+  describe('service-owned login', () => {
+    const serviceDescriptor = () => buildExtensionDescriptor({ guestId: 'forge', guest, contribution: {
+      ...contribution, token: undefined, login: { kind: 'service', hint: 'Run forge auth login on the server' },
+    } });
+    const accountId = `${INSTANCE}#cli:7`;
+
+    it('rechecks a tokenless CLI account for status and reads, without storing it or granting forge access', async () => {
+      setup(serviceDescriptor());
+      service = async (request, forge) => {
+        expect(await forge()).toMatchObject({ status: 403, body: { error: { code: 'METHOD_NOT_ALLOWED' } } });
+        if (request.method === 'auth.status') return ok({ user: request.session.instance === INSTANCE ? USER : null });
+        return ok({ project, headSha: SHA, headBranch: 'feature', headOwner: 'mona' });
+      };
+      expect(await provider.auth.status({ instance: INSTANCE })).toMatchObject({
+        connected: true, accounts: [{ id: accountId, current: true, source: 'cli', user: USER }],
+      });
+      const session = await provider.auth.resolveAccount({ instance: INSTANCE, accountId });
+      expect(session).toMatchObject({ persisted: false, secretKind: 'cli', providerUserId: `${INSTANCE}#7` });
+      expect(await provider.resources.readChangeRequestHead({ session, ...readInput({ number: 2 }) })).toMatchObject({ headSha: SHA });
+      expect(calls.at(-1)).toMatchObject({ session: { instance: INSTANCE, user: USER } });
+      expect(await provider.auth.status({ instance: 'https://other.example' })).toMatchObject({ connected: false, accounts: [] });
+      await provider.auth.status({ instance: INSTANCE });
+      expect(calls.filter((call) => call.method === 'auth.status')).toHaveLength(4);
+      expect(calls.some((call) => call.method === 'auth.verify')).toBe(false);
+      expect(await provider.transport.readCredential({ instance: INSTANCE, credentialId: accountId })).toBeNull();
+      expect((await store.readInstance(INSTANCE)).accounts).toEqual([]);
+      expect(fs.existsSync(path.join(dir, 'source-control-auth.json'))).toBe(false);
+      expect(forgeHeaders).toEqual([]);
+    });
+
+    it('keeps an unknown login distinct from a signed-out or changed identity', async () => {
+      setup(serviceDescriptor());
+      service = async () => ok({ user: USER });
+      await provider.auth.status({ instance: INSTANCE });
+      service = async () => fail({ message: 'CLI could not answer', status: 503 });
+      await expect(provider.auth.status({ instance: INSTANCE })).rejects.toMatchObject({ status: 503 });
+      await expect(provider.auth.resolveAccount({ instance: INSTANCE, accountId })).rejects.toMatchObject({ status: 503 });
+      expect(invalidated).not.toHaveBeenCalled();
+      service = async () => ok({ user: null });
+      expect(await provider.auth.status({ instance: INSTANCE })).toMatchObject({ status: 'disconnected', accounts: [] });
+      expect(invalidated).not.toHaveBeenCalled();
+      service = async () => ok({ user: { id: 8, login: 'bob' } });
+      await expect(provider.auth.resolveAccount({ instance: INSTANCE, accountId })).rejects.toMatchObject({ status: 401 });
+      expect(invalidated).toHaveBeenCalledWith({ provider: 'ext-forge', instance: INSTANCE, accountId });
+    });
+
+    it('compares numeric and string IDs as strings while preserving significant whitespace', async () => {
+      setup(serviceDescriptor());
+      let user = USER;
+      service = async (request) => request.method === 'auth.status' ? ok({ user }) : ok({ user: request.session.user });
+      await provider.auth.resolveAccount({ instance: INSTANCE, accountId });
+      user = { ...USER, id: '7' };
+      const same = await provider.auth.resolveAccount({ instance: INSTANCE, accountId });
+      expect(await provider.resources.getIssue({ session: same, ...readInput({ number: 1 }) })).toEqual({ user });
+      expect(invalidated).not.toHaveBeenCalled();
+      user = { ...USER, id: ' 007 ' };
+      const distinct = `${INSTANCE}#cli: 007 `;
+      expect((await provider.auth.status({ instance: INSTANCE })).accounts[0].id).toBe(distinct);
+      const session = await provider.auth.resolveAccount({ instance: INSTANCE, accountId: distinct });
+      expect(await provider.resources.getIssue({ session, ...readInput({ number: 1 }) })).toEqual({ user });
+    });
+
+    it('accepts ACCOUNT_CHANGED only from a tokenless acting account and never trusts an unobserved 401', async () => {
+      setup(serviceDescriptor());
+      service = async () => ok({ user: USER });
+      const session = await provider.auth.resolveAccount({ instance: INSTANCE, accountId });
+      service = async () => fail({ message: 'The CLI account changed', code: 'ACCOUNT_CHANGED', status: 409 });
+      await expect(provider.resources.getIssue({ session, ...readInput({ number: 1 }) })).rejects.toMatchObject({
+        status: 401, code: 'ACCOUNT_CHANGED', sourceControlPersistedAccount: false,
+        sourceControlIdentity: { provider: 'ext-forge', instance: INSTANCE, accountId },
+      });
+      service = async () => fail({ message: 'unauthorized', status: 401 });
+      await expect(provider.resources.getIssue({ session, ...readInput({ number: 1 }) })).rejects.toMatchObject({ code: 'MALFORMED_PROVIDER_RESPONSE' });
+    });
+
+    it('does not infer that an unobserved CLI mutation failed before it wrote', async () => {
+      setup(serviceDescriptor());
+      service = async () => ok({ user: USER });
+      const session = await provider.auth.resolveAccount({ instance: INSTANCE, accountId });
+      service = async () => { throw new GuestServiceError('no answer', 'REQUEST_FAILED'); };
+      const error = await provider.mutations.perform({ session, route: '/issues/comment', kind: 'issue-comment', input: {}, resolved: {} })
+        .catch((caught) => caught);
+      expect(provider.mutations.classifyError(error)).toBe('outcome-unknown');
+    });
+
+    it('never falls back to a stored PAT when the selected service login is unknown', async () => {
+      const descriptor = buildExtensionDescriptor({ guestId: 'forge', guest, contribution: {
+        ...contribution, login: { kind: 'service', hint: 'Run forge auth login' },
+      } });
+      setup(descriptor);
+      await connect();
+      service = async () => ok({ user: USER });
+      await provider.auth.activate({ instance: INSTANCE, accountId });
+      service = async () => { throw new GuestServiceError('CLI timed out', 'REQUEST_FAILED'); };
+      await expect(provider.auth.readCurrentAccountId({ instance: INSTANCE })).rejects.toMatchObject({ kind: 'unreachable' });
+      expect((await store.readInstance(INSTANCE)).accounts[0].status).toBe('valid');
+      expect((await store.readInstance(INSTANCE)).cliActive).toBe(true);
+      expect(invalidated).not.toHaveBeenCalled();
+    });
+
+    it('leaves old PAT bytes intact but stops using them after an update to login-only', async () => {
+      const oldSession = await connect();
+      const file = path.join(dir, 'source-control-auth.json');
+      const bytes = fs.readFileSync(file, 'utf8');
+      provider = createExtensionProvider({
+        descriptor: serviceDescriptor(), guest, store, events, handles, persistPath: path.join(dir, 'extensions.json'),
+        currentGuest: async () => currentRow, reconcile,
+        proxy: async () => ({ status: 200, body: JSON.stringify(ok({ user: USER })) }),
+      });
+      expect((await provider.auth.status({ instance: INSTANCE })).accounts).toMatchObject([{ source: 'cli' }]);
+      expect(await provider.auth.accounts({ instance: INSTANCE })).toHaveLength(1);
+      expect(await provider.auth.listConnectedAccounts()).toEqual([]);
+      await expect(provider.auth.resolveAccount({ instance: INSTANCE, accountId: oldSession.accountId })).rejects.toMatchObject({ status: 401 });
+      expect(await provider.transport.readCredential({ instance: INSTANCE, credentialId: oldSession.accountId })).toBeNull();
+      expect(fs.readFileSync(file, 'utf8')).toBe(bytes);
+    });
+  });
+
   it('signs in through auth.verify with a handle that carries the token, never the token itself', async () => {
     const session = await connect();
     expect(session).toMatchObject({ instance: INSTANCE, providerUserId: `${INSTANCE}#7`, secretKind: 'pat' });

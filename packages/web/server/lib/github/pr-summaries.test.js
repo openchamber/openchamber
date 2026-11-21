@@ -217,6 +217,19 @@ describe('fetchPrSummaries', () => {
     expect(summaries).toHaveLength(26);
   });
 
+  test('carries the queue entry and auto-merge request from GitHub', async () => {
+    const mergeQueueEntry = { state: 'AWAITING_CHECKS', position: 3 };
+    const autoMergeRequest = { enabledAt: '2026-11-03T12:00:00Z', mergeMethod: 'SQUASH' };
+    const octokit = fakeOctokit(new Map([[7, prNode(7, { isInMergeQueue: true, mergeQueueEntry, autoMergeRequest })]]));
+    const graphql = octokit.graphql;
+    octokit.graphql = (query, variables) => {
+      expect(query).toContain('mergeQueueEntry { state position }');
+      return graphql(query, variables);
+    };
+    const { summaries: [summary] } = await fetchPrSummaries({ octokit, refs: [{ owner: 'acme', repo: 'app', number: 7 }] });
+    expect(summary).toMatchObject({ isInMergeQueue: true, mergeQueueEntry, autoMergeRequest });
+  });
+
   test('maps a merged PR without checks or mergeability', async () => {
     const octokit = fakeOctokit(new Map([[7, prNode(7, { state: 'MERGED', mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' })]]));
 
@@ -233,6 +246,9 @@ describe('fetchPrSummaries', () => {
       base: 'main',
       mergeable: null,
       mergeableState: 'unknown',
+      isInMergeQueue: false,
+      mergeQueueEntry: null,
+      autoMergeRequest: null,
       checks: null,
     });
   });

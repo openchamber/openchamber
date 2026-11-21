@@ -1,19 +1,19 @@
 import React from 'react';
 
+import { useGuestScopeSync } from '@/hooks/useGuestScopeSync';
 import { useGuestDialogStore } from '@/lib/guests/dialog-store';
 import { useGuestResolveHostStore } from '@/lib/guests/run-command';
 import { useGuestActionHostStore } from '@/lib/guests/run-action';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
 
-// Guest surfaces load on demand: nothing here is paid for until an extension
-// contributes an action or a command and the user uses it.
 const GuestAttachDialog = React.lazy(() => import('./GuestAttachDialog').then((module) => ({ default: module.GuestAttachDialog })));
 const PluginPane = React.lazy(() => import('./PluginPane').then((module) => ({ default: module.PluginPane })));
 
-/**
- * Frames that belong to no particular column: attach dialogs, temporary
- * background actions, and the hidden pane used by slash commands.
- */
+const GuestScopeSync: React.FC = () => {
+  useGuestScopeSync();
+  return null;
+};
+
 export const GuestHosts: React.FC = () => {
   const dialogRequest = useGuestDialogStore((state) => state.request);
   const closeDialog = useGuestDialogStore((state) => state.close);
@@ -22,6 +22,7 @@ export const GuestHosts: React.FC = () => {
 
   return (
     <>
+      <GuestScopeSync />
       {actionRequests.map((request) => (
         <div key={request.id} aria-hidden="true" inert className="pointer-events-none fixed top-0 -inset-s-[9999px] h-px w-px overflow-hidden">
           <React.Suspense fallback={null}>

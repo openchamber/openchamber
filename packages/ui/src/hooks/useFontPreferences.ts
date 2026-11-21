@@ -16,12 +16,6 @@ interface FontPreferences {
     customMonoFont: string;
 }
 
-/**
- * The fonts the app renders with. A font with a `source` loads from a public
- * CDN; enterprise mode keeps the app from reaching outside servers, so there
- * it falls back to the system font. The stored choice is untouched and comes
- * back when the mode is off.
- */
 export const useFontPreferences = (): FontPreferences => {
     const uiFont = useUIStore(state => state.uiFont);
     const monoFont = useUIStore(state => state.monoFont);

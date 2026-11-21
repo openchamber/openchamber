@@ -149,6 +149,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { createGlobalMessageStreamHub } from '../event-stream/global-hub.js';
 import { SpaceError } from './errors.js';
 import { IMAGE_CAT } from './layout.js';
+import { createSpaceRecords } from './space-records.js';
 
 const TOKEN = 'tok_' + 'a'.repeat(40);
 const ID = 'a1b2c3d4e5f6';
@@ -165,7 +166,7 @@ const startSpaceServer = async ({ sessions, status = {} }) => {
   const { createUiAuth } = await import('../ui-auth/ui-auth.js');
   const auth = createUiAuth({ password: TOKEN, readSettingsFromDiskMigrated: async () => ({}) });
   // `heldLists`, when set, holds every first-page list request until the test releases it with 'ok' or 'fail'.
-  const state = { eventStreams: [], sessions, listRequests: 0, heldLists: null };
+  const state = { eventStreams: [], controlStreams: [], taskTitle: '', sessions, listRequests: 0, heldLists: null };
   const app = express();
   app.post('/auth/session', express.json(), auth.handleSessionCreate);
   app.use('/api', auth.requireAuth);
@@ -180,6 +181,14 @@ const startSpaceServer = async ({ sessions, status = {} }) => {
     res.json({ data: page, cursor: { next: start + 2 < state.sessions.length ? String(start + 2) : undefined } });
   });
   app.get('/api/sessions/status', (_req, res) => res.json({ sessions: status }));
+  app.get('/api/openchamber/space-task-title', (_req, res) => res.json({ title: state.taskTitle, by: 'user' }));
+  app.get('/api/openchamber/events', (req, res) => {
+    res.setHeader('content-type', 'text/event-stream');
+    res.flushHeaders();
+    res.write(':ready\n\n');
+    state.controlStreams.push(res);
+    req.on('close', () => { state.controlStreams.splice(state.controlStreams.indexOf(res), 1); });
+  });
   app.get('/api/event', (req, res) => {
     res.setHeader('content-type', 'text/event-stream');
     res.flushHeaders();
@@ -225,6 +234,34 @@ describe('createSpacesHost: sessions and events', () => {
   const logger = { warn: (line) => logs.push(line) };
   afterEach(() => { logs.length = 0; });
 
+  it('owns task-title updates from an authenticated space stream and keeps user ownership on the host', async () => {
+    const space = await startSpaceServer({ sessions: [] });
+    space.state.taskTitle = 'Seed';
+    const spaces = new Map([[ID, { port: space.port, running: true, project: hashProjectDirectory('/home/me/project') }]]);
+    const dataDir = temporary();
+    const records = createSpaceRecords({ dataDir });
+    records.write(ID, { placeId: 'fake', name: 'Space', network: { mode: 'open' }, repository: '/home/me/project', spacePath: `/spaces/${ID}/project` });
+    const host = createSpacesHost({ dataDir, place: fakePlace(spaces), logger, setTimer: () => null, clearTimer: () => {}, listProjectDirectories: async () => ['/home/me/project'] });
+    hosts.push(host);
+    const hub = createGlobalMessageStreamHub({ buildOpenCodeUrl: (p) => `http://127.0.0.1:1${p}`, getOpenCodeAuthHeaders: () => ({}), deltaCoalesceWindowMs: 0, fetchImpl: async () => { throw new Error('no host upstream'); } });
+    const received = [];
+    hub.subscribeEvent((event) => received.push(event), { spaces: true });
+    await host.startEvents(hub, { broadcastUiEvent: () => {} });
+    expect(await until(() => records.read(ID).record.taskTitle?.title === 'Seed')).toBe(true);
+    const emit = (spaceId, title) => space.state.controlStreams[0].write(`data: ${JSON.stringify({ type: 'openchamber:space-task-title.updated', properties: { spaceId, title, by: 'user' } })}\n\n`);
+    emit(OTHER, 'Spoofed space');
+    emit(ID, `\u001b\u202e${'x'.repeat(130)}\nSecond line`);
+    expect(await until(() => records.read(ID).record.taskTitle?.title === 'x'.repeat(120))).toBe(true);
+    expect(records.read(ID).record.taskTitle.by).toBe('agent');
+    expect(received.filter((event) => event.payload.type === 'openchamber:space-task-title.updated').map((event) => event.payload.properties.taskTitle.title)).toEqual(['Seed', 'x'.repeat(120)]);
+    await host.journey.setTaskTitle(ID, 'User owns this');
+    emit(ID, 'Agent replacement');
+    space.state.controlStreams[0].end();
+    expect((await host.mergeSessionList({ data: [], cursor: {} })).spaces[0].taskTitle).toEqual({ title: 'User owns this', by: 'user' });
+    spaces.get(ID).running = false;
+    expect((await host.journey.listSpaces())[0].taskTitle).toEqual({ title: 'User owns this', by: 'user' });
+  });
+
   it('merges every reachable space\'s sessions after the host\'s, drops what a space may not claim, and keeps a stopped space\'s last list as stale', async () => {
     const first = await startSpaceServer({ sessions: [
       { id: 'a1', location: { directory: `/spaces/${ID}/repo` }, title: 'one', permissions: { x: 1 } },
@@ -241,8 +278,8 @@ describe('createSpacesHost: sessions and events', () => {
     const host = createSpacesHost({ dataDir: temporary(), place: fakePlace(spaces), logger, setTimer: () => null, clearTimer: () => {}, listProjectDirectories: async () => ['/home/me/project', '/home/me/other'] });
     hosts.push(host);
     const hostList = { data: [{ id: 'host-1', location: { directory: '/home/me' } }], cursor: {} };
-    const first_mark = { id: ID, name: ID, state: 'complete', sessions: 3, projectDirectory: '/home/me/project', directory: `/spaces/${ID}/project` };
-    const other_mark = (state, sessions) => ({ id: OTHER, name: OTHER, state, sessions, projectDirectory: null, directory: null });
+    const first_mark = { id: ID, name: ID, taskTitle: null, state: 'complete', sessions: 3, projectDirectory: '/home/me/project', directory: `/spaces/${ID}/project` };
+    const other_mark = (state, sessions) => ({ id: OTHER, name: OTHER, taskTitle: null, state, sessions, projectDirectory: null, directory: null });
 
     const merged = await host.mergeSessionList(hostList);
     expect(merged.data.map((item) => item.id)).toEqual(['host-1', 'a1', 'a2', 'a3', 'b1']);
@@ -373,7 +410,7 @@ describe('createSpacesHost: a place that cannot be asked', () => {
     expect((await host.journey.listSpaces())[0]).toMatchObject({ id: ID, name: 'On the box', state: 'unreachable', placeId: 'fake', projectDirectory: '/home/me/project' });
     const stale = await host.mergeSessionList(hostList);
     expect(stale.data.map((item) => item.id)).toEqual(['a1']);
-    expect(stale.spaces).toEqual([{ id: ID, name: 'On the box', state: 'stale', sessions: 1, projectDirectory: '/home/me/project', directory: `/spaces/${ID}/project` }]);
+    expect(stale.spaces).toEqual([{ id: ID, name: 'On the box', taskTitle: null, state: 'stale', sessions: 1, projectDirectory: '/home/me/project', directory: `/spaces/${ID}/project` }]);
     // The event connection is let go and not made again while the place is away.
     space.server.closeAllConnections();
     await host.startEvents(hub);

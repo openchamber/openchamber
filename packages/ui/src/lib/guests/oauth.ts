@@ -18,6 +18,7 @@ const statusSchema = z.object({
   account: z.string(),
   hasClient: z.boolean(),
   settings: z.record(z.string().regex(SETTING_KEY), z.string()),
+  secretsSet: z.array(z.string()).optional().default([]),
   redirectUri: z.string().optional(),
 });
 
@@ -69,6 +70,7 @@ export const parseGuestRequestProxyResponse = async (
 export type GuestOauthStatus = {
   connection: GuestConnection;
   settings: GuestSettings;
+  secretsSet: string[];
   hasClient: boolean;
   redirectUri: string;
 };
@@ -76,6 +78,7 @@ export type GuestOauthStatus = {
 const toStatus = (parsed: z.infer<typeof statusSchema>): GuestOauthStatus => ({
   connection: { connected: parsed.connected, account: parsed.account },
   settings: parsed.settings,
+  secretsSet: parsed.secretsSet,
   hasClient: parsed.hasClient,
   redirectUri: parsed.redirectUri ?? '',
 });

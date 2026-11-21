@@ -6,15 +6,17 @@ import { createRoot } from 'react-dom/client';
 
 const browser = new Window({ url: 'http://localhost/' });
 const requests: string[] = [];
+let onRequest: ((url: string) => void) | undefined;
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input: string | URL | Request) => {
   const url = input instanceof Request ? input.url : String(input);
   requests.push(url);
+  onRequest?.(url);
   const payload = url.includes('/api/fs/stat') ? { exists: true } : url.includes('/api/location') ? { directory: '/reference-test', project: { directory: '/reference-test' } } : url.includes('/api/session') ? [] : {};
   return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
 };
 browser.document.write('<!doctype html><html><head></head><body></body></html>');
-Object.assign(globalThis, { window: browser, document: browser.document, navigator: browser.navigator,
+Object.assign(globalThis, { window: browser, document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage, HTMLElement: browser.HTMLElement,
   HTMLAnchorElement: browser.HTMLAnchorElement, Element: browser.Element, Node: browser.Node, Text: browser.Text,
   SVGElement: browser.SVGElement, customElements: browser.customElements, MutationObserver: browser.MutationObserver,
@@ -24,7 +26,8 @@ Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: tr
 const { MarkdownContent } = await import('./MarkdownRendererImpl');
 const { I18nProvider } = await import('@/lib/i18n');
 const { createMarkdownCodePlugin } = await import('./markdown/streamdownCode');
-const { streamdownCodeWorker } = await import('./markdown/streamdownCodeWorker');
+const { markdownCodeHighlighter } = await import('./markdown/markdownCodeHighlighter');
+const { fileReferenceExists } = await import('./fileReferenceStat');
 const host = document.createElement('div');
 document.body.append(host);
 const root = createRoot(host);
@@ -65,7 +68,7 @@ test('streaming stable prefix retains selection, disclosure and scroll through a
 
 test('warm code is highlighted at the first layout commit and source changes never commit stale text', async () => {
   const source = 'const warmCode = "中文";';
-  const highlighted = await streamdownCodeWorker.highlight(source, 'typescript', false);
+  const highlighted = await markdownCodeHighlighter.highlight(source, 'typescript', false);
   expect(highlighted).not.toBeNull();
   const commits: Array<{ text: string; colored: boolean }> = [];
   function Capture({ code, language }: { code: string; language: string }) {
@@ -80,11 +83,23 @@ test('warm code is highlighted at the first layout commit and source changes nev
   expect(commits[0]).toEqual({ text: source, colored: true });
   const firstRow = host.querySelector('[data-streamdown="code-block-body"] code > span');
   const appended = source + '\nconst appended = 2;';
-  await streamdownCodeWorker.highlight(appended, 'typescript', false);
+  await markdownCodeHighlighter.highlight(appended, 'typescript', false);
   await act(() => root.render(<Capture code={appended} language="typescript" />));
   expect(host.querySelector('[data-streamdown="code-block-body"] code > span')).toBe(firstRow);
   await act(() => root.render(<Capture code="replacement" language="unknown-language" />));
   expect(commits.at(-1)?.text).toBe('replacement');
+});
+
+test('an ansi fence shows its text without escape sequences and still copies its own source', async () => {
+  const esc = String.fromCharCode(27);
+  const source = `${esc}[32mok${esc}[0m 2 passed\n${esc}[31mfail${esc}[0m 1`;
+  await act(() => root.render(<I18nProvider>
+    <MarkdownContent content={`\`\`\`ansi\n${source}\n\`\`\``} enableFileReferences={false} />
+  </I18nProvider>));
+  const body = host.querySelector('[data-streamdown="code-block-body"]');
+  expect(body?.textContent).toBe('ok 2 passedfail 1');
+  expect(body?.getAttribute('data-language')).toBe('ansi');
+  expect(host.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe(source);
 });
 
 test('append results advance while newer requests are pending without resetting highlighted nodes', async () => {
@@ -96,10 +111,10 @@ test('append results advance while newer requests are pending without resetting 
     [{ content: 'let', color: 'var(--syntax-keyword)' }, { content: ' tail' }],
   ] };
   const pending = new Map<string, (result: HighlightResult | null) => void>();
-  const lookup = spyOn(streamdownCodeWorker, 'cached').mockImplementation((code, language) => (
+  const lookup = spyOn(markdownCodeHighlighter, 'cached').mockImplementation((code, language) => (
     code === original && language === 'typescript' ? colored : undefined
   ));
-  const highlight = spyOn(streamdownCodeWorker, 'highlight').mockImplementation((code, language) => (
+  const highlight = spyOn(markdownCodeHighlighter, 'highlight').mockImplementation((code, language) => (
     code === original && language === 'typescript'
       ? Promise.resolve(colored)
       : new Promise((resolve) => { pending.set(code, resolve); })
@@ -190,9 +205,10 @@ test('confirmed fenced paths span syntax tokens and survive repeat highlight wit
   await draw('/reference-test', true);
   expect(requests.some((url) => url.includes('/api/fs/stat'))).toBe(false);
   await draw('/reference-test', false);
-  for (let attempt = 0; attempt < 100 && host.querySelectorAll('[data-openchamber-file-ref="src/second.ts:20:3"]').length === 0; attempt++) {
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
-  }
+  await act(async () => {
+    await Promise.all(['inline.ts', 'src/first.ts', 'src/second.ts'].map((path) =>
+      fileReferenceExists(`/reference-test/${path}`, '/reference-test')));
+  });
   expect(host.querySelector('[data-openchamber-file-ref="inline.ts:2"]')?.getAttribute('data-openchamber-file-path')).toBe('/reference-test/inline.ts');
   expect(host.querySelector('[data-openchamber-file-ref="src/first.ts:12"]')?.getAttribute('data-openchamber-file-path')).toBe('/reference-test/src/first.ts');
   expect(host.querySelector('[data-openchamber-file-ref="src/second.ts:20:3"]')?.getAttribute('data-openchamber-file-path')).toBe('/reference-test/src/second.ts');
@@ -204,6 +220,9 @@ test('confirmed fenced paths span syntax tokens and survive repeat highlight wit
 
 test('Plan-style document assets resolve relative media while raw HTML stays inert', async () => {
   const before = requests.length;
+  const rawRequest = new Promise<void>((resolve) => {
+    onRequest = (url) => { if (url.includes('/api/fs/raw')) resolve(); };
+  });
   // happy-dom's observer never reports, and a document image waits until it is near the view.
   const observer = Object.getOwnPropertyDescriptor(browser, 'IntersectionObserver');
   Object.defineProperty(browser, 'IntersectionObserver', { configurable: true, value: undefined });
@@ -212,14 +231,44 @@ test('Plan-style document assets resolve relative media while raw HTML stays ine
       allowRawHtml={false} enableFileReferences={false} directory="/project"
       documentAssets={{ filePath: '/plans/current/plan.md', workspaceRoot: '/project', colorScheme: 'light', onOpenFile: () => undefined }} />
     </I18nProvider>));
-    for (let attempt = 0; attempt < 30 && !requests.slice(before).some((url) => url.includes('/api/fs/raw')); attempt++) {
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
-    }
+    await act(async () => { await rawRequest; });
     const raw = requests.slice(before).find((url) => url.includes('/api/fs/raw'));
     expect(raw ? new URL(raw, 'http://localhost').searchParams.get('path') : null).toBe('/plans/current/diagram.png');
     expect(host.textContent).toContain('<div>inert HTML</div>');
   } finally {
+    onRequest = undefined;
     if (observer) Object.defineProperty(browser, 'IntersectionObserver', observer);
     else Reflect.deleteProperty(browser, 'IntersectionObserver');
   }
+});
+
+test('an svg fence draws as an image only where the document preview asks for it', async () => {
+  const content = '```svg\n<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>\n```';
+  const draw = (svgFences: boolean) => act(() => root.render(<I18nProvider><MarkdownContent content={content} svgFences={svgFences} enableFileReferences={false} directory="/project" settled /></I18nProvider>));
+  await draw(true);
+  expect(host.querySelector('img[src^="data:image/svg+xml"]')).not.toBeNull();
+  await draw(false);
+  expect(host.querySelector('img')).toBeNull();
+  expect(host.textContent).toContain('xmlns');
+});
+
+test('an svg fence with a script stays an ordinary code block', async () => {
+  const content = '```svg\n<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>\n```';
+  await act(async () => { root.render(<I18nProvider><MarkdownContent content={content} svgFences enableFileReferences={false} directory="/project" settled /></I18nProvider>); });
+  expect(host.querySelector('img')).toBeNull();
+  expect(host.querySelector('[data-streamdown="code-block"]')).not.toBeNull();
+});
+
+test('an svg the browser cannot draw keeps the ordinary code block, and a corrected source draws again', async () => {
+  const draw = (svg: string) => act(async () => {
+    root.render(<I18nProvider><MarkdownContent content={'```svg\n' + svg + '\n```'} svgFences enableFileReferences={false} directory="/project" settled /></I18nProvider>);
+  });
+  await draw('<svg><oops');
+  await act(async () => { host.querySelector('img')?.dispatchEvent(new Event('error')); });
+  expect(host.querySelector('img')).toBeNull();
+  expect(host.querySelector('[data-streamdown="code-block-header"]')?.textContent).toContain('svg');
+  expect(host.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe('<svg><oops');
+  expect(host.querySelector('[data-streamdown="code-block-actions"] button[aria-label="Copy code"]')).not.toBeNull();
+  await draw('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>');
+  expect(host.querySelector('img[src^="data:image/svg+xml"]')).not.toBeNull();
 });

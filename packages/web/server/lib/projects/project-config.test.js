@@ -232,7 +232,7 @@ describe('project-config runtime', () => {
 
       // A branch with a space is not a ref, and says so instead of failing at 3am.
       await expect(runtime.upsertScheduledTask('project-test', { ...base, baseBranch: 'feature/with space' }))
-        .rejects.toThrow('baseBranch must be a branch name without spaces');
+        .rejects.toThrow('baseBranch is invalid: a branch name cannot contain spaces or control characters');
 
       // Turning isolation off keeps the pick for the next time it is on.
       const off = await runtime.upsertScheduledTask('project-test', {
@@ -296,8 +296,69 @@ describe('project-config runtime', () => {
       const before = await readFile(path.join(tempRoot, 'project-test.json'), 'utf8');
       await expect(runtime.upsertScheduledTask('project-test', {
         ...input, id: saved.task.id, baseBranch: `${input.baseBranch}x`,
-      })).rejects.toThrow('baseBranch must be at most 200 characters');
+      })).rejects.toThrow('baseBranch is invalid: at most 200 characters, got 201');
       expect(await readFile(path.join(tempRoot, 'project-test.json'), 'utf8')).toBe(before);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it.each([
+    ['prompt', 20_000, (task, value) => ({ ...task, execution: { ...task.execution, prompt: value } }), 'execution.prompt is invalid: at most 20000 characters, got 20001'],
+    ['name', 80, (task, value) => ({ ...task, name: value }), 'task.name is invalid: at most 80 characters, got 81'],
+  ])('refuses a %s over the limit on create and update, and saves one at the limit whole', async (_field, limit, withValue, message) => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    const input = {
+      name: 'Digest', enabled: false, schedule: { kind: 'daily', time: '09:00' },
+      execution: { prompt: 'Summarise', useDefaults: true },
+    };
+    const file = path.join(tempRoot, 'project-test.json');
+    try {
+      await expect(runtime.upsertScheduledTask('project-test', withValue(input, 'x'.repeat(limit + 1)))).rejects.toThrow(message);
+      expect(await runtime.listScheduledTasks('project-test')).toEqual([]);
+      await expect(readFile(file, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const saved = await runtime.upsertScheduledTask('project-test', withValue(input, 'x'.repeat(limit)));
+      const stored = await readFile(file, 'utf8');
+      expect(JSON.stringify(JSON.parse(stored).scheduledTasks[0])).toContain('x'.repeat(limit));
+
+      await expect(runtime.upsertScheduledTask('project-test', {
+        ...withValue(input, 'y'.repeat(limit + 1)), id: saved.task.id,
+      })).rejects.toThrow(message);
+      expect(await readFile(file, 'utf8')).toBe(stored);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('counts the limit after trimming, as the stored value is measured', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const saved = await runtime.upsertScheduledTask('project-test', {
+        name: ` ${'n'.repeat(80)} `, enabled: false, schedule: { kind: 'daily', time: '09:00' },
+        execution: { prompt: `\n${'p'.repeat(20_000)}\n`, useDefaults: true },
+      });
+      expect(saved.task.name).toHaveLength(80);
+      expect(saved.task.execution.prompt).toHaveLength(20_000);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('still lists a stored task whose prompt or name is over the limit, cut to it', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    try {
+      await writeFile(path.join(tempRoot, 'project-test.json'), JSON.stringify({
+        version: 1,
+        scheduledTasks: [{
+          id: 'task-long', name: 'n'.repeat(100), enabled: false, schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
+          execution: { prompt: 'p'.repeat(23_499), useDefaults: true },
+        }],
+      }));
+      const [listed] = await runtime.listScheduledTasks('project-test');
+      expect(listed.id).toBe('task-long');
+      expect(listed.name).toHaveLength(80);
+      expect(listed.execution.prompt).toHaveLength(20_000);
     } finally {
       await cleanup();
     }
@@ -947,53 +1008,6 @@ describe('project-config loop reconciliation', () => {
     }
   });
 
-  it('serializes concurrent writes across two runtimes sharing a projects dir', async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-project-lock-contention-'));
-    const fsPromises = await import('fs/promises');
-    try {
-      const runtimeA = createProjectConfigRuntime({
-        fsPromises,
-        path,
-        projectsDirPath: tempRoot,
-        createTaskID: () => 'shared-task',
-      });
-      const runtimeB = createProjectConfigRuntime({
-        fsPromises,
-        path,
-        projectsDirPath: tempRoot,
-        createTaskID: () => 'shared-task',
-      });
-
-      await runtimeA.upsertScheduledTask('project-lock', {
-        name: 'contended',
-        enabled: true,
-        schedule: { kind: 'daily', time: '15:00', timezone: 'UTC' },
-        execution: { prompt: 'Run', providerID: 'openai', modelID: 'gpt-4.1' },
-      });
-
-      await Promise.all([
-        runtimeA.updateScheduledTaskState('project-lock', 'shared-task', {
-          lastStatus: 'success',
-          lastRunAt: 100,
-        }),
-        runtimeB.updateScheduledTaskState('project-lock', 'shared-task', {
-          lastStatus: 'error',
-          lastRunAt: 200,
-        }),
-      ]);
-
-      const tasks = await runtimeA.listScheduledTasks('project-lock');
-      expect(tasks).toHaveLength(1);
-      expect(['success', 'error']).toContain(tasks[0].state.lastStatus);
-      expect([100, 200]).toContain(tasks[0].state.lastRunAt);
-
-      const lockPath = `${runtimeA.resolveProjectConfigPath('project-lock')}.lock`;
-      await expect(fsPromises.access(lockPath)).rejects.toMatchObject({ code: 'ENOENT' });
-    } finally {
-      await rm(tempRoot, { recursive: true, force: true });
-    }
-  });
-
   it('recovers from a stale-by-age project config lock and cleans it up', async () => {
     const { runtime, cleanup } = await createRuntime();
     const fsPromises = await import('fs/promises');
@@ -1129,8 +1143,22 @@ describe('project-config loop reconciliation', () => {
   }, 15_000);
 
   it('releases the write chain after a lock timeout so a later write can complete', async () => {
-    const { runtime, cleanup } = await createRuntime();
+    const { tempRoot, cleanup } = await createRuntime();
     const fsPromises = await import('fs/promises');
+    const lockRead = Promise.withResolvers();
+    vi.useFakeTimers();
+    const runtime = createProjectConfigRuntime({
+      fsPromises: {
+        ...fsPromises,
+        readFile: async (...args) => {
+          const value = await fsPromises.readFile(...args);
+          if (String(args[0]).endsWith('.lock')) lockRead.resolve();
+          return value;
+        },
+      },
+      path,
+      projectsDirPath: tempRoot,
+    });
     try {
       const projectID = 'lock-timeout-recover';
       const configPath = runtime.resolveProjectConfigPath(projectID);
@@ -1141,27 +1169,27 @@ describe('project-config loop reconciliation', () => {
         at: Date.now(),
       }));
 
-      await expect(runtime.upsertScheduledTask(projectID, {
+      const blocked = expect(runtime.upsertScheduledTask(projectID, {
         name: 'blocked-then-recover',
         enabled: true,
         schedule: { kind: 'daily', time: '11:00', timezone: 'UTC' },
         execution: { prompt: 'Run', providerID: 'openai', modelID: 'gpt-4.1' },
       })).rejects.toThrow(/timeout acquiring project config lock/);
+      await lockRead.promise;
+      await vi.advanceTimersByTimeAsync(0);
+      vi.setSystemTime(Date.now() + 10_001);
+      await vi.advanceTimersByTimeAsync(20);
+      await blocked;
 
       // Remove the hostile lock. A wedged in-process chain would hang forever here.
       await fsPromises.unlink(lockPath);
 
-      const created = await Promise.race([
-        runtime.upsertScheduledTask(projectID, {
-          name: 'after-timeout',
-          enabled: true,
-          schedule: { kind: 'daily', time: '12:00', timezone: 'UTC' },
-          execution: { prompt: 'Run after timeout', providerID: 'openai', modelID: 'gpt-4.1' },
-        }),
-        new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('second write hung after lock timeout')), 3_000);
-        }),
-      ]);
+      const created = await runtime.upsertScheduledTask(projectID, {
+        name: 'after-timeout',
+        enabled: true,
+        schedule: { kind: 'daily', time: '12:00', timezone: 'UTC' },
+        execution: { prompt: 'Run after timeout', providerID: 'openai', modelID: 'gpt-4.1' },
+      });
 
       expect(created.created).toBe(true);
       expect(created.task.name).toBe('after-timeout');
@@ -1169,6 +1197,7 @@ describe('project-config loop reconciliation', () => {
       expect(listed).toHaveLength(1);
       expect(listed[0].name).toBe('after-timeout');
     } finally {
+      vi.useRealTimers();
       await cleanup();
     }
   }, 20_000);

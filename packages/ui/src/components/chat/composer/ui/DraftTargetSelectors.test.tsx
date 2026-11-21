@@ -7,15 +7,22 @@ import { I18nProvider } from '@/lib/i18n';
 import { themes } from '@/lib/theme/themes';
 
 import type { DraftTargetProject } from '../state/useDraftTarget';
+import { sessionEvents } from '@/lib/sessionEvents';
 import { MobileDraftTargetSheets } from './DraftTargetSelectors';
+import { DraftFolderTarget } from './DraftFolderTarget';
+import { ComposerDraftTargets } from './ComposerDraftTargets';
+import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 const project: DraftTargetProject = { id: 'p1', path: '/repo', label: 'repo', kind: 'project' };
 
-const renderBranchSheet = async (onCreateCustomWorktree?: () => void) => {
+const renderBranchSheet = (onCreateCustomWorktree?: () => void) => renderSheet('branch', onCreateCustomWorktree);
+
+const renderSheet = async (openPicker: 'project' | 'branch', onCreateCustomWorktree?: () => void) => {
     const win = new Window({ url: 'http://localhost' });
     const values = {
         window: win,
-        document: win.document,
+        document: win.document, Event: win.Event, CustomEvent: win.CustomEvent,
         navigator: win.navigator,
         localStorage: win.localStorage,
         requestAnimationFrame: win.requestAnimationFrame.bind(win),
@@ -27,7 +34,7 @@ const renderBranchSheet = async (onCreateCustomWorktree?: () => void) => {
     document.body.appendChild(container);
     const root = createRoot(container);
     let pickerChanges = 0;
-    let pickerOpen: string | null = 'branch';
+    let pickerOpen: string | null = openPicker;
     await act(async () => root.render(
         <I18nProvider>
             <MobileDraftTargetSheets
@@ -46,7 +53,7 @@ const renderBranchSheet = async (onCreateCustomWorktree?: () => void) => {
                 onDirectoryChange={() => {}}
                 onCreateCustomWorktree={onCreateCustomWorktree}
                 theme={themes[0]}
-                openPicker="branch"
+                openPicker={openPicker}
                 onOpenPickerChange={(next) => { pickerChanges += 1; pickerOpen = next; }}
             />
         </I18nProvider>,
@@ -73,5 +80,61 @@ describe('draft worktree actions', () => {
         expect(button('Quick worktree')).not.toBeNull();
         expect(button('New worktree…')).toBeNull();
         await act(async () => root.unmount());
+    });
+});
+
+describe('draft project picker', () => {
+    test('ends with Add project…, which closes the sheet and asks for a folder', async () => {
+        let requested = 0;
+        const stop = sessionEvents.onDirectoryRequest(() => { requested += 1; });
+        const { root, picker, button } = await renderSheet('project');
+        const add = button('Add project…');
+        expect(add).not.toBeNull();
+        await act(async () => { add?.click(); });
+        expect(requested).toBe(1);
+        expect(picker()).toEqual({ changes: 1, open: null });
+        stop();
+        await act(async () => root.unmount());
+    });
+});
+
+describe('draft folder destination', () => {
+    test('names the folder the send files the session in, and hides it once the draft leaves that scope', async () => {
+        const win = new Window({ url: 'http://localhost' });
+        for (const [key, value] of Object.entries({ window: win, document: win.document, navigator: win.navigator, IS_REACT_ACT_ENVIRONMENT: true })) {
+            Object.defineProperty(globalThis, key, { configurable: true, value });
+        }
+        const previousFolders = useSessionFoldersStore.getState().foldersMap;
+        const previousDraft = useSessionUIStore.getState().newSessionDraft;
+        const container = document.createElement('div');
+        document.body.appendChild(container);
+        const root = createRoot(container);
+        const draft = { ...previousDraft, open: true, target: 'project' as const, directoryOverride: '/repo', pendingWorktreeRequestId: null, targetFolderId: 'folder' };
+        try {
+            useSessionFoldersStore.setState({ foldersMap: { '/repo': [{ id: 'folder', name: 'Plans', sessionIds: [], createdAt: 1 }] } });
+            useSessionUIStore.setState({ newSessionDraft: draft });
+            await act(async () => root.render(<I18nProvider><DraftFolderTarget /></I18nProvider>));
+            expect(container.textContent).toBe('In folder Plans');
+            await act(async () => useSessionFoldersStore.setState({ foldersMap: { '/repo': [{ id: 'folder', name: 'Renamed', sessionIds: [], createdAt: 1 }] } }));
+            expect(container.textContent).toBe('In folder Renamed');
+            await act(async () => useSessionUIStore.setState({ newSessionDraft: { ...draft, directoryOverride: '/other' } }));
+            expect(container.textContent).toBe('');
+            await act(async () => useSessionUIStore.setState({ newSessionDraft: draft }));
+            await act(async () => root.render(<I18nProvider><ComposerDraftTargets
+                isVSCode isMobile={false} showSelectors={false} exiting={false}
+                presentationClassName="" onOpenPicker={() => {}} selectedProject={null} projects={[]}
+                selectedDirectory="/repo" selectedBranchLabel={null} selectedBranchIsKnown={false}
+                hasUncommittedChanges={false} projectRootBranchOption={null} worktreeBranchOptions={[]}
+                spaceBranchOptions={[]} branchItems={[]} showBranchSelector={false}
+                onProjectChange={() => {}} onDirectoryChange={() => {}} theme={themes[0]}
+            /></I18nProvider>));
+            expect(container.textContent).toBe('In folder Renamed');
+            await act(async () => useSessionFoldersStore.setState({ foldersMap: { '/repo': [] } }));
+            expect(container.textContent).toBe('');
+        } finally {
+            await act(async () => root.unmount());
+            useSessionFoldersStore.setState({ foldersMap: previousFolders });
+            useSessionUIStore.setState({ newSessionDraft: previousDraft });
+        }
     });
 });

@@ -176,7 +176,6 @@ function Tooltip({
 
   const handleOpenChange = React.useCallback((nextOpen: boolean, event: TooltipChangeEventDetails) => {
     onOpenChange?.(nextOpen, event)
-    // A caller that cancels the change keeps the tooltip as it was.
     if (!controlled && !event.isCanceled) {
       setLongPressOpen(nextOpen)
     }
@@ -258,8 +257,8 @@ type ContentProps = React.ComponentProps<typeof BaseTooltip.Popup> & {
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
   showArrow?: boolean;
-  /** An element to place the tooltip by other than its trigger, for one tooltip shared by many rows. */
   anchor?: React.ComponentProps<typeof BaseTooltip.Positioner>["anchor"];
+  surface?: "label" | "card";
 };
 
 function TooltipContent({
@@ -271,6 +270,7 @@ function TooltipContent({
   style,
   showArrow = false,
   anchor,
+  surface = "label",
   ...props
 }: ContentProps) {
   return (
@@ -280,10 +280,8 @@ function TooltipContent({
           <BaseTooltip.Popup
             data-slot="tooltip-content"
             className={cn(
-              // data-instant is set when moving between grouped tooltips
-              // (shared TooltipProvider): reposition without replaying the
-              // full exit/enter animation.
-              "oc-glass-tooltip text-[var(--surface-elevated-foreground)] border border-edge oc-popup-motion data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 data-[instant]:transition-none data-[instant]:duration-0 z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance",
+              surface === "card" ? "oc-glass-popover oc-glass-floating" : "oc-glass-tooltip border border-edge",
+              "text-[var(--surface-elevated-foreground)] oc-popup-motion data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 data-[instant]:transition-none data-[instant]:duration-0 z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance",
               showArrow ? "overflow-visible" : "overflow-hidden",
               className
             )}

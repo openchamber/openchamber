@@ -37,8 +37,9 @@ the machine running your OpenChamber server. Create the `themes` directory if
 it does not exist. A custom OpenChamber data directory uses its own `themes`
 folder. When connected to a remote server, put the file on that server.
 
-Open **Settings → Appearance → Reload themes**, then select your theme in the
-dark theme dropdown. After editing the file, use **Reload themes** again.
+OpenChamber picks up the file within a couple of seconds. Select your theme in
+the dark theme dropdown under **Settings → Appearance**. Saved edits apply the
+same way in every open window; **Reload themes** reads the folder at once.
 
 For a light companion, create another file with a different ID, such as
 `my-theme-light`, and set `metadata.variant` to `light`. Both files can share
@@ -137,8 +138,9 @@ Optional `config.fonts` accepts `sans`, `mono` and `heading`. Optional `config.t
   `selectionForeground` out to derive readable text from your body color.
   A selected row does not need the same bright fill as a primary button.
 - Set `markdown.inlineCode` to a distinct, readable accent and use
-  `markdown.inlineCodeBackground` for its quiet background. Keep `markdown.bold`
-  neutral, with a little more contrast than body text. Retired heading-color
+  `markdown.inlineCodeBackground` for its quiet background. Leave
+  `markdown.bold` out: bold then uses the body text color and stands out
+  through weight. Retired heading-color
   fields do not affect the theme.
 - Add a little of your accent to `chat.userMessageBackground`. Keep the tint
   faint enough that messages do not compete with buttons and selected rows.

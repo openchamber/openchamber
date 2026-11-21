@@ -24,6 +24,17 @@ afterEach(async () => {
 });
 
 describe('Git credential resolver', () => {
+  it('round trips opaque extension user identity without relaxing the other reference fields', () => {
+    const account = { provider: 'ext-forge', instance: 'https://forge.example', credentialId: 'credential-one', credentialRevision: 1 };
+    for (const id of ['alice ', 'alice\nteam', '90071992547409931234567']) {
+      const value = { ...account, providerUserId: `${account.instance}#${id}` };
+      expect(parseGitCredentialReference(createHttpsCredentialReference(value))).toEqual({ version: 2, transport: 'https', ...value });
+    }
+    for (const patch of [{ instance: 'https://forge.example\n' }, { credentialId: 'credential\n' },
+      { providerUserId: `${account.instance}#${'x'.repeat(257)}` }]) {
+      expect(() => createHttpsCredentialReference({ ...account, providerUserId: `${account.instance}#alice`, ...patch })).toThrow();
+    }
+  });
   it('derives the git-lfs repository-path alias only from /info/lfs endpoints', () => {
     expect(gitLfsCredentialEndpointAliases({ protocol: 'https', host: 'github.com', port: 443, path: 'owner/repo.git/info/lfs' }))
       .toEqual([{ protocol: 'https', host: 'github.com', port: 443, path: 'owner/repo.git' }]);

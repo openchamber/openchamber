@@ -57,6 +57,7 @@ describe('extension persist', () => {
       capabilityGrants: {},
       capabilityScopes: {},
       disabledGuests: {},
+      guestFolders: {},
       serviceSocketOverrides: {},
     });
     await writeExtensionStore(file, {
@@ -70,6 +71,7 @@ describe('extension persist', () => {
       capabilityGrants: {},
       capabilityScopes: {},
       disabledGuests: {},
+      guestFolders: {},
       serviceSocketOverrides: {},
     });
     await writeExtensionPaths(['/two'], file);
@@ -80,6 +82,7 @@ describe('extension persist', () => {
       capabilityGrants: {},
       capabilityScopes: {},
       disabledGuests: {},
+      guestFolders: {},
       serviceSocketOverrides: {},
     });
     expect(guestCopiesDir(file)).toBe(path.join(dir, 'extensions'));
@@ -104,6 +107,7 @@ describe('extension persist', () => {
       capabilityGrants: { docker: ['service'] },
       capabilityScopes: {},
       disabledGuests: {},
+      guestFolders: {},
       serviceSocketOverrides: {},
     });
     await fs.rm(dir, { recursive: true, force: true });
@@ -126,6 +130,7 @@ describe('extension persist', () => {
       capabilityGrants: { docker: ['service'] },
       capabilityScopes: {},
       disabledGuests: {},
+      guestFolders: {},
       serviceSocketOverrides: { docker: { docker: '/custom/docker.sock' } },
     });
     await writeExtensionPaths(['/one'], file);
@@ -136,6 +141,7 @@ describe('extension persist', () => {
       capabilityGrants: { docker: ['service'] },
       capabilityScopes: {},
       disabledGuests: {},
+      guestFolders: {},
       serviceSocketOverrides: { docker: { docker: '/custom/docker.sock' } },
     });
     await fs.rm(dir, { recursive: true, force: true });
@@ -156,6 +162,7 @@ describe('extension persist', () => {
       capabilityGrants: {},
       capabilityScopes: {},
       disabledGuests: { docker: true },
+      guestFolders: {},
       serviceSocketOverrides: {},
     });
     await fs.rm(dir, { recursive: true, force: true });
@@ -361,6 +368,23 @@ describe('notification channel scopes', () => {
   });
 });
 
+describe('quota scopes', () => {
+  test('round-trips the service grant\'s quota scope, an empty list included', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-persist-'));
+    const file = extensionsPersistPath(dir);
+    try {
+      const scope = { service: { exec: [], sockets: [], quota: { providers: ['deepinfra', 'openrouter'] } } };
+      await writeExtensionStore(file, { paths: ['/a'], sources: {}, gitOrigins: {}, capabilityGrants: { alpha: ['service'] }, capabilityScopes: { alpha: scope } });
+      expect((await readExtensionStore(file)).capabilityScopes).toEqual({ alpha: scope });
+      const empty = { service: { exec: [], sockets: [], quota: { providers: [] } } };
+      await writeExtensionStore(file, { paths: ['/a'], sources: {}, gitOrigins: {}, capabilityGrants: { alpha: ['service'] }, capabilityScopes: { alpha: empty } });
+      expect((await readExtensionStore(file)).capabilityScopes).toEqual({ alpha: empty });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('tracker scopes', () => {
   test('round-trips the service grant\'s tracker scope', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-persist-'));
@@ -372,6 +396,23 @@ describe('tracker scopes', () => {
       const typed = { service: { exec: [], sockets: [], tracker: { instances: { kind: 'user' }, oauth: null, urls: ['/issue/{id}'] } } };
       await writeExtensionStore(file, { paths: ['/a'], sources: {}, gitOrigins: {}, capabilityGrants: { alpha: ['service'] }, capabilityScopes: { alpha: typed } });
       expect((await readExtensionStore(file)).capabilityScopes).toEqual({ alpha: typed });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('links scopes', () => {
+  test('round-trips the links scope, with and without link templates', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-persist-'));
+    const file = extensionsPersistPath(dir);
+    try {
+      const scope = { links: { action: 'open', keys: ['DEMO'], origin: 'https://tasks.example.com', identifier: 'key-number', urls: ['/tasks/{id}'] } };
+      await writeExtensionStore(file, { paths: ['/a'], sources: {}, gitOrigins: {}, capabilityGrants: { alpha: ['links'] }, capabilityScopes: { alpha: scope } });
+      expect((await readExtensionStore(file)).capabilityScopes).toEqual({ alpha: scope });
+      const textOnly = { links: { action: 'open', keys: ['DEMO'], origin: null, identifier: null, urls: [] } };
+      await writeExtensionStore(file, { paths: ['/a'], sources: {}, gitOrigins: {}, capabilityGrants: { alpha: ['links'] }, capabilityScopes: { alpha: textOnly } });
+      expect((await readExtensionStore(file)).capabilityScopes).toEqual({ alpha: textOnly });
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }

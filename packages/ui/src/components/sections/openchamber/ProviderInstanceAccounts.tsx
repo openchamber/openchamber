@@ -11,7 +11,7 @@ import type {
   SourceControlDeviceFlowStart,
   SourceControlIdentity,
 } from '@/lib/api/types';
-import { SourceControlInstanceOtherProviderError } from '@/lib/api/types';
+import { SourceControlInstanceAliasError, SourceControlInstanceOtherProviderError } from '@/lib/api/types';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import {
   SETTINGS_CONTROL_CLUSTER_CLASS,
@@ -26,8 +26,13 @@ import { DeviceFlowCode } from './DeviceFlowCode';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { asksForUsername, providerSettingsCopy, tokenCreationUrl } from './sourceControlProviderSettings';
 
-/** The ways to add an account in the form; the CLI login has its own row. */
 type ConnectMethod = 'device' | 'pat';
+
+const aliasesText = (aliases: readonly string[] | undefined): string => (aliases ?? [])
+  .map((alias) => alias.replace(/^https:\/\//, ''))
+  .join(', ');
+
+const parseAliasesText = (text: string): string[] => text.split(/[\s,]+/).filter(Boolean);
 
 interface ProviderInstanceAccountsProps {
   descriptor: SourceControlProviderDescriptor;
@@ -36,27 +41,14 @@ interface ProviderInstanceAccountsProps {
   onSaved?: () => void;
 }
 
-/**
- * One instance of a source-control provider in its Settings card: the address,
- * its accounts, and the ways to add one. The sign-in methods are the ones the
- * descriptor names and the instance reports available
- * (`capabilities.authenticationMethods`), so a provider offers only what both
- * the server's provider module and this instance support.
- *
- * When the instance offers more than one way to add an account, a chip switch
- * picks one and only its form shows, so the card opens on a single Connect
- * choice. It starts on the method an existing account came from, else the
- * first one offered.
- *
- * A personal access token is typed into a password field that starts empty,
- * is cleared once the server accepts it, and is never logged or shown again.
- */
 export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> = ({ descriptor, identity, sourceControl, onSaved }) => {
   const { t } = useI18n();
   const sshUrlConfirm = useConfirmDialog();
   const copy = providerSettingsCopy(descriptor);
   const provider = descriptor.label;
-  const cliName = descriptor.auth.cliName ?? '';
+  const serviceLogin = descriptor.auth.login;
+  const serviceOnly = Boolean(serviceLogin && !descriptor.auth.methods.includes('pat'));
+  const cliName = descriptor.auth.cliName ?? descriptor.label;
   const refreshInstances = useSourceControlAuthStore((state) => state.refreshInstances);
   const refreshStatus = useSourceControlAuthStore((state) => state.refreshStatus);
   const setStatus = useSourceControlAuthStore((state) => state.setStatus);
@@ -74,14 +66,19 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
   const [sshUrlInvalid, setSshUrlInvalid] = React.useState(false);
   const [savingSshUrl, setSavingSshUrl] = React.useState(false);
   const takesSshUrl = descriptor.settings.fields.some((field) => field.id === 'sshUrl');
-  // An HTTP Basic host verifies the token as this username's password, so both are needed.
+  const [aliases, setAliases] = React.useState(aliasesText(identity.instanceAliases));
+  const [aliasError, setAliasError] = React.useState<{ reason: 'invalid' | 'taken'; alias: string } | 'failed' | null>(null);
+  const [savingAliases, setSavingAliases] = React.useState(false);
+  const defaultInstances = descriptor.instances.defaultInstances
+    ?? (descriptor.instances.defaultInstance ? [descriptor.instances.defaultInstance] : []);
+  const takesAliases = useSourceControlAuthStore((state) => !defaultInstances.includes(identity.instance)
+    && state.identities.some((known) => known.provider === identity.provider && known.instance === identity.instance));
   const needsUsername = asksForUsername(descriptor);
   const [isAddingAccount, setIsAddingAccount] = React.useState(false);
   const [chosenMethod, setChosenMethod] = React.useState<ConnectMethod | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [operationFailed, setOperationFailed] = React.useState(false);
   const [tokenRejected, setTokenRejected] = React.useState(false);
-  // The provider whose card the server said this instance belongs on.
   const [ownerProviderId, setOwnerProviderId] = React.useState<string | null>(null);
   const ownerProvider = useSourceControlProvider(ownerProviderId);
   const flowRuntimeKeyRef = React.useRef('');
@@ -117,6 +114,11 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
     setSshUrlFailed(false);
     setSshUrlInvalid(false);
   }, [identity.instance, identity.provider, identity.instanceSshUrl]);
+  const storedAliasesText = aliasesText(identity.instanceAliases);
+  React.useEffect(() => {
+    setAliases(storedAliasesText);
+    setAliasError(null);
+  }, [identity.instance, identity.provider, storedAliasesText]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -124,14 +126,14 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
     setCapabilitiesFailed(false);
     void Promise.all([
       sourceControl.capabilities(identity),
-      refreshStatus(sourceControl, identity),
+      refreshStatus(sourceControl, identity, serviceLogin ? { force: true } : undefined),
     ]).then(([nextCapabilities]) => {
       if (!cancelled && isCurrentRuntime()) setCapabilities(nextCapabilities);
     }).catch(() => {
       if (!cancelled && isCurrentRuntime()) setCapabilitiesFailed(true);
     });
     return () => { cancelled = true; };
-  }, [capabilitiesAttempt, captureRuntime, identity, refreshStatus, sourceControl]);
+  }, [capabilitiesAttempt, captureRuntime, identity, refreshStatus, serviceLogin, sourceControl]);
 
   React.useEffect(() => {
     if (!flow || pollDelayMs <= 0) return;
@@ -219,8 +221,6 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
       onSaved?.();
     } catch (error) {
       if (!isCurrentRuntime()) return;
-      // The server says whether the token itself was refused; anything else is
-      // a failure the person cannot fix by editing what they pasted.
       if (error instanceof Error && 'code' in error && error.code === 'INVALID_TOKEN') setTokenRejected(true);
       else if (error instanceof SourceControlInstanceOtherProviderError) setOwnerProviderId(error.provider);
       else setOperationFailed(true);
@@ -259,6 +259,32 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
       if (isCurrentRuntime()) {
         setBusy(false);
         setSavingSshUrl(false);
+      }
+    }
+  };
+
+  const saveAliases = async () => {
+    const isCurrentRuntime = captureRuntime();
+    setBusy(true);
+    setSavingAliases(true);
+    setAliasError(null);
+    try {
+      await sourceControl.setInstanceAliases(identity, parseAliasesText(aliases));
+      if (!isCurrentRuntime()) return;
+      await refreshInstances(sourceControl, { force: true });
+      if (!isCurrentRuntime()) return;
+      if (useSourceControlAuthStore.getState().identitiesError) {
+        setAliasError('failed');
+        return;
+      }
+      onSaved?.();
+    } catch (error) {
+      if (!isCurrentRuntime()) return;
+      setAliasError(error instanceof SourceControlInstanceAliasError ? { reason: error.reason, alias: error.alias } : 'failed');
+    } finally {
+      if (isCurrentRuntime()) {
+        setBusy(false);
+        setSavingAliases(false);
       }
     }
   };
@@ -334,7 +360,6 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
     setOwnerProviderId(null);
   };
 
-  // Offered where the descriptor names the method and this instance reports it available.
   const methods = new Set(descriptor.auth.methods.filter((method) => capabilities?.authenticationMethods[method].available));
   const connectMethods = descriptor.auth.methods.filter((method): method is ConnectMethod => (
     (method === 'device' || method === 'pat') && methods.has(method)
@@ -348,8 +373,6 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
   const createTokenUrl = tokenCreationUrl(descriptor, identity.instance);
   const connected = accounts.length > 0;
   const showConnectionMethods = !connected || isAddingAccount;
-  // The accounts listed below say the instance is connected; the line under
-  // the address only speaks when something is in progress or wrong.
   let statusMessage: string | null;
   if (authEntry?.isLoading) {
     statusMessage = t('settings.sourceControl.status.checking');
@@ -362,16 +385,13 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
   } else if (accounts.length > 0) {
     statusMessage = null;
   } else {
-    statusMessage = t(copy.notConnected);
+    statusMessage = serviceLogin?.hint ?? t(copy.notConnected);
   }
 
   return (
-    // One group per instance: the address heads it, its accounts and actions
-    // follow. Groups part with a line, never a filled box inside the card.
     <div className="space-y-3 py-4 first:pt-0 last:pb-0">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          {/* The address reads as a host; the full URL stays in the tooltip. */}
           <div className="typography-ui-label truncate font-medium text-foreground" title={identity.instance}>
             {identity.instance.replace(/^https?:\/\//, '')}
           </div>
@@ -419,24 +439,60 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
         </SettingsFieldRow>
       ) : null}
 
+      {takesAliases ? (
+        <SettingsFieldRow
+          label={t('settings.sourceControl.field.aliases.label')}
+          info={t('settings.sourceControl.field.aliases.info')}
+          description={aliasError === 'failed'
+            ? t(copy.operationFailed)
+            : aliasError?.reason === 'taken'
+              ? t('settings.sourceControl.field.aliases.taken', { alias: aliasesText([aliasError.alias]) })
+              : aliasError?.reason === 'invalid'
+                ? t('settings.sourceControl.field.aliases.invalid', { alias: aliasError.alias })
+                : undefined}
+        >
+          <div className={`${SETTINGS_CONTROL_CLUSTER_CLASS} flex flex-col gap-2 @xl:flex-row @xl:items-center`}>
+            <Input
+              className="h-8 w-full min-w-0 rounded-md"
+              value={aliases}
+              onChange={(event) => setAliases(event.target.value)}
+              placeholder={t('settings.sourceControl.field.aliases.placeholder')}
+              aria-label={t('settings.sourceControl.field.aliases.label')}
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
+            />
+            <Button
+              className="w-full @xl:w-auto"
+              size="sm"
+              onClick={() => void saveAliases()}
+              disabled={busy || savingAliases || parseAliasesText(aliases).join(', ') === storedAliasesText}
+            >
+              {t('settings.common.actions.saveChanges')}
+            </Button>
+          </div>
+        </SettingsFieldRow>
+      ) : null}
+
       {accounts.length > 0 ? (
         <div>
           <SourceControlAccountList
             accounts={accounts}
             avatarAlt={(username) => username}
             currentLabel={t('settings.sourceControl.accounts.inUse')}
-            sourceLabel={(account) => account.source === 'cli' ? t(copy.cliLabel, { cli: cliName }) : t(getManagedCredentialSourceLabelKey(account.source))}
+            sourceLabel={(account) => account.source === 'cli'
+              ? serviceLogin ? provider : t(copy.cliLabel, { cli: cliName })
+              : t(getManagedCredentialSourceLabelKey(account.source))}
             statusLabel={(account) => account.status === 'valid'
               ? null
               : t('settings.sourceControl.accounts.needsAuthentication')}
-            renderActions={(account) => (
+            renderActions={(account) => serviceOnly && account.source === 'cli' ? null : (
               <>
                 {account.status === 'invalid' && account.source !== 'cli' ? (
                   <Button size="sm" variant="outline" onClick={() => setIsAddingAccount(true)} disabled={busy}>
                     {t('settings.sourceControl.actions.reauthenticate')}
                   </Button>
                 ) : null}
-                {/* The CLI login is used only after a switch to it; the header switcher is not there while nothing is connected. */}
                 {account.source === 'cli' && !account.current ? (
                   <Button size="sm" variant="outline" onClick={() => void switchToAccount(account.id)} disabled={busy}>
                     {t(copy.useCli, { cli: cliName })}
@@ -456,7 +512,7 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
         </div>
       ) : null}
 
-      {connected && !isAddingAccount && (
+      {connected && connectMethods.length > 0 && !isAddingAccount && (
         <div>
           <Button size="sm" variant="outline" onClick={() => setIsAddingAccount(true)} disabled={busy}>
             {t('settings.github.page.actions.addAccount')}
@@ -501,8 +557,6 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
                   value={username}
                   onChange={(event) => setUsername(event.target.value)}
                   aria-label={t('settings.sourceControl.field.username.label')}
-                  // Not the sign-in login: a password manager would fill it,
-                  // and its sign-in password into the secret field below.
                   autoComplete="off"
                   autoCapitalize="off"
                   spellCheck={false}
@@ -532,8 +586,7 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
                   value={token}
                   onChange={(event) => setToken(event.target.value)}
                   aria-label={t(copy.tokenLabel)}
-                  // Browsers ignore "off" on a password field; "new-password"
-                  // keeps a saved sign-in password out of it.
+                  // external: https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Attributes/autocomplete#new-password Browsers can ignore off; new-password prevents filling a saved sign-in password.
                   autoComplete="new-password"
                 />
                 <Button className="w-full @xl:w-auto" size="sm" onClick={saveToken} disabled={busy || !token.trim() || (needsUsername && !username.trim())}>{t('settings.common.actions.saveChanges')}</Button>
@@ -550,8 +603,7 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
         </div>
       )}
 
-      {/* While the CLI login is a listed account, its own row carries the switch. */}
-      {descriptor.auth.methods.includes('cli') && (connected || cli?.disabled) && cli && (cli.available || cli.disabled)
+      {!serviceOnly && descriptor.auth.methods.includes('cli') && cli && (cli.disabled || cli.active || (connected && cli.available))
         && (cli.disabled || !accounts.some((account) => account.source === 'cli')) && (
         <div>
           <SettingsFieldRow label={t(copy.cliLabel, { cli: cliName })} info={t(copy.cliInfo, { cli: cliName })}>
@@ -565,4 +617,3 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
     </div>
   );
 };
-

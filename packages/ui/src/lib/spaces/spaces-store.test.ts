@@ -65,6 +65,22 @@ describe('the journey list and creation progress', () => {
     setup: null,
     ...overrides,
   });
+  test('a task-title event survives an older journey read and is forgotten on runtime switch', () => {
+    const store = useSpacesStore.getState();
+    store.resetForRuntimeSwitch();
+    store.applyMarks([mark()]);
+    store.applyJourney([entry()], 0);
+    const baseline = useSpacesStore.getState().progressRevision;
+    store.noteTaskTitle(ID, { title: 'User task', by: 'user' });
+    store.applyJourney([entry({ taskTitle: { title: 'Old agent task', by: 'agent' } })], baseline);
+    expect(useSpacesStore.getState().journey?.get(ID)?.taskTitle).toEqual({ title: 'User task', by: 'user' });
+    expect(getSpaceMark(ID)?.taskTitle).toEqual({ title: 'User task', by: 'user' });
+    store.applyJourney([entry({ taskTitle: { title: 'New host task', by: 'user' } })], useSpacesStore.getState().progressRevision);
+    expect(useSpacesStore.getState().journey?.get(ID)?.taskTitle?.title).toBe('New host task');
+    store.resetForRuntimeSwitch();
+    expect(useSpacesStore.getState().journey).toBeNull();
+    expect(getSpaceMark(ID)).toBeNull();
+  });
   test('a directory of a space the list says is stopped or gone is stopped; anything unknown is not', () => {
     const directory = `/spaces/${ID}/app/src`;
     expect(isSpaceDirectoryStopped(directory)).toBe(false);

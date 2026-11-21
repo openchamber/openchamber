@@ -20,8 +20,12 @@ type Props = {
   onMoveToFolder: (folderId: string) => void;
   onCreateFolderAndMove: () => void;
   onRemoveFromFolder: () => void;
+  canFileSelection: boolean;
   canRemoveFromFolder: boolean;
   onRestore: () => void;
+  showMarkDone: boolean;
+  canMarkDone: boolean;
+  onMarkDone: () => void;
   onArchive: () => void;
   onDelete: () => void;
   onDone: () => void;
@@ -35,15 +39,19 @@ export const BulkActionBar: React.FC<Props> = ({
   onMoveToFolder,
   onCreateFolderAndMove,
   onRemoveFromFolder,
+  canFileSelection,
   canRemoveFromFolder,
   onRestore,
+  showMarkDone,
+  canMarkDone,
+  onMarkDone,
   onArchive,
   onDelete,
   onDone,
 }) => {
   const { t } = useI18n();
   const hasSelection = selectedCount > 0;
-  const canMoveToFolder = hasSelection && Boolean(scopeKey) && !archivedBucket;
+  const canMoveToFolder = hasSelection && Boolean(scopeKey) && !archivedBucket && canFileSelection;
   const iconButtonClass = 'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40';
   const destructiveIconButtonClass = 'inline-flex h-7 w-7 items-center justify-center rounded-md text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50 disabled:pointer-events-none disabled:opacity-40';
 
@@ -78,7 +86,7 @@ export const BulkActionBar: React.FC<Props> = ({
               ) : (
                 scopeFolders.map((folder) => (
                   <DropdownMenuItem key={folder.id} onClick={() => onMoveToFolder(folder.id)}>
-                    <span className="flex-1 truncate">{folder.name}</span>
+                    <span dir="auto" className="oc-ui-start-align flex-1 truncate">{folder.name}</span>
                   </DropdownMenuItem>
                 ))
               )}
@@ -114,6 +122,23 @@ export const BulkActionBar: React.FC<Props> = ({
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.bulkActions.restore')}</p></TooltipContent>
+          </Tooltip>
+        ) : null}
+
+        {showMarkDone ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onMarkDone}
+                disabled={!canMarkDone}
+                className={iconButtonClass}
+                aria-label={t('sessions.sidebar.session.work.markDone')}
+              >
+                <Icon name="check" className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.session.work.markDone')}</p></TooltipContent>
           </Tooltip>
         ) : null}
 

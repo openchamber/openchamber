@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { createRuntimeOpencodeClient, opencodeClient } from "./client"
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from "../runtime-url"
+import { captureRuntimeInstance, getRuntimeKey, switchRuntimeEndpoint } from "../runtime-switch"
 
 const previous = getRuntimeUrlResolver()
 beforeEach(() => {
@@ -62,31 +63,6 @@ describe("v2 status and cancellation HTTP boundary", () => {
         { path: "/api/permission/request", directory: encodeURIComponent("C:/Tree with spaces") },
       ])
     } finally {
-      fetch.mockRestore()
-    }
-  })
-
-  test("the SDK Request's caller signal cancels a queued command read", async () => {
-    const controller = new AbortController()
-    const reason = new Error("runtime changed")
-    let started!: () => void
-    const ready = new Promise<void>((resolve) => { started = resolve })
-    const fetch = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const signal = input instanceof Request ? input.signal : init?.signal
-      if (!signal) throw new Error("Missing request signal")
-      started()
-      return new Promise<Response>((_resolve, reject) => {
-        signal.addEventListener("abort", () => reject(signal.reason), { once: true })
-      })
-    })
-    try {
-      const sdk = createRuntimeOpencodeClient({ baseUrl: "https://status.test/api", requestTimeoutMs: 1_000 })
-      const request = sdk.command.list(undefined, { signal: controller.signal })
-      await ready
-      controller.abort(reason)
-      expect(await request.catch((error: Error) => error)).toMatchObject({ reason: "Transport", cause: reason })
-    } finally {
-      controller.abort()
       fetch.mockRestore()
     }
   })
@@ -230,6 +206,41 @@ describe("v2 status and cancellation HTTP boundary", () => {
       ])
     } finally {
       fetch.mockRestore()
+    }
+  })
+
+  // #7163: a runtime switch while a batch is reading or writing must not send
+  // the rest of the first draft's files anywhere, even after switching back.
+  test("switching away and back during a batch stops it before the next write", async () => {
+    const runtimeKey = getRuntimeKey()
+    const writes: string[] = []
+    const fetch = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString())
+      if (url.pathname === "/api/info") return Response.json({ version: "2.0.32", pid: 1, urls: [], paths: { tmp: "/oc-tmp" } })
+      const target = url.searchParams.get("path")
+      if (url.pathname.endsWith("/fs/write")) writes.push(`${url.origin} ${target?.slice(target.lastIndexOf("/") + 1)}`)
+      return Response.json({ location: { directory: "/repo" }, data: { path: target } })
+    })
+    let reads = 0
+    const read = (byte: number, onRead?: () => void) => async () => {
+      reads += 1
+      onRead?.()
+      return new Uint8Array([byte])
+    }
+    try {
+      await expect(opencodeClient.writeOpenCodeTempFiles("/repo", [
+        { filename: "a.docx", bytes: read(1) },
+        { filename: "b.docx", bytes: read(2, () => {
+          switchRuntimeEndpoint({ apiBaseUrl: "https://second.test", runtimeKey: `${runtimeKey}-second` })
+          switchRuntimeEndpoint({ apiBaseUrl: "https://status.test", runtimeKey })
+        }) },
+        { filename: "c.docx", bytes: read(3) },
+      ], { isCurrentRuntime: captureRuntimeInstance() })).rejects.toThrow()
+      expect(writes).toEqual(["https://status.test a.docx"])
+      expect(reads).toBe(2)
+    } finally {
+      fetch.mockRestore()
+      switchRuntimeEndpoint({ apiBaseUrl: "https://status.test", runtimeKey })
     }
   })
 

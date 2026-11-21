@@ -13,10 +13,10 @@ const windowSchema = z.object({
   valueLabel: z.string().nullable().optional(),
   value: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('requests'), count: z.number().finite().nonnegative() }),
-    z.object({ kind: z.literal('spend'), spent: z.number().finite().nonnegative(), limit: z.number().finite().positive().nullable() }),
+    z.object({ kind: z.literal('spend'), spent: z.number().finite().nonnegative().nullable(), limit: z.number().finite().positive().nullable() }),
   ]).optional(),
   creditsUsed: z.number().finite().nonnegative().optional(),
-  giftReset: z.object({ recordId: z.number(), expireAt: z.number() }).nullable().optional(),
+  giftReset: z.object({ recordId: z.number(), expireAt: z.number(), grantType: z.string().optional() }).nullable().optional(),
 });
 const windowsSchema = z.record(z.string(), windowSchema);
 const consoleBudgetsSchema = z.object({
@@ -39,7 +39,29 @@ const consoleBudgetsSchema = z.object({
 
 export type QuotaGiftResetType = 'FIVE_HOUR' | 'WEEK';
 
-/** The deadline covers response bodies too, including transports that ignore abort. */
+const PROVIDER_LIST_TIMEOUT_MS = 10_000;
+
+export const fetchConfiguredQuotaProviders = async (timeoutMs = PROVIDER_LIST_TIMEOUT_MS): Promise<ReadonlySet<string> | null> => {
+  const controller = new AbortController();
+  const read = async () => {
+    const response = await runtimeFetch('/api/quota/providers', { signal: controller.signal });
+    if (!response.ok) return null;
+    return new Set(z.object({ providers: z.array(z.string()) }).parse(await response.json()).providers);
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(null);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([read().catch(() => null), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 export const fetchQuota = async (
   providerId: QuotaProviderId,
   { signal, timeoutMs = 30_000 }: { signal?: AbortSignal; timeoutMs?: number } = {},
@@ -70,6 +92,8 @@ export const fetchQuota = async (
       configured: z.boolean(),
       error: z.string().optional(),
       planLabel: z.string().nullable().optional(),
+      accountLabel: z.string().nullable().optional(),
+      selection: z.string().optional(),
       usage: z.object({
         windows: windowsSchema,
         models: z.record(z.string(), z.object({ windows: windowsSchema })).optional(),
@@ -87,11 +111,11 @@ export const fetchQuota = async (
   }
 };
 
-/** The deadline covers response bodies too, including transports that ignore abort. */
 export const activateGiftReset = async (
   providerId: QuotaProviderId,
   recordId: number,
   resetType: QuotaGiftResetType,
+  grantType?: string,
   { signal, timeoutMs = 30_000 }: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<void> => {
   const controller = new AbortController();
@@ -110,7 +134,7 @@ export const activateGiftReset = async (
     const response = await runtimeFetch(`/api/quota/${encodeURIComponent(providerId)}/gift-reset/use`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recordId, resetType }),
+      body: JSON.stringify({ recordId, resetType, grantType }),
       signal: controller.signal,
     });
     const payload = await response.json();

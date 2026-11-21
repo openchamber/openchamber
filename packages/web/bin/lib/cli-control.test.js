@@ -38,7 +38,7 @@ describe('requestControlAction', () => {
   it('keeps an existing-checkout retry alive through bootstrap and discovery', async () => {
     vi.mocked(requestJson).mockResolvedValueOnce({ response: { ok: true }, body: { sessionId: 'ses_retry' } });
     await requestControlAction(3000, 'session.create', { directory: '/fixture/checkout/ai', prompt: 'Review this' });
-    expect(requestJson).toHaveBeenLastCalledWith(3000, '/api/openchamber/control', expect.objectContaining({ timeoutMs: 120_000 }));
+    expect(requestJson).toHaveBeenLastCalledWith(3000, '/api/openchamber/control', expect.objectContaining({ timeoutMs: 360_000 }));
   });
 });
 
@@ -61,7 +61,7 @@ describe('resolveControlTimeoutMs', () => {
   });
 
   it('allows a worktree to be provisioned without waiting for the session', () => {
-    expect(resolveControlTimeoutMs({ worktree: 'feature' }, {})).toBe(120_000);
+    expect(resolveControlTimeoutMs({ worktree: 'feature' }, {})).toBe(360_000);
   });
 
   it('ignores a blank worktree name', () => {
@@ -69,15 +69,15 @@ describe('resolveControlTimeoutMs', () => {
   });
 
   it('covers bootstrap before a session wait in an existing checkout', () => {
-    expect(resolveControlTimeoutMs({ directory: '/fixture/checkout', wait: true, timeout: 30 }, {}, 'session.create')).toBe(180_000);
-    expect(resolveControlTimeoutMs({ projectId: 'project' }, {}, 'session.create')).toBe(120_000);
+    expect(resolveControlTimeoutMs({ directory: '/fixture/checkout', wait: true, timeout: 30 }, {}, 'session.create')).toBe(420_000);
+    expect(resolveControlTimeoutMs({ projectId: 'project' }, {}, 'session.create')).toBe(360_000);
     expect(resolveControlTimeoutMs({ directory: '/fixture/checkout' }, {}, 'session.status')).toBeUndefined();
   });
 
   it('covers provisioning and waiting in sequence when both are requested', () => {
     // The server creates the worktree before it begins waiting for the session,
     // so the client window must span both rather than the longer of the two.
-    expect(resolveControlTimeoutMs({ wait: true, timeout: 30, worktree: 'feature' }, {})).toBe(180_000);
-    expect(resolveControlTimeoutMs({ wait: true, worktree: 'feature' }, {})).toBe(750_000);
+    expect(resolveControlTimeoutMs({ wait: true, timeout: 30, worktree: 'feature' }, {})).toBe(420_000);
+    expect(resolveControlTimeoutMs({ wait: true, worktree: 'feature' }, {})).toBe(990_000);
   });
 });

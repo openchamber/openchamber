@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { useProviderLogo } from './useProviderLogo';
+import { providerLogoIds, useProviderLogo } from './useProviderLogo';
 
 // Bun does not transform the Vite asset glob, so every provider resolves through the
 // remote fallback URL here. Local asset resolution is covered by the Vite smoke check.
@@ -36,6 +36,16 @@ const renderLogoSrc = (providerId: string) =>
     renderToStaticMarkup(createElement(LogoSource, { providerId }));
 
 describe('provider logo aliases', () => {
+    test('maps rotating exe.dev proxy provider IDs to the local exe.dev logo', () => {
+        expect(providerLogoIds('exe-proxy-123')[1]).toBe('exe-dev');
+    });
+
+    test('aliases the copilot provider id to the bundled github-copilot logo', () => {
+        expect(providerLogoIds('copilot')[1]).toBe('github-copilot');
+    });
+});
+
+describe('provider logo lookup order', () => {
     for (const [id, target] of expected) {
         test(id + ' uses ' + target + ' across case and spacing variants', () => {
             const variants = new Set([id, id.toUpperCase(), id.charAt(0).toUpperCase() + id.slice(1), id.replaceAll('-', ' ')]);
@@ -44,6 +54,12 @@ describe('provider logo aliases', () => {
             }
         });
     }
+
+    test('the public candidate list starts with the id the hook requests', () => {
+        for (const [id, target] of expected) {
+            expect(providerLogoIds(id).slice(1)[0]).toBe(target);
+        }
+    });
 
     test('keeps decorated provider IDs and existing aliases', () => {
         expect(renderLogoSrc('my-glm')).toBe('https://models.dev/logos/my-glm.svg');

@@ -9,6 +9,7 @@ import {
   getSignInIntegrationId,
   getSignInMethods,
   providerHasCredentials,
+  providerHoldsStoredLogin,
   shouldShowApiKeyAuth,
   shouldShowModelsSection,
   usesMachineCredentials,
@@ -208,6 +209,34 @@ describe('getProviderCardStatus', () => {
 
   test('a provider with no integration gets no status instead of a false warning', () => {
     expect(status([integration({ id: 'openai' })])).toBe(null);
+  });
+
+  test('a stored login with no model says so, and a needed new sign-in outranks it', () => {
+    const noModels = (connections: ConnectionInfo[]) => getProviderCardStatus({
+      integrations: [integration({ connections })],
+      providerId: 'anthropic',
+      noModels: true,
+    });
+    expect(noModels([credential])).toEqual({ kind: 'noModels' });
+    expect(noModels([{ ...credential, status: { status: 'needs_auth', message: 'Signed out.' } }])).toEqual({ kind: 'reauthNeeded' });
+  });
+});
+
+describe('providerHoldsStoredLogin', () => {
+  test('reads the integration OpenCode uses for the provider', () => {
+    const consoleLogin = integration({ id: 'opencode', connections: [credential] });
+    expect(providerHoldsStoredLogin([consoleLogin], { id: 'opencode-go', integrationID: 'opencode' })).toBe(true);
+    expect(providerHoldsStoredLogin([consoleLogin], { id: 'opencode-go' })).toBe(false);
+  });
+
+  test('a login the provider page would not list does not count', () => {
+    const consoleLogin = integration({ id: 'opencode', connections: [credential] });
+    expect(providerHoldsStoredLogin([consoleLogin], { id: 'console-openai', integrationID: 'opencode' })).toBe(false);
+  });
+
+  test('an environment key or an unread list is no stored login', () => {
+    expect(providerHoldsStoredLogin([integration({ connections: [envConnection] })], { id: 'anthropic' })).toBe(false);
+    expect(providerHoldsStoredLogin(null, { id: 'anthropic' })).toBe(false);
   });
 });
 

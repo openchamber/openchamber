@@ -38,7 +38,7 @@ describe('NotificationChannelCard', () => {
   beforeEach(() => {
     dom = new Window({ url: 'http://localhost/' });
     const values = {
-      window: dom, document: dom.document, navigator: dom.navigator,
+      window: dom, document: dom.document, navigator: dom.navigator, localStorage: dom.localStorage,
       HTMLElement: dom.HTMLElement, Element: dom.Element, Node: dom.Node,
       HTMLInputElement: dom.HTMLInputElement, DocumentFragment: dom.DocumentFragment,
       MutationObserver: dom.MutationObserver, ResizeObserver: dom.ResizeObserver,

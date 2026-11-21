@@ -23,4 +23,27 @@ describe('createWebGitAPI', () => {
     expect(api.getNetworkOperation).toBeDefined();
     expect(api.cancelNetworkOperation).toBeDefined();
   });
+
+  // `gitApi.ts` rejects these when a registered runtime omits them, and every
+  // web, desktop and mobile surface runs through this adapter.
+  it.each([
+    'checkoutCommit',
+    'cherryPick',
+    'getBranchBase',
+    'getCommitFileDiff',
+    'getCommitFiles',
+    'getConflictDetails',
+    'getGitLog',
+    'getGitRangeDiff',
+    'getGitRangeFiles',
+    'getGlobalGitIdentity',
+    'merge',
+    'rebase',
+    'resetToCommit',
+    'revertCommit',
+  ] as const)('implements %s', async (operation) => {
+    const { createWebGitAPI } = await import('./git');
+
+    expect(typeof createWebGitAPI()[operation]).toBe('function');
+  });
 });

@@ -9,11 +9,11 @@ import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { setSessionWorkState } from '@/sync/session-actions';
+import { settleRunningOperatorChildren } from '@/sync/operator-children-done';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { SessionNode } from '../types';
 import { normalizePath } from '../utils';
 
-/** The lanes and the sessions they started, past subagents: what Done finishes. */
 const collectRunWorkSessions = (laneNodes: readonly SessionNode[]): Session[] => {
   const sessions: Session[] = [];
   const stack = [...laneNodes];
@@ -26,15 +26,8 @@ const collectRunWorkSessions = (laneNodes: readonly SessionNode[]): Session[] =>
   return sessions;
 };
 
-/**
- * What a multi-run's row knows and does, whatever draws it: the desktop row
- * with hover actions and menus, the phone's with swipe actions. A click opens
- * the run's newest fusion when it has one, otherwise the overview.
- */
 export function useRunWork(run: MultiRunSummary, laneNodes: readonly SessionNode[], onNavigate: () => void) {
   const { t } = useI18n();
-  // Selected while the screen shows the run: its overview, or one of its
-  // sessions (a click opens the fusion), as a worktree's row is.
   const overviewKey = useUIStore((state) => state.runOverviewKey);
   const showsMember = useSessionUIStore((state) => state.currentSessionId !== null && run.memberIds.includes(state.currentSessionId));
   const isActive = overviewKey === run.key || (overviewKey === null && showsMember);
@@ -48,8 +41,6 @@ export function useRunWork(run: MultiRunSummary, laneNodes: readonly SessionNode
     useUIStore.getState().setRunOverviewKey(run.key);
     onNavigate();
   };
-  // The run's result, the newest fusion, as a worktree's row opens its
-  // session; without one, the overview where the lanes compare.
   const open = (): void => {
     const fusionId = run.fusions[0]?.sessionId;
     if (!fusionId) {
@@ -65,10 +56,10 @@ export function useRunWork(run: MultiRunSummary, laneNodes: readonly SessionNode
     setBusy(true);
     try {
       if (inWork) {
+        if (!await settleRunningOperatorChildren(inWorkSessions.map((session) => session.id))) return;
         for (const session of inWorkSessions) {
           await setSessionWorkState(session.id, normalizePath(session.directory ?? null), 'done');
         }
-        // Done work leaves the working set, as it does for a session.
         leaveFinishedSessions(inWorkSessions.map((session) => session.id));
       } else {
         const first = laneNodes[0]?.session;

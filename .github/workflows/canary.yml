@@ -107,7 +107,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24'
+          node-version: '26'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -124,17 +124,17 @@ jobs:
             --workspace @openchamber/ui \
             --include-workspace-root
 
-      - name: Get bundled OpenCode CLI version
-        id: opencode_cli_version
-        run: echo "version=$(node -p "require('./packages/electron/package.json').opencodeCli.version")" >> "$GITHUB_OUTPUT"
+      - name: Get bundled OpenCode server version
+        id: opencode_server_version
+        run: echo "version=$(node -p "require('./packages/electron/package.json').devDependencies['@opencode/server']")" >> "$GITHUB_OUTPUT"
 
-      - name: Cache bundled OpenCode CLI artifact
+      - name: Cache bundled OpenCode server native packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: packages/electron/.cache/opencode-cli
-          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          path: packages/electron/.cache/opencode-server
+          key: opencode-server-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_server_version.outputs.version }}
           restore-keys: |
-            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+            opencode-server-${{ runner.os }}-${{ matrix.arch }}-
 
       - name: Install Apple Certificate
         env:
@@ -167,14 +167,14 @@ jobs:
           ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
         run: |
           bun run build:web-assets
-          bun run prepare:opencode-cli
-          bun run verify:opencode-cli
+          bun run prepare:opencode-server
+          bun run verify:opencode-server
           bun run prepare:ripgrep
           bun run bundle:main
           bun run rebuild:native
           # package.mjs applies the Canary icons (scripts/canary-build-config.mjs).
           node ./scripts/package.mjs --mac --${{ matrix.arch }} --publish=never
-          bun run verify:opencode-cli:packaged
+          bun run verify:opencode-server:packaged
 
       - name: Verify signature + entitlements + notarization
         env:
@@ -189,7 +189,19 @@ jobs:
           fi
           codesign -vv --deep --strict "$APP_PATH"
           codesign -dv --verbose=4 "$APP_PATH" 2>&1 | grep -q "flags=.*runtime"
-          xcrun stapler validate "$APP_PATH"
+          # stapler validate looks the ticket up in Apple CloudKit, which drops
+          # connections now and then (error 68); retry before failing the build.
+          for attempt in 1 2 3 4 5; do
+            if xcrun stapler validate "$APP_PATH"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "Error: stapler validate failed after $attempt attempts"
+              exit 1
+            fi
+            echo "stapler validate failed (attempt $attempt), retrying in 30s"
+            sleep 30
+          done
           # The same app as the release, at the Canary version.
           test "$(defaults read "$PWD/$APP_PATH/Contents/Info" CFBundleIdentifier)" = "dev.openchamber.desktop"
           test "$(defaults read "$PWD/$APP_PATH/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
@@ -239,7 +251,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24'
+          node-version: '26'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -256,32 +268,32 @@ jobs:
             --workspace @openchamber/ui \
             --include-workspace-root
 
-      - name: Get bundled OpenCode CLI version
-        id: opencode_cli_version
+      - name: Get bundled OpenCode server version
+        id: opencode_server_version
         shell: bash
-        run: echo "version=$(node -p "require('./packages/electron/package.json').opencodeCli.version")" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(node -p "require('./packages/electron/package.json').devDependencies['@opencode/server']")" >> "$GITHUB_OUTPUT"
 
-      - name: Cache bundled OpenCode CLI artifact
+      - name: Cache bundled OpenCode server native packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: packages/electron/.cache/opencode-cli
-          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          path: packages/electron/.cache/opencode-server
+          key: opencode-server-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_server_version.outputs.version }}
           restore-keys: |
-            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+            opencode-server-${{ runner.os }}-${{ matrix.arch }}-
 
       - name: Build web assets
         working-directory: packages/electron
         run: bun run build:web-assets
 
-      - name: Prepare bundled OpenCode CLI
+      - name: Prepare bundled OpenCode server
         working-directory: packages/electron
         shell: bash
         env:
           # Windows arm64 builds on an x64 runner; OpenCode and ripgrep need the target arch.
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
         run: |
-          bun run prepare:opencode-cli
-          bun run verify:opencode-cli
+          bun run prepare:opencode-server
+          bun run verify:opencode-server
           bun run prepare:ripgrep
 
       - name: Bundle main process
@@ -302,7 +314,7 @@ jobs:
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
         run: |
           node ./scripts/package.mjs --win --${{ matrix.arch }} --publish=never
-          bun run verify:opencode-cli:packaged
+          bun run verify:opencode-server:packaged
 
       - name: Upload Windows files
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -356,7 +368,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24'
+          node-version: '26'
 
       - name: Verify native Linux architecture
         env:
@@ -385,17 +397,17 @@ jobs:
       - name: Install rpmbuild for the .rpm package
         run: sudo apt-get update && sudo apt-get install -y rpm
 
-      - name: Get bundled OpenCode CLI version
-        id: opencode_cli_version
-        run: echo "version=$(node -p "require('./packages/electron/package.json').opencodeCli.version")" >> "$GITHUB_OUTPUT"
+      - name: Get bundled OpenCode server version
+        id: opencode_server_version
+        run: echo "version=$(node -p "require('./packages/electron/package.json').devDependencies['@opencode/server']")" >> "$GITHUB_OUTPUT"
 
-      - name: Cache bundled OpenCode CLI artifact
+      - name: Cache bundled OpenCode server native packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: packages/electron/.cache/opencode-cli
-          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          path: packages/electron/.cache/opencode-server
+          key: opencode-server-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_server_version.outputs.version }}
           restore-keys: |
-            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+            opencode-server-${{ runner.os }}-${{ matrix.arch }}-
 
       - name: Build Canary AppImage, .deb and .rpm
         working-directory: packages/electron
@@ -405,13 +417,13 @@ jobs:
         run: |
           set -euo pipefail
           bun run build:web-assets
-          bun run prepare:opencode-cli
-          bun run verify:opencode-cli
+          bun run prepare:opencode-server
+          bun run verify:opencode-server
           bun run prepare:ripgrep
           bun run bundle:main
           bun run rebuild:native
           node ./scripts/package.mjs --linux --${{ matrix.arch }} --publish=never
-          bun run verify:opencode-cli:packaged
+          bun run verify:opencode-server:packaged
           node ./scripts/verify-linux-appimage.mjs "dist/OpenChamber-${VERSION}-linux-${{ matrix.artifact_arch }}.AppImage"
 
       - name: Validate Linux update manifest
@@ -460,7 +472,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24'
+          node-version: '26'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
@@ -496,8 +508,9 @@ jobs:
 
       # A re-run after a desktop build failed finds this version already there;
       # the `canary` tag then already points at it, or at a newer night's build.
-      - name: Publish to npm
+      - name: Build server and publish to npm
         working-directory: packages/web
+        # bun publish runs prepack, including the server build.
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -524,6 +537,7 @@ jobs:
       build_number: ${{ needs.prepare.outputs.build_number }}
       build_android: true
       build_ios: false
+      retention_days: '3'
     secrets: inherit
 
   # Not needed by the publish job: a failed TestFlight upload does not hold
@@ -543,6 +557,7 @@ jobs:
       build_number: ${{ needs.prepare.outputs.build_number }}
       build_android: false
       build_ios: true
+      retention_days: '3'
     secrets: inherit
 
   # Last, after npm too: the release notes name the commit the next night
@@ -567,7 +582,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24'
+          node-version: '26'
 
       - name: Download update manifests
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -596,10 +611,10 @@ jobs:
         run: |
           set -euo pipefail
           apk=$(find android -name '*.apk' | head -1)
-          aab=$(find android -name '*.aab' | head -1)
-          test -n "$apk" && test -n "$aab"
+          test -n "$apk"
           cp "$apk" "files/OpenChamber-${VERSION}-${BUILD_NUMBER}-android.apk"
-          cp "$aab" "files/OpenChamber-${VERSION}-${BUILD_NUMBER}-android.aab"
+          # A name that never changes, for the website's download buttons.
+          cp "$apk" files/OpenChamber-canary-android.apk
 
       - name: Combine macOS and Windows manifests
         env:
@@ -631,21 +646,56 @@ jobs:
           node scripts/changelog/canary-notes.mjs --previous "$RUNNER_TEMP/previous-notes.json" \
             --from "$FROM" --to "$SHA" --version "$VERSION" > "$RUNNER_TEMP/canary-notes.json"
 
-      - name: Publish to the canary pre-release
+      # The desktop app reads Canary updates from the R2 mirror first, and the
+      # website links its Canary downloads there, so the night goes there
+      # before the GitHub release names it. A failed upload stops the night
+      # unpublished; the GitHub release still names the previous commit, so
+      # the next run builds this one again.
+      - name: Mirror to R2
+        env:
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          # R2 rejects the checksums newer AWS CLI versions send by default.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
         run: |
           set -euo pipefail
-          NOTES="OpenChamber Canary ${VERSION}, built from ${SHA}. The nightly build of main. In the desktop app, or in the browser page of a server installed from npm (@openchamber/web@canary), Settings → About → Updates: pick Canary to update into it, Stable to go back. Expect rough edges."
+          mkdir -p "$RUNNER_TEMP/mirror"
+          cp files/OpenChamber-* files/latest-linux.yml files/latest-linux-arm64.yml \
+            "$RUNNER_TEMP/latest-mac.yml" "$RUNNER_TEMP/latest.yml" "$RUNNER_TEMP/latest-arm64.yml" \
+            "$RUNNER_TEMP/canary-notes.json" "$RUNNER_TEMP/mirror/"
+          node scripts/release-mirror/mirror-to-r2.mjs --channel canary --dir "$RUNNER_TEMP/mirror" --version "$VERSION"
+
+      - name: Publish to the canary pre-release
+        env:
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/openchamber/openchamber/releases/download/canary/OpenChamber-${VERSION}"
+          NOTES="OpenChamber Canary ${VERSION}, built from ${SHA}. The nightly build of main. In the desktop app, or in the browser page of a server installed from npm (@openchamber/web@canary), Settings → About → Updates: pick Canary to update into it, Stable to go back. Expect rough edges.
+
+          ## Downloads
+
+          | System | File |
+          | --- | --- |
+          | macOS, Apple Silicon | [.dmg](${BASE}-mac-arm64.dmg) |
+          | macOS, Intel | [.dmg](${BASE}-mac-x64.dmg) |
+          | Windows, x64 | [.exe](${BASE}-win-x64.exe) |
+          | Windows, ARM | [.exe](${BASE}-win-arm64.exe) |
+          | Linux, x64 | [.AppImage](${BASE}-linux-x86_64.AppImage), [.deb](${BASE}-linux-amd64.deb), [.rpm](${BASE}-linux-x86_64.rpm) |
+          | Linux, ARM | [.AppImage](${BASE}-linux-arm64.AppImage), [.deb](${BASE}-linux-arm64.deb), [.rpm](${BASE}-linux-aarch64.rpm) |
+          | Android | [.apk](${BASE}-${BUILD_NUMBER}-android.apk) |"
           # The notes name the published commit, which tells the next night
           # whether main moved, so they are written last, once every file is up.
           if ! gh release view canary >/dev/null 2>&1; then
             gh release create canary --prerelease --latest=false --target "$SHA" --title "OpenChamber Canary" --notes "OpenChamber Canary: the first build is being published."
           fi
           OLD_ASSETS=$(gh release view canary --json assets --jq '.assets[].name')
-          # The newest earlier build's files stay one more night: an app that
-          # found that build before this run downloads it from the addresses
-          # it read. Taken from the files, so a re-run of this version keeps it too.
-          PREVIOUS=$(printf '%s\n' "$OLD_ASSETS" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+-canary\.[0-9]+\.[0-9]+' | grep -vxF "$VERSION" | sort -uV | tail -1 || true)
-          PREVIOUS=${PREVIOUS:-$VERSION}
+          # Only this build stays, so the release page lists one file per
+          # system. An app still holding the previous build's addresses fails
+          # its download and finds this build on its next update check.
           # New files first, then the manifests that name them, then the old
           # files: an updater always reads a manifest whose files exist.
           gh release upload canary files/OpenChamber-* "$RUNNER_TEMP/canary-notes.json" --clobber
@@ -654,7 +704,7 @@ jobs:
             files/latest-linux.yml files/latest-linux-arm64.yml --clobber
           for asset in $OLD_ASSETS; do
             case "$asset" in
-              latest*.yml|canary-notes.json|*"-${VERSION}-"*|*"-${PREVIOUS}-"*) ;;
+              latest*.yml|canary-notes.json|OpenChamber-canary-android.apk|*"-${VERSION}-"*) ;;
               *) gh release delete-asset canary "$asset" --yes ;;
             esac
           done

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import webPackage from '../../../package.json' with { type: 'json' };
 import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpenCodeVersion, readOpenCodeInfo, requireOpenCodeV2, UnsupportedOpenCodeVersionError } from './compatibility.js';
 
 const cli = (output, code = 0) => ({ binary: process.execPath, args: ['-e', `console.log(${JSON.stringify(output)}); process.exit(${code})`, '--'] });
@@ -11,6 +12,15 @@ describe('OpenCode compatibility', () => {
     await expect(requireOpenCodeV2(cli('1.18.32'))).rejects.toBeInstanceOf(UnsupportedOpenCodeVersionError);
     await expect(readOpenCodeCliVersion(cli('2.0.19', 1))).rejects.toThrow();
     await expect(readOpenCodeCliVersion(cli('error, requires 2.0.19'))).rejects.toThrow();
+  });
+
+  it('runs the version check with the environment a launch needs', async () => {
+    const launch = {
+      binary: process.execPath,
+      args: ['-e', 'console.log(process.env.OPENCHAMBER_TEST_VERSION ?? "missing")', '--'],
+      env: { OPENCHAMBER_TEST_VERSION: '2.3.0' },
+    };
+    expect(await readOpenCodeCliVersion(launch)).toBe('2.3.0');
   });
 
   it('does not accept HTTP 200 HTML or malformed JSON as readiness', async () => {
@@ -55,6 +65,11 @@ describe('OpenCode compatibility', () => {
       expect(describeOpenCodeCompatibility(version, 'managed', true).state).toBe('incompatible');
     }
     expect(describeOpenCodeCompatibility('2.1.4', 'managed', true).minimumVersion).toBe('2.2.4');
+  });
+
+  it('publishes the minimum in the package, where an older server reads it before updating', () => {
+    const { minimumVersion } = describeOpenCodeCompatibility(null, 'managed', false);
+    expect(webPackage.engines.opencode).toBe(`>=${minimumVersion}`);
   });
 
   it('reports which local CLI was checked', () => {

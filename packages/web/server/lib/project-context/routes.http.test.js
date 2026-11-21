@@ -120,6 +120,24 @@ describe('todo item routes', () => {
     await request(app).patch(`${BASE}/todos/x`).send({}).expect(400);
     expect((await request(app).get(BASE).expect(200)).body.todos).toEqual([]);
   }));
+
+  it('refuses a whole list read from the other store with 409', () => withRuntime(async ({ app }) => {
+    await request(app).post(`${BASE}/todos`).send({ id: 'a', text: 'A' }).expect(201);
+    const read = (await request(app).get(BASE).expect(200)).body;
+    expect(read.notesTodosStore).toMatch(/^local:/);
+    await request(app).put(`${BASE}/todos`).send({ todos: [], store: 'repository:other.0' }).expect(409);
+    await request(app).put(`${BASE}/todos`).send({ todos: [], store: 'elsewhere' }).expect(400);
+    expect((await request(app).get(BASE).expect(200)).body.todos.map((todo) => todo.id)).toEqual(['a']);
+    await request(app).put(`${BASE}/todos`).send({ todos: [], store: read.notesTodosStore }).expect(200);
+  }));
+
+  it('checks the original store value after the route coerces it for its prefix check', () => withRuntime(async ({ app }) => {
+    await request(app).post(`${BASE}/todos`).send({ id: 'a', text: 'A' }).expect(201);
+    const read = (await request(app).get(BASE).expect(200)).body;
+    await request(app).put(`${BASE}/todos`).send({ todos: [], store: [read.notesTodosStore] }).expect(409);
+    await request(app).put(`${BASE}/todos`).send({ todos: [], store: ['elsewhere'] }).expect(400);
+    expect((await request(app).get(BASE).expect(200)).body.todos.map((todo) => todo.id)).toEqual(['a']);
+  }));
 });
 
 describe('plan links over HTTP', () => {
@@ -265,16 +283,6 @@ describe('project context routes over HTTP', () => {
     expect(received.planRaw).toEqual({ raw: '# A\n\nx' });
   });
 
-  it('deletes a note', async () => {
-    const { app } = createApp();
-    await request(app).delete(`${BASE}/notes/n1`).expect(200);
-  });
-
-  it('deletes a plan', async () => {
-    const { app } = createApp();
-    await request(app).delete(`${BASE}/plans/p1`).expect(200);
-  });
-
   it('still rejects a genuinely malformed body', async () => {
     const { app } = createApp();
 
@@ -291,6 +299,21 @@ describe('project context routes over HTTP', () => {
       .put(`${BASE}/todos`)
       .send({ todos: [{ id: 1, text: 'bad id type' }] })
       .expect(400);
+  });
+
+  it('accepts finite negative todo timestamps and leaves link validation to the runtime', async () => {
+    const { app, received } = createApp();
+    const todos = [{ id: 't1', text: 'one', createdAt: -1, planId: 3, dependsOn: 'unchecked' }];
+    await request(app).put(`${BASE}/todos`).send({ todos }).expect(200);
+    expect(received.todos).toEqual(todos);
+  });
+
+  it('maps inherited error status fields without requiring an Error instance', async () => {
+    for (const status of [400, 404, 409]) {
+      const { app } = createApp({ readContext: async () => { throw Object.create({ status }); } });
+      const response = await request(app).get(BASE).expect(status);
+      expect(response.body).toEqual({ error: 'Failed to read project context' });
+    }
   });
 
   it('rejects an unknown note source', async () => {

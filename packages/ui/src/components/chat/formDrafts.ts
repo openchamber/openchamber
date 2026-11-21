@@ -1,4 +1,3 @@
-/** Memory-only answers survive switching between a question's form surfaces. */
 
 import type { FormValues } from './formCardState';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -22,9 +21,9 @@ const MAX_FORM_DRAFTS = 50;
 const scopeKey = (scope: FormDraftScope): string =>
   [scope.runtimeKey, scope.directory, scope.sessionID, scope.formID].join('\u0000');
 
-export function formDraftScope(form: { id: string; sessionID: string }, directory?: string): FormDraftScope {
+export function formDraftScope(form: { id: string; sessionID: string }, directory?: string, runtimeKey: string = getRuntimeKey()): FormDraftScope {
   return {
-    runtimeKey: getRuntimeKey(),
+    runtimeKey,
     directory: directory ?? '',
     sessionID: form.sessionID,
     formID: form.id,
@@ -48,6 +47,13 @@ export function saveFormDraft(scope: FormDraftScope, draft: FormDraft): void {
 
 export function dropFormDraft(scope: FormDraftScope): void {
   formDrafts.delete(scopeKey(scope));
+}
+
+export function dropFormDraftsForRequest(runtimeKey: string, sessionID: string, formID: string): void {
+  for (const key of [...formDrafts.keys()]) {
+    const [draftRuntimeKey, , draftSessionID, draftFormID] = key.split('\u0000');
+    if (draftRuntimeKey === runtimeKey && draftSessionID === sessionID && draftFormID === formID) formDrafts.delete(key);
+  }
 }
 
 export function resetFormDrafts(): void {

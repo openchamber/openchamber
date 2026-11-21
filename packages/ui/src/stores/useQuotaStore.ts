@@ -2,106 +2,167 @@ import React from 'react';
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type { ProviderResult, QuotaProviderId } from '@/types';
-import { QUOTA_PROVIDERS } from '@/lib/quota';
-import type { DesktopSettings } from '@/lib/desktop';
+import type { QuotaProviderMeta } from '@/lib/quota';
+import { fetchExtensionQuotaProviders, quotaProviderIds, quotaProviderList, sameExtensionQuotaProviders, type ExtensionQuotaProvider } from '@/lib/quota/extensionProviders';
+import { getDesktopWindowVisibility, isDesktopShell, type DesktopSettings } from '@/lib/desktop';
+import { isCapacitorApp } from '@/lib/platform';
 import { getDefaultModels } from '@/lib/quota/model-families';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
-import { fetchQuota } from '@/lib/quota/fetchQuota';
+import { fetchConfiguredQuotaProviders, fetchQuota } from '@/lib/quota/fetchQuota';
 import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { runBackgroundNetworkTask } from '@/lib/background-network';
 
 const QUOTA_REFRESH_INTERVAL_MS = 3 * 60 * 1000;
-// Quotas and their display settings are read from the connected OpenChamber
-// instance, so both belong to that instance. Bumped on every reset so a
-// response in flight for the previous instance cannot land in the new one.
+const QUOTA_OPEN_FRESHNESS_MS = 15 * 1000;
 let quotaGeneration = 0;
 let inFlightRuntimeLoad: Promise<void> | null = null;
+let inFlightExtensionLoad: Promise<void> | null = null;
+let extensionLoadAgain = false;
 const quotaRequests = new Map<QuotaProviderId, { controller: AbortController; promise: Promise<boolean> }>();
-let quotaAutoRefreshConsumers = 0;
+let configuredProvidersRequest: Promise<ReadonlySet<string> | null> | null = null;
+let claudeSelectionRevision = 0;
+const quotaAutoRefreshConsumers = new Map<symbol, boolean>();
 let quotaAutoRefreshInterval: number | null = null;
+let lastVisibleRefreshAt: number | null = null;
+let lastVisibleRefreshIncludedAll = false;
+let nativeQuotaWindowVisible = false;
 
 interface QuotaSettingsState {
   displayMode: 'usage' | 'remaining';
   dropdownProviderIds: QuotaProviderId[];
-  selectedModels: Record<string, string[]>;  // Map of providerId -> selected model names
-  expandedFamilies: Record<string, string[]>;  // Map of providerId -> EXPANDED family IDs (header dropdown - inverted)
+  savedDropdownProviderIds: string[] | null;
+  selectedModels: Record<string, string[]>;
+  expandedFamilies: Record<string, string[]>;
 }
 
 interface QuotaStore extends QuotaSettingsState {
   results: ProviderResult[];
-  /** Instance whose quotas `results` describes, or `null` when nothing is loaded. */
+  extensionProviders: ExtensionQuotaProvider[];
   loadedRuntimeKey: string | null;
   selectedProviderId: QuotaProviderId | null;
   isLoading: boolean;
   isFetchingProvider: Record<string, boolean>;
   lastUpdated: number | null;
   error: string | null;
-  /** Refresh failures are not authoritative provider configuration or usage. */
   refreshErrors: Partial<Record<QuotaProviderId, string>>;
 
   loadSettings: () => Promise<void>;
+  loadExtensionProviders: () => Promise<void>;
   fetchAllQuotas: () => Promise<void>;
-  /** Resolves true when at least one provider answered — see `ensureLoadedForRuntime`. */
   fetchQuotas: (providerIds: QuotaProviderId[], options?: { invalidate?: boolean }) => Promise<boolean>;
-  /** Resolves true when the instance answered, false on a transport failure. */
   fetchProviderQuota: (providerId: QuotaProviderId, invalidate?: boolean) => Promise<boolean>;
   setSelectedProvider: (providerId: QuotaProviderId | null) => void;
   setDisplayMode: (mode: 'usage' | 'remaining') => void;
-  setDropdownProviderIds: (providerIds: QuotaProviderId[]) => void;
+  setProviderInDropdown: (providerId: QuotaProviderId, shown: boolean) => string[];
   setSelectedModels: (providerId: string, modelNames: string[]) => void;
-  toggleModelSelected: (providerId: string, modelName: string) => void;
   setExpandedFamilies: (providerId: string, familyIds: string[]) => void;
   toggleFamilyExpanded: (providerId: string, familyId: string) => void;
   applyDefaultSelections: (providerId: string, availableModels: string[]) => void;
-  /**
-   * Load settings and quotas once per instance, when that instance is ready.
-   *
-   * Providers report themselves as configured only after the instance can read
-   * their credentials, which on a remote instance is not true the moment the UI
-   * mounts. A fetch fired at mount therefore answers "nothing configured", and
-   * because every provider then has a result, no consumer asks again until the
-   * three-minute refresh — which is why Usage stayed missing from the
-   * work-status panel until Settings -> Usage forced a fresh fetch.
-   */
-  ensureLoadedForRuntime: () => Promise<void>;
+  ensureLoadedForRuntime: (options?: { refresh?: boolean; allProviders?: boolean; visibleOnly?: boolean }) => Promise<void>;
   resetForRuntimeSwitch: () => void;
+  refreshAfterCredentialChange: () => Promise<void>;
+  reconcileClaudeSelection: (options: { changed: boolean }) => Promise<void>;
 }
 
-const parseSettings = (data: DesktopSettings): QuotaSettingsState => {
-  const allProviderIds = QUOTA_PROVIDERS.map((provider) => provider.id);
+const resolveDropdownProviderIds = (saved: readonly string[] | null, known: readonly QuotaProviderId[]): QuotaProviderId[] => (
+  saved === null
+    ? [...known]
+    : saved.filter((entry): entry is QuotaProviderId => known.some((id) => id === entry))
+);
+
+const parseSettings = (data: DesktopSettings, extensionProviders: readonly ExtensionQuotaProvider[]): QuotaSettingsState => {
   const displayMode = data.usageDisplayMode === 'remaining' ? 'remaining' : 'usage';
-  const dropdownProviderIds = data.usageDropdownProviders
-    ? data.usageDropdownProviders.filter((entry): entry is QuotaProviderId =>
-        allProviderIds.some((id) => id === entry)
-      )
-    : allProviderIds;
+  const savedDropdownProviderIds = data.usageDropdownProviders ?? null;
 
   return {
     displayMode,
-    dropdownProviderIds,
-    // Map of providerId -> selected model names
+    savedDropdownProviderIds,
+    dropdownProviderIds: resolveDropdownProviderIds(savedDropdownProviderIds, quotaProviderIds(extensionProviders)),
     selectedModels: data.usageSelectedModels ?? {},
-    // Expanded families (inverted collapsed logic for header dropdown)
     expandedFamilies: data.usageExpandedFamilies ?? {},
   };
 };
 
-const defaultQuotaSettings = (): QuotaSettingsState => ({
+const defaultQuotaSettings = (extensionProviders: readonly ExtensionQuotaProvider[] = []): QuotaSettingsState => ({
   displayMode: 'usage',
-  dropdownProviderIds: QUOTA_PROVIDERS.map((provider) => provider.id),
+  savedDropdownProviderIds: null,
+  dropdownProviderIds: quotaProviderIds(extensionProviders),
   selectedModels: {},
   expandedFamilies: {},
 });
 
-const loadSettingsFromRuntime = async (): Promise<QuotaSettingsState> => {
+const loadSettingsFromRuntime = async (extensionProviders: readonly ExtensionQuotaProvider[]): Promise<QuotaSettingsState> => {
   const settings = await loadDesktopSettings();
-  return settings ? parseSettings(settings) : defaultQuotaSettings();
+  return settings ? parseSettings(settings, extensionProviders) : defaultQuotaSettings(extensionProviders);
+};
+
+const applyExtensionProviders = (next: ExtensionQuotaProvider[]): void => {
+  const state = useQuotaStore.getState();
+  if (sameExtensionQuotaProviders(state.extensionProviders, next)) return;
+  const gone = state.extensionProviders.map((previous) => previous.id).filter((id) => !next.some((entry) => entry.id === id));
+  const isGone = (id: string): boolean => gone.some((goneId) => goneId === id);
+  const replaced = state.extensionProviders
+    .filter((previous) => next.some((entry) => entry.id === previous.id && !sameExtensionQuotaProviders([previous], [entry])))
+    .map((previous) => previous.id);
+  const stale = [...gone, ...replaced];
+  const isStale = (id: string): boolean => stale.some((staleId) => staleId === id);
+  for (const id of stale) {
+    quotaRequests.get(id)?.controller.abort();
+    quotaRequests.delete(id);
+  }
+  useQuotaStore.setState((current) => {
+    const refreshErrors = { ...current.refreshErrors };
+    for (const id of stale) delete refreshErrors[id];
+    return {
+      extensionProviders: next,
+      dropdownProviderIds: resolveDropdownProviderIds(current.savedDropdownProviderIds, quotaProviderIds(next)),
+      results: stale.length > 0 ? current.results.filter((result) => !isStale(result.providerId)) : current.results,
+      refreshErrors,
+      selectedProviderId: current.selectedProviderId !== null && isGone(current.selectedProviderId) ? null : current.selectedProviderId,
+      isFetchingProvider: Object.fromEntries(Object.entries(current.isFetchingProvider).filter(([id]) => !isStale(id))),
+      isLoading: quotaRequests.size > 0,
+    };
+  });
+  const { results, loadedRuntimeKey, fetchQuotas } = useQuotaStore.getState();
+  const arrived = next.map((entry) => entry.id).filter((id) => !results.some((result) => result.providerId === id) && !quotaRequests.has(id));
+  if (arrived.length > 0 && (loadedRuntimeKey !== null || results.length > 0)) void fetchQuotas(arrived);
+};
+
+const readConfiguredProviders = () => {
+  if (configuredProvidersRequest) return configuredProvidersRequest;
+  const request: Promise<ReadonlySet<string> | null> = fetchConfiguredQuotaProviders().finally(() => {
+    if (configuredProvidersRequest === request) configuredProvidersRequest = null;
+  });
+  configuredProvidersRequest = request;
+  return request;
+};
+
+const recordNotConfigured = (set: (update: (state: QuotaStore) => Partial<QuotaStore>) => void, providerIds: QuotaProviderId[]) => {
+  const absent = new Set<QuotaProviderId>(providerIds);
+  const fetchedAt = Date.now();
+  set((state) => {
+    const refreshErrors = { ...state.refreshErrors };
+    for (const providerId of absent) delete refreshErrors[providerId];
+    return {
+      results: [
+        ...state.results.filter((entry) => !absent.has(entry.providerId)),
+        ...quotaProviderList(state.extensionProviders).filter((provider) => absent.has(provider.id)).map((provider) => ({
+          providerId: provider.id, providerName: provider.name, ok: false, configured: false, error: 'Not configured', usage: null, fetchedAt,
+        })),
+      ],
+      refreshErrors,
+      error: Object.values(refreshErrors)[0] ?? null,
+      lastUpdated: fetchedAt,
+    };
+  });
 };
 
 export const useQuotaStore = create<QuotaStore>()(
   devtools(
     (set, get) => ({
       results: [],
+      extensionProviders: [],
       loadedRuntimeKey: null,
       selectedProviderId: null,
       isLoading: false,
@@ -109,30 +170,59 @@ export const useQuotaStore = create<QuotaStore>()(
       lastUpdated: null,
       error: null,
       refreshErrors: {},
-      displayMode: 'usage',
-      dropdownProviderIds: QUOTA_PROVIDERS.map((provider) => provider.id),
-      selectedModels: {},
-      expandedFamilies: {},
+      ...defaultQuotaSettings(),
 
       loadSettings: async () => {
         const generation = quotaGeneration;
         try {
-          const settings = await loadSettingsFromRuntime();
+          const settings = await loadSettingsFromRuntime(get().extensionProviders);
           if (generation !== quotaGeneration) return;
-          set(settings);
+          set({ ...settings, dropdownProviderIds: resolveDropdownProviderIds(settings.savedDropdownProviderIds, quotaProviderIds(get().extensionProviders)) });
         } catch (error) {
           console.warn('Failed to load usage settings:', error);
         }
       },
 
+      loadExtensionProviders: async () => {
+        if (inFlightExtensionLoad) {
+          extensionLoadAgain = true;
+          return inFlightExtensionLoad;
+        }
+        const generation = quotaGeneration;
+        inFlightExtensionLoad = (async () => {
+          try {
+            const next = await fetchExtensionQuotaProviders();
+            if (generation !== quotaGeneration) return;
+            applyExtensionProviders(next);
+          } catch (error) {
+            if (generation === quotaGeneration) console.warn('Failed to load extension usage providers:', error);
+          }
+        })().finally(() => {
+          if (generation !== quotaGeneration) return;
+          inFlightExtensionLoad = null;
+          if (extensionLoadAgain) {
+            extensionLoadAgain = false;
+            void get().loadExtensionProviders();
+          }
+        });
+        return inFlightExtensionLoad;
+      },
+
       fetchQuotas: async (providerIds, { invalidate = false } = {}) => {
         const generation = quotaGeneration;
+        const claudeRevision = claudeSelectionRevision;
         try {
-          const answered = await Promise.all(
-            providerIds.map((providerId) => get().fetchProviderQuota(providerId, invalidate))
-          );
+          if (!invalidate) set({ isLoading: true });
+          const configured = invalidate ? null : await readConfiguredProviders();
           if (generation !== quotaGeneration) return false;
-          return answered.some(Boolean);
+          const current = providerIds.filter((providerId) => providerId !== 'claude' || claudeRevision === claudeSelectionRevision);
+          const absent = configured ? current.filter((providerId) => !configured.has(providerId)) : [];
+          const targets = current.filter((providerId) => !absent.includes(providerId));
+          if (absent.length > 0) recordNotConfigured(set, absent);
+          if (targets.length === 0) set({ isLoading: quotaRequests.size > 0 });
+          const answered = await Promise.all(targets.map((providerId) => get().fetchProviderQuota(providerId, invalidate)));
+          if (generation !== quotaGeneration) return false;
+          return absent.length > 0 || answered.some(Boolean);
         } catch (error) {
           if (generation !== quotaGeneration) return false;
           const message = error instanceof Error ? error.message : 'Failed to fetch quotas';
@@ -142,13 +232,10 @@ export const useQuotaStore = create<QuotaStore>()(
       },
 
       fetchAllQuotas: async () => {
-        await get().fetchQuotas(QUOTA_PROVIDERS.map((provider) => provider.id));
+        await get().fetchQuotas(quotaProviderIds(get().extensionProviders));
       },
 
       fetchProviderQuota: async (providerId, invalidate = false) => {
-        // Concurrent callers share one request per provider. `invalidate` is how
-        // a provider-account switch says the shared request, and any sample it
-        // produces, describe the account being switched away from.
         const existing = quotaRequests.get(providerId);
         if (existing && !invalidate) return existing.promise;
         if (existing) {
@@ -161,17 +248,11 @@ export const useQuotaStore = create<QuotaStore>()(
           try {
             const result = await fetchQuota(providerId, { signal: controller.signal });
             if (generation !== quotaGeneration) return false;
-            // A reachable instance can still report that its provider request
-            // failed. Configuration is known, but there is no new usage sample.
             if (!result.ok && result.configured) {
               const message = result.error || 'Failed to fetch quota';
               set(state => {
                 const previous = state.results.find(entry => entry.providerId === providerId);
-                // Preserving the last sample keeps a periodic refresh from
-                // blanking the surface on a blip. After a switch it is wrong:
-                // that sample belongs to the account just left, so keeping it
-                // shows one account's usage as if it were the new account's.
-                const keepPrevious = previous?.configured && !invalidate;
+                const keepPrevious = previous?.configured && !invalidate && previous.selection === result.selection;
                 const results = keepPrevious
                   ? state.results
                   : [...state.results.filter(entry => entry.providerId !== providerId), result];
@@ -189,9 +270,6 @@ export const useQuotaStore = create<QuotaStore>()(
             return true;
           } catch (error) {
             if (generation !== quotaGeneration) return false;
-            // An abort is this store superseding its own request, not the
-            // instance failing. Recording it would report a refresh error right
-            // after a switch, over the sample being replaced.
             if (controller.signal.aborted) return false;
             const message = error instanceof Error ? error.message : 'Failed to fetch quota';
             set(state => ({ refreshErrors: { ...state.refreshErrors, [providerId]: message }, error: message }));
@@ -199,8 +277,6 @@ export const useQuotaStore = create<QuotaStore>()(
           } finally {
             if (quotaRequests.get(providerId)?.controller === controller) quotaRequests.delete(providerId);
             if (generation === quotaGeneration) {
-              // A superseded request finishes while its replacement still runs;
-              // the provider stays fetching until the replacement settles too.
               set((state) => ({
                 isFetchingProvider: { ...state.isFetchingProvider, [providerId]: quotaRequests.has(providerId) },
                 isLoading: quotaRequests.size > 0,
@@ -213,27 +289,37 @@ export const useQuotaStore = create<QuotaStore>()(
         return promise;
       },
 
-      ensureLoadedForRuntime: async () => {
+      ensureLoadedForRuntime: async ({ refresh = false, allProviders = false, visibleOnly = false } = {}) => {
         const runtimeKey = getRuntimeKey();
         if (isTransientRuntimeKey(runtimeKey)) return;
-        // Wait for the instance to report itself initialised. Asking earlier
-        // gets an honest-looking "not configured" for every provider, which is
-        // then cached as if it were the answer.
         if (!useConfigStore.getState().isInitialized) return;
-        if (get().loadedRuntimeKey === runtimeKey) return;
-        if (inFlightRuntimeLoad) return inFlightRuntimeLoad;
-
+        if (visibleOnly && !hasVisibleQuotaReadout()) return;
+        if (!refresh && get().loadedRuntimeKey === runtimeKey) return;
         const generation = quotaGeneration;
-        inFlightRuntimeLoad = (async () => {
-          await get().loadSettings();
+        let missingProvidersOnly = false;
+        if (inFlightRuntimeLoad) {
+          await inFlightRuntimeLoad;
           if (generation !== quotaGeneration) return;
+          if (!allProviders) return;
+          missingProvidersOnly = true;
+        }
+
+        inFlightRuntimeLoad = (async () => {
+          if (get().loadedRuntimeKey !== runtimeKey) await Promise.all([get().loadSettings(), get().loadExtensionProviders()]);
+          if (generation !== quotaGeneration) return;
+          if (visibleOnly && !hasVisibleQuotaReadout()) {
+            lastVisibleRefreshAt = null;
+            lastVisibleRefreshIncludedAll = false;
+            return;
+          }
+          if (!useConfigStore.getState().isInitialized) return;
           const { dropdownProviderIds, fetchQuotas } = get();
-          if (dropdownProviderIds.length === 0) return;
-          const answered = await fetchQuotas(dropdownProviderIds);
-          // Mark the instance loaded only once it actually answered. Claiming it
-          // up front meant a load that failed on a cold or briefly unreachable
-          // instance was never attempted again — Usage would stay empty until
-          // the three-minute refresh, or forever after a switch.
+          const requestedIds = allProviders ? quotaProviderIds(get().extensionProviders) : dropdownProviderIds;
+          const providerIds = missingProvidersOnly
+            ? requestedIds.filter(providerId => !get().results.some(result => result.providerId === providerId))
+            : requestedIds;
+          if (providerIds.length === 0) return;
+          const answered = await fetchQuotas(providerIds);
           if (answered && generation === quotaGeneration) set({ loadedRuntimeKey: runtimeKey });
         })().finally(() => { if (generation === quotaGeneration) inFlightRuntimeLoad = null; });
 
@@ -242,15 +328,17 @@ export const useQuotaStore = create<QuotaStore>()(
 
       resetForRuntimeSwitch: () => {
         quotaGeneration += 1;
+        configuredProvidersRequest = null;
         for (const request of quotaRequests.values()) request.controller.abort();
         quotaRequests.clear();
         inFlightRuntimeLoad = null;
+        inFlightExtensionLoad = null;
+        extensionLoadAgain = false;
+        lastVisibleRefreshAt = null;
+        lastVisibleRefreshIncludedAll = false;
         set({
-          // Display mode, the provider selection and the per-provider model
-          // picks all come from the instance's own settings, and
-          // `dropdownProviderIds` decides what gets fetched — carrying them
-          // over would query the new instance through the old one's choices.
           ...defaultQuotaSettings(),
+          extensionProviders: [],
           results: [],
           loadedRuntimeKey: null,
           selectedProviderId: null,
@@ -262,9 +350,59 @@ export const useQuotaStore = create<QuotaStore>()(
         });
       },
 
+      refreshAfterCredentialChange: async () => {
+        quotaGeneration += 1;
+        configuredProvidersRequest = null;
+        for (const request of quotaRequests.values()) request.controller.abort();
+        quotaRequests.clear();
+        inFlightRuntimeLoad = null;
+        inFlightExtensionLoad = null;
+        extensionLoadAgain = false;
+        lastVisibleRefreshAt = null;
+        lastVisibleRefreshIncludedAll = false;
+        set({ results: [], loadedRuntimeKey: null, isLoading: false, isFetchingProvider: {}, lastUpdated: null, refreshErrors: {}, error: null });
+        if (!hasVisibleQuotaReadout()) return;
+        await get().ensureLoadedForRuntime({ refresh: true, allProviders: [...quotaAutoRefreshConsumers.values()].some(Boolean), visibleOnly: true });
+      },
+
+      reconcileClaudeSelection: async ({ changed }) => {
+        lastVisibleRefreshAt = null;
+        lastVisibleRefreshIncludedAll = false;
+        if (changed) {
+          claudeSelectionRevision += 1;
+          configuredProvidersRequest = null;
+          quotaRequests.get('claude')?.controller.abort();
+          quotaRequests.delete('claude');
+          set((state) => {
+            const refreshErrors = { ...state.refreshErrors };
+            delete refreshErrors.claude;
+            return {
+              results: state.results.filter((entry) => entry.providerId !== 'claude'),
+              refreshErrors,
+              error: Object.values(refreshErrors)[0] ?? null,
+              isFetchingProvider: { ...state.isFetchingProvider, claude: false },
+              isLoading: quotaRequests.size > 0,
+            };
+          });
+        } else if (!get().results.some((entry) => entry.providerId === 'claude')) {
+          return;
+        }
+        if (!hasVisibleQuotaReadout() || !useConfigStore.getState().isInitialized) {
+          if (changed) set({ loadedRuntimeKey: null });
+          return;
+        }
+        await get().fetchProviderQuota('claude', changed);
+      },
+
       setSelectedProvider: (providerId) => set({ selectedProviderId: providerId }),
       setDisplayMode: (mode) => set({ displayMode: mode }),
-      setDropdownProviderIds: (providerIds) => set({ dropdownProviderIds: providerIds }),
+      setProviderInDropdown: (providerId, shown) => {
+        const { savedDropdownProviderIds, dropdownProviderIds, extensionProviders } = get();
+        const base: readonly string[] = savedDropdownProviderIds ?? dropdownProviderIds;
+        const next = shown ? [...new Set([...base, providerId])] : base.filter((id) => id !== providerId);
+        set({ savedDropdownProviderIds: next, dropdownProviderIds: resolveDropdownProviderIds(next, quotaProviderIds(extensionProviders)) });
+        return next;
+      },
 
       setSelectedModels: (providerId, modelNames) => {
         set((state) => ({
@@ -272,24 +410,10 @@ export const useQuotaStore = create<QuotaStore>()(
         }));
       },
 
-      toggleModelSelected: (providerId, modelName) => {
-        set((state) => {
-          const currentSelected = state.selectedModels[providerId] ?? [];
-          const isSelected = currentSelected.includes(modelName);
-          const nextSelected = isSelected
-            ? currentSelected.filter((m) => m !== modelName)
-            : [...currentSelected, modelName];
-          return {
-            selectedModels: { ...state.selectedModels, [providerId]: nextSelected }
-          };
-        });
-      },
-
       setExpandedFamilies: (providerId, familyIds) => {
         set((state) => ({
           expandedFamilies: { ...state.expandedFamilies, [providerId]: familyIds }
         }));
-        // Persist
         void updateDesktopSettings({ usageExpandedFamilies: get().expandedFamilies });
       },
 
@@ -304,13 +428,11 @@ export const useQuotaStore = create<QuotaStore>()(
             expandedFamilies: { ...state.expandedFamilies, [providerId]: nextExpanded }
           };
         });
-        // Persist
         void updateDesktopSettings({ usageExpandedFamilies: get().expandedFamilies });
       },
 
       applyDefaultSelections: (providerId, availableModels) => {
         const state = get();
-        // Only apply if no prior selections exist
         if ((state.selectedModels[providerId]?.length ?? 0) > 0) return;
 
         const defaults = getDefaultModels(providerId as QuotaProviderId, availableModels);
@@ -319,7 +441,6 @@ export const useQuotaStore = create<QuotaStore>()(
         set((s) => ({
           selectedModels: { ...s.selectedModels, [providerId]: defaults },
         }));
-        // Persist
         void updateDesktopSettings({ usageSelectedModels: get().selectedModels });
       },
     }),
@@ -327,24 +448,100 @@ export const useQuotaStore = create<QuotaStore>()(
   )
 );
 
-export const useQuotaAutoRefresh = () => {
-  React.useEffect(() => {
-    quotaAutoRefreshConsumers += 1;
-    if (quotaAutoRefreshInterval === null) {
-      quotaAutoRefreshInterval = window.setInterval(() => {
-        const { dropdownProviderIds, fetchQuotas } = useQuotaStore.getState();
-        if (dropdownProviderIds.length > 0) {
-          void fetchQuotas(dropdownProviderIds);
-        }
-      }, QUOTA_REFRESH_INTERVAL_MS);
+const hasVisibleQuotaReadout = () => quotaAutoRefreshConsumers.size > 0
+  && globalThis.document !== undefined && document.visibilityState !== 'hidden'
+  && ((!isDesktopShell() && !isCapacitorApp()) || nativeQuotaWindowVisible);
+
+const refreshVisibleQuotas = (tray = false) => {
+  if ((!tray && !hasVisibleQuotaReadout()) || !useConfigStore.getState().isInitialized) return;
+  const allProviders = !tray && [...quotaAutoRefreshConsumers.values()].some(Boolean);
+  const now = Date.now();
+  if (lastVisibleRefreshAt !== null && now - lastVisibleRefreshAt < QUOTA_OPEN_FRESHNESS_MS
+    && (!allProviders || lastVisibleRefreshIncludedAll)) return;
+  lastVisibleRefreshAt = now;
+  lastVisibleRefreshIncludedAll = allProviders;
+  void runBackgroundNetworkTask(async () => {
+    if (!tray && !hasVisibleQuotaReadout()) {
+      if (lastVisibleRefreshAt === now) {
+        lastVisibleRefreshAt = null;
+        lastVisibleRefreshIncludedAll = false;
+      }
+      return;
     }
+    await useQuotaStore.getState().ensureLoadedForRuntime({ refresh: true, allProviders, visibleOnly: !tray });
+  }, 'active-session');
+};
+
+export const refreshTrayQuotas = (initial = false) => {
+  if (initial && useQuotaStore.getState().loadedRuntimeKey === getRuntimeKey()) return;
+  refreshVisibleQuotas(true);
+};
+
+const updateQuotaAutoRefresh = () => {
+  if (!hasVisibleQuotaReadout()) {
+    if (quotaAutoRefreshInterval !== null) window.clearInterval(quotaAutoRefreshInterval);
+    quotaAutoRefreshInterval = null;
+    return;
+  }
+  refreshVisibleQuotas();
+  if (quotaAutoRefreshInterval === null) quotaAutoRefreshInterval = window.setInterval(refreshVisibleQuotas, QUOTA_REFRESH_INTERVAL_MS);
+};
+
+export const useQuotaAutoRefresh = (visible = true, allProviders = false) => {
+  const isInitialized = useConfigStore(state => state.isInitialized);
+  const [nativeVisible, setNativeVisible] = React.useState(() => !isDesktopShell() && !isCapacitorApp());
+  React.useEffect(() => {
+    let disposed = false;
+    let removeListener: (() => void) | undefined;
+    const reportNativeVisibility = (value: boolean) => {
+      nativeQuotaWindowVisible = value;
+      setNativeVisible(value);
+      updateQuotaAutoRefresh();
+    };
+    if (isDesktopShell()) {
+      let revision = 0;
+      const onVisibility = (event: Event) => {
+        if (!(event instanceof CustomEvent) || (event.detail !== true && event.detail !== false)) return;
+        revision += 1;
+        reportNativeVisibility(event.detail);
+      };
+      window.addEventListener('openchamber:window-visibility', onVisibility);
+      void getDesktopWindowVisibility().then(value => {
+        if (!disposed && revision === 0) reportNativeVisibility(value === true);
+      }).catch(() => undefined);
+      removeListener = () => window.removeEventListener('openchamber:window-visibility', onVisibility);
+    } else if (isCapacitorApp()) {
+      void import('@capacitor/app').then(async ({ App }) => {
+        if (disposed) return;
+        let revision = 0;
+        const handle = await App.addListener('appStateChange', ({ isActive }) => {
+          revision += 1;
+          if (!disposed) reportNativeVisibility(isActive);
+        });
+        if (disposed) { void handle.remove(); return; }
+        removeListener = () => { void handle.remove(); };
+        const state = await App.getState();
+        if (!disposed && revision === 0) reportNativeVisibility(state.isActive);
+      }).catch(() => undefined);
+    }
+    return () => { disposed = true; removeListener?.(); };
+  }, []);
+  React.useEffect(() => {
+    if (!visible || !isInitialized || !nativeVisible) return;
+    const consumer = Symbol();
+    quotaAutoRefreshConsumers.set(consumer, allProviders);
+    if (quotaAutoRefreshConsumers.size === 1) document.addEventListener('visibilitychange', updateQuotaAutoRefresh);
+    updateQuotaAutoRefresh();
 
     return () => {
-      quotaAutoRefreshConsumers -= 1;
-      if (quotaAutoRefreshConsumers === 0 && quotaAutoRefreshInterval !== null) {
-        window.clearInterval(quotaAutoRefreshInterval);
-        quotaAutoRefreshInterval = null;
-      }
+      quotaAutoRefreshConsumers.delete(consumer);
+      if (quotaAutoRefreshConsumers.size === 0) document.removeEventListener('visibilitychange', updateQuotaAutoRefresh);
+      updateQuotaAutoRefresh();
     };
-  }, []);
+  }, [visible, allProviders, isInitialized, nativeVisible]);
+};
+
+export const useQuotaProviders = (): QuotaProviderMeta[] => {
+  const extensionProviders = useQuotaStore((state) => state.extensionProviders);
+  return React.useMemo(() => quotaProviderList(extensionProviders), [extensionProviders]);
 };

@@ -1,7 +1,6 @@
 import type { Message, Part } from "@/lib/opencode/model"
-import { mergeMessages } from "./optimistic"
+import { confirmedOptimisticIDs, mergeMessages, type OptimisticItem } from "./optimistic"
 import type { SessionMaterializationReason } from "./event-reducer"
-import { sortMessagesChronologically } from "./message-ordering"
 import { toolContentShellChars } from "@/lib/opencode/toolContentShells"
 
 const STREAMING_PART_FIELDS = ["text", "output"] as const
@@ -21,6 +20,7 @@ export type MaterializedState = {
 export type MaterializeSessionSnapshotsOptions = {
   skipPartTypes?: ReadonlySet<string>
   mode?: "merge" | "prepend"
+  placement?: "tail" | "head"
 }
 
 export type MaterializeSessionSnapshotsResult = {
@@ -29,6 +29,40 @@ export type MaterializeSessionSnapshotsResult = {
   messages: Message[]
   messagesChanged: boolean
   partsChanged: boolean
+}
+
+export function materializeFetchedSessionPage(
+  state: MaterializedState,
+  sessionID: string,
+  page: { session: Message[]; partsByMessageID: ReadonlyMap<string, Part[]> },
+  optimistic: Map<string, OptimisticItem>,
+  mode: "merge" | "prepend" | "replace" | "initial",
+): MaterializeSessionSnapshotsResult {
+  for (const messageID of confirmedOptimisticIDs(page, optimistic.values())) optimistic.delete(messageID)
+  const pageIDs = new Set(page.session.map((message) => message.id))
+  const outstanding = mode === "initial" || mode === "replace"
+    ? (state.message[sessionID] ?? []).filter((message) => !pageIDs.has(message.id) && optimistic.get(message.id)?.message === message)
+    : []
+  const base = outstanding.length === 0 ? state : {
+    ...state,
+    message: { ...state.message, [sessionID]: state.message[sessionID].filter((message) => !outstanding.includes(message)) },
+  }
+  let materialized = materializeSessionSnapshots(
+    base,
+    sessionID,
+    page.session.map((info) => ({ info, parts: page.partsByMessageID.get(info.id) ?? [] })),
+    mode === "prepend" ? { mode: "prepend" } : { placement: mode === "merge" ? "tail" : "head" },
+  )
+  const visibleIDs = new Set(materialized.messages.map((message) => message.id))
+  const missingOptimistic = [...new Set([...outstanding.map((message) => message.id), ...optimistic.keys()])]
+    .flatMap((messageID) => visibleIDs.has(messageID) ? [] : [optimistic.get(messageID)!])
+  if (missingOptimistic.length > 0) {
+    materialized = materializeSessionSnapshots(materialized, sessionID, missingOptimistic.map((item) => ({
+      info: item.message,
+      parts: item.parts,
+    })))
+  }
+  return materialized
 }
 
 export type SessionMaterializationStatus = {
@@ -125,9 +159,6 @@ function finalizeActiveToolsInCompletedMessage(message: Message, parts: Part[]):
 }
 
 function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): boolean {
-  // `undefined` means "parts never fetched", which is NOT equivalent to a
-  // fetched-empty snapshot — the empty array must be committed so
-  // getSessionMaterializationStatus can tell the two apart.
   if (!left) return false
   if (left.length !== right.length) return false
 
@@ -186,8 +217,6 @@ function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
   if (!existing) return next
 
   if (existing.type === "tool" && next.type === "tool") {
-    // A page carries finished results as shells. The whole call this client
-    // already holds (from the event stream, or a completed message) stays.
     if (
       existing.state.status === next.state.status
       && toolContentShellChars(next) !== null
@@ -205,10 +234,6 @@ function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
     ) {
       return existing
     }
-    // A snapshot fetched just before a call started can land after the live
-    // `called`/`progress` events. OpenCode publishes progress metadata only
-    // on change (a subagent's child `sessionID` exactly once), so letting the
-    // stale copy win would lose it until the call settles.
     if (existing.state.status === "running" && next.state.status === "pending") {
       return existing
     }
@@ -316,28 +341,28 @@ export function materializeSessionSnapshots(
       .filter((record) => !!record?.info?.id)
       .map((record) => [record.info.id, record] as const),
   )
-  const nextMessages = sortMessagesChronologically([...recordsByMessageID.values()].map((record) => record.info))
+  const nextMessages = [...recordsByMessageID.values()].map((record) => record.info)
   const snapshots = nextMessages.map((message) => recordsByMessageID.get(message.id)!)
   const existingMessages = state.message[sessionID]
   const currentMessages = existingMessages ?? []
   const incomingByID = new Map(nextMessages.map((message) => [message.id, message] as const))
   let reconciledCurrentMessages = currentMessages
+  const deliveredWhileAway = new Set<string>()
   for (let index = 0; index < currentMessages.length; index += 1) {
     const existing = currentMessages[index]
     const incoming = incomingByID.get(existing.id)
-    // A completion the server reports supersedes a turn this client still
-    // holds open, and the local interruption mark (`interruptedTurnToolParts`)
-    // it may have put on it. Any other existing record wins over the snapshot.
-    if (
-      existing.role !== "assistant"
-      || incoming?.role !== "assistant"
-      || incoming.time.completed === undefined
-      || (existing.time.completed !== undefined && !existing.closedLocally)
-    ) continue
+    const delivered = existing.role === "synthetic" && existing.pending === true && incoming?.role === "synthetic"
+    const completed = existing.role === "assistant"
+      && incoming?.role === "assistant"
+      && incoming.time.completed !== undefined
+      && (existing.time.completed === undefined || existing.closedLocally === true)
+    if (!incoming || (!delivered && !completed)) continue
+    if (delivered) deliveredWhileAway.add(existing.id)
     if (reconciledCurrentMessages === currentMessages) reconciledCurrentMessages = [...currentMessages]
     reconciledCurrentMessages[index] = incoming
   }
-  const messages = mergeMessages(reconciledCurrentMessages, nextMessages)
+  if (deliveredWhileAway.size > 0) reconciledCurrentMessages = reconciledCurrentMessages.filter((message) => !deliveredWhileAway.has(message.id))
+  const messages = mergeMessages(reconciledCurrentMessages, nextMessages, options.mode === "prepend" ? "older" : options.placement)
   const messagesChanged = messages !== currentMessages || (existingMessages === undefined && snapshots.length === 0)
 
   let partsChanged = false
@@ -357,9 +382,6 @@ export function materializeSessionSnapshots(
       isAssistant,
     )
     const nextParts = finalizeActiveToolsInCompletedMessage(record.info, mergedParts)
-    // For non-assistant messages an empty snapshot keeps the old "absent"
-    // representation; only assistant messages need the explicit [] marker
-    // (getSessionMaterializationStatus checks only assistant messages).
     const equivalent = existing
       ? haveEquivalentPartSnapshots(existing, nextParts)
       : nextParts.length === 0 && !isAssistant
@@ -370,10 +392,6 @@ export function materializeSessionSnapshots(
     if (nextParts.length === 0 && !isAssistant) {
       delete nextPartState[messageID]
     } else {
-      // Store fetched-empty as an explicit [] (not absence): an assistant
-      // message the server returned with zero parts (e.g. aborted before any
-      // output) is authoritatively empty and must count as renderable, or
-      // the ensure-renderable effects retry syncSession forever.
       nextPartState[messageID] = nextParts
     }
     partsChanged = true
@@ -388,9 +406,14 @@ export function materializeSessionSnapshots(
   }
 }
 
+export type SessionMaterializationStatusOptions = {
+  historyCovered?: boolean
+}
+
 export function getSessionMaterializationStatus(
   state: MaterializedState,
   sessionID: string,
+  options: SessionMaterializationStatusOptions = {},
 ): SessionMaterializationStatus {
   const messages = state.message[sessionID]
   if (!messages) {
@@ -400,19 +423,15 @@ export function getSessionMaterializationStatus(
   const missingPartMessageIDs: string[] = []
   for (const message of messages) {
     if (message.role !== "assistant") continue
-    // `undefined` = parts never fetched (not renderable yet). An explicit []
-    // is a fetched-empty snapshot (e.g. aborted assistant turn) and counts
-    // as renderable — otherwise sessions containing such a message can never
-    // reach renderable state and ensure-renderable callers loop forever.
     const parts = state.part[message.id]
-    if (!parts) {
-      missingPartMessageIDs.push(message.id)
-    }
+    if (parts) continue
+    if (options.historyCovered && message.time.completed === undefined) continue
+    missingPartMessageIDs.push(message.id)
   }
 
   return {
     hasMessages: true,
-    renderable: missingPartMessageIDs.length === 0,
+    renderable: options.historyCovered !== false && missingPartMessageIDs.length === 0,
     missingPartMessageIDs,
   }
 }

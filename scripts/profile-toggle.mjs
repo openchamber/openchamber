@@ -442,12 +442,15 @@ const locateControl = (client, kind, surface) => evaluateValue(client, `(() => {
  */
 const readEditorShown = (client, name) => evaluateValue(client, `(() => {
   const slot = document.querySelector("[data-right-slot]")
-  const content = slot?.querySelector(".cm-content")
+  // A file that opens rendered (Markdown) has no CodeMirror content: there
+  // the panel's card must hold the rendered text, well past its own chrome.
+  const editor = slot?.querySelector(".cm-content")
+  const content = editor ?? slot?.querySelector("[data-zone-card]")
   if (!content) return { shown: false, reason: "no editor in the panel" }
   const rect = content.getBoundingClientRect()
   const chars = (content.textContent ?? "").length
   const named = (slot.textContent ?? "").includes(${JSON.stringify(name)})
-  return { shown: rect.width > 0 && rect.height > 0 && chars > 0 && named, chars, width: Math.round(rect.width), named }
+  return { shown: rect.width > 0 && rect.height > 0 && chars > (editor ? 0 : 2000) && named, chars, width: Math.round(rect.width), named, rendered: !editor }
 })()`)
 
 const readIsOpen = (client, kind) => evaluateValue(client, `(${PAGE_IS_OPEN})(${JSON.stringify(kind)}, (${PAGE_TARGETS})[${JSON.stringify(kind)}]())`)

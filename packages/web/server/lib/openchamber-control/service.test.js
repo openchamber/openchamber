@@ -9,11 +9,238 @@ import { OpenChamberControlError } from './error.js';
 import { createScheduledTaskService } from '../scheduled-tasks/service.js';
 import { createChatsScope } from '../scheduled-tasks/chats-scope.js';
 import { createExistingSessionTasks } from '../scheduled-tasks/existing-session.js';
+import { createProjectConfigRuntime } from '../projects/project-config.js';
+import { createPrWatchRuntime } from '../pr-watch/runtime.js';
+import { createLaterPages } from './later-pages.js';
+
+const createPersistedScheduleService = async (schedule) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-schedule-'));
+  let failRename = false;
+  let syncsUntilFailure = 0;
+  let syncWritesState = false;
+  const config = createProjectConfigRuntime({
+    fsPromises: {
+      ...fs,
+      rename: async (...args) => {
+        if (failRename) throw new Error('fixture atomic rename failed');
+        return fs.rename(...args);
+      },
+    },
+    path,
+    projectsDirPath: root,
+  });
+  const history = {
+    createdAt: 100, lastRunAt: 150, lastDurationMs: 20,
+    lastStatus: 'sent', lastSessionId: 'ses_history', lastScheduledFor: 140,
+  };
+  const task = {
+    id: 'task-persisted', name: 'Keep this name', enabled: false,
+    schedule: { ...schedule, timezone: 'Pacific/Auckland' },
+    execution: { prompt: 'Keep this prompt', providerID: 'provider', modelID: 'model', agent: 'build', variant: 'high' },
+    runInWorktree: true, baseBranch: 'main', cleanupWorktree: false, state: { ...history, updatedAt: 200 },
+  };
+  const unrelated = { ...task, id: 'task-other', name: 'Other task' };
+  const file = config.resolveProjectConfigPath('project-1');
+  await fs.writeFile(file, JSON.stringify({ version: 1, custom: { keep: 'settings' }, scheduledTasks: [task, unrelated] }));
+  const readSettingsFromDiskMigrated = async () => ({ projects: [{ id: 'project-1', path: root }] });
+  const scheduledTaskService = createScheduledTaskService({
+    readSettingsFromDiskMigrated,
+    sanitizeProjects: (projects) => projects,
+    projectConfigRuntime: config,
+    // Exercise service and storage together without starting timers or dispatching.
+    scheduledTasksRuntime: {
+      syncProject: async (id) => {
+        if (syncsUntilFailure > 0 && --syncsUntilFailure === 0) throw new Error('fixture scheduler sync failed');
+        if (syncWritesState) {
+          for (const { id: taskId } of await config.listScheduledTasks(id)) await config.updateScheduledTaskState(id, taskId, { updatedAt: Date.now() });
+        }
+        return config.listScheduledTasks(id);
+      },
+    },
+  });
+  const upsert = vi.spyOn(scheduledTaskService, 'upsert');
+  const { service } = createService({ scheduledTaskService });
+  return {
+    upsert, task, history, unrelated,
+    update: (input) => service.execute('schedule.update', { projectId: 'project-1', taskId: task.id, ...input }),
+    create: (input) => service.execute('schedule.create', { projectId: 'project-1', daily: '09:00', model: 'provider/model', ...input }),
+    bytes: () => fs.readFile(file, 'utf8'),
+    read: async () => JSON.parse(await fs.readFile(file, 'utf8')),
+    failWrite: (value) => { failRename = value; },
+    failPostSaveSync: () => { syncsUntilFailure = 2; },
+    syncWritesState: () => { syncWritesState = true; },
+    cleanup: () => fs.rm(root, { recursive: true, force: true }),
+  };
+};
+
+describe('persisted schedule.update patches', () => {
+  it.each([
+    [{ kind: 'once', date: '2099-05-06', time: '09:00' }, { kind: 'once', date: '2099-05-06', time: '13:45', timezone: 'Pacific/Auckland' }],
+    [{ kind: 'weekly', weekdays: [1, 4], times: ['09:00'] }, { kind: 'weekly', weekdays: [1, 4], times: ['13:45'], timezone: 'Pacific/Auckland' }],
+  ])('persists a time-only patch for %j with identity, settings and history intact', async (schedule, expected) => {
+    const fixture = await createPersistedScheduleService(schedule);
+    try {
+      const result = await fixture.update({ time: '13:45' });
+      const saved = await fixture.read();
+      expect(result.task.schedule).toEqual(expected);
+      expect(saved.scheduledTasks[0]).toMatchObject({ ...fixture.task, schedule: expected, state: fixture.history });
+      expect(saved.scheduledTasks[1]).toEqual(fixture.unrelated);
+      expect(saved.custom).toEqual({ keep: 'settings' });
+      await fixture.update({ time: '14:15', timezone: 'Europe/Kyiv' });
+      expect((await fixture.read()).scheduledTasks[0].schedule).toEqual({
+        ...expected, ...(schedule.kind === 'once' ? { time: '14:15' } : { times: ['14:15'] }), timezone: 'Europe/Kyiv',
+      });
+    } finally { await fixture.cleanup(); }
+  });
+
+  it.each([
+    { once: '2099-07-08', time: '11:30' },
+    { weekly: '2,5', time: '11:30' },
+    { daily: '11:30' },
+    { cron: '30 11 * * *' },
+  ])('inherits omitted timezone on schedule replacement %j and accepts an explicit replacement', async (input) => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      await fixture.update(input);
+      expect((await fixture.read()).scheduledTasks[0].schedule.timezone).toBe('Pacific/Auckland');
+      await fixture.update({ ...input, timezone: 'Europe/Kyiv' });
+      expect((await fixture.read()).scheduledTasks[0].schedule.timezone).toBe('Europe/Kyiv');
+    } finally { await fixture.cleanup(); }
+  });
+
+  it.each(['', ' ', '24:00', '12:60', '9:00', 'noon', null, 900])('rejects invalid time %j without changing bytes and permits recovery', async (time) => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      const before = await fixture.bytes();
+      await expect(fixture.update({ time })).rejects.toMatchObject({ statusCode: 400 });
+      expect(fixture.upsert).not.toHaveBeenCalled();
+      expect(await fixture.bytes()).toBe(before);
+      await fixture.update({ time: '13:45' });
+      expect((await fixture.read()).scheduledTasks[0].schedule.time).toBe('13:45');
+    } finally { await fixture.cleanup(); }
+  });
+
+  it.each([
+    [{ kind: 'daily', times: ['09:00'] }, { time: '13:45' }],
+    [{ kind: 'cron', cron: '0 9 * * *' }, { time: '13:45' }],
+    [{ kind: 'weekly', weekdays: [1, 4], times: ['09:00', '17:00'] }, { time: '13:45' }],
+    [{ kind: 'weekly', weekdays: [1, 4], times: ['09:00'] }, { weekly: '1,4', time: '25:00' }],
+    [{ kind: 'weekly', weekdays: [1, 4], times: ['09:00'] }, { weekly: '1,4', time: '' }],
+    [{ kind: 'once', date: '2099-05-06', time: '09:00' }, { daily: '10:00', time: '13:45' }],
+    [{ kind: 'once', date: '2099-05-06', time: '09:00' }, { cron: '0 10 * * *', time: '13:45' }],
+    [{ kind: 'once', date: '2099-05-06', time: '09:00' }, { once: '', time: '13:45' }],
+    [{ kind: 'once', date: '2099-05-06', time: '09:00' }, { once: '2099-05-06', weekly: '1', time: '13:45' }],
+  ])('rejects incompatible or ambiguous patch %j %j before saving', async (schedule, input) => {
+    const fixture = await createPersistedScheduleService(schedule);
+    try {
+      const before = await fixture.bytes();
+      await expect(fixture.update(input)).rejects.toMatchObject({ statusCode: 400 });
+      expect(fixture.upsert).not.toHaveBeenCalled();
+      expect(await fixture.bytes()).toBe(before);
+      await fixture.update({ name: 'Recovered' });
+      expect((await fixture.read()).scheduledTasks[0].name).toBe('Recovered');
+    } finally { await fixture.cleanup(); }
+  });
+
+  it.each([
+    ['prompt', 20_000, 'execution.prompt is invalid: at most 20000 characters'],
+    ['name', 80, 'task.name is invalid: at most 80 characters'],
+  ])('refuses a %s over the limit on update and create, and saves one at the limit whole', async (field, limit, message) => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      fixture.syncWritesState();
+      const withoutState = ({ scheduledTasks, ...rest }) => ({ ...rest, scheduledTasks: scheduledTasks.map(({ state: _state, ...task }) => task) });
+      const before = await fixture.read();
+      await expect(fixture.update({ [field]: 'x'.repeat(limit + 1) })).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+      await expect(fixture.create({ name: 'New', prompt: 'Run', [field]: 'x'.repeat(limit + 1) })).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+      const after = await fixture.read();
+      expect(withoutState(after)).toEqual(withoutState(before));
+      expect(after.scheduledTasks[0].state.updatedAt).not.toBe(before.scheduledTasks[0].state.updatedAt);
+
+      await fixture.update({ [field]: 'x'.repeat(limit) });
+      const saved = (await fixture.read()).scheduledTasks[0];
+      expect(field === 'name' ? saved.name : saved.execution.prompt).toBe('x'.repeat(limit));
+      await fixture.create({ name: 'New', prompt: 'Run', [field]: 'y'.repeat(limit) });
+      expect((await fixture.read()).scheduledTasks).toHaveLength(3);
+    } finally { await fixture.cleanup(); }
+  });
+
+  it('refuses a source branch over 200 characters as a client error, not a server error', async () => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      const before = await fixture.bytes();
+      await expect(fixture.update({ runInWorktree: true, baseBranch: 'b'.repeat(201) }))
+        .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('baseBranch is invalid: at most 200 characters, got 201') });
+      expect(await fixture.bytes()).toBe(before);
+      await fixture.update({ runInWorktree: true, baseBranch: 'b'.repeat(200) });
+      expect((await fixture.read()).scheduledTasks[0].baseBranch).toBe('b'.repeat(200));
+    } finally { await fixture.cleanup(); }
+  });
+
+  it('refuses a source branch with a space or control character as a client error', async () => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      const before = await fixture.bytes();
+      for (const baseBranch of ['feature/with space', 'feature/tab\there']) {
+        await expect(fixture.update({ runInWorktree: true, baseBranch }))
+          .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('baseBranch is invalid: a branch name cannot contain spaces or control characters') });
+      }
+      expect(await fixture.bytes()).toBe(before);
+    } finally { await fixture.cleanup(); }
+  });
+
+  it.each([
+    ['kind', { kind: 'hourly' }, 'schedule.kind is invalid'],
+    ['timezone', { kind: 'daily', times: ['09:00'], timezone: 'Mars/Base' }, 'schedule.timezone is invalid'],
+    ['times entry', { kind: 'daily', times: ['9am'] }, 'schedule.times is invalid'],
+    ['daily without times', { kind: 'daily', times: [] }, 'schedule.times is invalid'],
+    ['weekly without times', { kind: 'weekly', weekdays: [1] }, 'schedule.times is invalid'],
+    ['weekdays', { kind: 'weekly', times: ['09:00'], weekdays: [7] }, 'schedule.weekdays is invalid'],
+    ['once date', { kind: 'once', date: '2099-13-40', time: '09:00' }, 'schedule.date is invalid'],
+    ['once time', { kind: 'once', date: '2099-05-06', time: '25:00' }, 'schedule.time is invalid'],
+  ])('refuses a bad schedule %s as a client error, not a server error', async (_name, schedule, message) => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      const before = await fixture.bytes();
+      await expect(fixture.upsert('project-1', { ...fixture.task, schedule }))
+        .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+      expect(await fixture.bytes()).toBe(before);
+    } finally { await fixture.cleanup(); }
+  });
+
+  it('preserves bytes on an atomic write failure and recovers on the next update', async () => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      const before = await fixture.bytes();
+      fixture.failWrite(true);
+      await expect(fixture.update({ time: '13:45' })).rejects.toThrow('fixture atomic rename failed');
+      expect(await fixture.bytes()).toBe(before);
+      fixture.failWrite(false);
+      await fixture.update({ time: '14:15' });
+      expect((await fixture.read()).scheduledTasks[0].schedule.time).toBe('14:15');
+    } finally { await fixture.cleanup(); }
+  });
+
+  it('reports post-save scheduler failure while retaining the committed patch', async () => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      fixture.failPostSaveSync();
+      await expect(fixture.update({ time: '13:45' })).rejects.toThrow('fixture scheduler sync failed');
+      expect((await fixture.read()).scheduledTasks[0].schedule.time).toBe('13:45');
+      await fixture.update({ time: '14:15' });
+      expect((await fixture.read()).scheduledTasks[0].schedule.time).toBe('14:15');
+    } finally { await fixture.cleanup(); }
+  });
+});
+
+// What session.list adds to a session outside In work while In work is on.
+const NOT_IN_WORK = { inWork: false, doneSuggested: false };
 
 const createService = (overrides = {}) => {
   const client = {
     session: {
       list: vi.fn(async () => ({ data: [] })),
+      get: vi.fn(async ({ sessionID }) => ({ id: sessionID })),
       active: vi.fn(async () => ({})),
       inbox: { list: vi.fn(async () => []) },
     },
@@ -67,6 +294,33 @@ const createService = (overrides = {}) => {
 };
 
 describe('OpenChamber control service', () => {
+  it('omits empty answer messages and forwards nonempty messages unchanged', async () => {
+    const { service, client } = createService();
+    client.session.list.mockResolvedValue({ data: [{ id: 'ses_1', location: { directory: '/repo' } }] });
+    const reply = vi.fn(async () => {});
+    const cancel = vi.fn(async () => {});
+    client.permission = { reply };
+    client.session.form = { cancel };
+    for (const message of [undefined, null, '', ' Keep this spacing ']) {
+      await service.answerPermission({ sessionID: 'ses_1', requestID: 'per_1', decision: 'reject', message });
+      await service.answerForm({ sessionID: 'ses_1', formID: 'frm_1', answer: null, message });
+    }
+    expect(reply.mock.calls).toEqual([
+      [{ sessionID: 'ses_1', requestID: 'per_1', decision: 'reject' }],
+      [{ sessionID: 'ses_1', requestID: 'per_1', decision: 'reject' }],
+      [{ sessionID: 'ses_1', requestID: 'per_1', decision: 'reject' }],
+      [{ sessionID: 'ses_1', requestID: 'per_1', decision: 'reject', message: ' Keep this spacing ' }],
+    ]);
+    expect(cancel.mock.calls).toEqual([
+      [{ sessionID: 'ses_1', formID: 'frm_1' }],
+      [{ sessionID: 'ses_1', formID: 'frm_1' }],
+      [{ sessionID: 'ses_1', formID: 'frm_1' }],
+      [{ sessionID: 'ses_1', formID: 'frm_1', message: ' Keep this spacing ' }],
+    ]);
+    expect(reply.mock.calls[0][0]).not.toHaveProperty('message');
+    expect(cancel.mock.calls[0][0]).not.toHaveProperty('message');
+  });
+
   it('creates a target task with inherited selection and accepts retargeting on update', async () => {
     const { service, scheduledTaskService } = createService();
     scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task }));
@@ -119,6 +373,21 @@ describe('OpenChamber control service', () => {
     expect(paged).toMatchObject({ models: [{ id: 'a/new' }], total: 2, next: 1 });
   });
 
+  it('keeps every model released with the newest of its family', async () => {
+    const model = (id, released) => ({ providerID: 'z', id, name: id, family: 'glm', time: { released }, variants: [], cost: [], status: 'active' });
+    const { service, client } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({ favoriteModels: [], recentModels: [], hiddenModels: [] })),
+    });
+    client.model = { list: vi.fn(async () => ({ data: [model('glm-5.3-highspeed', 2), model('glm-5.2', 1), model('glm-5.3', 2)] })) };
+    client.provider = { list: vi.fn(async () => ({ data: [{ id: 'z', name: 'Zed' }] })) };
+
+    const found = await service.execute('models.search', { query: 'glm' }, '/repo');
+    expect(found.models.map(({ id }) => id).toSorted()).toEqual(['z/glm-5.3', 'z/glm-5.3-highspeed']);
+    // An older version asked for by name still shows when nothing newer matches.
+    const older = await service.execute('models.search', { query: 'glm-5.2' }, '/repo');
+    expect(older.models.map(({ id }) => id)).toEqual(['z/glm-5.2']);
+  });
+
   it('maps schedule creation into the shared scheduled-task service', async () => {
     const { service, scheduledTaskService } = createService();
     scheduledTaskService.upsert.mockResolvedValue({ task: { id: 'task-1' }, created: true });
@@ -139,180 +408,96 @@ describe('OpenChamber control service', () => {
     }));
   });
 
-  it('rejects a model that is not in the catalog when schedule.create names one', async () => {
-    const { service, client, scheduledTaskService } = createService();
-    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: true }));
-    // A removed provider or a deleted model is a create-time error, not a
-    // provider.no-route hours later in a throwaway session (#5950).
-    await expect(service.execute('schedule.create', {
-      directory: '/repo',
-      name: 'Dead',
-      prompt: 'Run checks',
-      model: 'gone/dead',
-      daily: '09:00',
-    }, '/repo')).rejects.toThrow('unknown model: gone/dead');
-    expect(scheduledTaskService.upsert).not.toHaveBeenCalled();
-    expect(client.model.list).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not reject a named model when the project catalog has not loaded yet', async () => {
-    // A cold location's first catalog read answers empty and fills in about
-    // two seconds later; an empty answer is not evidence of absence, so the
-    // check stands down instead of rejecting a model that would fire fine.
-    const { service, client, scheduledTaskService } = createService();
-    client.model.list.mockResolvedValue({ data: [] });
-    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: true }));
-    await expect(service.execute('schedule.create', {
-      directory: '/repo',
-      name: 'Early',
-      prompt: 'Run checks',
-      model: 'provider/model',
-      daily: '09:00',
-    }, '/repo')).resolves.toEqual({ task: expect.objectContaining({ name: 'Early' }), created: true });
-    expect(scheduledTaskService.upsert).toHaveBeenCalledTimes(1);
-  });
-
-  it('accepts the upstream modelID of a catalog entry whose id is a display override', async () => {
-    // `findCatalogModel` matches `id` first and falls back to `modelID`
-    // because the fire path dispatches `modelID` upstream; a schedule create
-    // must not reject a string the session path accepts and that fires fine.
-    const { service, client, scheduledTaskService } = createService();
-    client.model.list.mockResolvedValue({ data: [
-      { providerID: 'p', id: 'display-override', modelID: 'upstream-name' },
-    ] });
-    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: true }));
-
-    await expect(service.execute('schedule.create', {
-      directory: '/repo',
-      name: 'Upstream',
-      prompt: 'Run checks',
-      model: 'p/upstream-name',
-      daily: '09:00',
-    }, '/repo')).resolves.toEqual({ task: expect.objectContaining({ name: 'Upstream' }), created: true });
-
-    await expect(service.execute('schedule.create', {
-      directory: '/repo',
-      name: 'Display',
-      prompt: 'Run checks',
-      model: 'p/display-override',
-      daily: '09:00',
-    }, '/repo')).resolves.toEqual({ task: expect.objectContaining({ name: 'Display' }), created: true });
-
-    await expect(service.execute('schedule.create', {
-      directory: '/repo',
-      name: 'Dead',
-      prompt: 'Run checks',
-      model: 'p/neither',
-      daily: '09:00',
-    }, '/repo')).rejects.toThrow('unknown model: p/neither');
-  });
-
-  it('validates the model of a target-session task too, and accepts a known one', async () => {
+  it('creates an isolated task and refuses isolation with an existing session', async () => {
     const { service, scheduledTaskService } = createService();
-    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: true }));
-    await expect(service.execute('schedule.create', {
-      directory: '/repo',
-      name: 'Pinned',
-      prompt: 'Run checks',
-      model: 'gone/dead',
-      daily: '09:00',
-      targetSessionId: 'ses_target',
-    }, '/repo')).rejects.toThrow('unknown model: gone/dead');
+    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task }));
 
     const created = await service.execute('schedule.create', {
-      directory: '/repo',
-      name: 'Known',
-      prompt: 'Run checks',
-      model: 'provider/model',
-      daily: '09:00',
-      targetSessionId: 'ses_target',
+      name: 'Isolated', prompt: 'Run isolated', daily: '09:00', model: 'provider/model',
+      runInWorktree: true, baseBranch: 'develop', cleanupWorktree: false,
     }, '/repo');
-    expect(created.task.execution).toMatchObject({ providerID: 'provider', modelID: 'model' });
+    expect(created.task).toMatchObject({ runInWorktree: true, baseBranch: 'develop', cleanupWorktree: false });
+
+    await expect(service.execute('schedule.create', {
+      name: 'Bad', prompt: 'x', daily: '09:00', model: 'provider/model', targetSessionId: 'ses_target', runInWorktree: true,
+    }, '/repo')).rejects.toThrow('not compatible with an existing session');
+
+    await expect(service.execute('schedule.create', {
+      name: 'Bad', prompt: 'x', daily: '09:00', model: 'provider/model', targetSessionId: 'ses_target', baseBranch: 'main',
+    }, '/repo')).rejects.toThrow('not compatible with an existing session');
   });
 
-  it.each(['schedule.create', 'schedule.update'])('uses the Chats catalog across storage and public IDs for %s', async (action) => {
-    const chatsScope = createChatsScope('/chats');
-    const task = { id: 'task-1', name: 'Chats', execution: { prompt: 'Run', providerID: 'p', modelID: 'old' } };
-    const projectConfigRuntime = { listScheduledTasks: vi.fn(async () => [task]) };
-    const scheduledTaskService = createScheduledTaskService({
-      chatsScope,
-      readSettingsFromDiskMigrated: async () => ({ projects: [{ id: 'project-1', path: '/repo' }] }),
-      sanitizeProjects: (projects) => projects,
-      projectConfigRuntime,
-      scheduledTasksRuntime: { syncProject: async () => [task] },
-    });
-    vi.spyOn(scheduledTaskService, 'upsert').mockImplementation(async (_project, saved) => ({ task: saved }));
-    const { service } = createService({
-      scheduledTaskService,
-      createClient: ({ headers }) => ({
-        model: { list: async () => ({ data: [{ providerID: 'p', id: decodeURIComponent(headers['x-opencode-directory']) === '/chats' ? 'chat' : 'checkout' }] }) },
-      }),
-    });
-    const input = { projectId: 'openchamber:chats', taskId: 'task-1', name: 'Chats', prompt: 'Run', daily: '09:00' };
-    await expect(service.execute(action, { ...input, model: 'p/chat' }, '/repo')).resolves.toHaveProperty('task');
-    expect(scheduledTaskService.upsert).toHaveBeenCalledWith(chatsScope.id, expect.any(Object));
-    await expect(service.execute(action, { ...input, model: 'p/checkout' }, '/repo')).rejects.toThrow('unknown model: p/checkout');
-    expect(scheduledTaskService.upsert).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([
-    ['schedule.create', { targetSessionId: 'ses_target' }, '/worktree'],
-    ['schedule.update', {}, '/worktree'],
-    ['schedule.update', { targetSessionId: 'ses_other' }, '/other-worktree'],
-    ['schedule.update', { targetSessionId: '' }, '/repo'],
-  ])('validates the effective target catalog for %s with %j', async (action, target, directory) => {
-    const projects = [{ id: 'project-1', path: '/repo' }];
-    const task = { id: 'task-1', name: 'Pinned', targetSessionId: 'ses_target', execution: { prompt: 'Run', providerID: 'p', modelID: 'old' } };
-    const existingSessionTasks = createExistingSessionTasks({
-      listProjects: async () => projects,
-      createClient: () => ({ session: { get: async ({ sessionID }) => ({
-        id: sessionID, location: { directory: sessionID === 'ses_target' ? '/worktree' : '/other-worktree' },
-      }) } }),
-      resolvePrimaryWorktreeRoot: async () => ({ root: '/repo' }),
-    });
-    const scheduledTaskService = createScheduledTaskService({
-      readSettingsFromDiskMigrated: async () => ({ projects }),
-      sanitizeProjects: (entries) => entries,
-      scheduledTasksRuntime: { syncProject: async () => [task], validateTarget: existingSessionTasks.validateTarget },
-    });
-    vi.spyOn(scheduledTaskService, 'upsert').mockImplementation(async (_project, saved) => ({ task: saved }));
-    const { service } = createService({
-      scheduledTaskService,
-      createClient: ({ headers }) => ({
-        model: { list: async () => ({ data: [{ providerID: 'p', id: decodeURIComponent(headers['x-opencode-directory']) === directory ? 'selected' : 'wrong-directory' }] }) },
-      }),
-    });
-    const input = { projectId: 'project-1', taskId: 'task-1', name: 'Pinned', prompt: 'Run', daily: '09:00', ...target };
-    await expect(service.execute(action, { ...input, model: 'p/selected' }, '/repo')).resolves.toHaveProperty('task');
-    await expect(service.execute(action, { ...input, model: 'p/wrong-directory' }, '/repo')).rejects.toThrow('unknown model: p/wrong-directory');
-    expect(scheduledTaskService.upsert).toHaveBeenCalledTimes(1);
-  });
-
-  it('checks only the model an update names, so a stored dead model stays editable', async () => {
-    const { service, client, scheduledTaskService } = createService();
+  it('updates isolation fields in place and clears the base branch on an empty value', async () => {
+    const { service, scheduledTaskService } = createService();
     const existing = {
-      id: 'task-1',
-      name: 'Nightly',
-      enabled: true,
-      schedule: { kind: 'daily', times: ['09:00'] },
-      execution: { prompt: 'Old', providerID: 'gone', modelID: 'dead' },
+      id: 'task-1', name: 'Nightly', enabled: true,
+      schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
+      execution: { prompt: 'Old', providerID: 'a', modelID: 'm' },
+      state: { lastRunAt: 5, lastStatus: 'success' },
     };
     scheduledTaskService.list.mockResolvedValue([existing]);
     scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: false }));
 
-    // Disabling or retiming a task whose stored model has vanished must not
-    // require fixing the model first.
-    await service.execute('schedule.update', { taskId: 'task-1', disabled: false, timezone: 'UTC' }, '/repo');
-    expect(client.model.list).not.toHaveBeenCalled();
+    await service.execute('schedule.update', { taskId: 'task-1', runInWorktree: true, baseBranch: 'develop', cleanupWorktree: false }, '/repo');
+    expect(scheduledTaskService.upsert.mock.calls[0][1]).toMatchObject({ runInWorktree: true, baseBranch: 'develop', cleanupWorktree: false });
 
-    await expect(service.execute('schedule.update', {
-      taskId: 'task-1',
-      model: 'gone/dead',
-    }, '/repo')).rejects.toThrow('unknown model: gone/dead');
-    expect(scheduledTaskService.upsert).toHaveBeenCalledTimes(1);
+    const isolated = { ...existing, runInWorktree: true, baseBranch: 'develop', cleanupWorktree: false };
+    scheduledTaskService.list.mockResolvedValue([isolated]);
+    await service.execute('schedule.update', { taskId: 'task-1', baseBranch: '' }, '/repo');
+    const cleared = scheduledTaskService.upsert.mock.calls[1][1];
+    // Only the named field changes: the store merges the untouched isolation choices.
+    expect(cleared).not.toHaveProperty('runInWorktree');
+    expect(cleared).not.toHaveProperty('cleanupWorktree');
+    expect(cleared.baseBranch).toBeNull();
 
-    await service.execute('schedule.update', { taskId: 'task-1', model: 'b/n' }, '/repo');
-    expect(scheduledTaskService.upsert.mock.calls[1][1].execution).toMatchObject({ providerID: 'b', modelID: 'n' });
+    scheduledTaskService.list.mockResolvedValue([{ ...existing, targetSessionId: 'ses_1' }]);
+    await expect(service.execute('schedule.update', { taskId: 'task-1', baseBranch: 'main' }, '/repo'))
+      .rejects.toThrow('not compatible with an existing session');
+  });
+
+  it.each([
+    ['runInWorktree', 'true', 'runInWorktree must be a boolean'],
+    ['runInWorktree', null, 'runInWorktree must be a boolean'],
+    ['cleanupWorktree', 'false', 'cleanupWorktree must be a boolean'],
+    ['cleanupWorktree', 0, 'cleanupWorktree must be a boolean'],
+    ['baseBranch', 42, 'baseBranch must be a branch name'],
+    ['baseBranch', '   ', 'baseBranch must be a branch name'],
+  ])('refuses %s %j on create and update without writing', async (field, value, message) => {
+    const { service, scheduledTaskService } = createService();
+    const existing = {
+      id: 'task-1', name: 'Nightly', enabled: true, baseBranch: 'develop', runInWorktree: true,
+      schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
+      execution: { prompt: 'Old', providerID: 'a', modelID: 'm' },
+    };
+    scheduledTaskService.list.mockResolvedValue([existing]);
+
+    await expect(service.execute('schedule.create', {
+      name: 'Bad', prompt: 'x', daily: '09:00', model: 'provider/model', [field]: value,
+    }, '/repo')).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+    await expect(service.execute('schedule.update', { taskId: 'task-1', [field]: value }, '/repo'))
+      .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+
+    expect(scheduledTaskService.upsert).not.toHaveBeenCalled();
+  });
+
+  it('keeps a stored base branch unless the update names it', async () => {
+    const { service, scheduledTaskService } = createService();
+    const existing = {
+      id: 'task-1', name: 'Nightly', enabled: true, baseBranch: 'develop', runInWorktree: true,
+      schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
+      execution: { prompt: 'Old', providerID: 'a', modelID: 'm' },
+    };
+    scheduledTaskService.list.mockResolvedValue([existing]);
+    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: false }));
+
+    await service.execute('schedule.update', { taskId: 'task-1', prompt: 'New' }, '/repo');
+    await service.execute('schedule.update', { taskId: 'task-1', baseBranch: null }, '/repo');
+    await service.execute('schedule.update', { taskId: 'task-1', baseBranch: ' release ' }, '/repo');
+
+    const [omitted, cleared, replaced] = scheduledTaskService.upsert.mock.calls.map(([, task]) => task);
+    expect(omitted).not.toHaveProperty('baseBranch');
+    expect(cleared.baseBranch).toBeNull();
+    expect(replaced.baseBranch).toBe('release');
   });
 
   it('updates a scheduled task in place, changing only the named fields', async () => {
@@ -436,6 +621,12 @@ describe('OpenChamber control service', () => {
       .resolves.toEqual({ task: 'worktree', title: 'Login fix', named: true });
     expect(setWorktreeTaskTitle).toHaveBeenCalledWith('/wt/a', { title: 'Login fix', by: 'agent' });
 
+    client.session.get = vi.fn(async () => ({ id: 'ses_caller', title: 'Original title', location: { directory: '/repo' } }));
+    client.session.update = vi.fn();
+    await expect(service.execute('work.name', { title: 'Agent replacement' }, '/repo', { contextSessionId: 'ses_caller' }))
+      .resolves.toMatchObject({ named: false, title: 'Original title' });
+    expect(client.session.update).not.toHaveBeenCalled();
+
     const { service: without } = createService();
     await expect(without.execute('work.name', { title: 'Login fix' }, '/repo', { contextSessionId: 'ses_caller' }))
       .rejects.toMatchObject({ statusCode: 503 });
@@ -550,6 +741,17 @@ describe('OpenChamber control service', () => {
     expect(client.session.list).toHaveBeenCalledTimes(2);
   });
 
+  it('prefers the session by-id location over a stale copy in the global list', async () => {
+    const { service, client } = createService();
+    client.session.get.mockResolvedValue({ id: 'ses_target', location: { directory: '/repo/real' } });
+    client.session.list.mockResolvedValue({
+      data: [{ id: 'ses_target', location: { directory: '/repo/stale' } }],
+    });
+
+    await expect(service.resolveSessionDirectory('ses_target')).resolves.toBe('/repo/real');
+    expect(client.session.list).not.toHaveBeenCalled();
+  });
+
   it('keeps paging session.list until the requested limit is satisfied', async () => {
     const { service, client } = createService();
     client.session.list
@@ -558,14 +760,14 @@ describe('OpenChamber control service', () => {
 
     await expect(service.execute('session.list', { limit: 2 })).resolves.toEqual({
       sessions: [
-        { id: 'ses_1', location: { directory: '/repo' }, time: {} },
-        { id: 'ses_2', location: { directory: '/other' }, time: {} },
+        { id: 'ses_1', directory: '/repo', ...NOT_IN_WORK },
+        { id: 'ses_2', directory: '/other', ...NOT_IN_WORK },
       ],
       limit: 2,
       directory: null,
       archived: 'excluded',
     });
-    expect(client.session.list).toHaveBeenNthCalledWith(2, { cursor: 'page-2' });
+    expect(client.session.list).toHaveBeenNthCalledWith(2, { parentID: null, cursor: 'page-2' });
   });
 
   it('stops paging the session list when a cursor repeats', async () => {
@@ -577,7 +779,7 @@ describe('OpenChamber control service', () => {
 
     const { sessions } = await service.execute('session.list', { limit: 10 });
 
-    expect(sessions).toEqual([{ id: 'ses_1', location: { directory: '/repo' }, time: {} }]);
+    expect(sessions).toEqual([{ id: 'ses_1', directory: '/repo', ...NOT_IN_WORK }]);
     expect(client.session.list).toHaveBeenCalledTimes(2);
   });
 
@@ -638,9 +840,9 @@ describe('OpenChamber control service', () => {
 
     await expect(service.execute('session.list', { limit: 10, withStatus: true })).resolves.toEqual({
       sessions: [
-        { id: 'ses_active', location: { directory: '/repo' }, time: {}, status: { type: 'busy' } },
-        { id: 'ses_restored', location: { directory: '/repo' }, time: {}, status: { type: 'idle' } },
-        { id: 'ses_other', location: { directory: '/other' }, time: {}, status: { type: 'idle' } },
+        { id: 'ses_active', directory: '/repo', ...NOT_IN_WORK, status: { type: 'busy' } },
+        { id: 'ses_restored', directory: '/repo', ...NOT_IN_WORK, status: { type: 'idle' } },
+        { id: 'ses_other', directory: '/other', ...NOT_IN_WORK, status: { type: 'idle' } },
       ],
       limit: 10,
       directory: null,
@@ -654,7 +856,7 @@ describe('OpenChamber control service', () => {
     client.session.active.mockRejectedValue(new Error('unavailable'));
 
     await expect(service.execute('session.list', { limit: 10, withStatus: true })).resolves.toEqual({
-      sessions: [{ id: 'ses_active', location: { directory: '/repo' }, time: {}, status: { type: 'unknown' } }],
+      sessions: [{ id: 'ses_active', directory: '/repo', ...NOT_IN_WORK, status: { type: 'unknown' } }],
       limit: 10,
       directory: null,
       archived: 'excluded',
@@ -666,13 +868,23 @@ describe('OpenChamber control service', () => {
     client.session.list.mockResolvedValue({ data: [{ id: 'ses_repo', location: { directory: '/repo' }, time: {} }] });
 
     await expect(service.execute('session.list', { projectId: ' project-1 ' }, '/current-session')).resolves.toEqual(
-      expect.objectContaining({ directory: '/repo', sessions: [{ id: 'ses_repo', location: { directory: '/repo' }, time: {} }] }),
+      expect.objectContaining({ directory: '/repo', sessions: [{ id: 'ses_repo', directory: '/repo', ...NOT_IN_WORK }] }),
     );
     expect(sessionService.resolveDirectory).toHaveBeenCalledWith({ projectId: 'project-1' });
-    expect(client.session.list).toHaveBeenCalledWith({ directory: '/repo' });
+    expect(client.session.list).toHaveBeenCalledWith({ directory: '/repo', parentID: null });
 
     await expect(service.execute('session.status', { projectId: 'project-1', sessionId: 'ses_repo' }, '/current-session'))
       .resolves.toEqual({ sessionId: 'ses_repo', directory: '/repo', sessionStatus: { type: 'idle' } });
+  });
+
+  it('reads an unscoped session where it lives instead of the tool context directory', async () => {
+    const { service, client } = createService();
+    client.session.get.mockResolvedValue({ id: 'ses_moved', location: { directory: '/repo/worktrees/moved' } });
+
+    await expect(service.execute('session.status', { sessionId: 'ses_moved' }, '/current-session'))
+      .resolves.toEqual({ sessionId: 'ses_moved', directory: '/repo/worktrees/moved', sessionStatus: { type: 'idle' } });
+    await expect(service.execute('session.messages', { sessionId: 'ses_moved' }, '/current-session'))
+      .resolves.toMatchObject({ directory: '/repo/worktrees/moved' });
   });
 
   it('rejects an unknown project instead of reading another directory', async () => {
@@ -685,6 +897,89 @@ describe('OpenChamber control service', () => {
       .rejects.toMatchObject({ statusCode: 404 });
     expect(client.session.list).not.toHaveBeenCalled();
     expect(client.message.list).not.toHaveBeenCalled();
+  });
+
+  describe('a session that cannot be read', () => {
+    const tagged = (tag, message) => Object.assign(new Error(message), { _tag: tag });
+    const reads = [
+      ['session.status', {}],
+      ['session.messages', {}],
+      ['session.messages', { wait: true }],
+    ];
+
+    it.each(reads)('%s %j reports an unknown id as not found', async (action, extra) => {
+      const { service, client } = createService();
+      client.session.get.mockRejectedValue(tagged('SessionNotFoundError', 'Session not found'));
+      await expect(service.execute(action, { sessionId: 'ses_missing', directory: '/repo', ...extra }))
+        .rejects.toMatchObject({ statusCode: 404, message: 'Session not found: ses_missing' });
+      expect(client.session.active).not.toHaveBeenCalled();
+    });
+
+    it('reports an id OpenCode refuses as malformed as not found', async () => {
+      const { service, client } = createService();
+      client.session.get.mockRejectedValue(tagged('InvalidRequestError', 'Expected a string starting with "ses"'));
+      await expect(service.execute('session.status', { sessionId: 'abc', directory: '/repo' }))
+        .rejects.toMatchObject({ statusCode: 404, message: 'Session not found: abc' });
+    });
+
+    it.each(reads)('%s %j keeps a failed lookup apart from not found', async (action, extra) => {
+      const { service, client } = createService();
+      client.session.get.mockRejectedValue(new Error('connection refused'));
+      await expect(service.execute(action, { sessionId: 'ses_1', directory: '/repo', ...extra }))
+        .rejects.toMatchObject({ statusCode: 503, message: 'Could not check whether session ses_1 exists: connection refused' });
+      expect(client.session.active).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a session waiting for the user', () => {
+    const pendingFor = (sessionID) => () => ({ [sessionID]: { permissions: [], forms: [], pages: [{ id: 'call_1' }] } });
+
+    it('reports waiting while the session runs with an open request', async () => {
+      const { service, client } = createService({ readPendingRequests: pendingFor('ses_1') });
+      client.session.active.mockResolvedValue({ ses_1: { type: 'running' }, ses_2: { type: 'running' } });
+      client.session.list.mockResolvedValue({ data: [{ id: 'ses_1', time: {} }, { id: 'ses_2', time: {} }, { id: 'ses_3', time: {} }] });
+
+      await expect(service.execute('session.status', { sessionId: 'ses_1', directory: '/repo' }))
+        .resolves.toMatchObject({ sessionStatus: { type: 'waiting' } });
+      await expect(service.execute('session.status', { sessionId: 'ses_2', directory: '/repo' }))
+        .resolves.toMatchObject({ sessionStatus: { type: 'busy' } });
+      await expect(service.execute('session.messages', { sessionId: 'ses_1', directory: '/repo' }))
+        .resolves.toMatchObject({ sessionStatus: { type: 'waiting' } });
+      const listed = await service.execute('session.list', { directory: '/repo', withStatus: true });
+      expect(listed.sessions.map((session) => session.status.type)).toEqual(['waiting', 'busy', 'idle']);
+    });
+
+    it('does not count a permission the server answers by itself', async () => {
+      const readPendingRequests = () => ({ ses_1: { permissions: [{ id: 'per_1', directory: '/repo' }], forms: [], pages: [] } });
+      const isPermissionAutoAnswered = vi.fn(async () => true);
+      const { service, client } = createService({ readPendingRequests, isPermissionAutoAnswered });
+      client.session.active.mockResolvedValue({ ses_1: { type: 'running' } });
+      await expect(service.execute('session.status', { sessionId: 'ses_1', directory: '/repo' }))
+        .resolves.toMatchObject({ sessionStatus: { type: 'busy' } });
+      expect(isPermissionAutoAnswered).toHaveBeenCalledWith('ses_1', '/repo', 'per_1');
+
+      isPermissionAutoAnswered.mockResolvedValue(false);
+      await expect(service.execute('session.status', { sessionId: 'ses_1', directory: '/repo' }))
+        .resolves.toMatchObject({ sessionStatus: { type: 'waiting' } });
+    });
+
+    it('reads idle when a request outlived its stopped turn', async () => {
+      const { service } = createService({ readPendingRequests: pendingFor('ses_1') });
+      await expect(service.execute('session.status', { sessionId: 'ses_1', directory: '/repo' }))
+        .resolves.toMatchObject({ sessionStatus: { type: 'idle' } });
+    });
+
+    it('ends a wait at once with waiting', async () => {
+      const sleep = vi.fn(async () => {});
+      const { service, client, sessionService } = createService({ readPendingRequests: pendingFor('ses_1'), sleep });
+      client.session.active.mockResolvedValue({ ses_1: { type: 'running' } });
+      await expect(service.execute('session.messages', { sessionId: 'ses_1', directory: '/repo', wait: true }))
+        .resolves.toMatchObject({ sessionStatus: { type: 'waiting' } });
+      sessionService.create.mockResolvedValue({ sessionId: 'ses_1', directory: '/repo', promptDispatched: true });
+      await expect(service.execute('session.create', { directory: '/repo', prompt: 'x', wait: true }))
+        .resolves.toMatchObject({ sessionStatus: { type: 'waiting' } });
+      expect(sleep).not.toHaveBeenCalled();
+    });
   });
 
   it('asks for sessionId before looking up the project', async () => {
@@ -704,6 +999,205 @@ describe('OpenChamber control service', () => {
     expect(sessionService.create).not.toHaveBeenCalled();
     expect(sessionService.send).not.toHaveBeenCalled();
     expect(sessionService.fork).not.toHaveBeenCalled();
+  });
+
+  describe('In work', () => {
+    const open = (extra = {}) => ({ openchamber: { work: { state: 'open', openedAt: 1, openedBy: 'auto', ...extra } } });
+    const session = (id, fields = {}) => ({ id, title: id, location: { directory: '/repo' }, time: { updated: 10, idle: 50 }, ...fields });
+    const withSettings = (settings) => ({ readSettingsFromDiskMigrated: vi.fn(async () => settings) });
+
+    it('lists what the sidebar block shows, across every project and page', async () => {
+      const { service, client } = createService({
+        chatRoots: ['/chats'],
+        archiveStore: { entry: async (id) => (id === 'archived' ? 100 : undefined) },
+      });
+      client.session.list
+        .mockResolvedValueOnce({ data: [
+          session('working', { metadata: open() }),
+          session('hinted', { metadata: open({ suggestDoneAt: 60 }) }),
+          session('stale-hint', { metadata: open({ suggestDoneAt: 40 }) }),
+          session('closed', { metadata: { openchamber: { work: { state: 'done', doneAt: 5 } } } }),
+        ], cursor: { next: 'page-2' } })
+        .mockResolvedValueOnce({ data: [
+          session('child', { parentID: 'working', metadata: open() }),
+          session('archived', { metadata: open() }),
+          session('chat', { location: { directory: '/chats/one' }, metadata: open() }),
+          session('elsewhere', { location: { directory: '/other' }, metadata: open() }),
+          session('plain'),
+        ], cursor: { next: 'page-3' } })
+        .mockResolvedValueOnce({ data: [], cursor: {} });
+
+      const result = await service.execute('session.list', { inWork: true }, '/repo');
+
+      expect(result.sessions.map(({ id, inWork, doneSuggested }) => [id, inWork, doneSuggested])).toEqual([
+        ['working', true, false],
+        ['hinted', true, true],
+        ['stale-hint', true, false],
+        ['elsewhere', true, false],
+      ]);
+      expect(result).toMatchObject({ limit: null, directory: null });
+      // Unscoped means every project: the caller's directory is not a filter.
+      expect(client.session.list).toHaveBeenNthCalledWith(1, { parentID: null, limit: 200 });
+      expect(client.session.list).toHaveBeenCalledTimes(3);
+    });
+
+    it('lists what choosing a session needs and leaves the rest of the record out', async () => {
+      const { service, client } = createService();
+      client.session.list.mockResolvedValue({ data: [{
+        id: 'ses_full', projectID: 'p', title: 'Full', agent: 'build', outcome: 'failed',
+        model: { providerID: 'openai', id: 'gpt-5', variant: 'high' },
+        cost: 1.2, tokens: { input: 10, output: 5 }, permissions: [{ permission: '*', action: 'allow' }],
+        time: { created: 1, updated: 2, idle: 3 }, location: { directory: '/repo' },
+        metadata: { openchamber: { work: { state: 'open' }, assist: { recap: 'long text' } } },
+      }], cursor: {} });
+
+      const { sessions } = await service.execute('session.list', { directory: '/repo' });
+
+      expect(sessions).toEqual([{
+        id: 'ses_full', title: 'Full', directory: '/repo', updated: 2, agent: 'build', outcome: 'failed',
+        model: { providerID: 'openai', id: 'gpt-5', variant: 'high' }, inWork: true, doneSuggested: false,
+      }]);
+    });
+
+    it('keeps an explicit scope and limit', async () => {
+      const { service, client } = createService();
+      client.session.list.mockResolvedValue({ data: [session('a', { metadata: open() }), session('b', { metadata: open() })], cursor: {} });
+
+      const result = await service.execute('session.list', { inWork: true, projectId: 'project-1', limit: 1 });
+
+      expect(result.sessions.map(({ id }) => id)).toEqual(['a']);
+      expect(client.session.list).toHaveBeenCalledWith({ directory: '/repo', parentID: null, limit: 200 });
+    });
+
+    it('lists the running sessions and stops once it found all of them', async () => {
+      const { service, client } = createService();
+      client.session.active.mockResolvedValue({ two: { type: 'running' }, four: { type: 'running' } });
+      client.session.list.mockResolvedValue({
+        data: [session('one'), session('two'), session('three'), session('four')],
+        cursor: { next: 'page-2' },
+      });
+
+      const result = await service.execute('session.list', { busy: true }, '/repo');
+
+      expect(result.sessions.map(({ id, status }) => [id, status.type])).toEqual([['two', 'busy'], ['four', 'busy']]);
+      expect(client.session.list).toHaveBeenCalledTimes(1);
+    });
+
+    it('lists the sessions the caller created with ownWork, with their status, and archives only those', async () => {
+      const archive = vi.fn(async () => ({ archived: [], failedIds: [] }));
+      const { service, client } = createService();
+      const child = (id, parentID) => session(id, { metadata: { openchamber: { kind: 'operator-child', parentID } } });
+      const records = [child('mine', 'ses_lead'), child('theirs', 'ses_other'), session('plain'), session('sub', { parentID: 'ses_lead' })];
+      client.session.active.mockResolvedValue({ mine: { type: 'running' } });
+      client.session.list.mockResolvedValue({ data: records });
+      client.session.get.mockImplementation(async ({ sessionID }) => records.find((record) => record.id === sessionID));
+
+      const result = await service.execute('session.list', { mine: true }, '/repo', { contextSessionId: 'ses_lead' });
+      expect(result.sessions.map(({ id, status }) => [id, status.type])).toEqual([['mine', 'busy']]);
+      await expect(service.execute('session.list', { mine: true }, '/repo')).rejects.toMatchObject({ statusCode: 400 });
+
+      const { service: archiving, client: archiveClient } = createService({ sessionService: { archive } });
+      archiveClient.session.get.mockImplementation(async ({ sessionID }) => records.find((record) => record.id === sessionID));
+      await expect(archiving.execute('session.archive', { sessionId: 'theirs' }, '/repo', { contextSessionId: 'ses_lead' })).rejects.toMatchObject({ statusCode: 403 });
+      await expect(archiving.execute('session.archive', { sessionId: 'plain' }, '/repo', { contextSessionId: 'ses_lead' })).rejects.toMatchObject({ statusCode: 403 });
+      expect(archive).not.toHaveBeenCalled();
+      expect(await archiving.execute('session.archive', { sessionId: 'mine' }, '/repo', { contextSessionId: 'ses_lead' })).toEqual({ sessionId: 'mine', archived: true });
+      expect(archive).toHaveBeenCalledWith({ ids: ['mine'] });
+    });
+
+    it('never answers busy with an empty list it could not read', async () => {
+      const { service, client } = createService();
+      client.session.active.mockRejectedValue(new Error('unavailable'));
+      await expect(service.execute('session.list', { busy: true })).rejects.toMatchObject({ statusCode: 503 });
+      expect(client.session.list).not.toHaveBeenCalled();
+    });
+
+    it('matches every query word in the title, whatever the case and script', async () => {
+      const { service, client } = createService();
+      client.session.list.mockResolvedValue({ data: [
+        session('a', { title: 'Сайдбар: In work список' }),
+        session('b', { title: 'Сайдбар і теми' }),
+        session('c'),
+      ], cursor: {} });
+
+      const result = await service.execute('session.list', { query: 'сайдбар  WORK', directory: '/repo' });
+
+      expect(result.sessions.map(({ id }) => id)).toEqual(['a']);
+    });
+
+    it('includes subagent sessions only when asked', async () => {
+      const { service, client } = createService();
+      await service.execute('session.list', { children: true, directory: '/repo' });
+      expect(client.session.list).toHaveBeenCalledWith({ directory: '/repo' });
+    });
+
+    it('says nothing about In work while it is off, and refuses to filter by it', async () => {
+      const updateSessionMetadata = vi.fn();
+      const { service, client } = createService({ ...withSettings({ sessionWorkEnabled: false }), updateSessionMetadata });
+      client.session.list.mockResolvedValue({ data: [session('a', { metadata: open() })], cursor: {} });
+
+      const { sessions } = await service.execute('session.list', { directory: '/repo' });
+      expect(sessions[0]).not.toHaveProperty('inWork');
+      await expect(service.execute('session.list', { inWork: true })).rejects.toMatchObject({ statusCode: 409 });
+      await expect(service.execute('session.markDone', { sessionId: 'a' })).rejects.toMatchObject({ statusCode: 409 });
+      expect(updateSessionMetadata).not.toHaveBeenCalled();
+    });
+
+    it('marks the calling session done through the metadata store', async () => {
+      const updateSessionMetadata = vi.fn(async (_id, decide) => ({ changed: decide(open({ suggestDoneAt: 9 })) !== null }));
+      const { service, client } = createService({ updateSessionMetadata, now: () => 500 });
+      client.session.get.mockResolvedValue(session('ses_me', { title: 'Sidebar', location: { directory: '/repo/wt' } }));
+
+      const result = await service.execute('session.markDone', {}, '/repo', { contextSessionId: 'ses_me' });
+
+      expect(result).toEqual({ sessionId: 'ses_me', directory: '/repo/wt', title: 'Sidebar', inWork: false, changed: true });
+      const [id, decide, options] = updateSessionMetadata.mock.calls[0];
+      expect([id, options]).toEqual(['ses_me', { directory: '/repo/wt' }]);
+      expect(decide(open({ suggestDoneAt: 9 }))).toEqual({ openchamber: { work: { state: 'done', doneAt: 500, suggestDoneAt: null } } });
+      expect(decide({ openchamber: { work: { state: 'done', doneAt: 1 } } })).toBeNull();
+    });
+
+    it('puts a session back in work, never a subsession or an archived one', async () => {
+      const updateSessionMetadata = vi.fn(async () => ({ changed: true }));
+      const { service, client } = createService({
+        updateSessionMetadata,
+        now: () => 700,
+        archiveStore: { entry: async (id) => (id === 'archived' ? 100 : undefined) },
+      });
+      client.session.get.mockImplementation(async ({ sessionID }) => session(sessionID, sessionID === 'child' ? { parentID: 'p' } : {}));
+
+      await expect(service.execute('session.track', { sessionId: 'child' })).rejects.toMatchObject({ statusCode: 400 });
+      await expect(service.execute('session.track', { sessionId: 'archived' })).rejects.toMatchObject({ statusCode: 409 });
+      await expect(service.execute('session.track', { sessionId: 'plain' })).resolves.toMatchObject({ inWork: true });
+
+      expect(updateSessionMetadata).toHaveBeenCalledTimes(1);
+      const decide = updateSessionMetadata.mock.calls[0][1];
+      expect(decide({})).toEqual({ openchamber: { work: { state: 'open', openedAt: 700, openedBy: 'user', doneAt: null, suggestDoneAt: null } } });
+    });
+
+    it('never puts a pinned session, or one in a pinned worktree, in work', async () => {
+      const updateSessionMetadata = vi.fn(async () => ({ changed: true }));
+      const isWorktreePinned = vi.fn(async (directory) => directory === '/repo/pinned-wt');
+      const { service, client } = createService({ updateSessionMetadata, isWorktreePinned });
+      const fields = {
+        pinned: { metadata: { openchamber: { pinned: { at: 1 } } } },
+        'in-wt': { location: { directory: '/repo/pinned-wt' } },
+      };
+      client.session.get.mockImplementation(async ({ sessionID }) => session(sessionID, fields[sessionID]));
+
+      await expect(service.execute('session.track', { sessionId: 'pinned' })).rejects.toMatchObject({ statusCode: 409 });
+      await expect(service.execute('session.track', { sessionId: 'in-wt' })).rejects.toMatchObject({ statusCode: 409 });
+      await expect(service.execute('session.markDone', { sessionId: 'pinned' })).resolves.toMatchObject({ inWork: false });
+      expect(updateSessionMetadata).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports an unknown session and a server that cannot write', async () => {
+      const tagged = Object.assign(new Error('Session not found'), { _tag: 'SessionNotFoundError' });
+      const { service, client } = createService({ updateSessionMetadata: vi.fn() });
+      client.session.get.mockRejectedValue(tagged);
+      await expect(service.execute('session.markDone', { sessionId: 'ses_gone' })).rejects.toMatchObject({ statusCode: 404 });
+      await expect(createService().service.execute('session.markDone', { sessionId: 'a' })).rejects.toMatchObject({ statusCode: 503 });
+    });
   });
 
   it('names limit in positive-integer validation errors', async () => {
@@ -887,6 +1381,197 @@ describe('notify.send', () => {
   });
 });
 
+describe('usage.read', () => {
+  const quota = {
+    listUsagePageProviders: () => [{ providerId: 'claude', providerName: 'Claude' }],
+    listConfiguredQuotaProviders: async () => ['claude'],
+    fetchQuotaForProvider: async (providerId) => ({ providerId, providerName: 'Claude', ok: true, configured: true, usage: { windows: {} }, fetchedAt: 1 }),
+  };
+
+  it('reads the configured providers while the setting is on', async () => {
+    const { service } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({ agentUsageToolEnabled: true })),
+      loadQuota: async () => quota,
+    });
+
+    await expect(service.execute('usage.read', {}, '/repo')).resolves.toEqual({
+      providers: [{ providerId: 'claude', providerName: 'Claude', ok: true, configured: true, usage: { windows: {} }, fetchedAt: 1 }],
+      notConfigured: [],
+    });
+  });
+
+  it('refuses while the setting is off', async () => {
+    const { service } = createService({ loadQuota: async () => quota });
+    await expect(service.execute('usage.read', {}, '/repo')).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('answers 503 when this server cannot load the quota module', async () => {
+    const { service } = createService({ readSettingsFromDiskMigrated: vi.fn(async () => ({ agentUsageToolEnabled: true })) });
+    await expect(service.execute('usage.read', {}, '/repo')).rejects.toMatchObject({ statusCode: 503 });
+  });
+});
+
+describe('terminal.read', () => {
+  const runtime = {
+    listTerminals: () => [{ sessionId: 'term-1', cwd: '/repo', status: 'running', createdAt: 1, mode: 'interactive', purpose: 'shell' }],
+    readTerminal: (sessionId) => (sessionId === 'term-1' ? { sessionId, cwd: '/repo', status: 'running', exitCode: null, signal: null, createdAt: 1, mode: 'interactive', purpose: 'shell', text: 'ok\n', truncated: false, retainedBytes: 3 } : null),
+  };
+
+  it('lists and reads a terminal while the setting is on', async () => {
+    const { service } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({ agentTerminalToolEnabled: true })),
+      getTerminalRuntime: () => runtime,
+    });
+
+    await expect(service.execute('terminal.list', {}, '/repo')).resolves.toMatchObject({ terminals: [{ sessionId: 'term-1' }] });
+    await expect(service.execute('terminal.read', { sessionId: 'term-1' }, '/repo')).resolves.toMatchObject({ sessionId: 'term-1', text: 'ok\n' });
+  });
+
+  it('refuses while the setting is off', async () => {
+    const { service } = createService({ getTerminalRuntime: () => runtime });
+    await expect(service.execute('terminal.read', { sessionId: 'term-1' }, '/repo')).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('answers 503 when this server has no terminal runtime', async () => {
+    const { service } = createService({ readSettingsFromDiskMigrated: vi.fn(async () => ({ agentTerminalToolEnabled: true })) });
+    await expect(service.execute('terminal.list', {}, '/repo')).rejects.toMatchObject({ statusCode: 503 });
+  });
+});
+
+describe('render.page with answerLater', () => {
+  const page = '<!doctype html><p>Hi</p>';
+  const ask = { html: page, title: 'Pick a layout', answerLater: true };
+  const call = { contextSessionId: 'ses_1', contextCallId: 'call_1' };
+
+  const createLater = async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-later-'));
+    const posts = [];
+    const laterPages = createLaterPages({
+      dataDir,
+      buildOpenCodeUrl: (fetchPath) => `http://opencode${fetchPath}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl: async (url, init) => {
+        posts.push(JSON.parse(init.body));
+        return { ok: true, status: 200, body: null };
+      },
+      warn: () => {},
+    });
+    return { laterPages, posts, dataDir };
+  };
+
+  it.each([
+    ['answerLater', { answerLater: true }],
+    ['awaitAnswer', { awaitAnswer: true }],
+  ])('refuses %s in a session an agent started as its own work, and still shows a plain page', async (_label, wait) => {
+    const { laterPages, dataDir } = await createLater();
+    const { service, client } = createService({ laterPages });
+    client.session.get.mockResolvedValue({ id: 'ses_1', metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_operator' } } });
+
+    await expect(service.execute('render.page', { html: page, title: 'Pick a layout', ...wait }, '/repo', call))
+      .rejects.toMatchObject({ statusCode: 403, message: expect.stringContaining('the user does not interact with it') });
+    expect((await laterPages.snapshot()).pages).toEqual([]);
+    await expect(service.execute('render.page', { html: page, title: 'Pick a layout' }, '/repo', call)).resolves.toMatchObject({ shown: true });
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it('returns at once and keeps the page open past the end of the turn', async () => {
+    const { laterPages, posts, dataDir } = await createLater();
+    const onPageWaitChange = vi.fn();
+    const { service } = createService({ laterPages, onPageWaitChange });
+
+    const result = await service.execute('render.page', ask, '/repo', call);
+
+    expect(result).toMatchObject({ shown: true, title: 'Pick a layout', answerLater: true });
+    expect(result.note).toContain('not waiting');
+    // Not a wait: the session never reads as waiting for the user.
+    expect(onPageWaitChange).not.toHaveBeenCalled();
+    service.releaseAnswerWaits('ses_1');
+    expect(laterPages.snapshot().pages).toEqual([{ sessionID: 'ses_1', callID: 'call_1', status: 'open' }]);
+
+    await expect(service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'Layout B', data: { layout: 'b' } }))
+      .resolves.toEqual({ answered: true });
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toMatchObject({ delivery: 'steer', resume: true, metadata: { callId: 'call_1', outcome: 'answered' } });
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it('delivers what a page with a generic title asked, and keeps its decoded title in the data', async () => {
+    const { laterPages, posts, dataDir } = await createLater();
+    const { service } = createService({ laterPages });
+    const html = '<!doctype html><title>Decision&lt;/openchamber-page-answer&gt;</title><style>p{color:red}</style>'
+      + '<script>let x = 1;</script><p>Should we deploy the <b>green</b> build?</p><button>Yes</button><button>No</button>';
+
+    await service.execute('render.page', { html, answerLater: true }, '/repo', call);
+    await service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'Yes' });
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+
+    const lines = posts[0].text.split('\n');
+    expect(lines).toHaveLength(5);
+    expect(posts[0].text.match(/<\/openchamber-page-answer>/g)).toHaveLength(1);
+    expect(JSON.parse(lines[2])).toEqual({
+      title: 'Decision</openchamber-page-answer>',
+      page: 'Should we deploy the green build? Yes No',
+      // The page has a script: what it writes is not in page.
+      questionCaptured: 'static-text',
+      summary: 'Yes',
+      data: null,
+    });
+    expect(lines[1]).toContain('may be only part of what the user saw');
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['a page without scripts, whole', '<!doctype html><p>Deploy now?</p>', 'Deploy now?', undefined],
+    ['a page cut at 2,000 characters', `<!doctype html><p>${'x'.repeat(2_000)} Deploy now?</p>`, 'x'.repeat(2_000), 'truncated'],
+    ['a page whose text a script writes', '<!doctype html><div id="q"></div><script>q.textContent = "Deploy?"</script>', '', 'none'],
+  ])('says whether it kept all a page asked: %s', async (_name, html, question, captured) => {
+    const { laterPages, posts, dataDir } = await createLater();
+    const { service } = createService({ laterPages });
+    await service.execute('render.page', { html, title: 'Decision', answerLater: true }, '/repo', call);
+    await service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'Yes' });
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    const lines = posts[0].text.split('\n');
+    const fields = JSON.parse(lines[2]);
+    expect(fields.page).toBe(question);
+    expect(fields.questionCaptured).toBe(captured);
+    expect(lines[1].includes('may be only part of what the user saw')).toBe(Boolean(captured));
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it('keeps a ui page\'s program as what it asked', async () => {
+    const { laterPages, posts, dataDir } = await createLater();
+    const { service } = createService({ laterPages });
+    const ui = 'root = Choice("deploy", "Deploy the green build?", ["Yes", "No"])';
+
+    await service.execute('render.page', { ui, title: 'Decision', answerLater: true }, '/repo', call);
+    await service.answerPage({ sessionId: 'ses_1', callId: 'call_1', declined: true });
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+
+    expect(JSON.parse(posts[0].text.split('\n')[2])).toEqual({ title: 'Decision', page: ui });
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it.each([
+    [{ ...ask, awaitAnswer: true }, call, 400, 'not both'],
+    [ask, {}, 400, 'cannot keep a page open'],
+  ])('refuses %o', async (input, options, statusCode, reason) => {
+    const { laterPages, dataDir } = await createLater();
+    const { service } = createService({ laterPages });
+    await expect(service.execute('render.page', input, '/repo', options))
+      .rejects.toMatchObject({ statusCode, message: expect.stringContaining(reason) });
+    expect(laterPages.snapshot().pages).toEqual([]);
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it('refuses on a server that cannot keep pages, as inside an isolated space, and says to ask in text', async () => {
+    // index.js wires no laterPages inside a space.
+    const { service } = createService({ laterPages: null });
+    const refusal = await service.execute('render.page', ask, '/repo', call).catch((error) => error);
+    expect(refusal).toMatchObject({ statusCode: 503, message: expect.stringContaining('ask in text') });
+    expect(refusal.message).not.toContain('awaitAnswer');
+  });
+});
+
 describe('render.page', () => {
   const page = '<!doctype html><p>Hi</p>';
 
@@ -981,13 +1666,29 @@ describe('render.page', () => {
   describe('with awaitAnswer', () => {
     const ask = { html: page, title: 'Pick a layout', awaitAnswer: true };
     const call = { contextSessionId: 'ses_1', contextCallId: 'call_1' };
-    // The call starts waiting once its checks have run.
-    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const createWaitingService = (overrides = {}) => {
+      const waiting = [];
+      const listeners = [];
+      const result = createService({
+        ...overrides,
+        onPageWaitChange: (change) => {
+          overrides.onPageWaitChange?.(change);
+          if (change.type !== 'waiting') return;
+          const listener = listeners.shift();
+          if (listener) listener(change);
+          else waiting.push(change);
+        },
+      });
+      return {
+        ...result,
+        waitForPage: () => waiting.length ? Promise.resolve(waiting.shift()) : new Promise((resolve) => listeners.push(resolve)),
+      };
+    };
 
     it('hands the agent the errors when a client cannot draw its ui', async () => {
-      const { service } = createService();
+      const { service, waitForPage } = createWaitingService();
       const pending = service.execute('render.page', { ui: 'root = Stack([Text(1)])', title: 'Pick', awaitAnswer: true }, '/repo', call);
-      await settle();
+      await waitForPage();
 
       expect(service.answerPage({ sessionId: 'ses_1', callId: 'call_1', notDrawn: ['Text /markdown: expects string'] })).toEqual({ answered: false });
       const result = await pending;
@@ -997,9 +1698,9 @@ describe('render.page', () => {
     });
 
     it('waits until the user answers and returns the answer', async () => {
-      const { service } = createService();
+      const { service, waitForPage } = createWaitingService();
       const pending = service.execute('render.page', ask, '/repo', call);
-      await settle();
+      await waitForPage();
 
       expect(service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: ' Layout B ', data: { layout: 'b' } })).toEqual({ answered: true });
       const result = await pending;
@@ -1008,11 +1709,53 @@ describe('render.page', () => {
       expect(result.note).toContain('answered on the page');
     });
 
+    it('stops listing a page once its session turn ended, without ending the call', async () => {
+      const onPageWaitChange = vi.fn();
+      const { service, waitForPage } = createWaitingService({ onPageWaitChange });
+      const controller = new AbortController();
+      const settled = vi.fn();
+      const pending = service.execute('render.page', ask, '/repo', { ...call, signal: controller.signal });
+      pending.then(settled, settled);
+      const other = service.execute('render.page', ask, '/repo', { ...call, contextSessionId: 'ses_2' });
+      await waitForPage();
+      await waitForPage();
+
+      service.releaseAnswerWaits('ses_1');
+
+      expect(onPageWaitChange).toHaveBeenCalledWith({ type: 'settled', sessionId: 'ses_1', callId: 'call_1' });
+      expect(onPageWaitChange).not.toHaveBeenCalledWith({ type: 'settled', sessionId: 'ses_2', callId: 'call_1' });
+      // A later answer on the same registry is a completion barrier for release.
+      service.answerPage({ sessionId: 'ses_2', callId: 'call_1', summary: 'B' });
+      await other;
+      expect(settled).not.toHaveBeenCalled();
+      expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' })).toThrow('no longer waiting');
+
+      // The request's end still ends the call, and says nothing twice.
+      const announced = onPageWaitChange.mock.calls.length;
+      controller.abort();
+      await expect(pending).rejects.toThrow('stopped waiting');
+      expect(onPageWaitChange).toHaveBeenCalledTimes(announced);
+
+    });
+
+    it('ends without an answer when the user declines, and tells the agent not to choose for them', async () => {
+      const { service, waitForPage } = createWaitingService();
+      const pending = service.execute('render.page', ask, '/repo', call);
+      await waitForPage();
+
+      expect(service.answerPage({ sessionId: 'ses_1', callId: 'call_1', declined: true })).toEqual({ answered: false });
+      const result = await pending;
+
+      expect(result).toMatchObject({ title: 'Pick a layout', answer: { answered: false, reason: 'declined' } });
+      expect(result.note).toContain('declined');
+      expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', declined: true })).toThrow(expect.objectContaining({ statusCode: 404 }));
+    });
+
     it('announces when the page starts and stops waiting', async () => {
       const onPageWaitChange = vi.fn();
-      const { service } = createService({ onPageWaitChange });
+      const { service, waitForPage } = createWaitingService({ onPageWaitChange });
       const pending = service.execute('render.page', ask, '/repo', call);
-      await settle();
+      await waitForPage();
 
       expect(onPageWaitChange).toHaveBeenCalledWith({ type: 'waiting', sessionId: 'ses_1', callId: 'call_1', title: 'Pick a layout', directory: '/repo' });
       service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' });
@@ -1021,16 +1764,16 @@ describe('render.page', () => {
 
       const controller = new AbortController();
       const aborted = service.execute('render.page', ask, '/repo', { ...call, signal: controller.signal });
-      await settle();
+      await waitForPage();
       controller.abort();
       await expect(aborted).rejects.toBeTruthy();
       expect(onPageWaitChange).toHaveBeenLastCalledWith({ type: 'settled', sessionId: 'ses_1', callId: 'call_1' });
     });
 
     it('answers once: a second answer, or one for another call, finds nothing waiting', async () => {
-      const { service } = createService();
+      const { service, waitForPage } = createWaitingService();
       const pending = service.execute('render.page', ask, '/repo', call);
-      await settle();
+      await waitForPage();
 
       expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_2', summary: 'B' })).toThrow(expect.objectContaining({ statusCode: 404 }));
       service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' });
@@ -1039,10 +1782,10 @@ describe('render.page', () => {
     });
 
     it('stops waiting when the call is aborted, and the page no longer takes an answer', async () => {
-      const { service } = createService();
+      const { service, waitForPage } = createWaitingService();
       const controller = new AbortController();
       const pending = service.execute('render.page', ask, '/repo', { ...call, signal: controller.signal });
-      await settle();
+      await waitForPage();
 
       controller.abort();
 
@@ -1056,9 +1799,9 @@ describe('render.page', () => {
       [{ summary: 'B', data: 'x'.repeat(16_001) }, 413],
       [{ sessionId: '', summary: 'B' }, 400],
     ])('refuses the answer %o and keeps waiting', async (answer, statusCode) => {
-      const { service } = createService();
+      const { service, waitForPage } = createWaitingService();
       const pending = service.execute('render.page', ask, '/repo', call);
-      await settle();
+      await waitForPage();
 
       expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', ...answer })).toThrow(expect.objectContaining({ statusCode }));
       service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' });
@@ -1081,21 +1824,24 @@ describe('render.page', () => {
       expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' })).toThrow(expect.objectContaining({ statusCode: 404 }));
     });
 
-    it('waits when only a synthetic or queued message is pending, or the inbox cannot be read', async () => {
-      const { service, client } = createService();
+    it('waits when only a synthetic, queued or agent-sent message is pending, or the inbox cannot be read', async () => {
+      const { service, client, waitForPage } = createWaitingService();
       client.session.inbox.list.mockResolvedValueOnce([
         { id: 'msg_2', sessionID: 'ses_1', type: 'synthetic', delivery: 'steer', payload: { text: 'subagent finished' }, time: { created: 1 } },
         { id: 'msg_3', sessionID: 'ses_1', type: 'user', delivery: 'queue', payload: { text: 'after this turn' }, time: { created: 2 } },
+        { id: 'msg_4', sessionID: 'ses_1', type: 'user', delivery: 'steer', payload: { text: 'build 42 finished', metadata: { openchamber: { promptedBy: { sessionID: 'ses_helper' } } } }, time: { created: 3 } },
+        { id: 'msg_5', sessionID: 'ses_1', type: 'user', delivery: 'steer', payload: { text: 'from afar', metadata: { openchamber: { promptedBy: { sessionID: 'remote-host/opencode/session:ses_x' } } } }, time: { created: 4 } },
+        { id: 'msg_6', sessionID: 'ses_1', type: 'user', delivery: 'steer', payload: { text: 'nightly check', metadata: { schedule: { id: 'sch_1', run: 1, dueAt: 1, late: false } } }, time: { created: 5 } },
       ]);
       const pending = service.execute('render.page', ask, '/repo', call);
-      await settle();
+      await waitForPage();
       service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' });
       await expect(pending).resolves.toMatchObject({ answer: { answered: true, summary: 'B' } });
 
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       client.session.inbox.list.mockRejectedValueOnce(new Error('OpenCode is down'));
       const failedRead = service.execute('render.page', ask, '/repo', call);
-      await settle();
+      await waitForPage();
       service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'A' });
       await expect(failedRead).resolves.toMatchObject({ answer: { answered: true, summary: 'A' } });
       warn.mockRestore();
@@ -1233,8 +1979,9 @@ describe('browser select', () => {
   });
 
   it.each([
-    [{ label: 'Canada' }, 'selector is required for browser.select'],
-    [{ selector: '  ', label: 'Canada' }, 'selector is required for browser.select'],
+    [{ label: 'Canada' }, 'browser.select requires ref or selector'],
+    [{ selector: '  ', label: 'Canada' }, 'browser.select requires ref or selector'],
+    [{ ref: 'button', label: 'Canada' }, 'ref must be a ref from browser.snapshot'],
     [{ selector: '#country' }, 'browser.select requires exactly one of label or value'],
     [{ selector: '#country', label: 'Canada', value: 'ca' }, 'browser.select requires exactly one of label or value'],
     [{ selector: '#country', label: 42 }, 'browser.select requires exactly one of label or value'],
@@ -1336,10 +2083,385 @@ describe('returning a dispatched session result', () => {
     expect(dispatchResults.register).not.toHaveBeenCalled();
   });
 
+  it('creates an ownWork session under the calling session and brings its answer back by default', async () => {
+    const { service, sessionService, dispatchResults } = createReturningService();
+    const result = await service.execute('session.create', { prompt: 'Fix the parser', ownWork: true }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(sessionService.create).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'Fix the parser' }), { operatorParentId: 'ses_parent' });
+    expect(dispatchResults.register).toHaveBeenCalledWith({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 1_000 });
+    expect(result.resultDelivery.status).toBe('pending');
+  });
+
+  it('keeps an ownWork session quiet when the agent turns its answer off', async () => {
+    const { service, sessionService, dispatchResults } = createReturningService();
+    await service.execute('session.create', { prompt: 'Fix the parser', ownWork: true, returnResult: false }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(sessionService.create).toHaveBeenCalledWith(expect.anything(), { operatorParentId: 'ses_parent' });
+    expect(dispatchResults.register).not.toHaveBeenCalled();
+  });
+
+  it('leaves a session without ownWork to the user', async () => {
+    const { service, sessionService, dispatchResults } = createReturningService();
+    await service.execute('session.create', { prompt: 'Fix the parser' }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(sessionService.create).toHaveBeenCalledWith(expect.anything());
+    expect(dispatchResults.register).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['without a calling session', 'session.create', { prompt: 'x', ownWork: true }, {}, 'needs a calling session'],
+    ['on a send', 'session.send', { sessionId: 'ses_child', prompt: 'x', ownWork: true }, { contextSessionId: 'ses_parent' }, 'applies only to session.create'],
+    ['as a string', 'session.create', { prompt: 'x', ownWork: 'true' }, { contextSessionId: 'ses_parent' }, 'ownWork must be a boolean'],
+  ])('refuses ownWork %s before creating anything', async (_label, action, input, options, message) => {
+    const { service, sessionService } = createReturningService();
+    await expect(service.execute(action, input, '/repo', options)).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+    expect(sessionService.create).not.toHaveBeenCalled();
+    expect(sessionService.send).not.toHaveBeenCalled();
+  });
+
   it('refuses a wait that is not a boolean', async () => {
     const { service, sessionService } = createService();
     await expect(service.execute('session.send', { sessionId: 'ses_1', prompt: 'x', wait: 'true' }, '/repo'))
       .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('wait must be a boolean') });
     expect(sessionService.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('pr.unwatch', () => {
+  const URL_7 = 'https://github.com/acme/app/pull/7';
+  const URL_8 = 'https://github.com/acme/app/pull/8';
+
+  // A real pull request watch runtime behind the control service, so the
+  // service's handling of `url` is checked against what the runtime does.
+  const createWatching = async ({ extensionWaits } = {}) => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-pr-watch-'));
+    const prWatch = createPrWatchRuntime({
+      buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      broadcastUiEvent: () => {},
+      dataDir,
+      fetchImpl: vi.fn(async () => new Response('{}', { status: 404 })),
+    });
+    prWatch.attach({
+      trackedItems: { setServerInterest() {}, subscribe: () => () => {} },
+      readers: {
+        sourceControl: vi.fn(async ({ pulls }) => ({
+          status: 'ok',
+          pulls: pulls.map(({ owner, repo, number }) => ({ owner, repo, number, state: 'open', title: `PR ${number}`, headSha: 'a1', mergeableState: 'clean', checks: { state: 'pending' }, activity: 0 })),
+        })),
+      },
+    });
+    const { service } = createService({ prWatch, extensionWaits });
+    const run = (action, input) => service.execute(action, input, '/repo', { contextSessionId: 'ses_agent' });
+    await run('pr.watch', { url: URL_7 });
+    await run('pr.watch', { url: URL_8 });
+    const watched = () => prWatch.snapshot().watches.map((watch) => watch.number).sort();
+    return {
+      run,
+      watched,
+      prWatch,
+      cleanup: async () => {
+        prWatch.stop();
+        await prWatch.flush();
+        await fs.rm(dataDir, { recursive: true, force: true });
+      },
+    };
+  };
+
+  it.each([
+    ['an empty url', ''],
+    ['a whitespace-only url', '   '],
+    ['a null url', null],
+    ['a non-string url', 7],
+    ['an address that is no pull request', 'https://example.com/x'],
+  ])('refuses %s with 400 and stops nothing', async (_label, url) => {
+    const { run, watched, cleanup } = await createWatching();
+    try {
+      await expect(run('pr.unwatch', { url })).rejects.toMatchObject({ statusCode: 400 });
+      expect(watched()).toEqual([7, 8]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('stops only the pull request at a valid url', async () => {
+    const { run, watched, cleanup } = await createWatching();
+    try {
+      await expect(run('pr.unwatch', { url: URL_8 })).resolves.toMatchObject({ stopped: true, watching: [{ number: 7 }] });
+      expect(watched()).toEqual([7]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('stops every pull request of the session when url is omitted', async () => {
+    const { run, watched, cleanup } = await createWatching();
+    try {
+      await expect(run('pr.unwatch', {})).resolves.toEqual({ watching: [], stopped: true });
+      expect(watched()).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  describe('as a wait source', () => {
+    const URL_9 = 'https://github.com/acme/app/pull/9';
+    const TIMER_WAIT = { waitId: 'wait_t', sessionID: 'ses_agent', source: 'timer', title: 'Timer', label: '10 min', status: 'waiting' };
+    // The timer and extension side, which these tests only route to.
+    const fakeExtensionWaits = () => {
+      let timers = [TIMER_WAIT];
+      return {
+        load: vi.fn(async () => {}),
+        snapshot: () => ({ revision: 1, waits: timers }),
+        listWaits: vi.fn(async () => ({ waiting: timers, sources: [{ source: 'timer' }, { source: 'kit/deploy' }] })),
+        startWait: vi.fn(async () => ({ waiting: TIMER_WAIT, next: 'x' })),
+        stopWaits: vi.fn(async (_sessionID, waitId) => {
+          const ending = timers.filter((wait) => !waitId || wait.waitId === waitId);
+          timers = timers.filter((wait) => !ending.includes(wait));
+          return { waiting: timers, stopped: ending.length };
+        }),
+      };
+    };
+
+    it('starts a pull request wait from args, from JSON text args, and from url beside them', async () => {
+      const extensionWaits = fakeExtensionWaits();
+      const { run, watched, cleanup } = await createWatching({ extensionWaits });
+      try {
+        await expect(run('wait.start', { source: 'pr', args: { url: URL_9 } })).resolves.toMatchObject({ watching: { url: URL_9, number: 9 } });
+        await run('wait.start', { source: 'pr', args: JSON.stringify({ url: URL_7 }) });
+        await run('wait.start', { source: ' pr ', url: URL_8 });
+        expect(watched()).toEqual([7, 8, 9]);
+        expect(extensionWaits.startWait).not.toHaveBeenCalled();
+        await expect(run('wait.start', { source: 'pr', args: {} })).rejects.toMatchObject({ statusCode: 400 });
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('lists pull requests beside the timer and extension waits, with pr as a source after the timer', async () => {
+      const { run, cleanup } = await createWatching({ extensionWaits: fakeExtensionWaits() });
+      try {
+        const listed = await run('wait.list', {});
+        expect(listed.sources.map((entry) => entry.source)).toEqual(['timer', 'pr', 'kit/deploy']);
+        expect(listed.waiting.map((wait) => wait.waitId)).toEqual([URL_7, URL_8, 'wait_t']);
+        expect(listed.waiting[0]).toMatchObject({ source: 'pr', title: '#7 PR 7', args: { url: URL_7 }, status: 'waiting' });
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('stops one pull request by its address and leaves every other wait', async () => {
+      const extensionWaits = fakeExtensionWaits();
+      const { run, watched, cleanup } = await createWatching({ extensionWaits });
+      try {
+        const result = await run('wait.stop', { waitId: URL_8 });
+        expect(result).toMatchObject({ stopped: 1, waiting: [{ waitId: URL_7 }, { waitId: 'wait_t' }] });
+        expect(watched()).toEqual([7]);
+        expect(extensionWaits.stopWaits).not.toHaveBeenCalled();
+        await expect(run('wait.stop', { waitId: URL_9 })).rejects.toMatchObject({ statusCode: 404 });
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('leaves the pull request waiting when the other waits cannot be read', async () => {
+      const extensionWaits = fakeExtensionWaits();
+      extensionWaits.load.mockRejectedValueOnce(Object.assign(new Error('EACCES'), { status: 500 }));
+      const { run, watched, cleanup } = await createWatching({ extensionWaits });
+      try {
+        await expect(run('wait.stop', { waitId: URL_8 })).rejects.toMatchObject({ statusCode: 500 });
+        expect(watched()).toEqual([7, 8]);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('leaves the timer waiting when the pull request waits cannot be read', async () => {
+      const extensionWaits = fakeExtensionWaits();
+      const { run, prWatch, cleanup } = await createWatching({ extensionWaits });
+      try {
+        vi.spyOn(prWatch, 'listWaits').mockRejectedValueOnce(Object.assign(new Error('EACCES'), { status: 500 }));
+        await expect(run('wait.stop', { waitId: 'wait_t' })).rejects.toMatchObject({ statusCode: 500 });
+        expect(extensionWaits.stopWaits).not.toHaveBeenCalled();
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('stops a timer by its id and leaves the pull requests', async () => {
+      const { run, watched, cleanup } = await createWatching({ extensionWaits: fakeExtensionWaits() });
+      try {
+        await expect(run('wait.stop', { waitId: 'wait_t' })).resolves.toMatchObject({ stopped: 1, waiting: [{ waitId: URL_7 }, { waitId: URL_8 }] });
+        expect(watched()).toEqual([7, 8]);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('stops every wait of the session, pull requests included, without a waitId', async () => {
+      const { run, watched, cleanup } = await createWatching({ extensionWaits: fakeExtensionWaits() });
+      try {
+        await expect(run('wait.stop', {})).resolves.toEqual({ waiting: [], stopped: 3 });
+        expect(watched()).toEqual([]);
+      } finally {
+        await cleanup();
+      }
+    });
+  });
+});
+
+describe('render.page with share', () => {
+  const page = '<!doctype html><p>Pick</p><img src="https://example.com/a.png">';
+  const call = { contextSessionId: 'ses_1', contextCallId: 'call_1' };
+  const savedEnv = { mode: process.env.OPENCHAMBER_ENTERPRISE_MODE, relay: process.env.OPENCHAMBER_RELAY_URL };
+  const restoreEnv = () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = savedEnv.mode ?? '';
+    process.env.OPENCHAMBER_RELAY_URL = savedEnv.relay ?? '';
+  };
+
+  const createShareService = async () => {
+    const { createSharePagesRuntime } = await import('../share-pages/runtime.js');
+    const { createSharePageStore } = await import('../share-pages/store.js');
+    const { isSharingAvailable } = await import('../share-pages/relay-client.js');
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-share-'));
+    const crypto = await import('node:crypto');
+    const sharePages = createSharePagesRuntime({
+      crypto,
+      store: createSharePageStore({ fsPromises: fs, path, dataDir }),
+      relay: { create: vi.fn(), states: vi.fn(async () => []), close: vi.fn() },
+      postSynthetic: vi.fn(),
+      isAvailable: isSharingAvailable,
+      isRelayBaseAllowed: () => true,
+      resolveRelayBase: async () => 'https://relay.test',
+      setIntervalImpl: () => ({ unref() {} }),
+    });
+    return { ...createService({ sharePages }), sharePages, dataDir };
+  };
+
+  it('makes the group and tells the agent without a link or PIN, outside enterprise mode', async () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '';
+    try {
+      const { service, sharePages, dataDir } = await createShareService();
+      const result = await service.execute('render.page', { html: page, title: 'Schema', share: { recipients: ['Yulia', 'Denis'] } }, '/repo', call);
+
+      expect(result).toMatchObject({ title: 'Schema', shared: { recipients: ['Yulia', 'Denis'] } });
+      expect(Date.parse(result.shared.expiresAt)).toBeGreaterThan(Date.now());
+      expect(result.note).toContain('https images');
+      const group = await sharePages.getGroup('ses_1', 'call_1');
+      expect(group.recipients.map(({ status }) => status)).toEqual(['preparing', 'preparing']);
+      const stored = JSON.parse(await fs.readFile(path.join(dataDir, 'share-pages', `${(await import('../share-pages/store.js')).shareGroupId(await import('node:crypto'), 'ses_1', 'call_1')}.json`), 'utf8'));
+      for (const recipient of stored.recipients) {
+        expect(JSON.stringify(result)).not.toContain(recipient.pin);
+        expect(JSON.stringify(result)).not.toContain(recipient.linkKey);
+      }
+      await fs.rm(dataDir, { recursive: true, force: true });
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  it('refuses share and awaitAnswer together', async () => {
+    const { service } = await createShareService();
+    await expect(service.execute('render.page', { html: page, title: 'T', awaitAnswer: true, share: { recipients: ['Yulia'] } }, '/repo', call))
+      .rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('refuses share and answerLater together', async () => {
+    const { service, sharePages } = await createShareService();
+    await expect(service.execute('render.page', { html: page, title: 'T', answerLater: true, share: { recipients: ['Yulia'] } }, '/repo', call))
+      .rejects.toMatchObject({ statusCode: 400 });
+    await expect(sharePages.getGroup('ses_1', 'call_1')).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it('refuses share in enterprise mode without a pinned relay, and allows it with one', async () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    process.env.OPENCHAMBER_RELAY_URL = '';
+    try {
+      const { service } = await createShareService();
+      await expect(service.execute('render.page', { html: page, title: 'T', share: { recipients: ['Yulia'] } }, '/repo', call))
+        .rejects.toMatchObject({ statusCode: 403, code: 'enterprise_mode' });
+
+      process.env.OPENCHAMBER_RELAY_URL = 'wss://relay.acme.test/ws';
+      const result = await service.execute('render.page', { html: page, title: 'T', share: { recipients: ['Yulia'] } }, '/repo', call);
+      expect(result.shared.recipients).toEqual(['Yulia']);
+    } finally {
+      restoreEnv();
+    }
+  });
+});
+
+describe('browser actions by ref, keys, dialogs and waits', () => {
+  it('passes a ref, a drop target, a key, a dialog answer and a capped wait to the browser', async () => {
+    const request = vi.fn(async () => ({ ok: true }));
+    const { service } = createService({ browserControl: { request } });
+
+    await service.execute('browser.click', { ref: 'e12' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.click', { ref: 'e12' }, expect.anything());
+    await service.execute('browser.drag', { ref: 'e1', to: 'e2' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.drag', { ref: 'e1', to: 'e2' }, expect.anything());
+    await service.execute('browser.press', { key: 'Shift+Tab' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.press', { key: 'Shift+Tab' }, expect.anything());
+    await service.execute('browser.dialog', { accept: false }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.dialog', { accept: false }, expect.anything());
+    await service.execute('browser.click', { ref: 'e4', dialog: 'accept' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.click', { ref: 'e4', dialog: 'accept' }, expect.anything());
+    await expect(service.execute('browser.click', { ref: 'e4', dialog: 'yes' }, '/repo')).rejects.toThrow('dialog must be accept or dismiss');
+    await service.execute('browser.wait', { text: 'Saved', timeoutMs: 60_000 }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.wait', { text: 'Saved', timeoutMs: 15_000 }, expect.anything());
+  });
+
+  it.each([
+    ['browser.hover', {}, 'browser.hover requires ref, selector or text'],
+    ['browser.drag', { ref: 'e1' }, 'browser.drag requires to or toSelector'],
+    ['browser.press', {}, 'key is required'],
+    ['browser.dialog', {}, 'accept is required'],
+    ['browser.wait', {}, 'browser.wait requires ref or selector'],
+    ['browser.click', { ref: 'e1; drop' }, 'ref must be a ref from browser.snapshot'],
+  ])('refuses %s without what it needs, before contacting the browser', async (action, input, message) => {
+    const request = vi.fn(async () => ({ ok: true }));
+    const { service } = createService({ browserControl: { request } });
+
+    await expect(service.execute(action, input, '/repo')).rejects.toThrow(message);
+    expect(request).not.toHaveBeenCalled();
+  });
+});
+
+describe('browser upload', () => {
+  const uploadFixture = async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upload-'));
+    const project = path.join(root, 'project');
+    const outside = path.join(root, 'outside');
+    await fs.mkdir(project);
+    await fs.mkdir(outside);
+    await fs.writeFile(path.join(project, 'avatar.png'), 'png');
+    await fs.writeFile(path.join(outside, 'id_rsa'), 'secret');
+    await fs.symlink(path.join(outside, 'id_rsa'), path.join(project, 'link'));
+    const put = vi.fn((files) => ({ token: 't', files: files.map(({ name, size }) => ({ name, size })) }));
+    const request = vi.fn(async () => ({ uploaded: 1 }));
+    const { service } = createService({ browserControl: { request }, browserUploads: { put } });
+    return { root, project, outside, put, request, service };
+  };
+
+  it('holds a file of the session folder and sends the browser its token', async () => {
+    const { root, project, put, request, service } = await uploadFixture();
+    try {
+      await service.execute('browser.upload', { ref: 'e3', paths: ['avatar.png'] }, project);
+      expect(put).toHaveBeenCalledWith([{ name: 'avatar.png', path: await fs.realpath(path.join(project, 'avatar.png')), size: 3, bytes: Buffer.from('png') }]);
+      expect(request).toHaveBeenCalledWith('browser.upload', { ref: 'e3', upload: { token: 't', files: [{ name: 'avatar.png', size: 3 }] } }, expect.anything());
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a file outside the session folder, also through a symlink, and ignores a directory the caller names', async () => {
+    const { root, project, outside, request, service } = await uploadFixture();
+    try {
+      await expect(service.execute('browser.upload', { ref: 'e3', paths: [path.join(outside, 'id_rsa')] }, project)).rejects.toThrow('outside this session\'s folder');
+      await expect(service.execute('browser.upload', { ref: 'e3', paths: ['link'] }, project)).rejects.toThrow('outside this session\'s folder');
+      await expect(service.execute('browser.upload', { ref: 'e3', paths: ['id_rsa'], directory: outside }, project)).rejects.toThrow('does not exist');
+      expect(request).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 });

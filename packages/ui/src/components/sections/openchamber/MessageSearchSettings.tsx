@@ -17,8 +17,6 @@ import {
 } from '@/lib/messageSearch';
 import { useUIStore } from '@/stores/useUIStore';
 
-// The server follows the switch after the debounced settings save, and fills
-// the index in the background: the status is read again until it settles.
 const STATUS_POLL_MS = 2_000;
 const REASONING_WALK_GRACE_POLLS = 3;
 
@@ -42,12 +40,6 @@ const formatSize = (bytes: number): string => {
   }).format(megabytes);
 };
 
-/**
- * Settings → Chat → Message search. One opt-in switch: off, the server keeps
- * no index running and the palette and chat offer no message search. The
- * index row stays visible either way, with rebuild while on and delete while
- * off. Not offered in VS Code, which has no OpenChamber server.
- */
 export const MessageSearchSettings: React.FC = () => {
   const { t } = useI18n();
   const enabled = useUIStore((state) => state.messageSearchEnabled);
@@ -57,9 +49,6 @@ export const MessageSearchSettings: React.FC = () => {
   const [view, setView] = React.useState<StatusView>({ kind: 'loading' });
   const [working, setWorking] = React.useState(false);
 
-  // Turning reasoning on starts a walk that re-reads every conversation. The
-  // save reaches the server after a debounce, so a settled answer right after
-  // the switch may predate it: a few more reads wait for the walk to show up.
   const previousReasoningRef = React.useRef(reasoning);
   React.useEffect(() => {
     const expectWalk = enabled && reasoning && !previousReasoningRef.current;
@@ -122,7 +111,6 @@ export const MessageSearchSettings: React.FC = () => {
       size,
     });
   } else {
-    // Switched on, the server has not picked it up yet.
     statusText = t('settings.openchamber.messageSearch.status.loading');
   }
 

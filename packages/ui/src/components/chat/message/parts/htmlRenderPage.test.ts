@@ -5,6 +5,7 @@ import { locateChatQuote } from '@/lib/chatQuoteAnchor';
 
 import {
     buildHtmlRenderDocument,
+    htmlRenderAnswerStateMessage,
     htmlRenderClearSelectionMessage,
     htmlRenderMarksMessage,
     htmlRenderPointerMessage,
@@ -173,6 +174,159 @@ describe('the page bootstrap', () => {
 
         expect(page.win.getSelection().rangeCount).toBe(0);
         expect(page.reports.slice(before).filter((message) => message?.kind === 'selection')).toEqual([]);
+    });
+
+    test('editor focus and repeated clicks dismiss sibling menus without reporting or clearing editor text', async () => {
+        const editable = mountPage(undefined, '<div contenteditable="true">editable text</div>');
+        const field = editable.win.document.querySelector('div');
+        if (!field) throw new Error('missing editable field');
+        field.focus();
+        expect(editable.reports.filter((message) => message?.kind === 'selection').at(-1))
+            .toMatchObject({ text: '', dismiss: true });
+        editable.select('editable text');
+        await settle();
+        const beforeClick = editable.reports.length;
+        field.dispatchEvent(new editable.win.MouseEvent('mouseup', { bubbles: true }));
+        await settle();
+        expect(editable.reports.slice(beforeClick).filter((message) => message?.kind === 'selection'))
+            .toEqual([{ kind: 'selection', text: '', rect: { top: 0, left: 0, width: 0, height: 0 }, dismiss: true }]);
+        expect(editable.win.getSelection().toString()).toBe('editable text');
+
+        const beforeClear = editable.reports.length;
+        editable.send(htmlRenderClearSelectionMessage());
+        editable.win.document.dispatchEvent(new editable.win.Event('selectionchange'));
+        await settle();
+        expect(editable.reports.slice(beforeClear).filter((message) => message?.kind === 'selection')).toEqual([]);
+        expect(editable.win.getSelection().toString()).toBe('editable text');
+    });
+
+    test('leaves editable selections to the page and preserves them on host clear', async () => {
+        const editable = mountPage(undefined, '<div contenteditable="true">editable text</div>');
+        const field = editable.win.document.querySelector('div');
+        if (!field) throw new Error('missing editable field');
+        field.focus();
+        editable.select('editable text');
+        await settle();
+
+        expect(editable.reports.filter((message) => message?.kind === 'selection'))
+            .toEqual([{ kind: 'selection', text: '', rect: { top: 0, left: 0, width: 0, height: 0 }, dismiss: true }]);
+        editable.send(htmlRenderClearSelectionMessage());
+        expect(editable.win.getSelection().toString()).toBe('editable text');
+    });
+
+    for (const tag of ['input', 'textarea']) {
+        test(`clears the previous page report when an ${tag} takes focus`, async () => {
+            const editable = mountPage(undefined, `<p>page text</p><${tag}></${tag}>`);
+            editable.select('page text');
+            await settle();
+            const field = editable.win.document.querySelector(tag);
+            if (!(field instanceof editable.win.HTMLElement)) throw new Error('missing text control');
+            field.focus();
+            editable.win.document.dispatchEvent(new editable.win.Event('selectionchange'));
+            await settle();
+
+            const reports = editable.reports.filter((message) => message?.kind === 'selection');
+            expect(reports.at(-1)).toMatchObject({ kind: 'selection', text: '' });
+            editable.send(htmlRenderClearSelectionMessage());
+            expect(editable.win.getSelection().toString()).toBe('page text');
+        });
+    }
+
+    for (const type of ['checkbox', 'radio']) {
+        test(`keeps the page report when a ${type} takes focus, while a text input still dismisses`, async () => {
+            const editable = mountPage(undefined, `<p>page text</p><input type="${type}"><input type="text">`);
+            editable.select('page text');
+            await settle();
+            const before = editable.reports.length;
+            const control = editable.win.document.querySelector(`input[type="${type}"]`);
+            if (!(control instanceof editable.win.HTMLElement)) throw new Error('missing control');
+            control.focus();
+            control.dispatchEvent(new editable.win.MouseEvent('mouseup', { bubbles: true }));
+            await settle();
+
+            const reports = editable.reports.slice(before).filter((message) => message?.kind === 'selection');
+            expect(reports.every((message) => message?.kind === 'selection' && message.text === 'page text' && !message.dismiss)).toBe(true);
+            editable.send(htmlRenderClearSelectionMessage());
+            expect(editable.win.getSelection().rangeCount).toBe(0);
+
+            editable.select('page text');
+            await settle();
+            const field = editable.win.document.querySelector('input[type="text"]');
+            if (!(field instanceof editable.win.HTMLElement)) throw new Error('missing text input');
+            field.focus();
+            expect(editable.reports.filter((message) => message?.kind === 'selection').at(-1))
+                .toMatchObject({ text: '', dismiss: true });
+        });
+    }
+
+    test('a checkbox inside editable content is not an editor', async () => {
+        const editable = mountPage(undefined, '<p>page text</p><div contenteditable="true"><input type="checkbox"></div>');
+        const control = editable.win.document.querySelector('input');
+        if (!control) throw new Error('missing checkbox');
+        // Chromium reports a control inside an editable ancestor as editable.
+        Object.defineProperty(control, 'isContentEditable', { value: true, configurable: true });
+        editable.select('page text');
+        await settle();
+        const before = editable.reports.length;
+        control.focus();
+        await settle();
+
+        expect(editable.reports.slice(before).filter((message) => message?.kind === 'selection' && message.dismiss)).toEqual([]);
+        editable.send(htmlRenderClearSelectionMessage());
+        expect(editable.win.getSelection().rangeCount).toBe(0);
+    });
+
+    test('dismisses when focus moves to an editor within the same open shadow root', () => {
+        const editable = mountPage(undefined, '<p>page text</p><div id="host"></div>');
+        const host = editable.win.document.getElementById('host');
+        if (!host) throw new Error('missing shadow host');
+        const root = host.attachShadow({ mode: 'open' });
+        const button = editable.win.document.createElement('button');
+        const field = editable.win.document.createElement('input');
+        root.append(button, field);
+
+        button.focus();
+        field.focus();
+        const before = editable.reports.length;
+        // A browser stops this focusin at the root: both ends retarget to the host.
+        field.dispatchEvent(new editable.win.FocusEvent('focusin', { bubbles: true, composed: false }));
+
+        expect(editable.reports.slice(before).filter((message) => message?.kind === 'selection').at(-1))
+            .toMatchObject({ text: '', dismiss: true });
+    });
+
+    test('leaves selections alone when an editor in nested open shadow roots takes focus', async () => {
+        const editable = mountPage(undefined, '<p>page text</p><div id="host"></div>');
+        const host = editable.win.document.getElementById('host');
+        if (!host) throw new Error('missing shadow host');
+        const outer = host.attachShadow({ mode: 'open' });
+        const innerHost = editable.win.document.createElement('div');
+        outer.append(innerHost);
+        const inner = innerHost.attachShadow({ mode: 'open' });
+        const field = editable.win.document.createElement('div');
+        field.contentEditable = 'true';
+        field.textContent = 'editable text';
+        inner.append(field);
+
+        editable.select('page text');
+        await settle();
+        field.focus();
+        expect(editable.win.document.activeElement).toBe(host);
+        expect(outer.activeElement).toBe(innerHost);
+        expect(inner.activeElement).toBe(field);
+        editable.win.document.dispatchEvent(new editable.win.Event('selectionchange'));
+        await settle();
+
+        expect(editable.reports.filter((message) => message?.kind === 'selection').at(-1))
+            .toMatchObject({ kind: 'selection', text: '' });
+        const range = editable.win.document.createRange();
+        range.selectNodeContents(field);
+        const selection = editable.win.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        expect(selection.toString()).toBe('editable text');
+        editable.send(htmlRenderClearSelectionMessage());
+        expect(selection.toString()).toBe('editable text');
     });
 
     test('passes Escape on only while a reported selection stands and the page left the key alone', async () => {
@@ -390,9 +544,38 @@ describe('the page height', () => {
         expect(sizes()).toEqual([90]);
     });
 
+    const barRoundingCases: Array<[number, number[]]> = [[48, [515]], [49, [514, 515]]];
+    for (const [startHeight, expected] of barRoundingCases) {
+        test(`settles on one height when rounding changes the scrollbar's height with the frame (from ${startHeight} px)`, () => {
+            // A 505 px page wider than its frame at 175%: the window's and the
+            // root's heights are rounded, so the 10 px bar reads 9 at odd frame
+            // heights and 10 at even ones.
+            const page = mountPage(undefined, '<div style="width:1100px;height:505px"></div>');
+            const { win } = page;
+            const root = win.document.documentElement;
+            let frameHeight = startHeight;
+            Object.defineProperty(win, 'innerHeight', { get: () => frameHeight, configurable: true });
+            Object.defineProperty(root, 'clientHeight', { get: () => frameHeight - (frameHeight % 2 ? 9 : 10), configurable: true });
+            Object.defineProperty(root, 'scrollHeight', { get: () => Math.max(frameHeight - (frameHeight % 2 ? 9 : 10), 505), configurable: true });
+            root.getBoundingClientRect = () => new win.DOMRect(0, 0, 600, 505);
+
+            const sizes = () => page.reports.flatMap((report) => (report?.kind === 'size' ? [report.height] : []));
+            for (let round = 0; round < 6; round += 1) {
+                frameHeight = sizes().at(-1) ?? frameHeight;
+                win.dispatchEvent(new win.Event('resize'));
+            }
+
+            expect(sizes()).toEqual(expected);
+        });
+    }
+
     test('sizes again when the scrollbar appears without the root resizing', async () => {
         const page = mountPage(undefined, '<div id="row" style="height:300px"></div>');
         const { win } = page;
+        // Let the page finish loading first, as it does in a browser before its
+        // own script changes anything; its load handler measures too.
+        await settle();
+        page.reports.length = 0;
         const root = win.document.documentElement;
         let bar = 0;
         Object.defineProperty(win, 'innerHeight', { get: () => 300, configurable: true });
@@ -449,6 +632,52 @@ describe('the page height', () => {
         // once, it does not follow, and the frame goes back for good.
         expect(sizes).toEqual([200, 349, 200]);
     });
+
+    for (const bar of [0, 10]) {
+        test(`keeps a grown box's height when measured again before the frame resizes (${bar}px scrollbar)`, () => {
+            const page = mountPage(undefined, '<div id="screen" style="overflow-y:auto"><div style="height:349px"></div></div>');
+            const { win } = page;
+            const root = win.document.documentElement;
+            const screen = win.document.getElementById('screen');
+            if (!screen) throw new Error('no scroller');
+            Object.defineProperty(win, 'innerHeight', { get: () => 48, configurable: true });
+            Object.defineProperty(root, 'clientHeight', { get: () => 48 - bar, configurable: true });
+            Object.defineProperty(root, 'scrollHeight', { get: () => 48 - bar, configurable: true });
+            root.getBoundingClientRect = () => new win.DOMRect(0, 0, 600, 48);
+            Object.defineProperty(screen, 'clientHeight', { get: () => 48, configurable: true });
+            Object.defineProperty(screen, 'scrollHeight', { get: () => 349, configurable: true });
+            screen.getBoundingClientRect = () => new win.DOMRect(0, 0, 600, 48);
+
+            // The page's load measures it again while the host has not yet
+            // given the frame the height it reported.
+            win.dispatchEvent(new win.Event('resize'));
+            win.dispatchEvent(new win.Event('load'));
+
+            expect(page.reports.flatMap((report) => (report?.kind === 'size' ? [report.height] : []))).toEqual([349 + bar]);
+        });
+    }
+
+    test('settles on one height with content sized to the frame at a fractional display scale', () => {
+        // `body{min-height:100vh}` at 175%: the frame snaps to device pixels,
+        // so the page measures a fraction above whatever height it is given.
+        const page = mountPage(undefined, '<p>Sized to the frame</p>');
+        const { win } = page;
+        const root = win.document.documentElement;
+        let frameHeight = 387;
+        const pageHeight = () => frameHeight + 0.43;
+        Object.defineProperty(win, 'innerHeight', { get: () => frameHeight, configurable: true });
+        Object.defineProperty(root, 'clientHeight', { get: () => frameHeight, configurable: true });
+        Object.defineProperty(root, 'scrollHeight', { get: () => frameHeight, configurable: true });
+        root.getBoundingClientRect = () => new win.DOMRect(0, 0, 600, pageHeight());
+
+        const sizes = () => page.reports.flatMap((report) => (report?.kind === 'size' ? [report.height] : []));
+        for (let round = 0; round < 6; round += 1) {
+            frameHeight = sizes().at(-1) ?? frameHeight;
+            win.dispatchEvent(new win.Event('resize'));
+        }
+
+        expect(sizes()).toEqual([387]);
+    });
 });
 
 describe('the page scrollbar', () => {
@@ -474,5 +703,33 @@ describe('a page that waits for an answer', () => {
         page.send(htmlRenderSubmitReply(1));
         await settle();
         expect(page.sent).toContain(JSON.stringify({ type: 'test:sent', answer: { layout: 'b' } }));
+    });
+
+    test('puts Decline beside its last button, sends it on a click, and drops it once the page stops waiting', () => {
+        const page = mountPage({ waiting: true, answer: null }, '<p>Pick one</p><div><button class="oc-button">A</button><button class="oc-button">B</button></div><p>Why</p>');
+        const decline = page.win.document.querySelector('[data-oc-decline]');
+
+        expect(decline?.textContent).toBe('Decline');
+        expect(decline?.previousElementSibling?.textContent).toBe('B');
+        expect(page.reports.some((report) => report?.kind === 'decline-placed' && report.placed)).toBe(true);
+
+        decline?.dispatchEvent(new page.win.MouseEvent('click'));
+        expect(page.reports.at(-1)).toEqual({ kind: 'decline' });
+        expect(decline?.hasAttribute('disabled')).toBe(true);
+
+        page.send(htmlRenderAnswerStateMessage({ waiting: false, answer: null }));
+        expect(page.win.document.querySelector('[data-oc-decline]')).toBeNull();
+    });
+
+    test('turns Decline off while its answer is on its way', () => {
+        const page = mountPage({ waiting: true, answer: null }, '<button class="oc-button">Send</button>');
+        page.run('window.openchamber.submit({},"Send");');
+        expect(page.win.document.querySelector('[data-oc-decline]')?.hasAttribute('disabled')).toBe(true);
+    });
+
+    test('tells the host it found no button, so the host draws Decline under the page', () => {
+        const page = mountPage({ waiting: true, answer: null });
+        expect(page.win.document.querySelector('[data-oc-decline]')).toBeNull();
+        expect(page.reports.some((report) => report?.kind === 'decline-placed' && !report.placed)).toBe(true);
     });
 });

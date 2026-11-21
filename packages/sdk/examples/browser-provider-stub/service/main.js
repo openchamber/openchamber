@@ -61,12 +61,25 @@ function installGuestScrollbarActivity(doc) {
 }
 var GUEST_SCROLLBAR_SCRIPT = `(${installGuestScrollbarActivity.toString()})(document);`;
 // packages/sdk/src/manifest.ts
+var GUEST_PROVIDER_LOGO_BYTES_MAX = 1024 * 1024;
 var TRACKER_URL_TOKENS = ["{id}", "{segment}", "{segments+}"];
 var TRACKER_URL_TOKEN_SET = new Set(TRACKER_URL_TOKENS);
 // packages/sdk/src/session-events.ts
-var GUEST_SESSION_EVENT_TYPES = ["turn-finished", "turn-failed", "permission-asked", "question-asked"];
+var GUEST_SESSION_EVENT_TYPES = [
+  "turn-finished",
+  "turn-failed",
+  "permission-asked",
+  "question-asked",
+  "turn-started",
+  "session-created",
+  "session-archived",
+  "session-deleted"
+];
 var SESSION_EVENTS_IDLE_MS = 10 * 60000;
 var EVENT_TYPES = new Set(GUEST_SESSION_EVENT_TYPES);
+// packages/sdk/src/service-host.ts
+var SERVICE_SCHEDULE_IDLE_MS = 10 * 60000;
+var MENTIONS_IDLE_MS = 10 * 60000;
 // packages/sdk/src/file-editor.ts
 var patternExpressions = new Map;
 // packages/sdk/src/contract.ts
@@ -111,12 +124,15 @@ var HOST_PUSH_TYPES = new Set([
   "item",
   "resolve",
   "action",
+  "service-event",
   "status-control-event",
   "popover-closed",
   "file-open",
   "file-snapshot",
   "file-saved",
-  "generate-late"
+  "generate-late",
+  "microphone-audio",
+  "microphone-ended"
 ]);
 // packages/sdk/src/service-providers.ts
 var BROWSER_PROVIDER_PATH = "/browser-control";
@@ -167,6 +183,7 @@ var readBrowserProviderRequest = (body) => {
 var SOURCE_CONTROL_PROVIDER_IDLE_MS = 10 * 60000;
 var NOTIFICATIONS_PROVIDER_IDLE_MS = 10 * 60000;
 var TRACKER_PROVIDER_IDLE_MS = 10 * 60000;
+var QUOTA_PROVIDER_IDLE_MS = 10 * 60000;
 // packages/sdk/src/service-surface.ts
 var SURFACE_FRAME_PATH = "/surface/frame";
 var SURFACE_INPUT_PATH = "/surface/input";
@@ -567,7 +584,12 @@ var handleSurface = async (req, res, url) => {
     if (surface.seq <= after) {
       await new Promise((resolve) => {
         surface.waiters.push(resolve);
-        setTimeout(resolve, wait);
+        setTimeout(() => {
+          const at = surface.waiters.indexOf(resolve);
+          if (at !== -1)
+            surface.waiters.splice(at, 1);
+          resolve();
+        }, wait);
       });
     }
     if (surface.seq <= after) {
@@ -657,7 +679,7 @@ http.createServer((req, res) => {
   }
   if (url.pathname === "/state" && req.method === "GET") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ url: page.url, title: page.title, caller: lastCaller }));
+    res.end(JSON.stringify({ url: page.url, title: page.title, caller: lastCaller, waiters: surface.waiters.length }));
     return;
   }
   if (url.pathname === "/navigate" && req.method === "POST") {

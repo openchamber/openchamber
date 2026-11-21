@@ -211,3 +211,96 @@ describe('tracker scope', () => {
     expect(effectiveGrants(['service'], plain, approved)).toEqual([]);
   });
 });
+
+describe('quota scope', () => {
+  const quota = (providers) => ({ ...guest, service: { ...guest.service, provides: ['quota'] }, quota: { providers } });
+
+  test('covers the providers whose credentials the service receives, sorted, an empty list included', () => {
+    expect(guestGrantScope(quota(['openrouter', 'deepinfra'])).service.quota).toEqual({ providers: ['deepinfra', 'openrouter'] });
+    expect(guestGrantScope(quota([])).service.quota).toEqual({ providers: [] });
+    expect(guestGrantScope(guest).service).not.toHaveProperty('quota');
+  });
+
+  test('a list that grows, shrinks or appears needs the service approved again', () => {
+    const approved = guestGrantScope(quota(['openrouter']));
+    expect(effectiveGrants(['service'], approved, approved)).toEqual(['service']);
+    expect(effectiveGrants(['service'], approved, guestGrantScope(quota(['openrouter', 'deepinfra'])))).toEqual([]);
+    expect(effectiveGrants(['service'], approved, guestGrantScope(quota([])))).toEqual([]);
+    expect(effectiveGrants(['service'], guestGrantScope(quota([])), approved)).toEqual([]);
+    // Adding the role to a service approved without it also asks again, and dropping it too.
+    expect(effectiveGrants(['service'], guestGrantScope(guest), approved)).toEqual([]);
+    expect(effectiveGrants(['service'], approved, guestGrantScope(guest))).toEqual([]);
+  });
+});
+
+describe('what a service does with nobody asking', () => {
+  const base = { service: { entry: 'service/main.js', runtime: 'host' } };
+  const granted = ['service', 'transcript', 'sessionControl'];
+  const control = { ...base, sessionControl: { content: true } };
+
+  test('an approval from before these keys stays as it was', () => {
+    expect(guestGrantScope(base)).toEqual({ service: { exec: [], sockets: [] } });
+    const stored = guestGrantScope(base);
+    expect(effectiveGrants(['service'], stored, guestGrantScope(base))).toEqual(['service']);
+  });
+
+  test('a version that starts to run alone, on a clock, or to read what is typed asks again', () => {
+    const stored = guestGrantScope(base);
+    for (const next of [
+      { service: { ...base.service, keepRunning: true } },
+      { service: { ...base.service, schedule: [{ id: 'a', cron: '* * * * *' }] } },
+      { ...base, mentions: { label: 'Notes' } },
+      { ...base, sessionControl: {} },
+    ]) expect(effectiveGrants(['service'], stored, guestGrantScope(next))).toEqual([]);
+  });
+
+  test('a changed clock asks again, a dropped one too', () => {
+    const daily = { service: { ...base.service, schedule: [{ id: 'a', cron: '0 3 * * *' }] } };
+    const hourly = { service: { ...base.service, schedule: [{ id: 'a', cron: '0 * * * *' }] } };
+    expect(effectiveGrants(['service'], guestGrantScope(daily), guestGrantScope(hourly))).toEqual([]);
+    expect(effectiveGrants(['service'], guestGrantScope(daily), guestGrantScope(base))).toEqual([]);
+  });
+
+  test('session control and its content hold only while the package still asks for them', () => {
+    const stored = guestGrantScope(control);
+    expect(effectiveGrants(granted, stored, guestGrantScope(control))).toEqual(granted);
+    expect(effectiveGrants(granted, stored, guestGrantScope({ ...base, sessionControl: {} }))).toEqual([]);
+    expect(effectiveGrants(['sessionControl'], guestGrantScope(base), guestGrantScope(control))).toEqual([]);
+  });
+
+  test('transcript from session control does not cover a subscription that starts to ask', () => {
+    const stored = guestGrantScope(control);
+    const wider = guestGrantScope({ ...control, sessionEvents: { events: ['turn-finished'], content: true } });
+    expect(effectiveGrants(['transcript'], stored, wider)).toEqual([]);
+  });
+});
+
+describe('links scope', () => {
+  const links = (overrides = {}) => ({
+    links: {
+      action: 'open',
+      identifier: { keys: ['OPS', 'DEMO'] },
+      urls: { origin: 'https://tasks.example.com', identifier: 'key-number', item: ['/tasks/{id}'] },
+      ...overrides,
+    },
+  });
+
+  test('covers the keys, the origin, the templates and the action, sorted', () => {
+    expect(guestGrantScope(links()).links).toEqual({
+      action: 'open', keys: ['DEMO', 'OPS'], origin: 'https://tasks.example.com', identifier: 'key-number', urls: ['/tasks/{id}'],
+    });
+    expect(guestGrantScope(links({ urls: undefined })).links).toEqual({ action: 'open', keys: ['DEMO', 'OPS'], origin: null, identifier: null, urls: [] });
+    expect(guestGrantScope(guest)).not.toHaveProperty('links');
+  });
+
+  test('claiming other identifiers or links, or acting differently, needs approval again', () => {
+    const approved = guestGrantScope(links());
+    expect(effectiveGrants(['links'], approved, approved)).toEqual(['links']);
+    expect(effectiveGrants(['links'], approved, guestGrantScope(links({ identifier: { keys: ['DEMO', 'OPS', 'HR'] } })))).toEqual([]);
+    expect(effectiveGrants(['links'], approved, guestGrantScope(links({ action: 'attach' })))).toEqual([]);
+    expect(effectiveGrants(['links'], approved, guestGrantScope(links({ urls: { origin: 'https://evil.example.com', identifier: 'key-number', item: ['/tasks/{id}'] } })))).toEqual([]);
+    expect(effectiveGrants(['links'], approved, guestGrantScope(links({ urls: { origin: 'https://tasks.example.com', identifier: 'key-number', item: ['/tasks/{id}', '/{segments+}/{id}'] } })))).toEqual([]);
+    expect(effectiveGrants(['links'], undefined, approved)).toEqual([]);
+    expect(effectiveGrants(['links'], approved, guestGrantScope(guest))).toEqual([]);
+  });
+});

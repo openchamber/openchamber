@@ -6,25 +6,35 @@ export const PRODUCTION_UPDATER_FEED = Object.freeze({
   repo: 'openchamber',
 });
 
-// Canary builds replace the files of one pre-release, tagged `canary`, every
-// night. The GitHub provider reads only the latest full release, so the
-// Canary channel reads that pre-release's files directly, and the Stable
-// channel never sees them.
 export const CANARY_UPDATER_FEED = Object.freeze({
   provider: 'generic',
   url: 'https://github.com/openchamber/openchamber/releases/download/canary/',
 });
 
-// Where the app takes its updates from: the releases, or the nightly Canary
-// build. The person picks it in Settings → About; the app installs the next
-// update from that channel and keeps following it. Anything else stored
-// (unset, an older build's value) is Stable.
-export const isUpdateChannel = (value) => value === 'stable' || value === 'canary';
-export const normalizeUpdateChannel = (value) => (value === 'canary' ? 'canary' : 'stable');
+export const STABLE_MIRROR_UPDATER_FEED = Object.freeze({
+  provider: 'generic',
+  url: 'https://downloads.openchamber.dev/desktop/stable/',
+});
 
-// A Canary build's version is the release it leads to with a `canary`
-// pre-release part: 2.5.4-canary.20261030.123.
+export const CANARY_MIRROR_UPDATER_FEED = Object.freeze({
+  provider: 'generic',
+  url: 'https://downloads.openchamber.dev/desktop/canary/',
+});
+
+export const MIRROR_FAILURE_BACKOFF_MS = 60 * 60 * 1000;
+
+export const pickUpdaterSource = ({ mirrorFailedAt = null, now = Date.now() } = {}) => (
+  mirrorFailedAt === null || now - mirrorFailedAt >= MIRROR_FAILURE_BACKOFF_MS ? 'mirror' : 'github'
+);
+
+export const isUpdateChannel = (value) => value === 'stable' || value === 'canary';
+
 export const isCanaryVersion = (version) => /-canary\./.test(String(version ?? ''));
+
+export const normalizeUpdateChannel = (value, appVersion) => {
+  if (isUpdateChannel(value)) return value;
+  return isCanaryVersion(appVersion) ? 'canary' : 'stable';
+};
 
 const isLoopbackHostname = (hostname) => {
   if (hostname === '::1' || hostname === '[::1]') return true;
@@ -56,8 +66,11 @@ export const resolveUpdaterFeed = ({
   environment = process.env,
   testBuild = false,
   channel = 'stable',
+  source = 'github',
 } = {}) => {
-  const productionFeed = channel === 'canary' ? CANARY_UPDATER_FEED : PRODUCTION_UPDATER_FEED;
+  const productionFeed = channel === 'canary'
+    ? (source === 'mirror' ? CANARY_MIRROR_UPDATER_FEED : CANARY_UPDATER_FEED)
+    : (source === 'mirror' ? STABLE_MIRROR_UPDATER_FEED : PRODUCTION_UPDATER_FEED);
   if (environment.OPENCHAMBER_E2E !== '1'
     || testBuild !== true) {
     return productionFeed;

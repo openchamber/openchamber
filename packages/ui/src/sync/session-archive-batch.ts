@@ -1,19 +1,3 @@
-/**
- * OpenChamber-owned session routes: archive, unarchive, metadata, links.
- *
- * Archiving the sessions linked to a worktree one request at a time is what
- * made removing a worktree with many sessions take tens of seconds: every
- * session cost its own round trip and its own store reconciliation. This asks
- * the OpenChamber server to archive the whole batch next to OpenCode, so the
- * browser spends one request and reconciles once.
- *
- * The server sets archive state on OpenCode's record and keeps it in its own
- * archive file for sessions OpenCode cannot change (their directory is gone);
- * metadata is merge-patched onto OpenCode's record. The batch, the fallback and
- * the merge are OpenChamber's, so these are OpenChamber routes. Runtimes that do
- * not serve them answer with a stable unsupported status, and callers fall back
- * to a per-session path or report failure.
- */
 
 import type { JsonValue, Metadata } from "@/lib/opencode/model"
 import { z } from 'zod';
@@ -21,11 +5,6 @@ import { z } from 'zod';
 import { toStoredLinkedIssue, type LinkedIssue } from '@/lib/linkedIssues';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-/**
- * The route answers with the archive stamps it stored, `{ id, archivedAt }`,
- * not session records: the caller applies each stamp to the session it
- * already holds.
- */
 const archiveResponseSchema = z.object({
   archived: z.array(z.object({ id: z.string().min(1), archivedAt: z.number() })),
   failedIds: z.array(z.string().min(1)),
@@ -67,9 +46,6 @@ export async function requestSessionArchiveBatch(
 
   const parsed = archiveResponseSchema.safeParse(body);
   if (!parsed.success) {
-    // A body this layer cannot read is reported as unavailable rather than as
-    // an empty success, so a caller never mistakes "the response made no
-    // sense" for "nothing needed archiving" and drops the sessions.
     return { outcome: 'unavailable', reason: `malformed archive response: ${parsed.error.issues[0]?.message ?? 'unknown shape'}` };
   }
 
@@ -89,7 +65,6 @@ export type SessionUnarchiveBatchResult =
   | { outcome: 'restored'; restored: string[]; failedIds: string[] }
   | { outcome: 'unavailable'; reason: string };
 
-/** Clears `time.archived` for a batch of sessions. Mirrors the archive route. */
 export async function requestSessionUnarchiveBatch(ids: string[], directory?: string | null): Promise<SessionUnarchiveBatchResult> {
   let response: Response;
   try {
@@ -132,30 +107,28 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 
 const metadataResponseSchema = z.object({
   metadata: z.record(z.string(), jsonValueSchema),
+  conflict: z.boolean().optional(),
 });
 
 export type SessionMetadataUpdateResult =
   | { outcome: 'updated'; metadata: Metadata }
-  | { outcome: 'unavailable'; reason: string };
+  | { outcome: 'conflict'; metadata: Metadata; reason: string }
+  | { outcome: 'unavailable'; reason: string; status?: number };
 
-/**
- * Applies a JSON Merge Patch (RFC 7386) to a session's metadata: nested
- * objects merge key by key and `null` deletes. OpenCode only accepts metadata
- * at creation time, so the merged record lives with the OpenChamber server,
- * which folds it into every session record it serves. Resolves with the
- * session's full metadata after the patch.
- */
+// external: https://www.rfc-editor.org/rfc/rfc7386 The host merges metadata objects recursively and deletes keys assigned null.
 export async function requestSessionMetadataUpdate(
   sessionID: string,
   patch: Metadata,
   directory?: string | null,
+  expected?: Metadata,
 ): Promise<SessionMetadataUpdateResult> {
   let response: Response;
   try {
-    response = await runtimeFetch(`/api/openchamber/sessions/${encodeURIComponent(sessionID)}/metadata`, {
+    const suffix = expected === undefined ? 'metadata' : 'metadata/compare-and-set';
+    response = await runtimeFetch(`/api/openchamber/sessions/${encodeURIComponent(sessionID)}/${suffix}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ patch }),
+      body: JSON.stringify({ patch, expected }),
       directory,
     });
   } catch (error) {
@@ -163,7 +136,7 @@ export async function requestSessionMetadataUpdate(
   }
 
   if (!response.ok) {
-    return { outcome: 'unavailable', reason: `metadata request failed with ${response.status}` };
+    return { outcome: 'unavailable', reason: `metadata request failed with ${response.status}`, status: response.status };
   }
 
   let body: unknown;
@@ -178,6 +151,10 @@ export async function requestSessionMetadataUpdate(
     return { outcome: 'unavailable', reason: `malformed metadata response: ${parsed.error.issues[0]?.message ?? 'unknown shape'}` };
   }
 
+  if (expected !== undefined && parsed.data.conflict === undefined) {
+    return { outcome: 'unavailable', reason: 'server did not confirm conditional metadata update' };
+  }
+  if (parsed.data.conflict) return { outcome: 'conflict', metadata: parsed.data.metadata, reason: 'metadata changed' };
   return { outcome: 'updated', metadata: parsed.data.metadata };
 }
 
@@ -185,13 +162,6 @@ export type SessionLinksUpdateResult =
   | { outcome: 'updated'; metadata: Metadata }
   | { outcome: 'unavailable'; reason: string };
 
-/**
- * Links or unlinks items on a session through OpenChamber's own route. The
- * server decides the new `linked_issues` list from its own fresh read inside
- * the session's write queue, so this sends only the operation — never a whole
- * list that a stale client snapshot could overwrite concurrent links with.
- * Resolves with the session's full metadata after the operation.
- */
 export async function requestSessionLinksUpdate(
   sessionID: string,
   entries: readonly LinkedIssue[],

@@ -1,6 +1,18 @@
 import { z } from 'zod';
 import { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_VALUE_BYTES, GUEST_STORAGE_KEYS_MAX } from './workspace.ts';
 
+export const guestSessionContextSchema = z.object({
+  tokens: z.number().nonnegative(), limit: z.number().positive().nullable(),
+});
+export const guestSessionTokenTotalsSchema = z.object({
+  prompt: z.number().nonnegative(),
+  output: z.number().nonnegative(),
+  reasoning: z.number().nonnegative(),
+  cacheRead: z.number().nonnegative(),
+  cacheWrite: z.number().nonnegative(),
+  cacheHitPercent: z.number().min(0).max(100).nullable(),
+});
+
 const identity = z.string().trim().min(1).max(1024);
 const state = z.enum(['loading', 'ready', 'error']);
 const worktree = z.object({
@@ -25,6 +37,11 @@ export const guestWorkspaceSnapshotSchema = z.discriminatedUnion('kind', [
       activity: z.enum(['unknown', 'idle', 'running', 'retrying', 'waiting-permission', 'waiting-question']),
       outcome: z.enum(['completed', 'failed']).nullable(), items: z.array(z.object({ id: identity, data: z.json().optional() })),
       links: z.array(z.object({ title: z.string(), url: z.string(), kind: z.enum(['issue', 'change']), linkedAt: z.number() })).optional(),
+      inWork: z.boolean().optional(),
+      unread: z.boolean().optional(),
+      tool: z.object({ name: z.string(), target: z.string().nullable() }).nullable().optional(),
+      context: guestSessionContextSchema.nullable().optional(),
+      tokens: guestSessionTokenTotalsSchema.nullable().optional(),
     })),
   }),
 ]);

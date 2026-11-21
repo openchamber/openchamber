@@ -1,7 +1,5 @@
 import { act } from 'react';
 import { expect, spyOn, test } from 'bun:test';
-import { plugin } from 'bun';
-import { pathToFileURL } from 'node:url';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
@@ -14,17 +12,6 @@ import { useGuestsStore } from '@/lib/guests/store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { subagentCancellationNote } from '@/lib/opencode/subagent-run';
-
-// Bun does not implement Vite's worker asset-query imports.
-plugin({
-  name: 'tool-guest-worker-url',
-  setup(build) {
-    build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, ({ path }) => ({
-      contents: `export default ${JSON.stringify(pathToFileURL(path.split('?')[0]).href)};`,
-      loader: 'js',
-    }));
-  },
-});
 
 const { default: ToolPart } = await import('./ToolPart');
 
@@ -167,6 +154,28 @@ test('a finished subagent is one row with its duration and an open action, never
     expect(openButton(container)).not.toBeNull();
     expect(container.textContent).not.toContain('child-work.ts');
     expect(container.textContent).not.toContain('Found two files');
+  });
+});
+
+test('an expanded subagent row draws a UI block from the reply, its buttons disabled', async () => {
+  const withBlock: ToolPartData = {
+    ...parent,
+    state: {
+      status: 'completed', input: { description: 'Update files', agent: 'explore' },
+      // The library's name as the fence tag: recovered as replies recover it.
+      output: '<subagent sessionID="child" state="completed">\nPick one:\n\n```openui\nroot = Stack([c])\nc = Card("Next step", [Button("Fix", "primary", "next")])\n```\n</subagent>',
+      metadata: { sessionID: 'child' }, time: { start: 1_000, end: 63_000 },
+    },
+  };
+  await withHarness(withBlock, true, async (_store, container) => {
+    let button: Element | undefined;
+    for (let attempt = 0; attempt < 50 && !button; attempt += 1) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+      button = [...container.querySelectorAll('button')].find((element) => element.textContent?.trim() === 'Fix');
+    }
+    expect(container.textContent).toContain('Next step');
+    expect(button?.hasAttribute('disabled')).toBe(true);
+    expect(container.textContent).not.toContain('root = Stack');
   });
 });
 

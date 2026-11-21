@@ -79,8 +79,9 @@ describe('openchamber events', () => {
       expect(MockEventSource.instances).toHaveLength(0);
       expect(controller).toBeDefined();
       controller?.enqueue(new TextEncoder().encode('data: {"type":"openchamber:event-stream-ready"}\n\n'));
-      for (let i = 0; i < 20 && !events.length; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(events).toEqual(['event-stream-ready']);
+      controller?.enqueue(new TextEncoder().encode('data: {"type":"openchamber:quota-credentials-changed","properties":{}}\n\n'));
+      for (let i = 0; i < 20 && events.length < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(events).toEqual(['event-stream-ready', 'quota-credentials-changed']);
     } finally {
       unsubscribe();
       fetchSpy.mockRestore();
@@ -186,6 +187,29 @@ describe('openchamber events', () => {
     } finally {
       unsubscribe();
     }
+  });
+
+  test('a listener that subscribes after the stream is ready still gets its connection, and not after a drop', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const unsubscribeEarly = subscribeOpenchamberEvents(() => {});
+    const source = MockEventSource.instances[0];
+    source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:event-stream-ready', properties: { connectionId: 'conn_1' } }) });
+
+    const late: unknown[] = [];
+    const unsubscribeLate = subscribeOpenchamberEvents((event) => late.push(event));
+    await Promise.resolve();
+    expect(late).toEqual([{ type: 'event-stream-ready', connectionId: 'conn_1' }]);
+    expect(MockEventSource.instances).toHaveLength(1);
+
+    source.onerror?.();
+    const afterDrop: unknown[] = [];
+    const unsubscribeAfterDrop = subscribeOpenchamberEvents((event) => afterDrop.push(event));
+    await Promise.resolve();
+    expect(afterDrop).toEqual([]);
+
+    unsubscribeAfterDrop();
+    unsubscribeLate();
+    unsubscribeEarly();
   });
 
   test('dispatches externally created session events', async () => {

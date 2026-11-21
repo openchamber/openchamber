@@ -51,12 +51,12 @@ Sohbetler göz simgesi almaz: Onlar sade konuşmalardır.
 
 ### "Bu iş tamamlanmış görünüyor."
 
-Bir [sınıflandırma sağlayıcısı](/tr/classification-providers/) kuruluysa Jev, devam eden bir oturumun her turuna bakar. Bir tur işin sonu gibi göründüğünde (teşekkür ettiniz, commit istediniz, çalıştığını onayladınız) Jev hiçbir şeyi kapatmaz, bir ipucu bırakır:
+Bir [sınıflandırma sağlayıcısı](/tr/classification-providers/) kuruluysa Jev, devam eden bir oturumun her turuna bakar. Bir tur işin sonu gibi göründüğünde (ajan işin bittiğini bildiriyor, kendi başına devam etmiyor, yanıtınızı beklemiyor ve başka bir şey önermiyor) Jev hiçbir şeyi kapatmaz, bir ipucu bırakır:
 
 - kenar çubuğunda oturum satırında gri bir onay işareti
 - mesaj alanının üstünde bir şerit: **Bu iş tamamlanmış görünüyor.** ve **Tamamlandı olarak işaretle** düğmesi
 
-Jev haklıysa **Tamamlandı olarak işaretle**'ye basın. Değilse devam edin: İpucu bir sonraki mesajınızla kaybolur. Sınıflandırma sağlayıcısı yoksa ipucu da yoktur; oturumları kendiniz tamamlandı olarak işaretlersiniz.
+İpucu, turdan sonra 10 dakika boyunca yazmadığınızda görünür; böylece bir adımdan diğerine geçerken araya girmez. Jev haklıysa **Tamamlandı olarak işaretle**'ye basın. Değilse devam edin: İpucu bir sonraki mesajınızla kaybolur. Sınıflandırma sağlayıcısı yoksa ipucu da yoktur; oturumları kendiniz tamamlandı olarak işaretlersiniz.
 
 ## Özet ve sonraki mesaj önerisi
 
@@ -71,9 +71,11 @@ Bunları **Ayarlar → Sohbet → Session Yardımı** bölümünden açıp kapat
 
 ## Ayarlar
 
-**Ayarlar → Session'lar → Devam eden oturumlar** bölümünü açın. Burada tek bir ayar vardır: **Devam eden oturumları göster**, varsayılan olarak açık. Kapatırsanız özelliğin tamamı kapanır: Bölüm görünmez ve mesaj göndermek oturumu artık devam edenlere almaz.
+**Ayarlar → Session'lar → Devam eden oturumlar** bölümünü açın. **Devam eden oturumları göster** varsayılan olarak açıktır. Kapatırsanız özelliğin tamamı kapanır: Bölüm görünmez ve mesaj göndermek oturumu artık devam edenlere almaz.
 
 Yalnızca bölümü gizlemek için kenar çubuğunun görünüm menüsündeki **Devam eden bölümünü göster** seçeneğini kullanın.
+
+Oturum temizliği, Devam eden bölümündeki oturumları korur. Diğer oturumlar gibi süreleri dolsun istiyorsanız **Ayarlar → Session'lar → Session Saklama** altında **"Devam eden" oturumları dahil et** seçeneğini açın. Bu seçenek varsayılan olarak kapalıdır ve sabitlenen oturumlar her durumda korunur.
 
 ## Nerede çalışır
 

@@ -17,6 +17,8 @@ import { openExternalUrl } from '@/lib/url';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { installWebUpdate, waitForUpdateApplied } from '@/lib/web-update';
 import { formatCanaryBuild, parseCanaryVersion } from '@/lib/updateChannel';
+import { formatReleaseDate, linkReleaseNoteMentions, parseReleaseNotesMarkdown, type ReleaseNotesContent } from '@/components/update/releaseNotes';
+import { ReleaseNotesBody } from '@/components/update/ReleaseNotesBody';
 
 type WebUpdateState = 'idle' | 'updating' | 'restarting' | 'reconnecting' | 'error';
 
@@ -26,13 +28,11 @@ interface UpdateDialogProps {
   info: UpdateInfo | null;
   downloading: boolean;
   downloaded: boolean;
-  /** Desktop install is being applied — the restart is already in flight */
   installing?: boolean;
   progress: UpdateProgress | null;
   error: string | null;
   onDownload: () => void;
   onRestart: () => void;
-  /** Runtime type to show different UI for desktop vs web */
   runtimeType?: 'desktop' | 'web' | 'vscode' | 'mobile' | null;
 }
 
@@ -57,29 +57,11 @@ type ParsedChangelog =
   | {
       kind: 'sections';
       title: string;
-      // A Canary night comes as groups, each folded to CANARY_GROUP_LIMIT lines.
-      sections: Array<{ version: string; dateLabel: string; content: string; canaryGroups: NotesGroup[] | null }>;
+      sections: Array<{ version: string; dateLabel: string; content: string; canaryGroups: NotesGroup[] | null; notes: ReleaseNotesContent | null }>;
     };
-
-function formatIsoDateForUI(isoDate: string): string {
-  const d = new Date(`${isoDate}T00:00:00`);
-  if (Number.isNaN(d.getTime())) {
-    return isoDate;
-  }
-  return new Intl.DateTimeFormat(getCurrentIntlLocale(), {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  }).format(d);
-}
 
 function stripChangelogHeading(sectionRaw: string): string {
   return sectionRaw.replace(/^## \[[^\]]+\] - \d{4}-\d{2}-\d{2}\s*\n?/, '').trim();
-}
-
-function processChangelogMentions(content: string): string {
-  // Convert @username to markdown links so they can be styled via css
-  return content.replace(/(^|[^a-zA-Z0-9])@([a-zA-Z0-9-]+)/g, '$1[@$2](https://github.com/$2)');
 }
 
 function compareSemverDesc(a: string, b: string): number {
@@ -96,7 +78,6 @@ function compareSemverDesc(a: string, b: string): number {
 }
 
 function parseChangelogSections(body: string): ChangelogSection[] {
-  // A Canary night is headed by its build's version: 2.5.4-canary.20261031.5.
   const re = /^## \[(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\] - (\d{4}-\d{2}-\d{2})\s*$/gm;
   const matches: Array<{ version: string; date: string; start: number }> = [];
 
@@ -120,11 +101,8 @@ function parseChangelogSections(body: string): ChangelogSection[] {
   });
 }
 
-// A Canary night can list well over a hundred commits; each group shows this
-// many until the person asks for the rest.
 const CANARY_GROUP_LIMIT = 8;
 
-/** The `### Group` and `- bullet` lines of one night, or null for any other shape. */
 function splitNotesGroups(content: string): NotesGroup[] | null {
   const groups: NotesGroup[] = [];
   for (const line of content.split('\n')) {
@@ -179,7 +157,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   const [webUpdateState, setWebUpdateState] = useState<WebUpdateState>('idle');
   const [webError, setWebError] = useState<string | null>(null);
 
-  // Every Canary build is on the one `canary` pre-release.
   const releaseUrl = info?.version
     ? (info.releaseUrl || `${GITHUB_RELEASES_URL}/tag/${parseCanaryVersion(info.version) ? 'canary' : `v${info.version}`}`)
     : GITHUB_RELEASES_URL;
@@ -187,9 +164,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
     const count = groups.reduce((total, group) => total + group.bullets.length, 0);
     return count === 1 ? t('updateDialog.changelog.changeCountSingle') : t('updateDialog.changelog.changeCountPlural', { count });
   };
-  // "2.5.4 Canary · Oct 31" for 2.5.4-canary.20261031.5. Between two Canary
-  // builds the header names the channel once: "Canary: 2.5.4 · Oct 29 → 2.5.4 · Oct 31",
-  // and two builds of one day add their build numbers: "Oct 31 #123 → Oct 31 #124".
   const bothCanary = Boolean(parseCanaryVersion(info?.currentVersion) && parseCanaryVersion(info?.version));
   const describeVersion = (version: string, beside: string | undefined) => {
     const canary = parseCanaryVersion(version);
@@ -202,12 +176,11 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   const progressPercent = updateProgressPercent(progress);
 
   const isWebRuntime = runtimeType === 'web';
-  // A desktop host installed from a Linux package asks for the password on its own screen.
   const desktopHostInstall = isWebRuntime && info?.installBlocked === 'desktop-host';
+  const needsNewerOpenCode = isWebRuntime && info?.installBlocked === 'opencode-version';
   const isMobileRuntime = runtimeType === 'mobile';
   const updateCommand = info?.updateCommand || 'openchamber update';
 
-  // Reset state when dialog closes
   useEffect(() => {
     if (!open) {
       setWebUpdateState('idle');
@@ -277,7 +250,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
       return {
         kind: 'raw',
         title: t('updateDialog.changelog.title'),
-        content: processChangelogMentions(body),
+        content: linkReleaseNoteMentions(body),
       };
     }
 
@@ -286,9 +259,9 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
       kind: 'sections',
       title: t('updateDialog.changelog.title'),
       sections: sorted.map((section, index) => {
-        const content = processChangelogMentions(stripChangelogHeading(section.raw) || body);
+        const stripped = stripChangelogHeading(section.raw) || body;
+        const content = linkReleaseNoteMentions(stripped);
         const canary = parseCanaryVersion(section.version);
-        // Another build of the same day among the sections adds the build number.
         const sameDayBuild = canary
           ? sorted
             .filter((_, other) => other !== index)
@@ -297,9 +270,10 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           : null;
         return {
           version: section.version,
-          dateLabel: canary ? formatCanaryBuild(canary, getCurrentIntlLocale(), sameDayBuild) : formatIsoDateForUI(section.date),
+          dateLabel: canary ? formatCanaryBuild(canary, getCurrentIntlLocale(), sameDayBuild) : formatReleaseDate(section.date),
           content,
           canaryGroups: canary ? splitNotesGroups(content) : null,
+          notes: canary ? null : parseReleaseNotesMarkdown(stripped),
         };
       }),
     };
@@ -309,7 +283,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
     <Dialog open={open} onOpenChange={isWebUpdating ? undefined : onOpenChange}>
       <DialogContent className="max-w-4xl p-5 border-[var(--interactive-border)]" showCloseButton={true}>
         
-        {/* Header Section */}
         <div className="flex items-center mb-1">
           <DialogTitle className="flex items-center gap-2.5">
             <Icon name="download-cloud" className="h-5 w-5 text-[var(--primary-base)]" />
@@ -320,7 +293,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             </span>
           </DialogTitle>
 
-          {/* Version Diff */}
           {(info?.currentVersion || info?.version) && (
             <div className="flex items-center gap-2 font-mono text-sm ms-3">
               {bothCanary && (
@@ -339,10 +311,8 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           )}
         </div>
 
-        {/* Content Body */}
         <div className="space-y-2">
 
-          {/* Web update progress */}
           {isWebRuntime && isWebUpdating && (
             <div className="rounded-lg bg-surface-elevated/30 p-5 border border-border">
               <div className="flex items-center gap-3">
@@ -359,7 +329,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             </div>
           )}
 
-          {/* Changelog Rendering */}
           {changelog && !isWebUpdating && (
               <div className="rounded-lg border border-border bg-surface-elevated/20 overflow-hidden">
               <ScrollableOverlay
@@ -407,7 +376,9 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                         >
                           {section.canaryGroups
                             ? section.canaryGroups.map((group) => <NotesGroupList key={group.heading} group={group} />)
-                            : <SimpleMarkdownRenderer content={section.content} disableLinkSafety={true} enableFileReferences={false} />}
+                            : section.notes
+                              ? <ReleaseNotesBody notes={section.notes} folded={true} />
+                              : <SimpleMarkdownRenderer content={section.content} disableLinkSafety={true} enableFileReferences={false} />}
                         </div>
                       </div>
                     ))}
@@ -417,7 +388,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             </div>
           )}
 
-          {/* Web runtime fallback command; it would not update a copy no package manager installed */}
           {isWebRuntime && info?.packageManager !== 'electron' && info?.installBlocked !== 'manual-install' && webUpdateState === 'error' && (
             <div className="space-y-2 mt-4">
               <div className="flex items-center gap-2 typography-meta text-muted-foreground">
@@ -448,7 +418,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             </div>
           )}
 
-          {/* Desktop progress bar */}
           {!isWebRuntime && !isMobileRuntime && downloading && (
             <div className="space-y-2 mt-4">
               <div className="flex items-center justify-between text-sm">
@@ -464,10 +433,19 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             </div>
           )}
 
-          {/* Error display */}
           {desktopHostInstall && (
             <p className="mt-4 typography-meta text-muted-foreground">
               {t('updateDialog.desktopHostInstall', { version: info?.version || '' })}
+            </p>
+          )}
+
+          {needsNewerOpenCode && (
+            <p className="mt-4 typography-meta text-[var(--status-warning)]">
+              {t('updateDialog.openCodeTooOld', {
+                version: describeVersion(info?.version || '', info?.currentVersion),
+                required: info?.requiredOpenCodeVersion || '',
+                current: info?.openCodeVersion || '',
+              })}
             </p>
           )}
 
@@ -478,7 +456,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           )}
         </div>
 
-        {/* Action Footer */}
         <div className="mt-4 flex items-center justify-between gap-4">
           <a
             href={releaseUrl}
@@ -491,7 +468,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           </a>
 
           <div className="flex-1 flex justify-end">
-            {/* Desktop Buttons */}
             {!isWebRuntime && !isMobileRuntime && !downloaded && !downloading && (
               <button
                 onClick={onDownload}
@@ -532,7 +508,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
               </button>
             )}
 
-            {/* Web Buttons */}
             {isMobileRuntime && (
               <Button
                 onClick={handleMobileUpdate}
@@ -546,7 +521,8 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             {isWebRuntime && !isWebUpdating && !desktopHostInstall && (
               <button
                 onClick={handleWebUpdate}
-                className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity"
+                disabled={needsNewerOpenCode}
+                className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Icon name="download" className="h-4 w-4" />
                 {t('updateDialog.actions.updateNow')}

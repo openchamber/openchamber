@@ -8,12 +8,10 @@ interface SessionRecapNoteProps {
   isMobile: boolean;
 }
 
-// Quiet one-paragraph recap of the agent's last reply. A hint about the
-// current state rather than part of the transcript: it lies over the empty
-// band the transcript keeps above the composer, right under the last
-// answer's footer (ChatContainer's tail spacer), and simply vanishes in place
-// once a new message makes it stale. Appears only after the 1-minute quiet
-// window.
+const plainRecap = (recap: string): string => recap
+  .replace(/`([^`]+)`/g, '$1')
+  .replace(/\*\*([^*]+)\*\*/g, '$1');
+
 export const SessionRecapNote: React.FC<SessionRecapNoteProps> = React.memo(({ sessionId, directory, isMobile }) => {
   const { visibleRecap } = useSessionAssistState(sessionId, directory);
   const { t } = useI18n();
@@ -26,7 +24,7 @@ export const SessionRecapNote: React.FC<SessionRecapNoteProps> = React.memo(({ s
     <div aria-label={t('chat.recap.aria')}>
       <span className={`typography-meta text-muted-foreground ${isMobile ? 'line-clamp-3' : 'line-clamp-2'}`}>
         <span className="italic text-muted-foreground">{t('chat.recap.label')} </span>
-        {visibleRecap}
+        {plainRecap(visibleRecap)}
       </span>
     </div>
   );

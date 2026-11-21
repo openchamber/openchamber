@@ -60,8 +60,6 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
     deleteCommand: s.deleteCommand,
     loadCommands: s.loadCommands,
   })));
-  // Settings browses whichever project its own selector points at; the app
-  // stays where it is.
   const settingsDirectory = useSettingsDirectory();
   const commands = useCommandsStore((state) => selectCommandsForDirectory(state, settingsDirectory));
   const skills = useSkillsStore((state) => selectSkillsForDirectory(state, settingsDirectory));
@@ -91,7 +89,6 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
   const bgClass = 'bg-background';
 
   const handleCreateNew = () => {
-    // Generate unique name
     const baseName = 'new-command';
     let newName = baseName;
     let counter = 1;
@@ -100,7 +97,6 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
       counter++;
     }
 
-    // Set draft and open the page for editing
     setCommandDraft({ name: newName, scope: 'user' });
     setSelectedCommand(newName);
     onItemSelect?.();
@@ -165,7 +161,6 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
       newName = `${baseName}-copy-${copyNumber}`;
     }
 
-    // Set draft with prefilled values from source command
     setCommandDraft({
       name: newName,
       scope: command.scope || 'user',
@@ -204,7 +199,6 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
       return;
     }
 
-    // Create new command with new name and all existing config
     const success = await createCommand({
       name: sanitizedName,
       description: renameDialogCommand.description,
@@ -216,7 +210,6 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
     }, settingsDirectory);
 
     if (success) {
-      // Delete old command
       const deleteSuccess = await deleteCommand(renameDialogCommand.name, settingsDirectory);
       if (deleteSuccess) {
         toast.success(`Command renamed to "${sanitizedName}"`);
@@ -350,7 +343,6 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
         </DialogContent>
       </Dialog>
 
-      {/* Rename Dialog */}
       <Dialog open={renameDialogCommand !== null} onOpenChange={(open) => !open && setRenameDialogCommand(null)}>
         <DialogContent>
           <DialogHeader>
@@ -471,9 +463,9 @@ const CommandListItem: React.FC<CommandListItemProps> = ({
           <DropdownMenuTrigger asChild>
             <Button size="sm"
               variant="ghost"
-              className="h-6 w-6 px-0 flex-shrink-0 -me-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
+              className="h-6 w-6 px-0 flex-shrink-0 -me-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 pointer-fine:hidden"
             >
-              <Icon name="more-2" className="h-3.5 w-3.5" />
+              <Icon name="more" className="h-3.5 w-3.5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-fit min-w-20">

@@ -1,5 +1,6 @@
 import { isSkillTool, toolDescription } from '@/lib/opencode/tools';
 import React from 'react';
+import { ChatExternalLink } from './ChatExternalLink';
 import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { cn } from '@/lib/utils';
 import type { TurnActivityRecord as TurnActivityPart } from '../../lib/turns/types';
@@ -10,11 +11,12 @@ import { Text } from '@/components/ui/text';
 import { getToolIcon } from './toolPresentation';
 import { getToolMetadata, isImageFile } from '@/lib/toolHelpers';
 import { Icon } from '@/components/icon/Icon';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { useDeviceInfo } from '@/lib/device';
 import { useGuestToolPresentation } from '@/lib/guests/tool-presentation';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
@@ -22,7 +24,7 @@ import { getExternalFaviconUrl } from '@/lib/url';
 import { getDirectoryForFilePath, getRelativeFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
-const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
+const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-normal', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
 const ExternalLinkFavicon: React.FC<{ href: string }> = ({ href }) => {
@@ -62,9 +64,6 @@ const isActivityRunning = (activity: TurnActivityPart): boolean => {
     return typeof activity.endedAt !== 'number';
 };
 
-/**
- * Extract a short filename from a tool part's input (for aggregation display).
- */
 const getToolFileName = (activity: TurnActivityPart): string | null => {
     const part = activity.part as ToolPartType;
     const state = part.state as { input?: Record<string, unknown>; metadata?: Record<string, unknown> } | undefined;
@@ -186,11 +185,6 @@ const resolveSkillFilePath = (skillPathOrDir: string): string => {
     return normalizedPath.toLowerCase().endsWith('/skill.md') ? normalizedPath : `${normalizedPath}/SKILL.md`;
 };
 
-/**
- * Short description for a static tool row (aggregation display). Tool naming
- * and per-tool input fields live in `@/lib/opencode/tools`; this only trims
- * the result to the row's width and falls back to a bare file name.
- */
 const SHORT_DESCRIPTION_MAX = 50;
 
 const getToolShortDescription = (activity: TurnActivityPart): string | null => {
@@ -207,10 +201,6 @@ const getToolShortDescription = (activity: TurnActivityPart): string | null => {
 };
 
 
-/**
- * Render a static aggregated tool row.
- * Shows: [icon] DisplayName file1.tsx file2.tsx ...
- */
 const areActivityListsEqual = (left: TurnActivityPart[], right: TurnActivityPart[]): boolean => {
     if (left === right) {
         return true;
@@ -248,8 +238,6 @@ const StaticToolRowInner: React.FC<{
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const { t } = useI18n();
     const { isMobile } = useDeviceInfo();
-    // Grouped rows share one normalized name; the registry wants the full
-    // name OpenCode reported, which every activity in the group carries.
     const firstPart = activities[0]?.part;
     const presentation = useGuestToolPresentation(firstPart?.type === 'tool' ? firstPart.tool : null);
     const displayName = presentation?.name ?? getToolMetadata(toolName).displayName;
@@ -257,7 +245,7 @@ const StaticToolRowInner: React.FC<{
     const isReadGroup = toolName.toLowerCase() === 'read';
     const runtime = React.useContext(RuntimeAPIContext);
     const mobileActions = useMobileAppActions();
-    const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+    const currentDirectory = useEffectiveDirectory() ?? '';
     const skills = useSkillsStore((state) => state.skills);
     const hasRunningActivity = React.useMemo(() => activities.some((activity) => isActivityRunning(activity)), [activities]);
     const skillByName = React.useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills]);
@@ -318,9 +306,6 @@ const StaticToolRowInner: React.FC<{
             return;
         }
 
-        // Dedicated mobile app: stage the same pending file focus/navigation
-        // desktop uses, then surface the Files pane (workspace drawer tab),
-        // which consumes it.
         if (mobileActions) {
             const uiStore = useUIStore.getState();
             const contextDirectory = currentDirectory || getDirectoryForFilePath(currentDirectory, absolutePath);
@@ -353,9 +338,6 @@ const StaticToolRowInner: React.FC<{
         uiStore.openContextFile(contextDirectory, absolutePath);
     }, [currentDirectory, mobileActions, runtime]);
 
-    // An image opens straight into the expanded panel to be looked at closely.
-    // Only where the file opens in the context panel: VS Code opens an editor
-    // tab and mobile a full-screen pane, where the path itself already does it.
     const canOpenImageExpanded = !runtime?.editor && !mobileActions && !isMobile;
     const handleOpenImageExpanded = React.useCallback((filePath: string) => {
         const absolutePath = toAbsoluteFilePath(currentDirectory, filePath);
@@ -377,9 +359,6 @@ const StaticToolRowInner: React.FC<{
 
     return (
         <div
-            // oc-static-tool-row: on touch devices mobile.css raises this to the
-            // same 36px floor the [role="button"] expandable/reasoning rows get,
-            // so static and expandable rows have identical rhythm.
             className={cn(
                 'oc-static-tool-row flex w-full items-center gap-x-1.5 pe-2 ps-px py-1.5 rounded-xl min-w-0'
             )}
@@ -390,8 +369,8 @@ const StaticToolRowInner: React.FC<{
             <MinDurationShineText
                 active={hasRunningActivity}
                 minDurationMs={1000}
-                className={cn(TOOL_ROW_TITLE_CLASS, 'inline-flex items-center flex-shrink-0 opacity-85')}
-                style={{ color: 'var(--tools-title)' }}
+                className={cn(TOOL_ROW_TITLE_CLASS, 'inline-flex items-center flex-shrink-0')}
+                style={{ color: 'var(--tools-description)' }}
                 title={displayName}
             >
                 {displayName}
@@ -400,23 +379,24 @@ const StaticToolRowInner: React.FC<{
                 ? readFileEntries.map((entry) => (
                     <React.Fragment key={entry.path}>
                         {canOpenImageExpanded && isImageFile(entry.path) ? (
-                            <button
-                                type="button"
-                                onClick={(event) => {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    handleOpenImageExpanded(entry.path);
-                                }}
-                                className={cn(
-                                    'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
-                                    'opacity-60 hover:opacity-100 focus-visible:opacity-100',
-                                )}
-                                style={{ color: 'var(--tools-icon)' }}
-                                title={t('chat.toolPart.openImageExpanded')}
-                                aria-label={t('chat.toolPart.openImageExpanded')}
-                            >
-                                <Icon name="fullscreen" className="h-3 w-3" />
-                            </button>
+                            <HoverTooltip label={t('contextTooltips.chat.openImage')}>
+                                <button
+                                    type="button"
+                                    onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        handleOpenImageExpanded(entry.path);
+                                    }}
+                                    className={cn(
+                                        'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity',
+                                        'opacity-60 hover:opacity-100 focus-visible:opacity-100',
+                                    )}
+                                    style={{ color: 'var(--tools-icon)' }}
+                                    aria-label={t('chat.toolPart.openImageExpanded')}
+                                >
+                                    <Icon name="fullscreen" className="h-3 w-3" />
+                                </button>
+                            </HoverTooltip>
                         ) : null}
                         <button
                             type="button"
@@ -441,7 +421,7 @@ const StaticToolRowInner: React.FC<{
                         <Text
                             variant={animateTailText ? 'generate-effect' : 'static'}
                             className={cn('min-w-0 flex-1 truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS)}
-                            style={{ color: 'var(--tools-description)' }}
+                            style={{ color: 'var(--tools-title)' }}
                             title={desc}
                         >
                             "{desc}"
@@ -451,21 +431,19 @@ const StaticToolRowInner: React.FC<{
                 : null}
             {isFetchGroup && descriptions.length > 0
                 ? descriptions.map((url, index) => (
-                    <a
+                    <ChatExternalLink
                         key={`${url}-${index}`}
                         href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
                         className={cn(
-                            'min-w-0 flex-1 inline-flex items-center gap-1.5 underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90',
+                            'min-w-0 flex-1 inline-flex items-center gap-1.5 underline decoration-[color:var(--tools-description)] underline-offset-2 hover:opacity-90',
                             'truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS
                         )}
-                        style={{ color: 'var(--status-info)' }}
+                        style={{ color: 'var(--tools-title)' }}
                         title={url}
                     >
                         <ExternalLinkFavicon href={url} />
                         <span className="min-w-0 truncate">{url}</span>
-                    </a>
+                    </ChatExternalLink>
                 ))
                 : null}
             {isSkillGroup && skillEntries.length > 0
@@ -479,7 +457,7 @@ const StaticToolRowInner: React.FC<{
                             handleFileClick(entry.path);
                         }}
                         className={cn('!min-h-0 min-w-0 flex-1 truncate whitespace-nowrap text-start hover:opacity-90', TOOL_ROW_DESCRIPTION_CLASS)}
-                        style={{ color: 'var(--tools-description)' }}
+                        style={{ color: 'var(--tools-title)' }}
                         title={entry.path}
                     >
                         {entry.name}
@@ -490,7 +468,7 @@ const StaticToolRowInner: React.FC<{
                 <Text
                     variant={animateTailText ? 'generate-effect' : 'static'}
                     className={cn('min-w-0 flex-1 truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS)}
-                    style={{ color: 'var(--tools-description)' }}
+                    style={{ color: 'var(--tools-title)' }}
                 >
                     {descriptions.join(' ')}
                 </Text>

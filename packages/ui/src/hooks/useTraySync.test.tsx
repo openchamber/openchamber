@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
+import type { SyncEvent } from '@/lib/opencode/events';
 import type { Session } from '@/lib/opencode/model';
 import { CHAT_DRAFT_PROJECT_ID, ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -12,8 +13,14 @@ import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { getPinnedSessionKey } from '@/lib/sessionPins';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { useI18nStore } from '@/lib/i18n';
+import { dict as germanDictionary } from '@/lib/i18n/messages/de';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
+import { useQuotaStore } from '@/stores/useQuotaStore';
+import type { ProviderResult } from '@/types/quota';
+import { applyBackgroundShellEvents } from '@/sync/background-shells';
+import { replaceGlobalSessionStatusById, setSessionParentResolver } from '@/sync/global-session-status';
 import {
   applyGlobalBlockingRequestEvents,
   applyWaitingPageEvent,
@@ -31,6 +38,10 @@ const Harness = () => {
   return null;
 };
 
+const flush = () => act(async () => {
+  jest.advanceTimersByTime(500);
+});
+
 const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
 opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home' });
 await ensureChatsRootDirectory();
@@ -40,11 +51,14 @@ describe('Dock badge with the macOS menu bar disabled', () => {
   let dom: Window;
   let root: Root;
   const counts: number[] = [];
+  const unreadLists: { id: string; title: string; directory: string }[][] = [];
   let listenerCount = 0;
   let intervalCount = 0;
-  const invoke = async (command: string, args?: { dockBadgeCount?: number }) => {
+  const invoke = async (command: string, args?: { dockBadgeCount?: number; dockUnreadSessions?: { id: string; title: string; directory: string }[] }) => {
+    if (command === 'desktop_tray_actions_ready') return null;
     expect(command).toBe('desktop_tray_update');
     if (args?.dockBadgeCount !== undefined) counts.push(args.dockBadgeCount);
+    if (args?.dockUnreadSessions) unreadLists.push(args.dockUnreadSessions);
     return null;
   };
   const listen = async () => { listenerCount += 1; return () => {}; };
@@ -56,17 +70,16 @@ describe('Dock badge with the macOS menu bar disabled', () => {
   // A turn ends: OpenCode stamps `time.idle`, which leaves the session unread.
   const finishTurn = (id: string) => patchSession(id, (time) => ({ ...time, idle: ++clock }));
   const view = (id: string) => patchSession(id, (time) => ({ ...time, viewed: time.idle }));
-  const flush = async () => {
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
-  };
-
   beforeEach(() => {
     dom = new Window({ url: 'http://localhost/' });
+    jest.useFakeTimers();
     Object.assign(dom, {
       __OPENCHAMBER_PLATFORM__: 'darwin',
       __OPENCHAMBER_ELECTRON__: { runtime: 'electron', trayEnabled: false },
       __OPENCHAMBER_DESKTOP__: { invoke, listen },
       setInterval: intervals,
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout,
     });
     Object.assign(globalThis, {
       window: dom, document: dom.document, navigator: dom.navigator,
@@ -77,6 +90,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     useUIStore.setState({ dockBadgeEnabled: true, notifyOnSubtasks: false, sessionWorkEnabled: true });
     useSessionDisplayStore.setState({ showChatsSection: true, showPinnedSection: true, showWorkSection: true });
     counts.length = 0;
+    unreadLists.length = 0;
     listenerCount = 0;
     intervalCount = 0;
     root = createRoot(document.createElement('div'));
@@ -85,6 +99,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     useProjectsStore.setState({ projects: [] });
+    jest.useRealTimers();
     await dom.happyDOM.close();
   });
 
@@ -100,6 +115,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     for (const id of ['root', 'elsewhere', 'btw-fork', 'archived']) finishTurn(id);
     await act(async () => root.render(<Harness />));
     expect(counts).toEqual([1]);
+    expect(unreadLists.at(-1)).toEqual([{ id: 'root', title: 'root', directory: '/project' }]);
     // Removing the project takes its sessions out of the sidebar and the count.
     useProjectsStore.setState({ projects: [] });
     await flush();
@@ -148,7 +164,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     expect(counts).toEqual([0]);
   });
 
-  test('publishes unread chats, clears viewed chats, and respects the badge toggle without tray timers or listeners', async () => {
+  test('publishes unread chats and respects the badge toggle without tray timers', async () => {
     await act(async () => root.render(<Harness />));
     expect(counts).toEqual([0]);
     finishTurn('root');
@@ -157,6 +173,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     useUIStore.setState({ dockBadgeEnabled: false });
     await flush();
     expect(counts).toEqual([0, 1, 0]);
+    expect(unreadLists.at(-1)).toEqual([]);
     useUIStore.setState({ dockBadgeEnabled: true });
     await flush();
     expect(counts).toEqual([0, 1, 0, 1]);
@@ -164,7 +181,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     await flush();
     expect(counts).toEqual([0, 1, 0, 1, 0]);
     expect(intervalCount).toBe(0);
-    expect(listenerCount).toBe(0);
+    expect(listenerCount).toBe(1);
   });
 
   test('never counts a subtask and reconciles global session membership', async () => {
@@ -178,6 +195,35 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     useGlobalSessionsStore.setState({ activeSessions: [] });
     await flush();
     expect(counts).toEqual([0, 1, 0]);
+  });
+
+  test('counts a session idling on background work only when that work ends', async () => {
+    const started: SyncEvent = {
+      type: 'shell.started',
+      properties: { shell: { id: 'sh_1', sessionID: 'root', command: 'sleep 300', file: '/tmp/sh_1.out', startedAt: 1 } },
+    };
+    const ended: SyncEvent = { type: 'shell.ended', properties: { shellID: 'sh_1', end: { kind: 'exited', status: 'exited', exit: 0 }, endedAt: 2 } };
+    await act(async () => root.render(<Harness />));
+
+    applyBackgroundShellEvents('/project', [started]);
+    finishTurn('root');
+    await flush();
+    expect(counts).toEqual([0]);
+    applyBackgroundShellEvents('/project', [ended]);
+    await flush();
+    expect(counts).toEqual([0, 1]);
+
+    view('root');
+    await flush();
+    setSessionParentResolver((id) => (id === 'child' ? 'root' : undefined));
+    replaceGlobalSessionStatusById(new Map([['child', { directory: '/project', status: { type: 'busy' } }]]));
+    finishTurn('root');
+    await flush();
+    expect(counts).toEqual([0, 1, 0]);
+    replaceGlobalSessionStatusById(new Map());
+    await flush();
+    expect(counts).toEqual([0, 1, 0, 1]);
+    setSessionParentResolver(() => undefined);
   });
 
   test('coalesces unread updates and cancels pending updates on unmount', async () => {
@@ -204,6 +250,17 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     for (const item of sessions) finishTurn(item.id);
     await act(async () => root.render(<Harness />));
     expect(counts).toEqual([25]);
+    expect(unreadLists.at(-1)?.map((item) => item.id)).toEqual(
+      Array.from({ length: 10 }, (_, index) => `root-${24 - index}`),
+    );
+  });
+
+  test('keeps the dock unread list in snapshots with the tray enabled too', async () => {
+    Object.assign(dom, { __OPENCHAMBER_ELECTRON__: { runtime: 'electron', trayEnabled: true } });
+    finishTurn('root');
+    await act(async () => root.render(<Harness />));
+    expect(unreadLists.at(-1)).toEqual([{ id: 'root', title: 'root', directory: '/project' }]);
+    expect(counts.at(-1)).toBe(1);
   });
 
   test('starts with a cleared badge when both controls are disabled', async () => {
@@ -212,7 +269,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     await act(async () => root.render(<Harness />));
     expect(counts).toEqual([0]);
     expect(intervalCount).toBe(0);
-    expect(listenerCount).toBe(0);
+    expect(listenerCount).toBe(1);
   });
 
   test('does not publish desktop state outside Electron', async () => {
@@ -234,25 +291,27 @@ describe('tray approvals carry whether a permission can be remembered', () => {
   const previousProjects = useProjectsStore.getState().projects;
   let dom: Window;
   let root: Root;
-  const snapshots: Array<{ approvals?: Array<{ id: string; canSave: boolean }> }> = [];
+  const snapshots: Array<{ approvals?: Array<{ id: string; canSave: boolean }>; instanceName?: string }> = [];
   const invoke = async (command: string, args?: { approvals?: Array<{ id: string; canSave: boolean }> }) => {
     if (command === 'desktop_tray_update') snapshots.push(args as never);
     return null;
   };
   const listen = async () => () => {};
-  const flush = async () => {
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
-  };
   const canSaveById = () => Object.fromEntries(
     (snapshots.at(-1)?.approvals ?? []).map((a) => [a.id, a.canSave]),
   );
 
   beforeEach(() => {
     dom = new Window({ url: 'http://localhost/' });
+    jest.useFakeTimers();
     Object.assign(dom, {
       __OPENCHAMBER_PLATFORM__: 'darwin',
       __OPENCHAMBER_ELECTRON__: { runtime: 'electron', trayEnabled: true },
       __OPENCHAMBER_DESKTOP__: { invoke, listen },
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout,
+      setInterval: globalThis.setInterval,
+      clearInterval: globalThis.clearInterval,
     });
     Object.assign(globalThis, {
       window: dom, document: dom.document, navigator: dom.navigator,
@@ -270,6 +329,7 @@ describe('tray approvals carry whether a permission can be remembered', () => {
     await act(async () => root.unmount());
     resetGlobalBlockingRequests();
     useProjectsStore.setState({ projects: previousProjects });
+    jest.useRealTimers();
     await dom.happyDOM.close();
   });
 
@@ -282,6 +342,20 @@ describe('tray approvals carry whether a permission can be remembered', () => {
     await flush();
 
     expect(canSaveById()).toEqual({ 'live-save': true, 'live-once': false });
+  });
+
+  test('updates the local instance label when the language changes', async () => {
+    const original = useI18nStore.getState().dictionary;
+    try {
+      await act(async () => root.render(<Harness />));
+      await flush();
+      expect(snapshots.at(-1)?.instanceName).toBe('Local OpenChamber');
+      useI18nStore.setState({ dictionary: germanDictionary });
+      await flush();
+      expect(snapshots.at(-1)?.instanceName).toBe('Lokales OpenChamber');
+    } finally {
+      useI18nStore.setState({ dictionary: original });
+    }
   });
 
   test('a seeded ask does too, so an unopened directory does not lose the option', async () => {
@@ -318,6 +392,73 @@ describe('tray approvals carry whether a permission can be remembered', () => {
   });
 });
 
+describe('tray usage names the account its meters belong to', () => {
+  let dom: Window;
+  let root: Root;
+  const previousQuota = useQuotaStore.getState();
+  const groups: Array<Array<{ provider: string; account: string | null }>> = [];
+  const invoke = async (command: string, args?: { usage?: { groups: Array<{ provider: string; account: string | null }> } }) => {
+    if (command === 'desktop_tray_update') groups.push(args?.usage?.groups ?? []);
+    return null;
+  };
+  const listen = async () => () => {};
+  const goResult = (accountLabel: string): ProviderResult => ({
+    providerId: 'opencode-go', providerName: 'OpenCode Go', ok: true, configured: true, accountLabel, fetchedAt: 1,
+    usage: { windows: { '5h': {
+      usedPercent: 25, remainingPercent: 75, windowSeconds: 18_000, resetAfterSeconds: null,
+      resetAt: null, resetAtFormatted: null, resetAfterFormatted: null,
+    } } },
+  });
+
+  beforeEach(() => {
+    dom = new Window({ url: 'http://localhost/' });
+    jest.useFakeTimers();
+    Object.assign(dom, {
+      __OPENCHAMBER_PLATFORM__: 'darwin',
+      __OPENCHAMBER_ELECTRON__: { runtime: 'electron', trayEnabled: true },
+      __OPENCHAMBER_DESKTOP__: { invoke, listen },
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout,
+      setInterval: globalThis.setInterval,
+      clearInterval: globalThis.clearInterval,
+    });
+    Object.assign(globalThis, {
+      window: dom, document: dom.document, navigator: dom.navigator,
+      IS_REACT_ACT_ENVIRONMENT: true,
+    });
+    // Already loaded for this runtime, so mounting the tray starts no quota read.
+    useQuotaStore.setState({ loadedRuntimeKey: getRuntimeKey(), dropdownProviderIds: ['opencode-go'], results: [] });
+    groups.length = 0;
+    root = createRoot(document.createElement('div'));
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    useQuotaStore.setState(previousQuota, true);
+    jest.useRealTimers();
+    await dom.happyDOM.close();
+  });
+
+  test('a switch between accounts with equal meters still reaches the tray', async () => {
+    await act(async () => root.render(<Harness />));
+    useQuotaStore.setState({ results: [goResult('outlook')] });
+    await flush();
+    expect(groups.at(-1)).toMatchObject([{ provider: 'OpenCode Go', account: 'outlook' }]);
+
+    useQuotaStore.setState({ results: [goResult('solar tool')] });
+    await flush();
+    expect(groups.at(-1)).toMatchObject([{ provider: 'OpenCode Go', account: 'solar tool' }]);
+  });
+
+  test('a Codex sign-in email stays out of the tray heading', async () => {
+    useQuotaStore.setState({ dropdownProviderIds: ['codex'] });
+    await act(async () => root.render(<Harness />));
+    useQuotaStore.setState({ results: [{ ...goResult('cli@example.com'), providerId: 'codex', providerName: 'Codex' }] });
+    await flush();
+    expect(groups.at(-1)).toMatchObject([{ provider: 'Codex', account: null }]);
+  });
+});
+
 type TraySnapshotForTest = {
   sessions?: Array<{ id: string }>;
   approvals?: Array<{ id: string }>;
@@ -337,17 +478,19 @@ describe('Tray sessions follow the configured projects', () => {
     return null;
   };
   const listen = async () => () => {};
-  const flush = async () => {
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
-  };
   const lastSnapshot = () => snapshots.at(-1);
 
   beforeEach(() => {
     dom = new Window({ url: 'http://localhost/' });
+    jest.useFakeTimers();
     Object.assign(dom, {
       __OPENCHAMBER_PLATFORM__: 'darwin',
       __OPENCHAMBER_ELECTRON__: { runtime: 'electron', trayEnabled: true },
       __OPENCHAMBER_DESKTOP__: { invoke, listen },
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout,
+      setInterval: globalThis.setInterval,
+      clearInterval: globalThis.clearInterval,
     });
     Object.assign(globalThis, {
       window: dom, document: dom.document, navigator: dom.navigator,
@@ -372,6 +515,7 @@ describe('Tray sessions follow the configured projects', () => {
     resetGlobalBlockingRequests();
     useProjectsStore.setState({ projects: [] });
     useSessionUIStore.setState({ availableWorktreesByProject: new Map() });
+    jest.useRealTimers();
     await dom.happyDOM.close();
   });
 

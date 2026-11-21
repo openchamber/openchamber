@@ -9,7 +9,6 @@ import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import type { SidebarPeek } from './useSidebarPeek';
 
 const SIDEBAR_CONTENT_WIDTH = 280;
-// Wide enough for the toolbar's eight icons and a labelled titlebar button.
 const SIDEBAR_MIN_WIDTH = 264;
 const SIDEBAR_MAX_WIDTH = 500;
 
@@ -18,9 +17,7 @@ interface SidebarProps {
     isMobile: boolean;
     children: React.ReactNode;
     className?: string;
-    /** Fixed strip rendered above the scrollable content (e.g. toggle + project actions). */
     topBar?: React.ReactNode;
-    /** The collapsed sidebar shown over the chat on hover (`useSidebarPeek`). */
     peek?: SidebarPeek;
 }
 
@@ -41,9 +38,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, value));
     }, []);
 
-    // The overlay lives outside the sidebar and is stable for the whole drag,
-    // so it is resolved once instead of on every pointermove. `isConnected`
-    // drops the cache when a layout switch remounts it.
     const getTitlebarOverlay = React.useCallback(() => {
         const cached = titlebarOverlayRef.current;
         if (cached?.isConnected) {
@@ -65,11 +59,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         sidebar.style.minWidth = `${nextWidth}px`;
         sidebar.style.maxWidth = `${nextWidth}px`;
         sidebar.style.setProperty('--oc-left-sidebar-width', `${nextWidth}px`);
-        // Keep the titlebar overlay in sync without restyling the whole
-        // document: its cap reads `--oc-left-sidebar-width`, so the drag sets
-        // that variable on the overlay itself instead of on <html>. The
-        // React-owned `maxWidth` stays untouched; React only rewrites a style
-        // key whose value changed, so clearing it would drop the cap.
         const overlay = getTitlebarOverlay();
         if (overlay) {
             overlay.style.setProperty('--oc-left-sidebar-width', `${nextWidth}px`);
@@ -91,8 +80,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         }
     }, [isResizing]);
 
-    // Closing the sidebar mid-drag (its shortcut) takes the handle away with
-    // its pointer capture, so no pointerup ends the drag.
     React.useEffect(() => {
         if (!isOpen && isResizing) setIsResizing(false);
     }, [isOpen, isResizing]);
@@ -110,29 +97,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
     const currentWidth = isResizing ? (resizingWidthRef.current ?? appliedWidth) : appliedWidth;
     const publishedWidth = isResizing ? currentWidth : openWidth;
 
-    // The titlebar overlay that floats above the sidebar is a sibling of it, not
-    // a child, so it cannot read the width published on <aside>. Publish it on
-    // the root as well, the way --oc-header-height and --oc-titlebar-start-inset
-    // already are, so the overlay can cap itself to the sidebar. It is the open
-    // width, which a toggle leaves alone: a new value on the root restyles the
-    // whole document.
     React.useEffect(() => {
         document.documentElement.style.setProperty('--oc-left-sidebar-width', `${publishedWidth}px`);
-        // Same callback, so the two writes land in one commit: the overlay never
-        // paints a width the root variable disagrees with. After a drag the
-        // overlay's own copy and the settled width are equal, so removing it
-        // changes nothing on screen and leaves the root variable as the single
-        // source of truth, which a later width change not from a drag needs.
         const overlay = titlebarOverlayRef.current;
         if (!isResizing && overlay) {
             overlay.style.removeProperty('--oc-left-sidebar-width');
         }
     }, [publishedWidth, isResizing]);
 
-    // The session list stays mounted while the sidebar is closed, so opening it
-    // does not build the list again. Once the close animation has finished its
-    // content is skipped by rendering (`content-visibility: hidden`); it is
-    // shown again in the frame the sidebar starts to open.
     const [contentSkipped, setContentSkipped] = React.useState(!isOpen);
     if (isOpen && contentSkipped) {
         setContentSkipped(false);
@@ -173,8 +145,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         startWidthRef.current = appliedWidth;
         resizingWidthRef.current = appliedWidth;
         applyLiveWidth(appliedWidth);
-        // The chat re-wraps on every pointer frame, as in a toggle: the work
-        // that follows its width waits for the release (lib/layoutAnimation.ts).
         releaseResizeHoldRef.current?.();
         releaseResizeHoldRef.current = holdLayoutAnimation();
         event.preventDefault();
@@ -185,7 +155,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             return;
         }
 
-        // The handle is on the sidebar's end edge: in RTL dragging left widens it.
         const delta = (event.clientX - startXRef.current) * (direction === 'rtl' ? -1 : 1);
         const nextWidth = clampSidebarWidth(startWidthRef.current + delta);
         if (resizingWidthRef.current === nextWidth) {
@@ -216,15 +185,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         releaseResizeHoldRef.current = null;
     };
 
-    // The column never changes its own accessibility state: a toggle hides or
-    // shows only its content, which is the landmark (`aside`), and only through
-    // `inert`. Chrome re-serializes the accessibility tree around a node whose
-    // own hidden state flips, and this column sits beside the transcript, so
-    // `aria-hidden` here cost a 40 to 55 ms frame at the start of every
-    // toggle whenever an accessibility client was on. `inert` already removes
-    // the content from the accessibility tree and from focus.
-    // Collapsed and hovered: the column stays at zero width, so the chat does
-    // not move, and the sidebar slides out over it from the start edge.
     const peekState = !isOpen && peek ? peek.state : false;
     const peeking = peekState !== false;
     const peekAnimation = peeking && peek && peek.animationMs > 0
@@ -238,9 +198,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             className={cn(
                 'relative flex h-full',
                 !peeking && 'overflow-hidden',
-                // In the class, not the inline style: an inline transition
-                // outranked `motion-reduce:transition-none`, so the sidebar
-                // still animated for readers who asked for reduced motion.
                 isResizing ? 'transition-none' : 'transition-[width,min-width,max-width] motion-reduce:transition-none',
                 'bg-sidebar',
                 className,
@@ -256,8 +213,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             }}
         >
             {isOpen && (
-                // The edge toward the chat: a half-pixel hairline, drawn as a
-                // shadow above the content so it never takes width.
                 <div
                     className="pointer-events-none absolute inset-0 z-30 shadow-[inset_-0.5px_0_0_0_var(--oc-edge-strong)] rtl:shadow-[inset_0.5px_0_0_0_var(--oc-edge-strong)]"
                     aria-hidden="true"
@@ -285,8 +240,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                 className={cn(
                     'flex h-full shrink-0 flex-col',
                     peeking
-                        // Above the chat, the header and the zones; under the
-                        // titlebar controls (z-30).
                         ? 'absolute inset-s-0 top-0 z-[25] bg-sidebar shadow-xl'
                         : 'relative z-10 transition-opacity ease-out motion-reduce:transition-none',
                     isResizing && 'pointer-events-none',
@@ -307,8 +260,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                 onAnimationEnd={peeking ? peek?.overlayHandlers.onAnimationEnd : undefined}
             >
                 {topBar}
-                {/* A frame around the sidebar's own scrollers: it reserves no
-                    gutter, or the list's thumb would sit a second gutter in. */}
                 <ScrollableOverlay outerClassName="overlay-scrollbar-wrapper--no-gutter flex-1 min-h-0" disableHorizontal>
                     <ErrorBoundary>{children}</ErrorBoundary>
                 </ScrollableOverlay>

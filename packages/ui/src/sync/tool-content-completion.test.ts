@@ -128,3 +128,21 @@ test("strict pin reads neither walk ancestors nor import their text", async () =
   expect(paths).toEqual([`/api/session/${sessionID}/message/${messageID}`])
   expect(JSON.stringify(stores.getChild(directory)!.getState().part[messageID])).not.toContain("parent-owned output")
 })
+
+test("completes into the store the row renders from, not the session's directory", async () => {
+  const storeDirectory = "/repo/chat"
+  const chat = stores.ensureChild(storeDirectory, { bootstrap: false })
+  // The chat shows the same shelled message from another directory's store.
+  const seeded = stores.getChild(directory)!.getState()
+  chat.setState({ message: seeded.message, part: seeded.part })
+  expect(chat.getState().message[sessionID]).toHaveLength(1)
+  expect(toolContentShellChars(chat.getState().part[messageID][0])).not.toBeNull()
+
+  responses.push(() => json({ data: wire(false) }))
+  await completeToolContent({ directory, storeDirectory, sessionID }, messageID)
+
+  const state = chat.getState()
+  expect(state.part[messageID].every((part) => toolContentShellChars(part) === null)).toBe(true)
+  expect(JSON.stringify(state.part[messageID])).toContain("parent-owned output")
+  expect(stores.getChild(directory)!.getState().part[messageID].some((part) => toolContentShellChars(part) !== null)).toBe(true)
+})

@@ -38,6 +38,9 @@ export const SessionRetentionSettings: React.FC = () => {
   const setAutoDeleteAfterDays = useUIStore((state) => state.setAutoDeleteAfterDays);
   const setSessionRetentionAction = useUIStore((state) => state.setSessionRetentionAction);
   const setOnlyArchived = useUIStore((state) => state.setSessionRetentionOnlyArchived);
+  const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
+  const includeInWork = useUIStore((state) => state.sessionRetentionIncludeInWork);
+  const setIncludeInWork = useUIStore((state) => state.setSessionRetentionIncludeInWork);
 
   const { candidates, isRunning, runCleanup, action, status } = useSessionAutoCleanup({ autoRun: false });
   const pendingCount = candidates.length;
@@ -104,10 +107,19 @@ export const SessionRetentionSettings: React.FC = () => {
           label={t('settings.openchamber.sessionRetention.field.enableAutoCleanup')}
           ariaLabel={t('settings.openchamber.sessionRetention.field.enableAutoCleanupAria')}
         />
+        {sessionWorkEnabled ? (
+          <SettingsCheckboxRow
+            settingsItem="sessions.retention-include-in-work"
+            checked={includeInWork}
+            disabled={onlyArchived}
+            onChange={setIncludeInWork}
+            label={t('settings.openchamber.sessionRetention.field.includeInWork')}
+            ariaLabel={t('settings.openchamber.sessionRetention.field.includeInWork')}
+            info={t('settings.openchamber.sessionRetention.field.includeInWorkInfo')}
+          />
+        ) : null}
       </div>
 
-      {/* The period, the target and the action also drive "Run cleanup now",
-          so they stay editable while auto-cleanup is off. */}
       <div>
         <SettingsFieldRow
           settingsItem="sessions.retention-only-archived"

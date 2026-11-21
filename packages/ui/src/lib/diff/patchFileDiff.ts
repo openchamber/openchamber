@@ -18,8 +18,6 @@ const patchVersionHeader = (patch: string): string | null => {
   const firstHunk = patch.search(/^@@\s/m);
   if (firstHunk < 0) return null;
   const header = patch.slice(0, firstHunk);
-  // getDiff requests full object IDs. Do not infer identity from abbreviated
-  // hashes or from changed-line totals, which survive partial staging.
   return /^index (?:[a-f0-9]{40}|[a-f0-9]{64})\.\.(?:[a-f0-9]{40}|[a-f0-9]{64})(?: [0-7]+)?$/m.test(header)
     ? header : null;
 };
@@ -145,20 +143,9 @@ const joinPatchLines = (lines: Array<{ text: string; newline: boolean }>): strin
 const emptyFileDiff = (file: string): FileDiffMetadata =>
   parseDiffFromFile({ name: file, contents: '' }, { name: file, contents: '' });
 
-/**
- * Split a unified diff patch for a single file into standalone per-hunk patches.
- *
- * Each returned patch preserves the original file header (everything before the
- * first `@@` hunk header) plus exactly one hunk, producing a patch that can be
- * fed to `git apply` on its own.
- *
- * Returns an empty array when no hunk headers are present.
- */
 export const splitPatchIntoHunks = (patch: string): string[] => {
   if (!patch) return [];
 
-  // Git's structural newlines are LF. A CR before LF inside a hunk belongs
-  // to the file contents and must survive an apply/reverse round trip.
   const starts = [...patch.matchAll(/^@@\s/gm)].map((match) => match.index);
   if (starts.length === 0) return [];
   const header = patch.slice(0, starts[0]);
@@ -168,11 +155,6 @@ export const splitPatchIntoHunks = (patch: string): string[] => {
   });
 };
 
-/**
- * Extract a standalone patch for a single hunk by zero-based index.
- *
- * Returns `null` when the index is out of range or the patch has no hunks.
- */
 export const extractHunkPatch = (patch: string, hunkIndex: number): string | null => {
   if (!Number.isInteger(hunkIndex) || hunkIndex < 0) return null;
   const hunks = splitPatchIntoHunks(patch);
@@ -183,9 +165,9 @@ export interface PatchHunkAnchor {
   index: number;
   side: AnnotationSide;
   lineNumber: number;
+  span: Record<AnnotationSide, readonly [number, number]>;
 }
 
-/** Anchor each action after the final changed row, before trailing context. */
 export const getPatchHunkAnchors = (patch: string): PatchHunkAnchor[] => {
   const anchors: PatchHunkAnchor[] = [];
   for (const [index, hunk] of splitPatchIntoHunks(patch).entries()) {
@@ -193,7 +175,7 @@ export const getPatchHunkAnchors = (patch: string): PatchHunkAnchor[] => {
     if (!header) continue;
     let deletionLine = Number(header[1]);
     let additionLine = Number(header[3]);
-    let anchor: PatchHunkAnchor | undefined;
+    let anchor: Omit<PatchHunkAnchor, 'span'> | undefined;
     for (const line of hunk.slice(header.index + header[0].length).split('\n')) {
       if (line.startsWith('-')) {
         anchor = { index, side: 'deletions', lineNumber: deletionLine++ };
@@ -205,7 +187,15 @@ export const getPatchHunkAnchors = (patch: string): PatchHunkAnchor[] => {
       }
     }
     if (anchor && Number.isSafeInteger(anchor.lineNumber) && anchor.lineNumber > 0) {
-      anchors.push(anchor);
+      const deletionStart = Number(header[1]);
+      const additionStart = Number(header[3]);
+      anchors.push({
+        ...anchor,
+        span: {
+          deletions: [deletionStart, deletionLine - 1],
+          additions: [additionStart, additionLine - 1],
+        },
+      });
     }
   }
   return anchors;

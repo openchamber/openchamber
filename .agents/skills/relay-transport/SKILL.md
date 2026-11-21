@@ -35,7 +35,7 @@ Adding or porting a WS endpoint needs every step below, or it breaks over the re
 - **Two implementations must stay byte-compatible.** Any wire-format, frame-type, handshake, or batching change must update both the TS implementation and the JS host mirror and keep `packages/web/server/lib/relay/cross-compat.test.js` green.
 - **Frame types live in `protocol.ts`** and must match across `protocol.ts`, `tunnel-codec.ts`, and `tunnel-codec.js`. Adding a frame type without mirroring it corrupts the stream on one side.
 - **Frame batching is capability-negotiated** in the handshake with a legacy fallback, so mixed client/host app versions still interoperate. Preserve the negotiation and the single-frame fallback; do not make batching unconditional.
-- **The encrypted-frame counter/IV is per-direction and strictly increasing.** One encrypted WS message = one encrypt call = one counter tick. Keep encrypt+send serialized per direction; do not reorder or parallelize it.
+- **The encrypted-frame counter/IV is per-direction and consecutive.** One encrypted WS message = one encrypt call = one counter tick, and the receiver rejects any counter other than the previous one plus one. Keep encrypt+send serialized per direction; do not reorder or parallelize it.
 
 ## Runtime Transport Branch
 
@@ -53,6 +53,16 @@ For indefinite SSE/WebSocket reconnect loops:
 - Reset failure state only after a genuinely healthy connection.
 
 Blind short retries on hidden, offline, unauthorized, or stale-path clients waste battery and flood server logs.
+
+## Measuring Relay Cost
+
+The relay service is a Cloudflare Worker with one Durable Object per server (`apps/relay` in the `openchamber-website` repo). Billed duration comes from objects that stay awake, not from message count: hibernatable messages cost almost no duration, so a chatty idle client costs requests, while an object that stops hibernating costs duration.
+
+- **Read activity per object** with the Cloudflare GraphQL dataset `durableObjectsPeriodicGroups` (`activeTime`, filtered by object name `relay-v1:<serverId>`). Data lands 10 to 20 minutes late, and per-minute figures are unreliable for small objects; compare hourly sums.
+- **Measure a close or disconnect path in a lab.** Copy the relay's `src`, `wrangler deploy` it under another name (no D1 needed), and drive it with a Node host built on `host-client.js`. Simulate a peer that is gone by black-holing the socket's local port with `pf`, then read `activeTime` for that object. A `close()` from the object to a gone peer keeps it awake for minutes; a retire frame costs nothing.
+- **See what a phone sends over the relay.** On a debuggable Android build, `adb forward tcp:9333 localabstract:webview_devtools_remote_<pid>` exposes the WebView over CDP. Frame stacks are useless because sends go through a batcher; patch `TextEncoder.prototype.encode` in the page instead, since tunnel request heads are JSON carrying `path`.
+- **A test host beside the desktop app**: run a server with a scratch `OPENCHAMBER_DATA_DIR` and `OPENCHAMBER_RELAY_HOST=on`, with every inherited `OPENCHAMBER_*` unset (otherwise pairing answers "UI authentication required"). Create a relay-only pairing with `POST /api/client-auth/pairing/sessions` and body `{"includeRelay":true,"includeDirect":false}`, and render its payload as a QR (`connectionPayload.ts` plus `qrcode`).
+- The host client logs every control and data socket close with its code and lifetime at info level (`[Relay] ... socket closed`, `~/Library/Logs/OpenChamber/main.log` on desktop): a run of short lifetimes is a reconnect loop.
 
 ## Verification
 

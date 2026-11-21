@@ -63,9 +63,45 @@ describe('skills', () => {
     }
   });
 
+  // A file link needs elevation on Windows.
+  it.skipIf(process.platform === 'win32')('treats a linked SKILL.md as the skill and does not search below it', async () => {
+    const root = await fsPromises.realpath(await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-linked-skill-md-')));
+    const write = async (relative, name) => {
+      const file = path.join(root, relative);
+      await fsPromises.mkdir(path.dirname(file), { recursive: true });
+      await fsPromises.writeFile(file, `---\nname: ${name}\ndescription: ${name} skill\n---\nBody\n`, 'utf8');
+    };
+    try {
+      await fsPromises.mkdir(path.join(root, 'project', '.git'), { recursive: true });
+      await write('shared/parent.md', 'parent');
+      await fsPromises.mkdir(path.join(root, 'project/.agents/skills/parent'), { recursive: true });
+      await fsPromises.symlink(path.join(root, 'shared/parent.md'), path.join(root, 'project/.agents/skills/parent/SKILL.md'));
+      await write('project/.agents/skills/parent/bundled/child/SKILL.md', 'nested-child');
+      // A grouping folder whose SKILL.md link is dangling still hands down its children.
+      await fsPromises.mkdir(path.join(root, 'project/.agents/skills/group'), { recursive: true });
+      await fsPromises.symlink(path.join(root, 'missing.md'), path.join(root, 'project/.agents/skills/group/SKILL.md'));
+      await write('project/.agents/skills/group/beta/SKILL.md', 'beta');
+
+      const names = (await discoverSkills(path.join(root, 'project')))
+        .filter((skill) => skill.path.startsWith(root))
+        .map((skill) => [skill.name, path.relative(root, skill.path).split(path.sep).join('/')])
+        .sort((a, b) => a[0].localeCompare(b[0]));
+
+      expect(names).toEqual([
+        ['beta', 'project/.agents/skills/group/beta/SKILL.md'],
+        ['parent', 'project/.agents/skills/parent/SKILL.md'],
+      ]);
+    } finally {
+      await fsPromises.rm(root, { recursive: true, force: true });
+    }
+  });
+
   describe('discovery over a tree with nested skills and links', () => {
-    // Expected values were recorded from the synchronous discovery on main
-    // before it became async; they must not move.
+    // The expected values follow OpenCode's own discovery rules (#6708): a
+    // directory holding its own SKILL.md is one skill that is not searched
+    // further, and hidden directories and node_modules are skipped. They were
+    // first recorded from the synchronous discovery on main before it became
+    // async; from here they move only with a rule change.
     const buildTree = async () => {
       const root = await fsPromises.realpath(await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-skill-equiv-')));
       const write = async (relative, frontmatter) => {
@@ -82,6 +118,10 @@ describe('skills', () => {
       await skill('home/.agents/skills/alpha/SKILL.md', 'alpha');
       await skill('home/.agents/skills/alpha/nested/inner/SKILL.md', 'alpha-inner');
       await skill('home/.agents/skills/group/beta/SKILL.md', 'beta');
+      // Bundled beside a real skill rather than inside one, so only the rule
+      // for node_modules keeps it out of the list.
+      await skill('home/.agents/skills/group/node_modules/dep/skills/dep-skill/SKILL.md', 'dep-skill');
+      await skill('home/.agents/skills/.hidden/hidden-skill/SKILL.md', 'hidden-skill');
       await write('home/.agents/skills/broken/SKILL.md', 'description: no name');
       await skill('outside/gamma/SKILL.md', 'gamma');
       await link('outside/gamma', 'home/.agents/skills/linked-gamma');
@@ -119,27 +159,23 @@ describe('skills', () => {
 
     const userSkills = (scope) => [
       ['alpha', 'home/.agents/skills/alpha/SKILL.md', scope, 'agents'],
-      ['alpha-inner', 'home/.agents/skills/alpha/nested/inner/SKILL.md', scope, 'agents'],
       ['beta', 'home/.agents/skills/group/beta/SKILL.md', scope, 'agents'],
       ['delta', 'home/.claude/skills/delta/SKILL.md', scope, 'claude'],
       ['gamma', 'home/.agents/skills/linked-gamma/SKILL.md', scope, 'agents'],
-      ['venv-skill', 'home/.claude/skills/delta/.venv/lib/pkg/SKILL.md', scope, 'claude'],
     ];
 
-    it('finds the same skills as before for a project, a home-directory project and no project', async () => {
+    it('finds the skills the discovery rules name for a project, a home-directory project and no project', async () => {
       const root = await buildTree();
       const home = path.join(root, 'home');
       try {
         await withHome(home, async () => {
           expect(await discoveredIn(root, path.join(home, 'work', 'project'))).toEqual([
             ['alpha', 'home/.agents/skills/alpha/SKILL.md', 'user', 'agents'],
-            ['alpha-inner', 'home/.agents/skills/alpha/nested/inner/SKILL.md', 'user', 'agents'],
             ['beta', 'home/.agents/skills/group/beta/SKILL.md', 'user', 'agents'],
             ['delta', 'home/work/project/.claude/skills/delta/SKILL.md', 'project', 'claude'],
             ['gamma', 'home/.agents/skills/linked-gamma/SKILL.md', 'user', 'agents'],
             ['oc', 'home/work/project/.opencode/skills/oc/SKILL.md', 'project', 'opencode'],
             ['proj', 'home/work/project/.agents/skills/proj/SKILL.md', 'project', 'agents'],
-            ['venv-skill', 'home/.claude/skills/delta/.venv/lib/pkg/SKILL.md', 'user', 'claude'],
           ]);
           // The home directory's own skill roots are read once but still
           // land as project skills, the way the second pass always left them.

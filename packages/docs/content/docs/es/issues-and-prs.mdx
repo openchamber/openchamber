@@ -23,12 +23,14 @@ Todo está en una sola fila de la barra de herramientas. A la izquierda está el
 
 En **Linear**, el selector de proyecto pasa a ser un selector de equipo: elige **All teams** o un equipo. Si conectaste más de un espacio de trabajo de Linear, cámbialo desde el mismo menú. Cómo conectar Linear está en [Integraciones](/es/integrations/).
 
-La búsqueda acepta un título, un número o un enlace pegado. El menú de filtros sigue abierto mientras eliges, así que puedes combinar filtros.
+La búsqueda acepta un título, un número o un enlace pegado. El menú de filtros sigue abierto mientras eliges, así que puedes combinar filtros. En GitHub, el campo también acepta sus propios calificadores (`is:closed`, `label:bug`, `author:@me`), que mandan sobre el menú.
 
 Para GitHub, GitLab, Gitea, Forgejo y Gerrit:
 
 - Estado: **Open**, **Closed**, **All**, y **Merged** para pull requests
 - Personas: **Anyone**, **Assigned to me**, **Created by me**, y **Review requested** para pull requests
+
+El menú **Filter** también lista las etiquetas del repositorio, con un buscador y una marca por etiqueta; cada marca acota la lista al momento. El filtro se recuerda para cada repositorio y pestaña.
 
 Para Linear:
 
@@ -42,6 +44,8 @@ La vista previa muestra la descripción, las etiquetas y los comentarios. En una
 
 La fila **Labels** tiene un botón de lápiz que abre una lista con buscador de las etiquetas del repositorio. Márcalas o desmárcalas. El cambio se guarda al cerrar la lista, así que varios clics cuentan como un solo cambio. Un pull request abierto (merge request en GitLab) también tiene una fila **Reviewers** que funciona igual, con las personas que pueden revisar en el repositorio. En GitHub no se ofrece al autor del pull request. Las issues de Linear no tienen ninguna de las dos filas.
 
+Un lápiz junto al título edita el título y la descripción a la vez. <kbd>⌘</kbd>+<kbd>Enter</kbd> guarda (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> en Windows y Linux), <kbd>Esc</kbd> cancela, y luego la vista previa muestra lo que guardó el host. Un elemento abierto desde un enlace no tiene lápiz, y un host que no puede cambiar el texto tampoco.
+
 ## Comenta y revisa
 
 Debajo de la actividad de una issue o un pull request hay un cuadro de comentario. **Comment** publica tu texto en el host del repositorio, igual que <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> en Windows y Linux). El texto se queda en el cuadro hasta que se publica, así que un envío fallido no pierde nada. Al pasar a otro elemento, el cuadro se vacía. Las issues de Linear no lo tienen.
@@ -49,6 +53,8 @@ Debajo de la actividad de una issue o un pull request hay un cuadro de comentari
 Un pull request abierto (merge request en GitLab) también tiene **Approve** y **Request changes**, y el texto del cuadro va con la revisión. **Request changes** necesita un texto que diga qué cambiar. La revisión es para los commits que muestra la vista previa. Si alguien hizo push desde entonces, se rechaza y la vista previa se actualiza para que vuelvas a mirar. En GitLab, **Request changes** funciona si eres revisor del merge request, y el texto de la revisión se publica como un comentario aparte. Si solo falla ese comentario, la revisión cuenta igual y tu texto se queda en el cuadro.
 
 Un cambio de Gerrit tiene una fila para cada etiqueta del proyecto, como Code-Review y Verified, con las puntuaciones que puedes dar. Elígelas y pulsa **Votar**. Tu texto va con los votos como mensaje. Los votos van al último patchset, así que no se ofrecen mientras lees uno anterior.
+
+Un comentario que escribiste tiene un menú junto a su botón de enviar: **Edit** lo reescribe ahí mismo y **Delete** lo borra tras preguntar. Una respuesta se edita y se borra igual. Ambos actúan en el host, así que el comentario cambia para todos.
 
 ## Empieza a trabajar
 

@@ -82,6 +82,8 @@ Run a prompt once, daily, weekly, or on a cron schedule. Scheduled tasks can use
 
 Download the latest release from [GitHub Releases](https://github.com/openchamber/openchamber/releases/latest). Desktop bundles the matching OpenCode CLI, so no separate OpenCode installation is required.
 
+The nightly build of `main` is in the [Canary release](https://github.com/openchamber/openchamber/releases/tag/canary). Tomorrow's release, available tonight.
+
 Linux releases come for x86_64 and ARM64 as a `.deb` (Debian, Ubuntu), an `.rpm` (Fedora, openSUSE) and an AppImage. The packages install OpenChamber into the app menu, and in-app updates ask for your password to install the new package:
 
 ```bash
@@ -101,6 +103,10 @@ Linux AppImages require FUSE (`libfuse.so.2`). Without FUSE, run with `APPIMAGE_
 ### VS Code
 
 Install [OpenChamber from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber), or search for "OpenChamber" in Extensions.
+
+### iOS and Android
+
+Join the iOS beta on [TestFlight](https://testflight.apple.com/join/5ek6GU1E). For Android, download the `.apk` from the [Canary release](https://github.com/openchamber/openchamber/releases/tag/canary).
 
 ### CLI for Web and PWA
 

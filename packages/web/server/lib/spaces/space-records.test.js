@@ -26,7 +26,7 @@ describe('space records', () => {
     expect(records.read(ID)).toEqual({ status: 'missing', record: null });
 
     const written = records.write(ID, { network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project' });
-    expect(written).toEqual({ version: 1, placeId: 'docker', name: null, created: null, network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project', spacePath: null, base: null, history: 'pending', grants: [], setup: null });
+    expect(written).toEqual({ version: 1, placeId: 'docker', name: null, taskTitle: null, created: null, network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project', spacePath: null, base: null, history: 'pending', grants: [], setup: null });
     const file = path.join(dataDir, 'spaces', 'records', `${ID}.json`);
     if (process.platform !== 'win32') expect(fs.statSync(file).mode & 0o777).toBe(0o600);
     expect(fs.readdirSync(path.dirname(file))).toEqual([`${ID}.json`]);

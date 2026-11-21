@@ -1,7 +1,12 @@
 import React from 'react';
+import { useBackgroundShellsStore } from '@/sync/background-shells';
+import { useBackgroundImagesStore } from '@/sync/background-images';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
-import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { collectOpenTurnSessionIds, useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { usePrWatchStore } from '@/sync/pr-watch';
+import { useExtensionWaitsStore } from '@/sync/extension-waits';
 import { isSessionUnread } from '@/sync/session-unread';
+import { useWorkflowActivityStore } from '@/sync/workflow-activity';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
@@ -12,8 +17,11 @@ import { EMPTY_SIDEBAR_LIVE_FACTS, type SidebarLiveFacts } from './workFacts';
 const EMPTY_IDS: ReadonlySet<string> = new Set();
 type BlockingMap = ReturnType<typeof useGlobalBlockingRequestsStore.getState>['bySession'];
 const EMPTY_BLOCKING: BlockingMap = new Map();
+type PrWatchMap = ReturnType<typeof usePrWatchStore.getState>['bySession'];
+const EMPTY_PR_WATCHES: PrWatchMap = new Map();
+type ExtensionWaitMap = ReturnType<typeof useExtensionWaitsStore.getState>['bySession'];
+const EMPTY_EXTENSION_WAITS: ExtensionWaitMap = new Map();
 
-/** The ids of top-level sessions whose last turn is unread and of those whose last turn failed, as one comparable key. */
 const selectTurnOutcomeKey = (state: ReturnType<typeof useGlobalSessionsStore.getState>): string => {
   const unread: string[] = [];
   const failed: string[] = [];
@@ -25,43 +33,36 @@ const selectTurnOutcomeKey = (state: ReturnType<typeof useGlobalSessionsStore.ge
   return `${unread.sort().join(',')}|${failed.sort().join(',')}`;
 };
 
-/**
- * The live state the user's sections filter on, subscribed only while a shown
- * section asks for it: membership in those sections changes on every turn,
- * and nothing else in the list needs to rebuild for it.
- */
 export const useSidebarLiveFacts = (enabled: boolean): SidebarLiveFacts => {
-  // Membership of the active set changes only when a turn starts or ends.
   const activeIds = useGlobalSessionStatusStore((state) => (enabled ? state.activeSessionIds : EMPTY_IDS));
+  const workflowIds = useWorkflowActivityStore((state) => (enabled ? state.runningSessionIds : EMPTY_IDS));
+  const shellIds = useBackgroundShellsStore((state) => (enabled ? state.sessionIds : EMPTY_IDS));
+  const imageIds = useBackgroundImagesStore((state) => (enabled ? state.sessionIds : EMPTY_IDS));
+  const prWatches = usePrWatchStore((state) => (enabled ? state.bySession : EMPTY_PR_WATCHES));
+  const extensionWaits = useExtensionWaitsStore((state) => (enabled ? state.bySession : EMPTY_EXTENSION_WAITS));
   const blocking = useGlobalBlockingRequestsStore((state) => (enabled ? state.bySession : EMPTY_BLOCKING));
   const outcomeKey = useGlobalSessionsStore(React.useCallback((state) => (enabled ? selectTurnOutcomeKey(state) : ''), [enabled]));
   return React.useMemo(() => {
     if (!enabled) return EMPTY_SIDEBAR_LIVE_FACTS;
     const [unread = '', failed = ''] = outcomeKey.split('|');
+    const openTurnIds = collectOpenTurnSessionIds(activeIds, [workflowIds, shellIds, imageIds, prWatches.keys(), extensionWaits.keys()]);
     return {
-      activeIds,
+      activeIds: openTurnIds,
       blockingIds: new Set([...blocking].flatMap(([sessionId, pending]) => (
         pending.permissions.length + pending.forms.length + pending.pages.length > 0 ? [sessionId] : []
       ))),
-      unreadIds: new Set(unread ? unread.split(',') : []),
+      unreadIds: new Set(unread ? unread.split(',').filter((sessionId) => !openTurnIds.has(sessionId)) : []),
       failedIds: new Set(failed ? failed.split(',') : []),
     };
-  }, [activeIds, blocking, enabled, outcomeKey]);
+  }, [activeIds, blocking, enabled, extensionWaits, imageIds, outcomeKey, prWatches, shellIds, workflowIds]);
 };
 
-/** The start of the local hour: a local midnight is always one, whatever the time zone's offset. */
 const localHourStart = (): number => {
   const date = new Date();
   date.setMinutes(0, 0, 0);
   return date.getTime();
 };
 
-/**
- * The time the user's sections compare activity against, moved on by the
- * hour while a shown section filters by activity: "Today" turns over at
- * midnight and "Idle 3+ days" ages without any other change to the list.
- * The list rebuilds once an hour, never on every minute.
- */
 export const useSidebarSectionsNow = (active: boolean): number => {
   const [hourStart, setHourStart] = React.useState(localHourStart);
   React.useEffect(() => {
@@ -79,12 +80,6 @@ export const useSidebarSectionsNow = (active: boolean): number => {
 
 const EMPTY_PLAN_SESSIONS: ReadonlySet<string> = new Set();
 
-/**
- * The sessions a project plan was sent to. Plans live with each project's
- * knowledge, so `projects` are only those a shown section asks plans of:
- * each is read once through the background gate, and again when the server
- * says its knowledge changed. A project whose knowledge failed to load lists none.
- */
 export const useSidebarPlanSessions = (projects: readonly ProjectRef[]): ReadonlySet<string> => {
   const enabled = projects.length > 0;
   const entries = useProjectContextStore((state) => (enabled ? state.entries : null));

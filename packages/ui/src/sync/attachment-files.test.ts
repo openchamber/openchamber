@@ -2,14 +2,17 @@ import { describe, expect, mock, test } from "bun:test"
 import {
   ACCEPTED_ATTACHMENT_EXTENSIONS,
   ATTACHMENT_ACCEPT,
+  HeicConversionError,
   getAttachmentInputModality,
   getUnsupportedAttachmentInputs,
   isReadOnSendMentionFilename,
   prepareAttachmentFile,
 } from "./attachment-files"
 
+let decodeHeic = async (): Promise<Blob> => new Blob(["jpeg-data"], { type: "image/jpeg" })
+
 mock.module("heic2any", () => ({
-  default: async () => new Blob(["jpeg-data"], { type: "image/jpeg" }),
+  default: async () => decodeHeic(),
 }))
 
 const prepare = (file: File) => Promise.resolve(prepareAttachmentFile(file))
@@ -143,5 +146,18 @@ describe("attachment file preparation", () => {
     expect(result?.file.name).toBe("photo.jpg")
     expect(result?.file.type).toBe("image/jpeg")
     expect(await result?.file.text()).toBe("jpeg-data")
+  })
+
+  test("refuses a HEIC the decoder cannot read instead of reporting nothing", async () => {
+    // Apple HDR gain-map photos are the case: the vendored libheif rejects them.
+    decodeHeic = async () => {
+      throw new Error("ERR_LIBHEIF format not supported")
+    }
+    try {
+      await expect(prepare(new File(["heic-data"], "IMG_4015.heic", { type: "image/heic" })))
+        .rejects.toBeInstanceOf(HeicConversionError)
+    } finally {
+      decodeHeic = async () => new Blob(["jpeg-data"], { type: "image/jpeg" })
+    }
   })
 })

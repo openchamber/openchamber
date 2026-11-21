@@ -23,7 +23,6 @@ import { z } from 'zod';
 import { requestOpenCodeTrust } from '@/lib/opencodeTrust';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 
-/** Pick the preset colour least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
   const colorKeys: string[] = [...COLOR_PRESETS];
   const usageCounts = new Map<string, number>();
@@ -35,7 +34,6 @@ const pickAutoColor = (projects: ProjectEntry[]): string => {
       usageCounts.set(p.color, (usageCounts.get(p.color) ?? 0) + 1);
     }
   }
-  // Find minimum usage, then pick randomly among those with min usage
   const minUsage = Math.min(...usageCounts.values());
   const candidates = colorKeys.filter((k) => usageCounts.get(k) === minUsage);
   return candidates[Math.floor(Math.random() * candidates.length)];
@@ -60,8 +58,8 @@ interface ProjectsStore {
   manualProjectOrder: string[];
 
   addProject: (path: string, options?: { label?: string; id?: string }) => Promise<ProjectEntry | null>;
-  adoptSessionProject: (sessionId: string, directory: string, isCurrent: () => boolean) => Promise<boolean>;
-  addProjects: (paths: string[], options?: { fromOpenCode?: boolean }) => Promise<ProjectEntry[]>;
+  adoptSessionProject: (sessionId: string, directory: string, isCurrent: (directory: string) => boolean) => Promise<string | null>;
+  addProjects: (paths: string[]) => Promise<ProjectEntry[]>;
   removeProject: (id: string) => void;
   setActiveProject: (id: string) => void;
   setActiveProjectIdOnly: (id: string) => void;
@@ -176,8 +174,6 @@ const normalizeProjectPath = (value: string): string => {
   return normalizePath(expanded) ?? '';
 };
 
-// Folder names are shown verbatim: title-casing them turned `.ssh` into `.Ssh`
-// and made every project look like a name the user never chose.
 const deriveProjectLabel = (path: string): string => {
   const normalized = normalizeProjectPath(path);
   if (!normalized || normalized === '/') {
@@ -187,8 +183,6 @@ const deriveProjectLabel = (path: string): string => {
   return segments[segments.length - 1] || normalized;
 };
 
-// Labels auto-derived by older versions were title-cased and persisted. Drop
-// them back to the folder name unless marked as a manual rename.
 const legacyAutoProjectLabel = (path: string): string => {
   const derived = deriveProjectLabel(path);
   return derived.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -309,7 +303,6 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     const defaultModel = normalizeDefaultModel(candidate.defaultModel);
     if (defaultModel) {
       project.defaultModel = defaultModel;
-      // A variant only means something next to the model it belongs to.
       if (typeof candidate.defaultVariant === 'string' && candidate.defaultVariant.trim().length > 0) {
         project.defaultVariant = candidate.defaultVariant.trim();
       }
@@ -402,6 +395,14 @@ const persistProjects = (projects: ProjectEntry[], activeProjectId: string | nul
     persistManualProjectOrder(manualOrder);
   }
   void updateDesktopSettings({ projects, activeProjectId: activeProjectId ?? undefined });
+};
+
+const discoverIconsOnceSaved = async (get: () => ProjectsStore, entries: ProjectEntry[]) => {
+  const saved = await updateDesktopSettings({ projects: get().projects });
+  if (!saved.ok) return;
+  for (const entry of entries) {
+    await get().discoverProjectIcon(entry.id);
+  }
 };
 
 const persistManualProjectOrder = (manualOrder: string[]) => {
@@ -569,8 +570,6 @@ const getVSCodeWorkspaceProject = (): { projects: ProjectEntry[]; activeProjectI
   return { projects: result.projects, activeProjectId: result.activeProjectId };
 };
 
-// VS Code runtime is scoped to the workspace folders opened in VS Code.
-// Always prefer the VS Code workspace projects over any persisted multi-project registry.
 const vscodeWorkspace = getVSCodeWorkspaceProject();
 const isVSCodeProjectsRuntime = (() => {
   return isVSCodeRuntime(getRegisteredRuntimeAPIs(), getVSCodeBootstrapConfig());
@@ -607,44 +606,42 @@ export const useProjectsStore = create<ProjectsStore>()(
     },
 
     adoptSessionProject: async (sessionId, directory, isCurrent) => {
-      if (!isCurrent()) return false;
+      if (!isCurrent(directory)) return null;
       if (isVSCodeProjectsRuntime) {
         const add = getRegisteredRuntimeAPIs()?.vscode?.addWorkspaceFolder;
         if (!add) throw new Error('Adding workspace folders is unavailable');
         const folders = await add(directory);
-        if (!isCurrent()) return false;
+        if (!isCurrent(directory)) return null;
         get().syncVSCodeWorkspaceFolders(folders);
         if (!get().projects.some((entry) => entry.path === directory)) throw new Error('The session workspace folder was not added');
-        return true;
+        return directory;
       }
-      const response = await runBackgroundNetworkTask(() => isCurrent() ? runtimeFetch('/api/projects/session-directory', {
+      const response = await runBackgroundNetworkTask(() => isCurrent(directory) ? runtimeFetch('/api/projects/session-directory', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId, directory }),
       }) : Promise.resolve(null));
-      if (!response) return false;
+      if (!response) return null;
       if (!response.ok) throw new Error(`Session project registration answered ${response.status}`);
-      const { project } = z.object({ project: z.object({
-        id: z.string().min(1), path: z.string().min(1), label: z.string().optional(),
-        addedAt: z.number().optional(), lastOpenedAt: z.number().optional(),
-      }) }).parse(await response.json());
-      if (!isCurrent()) return false;
-      // This response owns only an append, never a replacement or activation.
+      const { project, directory: answered } = z.object({
+        project: z.object({
+          id: z.string().min(1), path: z.string().min(1), label: z.string().optional(),
+          addedAt: z.number().optional(), lastOpenedAt: z.number().optional(),
+        }),
+        directory: z.string().min(1).optional(),
+      }).parse(await response.json());
+      const confirmed = answered ?? directory;
+      if (!isCurrent(confirmed)) return null;
       if (!get().projects.some((entry) => entry.id === project.id)) {
         const projects = [...get().projects, project];
         set({ projects });
         cacheProjects(projects, get().activeProjectId);
       }
-      // Join the append to this window's pending full-registry mutations. An
-      // older debounced manual add must not overwrite the confirmed project.
       void updateDesktopSettings({ projects: get().projects });
-      return true;
+      return confirmed;
     },
 
     addProject: async (path: string, options?: { label?: string; id?: string }) => {
       if (isVSCodeProjectsRuntime) {
-        // Projects are scoped to VS Code workspace folders in this runtime.
-        // Adding a folder through the extension host makes the project appear
-        // in the workspace and the new folder is synced back as a project.
         const validation = get().validateProjectPath(path);
         if (!validation.ok || !validation.normalizedPath) {
           return null;
@@ -701,17 +698,12 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       get().setActiveProject(entry.id);
-      void get().discoverProjectIcon(entry.id);
+      void discoverIconsOnceSaved(get, [entry]);
       return entry;
     },
 
-    addProjects: async (paths: string[], options?: { fromOpenCode?: boolean }) => {
+    addProjects: async (paths: string[]) => {
       if (isVSCodeProjectsRuntime) {
-        if (options?.fromOpenCode) throw new Error('OpenCode project import is unavailable in VS Code');
-        // VS Code paths are added via runtimeApis.vscode.addWorkspaceFolder,
-        // which is reached only by addProject. Iterate so valid selections
-        // succeed instead of silently returning []. Dedupe by path so the
-        // returned array mirrors the non-VS Code contract.
         const added: ProjectEntry[] = [];
         const seen = new Set<string>();
         for (const path of paths) {
@@ -726,9 +718,6 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
       const current = get();
       const existingPaths = new Set(current.projects.map((project) => project.path));
-      if (options?.fromOpenCode && (!current.hasServerSnapshot || current.serverSnapshotFailed)) {
-        throw new Error('Project settings are unavailable');
-      }
       const now = Date.now();
       const entries: ProjectEntry[] = [];
       const seenPaths = new Set<string>();
@@ -754,38 +743,19 @@ export const useProjectsStore = create<ProjectsStore>()(
         });
       }
 
-      if (entries.length === 0 && !options?.fromOpenCode) {
+      if (entries.length === 0) {
         return [];
       }
 
       const nextProjects = [...current.projects, ...entries];
-      if (options?.fromOpenCode) {
-        const runtime = getRuntimeKey();
-        // Save the list and the retirement marker together. Failed saves leave
-        // the current list intact and the suggestion available for retry.
-        const result = await updateDesktopSettings({
-          projects: nextProjects,
-          openCodeProjectImportCompleted: true,
-        });
-        if (!result.ok || runtime !== getRuntimeKey()) throw new Error('Failed to save imported projects');
-        // Settings synchronization supplies the server-validated list. A folder
-        // removed during the import must not be put back by this continuation.
-        const ids = new Set(entries.map((entry) => entry.id));
-        const added = get().projects.filter((entry) => ids.has(entry.id));
-        for (const entry of added) void get().discoverProjectIcon(entry.id);
-        return added;
-      }
       set({ projects: nextProjects });
 
       if (streamDebugEnabled()) {
         console.info('[ProjectsStore] Added projects', entries);
       }
 
-      // Mirror addProject: the first newly added project becomes active.
       get().setActiveProject(entries[0].id);
-      for (const entry of entries) {
-        void get().discoverProjectIcon(entry.id);
-      }
+      void discoverIconsOnceSaved(get, entries);
       return entries;
     },
 
@@ -806,11 +776,8 @@ export const useProjectsStore = create<ProjectsStore>()(
       set({ projects: nextProjects, activeProjectId: nextActiveId, manualProjectOrder: nextManualOrder });
       persistProjects(nextProjects, nextActiveId, nextManualOrder);
 
-      // Clean up worktree entries for the removed project
       if (project) {
         const normalizedPath = project.path.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
-        // Its chat folders go for every client of the server: those of the
-        // project root, its archive and each of its worktrees.
         const folderRoot = normalizePath(project.path);
         if (folderRoot) {
           const worktreeScopes = (useSessionUIStore.getState().availableWorktreesByProject.get(normalizedPath) ?? [])
@@ -822,8 +789,6 @@ export const useProjectsStore = create<ProjectsStore>()(
           next.delete(normalizedPath);
           return { availableWorktreesByProject: next };
         });
-        // Its running isolated spaces stop, but not one whose agent is working. Loaded on demand,
-        // so the feature stays out of this store's module graph.
         const label = project.label?.trim() || project.path.split('/').pop() || project.path;
         void import('@/lib/spaces/space-close').then(({ stopSpacesOfClosedProject }) => stopSpacesOfClosedProject(project.path, label));
       }
@@ -950,8 +915,6 @@ export const useProjectsStore = create<ProjectsStore>()(
             delete updated.defaultVariant;
           }
         }
-        // A variant without its model is meaningless, and the model may have
-        // just been cleared in this same update.
         if (!updated.defaultModel) {
           delete updated.defaultVariant;
         }
@@ -1040,6 +1003,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         return { ok: false, error: 'Custom icons are not supported in this runtime' };
       }
 
+      const runtime = getRuntimeKey();
       try {
         const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/icon/discover`, {
           method: 'POST',
@@ -1054,15 +1018,19 @@ export const useProjectsStore = create<ProjectsStore>()(
           error?: string;
           skipped?: boolean;
           reason?: string;
-          settings?: DesktopSettings;
+          project?: { iconImage?: unknown } | null;
         } | null;
 
         if (!response.ok) {
           return { ok: false, error: payload?.error || 'Failed to discover project icon' };
         }
 
-        if (payload?.settings) {
-          get().synchronizeFromSettings(payload.settings, { adoptActiveProject: false });
+        const iconImage = sanitizeProjectIconImage(payload?.project?.iconImage);
+        if (iconImage && runtime === getRuntimeKey() && get().projects.some((entry) => entry.id === id)) {
+          const projects = get().projects.map((entry) => (entry.id === id ? { ...entry, iconImage } : entry));
+          set({ projects });
+          cacheProjects(projects, get().activeProjectId);
+          void updateDesktopSettings({ projects });
         }
 
         return {
@@ -1127,10 +1095,6 @@ export const useProjectsStore = create<ProjectsStore>()(
       const incomingIds = new Set(incomingProjects.map((p) => p.id));
       if (!current.hasServerSnapshot || current.serverSnapshotFailed) set({ hasServerSnapshot: true, serverSnapshotFailed: false });
 
-      // The settings document is shared by every window on this server, so
-      // outside a bootstrap sync the incoming active pointer is just another
-      // window's choice — the project LIST still reconciles, but this
-      // window's active project stays its own while it remains valid.
       const nextActive = adoptActiveProject
         ? incomingActive
         : (current.activeProjectId && incomingIds.has(current.activeProjectId)

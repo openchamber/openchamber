@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { dict } from '@/lib/i18n/messages/en';
 import { changeRequestCopy, changeRequestCopyKeys } from './changeRequestCopy';
+import { githubLikeDescriptor, gitlabLikeDescriptor } from './providers/descriptor.fixture';
+import { changeRequestTermOfUrl, createRepositoryUrlMatcher } from './repositoryUrlMatcher';
 
 describe('change request copy', () => {
   test('speaks of merge requests on GitLab and leaves every other host and message alone', () => {
@@ -8,6 +10,19 @@ describe('change request copy', () => {
     expect(dict[changeRequestCopy('gitView.pr.history.merged', 'mergeRequest')]).toBe('MR !{number} was merged into {base}.');
     expect(changeRequestCopy('gitView.pr.actions.createPr', 'pullRequest')).toBe('gitView.pr.actions.createPr');
     expect(changeRequestCopy('gitView.pr.segment.checks', 'mergeRequest')).toBe('gitView.pr.segment.checks');
+  });
+
+  test('a pull request watch uses the term and the number prefix of its host', () => {
+    expect(dict[changeRequestCopy('chat.prWatch.title', 'mergeRequest')]).toBe('Waiting on merge request !{number}');
+    expect(dict[changeRequestCopy('chat.sessionNotice.pullRequest.title', 'mergeRequest')]).toBe('Merge request !{number}');
+    expect(dict[changeRequestCopy('chat.sessionNotice.pullRequest.title', 'pullRequest')]).toBe('Pull request #{number}');
+  });
+
+  test('a link names the term of the provider it belongs to', () => {
+    const urls = createRepositoryUrlMatcher([githubLikeDescriptor(), gitlabLikeDescriptor()], []);
+    expect(changeRequestTermOfUrl('https://gitlab.com/acme/app/-/merge_requests/7', urls)).toBe('mergeRequest');
+    expect(changeRequestTermOfUrl('https://github.com/acme/app/pull/7', urls)).toBe('pullRequest');
+    expect(changeRequestTermOfUrl('https://example.com/acme/app/7', urls)).toBe('pullRequest');
   });
 
   test('speaks of changes on a review host', () => {

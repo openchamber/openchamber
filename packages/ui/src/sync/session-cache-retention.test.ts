@@ -79,7 +79,7 @@ function setup(surface: "desktop" | "mobile" | "vscode" = "desktop", recordsFor 
       const oldest = page[0]?.info
       const next = eligible.length > page.length && oldest
         ? Buffer.from(JSON.stringify({ id: oldest.id, time: oldest.time.created })).toString("base64url") : undefined
-      return { items: page, cursor: next ? { next } : {} }
+      return { items: page.reverse(), cursor: next ? { next } : {} }
     },
   }
   const loader = new SessionMessageLoader(childStores, { sdk, runtimeKey: "cache-test" })

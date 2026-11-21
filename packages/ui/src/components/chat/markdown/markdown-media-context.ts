@@ -1,11 +1,11 @@
 import React from 'react';
 import type { ToolPopupContent } from '../message/types';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { runtimeFetch } from '@/lib/runtime-fetch';
-import { runtimeAssetsNeedHeaders } from '@/lib/runtime-asset';
+import { fetchBypassingRuntimeBridge, runtimeFetch } from '@/lib/runtime-fetch';
+import { runtimeAssetsNeedFetch } from '@/lib/runtime-asset';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
-import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { getRuntimeUrlResolver, type RuntimeUrlQuery } from '@/lib/runtime-url';
 import { isFilePathWithinDirectory } from '@/lib/path-utils';
 import { isMarkdownDocumentReference, resolveMarkdownDocumentReference } from '@/components/views/files/previews/useMarkdownLocalAssets';
 import { getPreparedMarkdownImageUrl, isLocalMarkdownImageSource, loadMessageImageBlob, loadPreparedImageAsDataUrl, prepareLocalMarkdownImages, resolveMarkdownImageSource, resolveWorkspaceMarkdownImageSource, type PreparedMarkdownImage } from './markdownImageAssets';
@@ -17,9 +17,9 @@ export type MarkdownDocumentAssets = {
   colorScheme: 'light' | 'dark';
 };
 
+const PROJECT_UPLOAD_ROUTE_RE = /^\/api\/source-control\/[^/?#]+\/uploads\/[A-Za-z0-9_-]{16,}\/[^/?#]+\?/;
+
 type GalleryImage = { source: string; filename: string; element: HTMLElement; resolve: () => Promise<string>; load: () => Promise<Blob> };
-// Parts of one message share the existing popup gallery. Entries live only while
-// their React-owned image is mounted and loaded, and retain no resolved URLs.
 const galleries = new Map<string, Set<GalleryImage>>();
 
 type MediaOwner = {
@@ -73,7 +73,12 @@ export class MarkdownMediaOwner {
     }
     if (/^data:/i.test(source)) return resolveMarkdownImageSource(source, signal);
     if (mode === 'document') {
-      if (!documentAssets) return source;
+      if (!documentAssets) {
+        if (video || !PROJECT_UPLOAD_ROUTE_RE.test(source)) return source;
+        const read = this.readDocumentImage(source, source, undefined, signal);
+        void read.catch(() => { if (this.documentUrls.get(source) === read) this.documentUrls.delete(source); });
+        return read;
+      }
       if (!isMarkdownDocumentReference(source)) throw new Error('Document source is unavailable');
       const path = resolveMarkdownDocumentReference(documentAssets.filePath, source);
       const workspace = documentAssets.workspaceRoot;
@@ -84,21 +89,8 @@ export class MarkdownMediaOwner {
         this.check(signal);
         return getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', query);
       }
-      const cached = this.documentUrls.get(path);
-      if (cached) return cached;
-      const pending = (async () => {
-        const response = await runtimeFetch('/api/fs/raw', { query, signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]) });
-        if (!response.ok) throw new Error(`Image read failed (${response.status})`);
-        const blob = await response.blob();
-        if (blob.size > 25 * 1024 * 1024) throw new Error('Image too large for preview');
-        this.check(signal);
-        return URL.createObjectURL(blob);
-      })();
-      this.documentUrls.set(path, pending);
-      return pending;
+      return this.readDocumentImage(path, '/api/fs/raw', query, signal);
     }
-    // Tool/reasoning local mode retains its direct local-source behavior.
-    // Only assistant media uses the message grant / workspace bridge policy.
     if (mode === 'local') return source;
     if (isVSCodeRuntime()) {
       if (video) throw new Error('Video bridge is unavailable');
@@ -107,8 +99,6 @@ export class MarkdownMediaOwner {
       return url;
     }
     if (!sessionId || !messageId) throw new Error('Missing media owner');
-    // All owned nodes register in effects before the first viewport callback or
-    // microtask requests the batch. Embedded images count toward the same cap.
     await Promise.resolve();
     this.check(signal);
     const sources = [...this.sources.keys()].slice(0, 12);
@@ -127,7 +117,7 @@ export class MarkdownMediaOwner {
     const prepared = (await this.batch).get(source);
     this.check(signal);
     if (prepared?.status !== 'ready') throw new Error('Image is unavailable');
-    if (!video && runtimeAssetsNeedHeaders()) {
+    if (!video && runtimeAssetsNeedFetch()) {
       const url = await loadPreparedImageAsDataUrl(prepared, directory, signal);
       this.check(signal);
       return url;
@@ -137,12 +127,21 @@ export class MarkdownMediaOwner {
     return getPreparedMarkdownImageUrl(prepared, directory);
   }
 
-  /**
-   * An image's own bytes, to save it from the viewer. A message's local image
-   * is read whole through its grant; a document's, already read, and an
-   * inline one come from their object or data URL. A remote image is not
-   * ours to read.
-   */
+  private readDocumentImage(key: string, path: string, query: RuntimeUrlQuery | undefined, signal: AbortSignal): Promise<string> {
+    const cached = this.documentUrls.get(key);
+    if (cached) return cached;
+    const pending = (async () => {
+      const response = await runtimeFetch(path, { query, signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]) });
+      if (!response.ok) throw new Error(`Image read failed (${response.status})`);
+      const blob = await response.blob();
+      if (blob.size > 25 * 1024 * 1024) throw new Error('Image too large for preview');
+      this.check(signal);
+      return URL.createObjectURL(blob);
+    })();
+    this.documentUrls.set(key, pending);
+    return pending;
+  }
+
   async load(source: string): Promise<Blob> {
     const signal = this.controller.signal;
     const { mode, directory, sessionId, messageId } = this.options;
@@ -152,7 +151,7 @@ export class MarkdownMediaOwner {
     }
     const url = await this.resolve(source);
     if (!/^(?:data|blob):/i.test(url)) throw new Error('Image cannot be saved');
-    return (await fetch(url, { signal })).blob();
+    return (await fetchBypassingRuntimeBridge(url, { signal })).blob();
   }
 
   addGallery(image: GalleryImage): () => void {

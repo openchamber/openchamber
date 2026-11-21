@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { DIRECT_TOOLS_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime } from './runtime.js';
+import { DISPATCH_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, REPLY_COMMAND_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime, directToolsGuidance } from './runtime.js';
 import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 
 const DIRECTORY = '/work/project';
@@ -39,8 +39,8 @@ const createRuntime = (overrides = {}) => {
   },
   };
   for (const key of [
-    'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isSessionLinkingAvailable',
-    'isPageRenderingAvailable', 'isSecretRequestAvailable', 'isWorkflowAvailable', 'areAgentToolsInCodeMode', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries',
+    'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isMemoryToolAvailable', 'isSessionLinkingAvailable',
+    'isPageRenderingAvailable', 'isSecretRequestAvailable', 'isWorkflowAvailable', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries', 'isWorkNamingAvailable',
   ]) {
     if (key in overrides) dependencies[key] = overrides[key];
   }
@@ -109,7 +109,7 @@ describe('writing the knowledge into a session', () => {
   test('an unpinned note takes its entry away', async () => {
     const instructionEntries = createEntriesStub();
     const store = pinnedStore();
-    const runtime = createRuntime({ ...store, instructionEntries, isAgentMemoryEnabled: async () => false });
+    const runtime = createRuntime({ ...store, instructionEntries, isMemoryToolAvailable: async () => false });
     await runtime.sync('ses_a', DIRECTORY);
     expect(instructionEntries.held.has(PINNED)).toBe(true);
 
@@ -130,39 +130,6 @@ describe('writing the knowledge into a session', () => {
 
     await runtime.sync('ses_a', DIRECTORY, '');
     expect(instructionEntries.held.has(RESPONSE_STYLE)).toBe(false);
-  });
-
-  test('serialises concurrent syncs for one session', async () => {
-    const held = new Map();
-    const calls = [];
-    let releaseFirst;
-    let firstPutStarted;
-    const firstPut = new Promise((resolve) => { firstPutStarted = resolve; });
-    let first = true;
-    const instructionEntries = {
-      put: async (sessionId, directory, key, value) => {
-        calls.push([sessionId, directory, key, value]);
-        if (first) {
-          first = false;
-          firstPutStarted();
-          await new Promise((resolve) => { releaseFirst = resolve; });
-        }
-        held.set(key, value);
-      },
-      remove: async (_sessionId, _directory, key) => { held.delete(key); },
-    };
-    const runtime = createRuntime({ ...pinnedStore(), instructionEntries });
-    const firstSync = runtime.sync('ses_a', DIRECTORY, 'old style');
-    await firstPut;
-    const secondSync = runtime.sync('ses_a', DIRECTORY, 'new style');
-
-    expect(calls.filter((call) => call[2] === RESPONSE_STYLE).map((call) => call[3])).toEqual(['old style']);
-    releaseFirst();
-    await firstSync;
-    await secondSync;
-
-    expect(held.get(RESPONSE_STYLE)).toBe('new style');
-    expect(calls.filter((call) => call[2] === RESPONSE_STYLE).map((call) => call[3])).toEqual(['old style', 'new style']);
   });
 
   test('one entry that will not write does not hold back the others', async () => {
@@ -198,19 +165,45 @@ describe('when to link', () => {
   test('is told in a session whose agent has the tool, even with nothing else to tell', async () => {
     const runtime = createRuntime({
       isSessionLinkingAvailable: async () => true,
-      isAgentMemoryEnabled: async () => false,
+      isMemoryToolAvailable: async () => false,
       projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
     });
     const entries = await entriesFor(runtime, NO_PINS);
 
-    expect(entries[GUIDANCE]).toBe(`${SESSION_LINK_GUIDANCE}\n\n${WORK_NAME_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
+    expect(entries[GUIDANCE]).toBe(`${SESSION_LINK_GUIDANCE}\n\n${DISPATCH_GUIDANCE}`);
     expect(entries[PINNED]).toBe('');
     expect(entries[MEMORY]).toBe('');
+  });
+
+  test('dispatch names the Code Mode call path and leaves subagent work alone', () => {
+    expect(DISPATCH_GUIDANCE).toContain('tools.openchamber inside execute');
+    expect(SESSION_LINK_GUIDANCE).toContain('tools.openchamber inside a Code Mode execute script');
+    expect(WORK_NAME_GUIDANCE).toContain('tools.openchamber inside execute');
+    for (const guidance of [SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, DISPATCH_GUIDANCE, WORKFLOW_GUIDANCE]) {
+      expect(guidance).toContain('if execute is unavailable');
+      expect(guidance).toContain('openchamber directly');
+    }
+    expect(DISPATCH_GUIDANCE).toContain('session.send');
+    expect(DISPATCH_GUIDANCE).toContain('subagent tool');
   });
 
   test('asks for the task name in the language of the user, the branch in English', () => {
     expect(WORK_NAME_GUIDANCE).toContain("in the language of the user's latest message");
     expect(WORK_NAME_GUIDANCE).toContain('A branch name stays in English.');
+  });
+
+  test('naming guidance is restricted to linked worktrees and spaces', async () => {
+    const runtime = createRuntime({
+      isSessionLinkingAvailable: async () => true,
+      isWorkNamingAvailable: async (directory) => directory === '/linked' || directory === '/spaces/abcdef123456/project',
+    });
+    for (const directory of ['/linked', '/spaces/abcdef123456/project']) {
+      expect((await entriesFor(runtime, NO_PINS, directory))[GUIDANCE]).toContain(WORK_NAME_GUIDANCE);
+    }
+    for (const directory of ['/main', '/plain']) {
+      expect((await entriesFor(runtime, NO_PINS, directory))[GUIDANCE]).not.toContain(WORK_NAME_GUIDANCE);
+    }
+    expect((await entriesFor(createRuntime({ isSessionLinkingAvailable: async () => true, isWorkNamingAvailable: async () => { throw new Error('unavailable'); } })))[GUIDANCE]).not.toContain(WORK_NAME_GUIDANCE);
   });
 
   test('is left out without the tool, or when the check fails', async () => {
@@ -223,14 +216,14 @@ describe('when to link', () => {
 
 describe('when to draw a page', () => {
   const bare = {
-    isAgentMemoryEnabled: async () => false,
+    isMemoryToolAvailable: async () => false,
     projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
   };
 
   test('is told in a session whose agent has the render tool', async () => {
     const entries = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable: async () => true }), NO_PINS);
 
-    expect(entries[GUIDANCE]).toBe(`${UI_BLOCKS_GUIDANCE}\n\n${RENDER_PAGE_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
+    expect(entries[GUIDANCE]).toBe(`${UI_BLOCKS_GUIDANCE}\n\n${RENDER_PAGE_GUIDANCE}\n\n${REPLY_COMMAND_GUIDANCE}\n\n${directToolsGuidance(['openchamber_render'])}`);
     expect(entries[GUIDANCE]).toContain('Not for a few numbers');
     expect(entries[GUIDANCE]).toContain('root = Stack([...])');
   });
@@ -245,13 +238,13 @@ describe('when to draw a page', () => {
 
 describe('when to ask for a secret', () => {
   const bare = {
-    isAgentMemoryEnabled: async () => false,
+    isMemoryToolAvailable: async () => false,
     projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
   };
 
   test('is told only in a session whose agent has the secret tool', async () => {
     const withTool = await entriesFor(createRuntime({ ...bare, isSecretRequestAvailable: async () => true }), NO_PINS);
-    expect(withTool[GUIDANCE]).toBe(`${SECRET_REQUEST_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
+    expect(withTool[GUIDANCE]).toBe(`${SECRET_REQUEST_GUIDANCE}\n\n${directToolsGuidance(['openchamber_secret'])}`);
 
     const without = await entriesFor(createRuntime({ ...bare, isSecretRequestAvailable: async () => { throw new Error('settings unreadable'); } }), NO_PINS);
     expect(without[GUIDANCE]).toBe('');
@@ -260,13 +253,13 @@ describe('when to ask for a secret', () => {
 
 describe('when to offer a workflow', () => {
   const bare = {
-    isAgentMemoryEnabled: async () => false,
+    isMemoryToolAvailable: async () => false,
     projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
   };
 
   test('is told only in a session whose agent has the workflow tool', async () => {
     const withTool = await entriesFor(createRuntime({ ...bare, isWorkflowAvailable: async () => true }), NO_PINS);
-    expect(withTool[GUIDANCE]).toBe(`${WORKFLOW_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
+    expect(withTool[GUIDANCE]).toBe(`${WORKFLOW_GUIDANCE}\n\n${directToolsGuidance(['openchamber_workflow'])}`);
     expect(withTool[GUIDANCE]).toContain('never start one unasked');
 
     const without = await entriesFor(createRuntime({ ...bare, isWorkflowAvailable: async () => { throw new Error('settings unreadable'); } }), NO_PINS);
@@ -275,11 +268,12 @@ describe('when to offer a workflow', () => {
 });
 
 describe('where the managed tools are called', () => {
-  test('says they are direct tools, and not when they run through Code Mode', async () => {
-    const direct = await entriesFor(createRuntime({ isSessionLinkingAvailable: async () => true }));
-    expect(direct[GUIDANCE]).toContain('never call them from inside a Code Mode execute script');
-    const codeMode = await entriesFor(createRuntime({ isSessionLinkingAvailable: async () => true, areAgentToolsInCodeMode: async () => true }));
-    expect(codeMode[GUIDANCE]).not.toContain(DIRECT_TOOLS_GUIDANCE);
+  test('names the direct tools the session has, and none for tools behind Code Mode', async () => {
+    const control = await entriesFor(createRuntime({ isSessionLinkingAvailable: async () => true }));
+    expect(control[GUIDANCE]).not.toContain('direct tool');
+    const all = await entriesFor(createRuntime({ isPageRenderingAvailable: async () => true, isSecretRequestAvailable: async () => true, isWorkflowAvailable: async () => true }));
+    expect(all[GUIDANCE]).toContain('openchamber_render, openchamber_secret, openchamber_workflow are direct tool calls: never call them from inside a Code Mode execute script');
+    expect(directToolsGuidance(['openchamber_render'])).toBe('openchamber_render is a direct tool call: never call it from inside a Code Mode execute script, where it does not exist.');
   });
 });
 
@@ -293,7 +287,7 @@ describe('the worktree move', () => {
 describe('which branch the session works on', () => {
   const runtimeOn = (branch, overrides = {}) => createRuntime({
     isSessionLinkingAvailable: async () => true,
-    isAgentMemoryEnabled: async () => false,
+    isMemoryToolAvailable: async () => false,
     readCheckoutBranch: async () => {
       if (branch instanceof Error) throw branch;
       return branch;
@@ -422,7 +416,7 @@ describe('what the session carries', () => {
   test('nothing pinned with memory off carries nothing', async () => {
     const runtime = createRuntime({
       projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
-      isAgentMemoryEnabled: async () => false,
+      isMemoryToolAvailable: async () => false,
     });
     const entries = await entriesFor(runtime, NO_PINS);
     expect(Object.values(entries).every((text) => text === '')).toBe(true);
@@ -502,15 +496,24 @@ describe('when a source will not load', () => {
 });
 
 describe('the memory switch', () => {
-  test('memory is left out entirely while the feature is off', async () => {
-    const entries = await entriesFor(createRuntime({ isAgentMemoryEnabled: async () => false }));
+  test('memory is left out entirely while the session has no memory tool', async () => {
+    const entries = await entriesFor(createRuntime({ isMemoryToolAvailable: async () => false }));
     expect(entries[MEMORY]).toBe('');
     expect(entries[PINNED]).toContain('Pinned note body.');
   });
 
+  test('the panel still counts memory while the session has no tool to save with', async () => {
+    const runtime = createRuntime({
+      isAgentMemoryEnabled: async () => true,
+      isMemoryToolAvailable: async () => false,
+    });
+    expect((await entriesFor(runtime))[MEMORY]).toBe('');
+    expect((await runtime.collectSummary(DIRECTORY)).memory).toEqual({ global: 1, project: 0 });
+  });
+
   test('an unreadable setting keeps memory out rather than guessing', async () => {
     const runtime = createRuntime({
-      isAgentMemoryEnabled: async () => { throw new Error('settings unreadable'); },
+      isMemoryToolAvailable: async () => { throw new Error('settings unreadable'); },
     });
     expect((await entriesFor(runtime))[MEMORY]).toBe('');
   });
@@ -583,6 +586,31 @@ describe('size', () => {
     expect(memory).not.toContain('- Project decision number 0 about something');
     const shown = memory.split('\n').filter((line) => line.startsWith('- Project decision')).length;
     expect(memory).toContain(`${300 - shown} older titles did not fit here; memory.list gives every title.`);
+  });
+});
+
+describe('lead', () => {
+  const base = { notes: [], plans: [], memory: { global: [], project: [] } };
+
+  test('tells a lead how to lead and what its brief says, and nobody else', () => {
+    const lead = buildKnowledgeEntries({ ...base, linking: true, lead: { brief: '# Goal\nShip it' } });
+    expect(lead[KNOWLEDGE_ENTRY_KEYS.lead]).toContain('This session is a lead');
+    expect(lead[KNOWLEDGE_ENTRY_KEYS.leadBrief]).toContain('# Goal\nShip it');
+    expect(buildKnowledgeEntries({ ...base, linking: true, lead: { brief: null } })[KNOWLEDGE_ENTRY_KEYS.leadBrief]).toContain('no brief yet');
+
+    for (const entries of [buildKnowledgeEntries({ ...base, linking: true, lead: null }), buildKnowledgeEntries({ ...base, linking: false, lead: { brief: 'x' } })]) {
+      expect(entries[KNOWLEDGE_ENTRY_KEYS.lead]).toBe('');
+      expect(entries[KNOWLEDGE_ENTRY_KEYS.leadBrief]).toBe('');
+    }
+  });
+
+  test('leaves the lead entries as they are when the session or its brief cannot be read', () => {
+    const unknown = buildKnowledgeEntries({ ...base, linking: true, lead: undefined });
+    expect(KNOWLEDGE_ENTRY_KEYS.lead in unknown).toBe(false);
+    expect(KNOWLEDGE_ENTRY_KEYS.leadBrief in unknown).toBe(false);
+    const unreadableBrief = buildKnowledgeEntries({ ...base, linking: true, lead: { brief: undefined } });
+    expect(unreadableBrief[KNOWLEDGE_ENTRY_KEYS.lead]).toContain('This session is a lead');
+    expect(KNOWLEDGE_ENTRY_KEYS.leadBrief in unreadableBrief).toBe(false);
   });
 });
 

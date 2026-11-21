@@ -5,7 +5,7 @@ import { FinishedWorktreesSettings } from './FinishedWorktreesSettings';
 import { SessionWorkSettings } from './SessionWorkSettings';
 import { PasskeySettings } from './PasskeySettings';
 import { AppLinkSecuritySettings } from './AppLinkSecuritySettings';
-import { DefaultsSettings } from './DefaultsSettings';
+import { DefaultsSettings, SessionContextSettings } from './DefaultsSettings';
 import { GitSettings } from './GitSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { VoiceSettings } from './VoiceSettings';
@@ -15,9 +15,10 @@ import { EnvironmentVariablesSettings } from './EnvironmentVariablesSettings';
 import { IsolatedSpacesSettings } from './IsolatedSpacesSettings';
 import { OpenChamberToolsSettings } from './OpenChamberToolsSettings';
 import { DesktopNetworkSettings } from './DesktopNetworkSettings';
-import { DesktopAppSettings } from './DesktopAppSettings';
+import { DesktopAppSettings, DesktopQuickAccessSettings } from './DesktopAppSettings';
 import { ChatSettings } from './ChatSettings';
-import { GeneralConnectionAndPrivacySettings, GeneralWorkspaceSettings } from './GeneralWorkspaceSettings';
+import { GeneralConnectionAndPrivacySettings, GeneralFilesAndTerminalSettings, GeneralInterfaceSettings } from './GeneralWorkspaceSettings';
+import { MobileAppSettings } from './MobileAppSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
@@ -37,7 +38,6 @@ const useRuntimeEndpointEpoch = (): number => {
 };
 
 interface OpenChamberPageProps {
-    /** Which section to display. */
     section: OpenChamberSection;
 }
 
@@ -45,7 +45,6 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
     const { t } = useI18n();
     const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
 
-    // Show specific section content
     const renderSectionContent = () => {
         switch (section) {
             case 'general':
@@ -87,24 +86,10 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
         spaces: t('settings.openchamber.spaces.title'),
     }[section];
 
-    const pageDescription = {
-        general: t('settings.page.general.description'),
-        visual: t('settings.page.appearance.description'),
-        chat: t('settings.page.chat.description'),
-        sessions: t('settings.page.sessions.description'),
-        shortcuts: t('settings.page.shortcuts.description'),
-        git: undefined,
-        github: undefined,
-        notifications: t('settings.page.notifications.description'),
-        voice: t('settings.page.voice.description'),
-        tunnel: t('settings.page.tunnel.description'),
-        spaces: undefined,
-    }[section];
-
     return (
         <SettingsPageLayout
             title={pageTitle}
-            description={pageDescription}
+            namedBySidebar
             showSaveStatus
             className="openchamber-page-body"
         >
@@ -117,33 +102,29 @@ const ShortcutsSectionContent: React.FC = () => {
     return <KeyboardShortcutsSettings />;
 };
 
-// General: the desktop app and quick access, files/terminal/panels, network
-// access and sign-in, links, the OpenCode CLI and environment, agent tools,
-// then message transport and privacy.
 const GeneralSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
     const isLocalDesktop = isDesktopShell() && isDesktopLocalOriginActive();
-    // Passkeys only work against the browser's WebAuthn UI on the web surface —
-    // desktop shell, VS Code, and the Capacitor app never show the login screen.
     const showPasskeySettings = isWebRuntime() && !isDesktopShell() && !isVSCode && !isCapacitorApp();
     return (
         <>
-            {isLocalDesktop && <DesktopAppSettings />}
-            <GeneralWorkspaceSettings firstSection={!isLocalDesktop} />
+            {isDesktopShell() && <DesktopAppSettings />}
+            <MobileAppSettings />
+            {!isVSCode && <OpenChamberToolsSettings />}
             {isLocalDesktop && <DesktopNetworkSettings />}
             {showPasskeySettings && <PasskeySettings />}
-            <AppLinkSecuritySettings />
+            <GeneralInterfaceSettings />
+            {isLocalDesktop && <DesktopQuickAccessSettings />}
             {!isVSCode && <OpenCodeCliSettings />}
-            {/* Remounts on a runtime switch: the names come from that server. */}
             {!isVSCode && <EnvironmentVariablesSettings key={runtimeEndpointEpoch} />}
-            {!isVSCode && <OpenChamberToolsSettings />}
+            <GeneralFilesAndTerminalSettings />
+            <AppLinkSecuritySettings />
             <GeneralConnectionAndPrivacySettings />
         </>
     );
 };
 
-// Visual section: Theme Mode, Font Size, Spacing, Input Bar Offset (mobile), Nav Rail
 const VisualSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     return <OpenChamberVisualSettings visibleSettings={[
@@ -166,29 +147,26 @@ const VisualSectionContent: React.FC = () => {
 
 const ChatSectionContent: React.FC = () => <ChatSettings />;
 
-// Sessions section: Default model & agent, Session retention
 const SessionsSectionContent: React.FC<{ runtimeEndpointEpoch: number }> = ({ runtimeEndpointEpoch }) => {
     return (
         <>
-            <DefaultsSettings key={runtimeEndpointEpoch} />
+            <DefaultsSettings key={`defaults-${runtimeEndpointEpoch}`} />
             <SessionWorkSettings />
             <SessionRetentionSettings />
             {!isVSCodeRuntime() && <FinishedWorktreesSettings />}
+            <SessionContextSettings key={`context-${runtimeEndpointEpoch}`} />
         </>
     );
 };
 
-// Git section: Commit message model, Worktree settings
 const GitSectionContent: React.FC = () => {
     return <GitSettings />;
 };
 
-// Notifications section: Native browser notifications
 const NotificationSectionContent: React.FC = () => {
     return <NotificationSettings />;
 };
 
-// Voice section: Language selection and continuous mode
 const VoiceSectionContent: React.FC = () => {
     if (isVSCodeRuntime()) {
         return null;
@@ -196,9 +174,6 @@ const VoiceSectionContent: React.FC = () => {
     return <VoiceSettings />;
 };
 
-// Isolated spaces: the switch, the idle stop, the places with their disk, and the spaces without a
-// project. Never in VS Code (decision 16); whether Settings offers the page at all is the page's
-// `isAvailable` in lib/settings/metadata.ts.
 const SpacesSectionContent: React.FC = () => {
     if (isVSCodeRuntime()) {
         return null;

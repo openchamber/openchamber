@@ -86,8 +86,8 @@ describe('comment inputs ignore IME composition keystrokes', () => {
 
 describe('comment surfaces type into the guarded comment field', () => {
   for (const file of [
-    'components/chat/message/TextSelectionMenu.tsx',
-    'components/chat/composer/ui/ComposerContextChips.tsx',
+    'components/chat/message/SelectionCommentInput.tsx',
+    'components/chat/composer/ui/ComposerContextRows.tsx',
   ]) {
     test(file, () => {
       const source = readFileSync(join(srcDir, file), 'utf-8');

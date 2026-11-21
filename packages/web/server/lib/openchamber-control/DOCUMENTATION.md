@@ -9,6 +9,10 @@ other.
 
 ## Boundaries
 
+`error.ts` carries optional unchecked task details and the scheduler's
+`'queued' | 'running'` busy values through `OpenChamberControlError`. The
+constructor retains its existing `Object.assign` behavior.
+
 - `service.js` validates and executes the fixed project, model, session, and
   scheduled-task action allowlist. `actions.js` marks CLI-only actions with
   `agentExposed: false` (currently `schedule.status`); the agent tool consumes
@@ -19,13 +23,28 @@ other.
   (`../scheduled-tasks/DOCUMENTATION.md`, *Local approval*).
   `schedule.list` also returns scheduler status as `scheduler`.
   `schedule.update` patches a task in place: only the fields the call names
-  change, the id and run state stay, and a task driven by a loop file is
+  change, the id and run history stay, and a task driven by a loop file is
   refused (the file is its source).
+  A standalone `time` changes a once task's time while keeping its date, or a
+  single-time weekly task's time while keeping its weekdays. It must be a
+  nonempty `HH:mm` value. Daily, cron and multi-time weekly tasks require an
+  explicit schedule replacement; incompatible or ambiguous time patches fail
+  before upsert. Omitted timezone inherits the stored timezone through project
+  config normalization, including schedule replacements. An explicit nonempty
+  timezone replaces it. Timezone clearing and creation behavior are unchanged.
+  Rejected patches leave the requested fields, schedule and run history
+  unchanged by the patch. The preceding task list reconciles the scheduler
+  before validation and may persist legitimate state recalculations, including
+  `state.updatedAt`, even when the patch is rejected before upsert. A failed
+  atomic patch write preserves the prior valid snapshot at that write boundary.
+  Scheduler synchronization also follows the save; a failure there retains the
+  committed change on disk.
   `schedule.create` and `schedule.update` accept `targetSessionId`, validated
   by the scheduled-task service. An empty `targetSessionId` on update clears
   the target. Create
-  without a model inherits the target selection; an explicit agent overrides
-  it. A task without a target still requires a model. When a call names a
+  without a model inherits the target selection; a model or agent the task
+  names switches the target session to it on every run, so the tool
+  descriptions say so. A task without a target still requires a model. When a call names a
   model, it is checked against the execution directory's catalog first. The
   scheduled-task service resolves the project checkout or Chats root through
   its storage/public ID mapping. A target task uses the target session's own
@@ -35,6 +54,28 @@ other.
   Only the model the call names is checked, so an update that names no model
   validates nothing. This server runs for web, Electron, hosted mobile and
   Capacitor clients; the VS Code extension does not run it.
+  `schedule.create` and `schedule.update` also accept the isolation fields
+  `runInWorktree`, `baseBranch` and `cleanupWorktree`, the same choices the
+  editor stores for a git project's task. All three are refused together with
+  an existing-session target, because that session's own directory wins and
+  the fields would otherwise be stored and ignored. `runInWorktree` and
+  `cleanupWorktree` must be booleans, and `baseBranch` a nonempty string, or
+  empty or null on update to clear the stored branch. Anything else is a 400
+  before upsert, because the CLI HTTP route forwards raw JSON and a wrong type
+  would turn isolation off or erase the branch.
+  A `name` over 80 characters or a `prompt` over 20,000 characters after
+  trimming is a 400 from either action that names the limit. The CLI exits
+  non-zero with that message. The refused request applies none of its fields.
+  The preceding scheduler sync on `schedule.update` can still write task
+  state and reconcile changes made to loop files.
+- `session-listing.js` owns `session.list` and `session.archive`. `mine`
+  lists only the sessions the calling session created with `ownWork`
+  (`metadata.openchamber.kind === 'operator-child'` with its id as
+  `parentID`), across every project unless scoped, each with its status; a
+  call without a calling session is a `400`. `session.archive` archives only
+  such a session of the caller (`403` for any other), so an agent cleans up
+  its own finished work and never the user's sessions. `lead.brief` and
+  `lead.digest` go to `../session-lead/` (`leadActions`).
 - `project-knowledge.js` runs the `knowledge.*` actions of the
   `openchamber_knowledge` agent tool (`list`, `save`, `delete`, `show`;
   `kind` names note, todo or plan) against
@@ -64,20 +105,29 @@ other.
   drawer's plan viewer on mobile. No
   window reached is `503`.
 - `generate-image.js` runs `image.generate` for the `openchamber_image` agent tool, off by default. It reads `agentImageToolEnabled` (`403` while off) and `agentImageModel` (`provider/model`, `409` while unset) on every call and asks OpenCode's `POST /api/experimental/generate/image` (OpenCode 2.2), which takes no location, so it starts no MCP servers. The session keeps its own model. Reference images are read from the agent's paths (PNG, JPEG, GIF or WebP by signature, at most 8 of 10 MB each). The generated bytes go to files, never into the result: a picture stored with the session would sync a few megabytes to every client per call. Without `path` they land in OpenCode's temporary folder (`os.tmpdir()/opencode/generated-images`), which OpenCode tells agents they may read and write without asking; more than one image numbers the rest `-2`, `-3`. OpenCode's tagged errors become actions for the agent: a missing or non-image model asks the user to choose another, a provider refusal passes on the provider's reason. The result is `{ model, images: [{ path, mime }], cost? }`; `generatedImagePaths` reads the paths back from the stored envelope for the image grant route.
+- `usage-read.js` runs `usage.read` for the `openchamber_usage` agent tool, off by default. It reads `agentUsageToolEnabled` on every call (`403` while not `true`) and loads the quota module through the `loadQuota` dependency (absent: `503`). It runs the readers Settings → Usage runs, with the page's deadlines: the configured-provider list within 10 seconds, then every configured provider in parallel, each within 30 seconds. Only the providers the page reads are asked (`listUsagePageProviders`, `../quota/DOCUMENTATION.md`), so an agent never causes a request the page does not make. The result is `{ providers, notConfigured }`: each provider's result exactly as `GET /api/quota/:providerId` answers it, and the ids of the page's providers without a credential. A provider that throws or misses its deadline is its own failed entry (`ok: false`, `configured: true`, `usage: null`, `error`), and the others stay. A provider list that fails or times out does what the page does, asking every provider, and the result carries `listError` instead of `notConfigured`; it is never an empty list. `providerId` reads one provider without the list read; an id the page does not read is a `400` naming the ids it does. Nothing is cached: each call is a fresh read, under the readers' own limits (concurrent reads of one provider share a request; Claude answers from its last sample during a 429 cooldown, so `fetchedAt` can be newer than the numbers). A cancelled turn ends the wait with `499`; the shared reads finish for their other callers.
+- `terminal-read.js` runs `terminal.list` and `terminal.read` for the `openchamber_terminal` agent tool, off by default. It reads `agentTerminalToolEnabled` on every call (`403` while not `true`) and takes the terminal runtime through the `getTerminalRuntime` dependency (absent: `503`). Both actions only copy in-memory state from `../terminal/runtime.js`: `terminal.list` returns `{ terminals }` for the session's own folder, or for an explicit `directory`, and answers `400` when neither resolves rather than listing every terminal of the instance; `terminal.read` returns one terminal's `{ sessionId, cwd, status, exitCode, signal, createdAt, mode, purpose, text, truncated, retainedBytes }`, where `text` is plain text without VT control sequences, end-aligned to a line, with `maxBytes` (default 32,768, at most 262,144) capping it. An unknown id is a `404` naming `terminal.list`, because the ids are client-supplied. Nothing here types, starts or stops a PTY, moves `lastActivity` or publishes to an attached client. Both actions run only for the managed agent-tool callback (`../agent-tool/runtime.js`), which authenticates each OpenCode child: `POST /api/openchamber/control` answers them with `403` before the service is called, whatever the setting says.
 - `render-page.js` runs `render.page` for the `openchamber_render` agent tool. It takes `html` or `ui` (a program in the UI block language, which the chat draws with its own components; the server cannot parse it, so a client that cannot draw it answers the wait with `notDrawn` errors, and the agent gets them in its result). Only one of them is required: a page sent without a title is named after its own `<title>`, else its first h1 to h3, else "Page", with the same rule the chat uses (`renderedPage` in `packages/ui/src/lib/opencode/tools.ts`). Weaker models sent title and html in separate calls, each refused call costing the whole page again; a missing html now also asks for both in one call.
   The chat draws the page from the call's own input, so the action stores
   nothing: it checks `html` (at most 200,000 characters) and `title` (at most
-  120) and answers `403` while `agentRenderToolEnabled` is `false`. With
+  120) and answers `403` while `agentRenderToolEnabled` is `false`. A call
+  with `share` is refused first when sharing is unavailable (`403`,
+  `code: 'enterprise_mode'`) and with `awaitAnswer` or `answerLater` (`400`), then makes its
+  group through `sharePages` (`../share-pages/`) and returns at once without
+  any link or PIN. With
   `awaitAnswer` the action waits in `createPageAnswers`, keyed by session and
   call id, until `answerPage` resolves it (`POST /api/openchamber/render/answer`
   from the chat: a summary of at most 500 characters and data of at most
-  16,000 characters as JSON) or the request is aborted. Nothing outlives the
+  16,000 characters as JSON, or `declined: true` when the user declined, which
+  ends the call with `{ answered: false, reason: "declined" }` and a note that
+  tells the agent not to choose for them) or the request is aborted. Nothing outlives the
   call, so a second answer, an answer for a call that ended, and an answer
   after a server restart are a `404`, never a silent success.
   Before it waits, the action reads the session's OpenCode inbox. A message
   the user steered into the turn that the agent has not read yet means they
   wrote before the page appeared (a queued one waits for the turn to end
-  anyway, so it does not count); OpenCode delivers it only after this call returns, so
+  anyway, and one an agent or OpenCode's scheduler sent, `isAgentPrompt`, is
+  not the user writing, so neither counts); OpenCode delivers it only after this call returns, so
   waiting held it back and an answer on the page reached the agent first.
   The call then returns at once with `{ answered: false, reason:
   "chat-sent-earlier" }` and a note that the message is not an answer to the
@@ -91,6 +141,73 @@ other.
   (`trackWaitingPage` in `../opencode/session-runtime.js`), broadcasts
   `openchamber:page-waiting` / `openchamber:page-settled` to the clients, and
   sends the same "Input needed" notification a form gets.
+  A turn that ends (`session.idle`, `session.error` in `index.js`) releases
+  the session's waits through `releaseAnswerWaits`: they leave the pending
+  list, and a late answer is a `404`. See *Why a released page keeps its
+  request open*.
+  With `answerLater` (exclusive with `awaitAnswer`, `400` together, and
+  needing a call id like a wait) the call returns at once with
+  `answerLater: true` and a note that the answer comes later, after
+  `later-pages.js` saved the page as open (`<data-dir>/render-later-pages.json`,
+  atomic, owner-readable; a failed save fails the call with `500`), with what
+  it asked (`renderPageQuestion`: an html page's visible text without its
+  title, scripts and styles, or the ui program, at most 2,000 characters), so
+  the answer still names its question after other work or a compaction. No
+  script runs on the server, so that is only part of what the user saw when
+  the page has a script (`questionCaptured: 'static-text'`), was cut
+  (`'truncated'`) or had no text (`'none'`); the page keeps that field, the
+  answer's JSON carries it and its prose tells the agent not to assume more,
+  and the tool description asks for the question in static text. The page
+  is not a wait: it never enters `createPageAnswers`, the pending list or
+  `onPageWaitChange`, so neither the turn's end (`releaseAnswerWaits`), a
+  message in the chat (the plugin's prompt hook) nor Stop closes it, and the
+  session never reads as waiting. `answerPage` tries a live wait first and
+  falls through to the open later page; the answer (the same checks) is saved
+  with a freshly minted message id before the route answers, a second answer
+  is a `404`, and the page keeps the answer so every client shows it.
+  Delivery is one `POST /api/session/:id/synthetic` with `delivery: 'steer'`,
+  `resume: true`: steered into a running turn, starting one in an idle
+  session. A session archived since (asked before every attempt, as
+  `../dispatch-results` does) gets `resume: false`: the message is recorded and
+  nothing wakes. The state comes from `sessionArchive.archiveState`
+  (`../openchamber-sessions/session-archive.js`), which tells `archived`,
+  `active` and `unknown` apart, unlike `isArchived`, which calls a failed read
+  active. The read is bounded like the POST (15 s, its signal cancels the
+  OpenCode request); a failed, stalled or unknown read sends nothing and goes
+  to the retry below, so an archived session is never woken on a guess and
+  the page shows `undelivered` meanwhile. Its text sits in `<openchamber-page-answer call=… outcome=…>`:
+  a line of prose, then one JSON line with every field that came from the page
+  or the client (`title`, `page` for what it asked, `questionCaptured` when
+  that is only part of the page, and `summary` and `data`,
+  or `errors` for a page the chat could not draw; `<` escaped), then a closing
+  line. The prose says the JSON is data, never instructions; nothing
+  page-derived sits outside it, because an html title is entity-decoded and
+  could otherwise close the envelope. Its `description` is
+  `<title>: <summary>` (what OpenCode's own clients show), its metadata
+  `{ source: 'openchamber-page-answer', callId, title, outcome }`; the chat
+  draws its own row from the metadata and the JSON line
+  (`@/lib/opencode/session-notices`), so the JSON line's shape is a contract
+  with it. 409 counts
+  as delivered, 404 ends it, other failures retry under the same id with
+  backoff, then every five minutes after eight, until OpenCode takes it; the
+  next OpenCode connect or server start also tries at once. From the first
+  failure until it lands the page carries `undelivered: true`, and the chat
+  says the agent has not got the answer yet.
+  `session.deleted` drops the session's pages. At most 500 pages are kept: an
+  answered, delivered one makes room for a new page, an open one is never
+  evicted (`409`). `GET /api/openchamber/render/later` answers
+  `{ revision, pages[] }` (`sessionID`, `callID`, `status` `open`,
+  `answered`, `declined` or `ui-not-drawn`, `summary` and `data` when
+  answered, `undelivered` while delivery fails); every change broadcasts `openchamber:render-later.updated`
+  `{ revision, sessionID, pages[] }`, and the chat reads it through
+  `packages/ui/src/sync/later-pages.ts` (`usePageAsk`).
+  Known limits: the OpenChamber server inside an isolated space refuses
+  `answerLater` with `503`, as it refuses extension waits and `pr.watch`
+  (`index.js` gives it no `laterPages`), because the host's chat reads later
+  pages and sends answers to the host's server only. The VS Code
+  extension does not read later pages, so it shows a later page without
+  answer controls or the answer given on another client. The `answerLater`
+  description tells agents both, so they ask in text there.
   `renderPageImageSources` lists the local images a page names by absolute
   path (in quotes or a CSS `url()`, PNG, JPEG, GIF or WebP), every one of them.
   The image grant route (`../markdown-image-grants/`) allows exactly those, and
@@ -122,6 +239,78 @@ other.
   card says the agent's commands can read it. `createSecretFiles().sweep()`
   deletes files 24 hours after they were written, on server start and
   hourly. Answers `403` while `agentSecretToolEnabled` is `false`.
+- `secret-run.js` runs `secret.run` (and `secret.forget`) for the same tool,
+  through `createSecretRequests`, so one answer route and one wait registry
+  serve both kinds of card. The call names a `program`, its `args`, a `reason`
+  and 1 to 8 `inputs` (`env`, `label`, optional `placeholder`); a malformed
+  call is a `400` before any card. Only a call the agent tool marks
+  `secretRunAuthorized` runs (the secret tool's plugin, after OpenCode's shell
+  permission for the command line, see `../agent-tool/DOCUMENTATION.md`);
+  anything else is a `403`. Before it waits, the call reads the values the
+  chat remembers; with none missing it runs at once and no card waits. While
+  the card waits, `GET /api/openchamber/secret/fields` names the fields it
+  asks for and the ones it reuses (names only; a `404` once it stopped
+  waiting), and the card reads them there. The answer carries exactly the
+  asked fields, each non-empty, plus the ones the user ticked to remember;
+  the values pass the wait in memory, never through its data. The command
+  runs once with `runCommand` from `../spaces/run-command.js`, without a
+  shell, in the session's directory, with the values added to the server's
+  environment, stdin closed, the process tree killed on Stop, a chat message
+  or `timeoutMs` (default 2 minutes, at most 10), on every platform that
+  module supports, Windows included. stdout and stderr are kept in a 1 MB
+  window, every value is replaced by `[secret:NAME]`, and the last 32,000
+  characters of each go back with the exit code and the env names still
+  remembered. Remembered values live in memory only, per session and env
+  name, for 10 minutes from submission; use does not extend them, a restart
+  drops them, and `secret.forget` drops the session's.
+  A value can also be saved for the project the session's directory belongs
+  to, its worktrees included, or for all projects (`createSavedSecrets`,
+  kept as the project's `secrets` or the `user` layer's `secrets` in
+  `../environment/store.js`); the project's value wins over the one for all
+  projects. Each field on the card picks one: this run only, this chat for
+  10 minutes (`remember`), this project (`save`, offered only inside a
+  configured project: `canSave`) or all projects (`saveGlobally`, offered
+  whenever the store can be read: `canSaveGlobally`), and only for fields it
+  asked the user to type; a field in both save lists goes to the project. A
+  saved value never runs on its own: a call that
+  uses one waits on the card, which lists it as `saved` with no field (the
+  ones saved for all projects also in `savedGlobally`), and the user's Run
+  confirms it. The answer names the saved values the card
+  showed (`saved`) or gives a typed value for them, and one that does
+  neither for any of them is refused with 409, so a card that never showed a
+  saved value cannot run it. `fields` lists the saved names too, which a
+  current card skips: an app older than saved secrets draws only `fields`,
+  so it asks the user to type every value again instead of waiting on a card
+  it cannot draw, and a typed value runs in place of the saved one, which
+  stays saved. Nothing runs unconfirmed.
+  `POST /api/openchamber/secret/forget-saved` removes one from where it was
+  saved while the card waits and turns it into an asked field; the field leaves
+  `savedValues` before the store is written, so a Run in that window asks for
+  it, and forgetting a field already asked answers the current card. It
+  removes the value only while the store still holds the one the card
+  showed (`removeSecrets` checks inside the queued write): a replacement
+  saved from another chat or Settings meanwhile answers 409 and stays, and
+  the field stays asked, so the card never offers the stale value again. The
+  result lists the saved env names in `saved`, and a value the store could
+  not take in `notSaved`; the command runs either way.
+  `secret.forget` with `saved: true` waits on a card that lists the names
+  saved for the session's project and for all projects, each once (one in
+  both places in `savedInBoth`), in the same `pending` slot with no field to
+  type, marked `kind: 'forget'` so a row Forget on it is refused (400); the user's confirmation is an answer that names them all (the same
+  409 check), and only those names leave the store, from both places in one
+  write, and only while each still holds the value the card listed: a
+  replacement saved meanwhile fails the call with 409 and nothing is removed,
+  and a write that fails leaves both places as they were. Keep is a decline. With
+  nothing saved it answers at once, and without a session directory it fails
+  instead of reporting nothing saved. A saved value is read when the call
+  starts and again after the user's click: one forgotten or changed while the
+  card waited (another card, Settings) does not run, and the call reports
+  `not-started` with a note to call again. Inside an isolated space the
+  server runs without saved secrets (`savedSecrets: null` in `runtime.ts`):
+  its store is the container's, which the host's Settings never list, so
+  the card offers only this run and this chat, `secret.forget` with
+  `saved: true` has nothing to forget, and the space's environment store
+  refuses a `secrets` change from any route (`savesSecrets: false`).
 - `routes.js` is the authenticated CLI HTTP adapter. It forwards one action,
   preserves service status and partial-result details, and propagates request
   cancellation. It also carries the chat's answer to a waiting page.
@@ -133,6 +322,51 @@ other.
 
 ## Invariants
 
+- A directory whose OpenCode configuration runs untrusted code requires the
+  user's approval in the app before the control service opens it. Agent-selected
+  directories, including pull request checkouts, pass the same trust check.
+- Hidden sessions are excluded from lists and active counts. Sessions in pinned
+  worktrees cannot enter In work, under `../session-work/membership.js`.
+- A scheduled task's thinking level belongs to its selected model. Replacing
+  that model clears the previous level before any new level is applied.
+- The OpenCode client receives the server origin because it adds `/api` itself;
+  directory scope travels in `x-opencode-directory`. Message records carry user
+  text in `text` and assistant text in `content`, without an `info`/`parts` wrapper.
+- Session lists deduplicate ids and stop at a repeated cursor to bound malformed
+  upstream pagination. Message reads send `order` only on the first page because
+  OpenCode rejects it alongside a cursor; they stop at an empty page or repeated
+  cursor and return gathered text oldest first. A bounded read stops once enough
+  matching text messages are collected.
+- Model search follows the picker's hidden, favorite and recent preferences.
+  Family folding keeps every unranked candidate tied for the newest release,
+  since distinct models can share a release date.
+- Rendered content's character cap leaves room for multibyte text inside the
+  callback's 1 MB JSON body. Answer limits reserve the reply for choices and
+  values. The local-image budget bounds memory because the chat holds data URLs
+  and the browser also holds decoded images.
+- Local-image matching stays aligned with
+  `packages/ui/src/components/chat/message/parts/renderPageImages.ts` because
+  the rendered page cannot read files itself. Quoted paths allow spaces;
+  unquoted CSS URLs end at whitespace or parentheses. Once a readable image
+  exceeds the page budget, subsequent readable images are also omitted so the
+  visible images remain a prefix. Unreadable files consume no budget.
+- Later-page writes wait for a successful load, so a read failure cannot erase
+  saved pages. A failed write undoes its memory change. Revisions increase across
+  restarts and rollbacks because clients discard older updates. One invalid
+  stored page is dropped without discarding valid pages.
+- Secret redaction finds overlapping matches in the original output before
+  replacing them, so one replacement cannot create a new partial match. The
+  longest covering value names each hidden character. A byte-truncated output
+  window also hides a leading secret suffix after skipping replacement characters
+  from a split UTF-8 sequence. NUL values are refused because a process cannot
+  receive them and a runtime error could quote them.
+- Secret answer bodies are never logged or echoed. An unread user message
+  prevents `secret.run` even when all values are remembered, since it can arrive
+  during command approval. Remembered values are kept before execution so a
+  failed command can be corrected without asking for them again.
+- Screenshot result paths use forward slashes because Windows separators act
+  as escapes in Markdown and commit messages. Stored tool envelopes accept
+  JSON quoted once more by Code Mode, which can return the envelope as a string.
 - `projects.list` offers registered projects and the server's Chats destination.
   `session.create` accepts its `openchamber:chats` id to create a separate managed
   chat directory. With no explicit scope, creation still uses the caller's directory.
@@ -140,17 +374,32 @@ other.
   by session id. The Chats id is a creation destination, not a registered project.
   Chats creation and directory-scoped send/fork do not infer a project or its defaults from Git,
   including when the configured Chats root is inside a registered checkout.
-  Membership compares the canonical directory and root so symlink aliases keep
-  the same projectless behavior.
+  They take the Chats defaults from Settings > Sessions in the project's place,
+  then the global ones. Membership compares the canonical directory and root, so
+  symlink aliases keep the same projectless behavior and the same Chats defaults.
 - Chats creation belongs to the session service. It reuses the directory allocator
   in `../scheduled-tasks/chats-scope.js`, including the configured Chats root.
   Failed creation removes only an empty directory. Once OpenCode creates the
   session, a failed prompt keeps its directory. Chats cannot request a worktree.
 - Session status and messages come from official directory-scoped OpenCode
   APIs. Message output includes only ordered `text` parts.
+- `session.status` and `session.messages` ask OpenCode's `session.get` first,
+  because the active-session map names only running sessions: a session it
+  does not name is idle or does not exist. An unknown id is a 404. A lookup
+  that fails is a 503 with its own message, never a 404 or an idle status.
+- A session status is `busy`, `idle`, or `waiting`: a running session with an
+  open permission, form, secret card or page (`readPendingRequests`). A
+  permission the server answers by itself does not count
+  (`isPermissionAutoAnswered`, the rule notifications use; in `safety` mode the
+  read waits for the verdict). Each session answers for itself: a parent whose
+  child waits stays `busy`. The pending list comes from this server's event
+  stream, so a request opened before this server connected to OpenCode reads as
+  `busy`. `session.list` with `withStatus` uses the same rule.
 - Wait (CLI only; the agent tool refuses it) never treats an initial idle
   response as completion after dispatch. It requires observed activity or a
-  newly completed assistant message.
+  newly completed assistant message. A `waiting` session ends the wait at once
+  with that status, because the user may never answer; the CLI then exits
+  non-zero, so a script does not read it as finished.
 - Timeout and cancellation are failures, never authoritative idle results.
 - `returnResult` on create/send/fork hands the dispatched session's final
   answer back to the calling session (`options.contextSessionId`) through
@@ -160,6 +409,33 @@ other.
   result carries `resultDelivery`: `pending` with a note for the agent, or
   `not-scheduled` with the reason (the prompt never landed, or registering
   failed); the session keeps running either way, so neither is thrown.
+- `session.create` with `ownWork: true` makes a session that is part of the
+  calling agent's own work (an operator's child), not one the user asked for.
+  It needs a calling session (400 without one) and applies to create only.
+  The session service creates it with `metadata.openchamber` `{ kind:
+  'operator-child', parentID: <caller> }`, session permission rules that
+  deny the `question` and `openchamber_secret` tools (OpenCode drops a wholly
+  denied tool from the model's list; nobody is there to answer either), and, before any prompt, a synthetic message with
+  `resume: false` (`source: 'openchamber-operator-child'`) telling the agent
+  that the user does not interact with it, to ask in plain text in its answer
+  and that the answer goes to the agent that started it
+  (`../openchamber-sessions/create-session.js`). A failed note is logged and
+  the session stays: the refusals below still tell the agent. With a prompt
+  `returnResult` defaults to true, so the answer comes back; an explicit
+  `false` turns that off. `sessionParentId` (`../session-lineage.js`) reads
+  the link, so the session is a subsession for In work, goals, assist,
+  auto-accept lineage and `session.list`, and the UI nests it under the
+  caller wherever it lives. `render.page` refuses `awaitAnswer` and
+  `answerLater` in such a session with a 403 that says to ask in text, read
+  from the session record per call; a failed read lets the page wait as
+  before. The user takes a session over only from its sidebar menu or its
+  worktree's (`packages/ui/src/sync/session-take-over.ts`): the link goes, the
+  `question` rule goes and the session opens in In work. A fork of such a
+  session is the user's from the start: both fork repairs (`fork-inheritance.js`
+  here, `sessionForkInheritance.ts` in the UI) drop the link and the rule,
+  which OpenCode copies into a fork. The metadata store's
+  `onWritten` tells the lineage cache and the auto-accept cache, which then
+  read the session again.
 - `returnResult` and `wait` must be booleans when present. Both are compared
   with `=== true`, so a string `"true"` (the tool path forwards raw JSON, and a
   model or harness can stringify a boolean) would read as false: a dispatch
@@ -206,6 +482,41 @@ other.
   `session.move`. A failure after the worktree exists removes it again and
   puts the changes back; when restoring fails too, the error names the stash
   so nothing is lost. A 409 means the changes did not apply on the start ref.
+- A new worktree from `session.create` (`worktree` or `pullRequest`) or
+  `session.moveToWorktree` runs the project's setup commands, as one from the
+  New worktree dialog does. The server resolves them itself
+  (`../projects/worktree-setup.js`) from the registered project's merged setup
+  (`readProjectSetup`), because no client is there to show the trust prompt:
+  shared commands the user has not trusted are left out, the personal ones
+  still run, and the result names the skipped ones in
+  `untrustedSetupCommandsSkipped`. That is the dialog's answer when the user
+  skips them. The project is the one a move's start folder follows (below),
+  for a create too. A directory outside every registered project gets no
+  setup. The commands run inside the bootstrap, so the session is created or
+  moved only after they finished, whatever `setupWorktreeWait` says: an agent
+  works in the folder at once. The 60-second bootstrap deadline covers git's
+  part; once the bootstrap reports `git-ready`, the commands get three more
+  minutes, which keeps the call well inside the agent tool's request window
+  (Bun's fetch gives up after about six minutes). A command still running past
+  that gets a 503 and no work starts in the worktree, so a command that never
+  exits cannot hold every agent create and an agent never edits files a setup
+  is still writing. A create answers `partialAction: worktree-created` with no
+  session, as for any failed prerequisite below; the retry in that folder gets
+  the same answer until the setup finishes. A move answers
+  `partialAction: worktree-setup-running` with the worktree's `directory`, stops
+  before stashing anything and leaves the session and its files where they
+  were: a setup command could overwrite a carried file once the stash, the only
+  other copy, is dropped. The same move again, from the same session with the
+  same worktree input, moves into that worktree once its setup finished, while
+  the folder is still a worktree of the repository. The mover keeps the
+  worktrees it left this way in memory, so after a restart a retry makes a new
+  one, as the first call would. A failed retry leaves that worktree in place,
+  since another session may have entered it meanwhile. A move that goes ahead applies its `carry` files after
+  the setup, so a carried dependency change needs the install run again. A
+  failing command is logged and does not fail the bootstrap, as on every
+  creation path. A move that fails after the worktree exists stops the setup
+  commands (`cancelSetup` in `removeWorktree`), so a command that never exits
+  cannot strand the worktree; the changes go back without waiting for that.
 - A session created in a new worktree (`session.create` with `worktree` or
   `pullRequest`) or moved into one (`session.moveToWorktree`) starts in the same
   folder of that worktree as the project opens on in its repository: a project
@@ -232,32 +543,53 @@ other.
   directory the request names, the project's own folder, as before: a new worktree
   does not exist yet, and its start folder mirrors that one. Git work (carrying
   changes, removal) stays on the worktree root.
-- Default agents resolve from the owning project before global settings and
+- Default agents resolve from the owning project, or for a chat from the Chats
+  defaults, before global settings and
   OpenCode defaults. Directory-based requests identify the project before
   creating a worktree; existing linked worktrees resolve through Git's primary
   worktree root. Send/fork fallback uses that same owner. Configured model IDs
   and effort preferences survive missing catalog entries rather than silently
   dispatching with a different model.
 - A create with a prompt resolves its selection in the target directory before
-  creating an OpenCode session. It reads discovery once with a 10-second request
-  deadline. Unavailable agent/config reads, an empty agent list, or a configured
-  agent absent from the list produce 503; no fallback model is dispatched from
-  those snapshots. A missing saved default agent is named in the error with a
+  creating an OpenCode session. Each discovery read takes two steps with a
+  10-second request deadline each: the model list first, then the agent list
+  and config in parallel (`../openchamber-sessions/selection-inputs.js`). The
+  agent list of a folder whose OpenCode location is not running yet (a new chat
+  or worktree, a project first used since start, one idle for an hour) is only
+  complete once that location's plugins have activated, and the model read is
+  what waits for them. When the plugins did not activate within OpenCode's
+  limit, a selection that still needs a default produces 503 with OpenCode's
+  reason, even if some agents and the config arrived: the list may be partial.
+  A failed agent or config read, an empty agent list, or a configured agent
+  absent from the list produce 503 too, and so does an explicitly requested
+  agent missing from a list read after activation failed. No fallback model is
+  dispatched from those snapshots. Validating an explicit model, agent or
+  level reads discovery too, so it also waits for the plugins of a cold
+  location, up to OpenCode's limit. A missing saved default agent is named in the error with a
   hint to update the default or pass an explicit agent; it never silently picks
   another agent. An explicit agent that needs only a model does not require the
   saved default agent to exist. Model precedence stays unchanged.
   Explicit model/agent pairs keep their existing validation,
   and send/fork reuse the session selection before requesting defaults.
 - Worktree-dependent operations await the tracked bootstrap promises, including
-  setup, with a 60-second deadline, then check the final status once. Git-ready
+  setup, with the deadlines above, then check the final status once. Git-ready
   alone is insufficient. Creating in an existing checkout subdirectory checks
   bootstrap at the checkout root while retaining the session's requested folder.
-  If a create prerequisite fails after making a worktree,
-  the error carries `partialAction: worktree-created` and `directory`, with no
-  session ID. The caller can retry that directory without a `worktree` parameter.
+  If a create prerequisite fails after making a worktree (plugins that did not
+  activate, a missing default agent, setup still running), the error carries
+  `partialAction: worktree-created` and `directory`, with no session ID. The
+  caller can retry that directory without a `worktree` parameter.
   The CLI prints the retained directory and a retry command preserving the
   prompt and selection options without creating another worktree.
-  An empty-session create without a prompt keeps its existing selection behavior.
+  An empty-session create stores any requested model and variant on the
+  OpenCode session, so a later send can reuse them. A variant without a model
+  resolves the model first; a create with no selection leaves defaults unset.
+  The stored model is the catalog id of the session directory's checkout, so a
+  model named by its upstream id, or one a new worktree does not offer, never
+  lands as an unusable selection; when the catalog cannot be read, the create
+  fails as not ready instead of pinning an unverified model. A malformed model reference is rejected, and
+  Auto needs a prompt to select a model; both are refused for an empty session
+  before any worktree is created.
 - Usage errors name the missing or conflicting input so CLI and agent-tool
   callers can correct an invalid request without an upfront usage manual.
 - Explicit `projectId` or `directory` scope takes precedence over the managed
@@ -266,10 +598,42 @@ other.
   `session.messages`) resolve `projectId` through the session service's
   `resolveDirectory`, the lookup create/send/fork use: an unknown project is a
   404 and a missing project folder a 400, never a read of the current or every
-  directory. Every `session.*` action refuses `projectId` and `directory`
-  together with a 400, so neither silently wins.
+  directory. An action that names a session ID resolves its directory by
+  reading that session by ID (unscoped) first: a moved session can leave a
+  stale copy under the directory the call came from, which the global list can
+  return first. The list is the fallback. Every `session.*` action refuses
+  `projectId` and `directory` together with a 400, so neither silently wins.
 - One failed directory status lookup produces `unknown` for only that
   directory and does not erase other session results.
+- `session.list` returns top-level sessions newest first (no parent by
+  `sessionParentId`: OpenCode's, a workflow agent's or an ownWork link);
+  `children` adds subagents and those. Each session is
+  trimmed to `id`, `title`, `directory`, `updated`, `archived`, `parentID`,
+  `agent`, `model`, `outcome` (plus the In work fields and `status` below):
+  the raw OpenCode record averaged about 1,100 characters on real sessions,
+  a session in work about 1,750, with tokens, cost, permissions and every
+  metadata namespace; the trimmed one about 300. The chat's tool row reads
+  `directory` and falls back to `location.directory` for calls stored before. While In work is on
+  (`sessionWorkEnabled`), every session carries `inWork` and
+  `doneSuggested`, by the sidebar block's rule
+  (`../session-work/membership.js`: top level, not archived, not a Chat,
+  `work.state` open; the hint while it is newer than `time.idle`). Filters:
+  `inWork`, `busy` (in OpenCode's active map, so busy or waiting) and `query`
+  (every word in the title, case-insensitive, matched here because OpenCode's
+  `search` is SQLite `LIKE`, case-sensitive outside ASCII). `inWork` and
+  `busy` read every project unless `projectId` or `directory` scopes them and
+  return every match unless `limit` is given; a filtered read asks for pages
+  of 200. `inWork` while In work is off is a 409, and a failed active-map read
+  under `busy` is a 503, never an empty list. `busy` stops paging once it saw
+  every running session.
+- `session.markDone` and `session.track` write the record the app's Done and
+  Track write (`userStatePatch` in `../session-work/state.js`) through the
+  injected `updateSessionMetadata`, the session metadata store's queued
+  write that broadcasts the change, so every window updates. The session
+  defaults to the caller and is read first (unknown is a 404). Track refuses
+  a session that can never be in work (400) and an archived one (409); Done
+  takes any session, as the app's button does. Both are a 409 while In work
+  is off and a 503 on a server without the store.
 - Destructive session/worktree deletion and project-path registration are not
   part of the action contract.
 - `session.send` to an archived top-level session restores it, with its
@@ -287,12 +651,14 @@ other.
 - `work.name` names the task the session (default: the calling one) works on
   (`../openchamber-sessions/work-naming.js`, wired through the `workNaming`
   dependency; without it the action answers 503). In a linked worktree it sets
-  the branch description (`setWorktreeTaskTitle` in `../git`); in the main
-  checkout it renames the task's root session, found through the same lineage
-  the sidebar nests by, and records `metadata.openchamber.workTitle`. Explicit
-  creation titles from the shared UI and `POST /api/openchamber/sessions`
-  carry `by: 'user'` in that same creation request. The agent's `session.create`
-  does not claim user ownership, so the agent can still rename its own tasks. A name
+  the branch description (`setWorktreeTaskTitle` in `../git`). It never changes
+  a session title or its metadata. In the main checkout or a plain folder it
+  answers `named: false`: those tasks use their session titles and need no naming.
+  Inside an isolated space the call persists an agent proposal and publishes it
+  on that server's control stream. The host owns the displayed space title;
+  see `../spaces/DOCUMENTATION.md`, "Task titles". A copied user title inside
+  makes the call answer `named: false` with that title.
+  A name
   the user gave stays: the call changes nothing and answers `named: false`
   with the current name. When to call it is in the session context, next to
   the linking guidance (`WORK_NAME_GUIDANCE`). Both that guidance and the
@@ -307,11 +673,26 @@ other.
   checkout, is not renamed: a `branch` passed there answers
   `branchRenamed: false` with a note, so the agent does not take the call for
   a rename.
-- `pr.watch` and `pr.unwatch` let the calling session wait on its pull
-  request without polling: `pr.watch` takes the address in the control tool's
-  own `url` input and hands it to `prWatch` (`../pr-watch/DOCUMENTATION.md`),
-  which reads it, follows it and wakes the session once when it changes. Both
-  act only on the calling session, never one the input names.
+
+  Moving a session into a new worktree carries its current title to the branch
+  description as agent-owned. Existing `metadata.openchamber.workTitle` with
+  `by: 'user'` makes the carried title user-owned. Explicit creation titles and
+  UI renames still record that marker; no metadata migration runs.
+- `wait.list`, `wait.start` and `wait.stop` are the agent's one way to wait,
+  only for the calling session: on the built-in timer and what an extension's
+  service follows (`../extension-waits/DOCUMENTATION.md`), and on a pull
+  request (`../pr-watch/DOCUMENTATION.md`). `wait.start` takes `source`
+  (`timer`, `pr` or `<extension>/<wait>`) and `args`; `pr` reads `args.url`,
+  or `url` beside it, and is handed to `prWatch`, which keeps its own store.
+  `wait.list` merges both stores, `pr` listed after the timer while `prWatch`
+  offers it (never inside a space). A pull request's `waitId` is its address,
+  every other one is `wait_…`, so `wait.stop` routes by the id and without
+  one stops both kinds.
+- `pr.watch` and `pr.unwatch` are the same pull request wait under its older
+  names. They stay for the CLI and for transcripts that call them, and are off
+  the agent's tool (`agentExposed: false`): an agent that saw two ways to wait
+  looked only in `wait.list`, found no pull request there and decided it could
+  not wait on one.
 - `session.link` records a code change under review or an issue on a session
   (`../openchamber-sessions/session-link.js`), defaulting to the calling
   session. When to link is not in the action's description but at the head of
@@ -334,9 +715,21 @@ other.
   A change request or issue address that a source-control provider's
   `urls.thread` names (GitLab's `/-/merge_requests/N` shape on any host) is
   keyed by the thread, so linking it again from a tab like `/diffs` or with a
-  query refreshes the one entry. It only adds or refreshes links, never removes
-  one: the user owns removal. A missing field or a non-http(s) URL is a 400 and
-  nothing is written.
+  query refreshes the one entry. A missing field or a non-http(s) URL is a 400
+  and nothing is written.
+- `session.unlink` removes a link from a session, defaulting to the calling
+  session, whoever made the link. The agent names it the way it linked it: the
+  control tool's `url` or `identifier` input (also read beside the action), or
+  the same complete `link` it linked with; the tool schema requires `title` and
+  `kind` in `link`, so a bare identifier goes in `identifier`. A url removes
+  every entry that linking the address would key the same (a `/files` or `/diffs` tab names its thread) or that is
+  stored under the same address; an identifier matches an entry's
+  `identifier`, its id, or a github.com entry's `#N`, in any case. The removal is
+  the Work Status unlink's own transform (`buildLinkedIssuesPatch` in
+  `../openchamber-sessions/session-linked-issues.js`), decided inside the
+  session's metadata write turn. No match is a 404 that lists the session's
+  links; an identifier that names more than one is a 409 that removes nothing
+  and asks for the url.
 - `file.open` shows a file in the user's viewer. `file-open.js` resolves a
   relative path against the session directory (an explicit `directory` wins),
   refuses a relative path with no directory at all, checks the target is an
@@ -365,6 +758,312 @@ other.
 
 ## Decisions
 
+### Why control input fields keep their unchecked types
+
+`contracts.ts` names the raw fields used by the converted actions. Each action
+keeps its existing validation before reading a narrower value. Knowledge links
+and plan-session inputs pass unchanged to project context, which owns their
+validation. Image envelopes retain the inferred schema's optional, unknown
+`data`; consumers narrow that field before reading image paths.
+
+### Why error fields stay optional and unknown
+
+Thrown values can be errors, plain objects, functions or primitives. Error
+normalization boxes a non-null value for property reads and keeps the original
+numeric coercion, inherited properties and short-circuit order. Copying details
+onto the error does not validate them. Only an actual `Error` supplies the
+normalized message; other thrown values retain the caller's fallback.
+
+### Why action resolution trusts the adapter's text normalization
+
+The managed-tool adapter passes the result of `asNonEmptyString` for both the
+requested action and tool name. Resolution accepts those strings or null.
+The tool map is an ordinary object, so a lookup can also reach inherited
+properties.
+
+### Why agent capabilities have separate tools
+
+Distinct intents have their own descriptions and inputs so models can choose
+between them. Turning a capability off removes its complete schema and guidance;
+image generation spends money on another model, notifications interrupt the user,
+and terminal reads can expose secrets. The workflow-answer tool is denied by
+default and allowed only in workflow sessions whose prompts request a schema
+answer, so unrelated sessions never carry its declaration. Memory reads use the
+title index already in the session; listing serves a missing or stale index.
+
+### Why bare actions resolve inside the calling tool
+
+Models omit namespaces already implied by a tool's name, while verbs such as
+`delete` belong to several capabilities. Resolution uses the calling tool's
+allowlist, accepts a globally unique bare name when the tool is unknown, and
+lists the applicable actions on failure so another call needs no guessing.
+
+### Why embedded helpers stay self-contained
+
+The agent plugin embeds `secretRunCommand`, `secretRunCommandLine` and
+`isAgentPrompt` with `toString()`, so imports or closed-over helpers cannot
+resolve there. Command validation precedes permission requests and bounds the
+whole line because a shell script can occupy one argument. The displayed line
+escapes invisible and directional characters so approval describes what runs.
+
+### Why service form answers are completed like the chat's answers
+
+OpenCode supplies no defaults and rejects inactive fields, so service answers
+use the same defaults and conditions as `formCardState.ts`. An untouched boolean
+is false, and an unanswered dependency matches neither `eq` nor `neq`. External
+fields bypass conditions so the service can answer a link only the user can open.
+
+Supplied values pass through unchanged, including values outside OpenCode's
+declared form-answer union. `FormValues` therefore keeps unchecked values;
+OpenCode owns the refusal. The own-property check on supplied answers stays
+because names such as `constructor` also exist on an ordinary object's prototype.
+
+### Why the control client keeps raw form answers
+
+`service.ts` forwards `completeFormAnswer` to `OpenCode.session.form.reply`.
+`opencode-client.d.ts` describes this dependency's raw form transport: the
+published client serializes `answer` directly with `JSON.stringify`, without
+validating its values. Its method contract therefore accepts `FormValues`;
+OpenCode still owns rejection. The remaining client methods retain the
+published types.
+
+### Why image inspection accepts a missing directory
+
+`render-page.ts` passes the original directory to `inspectLocalImage`. Its
+options and path-resolver contract include null and undefined because those
+values reach Node's resolver, which throws before reading an image. The action
+catches that rejection as an unreadable image. An empty directory resolves
+against the working directory and can show the same image, so replacing a
+missing directory with an empty string changes behavior.
+
+### Why control inputs stay unchecked across neighbouring parsers
+
+Task naming and link creation validate their own raw inputs with Zod. Their
+parameter types accept unknown values, including the control route's unchecked
+fields. Unlinking boxes a non-null target for property reads, preserving
+primitive and inherited properties without claiming a validated link.
+
+The result-delivery validator returns the service and parent id it checked.
+Browser dispatch receives the available router from its caller. Both preserve
+the original validation order without repeating availability checks.
+
+### Why route input stays unchecked
+
+`routes.ts` uses the shared Express contract and derives its service and
+later-page dependencies from their owning factories. Request fields remain
+unknown until the existing string and non-array object checks pass. Reading
+the envelope boxes non-null values so primitive bodies and inherited properties
+keep JavaScript's property-access behavior. Answer bodies and context directories
+pass unchanged to the service, which owns their validation.
+
+### Why later pages retain the stored schema's nullable answer
+
+The file schema permits a message id alongside a null answer. Such a page still
+fails delivery with a `TypeError` when its answer is read; it is not silently
+dropped or marked delivered. Live answers retain `readPageAnswer`'s inferred
+shape, including unchecked data, while stored answers follow the file schema.
+
+### Why secret files reset permissions and remove failed writes
+
+`mkdir` applies its mode only when it creates a directory, so the secret store
+also calls `chmod`. A `wx` write creates the file before writing its contents;
+a failed write removes that file because it can already contain secret bytes.
+
+Secret-run submissions stay in a mutable cell while the wait callback completes.
+Every remembered name comes from the validated submission and has a retained
+value before it enters a lease. Indexed redaction buffers are initialized in
+full; their typed reads retain the zero value at every occupied position.
+
+### Why a chat message dismisses open forms before dispatch
+
+OpenCode holds a prompt until its form settles, which otherwise leaves the
+message behind a form the user has left. The service reads open forms from
+OpenCode because its local pending map is empty after a restart, and sends
+extension form and permission actions to the session's own directory because
+another instance can acknowledge them without answering anything.
+
+### Why image generation validates before the provider call
+
+An invalid relative output path is refused before the provider bills an image.
+Optional generation settings are sent only when supplied so the model's defaults
+apply; a five-minute deadline bounds a stuck provider. Numeric strings and a
+single bare source path remain accepted because callers can serialize those
+inputs that way. Generated filenames use local time so they match the user's
+clock, and model parsing preserves slashes inside the model id.
+
+### Why browser validation and timeouts belong in the service
+
+Invalid calls return correctable usage errors before waking a renderer or waiting
+for a round trip. Navigation and upload get a longer budget than quick actions;
+navigation's budget exceeds the client's own wait so a slow page can be
+distinguished from an unreachable browser. Upload scope comes from the calling
+session, and provider context comes from the plugin, so model-supplied directories
+cannot widen those boundaries.
+
+### Why plan saves warn about a missing steps checklist
+
+The panel derives progress from a plan's `## Steps` checklist, so the save result
+warns while the agent can still add one. Omitted plan links and dependencies stay
+undefined through the control layer so the storage runtime preserves their
+existing values and owns their validation.
+
+### Why time-only patches require an unambiguous schedule
+
+A once task has one time and a single-time weekly task has one slot to replace.
+Daily and cron selectors already encode their time, and a multi-time weekly
+task does not identify which slot a standalone `time` should change. Rejecting
+those patches lets callers provide an explicit replacement without silently
+dropping slots or ignoring the requested time.
+
+### Why a background message waits behind a page and does not end it
+
+A dispatched session's result, a pull request or extension wait's wake, a
+workflow report, a restart resume, another agent's `session.send`, a run of
+OpenCode's own scheduler or a prompt queued for after the turn can arrive
+while a page or a secret card waits. OpenCode keeps it
+in the session's inbox until the waiting call returns, and the agent reads it at
+the next step, right after the user's answer. The alternative, ending the wait
+so the agent reads the message at once and asks again, loses the question the
+user was reading, and the result told the agent the user had written. A
+queued prompt would not even follow the result: OpenCode delivers it only
+after the turn. A message the user writes in the chat still ends the wait, as
+does an undelivered prompt the user moves (back) to steer, and `hasUnreadChat` counts only
+the user's steered messages. A prompt counts as an agent's when its metadata names a sending session in
+`openchamber.promptedBy.sessionID`, as `session.send` writes it, or carries the `schedule: { id }` marker of OpenCode's
+scheduler (`isAgentPrompt` in `render-page.js`); the sender is not checked,
+since this decides what the agent reads and grants nothing. Any other prompt
+counts as the user's, because a person typing in the TUI or calling the API is
+the user too. An agent's `session.send` of a slash command is the known gap:
+it reaches OpenCode's command endpoint without that metadata (see
+`../agent-tool/DOCUMENTATION.md`). The chat keeps a
+background synthetic message out of the transcript while the wait lasts (`holdPendingSynthetic` in `packages/ui`, read
+through `SyntheticMessage.pending`): drawn as a new turn, it took the question
+out of the chat.
+
+### Why a released page keeps its request open
+
+In one OpenCode no call outlives its turn, so `releaseAnswerWaits` finds
+nothing there. It exists for a second OpenCode on the same database. An
+`opencode` CLI command, an agent's shell included, can start
+`opencode serve --service`. At start it takes over every turn with an open
+execution claim, also one alive in the OpenCode this server runs, and it
+inherits the callback URL and token through the shell's environment. Its page
+call reaches this server, but a chat message goes to this server's OpenCode,
+whose prompt hook has no such call. That turn runs and ends, and the page stayed
+listed until the server restarted: the question mark in the sidebar, background
+messages held out of the chat. Aborting the request cleared that too, but the
+other OpenCode's turn then woke up and answered the same message, so the chat
+had two replies and, with a real model, two agents in one session. The release
+takes the page off the list and leaves that call parked until its request
+ends: that OpenCode exits, this server restarts, or the user stops a turn in
+the session (`abortSession`).
+
+### Why a later page is its own store and not a wait that outlives its call
+
+A page kept in `createPageAnswers` would count as a pending request: the
+session would read as waiting, the sidebar would show its question mark, and
+the chat holds background messages out of the transcript while a page waits
+(`holdPendingSynthetic`), for as long as the user takes. Its turn's end, a chat
+message and Stop all end waits on purpose. A later page asks nothing of the
+turn, so it lives beside the waits, saved on disk because the user may answer
+after a restart.
+
+### Why a later answer steers into a running turn
+
+`../extension-waits` and `../pr-watch` deliver only into an idle session,
+because the agent did not ask for their news at that moment. A later answer
+is the reply to a question the agent asked; it goes out at once, and the agent
+reads it at its next step or as a new turn. The delivery keeps their other
+rules: an id saved before the first attempt, 409 as delivered, 404 as the end.
+
+### Why secret.run keeps secret.request beside it
+
+`secret.run` delivers a value to one process and returns redacted output, so
+the agent's later commands, and a program's verbose or error output, never see
+it. It cannot serve a program that reads a secret from a file (a key file, a
+kubeconfig, a client certificate), so `secret.request` stays for those. A
+proposal to replace the file mode outright (#6086) was declined for that
+reason.
+
+### Why remembering a value is the user's tick, not the agent's flag
+
+Reusing a password across a script's retries saves typing, but a value kept in
+memory is one more place it lives. The agent asking for reuse would decide
+that for the user, and a one-time code would be kept on the agent's word. The
+card offers the choice per field instead, off by default; the agent only learns
+which env names are remembered from the result.
+
+### Why a saved value waits for a click and a remembered one does not
+
+A remembered value lives 10 minutes in one chat, the time to fix and rerun a
+script the user just watched. A saved value outlives the chat and reaches
+every session in the project, and OpenCode's shell permission alone can pass
+on an allow rule the user set long before. If a saved value ran on its own, a
+prompt-injected agent in any later session could send it out through
+`secret.run` without the user seeing a thing, so each run that uses one shows
+the card, and the user's click on Run is the approval. Saving it in the project's environment store reuses
+that file's guarantees (mode 0600, values never answered by a route) and its
+project lookup, so a worktree finds what the primary checkout saved. The store
+keeps it apart from the variables, which Git, the terminal and project actions
+receive. A value for all projects is one click away for an agent in any
+project, a cloned repository the user does not know among them, so the card
+says where each saved value comes from, and the user chooses that scope per
+field, never by default.
+
+### What the click does not protect
+
+The click guards the `secret.run` path only, and two others stay open to an
+agent whose shell runs as the user. The value sits in plaintext in
+`environment.json`, which the user's own processes can read, as they can the
+project's variables. And the agent's shell inherits
+`OPENCHAMBER_AGENT_TOOL_URL` and `OPENCHAMBER_AGENT_TOOL_TOKEN`: it can start
+its own `secret.run`, which draws no card in the chat, and on a server without
+a UI password answer that call over HTTP. Saved secrets accept both, as a
+known limit. An OS keychain was considered and closes neither on its own:
+DPAPI and Credential Manager on Windows, and an unlocked Secret Service
+collection on Linux, hand any process of the same user the value without a
+prompt; on macOS a keychain item prompts other apps, but "Always Allow" lifts
+that for good, and a prompt on every read needs native Security framework
+code (`SecAccessControl` with user presence) in the signed desktop app, which
+the web server, the VS Code extension and a headless server do not have.
+
+### Why secret.forget asks before it drops saved values
+
+The tool tells the agent to call `secret.forget` when the work is done. Had it
+also dropped the saved values, every finished task would erase what the user
+chose to keep. It touches them only with `saved: true`, and even then the user
+confirms on a card: the tool's description is a prompt, and an agent that
+misreads it, or a prompt-injected one, must not erase values the user cannot
+recover.
+
+### Why the card reads its fields from the server and not from the call
+
+Which fields a run still needs depends on what the chat remembers, which only
+the server knows, and every client must draw the same card. The first build
+passed them to the plugin as NDJSON progress frames into the call's progress
+metadata; OpenCode publishes that only to clients connected at that moment and
+keeps none of it in the stored call, so a reload or a second device showed no
+fields while the call waited. The card now asks the server once the wait is
+announced (`openchamber:page-waiting`), which every client hears or reads from
+the host's pending snapshot. The values a run uses are read when it starts, so
+a remembered value that expires while the user fills another field is still
+used.
+
+### Why work.name leaves session titles alone
+
+Session titles belong to OpenCode or the user. A metadata ownership marker
+cannot distinguish a generated title from a user rename made in another
+client or an older release, so `work.name` has no session-title write path.
+
+### Why session.unlink names a link by url or identifier and not by entry id
+
+The agent knows the address and label it linked, while the stored id depends
+on how the server keyed it (`acme/app#7`, `linear:ENG-12`,
+`link:<thread address>`) and on who linked it. Matching what the agent can name
+lets it remove links the user or the UI made too. An identifier such as `#7`
+can name links in two repositories, so an ambiguous one removes nothing and
+the url decides.
+
 ### Why selection is checked before creating a session
 
 The target directory's agent snapshot determines its model bindings. Missing
@@ -372,15 +1071,36 @@ discovery cannot establish the default choice. Checking it once before creation
 lets the caller retry a known directory without polling, sending a prompt with
 an unintended model, or accumulating empty sessions.
 
-### Why a dispatched session links back from its prompt and does not nest in the sidebar
+### Why selection reads the models before the agents, and does not poll
 
-A dispatched session used to nest under the caller's work in the sidebar
-(`metadata.openchamber.originSessionID` on the session). These sessions are
-the user's own conversations, such as PRs a triage session splits off for a
-separate discussion: nesting hid them under one chevron, reshuffled them when
-the caller was archived, and made `work.name` in each of them rename the
-caller. They stay roots now, and the link sits on the prompt that started
-them, where it says who sent which message.
+OpenCode 2.3 builds the agent registry from plugins, the built-in agents
+included, and starts them when a location is first used. `agent.list` answers
+from the registry at once, so a parallel read on a new location got an empty
+list, while `model.list` waits up to 5 seconds for the plugins. Reading the
+models first makes that wait OpenCode's own activation barrier: one read gives
+the real agent list in every folder. It replaced a worktree-only loop that
+re-read every half second for up to 15 seconds, which guessed at readiness
+from an empty list, left new chats and evicted folders failing, and hid the
+real reason when activation failed. The order is a workaround for this server
+selection path only; it costs a second round trip before the agent read. When
+`agent.list` itself waits for activation upstream, read the three in parallel
+again.
+
+### Why only ownWork nests a dispatched session, and by metadata
+
+A dispatched session the user asked for is their own conversation, such as a
+PR a triage session splits off for a separate discussion. It stays a root,
+with the link on the prompt that started it, where it says who sent which
+message. An older build nested every dispatched session under the caller
+(`metadata.openchamber.originSessionID`): that hid the user's conversations
+under one chevron, reshuffled them when the caller was archived, and made
+`work.name` in each rename the caller. So nesting is now the agent's explicit
+claim, `ownWork`, for a worker it runs and collects itself; overnight an
+operator starts a dozen of them, and as roots they crowded the user's own
+sessions and In work. The link is OpenChamber metadata, as for workflow
+agents, and never OpenCode's `parentID`: OpenCode wakes a `parentID` parent
+with a `<subagent>` report after every round, while an operator decides when
+it reads its workers (`returnResult`, `session.messages`).
 
 ### Why Chats uses an explicit destination id
 
@@ -405,3 +1125,63 @@ validation.
 This check covers the control actions only. Agent and variant validation,
 the UI editor, loop-file validation and changes to target-session pinning
 remain outside this fix for #5950.
+
+### Why usage.read leaves out the account
+
+Codex reports the email it is signed in with (`accountLabel`), which the page
+shows next to the provider name. An agent needs the windows and resets, and
+its result goes to the session's model provider, which may be another company
+than the one the account is at, so `usage.read` drops the field.
+
+### Why usage.read reads fresh and does not reuse a recent result
+
+The tool returns what Settings → Usage would show if the user opened it now,
+and the page itself caches nothing on the server: a load or a refresh runs the
+readers again. A short server-side cache would spare providers when an agent
+calls the tool in a loop, but it would add a freshness rule the page does not
+have, and the issue left that choice to the maintainer. The tool description
+asks agents to read once per decision instead.
+
+### Why a failed provider list asks every provider and is not an error
+
+The page treats a list it could not read as "ask every provider", because a
+provider can hold a credential OpenCode does not report (Claude reads Claude
+Code's own credentials). Answering an error there would hide usage the page
+still shows; answering an empty list would read as "nothing configured". The
+fallback keeps the page's behavior and says why in `listError`.
+
+### Why the terminal tool is read-only and refused on the control route
+
+Everything the terminal panel does passes through one PTY that a person is
+attached to: a keystroke from an agent would land in the middle of what the
+user is typing, and `stop` would end a process they are waiting on. Reading is
+the part that answers a question without taking anything over, so `terminal.*`
+is only list and read.
+
+The read goes through the runtime's own accessor instead of a new HTTP route
+because an output-returning route is reachable by any client that holds the
+session cookie, on every runtime. `POST /api/openchamber/control` is such a
+route: it shares the action set with the agent tool, so it refuses
+`terminal.*` at its own boundary (`routes.js`) and only the managed callback,
+which authenticates each OpenCode child with its own token, reaches the read.
+The setting decides whether agents may read terminals; it never opens an HTTP
+read.
+
+The read copies the sanitized replay buffer `attach` already sends rather than
+the raw PTY stream, and returns it as plain text: the replay keeps colours,
+titles and cursor controls for the panel to redraw, which a model would read as
+noise. It lives in memory, so the copy cannot block the PTY or move
+`lastActivity`.
+
+### Why a quoted image path may hold the other quote characters
+
+A page names a local image in a quoted string: an `src` attribute, a CSS
+`url("...")`, or a string in its script. The rule used to stop at every quote
+character, so a Windows folder named `chef's` made the whole path unreadable and
+the page showed no image, not even the "not shown" note. It now stops only at
+the quote that opened the string, which a character class cannot express: the
+body tests each character against `\1`. The chat's copy in
+`packages/ui/src/components/chat/message/parts/renderPageImages.ts` carries the
+same rule, because the grant route allows exactly the paths the chat reads
+(#6806).
+

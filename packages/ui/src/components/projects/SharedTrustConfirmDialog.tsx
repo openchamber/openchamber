@@ -61,7 +61,17 @@ export const SharedTrustConfirmDialog = () => {
               <p className="typography-meta text-muted-foreground">{t('projects.sharedTrust.setupCommands')}</p>
               <div className="rounded-lg bg-[var(--surface-muted)] px-3 py-2 font-mono text-[0.8125rem] leading-relaxed break-all text-[var(--surface-foreground)]">
                 {request.setupCommands.map((command, index) => (
-                  <div key={`${index}-${command}`}>{command}</div>
+                  <div dir="ltr" key={`${index}-${command}`}>{command}</div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {request && request.teardownCommands.length > 0 ? (
+            <div className="space-y-1">
+              <p className="typography-meta text-muted-foreground">{t('projects.sharedTrust.teardownCommands')}</p>
+              <div className="rounded-lg bg-[var(--surface-muted)] px-3 py-2 font-mono text-[0.8125rem] leading-relaxed break-all text-[var(--surface-foreground)]">
+                {request.teardownCommands.map((command, index) => (
+                  <div dir="ltr" key={`${index}-${command}`}>{command}</div>
                 ))}
               </div>
             </div>

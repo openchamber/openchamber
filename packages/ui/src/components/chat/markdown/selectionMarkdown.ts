@@ -1,19 +1,6 @@
 import { MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE } from '../message/imageExport';
 import { cloneSelectionAncestor, cloneSelectionContent } from './selectionRange';
 
-// Turns a selection inside rendered chat markdown back into Markdown, so Cmd+C
-// on part of a response pastes the formatting the message copy button gives.
-//
-// The rendered DOM still carries what the source said: code blocks keep their
-// language, KaTeX keeps its TeX annotation, mermaid blocks keep their source.
-// Decorations the renderer added (toolbars, favicons, line numbers) are
-// skipped. Text is not re-escaped: the result is meant to be read and pasted
-// into a prompt, not round-tripped byte for byte.
-//
-// The `plain` format walks the same structure but writes what the reader sees:
-// no emphasis, heading or quote markers, code without fences, links as their
-// label, tables as tab-separated rows. Formulas stay as their TeX, the only
-// readable text form KaTeX keeps.
 
 type RenderedCopyFormat = 'markdown' | 'plain';
 
@@ -22,8 +9,6 @@ const TEXT_NODE = 3;
 
 const MARKDOWN_ROOT_SELECTOR = '[data-markdown-content]';
 
-// Renderer chrome that never belongs to the copied content. KaTeX draws each
-// formula twice; the formula is read from its TeX annotation instead.
 const SKIP_SELECTOR = [
   'button:not([data-streamdown="link"]):not([data-oc-media-source])',
   '[data-streamdown="code-block-header"]',
@@ -47,7 +32,7 @@ const isElement = (node: Node): node is Element => node.nodeType === ELEMENT_NOD
 
 const isBlockElement = (element: Element): boolean => {
   if (element.matches('.katex-display')) return true;
-  if (element.matches('[data-streamdown="mermaid-block"], [data-streamdown="code-block"], [data-streamdown="table-wrapper"]')) return true;
+  if (element.matches('[data-streamdown="mermaid-block"], [data-streamdown="svg-block"], [data-streamdown="code-block"], [data-streamdown="table-wrapper"]')) return true;
   if (element.hasAttribute('data-oc-media-source')) return false;
   return BLOCK_TAGS.has(element.tagName);
 };
@@ -74,7 +59,6 @@ const inlineCode = (text: string): string => {
   return `${marker}${pad}${text}${pad}${marker}`;
 };
 
-// Emphasis markers must hug the text: `** bold **` is not bold.
 const wrapInline = (text: string, marker: string): string => {
   const match = /^(\s*)([\s\S]*?)(\s*)$/.exec(text);
   if (!match || !match[2]) return text;
@@ -107,8 +91,6 @@ const codeBlockText = (element: Element): string => {
   const code = element.querySelector('code') ?? element;
   if (!element.matches('[data-streamdown="code-block"]')
     && !element.closest('[data-streamdown="code-block-body"]')) return code.textContent ?? '';
-  // Native rows carry their line breaks in layout. An empty row contains a
-  // newline placeholder, which contributes one empty line in the joined source.
   return Array.from(code.childNodes).map((row) => {
     const text = row.textContent ?? '';
     return text === '\n' ? '' : text;
@@ -175,6 +157,10 @@ const serializeBlockElement = (element: Element, format: RenderedCopyFormat): st
     const source = element.getAttribute('data-oc-mermaid-source') ?? '';
     return plain ? source : fence(source, 'mermaid');
   }
+  if (element.matches('[data-streamdown="svg-block"]')) {
+    const source = element.getAttribute('data-oc-svg-source') ?? '';
+    return plain ? source : fence(source, 'svg');
+  }
   if (element.matches('.katex-display')) {
     const tex = texOf(element);
     if (!tex) return element.textContent ?? '';
@@ -198,7 +184,6 @@ const serializeBlockElement = (element: Element, format: RenderedCopyFormat): st
     case 'UL': case 'OL':
       return serializeList(element, format);
     case 'LI':
-      // A list item without its list: the selection started inside it.
       return prefixLines(serializeChildren(element, '\n', format), bulletMarker(format), '  ');
     case 'BLOCKQUOTE': {
       const text = serializeChildren(element, '\n\n', format);
@@ -213,7 +198,6 @@ const serializeBlockElement = (element: Element, format: RenderedCopyFormat): st
       return `<details>\n<summary>${summaryText}</summary>\n\n${body}\n\n</details>`;
     }
     case 'P': {
-      // An alert's drawn title goes back to the marker GitHub reads.
       const alert = element.getAttribute('data-oc-alert-title');
       if (alert && !plain) return `[!${alert}]`;
       return serializeInlineChildren(element, format).trim();
@@ -234,8 +218,6 @@ const serializeInlineElement = (element: Element, format: RenderedCopyFormat): s
     return plain ? tex : `$${tex}$`;
   }
   const content = () => serializeInlineChildren(element, format);
-  // An assistant image, as its label or drawn in its place: the source the
-  // message wrote, never the authenticated URL the picture loaded from.
   const imageSource = element.getAttribute('data-oc-media-source');
   if (imageSource) {
     const media = element.matches('img, video') ? element : element.querySelector('img, video');
@@ -271,7 +253,6 @@ const serializeInlineElement = (element: Element, format: RenderedCopyFormat): s
       const media = element.querySelector('[data-oc-media-source]');
       if (media?.getAttribute('data-oc-media-source') === href && Array.from(element.childNodes).every((node) =>
         node === media || (isElement(node) && node.contains(media)) || !node.textContent?.trim())) return text;
-      // File references were plain paths in the source; keep them as text.
       if (plain || !href || element.getAttribute('data-openchamber-file-link') === 'true') return text;
       if (text.trim() === href) return href;
       return `[${text}](${href})`;
@@ -282,7 +263,6 @@ const serializeInlineElement = (element: Element, format: RenderedCopyFormat): s
 };
 
 const serializeNode = (node: Node, format: RenderedCopyFormat): Serialized | null => {
-  // Word joiners only keep a chip and its punctuation on one line; they are not text.
   if (node.nodeType === TEXT_NODE) return { block: false, text: (node.textContent ?? '').replace(/\u2060/g, '') };
   if (!isElement(node) || node.matches(SKIP_SELECTOR)) return null;
   if (isBlockElement(node)) return { block: true, text: serializeBlockElement(node, format) };
@@ -320,24 +300,20 @@ function serializeInlineChildren(element: Element, format: RenderedCopyFormat): 
     .join('');
 }
 
-/** Markdown (or its plain reading) for a detached fragment or element of rendered chat markdown. */
 export const serializeRenderedMarkdown = (
   root: Element | DocumentFragment,
   format: RenderedCopyFormat = 'markdown',
 ): string => serializeNodes(Array.from(root.childNodes), '\n\n', format);
 
-/** The plain reading of a rendered markdown HTML string, for the message copy button. */
 export const renderedMarkdownHtmlToPlainText = (html: string, doc: Document): string => {
   const template = doc.createElement('template');
   template.innerHTML = html;
   return serializeRenderedMarkdown(template.content, 'plain');
 };
 
-/** Make a detached, already sanitized copy self-contained for rich clipboard recipients. */
 export const normalizeMarkdownCopyContent = (root: HTMLElement): void => {
   if (root.isConnected) throw new Error('Markdown copy normalization requires a detached root');
   const doc = root.ownerDocument;
-  // Read semantic source before removing application metadata or chrome.
   for (const diagram of Array.from(root.querySelectorAll('[data-streamdown="mermaid-block"]'))) {
     const pre = doc.createElement('pre');
     const code = doc.createElement('code');
@@ -345,6 +321,14 @@ export const normalizeMarkdownCopyContent = (root: HTMLElement): void => {
     code.textContent = diagram.getAttribute('data-oc-mermaid-source') ?? '';
     pre.append(code);
     diagram.replaceWith(pre);
+  }
+  for (const figure of Array.from(root.querySelectorAll('[data-streamdown="svg-block"]'))) {
+    const pre = doc.createElement('pre');
+    const code = doc.createElement('code');
+    code.className = 'language-svg';
+    code.textContent = figure.getAttribute('data-oc-svg-source') ?? '';
+    pre.append(code);
+    figure.replaceWith(pre);
   }
   for (const card of Array.from(root.querySelectorAll('[data-streamdown="code-block"]'))) {
     if (!root.contains(card)) continue;
@@ -363,11 +347,8 @@ export const normalizeMarkdownCopyContent = (root: HTMLElement): void => {
     const media = element.matches('img, video') ? element : element.querySelector('img, video');
     const rawLabel = media?.getAttribute('alt') ?? media?.getAttribute('title') ?? element.textContent ?? '';
     const label = /[?&]oc_(?:url|client)_token=/i.test(rawLabel) ? '' : rawLabel;
-    // Copy preserves labels without introducing image or video requests in the
-    // receiving document. Loaded URLs and source-set metadata stay out of HTML.
     element.replaceWith(doc.createTextNode(label));
   }
-  // Media controls and link preview actions may wrap the now-safe content.
   root.querySelectorAll('button').forEach((button) => {
     if (button.matches('[data-streamdown="link"]') || button.querySelector('img')) button.replaceWith(...Array.from(button.childNodes));
     else button.remove();
@@ -391,20 +372,12 @@ const getMarkdownRoot = (node: Node): Element | null => {
   return element?.closest(MARKDOWN_ROOT_SELECTOR) ?? null;
 };
 
-// Blocks that hold one piece of text. A selection that stays inside one of
-// them is that text, not the list, table or emphasis around it.
 const TEXT_BLOCK_SELECTOR = 'p, h1, h2, h3, h4, h5, h6, li, td, th, summary, dt, dd';
 
-// A long answer is drawn as several transcript rows, one markdown root each,
-// under wrappers naming the text part they cut (`data-answer-part`).
 const ANSWER_PART_ATTRIBUTE = 'data-answer-part';
 
 const answerPartOf = (root: Element): string | null => root.closest(`[${ANSWER_PART_ATTRIBUTE}]`)?.getAttribute(ANSWER_PART_ATTRIBUTE) ?? null;
 
-/**
- * A selection across the rows of one long answer, as the Markdown of each
- * row's part of it, in order. Null unless both ends are in rows of one answer.
- */
 const getAnswerSelectionText = (range: Range, startRoot: Element, endRoot: Element, format: RenderedCopyFormat): string | null => {
   const part = answerPartOf(startRoot);
   if (!part || part !== answerPartOf(endRoot)) return null;
@@ -423,17 +396,6 @@ const getAnswerSelectionText = (range: Range, startRoot: Element, endRoot: Eleme
   return pieces.length > 0 ? pieces.join('\n\n') : null;
 };
 
-/**
- * The selected part of one rendered markdown block as Markdown (or its plain
- * reading), or null when the range is not inside a single markdown root or
- * the rows of one long answer.
- *
- * Formatting inside the selection is kept. `cloneContents` drops the ancestors
- * the range starts and ends in, so a selection that crosses blocks is
- * re-nested in shallow copies of them: two list items stay a list, two table
- * cells stay a table. A selection within one text block (part of a list item,
- * a table cell, a bold run) is not re-nested and copies as the text itself.
- */
 export const getMarkdownSelectionText = (range: Range, format: RenderedCopyFormat = 'markdown'): string | null => {
   const root = getMarkdownRoot(range.startContainer);
   const endRoot = getMarkdownRoot(range.endContainer);
@@ -444,9 +406,6 @@ export const getMarkdownSelectionText = (range: Range, format: RenderedCopyForma
   let content: Node = fragment;
   let ancestor: Node | null = range.commonAncestorContainer;
   if (ancestor.nodeType === TEXT_NODE) ancestor = ancestor.parentNode;
-  // A code-only range needs its row and language shells even inside a list
-  // item or table cell. Stop at the code card so unselected enclosing markers
-  // cannot become part of the copied Markdown.
   const codeBlock = ancestor && isElement(ancestor)
     ? ancestor.closest('[data-streamdown="code-block"]') ?? ancestor.closest('pre') : null;
   const textBlock = ancestor && isElement(ancestor) ? ancestor.closest(TEXT_BLOCK_SELECTOR) : null;

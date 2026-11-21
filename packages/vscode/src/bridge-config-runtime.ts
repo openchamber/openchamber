@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
+import { readMachineSetting } from './machine-settings';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -45,6 +46,8 @@ import {
   createPluginEntry,
   updatePluginEntry,
   deletePluginEntry,
+  setPluginEntryEnabled,
+  setPluginFileEnabled,
   readPluginDirFile,
   writePluginDirFile,
   deletePluginDirFile,
@@ -74,6 +77,7 @@ import {
 import { buildAppliedResponse } from './config-mutation-response';
 import { magicPromptRequestSchema, type MagicPromptHttpResponse, type MagicPromptRequest } from './magic-prompts';
 import type { BridgeContext, BridgeResponse } from './bridge';
+import { normalizeWindowsDriveLetter } from './pathUtils';
 import { appendInstalledSources, removeInstalledSources } from '../../web/server/lib/skills-catalog/installed-sources.js';
 
 type BridgeMessageInput = {
@@ -85,7 +89,6 @@ type BridgeMessageInput = {
 type ConfigRuntimeDeps = {
   readSettings: (ctx?: BridgeContext) => Record<string, unknown>;
   persistSettings: (changes: Record<string, unknown>, ctx?: BridgeContext) => Promise<Record<string, unknown>>;
-  /** One `/api/magic-prompts` request; the webview answers with the returned status and body. */
   handleMagicPromptRequest: (request: MagicPromptRequest) => Promise<MagicPromptHttpResponse>;
   fetchOpenCodeSkillsFromApi: (ctx: BridgeContext | undefined, workingDirectory?: string) => Promise<DiscoveredSkill[] | null>;
   clientReloadDelayMs: number;
@@ -102,6 +105,10 @@ const resolveWorkingDirectory = (ctx: BridgeContext | undefined, directory?: str
 
 const pluginMutationPayload = (label: string) => buildAppliedResponse(
   `${label}.`,
+);
+
+const codedBridgeError = (message: string, code: string): Error & { code: string } => (
+  Object.assign(new Error(message), { code })
 );
 
 const parseSkillsCatalogSources = (settings: Record<string, unknown>): SkillsCatalogSourceConfig[] => {
@@ -150,10 +157,7 @@ export async function handleConfigBridgeMessage(
   switch (type) {
     case 'api:config/opencode-resolution:get': {
       const debugInfo = ctx?.manager?.getDebugInfo();
-      const configuredFromWorkspace = vscode.workspace.getConfiguration('openchamber').get<string>('opencodeBinary');
-      const configured = typeof configuredFromWorkspace === 'string' && configuredFromWorkspace.trim().length > 0
-        ? configuredFromWorkspace.trim()
-        : null;
+      const configured = readMachineSetting('opencodeBinary').trim() || null;
       const resolved = debugInfo?.cliPath ?? null;
       const source = (() => {
         if (!resolved) return null;
@@ -248,7 +252,6 @@ export async function handleConfigBridgeMessage(
         name?: string;
         body?: Record<string, unknown>;
         directory?: string;
-        /** `config` or `permissions`, mirroring the web sub-routes. */
         resource?: string;
       };
       const agentName = typeof name === 'string' ? name.trim() : '';
@@ -260,8 +263,6 @@ export async function handleConfigBridgeMessage(
       const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
 
       if (normalizedMethod === 'GET') {
-        // Mirrors the web routes: `/config` answers the canonical v2 entity and
-        // `/permissions` the effective rule list.
         if (resource === 'config') {
           return { id, type, success: true, data: getAgentConfig(agentName, workingDirectory) };
         }
@@ -323,7 +324,6 @@ export async function handleConfigBridgeMessage(
         name?: string;
         body?: Record<string, unknown>;
         directory?: string;
-        /** `config`, mirroring the web sub-route. */
         resource?: string;
       };
       const commandName = typeof name === 'string' ? name.trim() : '';
@@ -385,8 +385,6 @@ export async function handleConfigBridgeMessage(
       return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
     }
 
-    // GET/PUT /api/config/websearch — see the web routes in
-    // packages/web/server/lib/opencode/routes.js.
     case 'api:config/websearch': {
       // SAFETY: every field is checked before use: `method` against a literal,
       // `directory` by resolveWorkingDirectory, `selection` by parseWebSearchSelection.
@@ -402,8 +400,6 @@ export async function handleConfigBridgeMessage(
       return { id, type, success: true, data: { success: true, changed: result.changed } };
     }
 
-    // PUT /api/config/warming — see the web route in
-    // packages/web/server/lib/opencode/routes.js.
     case 'api:config/warming': {
       const enabled = (payload as { enabled?: unknown } | undefined)?.enabled;
       if (typeof enabled !== 'boolean') {
@@ -413,8 +409,6 @@ export async function handleConfigBridgeMessage(
       return { id, type, success: true, data: { success: true, changed: result.changed } };
     }
 
-    // PUT /api/config/compaction — see the web route in
-    // packages/web/server/lib/opencode/routes.js.
     case 'api:config/compaction': {
       const parsed = compactionUpdateSchema.safeParse(payload ?? {});
       if (!parsed.success) {
@@ -424,8 +418,6 @@ export async function handleConfigBridgeMessage(
       return { id, type, success: true, data: { success: true, changed: result.changed } };
     }
 
-    // PUT /api/config/skill-switch — see the web route in
-    // packages/web/server/lib/opencode/skill-routes.js.
     case 'api:config/skill-switch': {
       const parsed = skillSwitchRequestSchema.extend({ directory: z.string().optional() }).safeParse(payload);
       if (!parsed.success) {
@@ -501,9 +493,10 @@ export async function handleConfigBridgeMessage(
     }
 
     case 'api:config/plugins': {
-      const { method, target, pluginId, body, directory, specs, refresh } = (payload || {}) as {
+      const { method, target, action, pluginId, body, directory, specs, refresh } = (payload || {}) as {
         method?: string;
         target?: 'list' | 'registry' | 'entry' | 'file';
+        action?: 'enabled';
         pluginId?: string;
         body?: Record<string, unknown>;
         directory?: string;
@@ -512,15 +505,58 @@ export async function handleConfigBridgeMessage(
       };
       const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
       const workingDirectory = resolveWorkingDirectory(ctx, directory);
+      const manager = ctx?.manager;
+      const switchDirectory = ctx?.context ? normalizeWindowsDriveLetter(ctx.context.globalStorageUri.fsPath) : null;
+      const switchAvailable = manager ? manager.getDebugInfo().mode !== 'external' : false;
 
       if ((target === 'list' || !target) && normalizedMethod === 'GET') {
+        const listSwitchDirectory = switchAvailable && switchDirectory ? switchDirectory : undefined;
         return {
           id,
           type,
           success: true,
           data: {
-            entries: listPluginEntries(workingDirectory),
-            files: listPluginDirFiles(workingDirectory),
+            entries: listPluginEntries(workingDirectory, listSwitchDirectory).map((entry) => (
+              switchAvailable ? entry : { ...entry, switchState: 'unavailable' as const }
+            )),
+            files: listPluginDirFiles(workingDirectory, listSwitchDirectory).map((file) => (
+              switchAvailable ? file : { ...file, switchState: 'unavailable' as const }
+            )),
+          },
+        };
+      }
+
+      if (action === 'enabled') {
+        const enabled = body?.enabled;
+        if (enabled !== true && enabled !== false) {
+          throw codedBridgeError('enabled must be a boolean', 'INVALID_STATE');
+        }
+        if (!switchAvailable || !switchDirectory || !manager) {
+          throw codedBridgeError('Plugin switches apply only to the OpenCode OpenChamber starts', 'SWITCH_UNAVAILABLE');
+        }
+        if (target !== 'entry' && target !== 'file') {
+          throw codedBridgeError('Unsupported plugin switch target', 'INVALID_SPEC');
+        }
+        if (!pluginId) {
+          throw codedBridgeError(`Plugin ${target} id is required`, 'INVALID_SPEC');
+        }
+        const result = target === 'entry'
+          ? setPluginEntryEnabled(pluginId, enabled, workingDirectory, switchDirectory)
+          : setPluginFileEnabled(pluginId, enabled, workingDirectory, switchDirectory);
+        let requiresManualRestart = true;
+        try {
+          ({ requiresManualRestart } = await manager.refreshPluginSwitches());
+        } catch (error) {
+          console.warn('[plugins] Failed to apply a plugin switch to the managed OpenCode config:', error);
+        }
+        return {
+          id,
+          type,
+          success: true,
+          data: {
+            ...buildAppliedResponse(`Plugin ${enabled ? 'enabled' : 'disabled'}.`, result),
+            requiresReload: false,
+            requiresManualRestart,
           },
         };
       }
@@ -606,7 +642,6 @@ export async function handleConfigBridgeMessage(
       }
 
       if (normalizedMethod === 'POST' && !snippetName) {
-        // `content` asks for a snippet body's preview, `text` for a prompt's expansion.
         const text = body?.content !== undefined
           ? previewSnippet(String(body.content), workingDirectory)
           : expandSnippets(typeof body?.text === 'string' ? body.text : '', workingDirectory);
@@ -648,8 +683,6 @@ export async function handleConfigBridgeMessage(
       const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
 
       if (!name && normalizedMethod === 'GET') {
-        // A failed OpenCode list is flagged so the store treats the disk scan as
-        // partial instead of caching it as the complete list (#3921).
         const openCodeSkills = await deps.fetchOpenCodeSkillsFromApi(ctx, workingDirectory);
         const skills = mergeDiscoveredSkills(openCodeSkills || [], discoverSkills(workingDirectory));
         return {
@@ -734,7 +767,6 @@ export async function handleConfigBridgeMessage(
         try {
           removeInstalledSources(skillName);
         } catch (error) {
-          // Provenance only refines the Installed badge; the skill is gone either way.
           console.error('Failed to forget skill install provenance:', error);
         }
         return {
@@ -808,7 +840,6 @@ export async function handleConfigBridgeMessage(
           try {
             appendInstalledSources(installed.map((entry) => ({ ...entry, sourceId, sourceRef: String(body.source || '') })));
           } catch (error) {
-            // Provenance only refines the Installed badge; the install already succeeded.
             console.error('Failed to record skill install provenance:', error);
           }
         }

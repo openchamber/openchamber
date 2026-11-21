@@ -40,7 +40,7 @@ description: OpenChamber와 함께 쓰는 서비스와 구독을 연결합니다
 GitLab, Gitea, Forgejo, Gerrit는 GitHub 옆에 각자의 카드가 있습니다. 연결하면 그 이슈와 풀 리퀘스트(GitLab에서는 머지 리퀘스트, Gerrit에서는 변경)가 GitHub처럼 [이슈 및 PR](/ko/issues-and-prs/) 보드와 채팅의 **+** 메뉴에 표시됩니다.
 
 - **GitLab**: gitlab.com에서는 짧은 기기 코드, 개인 액세스 토큰 또는 서버의 `glab` 로그인으로 로그인합니다. 자체 관리형 GitLab에서는 주소를 추가하고 `api` 범위가 있는 개인 액세스 토큰을 붙여 넣습니다. 그곳에서 기기 코드 로그인은 서버가 `OPENCHAMBER_GITLAB_CLIENT_ID`를 그 인스턴스에 등록한 애플리케이션으로 설정한 경우에만 동작합니다.
-- **Gitea**: `https://gitea.example.com` 같은 인스턴스 주소를 추가하고 `write:repository`, `write:issue`, `read:user` 범위가 있는 개인 액세스 토큰을 붙여 넣습니다. 카드에는 인스턴스에서 토큰을 만드는 페이지로 가는 링크가 있습니다. Gitea에는 기기 코드나 CLI 로그인이 없습니다. Gitea 1.21 이상이 필요하며, 주소의 루트에서 제공되어야 합니다.
+- **Gitea**: `https://gitea.example.com` 같은 인스턴스 주소를 추가하고 `write:repository`, `write:issue`, `read:user` 범위가 있는 개인 액세스 토큰을 붙여 넣습니다. 카드에는 인스턴스에서 토큰을 만드는 페이지로 가는 링크가 있습니다. 서버에서 Gitea의 `gt` CLI로 로그인되어 있으면(`gt auth login`) 인스턴스가 카드에 자동으로 표시됩니다. **gt CLI 사용**을 선택하면 그 로그인으로 작업합니다. `gt` 로그인은 이슈와 풀 리퀘스트에 쓰이며, push와 pull에는 토큰을 연결하거나 `gt auth setup-git` 등으로 Git을 직접 설정하세요. Gitea 1.21 이상이 필요하며, 주소의 루트에서 제공되어야 합니다.
 - **Forgejo**: Codeberg는 이미 카드에 있으므로 `write:repository`, `write:issue`, `read:user` 범위가 있는 개인 액세스 토큰만 있으면 연결할 수 있습니다. 카드에는 Codeberg에서 토큰을 만드는 페이지로 가는 링크가 있습니다. 다른 Forgejo 서버는 `https://forgejo.example.com` 같은 주소를 추가하고 같은 범위가 있는 토큰을 붙여 넣습니다. Forgejo 7.0 이상이 필요하며, 주소의 루트에서 제공되어야 합니다. Forgejo 서버는 이 카드에서, Gitea 서버는 Gitea 카드에서 연결합니다.
 - **Gerrit**: `https://gerrit.example.com` 같은 인스턴스 주소를 추가한 다음 Gerrit 사용자 이름과 HTTP 비밀번호를 입력합니다. 비밀번호는 Gerrit의 **Settings → HTTP Credentials**에서 생성하며, 카드에 그곳으로 가는 링크가 있습니다. 로그인 비밀번호는 쓸 수 없고, 사용자 이름이 없는 계정은 연결할 수 없습니다. Gerrit 3.8 이상이 필요하며, 주소의 루트에서 제공되어야 합니다. googlesource.com과 `.gitcookies`처럼 리뷰 주소와 Git 주소가 다른 사이트는 지원하지 않습니다.
 

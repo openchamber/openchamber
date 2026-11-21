@@ -1,19 +1,9 @@
-/**
- * Dictation for a plain text field outside the composer (project notes and
- * todos): a mic button that turns into discard/insert while recording and a
- * spinner while the server transcribes. The transcript goes to `onTranscript`;
- * the host decides where it lands in its field.
- *
- * Unlike ComposerDictation there is no overlay and no global shortcut: the
- * toggle_dictation shortcut belongs to the chat composer, and a second listener
- * would start two recordings from one key press.
- */
-
 import React from 'react';
 
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { DictationWaveform } from '@/components/dictation/DictationWaveform';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { useDictation } from '@/hooks/useDictation';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
@@ -25,7 +15,6 @@ import { useConfigStore } from '@/stores/useConfigStore';
 interface InlineDictationButtonProps {
   onTranscript: (text: string) => void;
   disabled?: boolean;
-  /** Classes for each icon button, so the controls match the host's own. */
   buttonClassName: string;
   iconClassName?: string;
 }
@@ -38,8 +27,6 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
 }) => {
   const { t } = useI18n();
   const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
-  // The dictation server lives in the OpenChamber web server; the VS Code
-  // bridge has none.
   const [supported] = React.useState(() => !isVSCodeRuntime() && isDictationCaptureSupported());
 
   const onTranscriptRef = React.useRef(onTranscript);
@@ -64,8 +51,6 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
     },
   });
 
-  // No room here for the composer's salvage view: keep whatever was
-  // transcribed before the failure, say it failed, and go back to idle.
   React.useEffect(() => {
     if (status !== 'failed') return;
     const salvage = partialTranscript.trim();
@@ -93,8 +78,6 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
     const downloadingModel = errorReason === 'model_download_in_progress';
     return (
       <>
-        {/* The composer's recording signs: a live dot, the mic level and the
-            elapsed time, so it is plain that speech is being heard. */}
         <span role="status" aria-label={t('chat.dictation.listening')} className="inline-flex min-w-0 items-center gap-1.5">
           <span className="relative flex size-1.5 shrink-0" aria-hidden="true">
             <span className={cn('relative inline-flex size-1.5 rounded-full bg-[var(--status-error)]', recordingBlink)} />
@@ -108,38 +91,41 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
             {`${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, '0')}`}
           </span>
         </span>
-        <button
-          type="button"
-          onClick={() => void cancelDictation()}
-          className={buttonClassName}
-          aria-label={t('chat.dictation.cancel')}
-          title={t('chat.dictation.cancel')}
-        >
-          <Icon name="close" className={iconClassName} />
-        </button>
-        <button
-          type="button"
-          onClick={() => void confirmDictation()}
-          className={cn(buttonClassName, 'text-primary hover:text-primary')}
-          aria-label={t('chat.dictation.insert')}
-          title={t('chat.dictation.insert')}
-        >
-          <Icon name="check" className={iconClassName} />
-        </button>
+        <ButtonTooltip label={t('chat.dictation.cancel')} className="shrink-0">
+          <button
+            type="button"
+            onClick={() => void cancelDictation()}
+            className={buttonClassName}
+            aria-label={t('chat.dictation.cancel')}
+          >
+            <Icon name="close" className={iconClassName} />
+          </button>
+        </ButtonTooltip>
+        <ButtonTooltip label={t('chat.dictation.insert')} className="shrink-0">
+          <button
+            type="button"
+            onClick={() => void confirmDictation()}
+            className={cn(buttonClassName, 'text-primary hover:text-primary')}
+            aria-label={t('chat.dictation.insert')}
+          >
+            <Icon name="check" className={iconClassName} />
+          </button>
+        </ButtonTooltip>
       </>
     );
   }
 
   return (
-    <button
-      type="button"
-      onClick={() => void startDictation()}
-      disabled={disabled}
-      className={buttonClassName}
-      aria-label={t('chat.dictation.start')}
-      title={t('chat.dictation.start')}
-    >
-      <Icon name="mic" className={iconClassName} />
-    </button>
+    <ButtonTooltip label={t('chat.dictation.start')} className="shrink-0">
+      <button
+        type="button"
+        onClick={() => void startDictation()}
+        disabled={disabled}
+        className={buttonClassName}
+        aria-label={t('chat.dictation.start')}
+      >
+        <Icon name="mic" className={iconClassName} />
+      </button>
+    </ButtonTooltip>
   );
 };

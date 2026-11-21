@@ -18,9 +18,8 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { projectTurnRecords } from '../lib/turns/projectTurnRecords';
 import type { ChatMessageEntry, TurnChangedFile, TurnRecord } from '../lib/turns/types';
-import { TurnFold, TurnPagesRow } from './LiveTurnActivity';
 import { useTurnFoldContexts } from './useTurnFold';
-import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './liveActivityContext';
+import { LiveFinalActivityContext, LiveTurnHoistedPagesContext, LiveActivityInteractionContext } from './liveActivityContext';
 import { buildTimelineRows } from '../lib/turns/timelineRows';
 import { MessageSliceContext } from '../message/messageSliceContext';
 import { useWorkflowRunsStore } from '@/lib/workflows/store';
@@ -32,11 +31,8 @@ import { getSyncChildStores } from '@/sync/sync-refs';
 import { ChatColumnSessionContext } from '../chatColumnSession';
 
 plugin({
-    name: 'live-activity-worker-url',
+    name: 'live-activity-provider-logos',
     setup(build) {
-        build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, ({ path }) => ({
-            contents: `export default ${JSON.stringify(pathToFileURL(path.split('?')[0]).href)};`, loader: 'js',
-        }));
         // Expand Vite's eager asset glob into the same real file URL map for
         // Bun. This is a loader transform, not a replacement of the logo hook.
         build.onLoad({ filter: /useProviderLogo\.ts$/ }, ({ path }) => {
@@ -48,6 +44,10 @@ plugin({
         });
     },
 });
+
+// Loaded after the plugin: its imports reach the logo glob that Bun cannot
+// expand on its own.
+const { TurnFold, TurnPagesRow } = await import('./LiveTurnActivity');
 
 const unavailable = (): never => { throw new Error('Activity rendering must not call runtime APIs'); };
 const runtimeApis: RuntimeAPIs = {
@@ -127,17 +127,31 @@ function TurnRows({ record, retired, expanded, onToggle, renderMessage }: {
     </LiveTurnHoistedPagesContext.Provider>;
 }
 
-function Harness({ record, retired = false, changedFiles, isLatestTurn = true, onCopyMessage, onCopyTurn }: {
+// Stands in for the selection menu's hold: Activity content that reports itself
+// as being acted on must keep the fold open and its window where it was.
+function ActivityHoldProbe() {
+    const interaction = React.useContext(LiveActivityInteractionContext);
+    React.useEffect(() => {
+        if (!interaction) return;
+        interaction.hold();
+        return interaction.release;
+    }, [interaction]);
+    return null;
+}
+
+function Harness({ record, retired = false, changedFiles, isLatestTurn = true, holdingMessageId, onCopyMessage, onCopyTurn }: {
     record: TurnRecord;
     retired?: boolean;
     changedFiles?: TurnChangedFile[];
     isLatestTurn?: boolean;
+    holdingMessageId?: string;
     onCopyMessage?: (messageId: string) => boolean;
     onCopyTurn?: () => Promise<boolean>;
 }) {
     const [expanded, setExpanded] = React.useState(false);
     const renderMessage = (message: ChatMessageEntry) => (
         <div key={message.info.id} data-fixture-message={message.info.id}>
+            {message.info.id === holdingMessageId ? <ActivityHoldProbe /> : null}
             <MessageBody
                 messageId={message.info.id} parts={message.parts} isUser={false}
                 isMessageCompleted={message.info.role === 'assistant' && Boolean(message.info.finish)}
@@ -179,7 +193,7 @@ describe('live Activity with the real message body', () => {
     beforeEach(async () => {
         const win = new Window({ url: 'http://localhost', settings: { device: { prefersReducedMotion: 'reduce' } } });
         const globals = {
-            window: win, document: win.document, navigator: win.navigator, localStorage: win.localStorage,
+            window: win, document: win.document, Event: win.Event, CustomEvent: win.CustomEvent, navigator: win.navigator, localStorage: win.localStorage,
             customElements: win.customElements,
             Node: win.Node, NodeList: win.NodeList, Element: win.Element, HTMLElement: win.HTMLElement, SVGElement: win.SVGElement,
             HTMLAnchorElement: win.HTMLAnchorElement,
@@ -378,6 +392,67 @@ describe('live Activity with the real message body', () => {
         expect(header?.getAttribute('aria-expanded')).toBe('true');
     });
 
+    test('keeps Activity open when the turn settles while a comment is being written in it', async () => {
+        const progress = assistant('progress', [text('progress-text', 'Checking the source'), readPart], 'tool-calls');
+        const final = assistant('final', [text('final-text', 'The final answer')], 'stop');
+        await act(async () => root.render(<Harness record={turn([progress])} holdingMessageId="progress" />));
+        expect(container.textContent).toContain('Checking the source');
+        // The turn finishes under the open comment: the step it quotes stays.
+        await act(async () => root.render(<Harness record={turn([progress, final])} holdingMessageId="progress" />));
+        expect(container.textContent).toContain('The final answer');
+        expect(container.textContent).toContain('Checking the source');
+        // Sending or cancelling the comment hands Activity back to the fold.
+        await act(async () => root.render(<Harness record={turn([progress, final])} />));
+        expect(container.textContent).not.toContain('Checking the source');
+    });
+
+    test('holds the live window still while Activity is being commented on', async () => {
+        const readStep = (suffix: string): Part => ({
+            type: 'tool', tool: 'read', id: `read-${suffix}`, callID: `read-${suffix}`, sessionID: 'session', messageID: `step-${suffix}`,
+            state: { status: 'completed', input: { filePath: '/project/source.ts' }, output: 'code', metadata: {}, time: { start: 1, end: 2 } },
+        });
+        const steps = (count: number) => Array.from({ length: count }, (_, index) => assistant(`step-${index}`, [
+            text(`step-text-${index}`, `Step ${index}`), readStep(String(index)),
+        ], 'tool-calls'));
+        // Two rows a step: eight steps leave four and part of a fifth out of the
+        // seven-row window.
+        await act(async () => root.render(<Harness record={turn(steps(8))} holdingMessageId="step-4" />));
+        expect(container.textContent).toContain('+9 more');
+        expect(container.querySelector('[data-fixture-message="step-4"]')).not.toBeNull();
+        // A ninth step arrives while the comment is open: the window stays put.
+        await act(async () => root.render(<Harness record={turn(steps(9))} holdingMessageId="step-4" />));
+        expect(container.textContent).toContain('+9 more');
+        expect(container.querySelector('[data-fixture-message="step-4"]')).not.toBeNull();
+        // Released, the window moves on as it would have.
+        await act(async () => root.render(<Harness record={turn(steps(9))} />));
+        expect(container.textContent).toContain('+11 more');
+        expect(container.querySelector('[data-fixture-message="step-4"]')).toBeNull();
+    });
+
+    test('keeps a step below a shown page mounted when the answer arrives while it is being commented on', async () => {
+        const page: Part = {
+            type: 'tool', tool: 'openchamber_render', id: 'page', callID: 'page', sessionID: 'session', messageID: 'drawing',
+            state: {
+                status: 'completed', input: { action: 'render.page', parameters: { html: '<p>chart</p>', title: 'Drawn page' } },
+                output: '{}', metadata: { openchamber: { ok: true } }, time: { start: 1, end: 2 },
+            },
+        };
+        const drawing = assistant('drawing', [text('drawing-text', 'Drawing'), page], 'tool-calls');
+        const after = assistant('after', [text('after-text', 'Checking the page'), readPart], 'tool-calls');
+        const final = assistant('final', [text('final-text', 'Here it is')], 'stop');
+        await act(async () => root.render(<Harness record={turn([drawing, after])} holdingMessageId="after" />));
+        const step = container.querySelector('[data-fixture-message="after"]');
+        expect(step).not.toBeNull();
+        // The answer lands under the open comment: the quoted step is the same
+        // element, so the editor inside it and its draft are still there.
+        await act(async () => root.render(<Harness record={turn([drawing, after, final])} holdingMessageId="after" />));
+        expect(container.querySelector('[data-fixture-message="after"]')).toBe(step);
+        expect(container.textContent).toContain('Here it is');
+        // Released, Activity folds as it would have.
+        await act(async () => root.render(<Harness record={turn([drawing, after, final])} />));
+        expect(container.textContent).not.toContain('Checking the page');
+    });
+
     test('draws a page the agent showed above the answer, outside the folded Activity', async () => {
         const pagePart = (id: string, messageID: string, ok: boolean): Part => ({
             type: 'tool', tool: 'openchamber_render', id, callID: id, sessionID: 'session', messageID,
@@ -514,10 +589,10 @@ describe('live Activity with the real message body', () => {
         ])} />));
         const header = container.querySelector<HTMLButtonElement>('button[aria-controls]');
         expect(header?.textContent).toContain('Changed 1 file');
-        expect(header?.textContent).toContain('+2/-1');
+        expect(header?.textContent).toContain('+2 −1');
         await act(async () => header?.click());
         expect(header?.textContent).toContain('Changed 1 file');
-        expect(header?.textContent).toContain('+2/-1');
+        expect(header?.textContent).toContain('+2 −1');
     });
 
     test('shows at most four changed files and folds the rest into one chip, including at the threshold', async () => {
@@ -575,9 +650,9 @@ describe('live Activity with the real message body', () => {
             { file: 'src/c.ts', additions: 1, deletions: 0, inTurnDiff: false },
         ]} />));
         expect(container.querySelector('button[aria-label="Open src/a.ts"]')?.textContent).toBe('a.ts');
-        expect(container.querySelector('button[aria-label="Open src/b.ts"]')?.textContent).toBe('b.ts+1/-2');
+        expect(container.querySelector('button[aria-label="Open src/b.ts"]')?.textContent).toBe('b.ts+1 −2');
         expect(container.querySelector('button[aria-label="Open src/c.ts"]')).toBeNull();
-        expect(container.querySelector('span[title="src/c.ts"]')?.textContent).toBe('c.ts+1/-0');
+        expect(container.querySelector('span[title="src/c.ts"]')?.textContent).toBe('c.ts+1 −0');
     });
 
     test('keeps historical files informational and withholds the list before stop', async () => {

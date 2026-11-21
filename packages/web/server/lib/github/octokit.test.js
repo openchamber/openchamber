@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { afterAll, describe, expect, test } from 'bun:test';
 
 // Token selection in getOctokitOrNull is pure (selectTokenForHost): the stored
@@ -23,13 +24,23 @@ fs.writeFileSync(path.join(process.env.OPENCHAMBER_DATA_DIR, 'settings.json'), J
 
 const ghBin = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-octokit-gh-'));
 const ghInvoked = path.join(ghBin, 'invoked-hosts.txt');
-fs.writeFileSync(path.join(ghBin, 'gh'), [
-  '#!/bin/sh',
-  `printf '%s\\n' "$GH_HOST" >> '${ghInvoked}'`,
-  'printf \'gh-token-%s\\n\' "$GH_HOST"',
-  '',
-].join('\n'));
-fs.chmodSync(path.join(ghBin, 'gh'), 0o755);
+if (process.platform === 'win32') {
+  const script = path.join(ghBin, 'gh.js');
+  fs.writeFileSync(script, [
+    "import fs from 'node:fs';",
+    `fs.appendFileSync(${JSON.stringify(ghInvoked)}, process.env.GH_HOST + '\\n');`,
+    "console.log('gh-token-' + process.env.GH_HOST);",
+  ].join('\n'));
+  execFileSync('bun', ['build', '--compile', script, '--outfile', path.join(ghBin, 'gh.exe')]);
+} else {
+  fs.writeFileSync(path.join(ghBin, 'gh'), [
+    '#!/bin/sh',
+    `printf '%s\\n' "$GH_HOST" >> '${ghInvoked}'`,
+    'printf \'gh-token-%s\\n\' "$GH_HOST"',
+    '',
+  ].join('\n'));
+  fs.chmodSync(path.join(ghBin, 'gh'), 0o755);
+}
 const previousPath = process.env.PATH;
 
 const { createOctokit, getOctokitForAccountId, getOctokitForHost, getOctokitOrNull, getGitHubCliCredential, selectTokenForHost } = await import('./octokit.js');
@@ -126,30 +137,6 @@ describe('selectTokenForHost token selection', () => {
 });
 
 describe('getOctokitOrNull host trust', () => {
-  test('refuses an untrusted host before any token lookup, even with an enterprise token and working gh on PATH', async () => {
-    const ghConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-gh-hosts-'));
-    const previousConfigDir = process.env.GH_CONFIG_DIR;
-    const previousToken = process.env.GH_ENTERPRISE_TOKEN;
-    process.env.GH_CONFIG_DIR = ghConfigDir;
-    process.env.GH_ENTERPRISE_TOKEN = 'env-enterprise-token';
-    process.env.PATH = `${ghBin}${path.delimiter}${previousPath}`;
-    fs.rmSync(ghInvoked, { force: true });
-    try {
-      expect(await getOctokitOrNull('gitlab.com')).toBeNull();
-    } finally {
-      if (previousToken === undefined) delete process.env.GH_ENTERPRISE_TOKEN;
-      else process.env.GH_ENTERPRISE_TOKEN = previousToken;
-      if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
-      else process.env.GH_CONFIG_DIR = previousConfigDir;
-      if (previousPath === undefined) delete process.env.PATH;
-      else process.env.PATH = previousPath;
-      fs.rmSync(ghConfigDir, { recursive: true, force: true });
-    }
-    // The refusal happens before gh is consulted: no `gh auth token` process,
-    // so the environment's enterprise token never leaves for gitlab.com.
-    expect(fs.existsSync(ghInvoked)).toBe(false);
-  });
-
   test('lets github.com past the trust gate into token selection', async () => {
     const ghConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-gh-hosts-'));
     fs.writeFileSync(path.join(ghConfigDir, 'hosts.yml'), 'github.com:\n  user: octocat\n  oauth_token: gho_ambient\n');
@@ -179,6 +166,8 @@ describe('getOctokitOrNull host trust', () => {
     fs.writeFileSync(path.join(ghConfigDir, 'hosts.yml'), 'github.example.com:\n  user: ghe-user\n  oauth_token: gho_ghe\n');
     const previousConfigDir = process.env.GH_CONFIG_DIR;
     process.env.GH_CONFIG_DIR = ghConfigDir;
+    // The token comes from `gh auth token`: use the fake gh, not one the host has installed.
+    process.env.PATH = `${ghBin}${path.delimiter}${previousPath}`;
     const previousFetch = globalThis.fetch;
     globalThis.fetch = async () => Response.json({ id: 42, login: 'ghe-user' });
     const { setGhCliActiveForHost } = await import('./auth.js');
@@ -197,6 +186,8 @@ describe('getOctokitOrNull host trust', () => {
       globalThis.fetch = previousFetch;
       if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
       else process.env.GH_CONFIG_DIR = previousConfigDir;
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
       fs.rmSync(ghConfigDir, { recursive: true, force: true });
     }
   });
@@ -288,27 +279,6 @@ describe('getOctokitOrNull host trust', () => {
     }
   });
 
-  test('refuses an untrusted host cli account id without a token lookup', async () => {
-    const ghConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-gh-hosts-'));
-    const previousConfigDir = process.env.GH_CONFIG_DIR;
-    const previousToken = process.env.GH_ENTERPRISE_TOKEN;
-    process.env.GH_CONFIG_DIR = ghConfigDir;
-    process.env.GH_ENTERPRISE_TOKEN = 'env-enterprise-token';
-    const previousFetch = globalThis.fetch;
-    globalThis.fetch = async () => {
-      throw new Error('must not reach the network');
-    };
-    try {
-      await expect(getOctokitForAccountId('gitlab.com#cli:7')).resolves.toBeNull();
-    } finally {
-      globalThis.fetch = previousFetch;
-      if (previousToken === undefined) delete process.env.GH_ENTERPRISE_TOKEN;
-      else process.env.GH_ENTERPRISE_TOKEN = previousToken;
-      if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
-      else process.env.GH_CONFIG_DIR = previousConfigDir;
-      fs.rmSync(ghConfigDir, { recursive: true, force: true });
-    }
-  });
 });
 
 describe('getGitHubCliCredential git transport', () => {

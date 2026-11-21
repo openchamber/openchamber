@@ -1,28 +1,5 @@
 #!/usr/bin/env node
-/**
- * Ensure the installed `electron` package has its binary fully installed and
- * matches the host architecture.
- *
- * Why this exists: `bun install` runs the electron package's postinstall
- * (`node install.js`) with the system Node. Under Node 24,
- * `extract-zip@2.0.1` silently unpacks only the first entry of the electron
- * zip and then resolves without error, leaving `dist/` without the binary
- * and `path.txt` missing. Running the same postinstall with Bun extracts
- * correctly. This script detects an incomplete (or wrong-architecture)
- * install and repairs it by re-running the postinstall under Bun (falling
- * back to Node).
- *
- * Test hooks (env, never used in normal operation):
- *   OPENCHAMBER_ELECTRON_PKG_DIR       - resolve the electron package here.
- *   OPENCHAMBER_ELECTRON_INSTALL_COMMANDS - JSON array of [bin, args] repair
- *                                        commands, e.g.
- *                                        `[["bun",["install.js"]],["node",["install.js"]]]`.
- *
- * Exit codes:
- *   0 - electron is complete (or was repaired; or `--best-effort` and repair
- *       was not possible but should not block the caller).
- *   1 - electron is incomplete and could not be repaired.
- */
+// external: https://github.com/electron/electron/blob/main/npm/install.js Repair incomplete or wrong-architecture installs; older extract-zip under Node 24 can silently extract only one entry.
 import { spawnSync, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,7 +13,6 @@ const __dirname = path.dirname(__filename);
 const repoElectronDir = path.resolve(__dirname, '..');
 const require = createRequire(import.meta.url);
 
-// cputype / e_machine / PE machine values -> Node-style architecture.
 const MACHO_CPU_TO_ARCH = {
   0x00000007: 'ia32',
   0x01000007: 'x64',
@@ -72,10 +48,6 @@ export function platformPath() {
   }
 }
 
-/**
- * Architecture that the installed Electron binary should match, mirroring the
- * logic in electron's own install.js (including the macOS Rosetta fallback).
- */
 export function expectedArch() {
   const platform = process.env.npm_config_platform || process.platform;
   let arch = process.env.npm_config_arch || process.arch;
@@ -99,11 +71,6 @@ export function expectedArch() {
   return arch;
 }
 
-/**
- * Read the executable header of a Mach-O (macOS), ELF (Linux), or PE
- * (Windows) binary and return its architecture as a Node-style string
- * ('x64', 'arm64', 'ia32', 'arm') or null when it cannot be determined.
- */
 export function detectExecutableArch(executablePath) {
   let fd;
   try {
@@ -127,20 +94,17 @@ export function detectExecutableArch(executablePath) {
 function archFromHeader(buf) {
   if (buf.length < 4) return null;
 
-  // ELF: e_machine at offset 18.
   if (buf[0] === 0x7f && buf[1] === 0x45 && buf[2] === 0x4c && buf[3] === 0x46) {
     if (buf.length < 20) return null;
     return ELF_MACHINE_TO_ARCH[buf.readUInt16LE(18)] ?? null;
   }
 
-  // Thin Mach-O: magic (LE) then cputype at offset 4.
   const magicLE = buf.readUInt32LE(0);
   if (magicLE === 0xfeedface || magicLE === 0xfeedfacf) {
     if (buf.length < 8) return null;
     return MACHO_CPU_TO_ARCH[buf.readUInt32LE(4)] ?? null;
   }
 
-  // Fat/universal Mach-O: magic (BE) then a list of fat_arch entries.
   const magicBE = buf.readUInt32BE(0);
   if (magicBE === 0xcafebabe || magicBE === 0xbebafeca) {
     if (buf.length < 8) return null;
@@ -154,7 +118,6 @@ function archFromHeader(buf) {
     return null;
   }
 
-  // PE: e_lfanew at offset 0x3c, machine at PE header + 4.
   if (buf[0] === 0x4d && buf[1] === 0x5a) {
     if (buf.length < 0x40) return null;
     const peOffset = buf.readUInt32LE(0x3c);
@@ -179,8 +142,6 @@ export function resolveElectronPackageDir(baseDir = repoElectronDir) {
     const pkgJson = require.resolve('electron/package.json', { paths: [baseDir] });
     return path.dirname(pkgJson);
   } catch {
-    // Fall back to the standard monorepo layout (Bun and npm hoist electron
-    // somewhere under <repo>/node_modules).
     const candidates = [
       path.resolve(baseDir, 'node_modules/electron'),
       path.resolve(baseDir, '../../node_modules/electron'),
@@ -219,8 +180,6 @@ export function isComplete(electronDir, expected = expectedArch()) {
   const executable = path.join(electronDir, 'dist', executablePath);
   if (!fs.existsSync(executable)) return false;
 
-  // A same-version binary built for another architecture satisfies all of the
-  // checks above but still fails at launch, so verify the real header.
   const detected = detectExecutableArch(executable);
   if (detected === null || detected !== expected) return false;
 
@@ -256,15 +215,9 @@ export function repair(electronDir, options = {}) {
   const runner = options.runner ?? spawnSync;
   const commands = options.commands ?? resolveInstallCommands(env, options.bunResolver);
 
-  // A partial extraction can leave stale entries (and a stale path.txt) that
-  // a re-run would merge with. Start clean so the repair is deterministic.
   fs.rmSync(path.join(electronDir, 'dist'), { recursive: true, force: true });
   fs.rmSync(path.join(electronDir, 'path.txt'), { force: true });
 
-  // Running the postinstall under Bun extracts the full zip on every Node
-  // version, including Node 24 where the Node-based extract-zip is broken.
-  // Fall back to `node install.js` only when Bun is unavailable (older Node
-  // versions extract fine with Node).
   for (const [bin, args] of commands) {
     const label = `${bin} ${args.join(' ')}`;
     const result = runner(bin, args, {

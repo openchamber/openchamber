@@ -1,4 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../opencode/auth.js', () => ({
   readOpenCodeCredentials: async () => ({ openai: { access: 'test-token' } }),
@@ -6,8 +10,17 @@ vi.mock('../../opencode/auth.js', () => ({
 
 import { fetchQuota } from './codex.js';
 
+let codexHome;
+
+beforeEach(() => {
+  codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-'));
+  process.env.CODEX_HOME = codexHome;
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  delete process.env.CODEX_HOME;
+  fs.rmSync(codexHome, { recursive: true, force: true });
 });
 
 const mockUsage = (rateLimit) => {
@@ -17,12 +30,39 @@ const mockUsage = (rateLimit) => {
   }));
 };
 
+const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+
+// Settles only when the request's deadline fires, the way a stalled connection does.
+const untilDeadline = (signal) => new Promise((_resolve, reject) => {
+  signal.addEventListener('abort', () => reject(signal.reason));
+});
+
+// Headers arrive, then the body never does.
+const stalledBody = (status, signal) => ({ ok: status === 200, status, json: () => untilDeadline(signal) });
+
 describe('Codex quota windows', () => {
   it.each([
-    { balance: 62500, unlimited: false, expected: '62500' },
-    { balance: '62500.00', unlimited: false, expected: '62500' },
-    { balance: 12.3456, unlimited: false, expected: '12.3456' },
-    { balance: '12.3456', unlimited: false, expected: '12.3456' },
+    ['usd', 'usage', '$8.10 / $150.00'],
+    ['credits', 'credits', '8 / 150 used'],
+    [undefined, 'credits', '8 / 150 used'],
+  ])('formats the individual allowance for unit %s', async (unit, key, label) => {
+    vi.stubGlobal('fetch', async () => Response.json({
+      spend_control: { individual_limit: { unit, used: '8.104', limit: '150', used_percent: 5 } },
+    }));
+
+    const result = await fetchQuota();
+
+    expect(result.usage.windows[key]?.valueLabel).toBe(label);
+    expect(result.usage.windows[key]?.usedPercent).toBe(5);
+    expect(Object.keys(result.usage.windows)).toEqual([key]);
+  });
+
+  it.each([
+    { balance: 62500, unlimited: false, expected: '62,500' },
+    { balance: '62500.00', unlimited: false, expected: '62,500' },
+    { balance: 12.3456, unlimited: false, expected: '12.3' },
+    { balance: '12.3456', unlimited: false, expected: '12.3' },
+    { balance: 38538.5254395, unlimited: false, expected: '38,538.5' },
     { balance: 0, unlimited: false, expected: '0' },
     { balance: null, unlimited: true, expected: 'Unlimited' },
     { balance: 62500, unlimited: true, expected: 'Unlimited' },
@@ -130,5 +170,150 @@ describe('Codex quota windows', () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('Session expired \u2014 please re-authenticate with OpenAI');
+  });
+
+  it('gives up on a usage request OpenAI never answers', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => realTimeout(5));
+    vi.stubGlobal('fetch', vi.fn((_url, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(init.signal.reason));
+    })));
+
+    try {
+      const result = await fetchQuota();
+
+      expect(timeout).toHaveBeenCalledWith(15_000);
+      expect(result.ok).toBe(false);
+      expect(result.configured).toBe(true);
+      expect(result.error).toBe('Request timed out');
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it('reports a 401 whose body never arrives as a timeout, not an expired session', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => realTimeout(5));
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => stalledBody(401, init.signal)));
+
+    try {
+      const result = await fetchQuota();
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe('Request timed out');
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+});
+
+describe('Codex usage through the Codex CLI sign-in', () => {
+  const REFUSED = { error: { type: 'rejected_by_access_enforcement', code: 'no_matching_rule' } };
+  const CLI_USAGE = { email: 'cli@example.com', rate_limit: { primary_window: { used_percent: 42, limit_window_seconds: 18000 } } };
+  const tokenWithEmail = (email) => `h.${Buffer.from(JSON.stringify({ 'https://api.openai.com/profile': { email } })).toString('base64url')}.s`;
+
+  const signInCli = () => fs.writeFileSync(
+    path.join(codexHome, 'auth.json'),
+    JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'cli-token', refresh_token: 'cli-refresh', account_id: 'acct_cli' } }),
+  );
+
+  // The usage endpoint refuses OpenCode's token and accepts the CLI's.
+  const stubUsageEndpoint = (cliStatus = 200) => {
+    const calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      calls.push({ url, headers: init.headers });
+      if (init.headers.Authorization !== 'Bearer cli-token') return Response.json(REFUSED, { status: 401 });
+      return Response.json(cliStatus === 200 ? CLI_USAGE : { error: { type: 'invalid_jwt' } }, { status: cliStatus });
+    }));
+    return calls;
+  };
+
+  it('reads the numbers with the CLI sign-in and names its account', async () => {
+    signInCli();
+    const calls = stubUsageEndpoint();
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows['5h'].usedPercent).toBe(42);
+    expect(result.accountLabel).toBe('cli@example.com');
+    expect(calls).toHaveLength(2);
+    expect(calls[1].url).toBe('https://chatgpt.com/backend-api/wham/usage');
+    expect(calls[1].headers['ChatGPT-Account-Id']).toBe('acct_cli');
+  });
+
+  it('names the account from the CLI token when the answer carries no email', async () => {
+    fs.writeFileSync(path.join(codexHome, 'auth.json'), JSON.stringify({ tokens: { access_token: tokenWithEmail('cli@example.com') } }));
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => init.headers.Authorization === 'Bearer test-token'
+      ? Response.json(REFUSED, { status: 401 })
+      : Response.json({ rate_limit: CLI_USAGE.rate_limit })));
+
+    expect((await fetchQuota()).accountLabel).toBe('cli@example.com');
+  });
+
+  it('keeps the usage-page message when the CLI request fails', async () => {
+    signInCli();
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      if (init.headers.Authorization === 'Bearer test-token') return Response.json(REFUSED, { status: 401 });
+      throw new Error('fetch failed');
+    }));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('OpenAI shows usage for Sign in with ChatGPT only at chatgpt.com/settings/usage. The legacy Codex sign-ins show it here.');
+  });
+
+  it.each([
+    ['before headers', (signal) => untilDeadline(signal)],
+    ['after headers', (signal) => Promise.resolve(stalledBody(200, signal))],
+  ])('reports a CLI request that stalls %s as a timeout', async (_when, stall) => {
+    signInCli();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => realTimeout(5));
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => init.headers.Authorization === 'Bearer test-token'
+      ? Response.json(REFUSED, { status: 401 })
+      : stall(init.signal)));
+
+    try {
+      const result = await fetchQuota();
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe('Request timed out');
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it('keeps the usage-page message without a CLI sign-in', async () => {
+    const calls = stubUsageEndpoint();
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('OpenAI shows usage for Sign in with ChatGPT only at chatgpt.com/settings/usage. The legacy Codex sign-ins show it here.');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('keeps the usage-page message when the endpoint refuses the CLI token too', async () => {
+    signInCli();
+    stubUsageEndpoint(401);
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('OpenAI shows usage for Sign in with ChatGPT only at chatgpt.com/settings/usage. The legacy Codex sign-ins show it here.');
+  });
+
+  it('never consults the CLI for a legacy sign-in', async () => {
+    signInCli();
+    const calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      calls.push(init.headers.Authorization);
+      return Response.json({ rate_limit: { primary_window: { used_percent: 7, limit_window_seconds: 18000 } } });
+    }));
+
+    const result = await fetchQuota();
+
+    expect(result.usage.windows['5h'].usedPercent).toBe(7);
+    expect(result.accountLabel).toBeUndefined();
+    expect(calls).toEqual(['Bearer test-token']);
   });
 });

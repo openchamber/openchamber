@@ -23,7 +23,9 @@ view, In work, Drafts, Folders with worktrees) describes how they are laid out.
   (`finishWorktreeWork`: sessions done, the work left, and with `archive` the
   worktree archived with its sessions) or a space work (`finishSpaceWork`:
   sessions done, the work left and the space stopped unless an agent still
-  works in it; the space stays).
+  works in it; the space stays). Bulk Mark done from the sidebar's bulk bar
+  (`markSessionsDone`) marks the selected sessions, then runs that same Done
+  on each work it finished whole (`selectFinishedWorks`, `finishBulkDoneWork`).
 - `useWorktreeWork.ts`, `useSessionDraftRow.ts`: what a worktree's or a
   space's work row and a draft's row know and do (the label, selection, open,
   Done, Archive, rename; open and discard), shared by the desktop's rows and
@@ -37,6 +39,18 @@ view, In work, Drafts, Folders with worktrees) describes how they are laid out.
 
 Invariants:
 
+- Draft restoration cites every attachment in its text because sending includes
+  only cited files. Server attachments can arrive later; they apply only while
+  that same draft is still open, and a failed download leaves other files usable.
+- A session or worktree keeps a folder membership only for display under that
+  folder's own project. Adding a nested directory as a project leaves old stored
+  membership intact without displaying the work under its former project.
+- Bulk Done captures works before writes can remove them from In work. A runtime
+  change, including switching away and back, stops queued writes and suppresses
+  results for the new runtime; a failed session never blocks unrelated successes.
+- Done leaves a work before optional worktree archival, because archival cannot
+  remove the checkout still on screen. Busy or unreadable activity keeps the
+  worktree after its sessions leave In work.
 - Display lineage belongs to `lib/sessionWorkLineage.ts`. Archive, delete and
   restore follow OpenCode's `parentID` plus linked reviews. Forks and promoted
   `/btw` conversations remain independent; move also carries the rendered tree.

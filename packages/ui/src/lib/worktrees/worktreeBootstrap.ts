@@ -9,9 +9,6 @@ type WorktreeBootstrapState = GitWorktreeBootstrapStatus;
 type WorktreeBootstrapFailureHandler = (status: GitWorktreeBootstrapStatus) => void;
 type WorktreeBootstrapReadyHandler = (status: GitWorktreeBootstrapStatus) => void;
 
-// Only the checkout has a deadline, the same one the server's OpenCode gate
-// applies. Setup commands in a large repository can run far longer, and the
-// server reports when they end, fail or die with it.
 const CHECKOUT_TIMEOUT_MS = 5 * 60 * 1000;
 const POLL_INTERVAL_MS = 250;
 
@@ -28,8 +25,6 @@ const watchers = new Map<string, { cancelled: boolean; lifecycleVersion: number 
 const getKey = (directory: string): string => normalizePath(directory);
 const getWaiterKey = (key: string, target: WorktreeBootstrapTarget): string => `${key}\n${target}`;
 
-// UI surfaces subscribe to know when a directory enters or leaves bootstrap,
-// so a half-created worktree's transient files are never shown as changes.
 const bootstrapListeners = new Set<() => void>();
 
 const notifyBootstrapListeners = (): void => {
@@ -176,6 +171,8 @@ const bootstrapFailureDescription = (status: GitWorktreeBootstrapStatus): string
       return t('worktree.bootstrap.toast.invalidConfiguration');
     case 'CHECKOUT_TOO_LARGE':
       return t('worktree.bootstrap.toast.repositoryTooManyFiles');
+    case 'BRANCH_NAME_CONFLICT':
+      return t('worktree.bootstrap.toast.branchNameConflict');
     case 'CANCELLED':
       return t('worktree.bootstrap.toast.cancelled');
     case 'TIMEOUT':

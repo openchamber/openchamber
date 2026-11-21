@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { dict as enDict } from './messages/en';
+import { getCustomizableShortcutActions } from '@/lib/shortcuts';
 import { dict as esDict } from './messages/es';
 import { dict as deDict } from './messages/de';
 import { dict as frDict } from './messages/fr';
@@ -53,6 +54,19 @@ describe('i18n dictionaries', () => {
       expect(dictionary['quota.value.creditsUsed']).toContain('{credits}');
       if (locale !== 'en') {
         expect(dictionary['quota.value.creditsUsed']).not.toBe(enDict['quota.value.creditsUsed']);
+      }
+    }
+  });
+
+  test('monthly spending labels and the unknown amount are translated in every locale', () => {
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      expect(dictionary['quota.window.monthlyTotal']).toBeTruthy();
+      expect(dictionary['quota.window.monthlyByok']).toContain('BYOK');
+      expect(dictionary['quota.value.unknown']).toBeTruthy();
+      if (locale !== 'en') {
+        expect(dictionary['quota.window.monthlyTotal']).not.toBe(enDict['quota.window.monthlyTotal']);
+        expect(dictionary['quota.window.monthlyByok']).not.toBe(enDict['quota.window.monthlyByok']);
+        expect(dictionary['quota.value.unknown']).not.toBe(enDict['quota.value.unknown']);
       }
     }
   });
@@ -122,6 +136,13 @@ describe('i18n dictionaries', () => {
       }
     }
   });
+  test('every customizable shortcut has an English label', () => {
+    const missing = getCustomizableShortcutActions()
+      .map((action) => action.settingsLabelKey)
+      .filter((key) => !(key in enDict));
+    expect(missing).toEqual([]);
+  });
+
   test('all locales stay in key parity with english', () => {
     const englishKeys = Object.keys(enDict).sort();
 

@@ -183,3 +183,44 @@ test('Authorize survives needs_auth while browser sign-in is pending and reconne
     connect.mockRestore();
   }
 });
+
+test('a sign-in started on needs_auth survives the server reconnecting as pending', async () => {
+  await renderConnectedServer(true);
+  const needsAuth = { gmail: { name: 'gmail', status: { status: 'needs_auth' as const, error: 'Authorization required' } } };
+  await act(async () => { useMcpStore.setState({ getStatusForDirectory: () => needsAuth }); });
+  const time = { created: 1, expires: 2 };
+  let finishStart!: (result: Awaited<ReturnType<typeof sdk.integration.oauth.connect>>) => void;
+  const startResult = new Promise<Awaited<ReturnType<typeof sdk.integration.oauth.connect>>>((resolve) => {
+    finishStart = resolve;
+  });
+  const connect = spyOn(sdk.integration.oauth, 'connect').mockImplementation(() => startResult);
+  const status = spyOn(sdk.integration.oauth, 'status').mockImplementation(async () => ({
+    location: { directory: '/test' },
+    data: { status: 'pending', time },
+  }));
+  const cancel = spyOn(sdk.integration.oauth, 'cancel').mockImplementation(async () => {});
+  try {
+    const start = [...document.body.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Sign in' && button.closest('.space-y-3'),
+    );
+    if (!start) throw new Error('sign-in button missing');
+    await act(async () => { start.click(); });
+    // Starting from another machine writes the redirect, and OpenCode reconnects the server.
+    const pending = { gmail: { name: 'gmail', status: { status: 'pending' as const } } };
+    await act(async () => { useMcpStore.setState({ getStatusForDirectory: () => pending }); });
+    await act(async () => {
+      finishStart({
+        location: { directory: '/test' },
+        data: { attemptID: 'remote-attempt', mode: 'auto', url: '', instructions: 'Finish signing in', time },
+      });
+    });
+    expect(cancel.mock.calls).toHaveLength(0);
+    expect(document.body.textContent).toContain('Waiting for authorization');
+  } finally {
+    await act(async () => root?.unmount());
+    root = null;
+    cancel.mockRestore();
+    status.mockRestore();
+    connect.mockRestore();
+  }
+});

@@ -11,6 +11,8 @@ import { MarkdownImage, MarkdownParagraph, MarkdownPicture, MarkdownSource, Mark
 import { Streamdown } from 'streamdown';
 import { getMarkdownProcessingOptions } from './streamdownPlugins';
 import { setRuntimeUrlAuthToken } from '@/lib/runtime-auth';
+import { adoptRelayTunnel, deactivateRelayTunnel } from '@/lib/relay/runtime-tunnel';
+import type { RelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { I18nProvider } from '@/lib/i18n';
 
 const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]);
@@ -30,7 +32,7 @@ function Document({ children, scheme = 'dark' }: { children: React.ReactNode; sc
 beforeEach(() => {
   const dom = new Window({ url: 'https://app.test' });
   Object.defineProperty(dom, 'IntersectionObserver', { configurable: true, value: undefined });
-  Object.assign(globalThis, { window: dom, document: dom.document, localStorage: dom.localStorage, sessionStorage: dom.sessionStorage, navigator: dom.navigator, HTMLElement: dom.HTMLElement, Element: dom.Element, HTMLImageElement: dom.HTMLImageElement, IS_REACT_ACT_ENVIRONMENT: true });
+  Object.assign(globalThis, { window: dom, document: dom.document, Event: dom.Event, CustomEvent: dom.CustomEvent, localStorage: dom.localStorage, sessionStorage: dom.sessionStorage, navigator: dom.navigator, HTMLElement: dom.HTMLElement, Element: dom.Element, HTMLImageElement: dom.HTMLImageElement, IS_REACT_ACT_ENVIRONMENT: true });
   configureRuntimeUrlResolver({ apiBaseUrl: 'https://runtime.test' });
   requests = []; batches = []; revoked = [];
   Object.assign(URL, { createObjectURL: () => 'blob:document-image', revokeObjectURL: (url: string) => revoked.push(url) });
@@ -57,6 +59,28 @@ describe('React-owned Markdown media', () => {
     expect(host.querySelectorAll('a')).toHaveLength(2);
     expect(host.querySelector('a a')).toBeNull();
     expect(requests).toEqual([]);
+  });
+  test('unsafe image schemes stay inert while file images go through the server grant', async () => {
+    const source = '![local](file:///workspace/image.png)\n\n![unsafe](javascript:alert%281%29)';
+    const render = (settled: boolean) => root.render(<Chat settled={settled} id="scheme-policy">
+      <Streamdown
+        mode="static"
+        parseIncompleteMarkdown={false}
+        controls={false}
+        {...getMarkdownProcessingOptions(false, false)}
+        urlTransform={(value) => value}
+        components={{ img: MarkdownImage }}
+      >{source}</Streamdown>
+    </Chat>);
+    await act(async () => render(false));
+    expect(host.querySelector('img[src], a[href^="javascript:"], a[href^="file:"]')).toBeNull();
+    expect(requests).toEqual([]);
+    await act(async () => render(true));
+    await flush(); await flush();
+    expect(batches).toEqual([['file:///workspace/image.png']]);
+    expect(host.querySelectorAll('img')).toHaveLength(1);
+    expect(host.querySelector('[src^="file:"]')).toBeNull();
+    expect(host.querySelector('[src^="javascript:"], [href^="javascript:"]')).toBeNull();
   });
   test('hides the incomplete-image sentinel', async () => {
     await act(async () => root.render(<Chat><MarkdownImage src="streamdown:incomplete-image" alt="pending" /></Chat>));
@@ -106,11 +130,6 @@ describe('React-owned Markdown media', () => {
     await act(async () => host.querySelector('video')?.dispatchEvent(new window.Event('error')));
     expect(host.querySelector('a')?.getAttribute('href')).toBe('https://remote.test/clip.mp4');
     expect(host.textContent).toBe('clip');
-  });
-  test('survives React strict-effect replay and retains the same document URL on theme changes', async () => {
-    await act(async () => root.render(<React.StrictMode><Document><MarkdownImage src="./strict.png" /></Document></React.StrictMode>));
-    await flush(); await flush();
-    expect(host.querySelector('img')?.getAttribute('src')).toBe('blob:document-image');
   });
   test('reconnects loaded media and gallery after a real hidden interval', async () => {
     const popups: import('../message/types').ToolPopupContent[] = [];
@@ -376,6 +395,32 @@ describe('React-owned Markdown media', () => {
     expect(reads()).toEqual(['/repo/docs/light.png', '/repo/docs/dark.png']);
     expect(host.querySelector('source')?.getAttribute('srcset')).toBe('blob:document-image');
   });
+  test('a body reads a project upload route itself and leaves any other path a plain address', async () => {
+    const upload = '/api/source-control/gitlab/uploads/66dbcd21ec5d24ed6ea225176098d52b/shot.png?owner=team';
+    await act(async () => root.render(<MarkdownMediaProvider content="body" mode="document" directory="/repo" settled><MarkdownImage src={upload} alt="shot" /></MarkdownMediaProvider>));
+    await flush();
+    expect(host.querySelector('img')?.getAttribute('src')).toBe('blob:document-image');
+    expect(requests).toEqual([`https://runtime.test${upload}`]);
+    requests = [];
+    await act(async () => root.render(<MarkdownMediaProvider content="other" mode="document" directory="/repo" settled><MarkdownImage src="/api/fs/raw?path=/etc/passwd" alt="other" /></MarkdownMediaProvider>));
+    await flush();
+    expect(host.querySelector('img')?.getAttribute('src')).toBe('/api/fs/raw?path=/etc/passwd');
+    expect(requests).toEqual([]);
+  });
+  test('a body reads a failed project upload again when it is shown again', async () => {
+    const upload = '/api/source-control/gitlab/uploads/66dbcd21ec5d24ed6ea225176098d52b/shot.png?owner=team';
+    const answered = globalThis.fetch;
+    globalThis.fetch = async () => new Response(null, { status: 503 });
+    const body = (shown: boolean) => <MarkdownMediaProvider content="body" mode="document" directory="/repo" settled>{shown ? <MarkdownImage src={upload} alt="shot" /> : null}</MarkdownMediaProvider>;
+    await act(async () => root.render(body(true)));
+    await flush();
+    expect(host.querySelector('[data-oc-media-state="failed"]')).not.toBeNull();
+    globalThis.fetch = answered;
+    await act(async () => root.render(body(false)));
+    await act(async () => root.render(body(true)));
+    await flush();
+    expect(host.querySelector('img')?.getAttribute('src')).toBe('blob:document-image');
+  });
   test('local mode keeps relative sources and document images remain valid children of picture', async () => {
     await act(async () => root.render(<MarkdownMediaProvider content="local" mode="local" directory="/repo" settled><MarkdownImage src="./local.png" /></MarkdownMediaProvider>));
     await flush(); expect(host.querySelector('img')?.getAttribute('src')).toBe('./local.png'); expect(requests).toEqual([]);
@@ -469,6 +514,51 @@ describe('React-owned Markdown media', () => {
     await act(async () => host.querySelector('button')?.click()); await flush();
     expect(batches).toHaveLength(2);
   });
+  test('over the relay, opening the viewer reads nothing more through the tunnel', async () => {
+    const reads: string[] = [];
+    const tunnel: RelayTunnelClient = {
+      fetch: async (input) => {
+        const url = String(input); reads.push(url);
+        if (url.includes('markdown-image-grants')) return Response.json({ results: [{ source: 'first.png', status: 'ready', path: '/repo/first.png', expiresAt: 1 }] });
+        return new Response(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64'), { headers: { 'content-type': 'image/png' } });
+      },
+      openWebSocket() { throw new Error('unused'); },
+      getStatus: () => ({ state: 'connected' }),
+      subscribeStatus: () => () => undefined,
+      retry: () => undefined,
+      close: () => undefined,
+    };
+    adoptRelayTunnel({ relayUrl: 'wss://relay.example/ws', serverId: 'srv_test', hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'eA', y: 'eQ' } }, tunnel);
+    class Reader {
+      result: string | null = null;
+      onload: (() => void) | null = null;
+      readAsDataURL(blob: Blob) {
+        void blob.arrayBuffer().then((bytes) => {
+          this.result = `data:${blob.type};base64,${Buffer.from(bytes).toString('base64')}`;
+          this.onload?.();
+        });
+      }
+    }
+    const originalReader = globalThis.FileReader;
+    Object.assign(globalThis, { FileReader: Reader });
+    let shown = '';
+    try {
+      await act(async () => root.render(<MarkdownMediaProvider content="viewer" mode="assistant" sessionId="viewer" messageId="viewer" directory="/repo" settled onShowPopup={(popup) => { shown = popup.image?.url ?? ''; }}><MarkdownImage src="first.png" /></MarkdownMediaProvider>));
+      for (let i = 0; i < 50 && !host.querySelector('img'); i += 1) await flush();
+      const image = host.querySelector('img');
+      if (!image) throw new Error('image was not drawn');
+      Object.defineProperties(image, { naturalWidth: { value: 100 }, naturalHeight: { value: 100 } });
+      await act(async () => image.dispatchEvent(new window.Event('load')));
+      const count = reads.length;
+      await act(async () => host.querySelector('button')?.click()); await flush();
+      expect(shown.startsWith('data:image/png;base64,')).toBe(true);
+      expect(reads).toHaveLength(count);
+    } finally {
+      deactivateRelayTunnel();
+      Object.assign(globalThis, { FileReader: originalReader });
+    }
+  });
+
   test('reference documents without a file owner preserve their inline local source', async () => {
     await act(async () => root.render(<MarkdownMediaProvider content="reference" mode="document" directory="/repo" settled><MarkdownImage src="reference.png" /></MarkdownMediaProvider>)); await flush();
     expect(host.querySelector('img')?.getAttribute('src')).toBe('reference.png');

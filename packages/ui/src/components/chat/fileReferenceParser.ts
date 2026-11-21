@@ -109,9 +109,6 @@ export const parseFileReference = (value: string): ParsedFileReference | null =>
         return null;
     }
 
-    // Range form: `path:start-end`. Tried before the colon form so a suffix
-    // like `:10-20` is consumed as a range rather than truncated to a line
-    // number. Range and col (`:line:col`) are mutually exclusive.
     const rangeMatch = withoutSemicolonSuffix.match(/^(.*?):(\d+)-(\d+)$/);
     if (rangeMatch) {
         const path = stripTrailingReference(rangeMatch[1] ?? '');
@@ -164,15 +161,4 @@ export const parseFileReference = (value: string): ParsedFileReference | null =>
     return { path: pathOnly };
 };
 
-// Matches `path[:line[:col]]` or `path:start-end` inside shell/grep-style
-// output. Requires a file extension (1-8 alphanumerics) so plain words don't
-// qualify; the path itself must contain at least one extension-bearing
-// segment. The line suffix is either `:N`, `:N:M`, or `:N-M` (range); col and
-// range are mutually exclusive.
-//
-// Known limitation: backslash-separated Windows paths (e.g.
-// `C:\Users\test\file.ts:12`) are not matched because the path character class
-// does not include `\`. Compiler output inside fenced code blocks predominantly
-// uses forward slashes, so this is a niche gap. The inline-code pipeline is not
-// affected — it reads full text content rather than matching with a regex.
 export const BLOCK_PATH_TOKEN_RE = /(?:[A-Za-z]:[\\/])?[\w.\-/@+]*[\w\-/@+]\.[A-Za-z0-9]{1,8}(?::\d+(?:-\d+)?(?::\d+)?)?/g;

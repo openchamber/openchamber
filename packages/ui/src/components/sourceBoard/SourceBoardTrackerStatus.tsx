@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { StatePill } from '@/components/references/ReferencePreview';
 import { toast } from '@/components/ui';
 import {
@@ -16,14 +17,12 @@ import { useI18n } from '@/lib/i18n';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
 import { trackerStateCategoryRank, trackerStateGlyph } from '@/lib/trackers/stateLook';
 
-// The workflow's own order: triage, backlog, to do, in progress, done, canceled; then position and name.
 const compareStates = (left: TrackerWorkflowState, right: TrackerWorkflowState): number => (
     trackerStateCategoryRank(left.category) - trackerStateCategoryRank(right.category)
     || left.position - right.position
     || left.name.localeCompare(right.name)
 );
 
-/** The workflow states of an item's container, read once per container while the preview shows. */
 function useContainerStates(provider: string, containerId: string | null, enabled: boolean): TrackerWorkflowState[] {
     const { trackers } = useRuntimeAPIs();
     const [loaded, setLoaded] = React.useState<{ key: string; states: TrackerWorkflowState[] } | null>(null);
@@ -41,12 +40,6 @@ function useContainerStates(provider: string, containerId: string | null, enable
     return loaded && loaded.key === key ? loaded.states : [];
 }
 
-/**
- * A tracker item's state pill that moves the item to another state of its
- * container, where the tracker can change states (`stateUpdate`). Until the
- * states arrive, or where they cannot change, it stays a plain pill. The list
- * reads again afterwards, so the row shows the change.
- */
 export const SourceBoardTrackerStatus: React.FC<{ item: TrackerItemSummary; onChanged: () => void }> = ({ item, onChanged }) => {
     const { t } = useI18n();
     const { trackers } = useRuntimeAPIs();
@@ -82,21 +75,23 @@ export const SourceBoardTrackerStatus: React.FC<{ item: TrackerItemSummary; onCh
 
     return (
         <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-                <button
-                    type="button"
-                    disabled={updating}
-                    aria-label={t('sourceBoard.tracker.statusAria', { status: label })}
-                    className="shrink-0 rounded-full outline-none transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-                >
-                    <StatePill
-                        icon={look.icon}
-                        color={look.color}
-                        label={label}
-                        trailing={<Icon name={updating ? 'loader-4' : 'arrow-down-s'} className={updating ? 'size-3.5 animate-spin' : 'size-3.5 opacity-70'} />}
-                    />
-                </button>
-            </DropdownMenuTrigger>
+            <ButtonTooltip label={t('contextTooltips.tracker.changeStatus')} side="bottom" className="shrink-0">
+                <DropdownMenuTrigger asChild>
+                    <button
+                        type="button"
+                        disabled={updating}
+                        aria-label={t('sourceBoard.tracker.statusAria', { status: label })}
+                        className="shrink-0 rounded-full outline-none transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                    >
+                        <StatePill
+                            icon={look.icon}
+                            color={look.color}
+                            label={label}
+                            trailing={<Icon name={updating ? 'loader-4' : 'arrow-down-s'} className={updating ? 'size-3.5 animate-spin' : 'size-3.5 opacity-70'} />}
+                        />
+                    </button>
+                </DropdownMenuTrigger>
+            </ButtonTooltip>
             <DropdownMenuContent align="start" className="w-56">
                 <DropdownMenuRadioGroup value={currentId} onValueChange={(value) => void update(String(value))}>
                     {states.map((state) => {

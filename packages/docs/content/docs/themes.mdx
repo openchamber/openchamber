@@ -26,10 +26,10 @@ mkdir -p ~/.config/openchamber/themes
 ```
 
 2. Copy a [built-in theme JSON](https://github.com/openchamber/openchamber/tree/main/packages/ui/src/lib/theme/themes) or the [starter example](https://github.com/openchamber/openchamber/blob/main/docs/CUSTOM_THEMES.md#create-your-own-theme) into that directory as `my-theme.json`. Give it a unique `metadata.id` and your own `metadata.name`, then edit the colors.
-3. Open OpenChamber, then go to **Settings → Appearance → Reload themes**.
+3. Open **Settings → Appearance**. OpenChamber picks up the new file within a couple of seconds.
 4. Pick your theme from the dropdown. It applies right away.
 
-Use **Reload themes** after saving further edits. For a light/dark pair, create two files with different IDs and set `metadata.variant` to `light` or `dark`. Select each in its matching dropdown.
+Saved edits show up the same way, in every open window. **Reload themes** reads the folder at once. For a light/dark pair, create two files with different IDs and set `metadata.variant` to `light` or `dark`. Select each in its matching dropdown.
 
 Start with the backgrounds, body text and accent. Keep borders and selected rows subtle, and give inline code a readable color of its own. Check your palette in chat, settings and diffs. Custom JSON keeps your explicit colors; the automatic adjustments used for VS Code imports do not run on these files.
 

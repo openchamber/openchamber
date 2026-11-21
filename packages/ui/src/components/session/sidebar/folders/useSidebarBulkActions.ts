@@ -1,24 +1,25 @@
 import React from 'react';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
+import { useKeybinds } from '@/hooks/useKeybind';
+import type { Session } from '@/lib/opencode/model';
+import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { takeSessionActionFailure } from '@/sync/session-action-failures';
 import { describeSessionActionError } from '../sessions/sessionActionError';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
-import { deriveSessionRowBulkSelectAll, deriveSessionRowSelectionArchived, useSessionRowOrderRegistry } from '../sessions/sessionRowOrder';
+import { deriveSessionRowBulkSelectAll, deriveSessionRowSelectionArchived, useSessionRowOrderRegistry, type SessionRowLifecycle, type SessionRowOrderWork } from '../sessions/sessionRowOrder';
+import { bulkDoneWorkLabel, selectFinishedWorks, type FinishWorktreeWorkOutcome } from '../works/workActions';
+import { toastFinishWorkOutcome } from '../works/useWorktreeWork';
 import type { BulkDeleteSessionsConfirmState } from '../shell/ConfirmDialogs';
 
-const EMPTY_SESSIONS_BY_ID = new Map<string, { time?: { archived?: number | null } }>();
+const EMPTY_SESSIONS_BY_ID: ReadonlyMap<string, Session> = new Map();
+const EMPTY_LIFECYCLE_BY_ID: ReadonlyMap<string, SessionRowLifecycle> = new Map();
 
 type Args = {
   isInlineEditing: boolean;
   showDeletionDialog: boolean;
   foldersMap: Record<string, SessionFolder[]>;
-  /**
-   * Selection scope is the project id (flat per-project session list); this
-   * map resolves it to the project's folder scopes (root + worktrees). When
-   * the scope is missing here it is treated as a plain directory scope.
-   */
   getFolderScopesForProject: (projectId: string) => readonly { scopeKey: string; directory: string | null }[];
   folderOwnerKeyBySessionId: ReadonlyMap<string, string>;
   addSessionsToFolder: (scopeKey: string, folderId: string, sessionIds: string[]) => void;
@@ -27,6 +28,9 @@ type Args = {
   archiveSessions: (ids: string[]) => Promise<{ archivedIds: string[]; failedIds: string[] }>;
   unarchiveSessions: (ids: string[]) => Promise<{ restoredIds: string[]; failedIds: string[] }>;
   deleteSessions: (ids: string[]) => Promise<{ deletedIds: string[]; failedIds: string[] }>;
+  markSessionsDone: (sessions: Session[]) => Promise<{ doneIds: string[]; failedIds: string[] } | null>;
+  finishWork: (work: SessionRowOrderWork, doneIds: ReadonlySet<string>) => Promise<FinishWorktreeWorkOutcome> | null;
+  sessionWorkEnabled: boolean;
   bulkDeleteConfirm: BulkDeleteSessionsConfirmState;
   setBulkDeleteConfirm: React.Dispatch<React.SetStateAction<BulkDeleteSessionsConfirmState>>;
 };
@@ -52,22 +56,30 @@ export const resolveSelectionFolderIds = (
   for (const sessionId of sessionIds) {
     const owner = folderOwnerKeyBySessionId.get(sessionId);
     if (!owner) return [];
-    // Subtree selection also includes descendants displayed under another owner.
     if (owner === ownerKey) ids.push(sessionId);
   }
   return ids;
 };
 
+export const selectSessionsToMarkDone = (
+  selectedIds: Iterable<string>,
+  sessionsById: ReadonlyMap<string, Session>,
+): Session[] => {
+  const sessions: Session[] = [];
+  for (const id of selectedIds) {
+    const session = sessionsById.get(id);
+    if (session && !session.parentID && !session.time?.archived && isSessionInWork(session)) sessions.push(session);
+  }
+  return sessions;
+};
+
 export const resolveBulkDeleteConfirmation = (
   value: NonNullable<BulkDeleteSessionsConfirmState>,
-  sessionsById: ReadonlyMap<string, { time?: { archived?: number | null } }>,
+  sessionsById: ReadonlyMap<string, SessionRowLifecycle>,
 ): { ready: true; value: NonNullable<BulkDeleteSessionsConfirmState> }
   | { ready: false; value: NonNullable<BulkDeleteSessionsConfirmState> | null } => {
   const sessionIds = value.sessionIds.filter((id) => sessionsById.has(id));
   if (sessionIds.length === 0) return { ready: false, value: null };
-  // `archivedBucket` names the action (true = permanent delete). A requested
-  // delete stays a delete; a requested archive turns into a delete only when
-  // every remaining session is already archived and cannot be archived again.
   const archivedBucket = value.archivedBucket
     || deriveSessionRowSelectionArchived(new Set(sessionIds), sessionsById);
   const next = { sessionIds, sessionCount: sessionIds.length, archivedBucket };
@@ -77,20 +89,6 @@ export const resolveBulkDeleteConfirmation = (
   };
 };
 
-/**
- * Bulk-action logic for the sidebar. The hot-path concern is that this
- * hook subscribes to `useSessionMultiSelectStore` — which can fire on
- * every selection toggle and on every setRange/toggleSelected call —
- * but the rest of the Sidebar tree only needs the boolean
- * `selectionModeEnabled` flag to decide whether to render the
- * selection chrome.
- *
- * To keep that subscription narrow, the heavy work (folders lookup,
- * DOM-attribute scanning for the active/archived scope, etc.) is
- * deferred behind a `selectedIds.size > 0` check inside the hook itself.
- * Scope and archive state come from the selection store rather than mounted
- * row DOM, so virtual eviction cannot change the available actions.
- */
 export const useSidebarBulkActions = (args: Args) => {
   const { t } = useI18n();
   const failureDescription = React.useCallback((ids: readonly string[]): { description: string } | undefined => {
@@ -109,6 +107,9 @@ export const useSidebarBulkActions = (args: Args) => {
     archiveSessions,
     unarchiveSessions,
     deleteSessions,
+    markSessionsDone,
+    finishWork,
+    sessionWorkEnabled,
     bulkDeleteConfirm,
     setBulkDeleteConfirm,
   } = args;
@@ -129,8 +130,12 @@ export const useSidebarBulkActions = (args: Args) => {
 
   const bulkScopeIsArchived = hasSelection && deriveSessionRowSelectionArchived(
     selectedIds,
-    rowOrderRegistry?.getSessionsById() ?? EMPTY_SESSIONS_BY_ID,
+    rowOrderRegistry?.getLifecycleById() ?? EMPTY_LIFECYCLE_BY_ID,
   );
+
+  const bulkShowsMarkDone = sessionWorkEnabled && !bulkScopeIsArchived;
+  const bulkCanMarkDone = bulkShowsMarkDone && hasSelection
+    && selectSessionsToMarkDone(selectedIds, rowOrderRegistry?.getSessionsById() ?? EMPTY_SESSIONS_BY_ID).length > 0;
 
   const derivedSelectionScope = React.useMemo(() => {
     if (selectionScopeKey) return selectionScopeKey;
@@ -141,14 +146,13 @@ export const useSidebarBulkActions = (args: Args) => {
     Array.from(selectedIds), derivedSelectionScope, folderOwnerKeyBySessionId,
   ), [selectedIds, derivedSelectionScope, folderOwnerKeyBySessionId]);
 
-  // The selection scope is a project id; folders live per directory scope
-  // (project root + each worktree). Resolve all of them, in project order.
   const selectionFolderScopes = React.useMemo<string[]>(() => {
     return resolveSelectionFolderScopes(derivedSelectionScope, getFolderScopesForProject);
   }, [derivedSelectionScope, getFolderScopesForProject]);
 
   const bulkScopeFolders = React.useMemo(() => {
-    return selectionFolderScopes.flatMap((scope) => foldersMap[scope] ?? []);
+    const rootScope = selectionFolderScopes[0];
+    return rootScope ? foldersMap[rootScope] ?? [] : [];
   }, [foldersMap, selectionFolderScopes]);
 
   const resolveFolderScope = React.useCallback((folderId: string): string | null => {
@@ -173,8 +177,6 @@ export const useSidebarBulkActions = (args: Args) => {
   const moveSelectionToFolder = React.useCallback((targetScope: string, folderId: string) => {
     const ids = folderSelectionIds;
     if (ids.length === 0) return;
-    // Clear memberships in every other scope first — the store only dedupes
-    // within one scope, and a session must live in a single folder.
     for (const scope of selectionFolderScopes) {
       if (scope === targetScope) continue;
       removeSessionsFromFolders(scope, ids);
@@ -247,7 +249,6 @@ export const useSidebarBulkActions = (args: Args) => {
     }
     setBulkDeleteConfirm({ sessionIds, sessionCount: sessionIds.length, archivedBucket: hardDelete });
   }, [executeBulkDelete, selectedIds, showDeletionDialog, setBulkDeleteConfirm, hasSelection]);
-  /** Archive active sessions; already-archived ones can only be deleted. */
   const handleBulkDelete = React.useCallback(() => requestBulkDestructive(bulkScopeIsArchived), [bulkScopeIsArchived, requestBulkDestructive]);
   const handleBulkArchive = React.useCallback(() => requestBulkDestructive(false), [requestBulkDestructive]);
   const handleBulkHardDelete = React.useCallback(() => requestBulkDestructive(true), [requestBulkDestructive]);
@@ -269,9 +270,43 @@ export const useSidebarBulkActions = (args: Args) => {
     useSessionMultiSelectStore.getState().removeMany(restoredIds);
   }, [bulkScopeIsArchived, failureDescription, hasSelection, selectedIds, t, unarchiveSessions]);
 
+  const markDoneRunningRef = React.useRef(false);
+  const handleBulkMarkDone = React.useCallback(async () => {
+    if (markDoneRunningRef.current) return;
+    const batchIds = Array.from(selectedIds);
+    const sessions = selectSessionsToMarkDone(batchIds, rowOrderRegistry?.getSessionsById() ?? EMPTY_SESSIONS_BY_ID);
+    if (sessions.length === 0) return;
+    const works = rowOrderRegistry?.getWorks() ?? [];
+    markDoneRunningRef.current = true;
+    try {
+      const result = await markSessionsDone(sessions);
+      if (!result) return;
+      const { doneIds, failedIds } = result;
+      if (doneIds.length > 0) {
+        toast.success(doneIds.length === 1
+          ? t('sessions.sidebar.bulkActions.markedDoneSingle', { count: doneIds.length })
+          : t('sessions.sidebar.bulkActions.markedDonePlural', { count: doneIds.length }));
+      }
+      if (failedIds.length > 0) {
+        toast.error(failedIds.length === 1
+          ? t('sessions.sidebar.bulkActions.failedMarkDoneSingle', { count: failedIds.length })
+          : t('sessions.sidebar.bulkActions.failedMarkDonePlural', { count: failedIds.length }), failureDescription(failedIds));
+      }
+      const failed = new Set(failedIds);
+      useSessionMultiSelectStore.getState().removeMany(batchIds.filter((id) => !failed.has(id)));
+      const done = new Set(doneIds);
+      await Promise.all(selectFinishedWorks(works, done).map(async (work) => {
+        const pending = finishWork(work, done);
+        if (pending) toastFinishWorkOutcome(await pending, bulkDoneWorkLabel(work.group), t);
+      }));
+    } finally {
+      markDoneRunningRef.current = false;
+    }
+  }, [failureDescription, finishWork, markSessionsDone, rowOrderRegistry, selectedIds, t]);
+
   const confirmBulkDelete = React.useCallback(async () => {
     if (!bulkDeleteConfirm) return;
-    const sessionsById = rowOrderRegistry?.getSessionsById() ?? EMPTY_SESSIONS_BY_ID;
+    const sessionsById = rowOrderRegistry?.getLifecycleById() ?? EMPTY_LIFECYCLE_BY_ID;
     const resolution = resolveBulkDeleteConfirmation(bulkDeleteConfirm, sessionsById);
     if (!resolution.ready) {
       setBulkDeleteConfirm(resolution.value);
@@ -281,41 +316,39 @@ export const useSidebarBulkActions = (args: Args) => {
     await executeBulkDelete(resolution.value.sessionIds, resolution.value.archivedBucket);
   }, [bulkDeleteConfirm, executeBulkDelete, rowOrderRegistry, setBulkDeleteConfirm]);
 
+  const selectionKeysApply = React.useCallback((event: KeyboardEvent): boolean => {
+    if (bulkDeleteConfirm || isInlineEditing) return false;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    return !(target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable));
+  }, [bulkDeleteConfirm, isInlineEditing]);
+
   React.useEffect(() => {
     if (!selectionModeEnabled) return;
-    const isMac = /Macintosh|Mac OS X/.test(navigator.userAgent || '');
     const listener = (event: KeyboardEvent) => {
-      if (bulkDeleteConfirm) return;
-      if (isInlineEditing) return;
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-        return;
-      }
-      const modifier = isMac ? event.metaKey : event.ctrlKey;
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        useSessionMultiSelectStore.getState().disable();
-        return;
-      }
-      if (modifier && event.key === 'Backspace') {
-        event.preventDefault();
-        handleBulkDelete();
-        return;
-      }
-      if (modifier && (event.key === 'a' || event.key === 'A')) {
-        const selection = deriveSessionRowBulkSelectAll(
-          rowOrderRegistry?.getEntries() ?? [],
-          rowOrderRegistry?.getDescendantIds() ?? [],
-          useSessionMultiSelectStore.getState().scopeKey,
-        );
-        if (!selection) return;
-        event.preventDefault();
-        useSessionMultiSelectStore.getState().replaceAll(selection.ids, selection.scopeKey);
-      }
+      if (!selectionKeysApply(event) || event.key !== 'Escape') return;
+      event.preventDefault();
+      useSessionMultiSelectStore.getState().disable();
     };
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
-  }, [bulkDeleteConfirm, handleBulkDelete, isInlineEditing, rowOrderRegistry, selectionModeEnabled]);
+  }, [selectionKeysApply, selectionModeEnabled]);
+
+  useKeybinds(selectionModeEnabled ? {
+    sessions_bulk_delete: (event) => {
+      if (!selectionKeysApply(event)) return false;
+      handleBulkDelete();
+    },
+    sessions_select_all: (event) => {
+      if (!selectionKeysApply(event)) return false;
+      const selection = deriveSessionRowBulkSelectAll(
+        rowOrderRegistry?.getEntries() ?? [],
+        rowOrderRegistry?.getDescendantIds() ?? [],
+        useSessionMultiSelectStore.getState().scopeKey,
+      );
+      if (!selection) return false;
+      useSessionMultiSelectStore.getState().replaceAll(selection.ids, selection.scopeKey);
+    },
+  } : {});
 
   return {
     selectionModeEnabled,
@@ -324,7 +357,10 @@ export const useSidebarBulkActions = (args: Args) => {
     bulkScopeIsArchived,
     derivedSelectionScope,
     bulkScopeFolders,
+    bulkCanMoveToFolder: folderSelectionIds.length > 0,
     bulkCanRemoveFromFolder,
+    bulkShowsMarkDone,
+    bulkCanMarkDone,
     handleToggleSelectionMode,
     handleExitSelectionMode,
     handleBulkMoveToFolder,
@@ -334,6 +370,7 @@ export const useSidebarBulkActions = (args: Args) => {
     handleBulkArchive,
     handleBulkHardDelete,
     handleBulkRestore,
+    handleBulkMarkDone,
     confirmBulkDelete,
   };
 };

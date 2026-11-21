@@ -62,6 +62,12 @@ const form = (id: string, title = "Pick"): FormRequest => ({
   id, sessionID: "session", title, fields: [{ key: "answer", type: "boolean" }],
 })
 
+const sessionRecord = (id: string): Session => ({
+  id, projectID: "project-a", directory: "/repo", title: id,
+  time: { created: 1, updated: 1 }, cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+})
+
 describe("bootstrapDirectory", () => {
   test("finishes session loading while the config read is unresolved", async () => {
     const blocked = deferred<void>()
@@ -82,11 +88,7 @@ describe("bootstrapDirectory", () => {
   })
 
   test("keeps session-list failure separate from successful environment initialization", async () => {
-    const cached: Session[] = [{
-      id: "cached", projectID: "project-a", directory: "/repo", title: "Cached",
-      time: { created: 1, updated: 1 }, cost: 0,
-      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-    }]
+    const cached = [sessionRecord("cached")]
     const input = inputFor({ session: cached })
     const bootstrap = bootstrapDirectory({ ...input, loadSessions: async () => { throw new Error("unavailable") } })
     expect(await bootstrap.sessions).toBe("failed")
@@ -113,6 +115,31 @@ describe("bootstrapDirectory", () => {
     const bootstrap = bootstrapDirectory(input)
     expect(await bootstrap.sessions).toBe("complete")
     expect(await bootstrap.environment).toBe("failed")
+    expect(input.store.getState().session_status).toBe(previous)
+    expect(input.store.getState().sessionStatusReady).toBeUndefined()
+  })
+
+  test("keeps only the host's active sessions that this directory lists, however late the list lands", async () => {
+    const own = { ...sessionRecord("own"), directory: "/repo" }
+    const list = deferred<void>()
+    statuses.mockResolvedValue({ own: { type: "busy" }, foreign: { type: "busy" } })
+    const input = inputFor()
+    const bootstrap = bootstrapDirectory({ ...input, loadSessions: () => list.promise })
+    await Promise.resolve()
+    expect(statuses.mock.calls).toHaveLength(0)
+    input.store.setState({ session: [own] })
+    list.resolve()
+    expect(await bootstrap.environment).toBe("complete")
+    expect(input.store.getState().session_status).toEqual({ own: { type: "busy" } })
+  })
+
+  test("a failed session list leaves statuses unknown, since it cannot say which sessions are here", async () => {
+    const previous: State["session_status"] = { running: { type: "busy" } }
+    statuses.mockResolvedValue({ running: { type: "busy" } })
+    const input = inputFor({ session_status: previous })
+    const bootstrap = bootstrapDirectory({ ...input, loadSessions: async () => { throw new Error("unavailable") } })
+    expect(await bootstrap.environment).toBe("complete")
+    expect(statuses.mock.calls).toHaveLength(0)
     expect(input.store.getState().session_status).toBe(previous)
     expect(input.store.getState().sessionStatusReady).toBeUndefined()
   })

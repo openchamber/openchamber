@@ -2,10 +2,12 @@ import { describe, expect, test } from 'bun:test';
 
 import {
     restoreDeferredEnterModifiers,
+    shouldPreserveDeferredEnterShift,
     shouldSubmitEnter,
     type EnterKeyPolicyInput,
     type EnterModifierState,
 } from './keyboardPolicy';
+import { getOrderedListContinuationEdit } from './text';
 
 const policy = (overrides: Partial<EnterKeyPolicyInput>): EnterKeyPolicyInput => ({
     isMobile: false,
@@ -101,7 +103,7 @@ describe('deferred Enter modifiers', () => {
         for (const enterToSend of [false, true]) {
             for (const modifiers of deferredModifierCases.map(([, value]) => value)) {
                 const event = { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false };
-                // Configured mobile autocapitalization deliberately skips Shift restoration.
+                // A soft keyboard's Shift is not restored, because autocapitalization fakes it.
                 restoreDeferredEnterModifiers(event, modifiers, false);
                 expect(shouldSubmitEnter(policy({
                     isMobile: true,
@@ -174,5 +176,39 @@ describe('deferred Enter modifiers', () => {
         restoreDeferredEnterModifiers(event, { shiftKey: true, ctrlKey: true, metaKey: false }, false);
 
         expect(shouldSubmitEnter(policy({ isMobile: true, returnKeySends: true, ...event }))).toBe(true);
+    });
+
+    describe('Shift+Enter in a numbered list on mobile', () => {
+        const deferredShiftEnter = (hasHardwareKeyboard: boolean) => {
+            const event = { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false };
+            restoreDeferredEnterModifiers(
+                event,
+                { shiftKey: true, ctrlKey: false, metaKey: false },
+                shouldPreserveDeferredEnterShift({ isMobile: true, hasHardwareKeyboard }),
+            );
+            return event;
+        };
+
+        for (const returnKeySends of [false, true]) {
+            test(`a hardware keyboard continues the list without sending, returnKeySends=${returnKeySends}`, () => {
+                const event = deferredShiftEnter(true);
+
+                expect(event.shiftKey).toBe(true);
+                expect(shouldSubmitEnter(policy({ isMobile: true, enterToSendConfigured: true, returnKeySends, ...event }))).toBe(false);
+                expect(getOrderedListContinuationEdit('1. item', 7, 7)?.insert).toBe('\n2. ');
+            });
+        }
+
+        test('a soft keyboard phantom Shift stays out of both Return modes', () => {
+            const event = deferredShiftEnter(false);
+
+            expect(event.shiftKey).toBe(false);
+            expect(shouldSubmitEnter(policy({ isMobile: true, enterToSendConfigured: true, returnKeySends: false, ...event }))).toBe(false);
+            expect(shouldSubmitEnter(policy({ isMobile: true, enterToSendConfigured: true, returnKeySends: true, ...event }))).toBe(true);
+        });
+
+        test('desktop always keeps the deferred Shift', () => {
+            expect(shouldPreserveDeferredEnterShift({ isMobile: false, hasHardwareKeyboard: false })).toBe(true);
+        });
     });
 });

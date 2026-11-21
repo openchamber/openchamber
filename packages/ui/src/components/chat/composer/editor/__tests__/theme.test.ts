@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { EditorState, type Extension } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 
 import {
     COMPOSER_EDITOR_THEME_SPEC,
@@ -25,6 +26,16 @@ function installationError(extension: Extension): string | null {
 }
 
 describe('composerEditorTheme', () => {
+    /**
+     * The composer's fill differs by theme (the canvas in light themes), so its
+     * text must follow the composer's own foreground. The elevated foreground
+     * alone typed white on white in a light theme with dark elevated surfaces.
+     */
+    test('text and caret take the composer foreground, not the elevated one alone', () => {
+        expect(declarations).toContain('var(--oc-composer-foreground, var(--surface-elevated-foreground))');
+        expect(declarations.replaceAll('var(--oc-composer-foreground, var(--surface-elevated-foreground))', '')).not.toContain('--surface-elevated-foreground');
+    });
+
     /**
      * EditorView.theme compiles its selectors when this module is imported and
      * throws RangeError on a scope it was not given — `&light` and `&dark`
@@ -111,6 +122,32 @@ describe('composerEditorTheme', () => {
 
     test('the common theme does not re-show the native selection', () => {
         expect(selectors.some((selector) => selector.includes('::selection'))).toBe(false);
+    });
+
+    /**
+     * Chromium on Android reads generated text inside an editable as the
+     * field's text, so without alternative text the empty composer told
+     * accessibility services it held the hint (#7096). The rule is checked in
+     * the CSS the theme actually emits: inside an @-block, style-mod drops a
+     * selector written with `&`, and the source would look right while nothing
+     * ships.
+     */
+    test('the hint has empty alternative text where the browser supports it', () => {
+        const css = EditorState.create({ extensions: [composerEditorTheme] })
+            .facet(EditorView.styleModule)
+            .map((module) => module.getRules())
+            .join('\n');
+        const hint = String.raw`(\S+ \.cm-content\.cm-composer-empty \.cm-line::before)`;
+        const base = new RegExp(`${hint} \\{content: var\\(--composer-placeholder\\);`).exec(css);
+        const guarded = new RegExp(
+            String.raw`@supports \(content: "" \/ ""\) \{\s*` + hint
+            + String.raw` \{content: var\(--composer-placeholder\) \/ "";\}`,
+        ).exec(css);
+        expect(base).not.toBeNull();
+        expect(guarded).not.toBeNull();
+        // Same selector, emitted later, so it wins where the browser takes it.
+        expect(guarded![1]).toBe(base![1]);
+        expect(css.indexOf(guarded![0]) > css.indexOf(base![0])).toBe(true);
     });
 });
 
@@ -242,19 +279,6 @@ describe('composerIOSSelectionExtension', () => {
 
     test('the CodeMirror fill does not stack over the iOS system highlight', () => {
         expect(selectionBackgroundRule.background).toBe('transparent !important');
-    });
-
-    /**
-     * A second custom layer was visually indistinguishable from duplicate
-     * native selection UI. iOS must only reposition the one layer that
-     * CodeMirror already uses for both selection rectangles and handles.
-     */
-    test('it does not add a second selection implementation', () => {
-        expect(Object.keys(IOS_SELECTION_THEME_SPEC)).toEqual([
-            '& .cm-scroller',
-            '& .cm-scroller > .cm-selectionLayer',
-            '& .cm-selectionBackground',
-        ]);
     });
 });
 

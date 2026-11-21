@@ -7,17 +7,13 @@ import { getFileExtension } from '@/lib/toolHelpers';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactSize } from './artifactMeta';
 
-/**
- * A file the viewer will not decode. It still tells the user what they have —
- * name, type, size — and hands them the download, rather than trying to read
- * the bytes as text and showing garbage.
- */
 export const BinaryArtifact: React.FC<{
   name: string;
   path: string;
   sizeBytes: number | null;
   download?: React.ReactNode;
-}> = ({ name, path, sizeBytes, download }) => {
+  description?: string;
+}> = ({ name, path, sizeBytes, download, description }) => {
   const { t } = useI18n();
   const extension = getFileExtension(path).toUpperCase();
   return (
@@ -26,9 +22,9 @@ export const BinaryArtifact: React.FC<{
       <ContentState
         icon={<FileTypeIcon filePath={path} className="size-10" />}
         title={name}
-        description={extension
+        description={description ?? (extension
           ? t('filesView.artifact.binary.descriptionWithType', { extension })
-          : t('filesView.artifact.binary.description')}
+          : t('filesView.artifact.binary.description'))}
         actions={download}
       />
     </div>

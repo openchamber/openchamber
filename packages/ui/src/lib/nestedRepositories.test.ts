@@ -1,6 +1,20 @@
 import { describe, expect, test } from 'bun:test';
 
-import { chooseAutoNestedRepo, discoversNestedRepos } from './nestedRepositories';
+import { chooseAutoNestedRepo, discoversNestedRepos, findFileRepository } from './nestedRepositories';
+
+describe('the repository a file belongs to', () => {
+  test('the deepest repository holding the file wins', () => {
+    const repositories = ['/proj', '/proj/vendor', '/proj/vendor/lib'];
+    expect(findFileRepository('/proj/vendor/docs/a.md', repositories)).toBe('/proj/vendor');
+    expect(findFileRepository('/proj/vendor/lib/a.md', repositories)).toBe('/proj/vendor/lib');
+    expect(findFileRepository('/proj/a.md', repositories)).toBe('/proj');
+  });
+
+  test('a file in no known repository has none, whatever its name starts with', () => {
+    expect(findFileRepository('/proj/vendor-old/a.md', ['/proj/vendor'])).toBeNull();
+    expect(findFileRepository('/proj/a.md', [])).toBeNull();
+  });
+});
 
 describe('automatic nested repository pick', () => {
   test('a repository hidden inside a dot-directory is never picked on its own (#5357)', () => {

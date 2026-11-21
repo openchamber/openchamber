@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
-import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, expect, jest, spyOn, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
 
@@ -16,13 +16,13 @@ let dom: Window;
 let root: Root;
 let host: HTMLDivElement;
 let restore: Array<() => void>;
-let searches: Array<{ query: string; type: string; resolve: (hits: ProjectFileSearchHit[]) => void }>;
+let searches: Array<{ query: string; type: string; toggled: boolean; signal?: AbortSignal; resolve: (hits: ProjectFileSearchHit[]) => void }>;
 let picked: string[];
+let fetchMock: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
 const globals = new Map<string, PropertyDescriptor | undefined>();
 const directory = '/mention-test';
 const sdk = OpenCode.make({ baseUrl: 'http://mention.test', fetch: () => new Promise<Response>(() => undefined) });
-// Past the popup's search debounce.
-const DEBOUNCE_MS = 220;
+const DEBOUNCE_MS = 180;
 
 beforeEach(async () => {
   dom = new Window({ url: 'http://localhost' });
@@ -44,7 +44,7 @@ beforeEach(async () => {
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
   // Keep unrelated bootstrap requests pending.
-  const fetch = spyOn(globalThis, 'fetch').mockImplementation(() => new Promise<Response>(() => undefined));
+  fetchMock = spyOn(globalThis, 'fetch').mockImplementation(() => new Promise<Response>(() => undefined));
   ({ I18nProvider } = await import('@/lib/i18n'));
   ({ SyncProvider } = await import('@/sync/sync-context'));
   ({ RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext'));
@@ -55,16 +55,19 @@ beforeEach(async () => {
   const { useConfigStore } = await import('@/stores/useConfigStore');
   const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
   const { useUIStore } = await import('@/stores/useUIStore');
+  const { useGuestsStore } = await import('@/lib/guests/store');
+  const priorGuests = useGuestsStore.getState();
   const priorSearch = useFileSearchStore.getState();
   const priorConfig = useConfigStore.getState();
   const priorDirectory = useDirectoryStore.getState();
   const priorUI = useUIStore.getState();
   restore = [
-    () => fetch.mockRestore(),
+    () => fetchMock.mockRestore(),
     () => useFileSearchStore.setState(priorSearch),
     () => useConfigStore.setState(priorConfig),
     () => useDirectoryStore.setState(priorDirectory),
     () => useUIStore.setState(priorUI),
+    () => useGuestsStore.setState(priorGuests, true),
   ];
   searches = [];
   picked = [];
@@ -74,17 +77,21 @@ beforeEach(async () => {
   useFileSearchStore.setState({
     invalidateDirectory: () => undefined,
     searchFiles: (_directory, query, _limit, options) => new Promise<ProjectFileSearchHit[]>((resolve) => {
-      searches.push({ query, type: options?.type ?? 'file', resolve });
+      searches.push({ query, type: options?.type ?? 'file', toggled: options?.includeHidden !== undefined, signal: options?.signal, resolve });
     }),
   });
   host = document.createElement('div');
   document.body.appendChild(host);
   const { createRoot } = await import('react-dom/client');
   root = createRoot(host);
+  jest.useFakeTimers();
+  dom.setTimeout = globalThis.setTimeout;
+  dom.clearTimeout = globalThis.clearTimeout;
 });
 
 afterEach(async () => {
   await act(async () => root.unmount());
+  jest.useRealTimers();
   restore.forEach((undo) => undo());
   host.remove();
   await dom.happyDOM.close();
@@ -97,6 +104,8 @@ afterEach(async () => {
 
 const handle = React.createRef<FileMentionHandle>();
 
+let mentioned: string[] = [];
+
 const type = (searchQuery: string) => act(async () => root.render(
   <SyncProvider sdk={sdk} directory="">
     <I18nProvider>
@@ -106,6 +115,7 @@ const type = (searchQuery: string) => act(async () => root.render(
           searchQuery={searchQuery}
           onClose={() => undefined}
           onFileSelect={(file) => picked.push(file.relativePath ?? file.path)}
+          onExtensionMentionSelect={(mention) => mentioned.push(mention.id)}
         />
       </RuntimeAPIContext.Provider>
     </I18nProvider>
@@ -113,7 +123,7 @@ const type = (searchQuery: string) => act(async () => root.render(
 ));
 
 const settleDebounce = () => act(async () => {
-  await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS));
+  jest.advanceTimersByTime(DEBOUNCE_MS);
 });
 
 const hit = (relativePath: string): ProjectFileSearchHit => ({
@@ -125,8 +135,22 @@ const hit = (relativePath: string): ProjectFileSearchHit => ({
 /** Answers the file and folder searches sent for `query`. */
 const answer = (query: string, files: string[]) => act(async () => {
   const sent = searches.filter((search) => search.query === query);
-  expect(sent.map((search) => search.type).sort()).toEqual(['directory', 'file']);
+  expect(sent.map((search) => search.type).sort()).toEqual(['directory', 'file', 'file']);
   for (const search of sent) search.resolve(search.type === 'file' ? files.map(hit) : []);
+});
+
+/** Answers only OpenCode's index for `query`; the toggles' file search stays open. */
+const answerIndexed = (query: string, files: string[]) => act(async () => {
+  for (const search of searches) {
+    if (search.query !== query) continue;
+    if (search.type === 'directory') search.resolve([]);
+    else if (!search.toggled) search.resolve(files.map(hit));
+  }
+});
+
+/** Answers the toggles' file search for `query`. */
+const answerToggled = (query: string, files: string[]) => act(async () => {
+  searches.find((search) => search.query === query && search.type === 'file' && search.toggled)?.resolve(files.map(hit));
 });
 
 const press = (key: string) => act(async () => handle.current?.handleKeyDown(key));
@@ -183,6 +207,70 @@ test('rows of the last answer stay while the next query searches, then give way 
   expect(empty()).toBe(true);
 });
 
+test('files from the index show while the search behind the toggles still runs, and its rows join later', async () => {
+  await type('ap');
+  await settleDebounce();
+  await answerIndexed('ap', ['src/app.ts']);
+  expect(rows()).toEqual(['src/app.ts']);
+  expect(busy()).toBe(false);
+
+  await answerToggled('ap', ['src/app.ts', '.config/app.json']);
+  expect(rows()).toEqual(['src/app.ts', '.config/app.json']);
+});
+
+test('an empty index answer keeps searching until the search behind the toggles answers', async () => {
+  await type('ap');
+  await settleDebounce();
+  await answerIndexed('ap', []);
+  expect(spinner()).not.toBeNull();
+  expect(empty()).toBe(false);
+
+  await answerToggled('ap', ['.config/app.json']);
+  expect(rows()).toEqual(['.config/app.json']);
+});
+
+test('rows that join later keep the selection on the row the keyboard moved to', async () => {
+  await type('ap');
+  await settleDebounce();
+  await answerIndexed('ap', ['src/app.ts', 'src/map.ts']);
+  await press('ArrowDown');
+  expect(selectedRow()).toBe('src/map.ts');
+
+  // The joining row ranks above the selected one, which moves down with it.
+  await answerToggled('ap', ['src/app.ts', 'src/map.ts', 'ap.json']);
+  expect(rows()).toEqual(['ap.json', 'src/app.ts', 'src/map.ts']);
+  expect(selectedRow()).toBe('src/map.ts');
+  await press('Enter');
+  expect(picked).toEqual(['src/map.ts']);
+});
+
+test('rows that join later keep the selection on the row the mouse is on', async () => {
+  await type('ap');
+  await settleDebounce();
+  await answerIndexed('ap', ['src/app.ts', 'src/map.ts']);
+  await act(async () => {
+    host.querySelectorAll('.cursor-pointer')[1]?.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+  });
+  expect(selectedRow()).toBe('src/map.ts');
+
+  await answerToggled('ap', ['src/app.ts', 'src/map.ts', 'ap.json']);
+  expect(selectedRow()).toBe('src/map.ts');
+});
+
+test('an arrow press before the first answer does not keep later rows out', async () => {
+  await type('ap');
+  await settleDebounce();
+  await answer('ap', ['src/ap.ts']);
+  await type('app');
+  await press('ArrowDown');
+  await settleDebounce();
+
+  await answerIndexed('app', ['src/app.ts']);
+  await answerToggled('app', ['src/app.ts', '.config/app.json']);
+  expect(rows()).toEqual(['src/app.ts', '.config/app.json']);
+  expect(selectedRow()).toBe('src/app.ts');
+});
+
 test('an answer to an older query never shows as the newer one\'s', async () => {
   await type('ab');
   await settleDebounce();
@@ -194,6 +282,21 @@ test('an answer to an older query never shows as the newer one\'s', async () => 
 
   await answer('abc', ['src/abc.ts']);
   expect(rows()).toEqual(['src/abc.ts']);
+});
+
+test('a new letter stops the previous query\'s walk, and closing the list stops the last one', async () => {
+  await type('ab');
+  await settleDebounce();
+  const walkOf = (query: string) => searches.find((search) => search.query === query && search.toggled && search.type === 'file')?.signal;
+  expect(walkOf('ab')?.aborted).toBe(false);
+
+  await type('abc');
+  await settleDebounce();
+  expect(walkOf('ab')?.aborted).toBe(true);
+  expect(walkOf('abc')?.aborted).toBe(false);
+
+  await act(async () => root.render(<div />));
+  expect(walkOf('abc')?.aborted).toBe(true);
 });
 
 test('the keyboard keeps its row while results update, and Enter picks the row it shows', async () => {
@@ -215,4 +318,34 @@ test('the keyboard keeps its row while results update, and Enter picks the row i
   await press('ArrowDown');
   await press('Enter');
   expect(picked).toEqual(['src/map.ts', 'src/apple.ts']);
+});
+
+test('an extension\'s rows leave a list held for a pending search once its folders stop covering the composer\'s directory', async () => {
+  mentioned = [];
+  const { useGuestsStore } = await import('@/lib/guests/store');
+  const tracker = (folders: string[]) => ({
+    id: 'tracker', name: 'Tracker', icon: 'apps', capabilities: { requested: [], granted: [] }, mentions: { label: 'Issues' }, folders,
+  });
+  useGuestsStore.setState({ guests: [tracker([directory])] });
+  fetchMock.mockImplementation((input) => (String(input).includes('/api/guests/mentions/search')
+    ? Promise.resolve(new Response(JSON.stringify({ groups: [{ guestId: 'tracker', label: 'Issues', items: [{ id: 'ISSUE-1', title: 'Fix the app' }] }] }), { headers: { 'Content-Type': 'application/json' } }))
+    : new Promise<Response>(() => undefined)));
+  const shownIssue = () => host.textContent?.includes('Fix the app') ?? false;
+
+  await type('ap');
+  await settleDebounce();
+  await answer('ap', ['src/app.ts']);
+  expect(shownIssue()).toBe(true);
+
+  // A new letter holds the rows while it searches; the folder list changes meanwhile.
+  await type('app');
+  expect(busy()).toBe(true);
+  await act(async () => useGuestsStore.setState({ guests: [tracker(['/elsewhere'])] }));
+  expect(busy()).toBe(true);
+  expect(shownIssue()).toBe(false);
+  await press('ArrowDown');
+  await press('ArrowDown');
+  await press('Enter');
+  expect(mentioned).toEqual([]);
+  expect(picked).toEqual(['src/app.ts']);
 });

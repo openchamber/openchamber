@@ -11,6 +11,11 @@ allowlist.
 
 ## Invariants
 
+- Only wildcard and loopback binds are offered through localhost; a listener
+  bound solely to a LAN address would not answer that URL. Known service-port
+  exclusions stay short so discovery does not hide real development servers.
+- OpenChamber's own listeners are excluded so previews cannot offer the app
+  itself. Failed scans are not cached, so the next request can recover.
 - A failed scan answers 503, never an empty list.
 - Linux merges `lsof` and `/proc/net/tcp*` listeners by port. The `lsof` pid and command take priority so own-process exclusions still apply. A successful command does not prove that its listener list is complete.
 - `directory` is optional. It is present only where `lsof` named the process's
@@ -24,8 +29,30 @@ allowlist.
   the scan still succeeds without folders.
 - The set of ports is the same with or without folders, so the tunnel reaches
   every port the panel can show, including the ones it hides by default.
+- Route registration supplies `getOwnPorts`, which returns a number array.
+  Command and proc-file parsers retain their empty and null input handling,
+  integer checks and malformed-record filtering.
 
 ## Decisions
+
+### Why route types describe only the methods used here
+
+The workspace has no Express declarations. The local route contract describes
+the GET handler and its JSON responses without adding a dependency or a
+declaration shim.
+
+### Why thrown messages remain unparsed
+
+The 500 response preserves any truthy `message` from a thrown value, including
+non-Error objects. The error guard excludes only null and undefined because
+JavaScript permits property reads on every other value. Its message property
+stays optional and unknown to preserve missing and non-string messages without
+adding object, string or property-presence checks.
+
+### Why proc listeners have no process name and not an exhaustive owner lookup
+
+Mapping every socket through every process's file descriptors costs more than
+the label is worth. The listener remains usable without that optional metadata.
 
 ### Why kernel listeners supplement lsof
 

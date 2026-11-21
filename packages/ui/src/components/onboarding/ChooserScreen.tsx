@@ -24,7 +24,6 @@ const POLL_INTERVAL_MS = 2500;
 type OnboardingPlatform = 'macos' | 'linux' | 'windows' | 'unknown';
 
 type ChooserScreenProps = {
-  /** Callback when CLI becomes available */
   onCliAvailable?: () => void;
   localAvailable?: boolean;
 };
@@ -57,7 +56,6 @@ function InstallCommand({ windows, onCopy, copyTitle }: { windows: boolean; onCo
   );
 }
 
-// Its own component: the blink re-renders this dot once a second, not the whole screen.
 function WatchingDot() {
   const blink = useWaitingBlink(true);
   return <span className={cn('absolute inset-0 rounded-full', blink)} style={{ backgroundColor: 'var(--primary-base)' }} />;
@@ -70,7 +68,6 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
   const [isApplyingPath, setIsApplyingPath] = React.useState(false);
   const [isManualChecking, setIsManualChecking] = React.useState(false);
   const [opencodeBinary, setOpencodeBinary] = React.useState('');
-  // The server ignores the user's path while the administrator pins one.
   const pinnedBinary = useEnterprisePolicyStore((state) => state.opencodeBinary);
   const [platform, setPlatform] = React.useState<OnboardingPlatform>('unknown');
   const [activeTab, setActiveTab] = React.useState<'local' | 'remote'>(() => localAvailable ? 'local' : 'remote');
@@ -150,9 +147,6 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
     onCliAvailable?.();
   }, [isDesktopApp, onCliAvailable, persistFirstChoice]);
 
-  // Background polling: while the local tab is visible, periodically check
-  // whether the OpenCode CLI is reachable. As soon as it is, transition
-  // automatically — the user doesn't have to click anything.
   React.useEffect(() => {
     if (!localAvailable || activeTab !== 'local') return;
 

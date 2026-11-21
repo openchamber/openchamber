@@ -7,7 +7,7 @@ description: Keep notes, a todo list, and saved plans for each project.
 
 Each project has its own scratch space for notes, a todo list, and saved plans. They belong to the project, not to any one session, so they stick around as you move between sessions. Find them in the **Project knowledge** panel on the right (in the workspace drawer on mobile), with tabs for Notes, Todo, Plans and, when agent memory is on, Memory.
 
-Each section has the same field at the top for adding an entry. Type and press **Enter**; in notes, **Shift+Enter** starts a new line. The search button next to the tabs opens a search bar that looks through all sections at once; each tab shows how many matches it has. **Esc** closes the search and clears it.
+Each section has the same field at the top for adding an entry. Type and press **Enter** or **Add** at the end of the field; in notes, **Shift+Enter** starts a new line. Text you have not added yet stays in the field when you switch tabs or panels or reload the app, separately for each project. The search button next to the tabs opens a search bar that looks through all sections at once; each tab shows how many matches it has. **Esc** closes the search and clears it.
 
 When the panel is wide, for example after you expand it, notes, plans and memory show the list on the left and the open entry on the right, so the list stays in view while you read and edit.
 
@@ -19,7 +19,9 @@ The pin on a note adds it to the current session's context, so the agent gets it
 
 ## Todos
 
-A simple checklist. Add items, check them off, reorder them by dragging, and clear the finished ones with **Clear completed** under the list.
+A simple checklist. Add items, check them off, and reorder them by dragging. Click a todo's text to edit it: **Enter** saves, **Esc** keeps the old text. The row menu (right-click, or **⋯** on a phone) also has **Edit**, and on a finished todo **Clear completed** removes all finished ones.
+
+A todo an agent filed under a plan shows the plan's name at the end of the row; click it to open the plan. A lock means the todo waits for others to be finished first.
 
 Each todo has a **send** menu so you can hand it to the agent:
 
@@ -31,7 +33,9 @@ Each todo has a **send** menu so you can hand it to the agent:
 
 A place to keep longer plans as saved files. Type a title in the field and press **Enter** to create a plan; it opens right away so you can write it. You can also import a plan from a Markdown or text file with the upload button in the same field.
 
-Click a plan to read and edit it in the panel. Like notes, a plan can be pinned to the current session. The row menu moves a plan into the repository's plans folder, so everyone who pulls the repository sees it, or back into your own plans, and deletes it.
+Click a plan to open it in the panel. It opens ready to read; the eye button switches between reading and editing the Markdown. **Implement** sends the plan to a new session or a [worktree session](/worktrees/) to build it, and the **⋯** menu has **Improve**, copy, the pin, the session working on the plan, and delete. Todos an agent filed under the plan show under its text, where you can check them off.
+
+Like notes, a plan can be pinned to the current session. The row menu moves a plan into the repository's plans folder, so everyone who pulls the repository sees it, or back into your own plans, and deletes it.
 
 ## Memory
 
@@ -54,6 +58,12 @@ An agent can link a note or todo to a plan and make a todo depend on other todos
 An agent works on the project its session belongs to, worktrees included. If an agent changes a note or plan while you are typing in it, what you type is saved over the agent's change. Agents are asked to send the text they read along with a note or plan they replace whole; if it changed since, the write is refused and the agent reads it again.
 
 The tool is on by default. Turn it off in **Settings → General → OpenChamber Tools** with **Project knowledge tool**. Like the other OpenChamber tools, it is only there when OpenChamber runs its own OpenCode server, so not with an external server or in the VS Code extension.
+
+## Keeping notes and todos in the repository
+
+Notes and todos are saved in OpenChamber's own data on this machine. To sync them through Git, open **Settings → Projects**, pick the project, and turn on **Keep notes and todos in the repository** on the General tab. They are then saved in `.openchamber/notes-todos.json`; commit it like any other file. The option applies to this machine only, so turn it on on every machine that should use the file.
+
+Turning the option on moves your notes and todos into the file, after any that are already there. Turning it off copies the file's entries back to this machine, and the file stays in the repository. Plans are not part of the file; to share a plan, move it to the repository's plans folder. If the file has a Git conflict, the panel cannot load or save notes and todos until you fix the file.
 
 ## Related
 

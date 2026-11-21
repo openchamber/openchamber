@@ -25,14 +25,8 @@ import {
   sessionSidebarRowVirtualKey,
 } from './sessionSidebarVirtualization';
 
-/** A row a header just hid, drawn where it was while it folds away. */
 type GhostRow = { row: SessionSidebarRow; nextRow: SessionSidebarRow | undefined; start: number; end: number };
 
-/**
- * One header opening or closing: the rows under it are clipped above a
- * boundary moving `from` → `to`, and every row from `followingIndex` on slides
- * the same distance.
- */
 type DisclosureMotion = {
   id: number;
   revealKeys: ReadonlySet<string>;
@@ -40,10 +34,6 @@ type DisclosureMotion = {
   followingIndex: number;
   from: number;
   to: number;
-  /**
-   * Rows that slide down from on screen to past the virtual range: they stay
-   * mounted until the motion ends, so the bottom of the list does not blank.
-   */
   slidingIndexes: readonly number[];
 };
 
@@ -56,22 +46,13 @@ type Props = {
   pinnedRowIndexes: ReadonlySet<number>;
   renderRow: (row: SessionSidebarRow, index: number) => React.ReactNode;
   onFirstVisibleIndexChange: (index: number) => void;
-  /** Where a level 0 row's slot starts, for the tree guides: the phone's rows sit further in. */
   guideSlotStartPx?: number;
-  /** Brings a row to the middle of the list; a new `id` asks again for the same row. */
   scrollRequest?: { index: number; id: number } | null;
-  /** How much of the scroller's top a pinned header covers: the row the user sees first sits under it. */
+  projectDivider?: boolean;
   getStickyHeaderHeight?: (scrollElement: HTMLElement) => number;
-  /**
-   * A row to hold where it is on screen through the next change of the rows,
-   * handed over once: a dragged project or section stays under the pointer
-   * while the list folds to its headers, and where it was dropped as the list
-   * opens again. The change then neither animates nor keeps another row.
-   */
   heldRowRef?: React.RefObject<SessionSidebarHeldRow | null>;
 };
 
-/** A row and how far below the top of the list's viewport it is to stay. */
 export type SessionSidebarHeldRow = { key: string; offset: number };
 
 export function SessionSidebarRows({
@@ -84,6 +65,7 @@ export function SessionSidebarRows({
   scrollRequest = null,
   getStickyHeaderHeight,
   heldRowRef,
+  projectDivider = true,
 }: Props): React.ReactNode {
   const rows = model.rows;
   const getScrollElement = React.useCallback(() => scrollElement, [scrollElement]);
@@ -107,8 +89,6 @@ export function SessionSidebarRows({
     const index = instance.indexFromElement(element);
     const row = rows[index];
     if (row) {
-      // Kept without the trailing gap, so a header that gains or loses its gap
-      // as it closes or opens is estimated exactly the first time too.
       const spacing = sectionSpacingAfter(row, rows[index + 1]);
       const gap = spacing ? Number.parseFloat(getComputedStyle(element).paddingBottom) || 0 : 0;
       if (spacing) measuredGapBySpacingRef.current.set(spacing, gap);
@@ -144,9 +124,6 @@ export function SessionSidebarRows({
   const maximumScrollOffset = scrollElement
     ? Math.max(totalSize - scrollElement.clientHeight, 0)
     : 0;
-  // Read before this render's rows reach the DOM: a list that got shorter
-  // clamps the scroller once it lays out, and the anchor below needs the
-  // position the user was looking at.
   const renderedScrollTop = scrollElement ? scrollElement.scrollTop : 0;
   const scrollOffset = Math.min(renderedScrollTop, maximumScrollOffset);
   const firstVisibleIndex = findFirstVisibleSessionSidebarRowIndex(virtualItems, scrollOffset);
@@ -156,7 +133,6 @@ export function SessionSidebarRows({
 
   React.useEffect(() => {
     if (scrollRequest && scrollElement) virtualizer.scrollToIndex(scrollRequest.index, { align: 'center' });
-    // Asked once per request: the rows changing under it must not scroll again.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollRequest, scrollElement]);
 
@@ -167,9 +143,6 @@ export function SessionSidebarRows({
     items: readonly VirtualItem[];
   } | null>(null);
 
-  // A header the user opened or closed: plan the motion from where the rows
-  // were to where they are now. Runs before paint, and the state it sets
-  // renders before paint too, so the first frame drawn is the motion's start.
   React.useLayoutEffect(() => {
     const last = lastLayoutRef.current;
     if (!last || last.model.rows === rows || !scrollElement || prefersReducedMotion() || heldRowRef?.current) return;
@@ -180,7 +153,6 @@ export function SessionSidebarRows({
     const headerBefore = before[disclosure.previousHeaderIndex];
     const headerAfter = after[disclosure.nextHeaderIndex];
     if (!headerBefore || !headerAfter) return;
-    // Rows above the header normally stay put; carry any shift over anyway.
     const shift = headerAfter.start - headerBefore.start;
     const followingBefore = disclosure.opened ? before[disclosure.previousHeaderIndex + 1] : before[disclosure.blockEnd];
     const followingIndex = disclosure.opened ? disclosure.blockEnd : disclosure.nextHeaderIndex + 1;
@@ -199,7 +171,6 @@ export function SessionSidebarRows({
         slidingIndexes.push(index);
       }
     } else {
-      // Only the hidden rows near the viewport need drawing as they fold.
       for (let index = disclosure.blockStart; index < disclosure.blockEnd; index += 1) {
         const measured = before[index];
         if (!measured || measured.end + shift < top || measured.start + shift > bottom) continue;
@@ -210,21 +181,13 @@ export function SessionSidebarRows({
     setMotion({ id: motionIdRef.current, revealKeys, ghosts, followingIndex, from, to, slidingIndexes });
   }, [rows, scrollElement, virtualizer, heldRowRef]);
 
-  // Rows that changed above what the user sees, with nothing the user did to
-  // the list (see `isSessionSidebarUserChange`): sessions arriving, leaving or
-  // moving, rows changing height with Detailed rows. The scroll position alone
-  // stays, so the rows on screen slid away, or past the end of a list that got
-  // shorter. Put the row at the top of what the user sees, under a pinned
-  // header, back where it was.
   React.useLayoutEffect(() => {
     const last = lastLayoutRef.current;
-    // A hidden list (the phone's while projects are reordered) has no viewport to keep.
     if (!last || last.model.rows === model.rows || !scrollElement || scrollElement.clientHeight === 0) return;
     const held = heldRowRef?.current;
     if (held && heldRowRef) {
       heldRowRef.current = null;
       const index = model.rowIndexByKey.get(held.key);
-      // Brings the measurements up to date with the rows mounted in this commit.
       virtualizer.getTotalSize();
       const start = index === undefined ? undefined : virtualizer.measurementsCache[index]?.start;
       if (start !== undefined) virtualizer.scrollToOffset(Math.max(start - held.offset, 0));
@@ -232,19 +195,14 @@ export function SessionSidebarRows({
     }
     if (isSessionSidebarUserChange(last.model, model)) return;
     const inset = getStickyHeaderHeight?.(scrollElement) ?? 0;
-    // The last layout's mounted rows hold the viewport: any scroll far enough
-    // to change them renders again.
     const line = renderedScrollTop + inset;
     const anchor = findSessionSidebarScrollAnchor(last.model.rows, last.items, line, renderedScrollTop + scrollElement.clientHeight, model.rowIndexByKey);
     if (!anchor) return;
-    // Brings the measurements up to date with the rows mounted in this commit.
     virtualizer.getTotalSize();
     const nextLine = resolveSessionSidebarScrollAnchor(anchor, model.rowIndexByKey, virtualizer.measurementsCache);
     if (nextLine !== null && Math.abs(nextLine - inset - scrollElement.scrollTop) > 0.5) virtualizer.scrollToOffset(Math.max(nextLine - inset, 0));
   }, [model, scrollElement, virtualizer, renderedScrollTop, getStickyHeaderHeight, heldRowRef]);
 
-  // Recorded after the effects above read it, on every commit, so it always
-  // holds the layout the user last saw.
   React.useLayoutEffect(() => {
     lastLayoutRef.current = { model, measurements: virtualizer.measurementsCache, items: virtualItems };
   });
@@ -260,8 +218,6 @@ export function SessionSidebarRows({
       const key = element.dataset.sidebarRowKey ?? '';
       const start = Number(element.dataset.sidebarVirtualStart);
       if (element.dataset.sidebarGhost === 'true') {
-        // Held shut after the end: the ghost unmounts a render later, and
-        // unclipped for that frame it would flash over the rows below.
         animations.push(element.animate(boundaryClipKeyframes(start, element.offsetHeight, motion.from, motion.to), { ...timing, fill: 'forwards' }));
         animations.push(element.animate(ROW_DISCLOSURE_FADE_OUT, { ...timing, fill: 'forwards' }));
       } else if (motion.revealKeys.has(key)) {
@@ -284,9 +240,6 @@ export function SessionSidebarRows({
     };
   }, [motion]);
 
-  // Tree guides draw over the row, so they show on its hover and selection
-  // fills too. The box contains the row's margins, so the lines of
-  // neighbouring rows meet across the gap between them.
   const renderRowWithGuides = (row: SessionSidebarRow, index: number): React.ReactNode => (row.treeGuides
     ? <div className="relative flow-root">
       {renderRow(row, index)}
@@ -301,7 +254,7 @@ export function SessionSidebarRows({
     return <div data-sidebar-virtual-pending="true">
       {indexes.map((index) => {
         const row = rows[index];
-        return row ? <div key={row.key} className={sectionWrapperClass(row, rows[index + 1])}>{renderRowWithGuides(row, index)}</div> : null;
+        return row ? <div key={row.key} className={sectionWrapperClass(row, rows[index + 1], projectDivider)}>{renderRowWithGuides(row, index)}</div> : null;
       })}
       {estimatedTotal > renderedHeight ? <div aria-hidden="true" style={{ height: estimatedTotal - renderedHeight }} /> : null}
     </div>;
@@ -313,7 +266,7 @@ export function SessionSidebarRows({
       key={ghost.row.key}
       aria-hidden="true"
       inert
-      className={`[&_[data-session-row-box]]:my-px ${sectionWrapperClass(ghost.row, ghost.nextRow)}`}
+      className={`[&_[data-session-row-box]]:my-px ${sectionWrapperClass(ghost.row, ghost.nextRow, projectDivider)}`}
       data-sidebar-ghost="true"
       data-sidebar-row-key={ghost.row.key}
       data-sidebar-virtual-start={ghost.start}
@@ -333,9 +286,7 @@ export function SessionSidebarRows({
       if (!row) return null;
       return <div
         key={row.key}
-        // Isolated virtual rows cannot collapse neighboring margins: 1px per side preserves the 2px gap.
-        // The row box, not the row: a session row in rename keeps the same margins.
-        className={`[&_[data-session-row-box]]:my-px ${sectionWrapperClass(row, rows[item.index + 1])}`}
+        className={`[&_[data-session-row-box]]:my-px ${sectionWrapperClass(row, rows[item.index + 1], projectDivider)}`}
         data-index={item.index}
         data-sidebar-row-key={row.key}
         data-sidebar-virtual-start={item.start}

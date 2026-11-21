@@ -23,6 +23,9 @@
       "instances": {
         "format": "host",
         "defaultInstance": "github.com",
+        "defaultInstances": [
+          "github.com"
+        ],
         "multiple": true,
         "allowLoopbackHttp": false,
         "allowPort": false,
@@ -90,13 +93,20 @@
         "referenceDetail": true,
         "listStatuses": true,
         "referencesAcross": true,
+        "reviewDraftFileComments": true,
+        "reviewDrafts": true,
         "startThread": false,
         "authorCanReview": false,
-        "projectUploads": false,
+        "projectUploads": true,
+        "absoluteProjectUploads": true,
         "issueCloseReason": true,
         "changeRequestTemplates": [],
         "changeRequestPatch": true,
-        "discussions": true
+        "discussions": true,
+        "issueEdit": true,
+        "changeRequestEdit": true,
+        "advancedSearch": true,
+        "commentEdit": true
       }
     },
     {
@@ -121,6 +131,9 @@
       "instances": {
         "format": "origin",
         "defaultInstance": "https://gitlab.com",
+        "defaultInstances": [
+          "https://gitlab.com"
+        ],
         "multiple": true,
         "allowLoopbackHttp": true,
         "allowPort": true,
@@ -176,6 +189,8 @@
         "referenceDetail": false,
         "listStatuses": false,
         "referencesAcross": false,
+        "reviewDraftFileComments": true,
+        "reviewDrafts": true,
         "startThread": true,
         "authorCanReview": true,
         "projectUploads": true,
@@ -183,7 +198,10 @@
         "changeRequestTemplates": [
           ".gitlab/merge_request_templates/Default.md"
         ],
-        "changeRequestPatch": true
+        "changeRequestPatch": true,
+        "issueEdit": true,
+        "changeRequestEdit": true,
+        "commentEdit": true
       }
     },
     {
@@ -208,6 +226,7 @@
       "instances": {
         "format": "origin",
         "defaultInstance": null,
+        "defaultInstances": [],
         "multiple": true,
         "allowLoopbackHttp": true,
         "allowPort": true,
@@ -216,9 +235,11 @@
       },
       "auth": {
         "methods": [
-          "pat"
+          "pat",
+          "cli"
         ],
         "cliTransport": false,
+        "cliName": "gt",
         "token": {
           "scopes": [
             "write:repository",
@@ -266,6 +287,8 @@
         "referenceDetail": false,
         "listStatuses": false,
         "referencesAcross": false,
+        "reviewDraftFileComments": false,
+        "reviewDrafts": true,
         "startThread": false,
         "authorCanReview": false,
         "projectUploads": false,
@@ -275,7 +298,10 @@
           ".gitea/PULL_REQUEST_TEMPLATE.md",
           ".github/pull_request_template.md"
         ],
-        "changeRequestPatch": true
+        "changeRequestPatch": true,
+        "issueEdit": true,
+        "changeRequestEdit": true,
+        "commentEdit": true
       }
     }
   ],
@@ -296,6 +322,7 @@
       "issues": true,
       "changeRequests": true,
       "draftChangeRequests": true,
+      "draftConversion": true,
       "mergeChangeRequests": true,
       "mergeMethods": [
         "merge",
@@ -320,6 +347,7 @@
       "issues": true,
       "changeRequests": true,
       "draftChangeRequests": true,
+      "draftConversion": true,
       "mergeChangeRequests": true,
       "mergeMethods": [
         "merge",
@@ -343,6 +371,7 @@
       "issues": true,
       "changeRequests": true,
       "draftChangeRequests": true,
+      "draftConversion": true,
       "mergeChangeRequests": true,
       "mergeMethods": [
         "merge",
@@ -376,6 +405,7 @@
       "instances": {
         "format": "origin",
         "defaultInstance": null,
+        "defaultInstances": [],
         "multiple": true,
         "allowLoopbackHttp": true,
         "allowPort": true,
@@ -422,6 +452,8 @@
         "referenceDetail": false,
         "listStatuses": false,
         "referencesAcross": false,
+        "reviewDraftFileComments": true,
+        "reviewDrafts": true,
         "startThread": false,
         "authorCanReview": true,
         "projectUploads": false,
@@ -432,7 +464,8 @@
         "changeRequestPatch": true,
         "reviewModel": "votes",
         "revisions": true,
-        "createByPush": true
+        "createByPush": true,
+        "commentEdit": false
       }
     },
     "capabilities": {
@@ -451,6 +484,7 @@
       "issues": false,
       "changeRequests": true,
       "draftChangeRequests": true,
+      "draftConversion": true,
       "mergeChangeRequests": true,
       "mergeMethods": [
         "submit"

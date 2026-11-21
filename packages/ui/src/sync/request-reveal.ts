@@ -1,15 +1,5 @@
 import React from "react"
 
-/**
- * "Open session" on a question or permission toast names the request it was
- * raised for. Selecting the session is not enough: when that session is
- * already open, a dock the user collapsed stays collapsed and the request
- * stays out of sight. The dock that holds the request takes it from here and
- * expands.
- *
- * The request waits until a dock holds it, so it also reaches a dock that
- * mounts or receives the request after the session switch.
- */
 
 let pendingRequestID: string | null = null
 const listeners = new Set<() => void>()
@@ -23,21 +13,42 @@ export const revealRequest = (requestID: string): void => {
   notify()
 }
 
-const subscribe = (listener: () => void) => {
+export const subscribeRequestReveal = (listener: () => void) => {
   listeners.add(listener)
   return () => {
     listeners.delete(listener)
   }
 }
 
+let pendingPageSessionID: string | null = null
+let pendingPageID: string | null = null
+
+export const revealWaitingPage = (sessionID: string, pageID?: string): void => {
+  pendingPageSessionID = sessionID
+  pendingPageID = pageID ?? null
+  notify()
+}
+
+export const pendingWaitingPageID = (): string | null => pendingPageID
+
+export const isWaitingPageRevealPending = (sessionID: string | null): boolean => (
+  sessionID !== null && pendingPageSessionID === sessionID
+)
+
+export const takeWaitingPageReveal = (sessionID: string | null): boolean => {
+  if (!isWaitingPageRevealPending(sessionID)) return false
+  pendingPageSessionID = null
+  return true
+}
+
+export const releaseWaitingPageRevealOutside = (sessionID: string | null): void => {
+  if (pendingPageSessionID !== sessionID) pendingPageSessionID = null
+}
+
 const getPendingRequestID = () => pendingRequestID
 
-/**
- * Calls `onReveal` once when a toast asks to reveal one of `requestIDs`.
- * `onReveal` should be stable.
- */
 export const useRequestReveal = (requestIDs: readonly string[], onReveal: (requestID: string) => void): void => {
-  const pending = React.useSyncExternalStore(subscribe, getPendingRequestID, getPendingRequestID)
+  const pending = React.useSyncExternalStore(subscribeRequestReveal, getPendingRequestID, getPendingRequestID)
   const held = pending !== null && requestIDs.includes(pending)
   React.useEffect(() => {
     if (!held || pending === null) return

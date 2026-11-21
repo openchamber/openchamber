@@ -28,11 +28,18 @@ class NotificationService: UNNotificationServiceExtension {
             openSealedText(into: content, from: request)
         }
 
-        contentHandler(bestAttempt ?? request.content)
+        // The push lists notifications handled since the last one; a clearing push may not
+        // have reached this phone. Removed before this one shows, which is never in the list.
+        PushClearing.removeDelivered(PushClearing.entries(in: request.content.userInfo)) { [weak self] in
+            guard let self, let handler = self.contentHandler else { return }
+            self.contentHandler = nil
+            handler(self.bestAttempt ?? request.content)
+        }
     }
 
     override func serviceExtensionTimeWillExpire() {
         if let handler = contentHandler {
+            contentHandler = nil
             handler(bestAttempt ?? UNNotificationContent())
         }
     }

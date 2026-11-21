@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import { type OpenCodeManager } from './opencode';
 import { handleStandardGitBridgeMessage } from './bridge-git-runtime';
-import { handleSpecialGitBridgeMessage } from './bridge-git-special-runtime';
 import { handleSmallModelBridgeMessage, readOpenCodeSmallModelCatalog } from './bridge-small-model-runtime';
 import { handleFsBridgeMessage } from './bridge-fs-runtime';
 import { handleConfigBridgeMessage } from './bridge-config-runtime';
@@ -83,14 +82,6 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
     const standardGitResponse = await handleStandardGitBridgeMessage({ id, type, payload }, ctx);
     if (standardGitResponse) {
       return standardGitResponse;
-    }
-    const specialGitResponse = await handleSpecialGitBridgeMessage(
-      { id, type, payload },
-      ctx,
-      { readSettings, execGit, readPromptOverrides: magicPrompts.overridesForDirectory }
-    );
-    if (specialGitResponse) {
-      return specialGitResponse;
     }
     const smallModelResponse = await handleSmallModelBridgeMessage(
       { id, type, payload },

@@ -4,6 +4,8 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { getExternalFaviconUrl, isAppLinkUrl, isExternalHttpUrl, isLoopbackHttpUrl } from '@/lib/url';
 import { parseSessionLink } from '@/lib/sessionLinks';
+import { parseExtensionInstallLink } from '@/lib/guests/install-link';
+import { requestGuestInstall } from '@/lib/guests/install-request';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -11,16 +13,23 @@ import { appOwnOrigins } from '@/lib/router/appOrigins';
 import { sessionLinkKey } from '@/lib/sessionLinks';
 import { SessionMentionChipsContext } from '../message/parts/sessionMentionChips';
 import { SessionMentionChipButton } from '../message/parts/SessionMentionChipButton';
+import { ReferenceLinkChipsContext } from '../message/parts/referenceLinkChips';
+import { ReferenceLinkChipButton } from '../message/parts/ReferenceLinkChipButton';
 import { useUIStore } from '@/stores/useUIStore';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { parseAgentHref, parseAttachmentHref, parseSkillHref, INLINE_REFERENCE_CHIP_CLASS, INTERACTIVE_REFERENCE_CHIP_CLASS, REFERENCE_CHIP_LABEL_CLASS, buildAgentMentionUrl } from '@/lib/messages/inlineMessageLinks';
 import { openAppLinkWithConfirmation } from '../appLinkConfirmation';
 import { useOpenChatLink } from '../useOpenChatLink';
 import { useMarkdownPresentation, type FileReferenceSource } from './MarkdownPresentationContext';
-import { activateMarkdownFile, resolveMarkdownFile, useOpenMarkdownFile, useRevealMarkdownPath } from './markdownFileReferences';
+import { activateMarkdownFile, resolveMarkdownFile, useOpenMarkdownFile, useOpenTappedMarkdownFile, useRevealMarkdownPath } from './markdownFileReferences';
 import { localPathFromFileUrl } from '../fileReferenceParser';
 import { MarkdownMediaLinkContext, useMarkdownMedia } from './markdown-media-context';
 import { openMarkdownDocumentLink } from '@/components/views/files/previews/useMarkdownLocalAssets';
+import { claimGuestIdentifier, claimGuestUrl } from '@/lib/guests/links';
+import { guestPanelOpensHere } from '@/lib/guests/phone';
+import { useGuestsStore } from '@/lib/guests/store';
+import { isBuiltInLink, runGuestLink } from './guestLinkClick';
 
 function useConfirmedInlineFile(raw: string, inputKind: FileReferenceSource = 'path'): string | null {
   const { directory, fileReferences, confirmFile } = useMarkdownPresentation();
@@ -37,24 +46,34 @@ function useConfirmedInlineFile(raw: string, inputKind: FileReferenceSource = 'p
   return fileReferences && confirmed?.raw === raw && confirmed.inputKind === inputKind && confirmed.directory === directory && confirmed.runtimeKey === runtimeKey ? confirmed.path : null;
 }
 
+const SHORT_INLINE_CODE_CHARS = 32;
+
 export function MarkdownInlineCode({ children, node: _node, ...props }: React.ComponentProps<'code'> & ExtraProps) {
   const raw = _node?.children.map((child) => child.type === 'text' ? child.value : '').join('') ?? '';
   const path = useConfirmedInlineFile(raw);
   const open = useOpenMarkdownFile();
+  const openTapped = useOpenTappedMarkdownFile();
+  const { directory, fileNavigation, fileReferences } = useMarkdownPresentation();
   const activate = (event: React.MouseEvent | React.KeyboardEvent) => {
     if (path) activateMarkdownFile(event, (external) => { void open(raw, path, external); });
+  };
+  const checksOnTap = fileNavigation && !fileReferences && resolveMarkdownFile(raw, directory) !== null;
+  const tap = (event: React.MouseEvent) => {
+    if (event.currentTarget.closest('a, button, [role="button"], summary')) return;
+    activateMarkdownFile(event, () => { void openTapped(raw); });
   };
   return (
     <code
       {...props}
       dir="ltr"
       data-streamdown="inline-code"
+      data-short={raw.length > 0 && raw.length <= SHORT_INLINE_CODE_CHARS ? '' : undefined}
       data-openchamber-file-link={path ? 'true' : undefined}
       data-openchamber-file-ref={path ? raw : undefined}
       data-openchamber-file-path={path ?? undefined}
       role={path ? 'button' : undefined}
       tabIndex={path ? 0 : undefined}
-      onClick={path ? activate : undefined}
+      onClick={path ? activate : checksOnTap ? tap : undefined}
       onKeyDown={path ? activate : undefined}
     >
       {children}
@@ -75,8 +94,6 @@ export function MarkdownLink(props: React.ComponentProps<'a'> & ExtraProps) {
   return <ScreenMarkdownLink {...props} />;
 }
 
-// The favicon sits before its link, framed, loads lazily, and goes away when
-// the site has none; a broken-image icon would read as a broken link.
 function LinkFavicon({ src }: { src: string }) {
   const [failed, setFailed] = React.useState(false);
   if (failed) return null;
@@ -101,9 +118,49 @@ const textOf = (node: ExtraProps['node']): string => {
   return text.trim();
 };
 
+const modified = (event: React.MouseEvent | React.KeyboardEvent): boolean => event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+
+function GuestIdentifierLink({ identifier, className, children }: { identifier: string; className?: string; children: React.ReactNode }) {
+  const { guestLinks, directory } = useMarkdownPresentation();
+  const { t } = useI18n();
+  const claim = guestLinks ? claimGuestIdentifier(guestLinks, identifier) : null;
+  const guest = useGuestsStore((state) => (claim ? state.guests.find((entry) => entry.id === claim.guestId) : undefined));
+  const name = guest?.name;
+  const openChatLink = useOpenChatLink(directory);
+  if (!claim || !guest || !name) return <>{children}</>;
+  const pageUrl = claim.action === 'open' && !guestPanelOpensHere(guest) ? claim.url : undefined;
+  const activate = (event: React.MouseEvent | React.KeyboardEvent) => {
+    if ('key' in event && event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (pageUrl) openChatLink(pageUrl);
+    else runGuestLink(claim, 'identifier', directory, t);
+  };
+  const label = pageUrl
+    ? pageUrl
+    : claim.action === 'open'
+      ? t('chat.guestLink.open', { identifier, name })
+      : t('chat.guestLink.attach', { identifier, name });
+  return (
+    <a
+      role="button"
+      tabIndex={0}
+      className={className ? `${className} cursor-pointer` : 'cursor-pointer'}
+      data-oc-guest-link={claim.guestId}
+      title={label}
+      aria-label={label}
+      onClick={activate}
+      onKeyDown={activate}
+    >
+      {children}
+    </a>
+  );
+}
+
 function ScreenMarkdownLink({ href, children: originalChildren, node, ...props }: React.ComponentProps<'a'> & ExtraProps) {
-  // The policy dropped an unsafe or unsupported URL: the anchor stays inert,
-  // as the old sanitizer left it, instead of opening the app in a new window.
+  if (node?.properties.dataOcGuestLink !== undefined) {
+    return <GuestIdentifierLink identifier={textOf(node)} className={props.className}>{originalChildren}</GuestIdentifierLink>;
+  }
   if (!href) {
     const { target: _target, rel: _rel, ...inert } = props;
     return <a {...inert}><MarkdownMediaLinkContext.Provider value={true}>{originalChildren}</MarkdownMediaLinkContext.Provider></a>;
@@ -124,28 +181,27 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
   const skill = parseSkillHref(href);
   const agent = parseAgentHref(href);
   const attachment = parseAttachmentHref(href);
-  // VS Code keeps session links inert: its sessions live on its own OpenCode,
-  // so a link to a web session opens in the browser like any other.
   const session = isVSCodeRuntime() ? null : parseSessionLink(href, appOwnOrigins());
-  // A session or message the user's message mentioned draws as its chip.
+  const extensionInstall = isVSCodeRuntime() ? null : parseExtensionInstallLink(href);
   const mentionChips = React.useContext(SessionMentionChipsContext);
   const mentionChip = session ? mentionChips.get(sessionLinkKey(session)) : undefined;
+  const referenceLink = React.useContext(ReferenceLinkChipsContext).get(href);
   const app = isAppLinkUrl(href);
   const file = presentation.fileNavigation && resolveMarkdownFile(href, directory, 'click', 'href');
   const revealPath = useRevealMarkdownPath();
   const folder = presentation.fileNavigation && !file && revealPath ? localPathFromFileUrl(href) : null;
-  // A link whose URL is not a file but whose text is a path opens that file
-  // once the file is confirmed, as the old annotation pass did.
   const probeHref = Boolean(file || folder || app || session || skill || agent || attachment);
   const probe = probeHref ? href : text;
   const path = useConfirmedInlineFile(probe, probeHref ? 'href' : 'path');
   const textFile = Boolean(path && !probeHref);
   const external = isExternalHttpUrl(href);
-  // A host's own reference (`#12`, a commit) reads as part of the text, without the site's mark.
   const reference = node?.properties.dataOcReference !== undefined;
   const favicon = external && !path && !reference ? getExternalFaviconUrl(href) : null;
   const showPreview = presentation.loopbackPreview && isLoopbackHttpUrl(href) && directory
     && !(isDesktopShell() && openLinksInBrowserPanel);
+  const guestClaim = presentation.guestLinks && external && !session && !app && !file && !folder && !textFile && !skill && !agent && !attachment && !extensionInstall
+    ? claimGuestUrl(presentation.guestLinks, href)
+    : null;
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (media?.documentAssets && openMarkdownDocumentLink(event, media.documentAssets)) return;
     if (textFile && path) {
@@ -175,7 +231,6 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
       return;
     }
     if (href.startsWith('#') && !media?.documentAssets) {
-      // In-message anchors (footnotes) scroll within this message.
       event.preventDefault();
       const id = decodeURIComponent(href.slice(1));
       const root = event.currentTarget.closest('[data-markdown-content]');
@@ -183,7 +238,13 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
       target?.scrollIntoView({ block: 'nearest' });
       return;
     }
-    if (external && !presentation.disableLinkSafety && !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)) {
+    if (guestClaim && !modified(event) && !isBuiltInLink(href)
+      && runGuestLink(guestClaim, 'link', directory, t)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (external && !presentation.disableLinkSafety && !modified(event)) {
       event.preventDefault();
       event.stopPropagation();
       openChatLink(href);
@@ -204,8 +265,26 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
       </span>
     );
   }
+  if (extensionInstall) {
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="my-1 align-middle"
+        onClick={() => requestGuestInstall({ source: extensionInstall.source, confirmed: extensionInstall.kind === 'path' })}
+      >
+        <Icon name="download" className="size-4" />
+        {children}
+      </Button>
+    );
+  }
+
   if (session && mentionChip) {
     return <SessionMentionChipButton chip={mentionChip} target={session} />;
+  }
+  if (referenceLink) {
+    return <ReferenceLinkChipButton chip={referenceLink.chip} url={referenceLink.url} />;
   }
   if (agent) {
     return (
@@ -241,17 +320,18 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
         {skill ? <span className={REFERENCE_CHIP_LABEL_CLASS}>{skill}</span> : children}
       </a>
       {showPreview && (
-        <Button
-          variant="ghost"
-          size="xs"
-          className="ms-1 align-middle"
-          data-export-ignore
-          title={t('terminalView.preview.openTitle')}
-          aria-label={t('terminalView.preview.open')}
-          onClick={() => useUIStore.getState().openContextPreview(directory, href)}
-        >
-          <Icon name="global" className="size-3.5" />
-        </Button>
+        <HoverTooltip label={t('terminalView.preview.openTitle')}>
+          <Button
+            variant="ghost"
+            size="xs"
+            className="ms-1 align-middle"
+            data-export-ignore
+            aria-label={t('terminalView.preview.open')}
+            onClick={() => useUIStore.getState().openContextPreview(directory, href)}
+          >
+            <Icon name="global" className="size-3.5" />
+          </Button>
+        </HoverTooltip>
       )}
     </>
   );

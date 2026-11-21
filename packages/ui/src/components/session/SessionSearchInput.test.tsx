@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from 'bun:test';
+import { afterAll, expect, jest, test } from 'bun:test';
 import React, { act } from 'react';
 import { Window } from 'happy-dom';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
@@ -46,7 +46,7 @@ async function fixture(initial = '') {
       return [session.title];
     }) : sessions, [value]);
     return <>
-      <SessionSearchInput value={value} active={active} onSearch={(query) => { searches.push(query); setValue(query); }}
+      <SessionSearchInput value={value} debounceMs={100} active={active} onSearch={(query) => { searches.push(query); setValue(query); }}
         onClose={() => { closes += 1; }} placeholder="Search sessions" clearLabel="Clear search" />
       <output>{results.length}</output>
     </>;
@@ -84,58 +84,109 @@ async function fixture(initial = '') {
   };
 }
 
-test('typing performs no search or parent render at 15,000 sessions; Enter commits once', async () => {
-  const view = await fixture();
+const advance = (milliseconds: number) => act(async () => { jest.advanceTimersByTime(milliseconds); });
+
+async function liveFixture(initial = '') {
+  jest.useFakeTimers();
+  const originalSetTimeout = browser.setTimeout;
+  const originalClearTimeout = browser.clearTimeout;
+  browser.setTimeout = globalThis.setTimeout;
+  browser.clearTimeout = globalThis.clearTimeout;
+  const view = await fixture(initial);
+  return {
+    ...view,
+    restore: () => {
+      browser.setTimeout = originalSetTimeout;
+      browser.clearTimeout = originalClearTimeout;
+      jest.useRealTimers();
+    },
+  };
+}
+
+test('live typing debounces the trimmed query and restarts after each edit', async () => {
+  const view = await liveFixture();
   try {
-    for (let length = 1; length <= 'Artificial'.length; length += 1) await view.type('Artificial'.slice(0, length));
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 200)); });
-    expect(view.input.value).toBe('Artificial');
+    expect(document.querySelector('[data-session-search-input]')).not.toBeNull();
+    await view.type('old');
+    await advance(99);
     expect(view.searches).toEqual([]);
-    expect(view.visited()).toBe(0);
-    expect(view.parentRenders()).toBe(1);
-    expect((await view.key('Enter')).defaultPrevented).toBe(true);
-    expect(view.searches).toEqual(['Artificial']);
-    expect(view.visited()).toBeGreaterThanOrEqual(15_000);
-    const visited = view.visited();
-    await view.key('Enter', { repeat: true });
-    await view.key('Enter');
-    expect(view.searches).toHaveLength(1);
-    expect(view.visited()).toBe(visited);
-  } finally { await view.cleanup(); }
+    await view.type('  committed  ');
+    await advance(99);
+    expect(view.searches).toEqual([]);
+    await advance(1);
+    expect(view.searches).toEqual(['committed']);
+  } finally { await view.cleanup(); view.restore(); }
 });
 
-test('edits preserve applied results until Enter and clearing applies immediately', async () => {
-  const view = await fixture('Artificial');
+test('live Enter flushes once and clear cancels pending work immediately', async () => {
+  const view = await liveFixture();
   try {
-    const visited = view.visited();
-    await view.type('Different');
-    expect(view.visited()).toBe(visited);
-    expect(view.searches).toEqual([]);
+    await view.type('query');
+    await view.key('Enter');
+    expect(view.searches).toEqual(['query']);
+    await advance(100);
+    expect(view.searches).toEqual(['query']);
+    await view.type('outdated');
     await view.clear();
-    expect(view.input.value).toBe('');
-    expect(view.searches).toEqual(['']);
-    await view.type('  Artificial  ');
-    await view.key('Enter');
-    expect(view.searches.at(-1)).toBe('Artificial');
-    await view.type('');
+    expect(view.searches).toEqual(['query', '']);
+    await advance(100);
+    expect(view.searches).toEqual(['query', '']);
+    await view.external('applied');
+    await view.type('   ');
     expect(view.searches.at(-1)).toBe('');
-  } finally { await view.cleanup(); }
+  } finally { await view.cleanup(); view.restore(); }
 });
 
-test('IME confirmation does not submit or clear the query', async () => {
-  const view = await fixture();
+test('live timers cancel on external value changes and inactive input', async () => {
+  const view = await liveFixture();
   try {
+    await view.type('pending');
+    await view.external('external');
+    await advance(100);
+    expect(view.searches).toEqual([]);
+    expect(view.input.value).toBe('external');
+    await view.type('hidden');
+    await view.active(false);
+    await advance(100);
+    await view.type('inactive');
+    await advance(100);
+    expect(view.searches).toEqual([]);
+  } finally { await view.cleanup(); view.restore(); }
+});
+
+test('live unmount cancels pending search', async () => {
+  const view = await liveFixture();
+  try {
+    await view.type('pending');
+    await view.cleanup();
+    await advance(100);
+    expect(view.searches).toEqual([]);
+  } finally { view.restore(); }
+});
+
+test('live IME cancels precomposition work and commits without another keystroke', async () => {
+  const view = await liveFixture();
+  try {
+    await view.type('outdated');
+    await advance(50);
     await view.compose('compositionstart');
     await view.type('人工');
-    expect((await view.key('Enter')).defaultPrevented).toBe(false);
-    await view.key('Escape', { isComposing: true });
-    expect(view.input.value).toBe('人工');
-    await view.compose('compositionend');
-    await view.key('Enter', { keyCode: 229 });
+    await advance(100);
+    await view.key('Enter', { isComposing: true });
     expect(view.searches).toEqual([]);
-    await view.key('Enter');
+    await view.compose('compositionend');
+    await advance(99);
+    expect(view.searches).toEqual([]);
+    await advance(1);
     expect(view.searches).toEqual(['人工']);
-  } finally { await view.cleanup(); }
+    await view.compose('compositionstart');
+    await view.type('');
+    expect(view.searches).toEqual(['人工']);
+    await view.compose('compositionend');
+    expect(view.searches).toEqual(['人工', '']);
+    await advance(100);
+    expect(view.searches).toEqual(['人工', '']);
+  } finally { await view.cleanup(); view.restore(); }
 });
 
 test('Escape clears the draft first, then closes; external resets replace unsent text', async () => {
@@ -159,5 +210,87 @@ test('Escape clears the draft first, then closes; external resets replace unsent
     await view.type('unsent edit');
     await view.external('');
     expect(view.input.value).toBe('');
+  } finally { await view.cleanup(); }
+});
+
+async function renderVariant(props: Partial<React.ComponentProps<typeof SessionSearchInput>>) {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  await act(async () => root.render(<I18nProvider>
+    <SessionSearchInput value="" onSearch={() => undefined} placeholder="Search sessions" clearLabel="Clear search" {...props} />
+  </I18nProvider>));
+  const input = host.querySelector('input');
+  if (!input) throw new Error('Input fixture missing');
+  return { host, input, cleanup: async () => { await act(async () => root.unmount()); host.remove(); } };
+}
+
+test('trailing controls sit inside the field, before the clear button', async () => {
+  const view = await renderVariant({ value: 'query', trailing: <span data-test-trailing>3</span> });
+  try {
+    const field = view.host.querySelector('[data-session-search-input]');
+    const trailing = view.host.querySelector('[data-test-trailing]');
+    const clear = view.host.querySelector('button[aria-label="Clear search"]');
+    expect(trailing?.parentElement).toBe(field);
+    expect(clear?.parentElement).toBe(field);
+    expect(trailing && clear ? Boolean(trailing.compareDocumentPosition(clear) & 4) : false).toBe(true);
+  } finally { await view.cleanup(); }
+});
+
+test('an empty field offers no clear button', async () => {
+  const view = await renderVariant({});
+  try {
+    expect(view.host.querySelector('button')).toBeNull();
+  } finally { await view.cleanup(); }
+});
+
+test('a quiet field rests without field chrome and takes it once focused or filled', async () => {
+  const resting = await renderVariant({ quiet: true });
+  try {
+    const field = resting.host.querySelector('[data-session-search-input]');
+    expect(field?.className).not.toContain('oc-field');
+    await act(async () => { resting.input.focus(); });
+    expect(field?.className).toContain('oc-field');
+  } finally { await resting.cleanup(); }
+  const filled = await renderVariant({ quiet: true, value: 'query' });
+  try {
+    expect(filled.host.querySelector('[data-session-search-input]')?.className).toContain('oc-field');
+  } finally { await filled.cleanup(); }
+});
+
+test('the label names the field when the placeholder is a short word', async () => {
+  const view = await renderVariant({ placeholder: 'Search', label: 'Search sessions' });
+  try {
+    expect(view.input.getAttribute('aria-label')).toBe('Search sessions');
+    expect(view.input.getAttribute('placeholder')).toBe('Search');
+  } finally { await view.cleanup(); }
+});
+
+test('a space typed before the debounce fires survives the commit', async () => {
+  const view = await liveFixture();
+  try {
+    await view.type('hello ');
+    await advance(100);
+    expect(view.searches).toEqual(['hello']);
+    // The parent now holds "hello"; the field still ends with the space.
+    expect(view.input.value).toBe('hello ');
+    await view.type('hello world');
+    await advance(100);
+    expect(view.searches).toEqual(['hello', 'hello world']);
+  } finally { await view.cleanup(); view.restore(); }
+});
+
+test('a press on the field outside its input and buttons puts the caret in the input', async () => {
+  const view = await renderVariant({ quiet: true, value: 'query' });
+  try {
+    const field = browser.document.querySelector('[data-session-search-input]');
+    const press = new browser.Event('mousedown', { bubbles: true, cancelable: true });
+    await act(async () => { field?.dispatchEvent(press); });
+    expect(press.defaultPrevented).toBe(true);
+    expect(browser.document.activeElement).toBe(view.input);
+    // A press on the clear button is the button's own.
+    const onButton = new browser.Event('mousedown', { bubbles: true, cancelable: true });
+    await act(async () => { browser.document.querySelector('button')?.dispatchEvent(onButton); });
+    expect(onButton.defaultPrevented).toBe(false);
   } finally { await view.cleanup(); }
 });

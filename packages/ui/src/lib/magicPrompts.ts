@@ -1,13 +1,3 @@
-/**
- * Magic Prompt definitions and the client for `/api/magic-prompts`
- * (contract: packages/web/server/lib/magic-prompts/DOCUMENTATION.md).
- *
- * `loadMagicPrompts(directory)` reads, once per operation, the overrides the
- * server resolved for work in that directory, and renders all of that
- * operation's prompts from the read. Nothing is cached between operations, so
- * a hand edit shows up on the next one, and a failed or malformed read throws
- * instead of falling back to built-in text.
- */
 import { z } from 'zod';
 
 import { runtimeFetch } from './runtime-fetch';
@@ -57,7 +47,9 @@ export type MagicPromptId =
   | 'session.fusion.instructions'
   | 'session.fusion.codeInstructions'
   | 'memory.tidy.visible'
-  | 'memory.tidy.instructions';
+  | 'memory.tidy.instructions'
+  | 'memory.toDocs.visible'
+  | 'memory.toDocs.instructions';
 
 interface MagicPromptDefinition {
   id: MagicPromptId;
@@ -163,8 +155,6 @@ Files changed across these commits:
     title: 'Walkthrough Instructions',
     group: 'Git',
     description: 'Your preferences for Changes walkthroughs: tone, emphasis, what to dwell on or leave out. The server adds them to its own prompt, so they cannot change the walkthrough format. Empty means none.',
-    // No built-in text, on purpose: the server reads only the override, so a
-    // default here would be text the server never sends.
     template: '',
   },
   {
@@ -883,11 +873,11 @@ Read diffs selectively, file by file; do not print every attempt in full.
     ],
     template: `You are tidying up the memory you keep through the openchamber_memory tool. Agents save entries as they work and rarely revisit them, while the code and the decisions behind them keep moving. Your job is to bring the store back in line with what is true now. Every stored entry is listed in full below, so you do not need memory.read or memory.list.
 
-During this session, save no new memories: you only restructure what is already stored, whatever the usual memory rules say.
+During this session, save no new memories: you only restructure what is already stored, whatever the usual memory rules say. The one save allowed is moving an entry to its right scope.
 
 1. Go through every entry. For project entries, check the files, flags, commands, routes and decisions they name against the project: the code, git history, docs, instructions and skills, plans and notes, and whatever else you can reach, such as issues and linked trackers. A reference to something that is gone is a sign the entry is stale, not proof: a decision can outlive renamed code.
 
-2. Decide what changes. The first test for every entry: would an agent that reads the relevant code, docs and skills learn everything this entry says, including why it is so and whether it may be changed? If yes, the entry only duplicates the project and drifts from it over time: delete it. Where the entry and a doc or skill disagree, the doc or skill is current. Code shows what was done, not why, nor that it was deliberate: an entry that holds a decision, its reason, a rejected alternative or a "leave this as it is" that the project does not state stays, trimmed to that part if the rest is readable elsewhere. Do not move anything into docs or skills; this session changes memory only.
+2. Decide what changes. The first test for every entry: would an agent that reads the relevant code, docs and skills learn everything this entry says, including why it is so and whether it may be changed? If yes, the entry only duplicates the project and drifts from it over time: delete it. Where the entry and a doc or skill disagree, the doc or skill is current. Who wrote an entry does not protect it: the user's own corrections go too once a newer entry or the project contradicts them. Code shows what was done, not why, nor that it was deliberate: an entry that holds a decision, its reason, a rejected alternative or a "leave this as it is" that the project does not state stays, trimmed to that part if the rest is readable elsewhere. Do not move anything into docs or skills; this session changes memory only.
 - Obsolete: what it describes is gone. Delete it.
 - Reversed: a decision the project or a later entry replaced. Rewrite it by memoryId to the decision that holds now, with one line on what it replaced and why when the reason is known: the abandoned choice and the reason for leaving it are what the code will never show.
 - Contradicting entries: the dates settle most of them. When the newer one records a decision or a correction, it holds: merge the two into one entry as under Reversed. When the newer one only discusses or proposes a change, the older one still holds; that pair is a question for the user.
@@ -897,6 +887,7 @@ During this session, save no new memories: you only restructure what is already 
 - One-off task state and anything the save rules exclude: delete.
 - A title with a date, or cut off mid-word: rewrite it by memoryId without the date, in at most 60 characters. The store keeps the dates, and they are what settles a contradiction.
 - A title that names only a topic ("Product decisions, part 2", "Feedback: what is still open"): rewrite it by memoryId to name what the entry holds, so an agent can tell from the session index whether to read it. Do not split the entry to do so.
+- Too many titles: sessions are given every title, newest first, in about 8,000 characters (roughly 150 titles). When the store holds more, merge related entries into topical ones, a short title with every still-true detail in the body, until the titles fit. Never delete what is still true just to fit.
 - Entries marked flagged: leave them alone; the user decides on those.
 An entry nothing contradicts still holds. Leave it as it is.
 
@@ -912,6 +903,33 @@ An entry nothing contradicts still holds. Leave it as it is.
 Nothing waits for approval. Keep the original text of what you changed in mind: if the user disagrees with something, you restore it from there.
 
 --- STORED MEMORY ---
+{{memory_entries}}`,
+  },
+  {
+    id: 'memory.toDocs.visible',
+    title: 'Memory to Docs Visible Prompt',
+    group: 'Memory',
+    description: 'Visible user message sent when the Memory panel offers to move entries into the project\'s agent docs.',
+    template: 'Move these memory entries into the project\'s agent docs.',
+  },
+  {
+    id: 'memory.toDocs.instructions',
+    title: 'Memory to Docs Instructions',
+    group: 'Memory',
+    description: 'Hidden instructions for moving memory entries into the project\'s agent docs, followed by the entries to move.',
+    placeholders: [
+      { key: 'memory_entries', description: 'The memory entries to move: id, scope, type, dates, title and body.' },
+    ],
+    template: `The memory entries below hold project knowledge (a rule, a recipe, a gotcha, a decision) that belongs in the project's agent docs, where every agent and teammate working here reads it. Memory reaches only this user. Move each one:
+
+1. Find where it belongs: the AGENTS.md, skill or module documentation an agent reads while doing the work the entry is about. Prefer an existing file and section over a new one. When the project has instructions for writing agent docs, follow them.
+2. Check the entry against the code before writing it. When part of it is no longer true, write what is true now; when it is wrong as a whole or turns out to be about the user rather than the project, skip it and keep it in memory.
+3. Add only what the file does not say yet, in that file's own style: no dates, no story of how it was learned, no people or private details.
+4. Delete each moved entry from memory with memory.delete and its memoryId.
+
+Do not commit: the changes stay in the working tree for the user to review. Reply with a short report in the language the user works in: each entry and the file it went to, and each skipped entry with one line on why.
+
+--- ENTRIES TO MOVE ---
 {{memory_entries}}`,
   },
 ] as const;
@@ -931,21 +949,17 @@ const LEGACY_PROMPT_KEY_MAP: Record<string, { visible: MagicPromptId; instructio
   },
 };
 
-/** One scope's overrides by prompt id. A Map, so an id such as `__proto__` stays an id. */
 type MagicPromptOverrides = ReadonlyMap<string, string>;
 
-/** One scope of a project view. `invalid` is a failed read and carries no map. */
 type MagicPromptScopeState =
   | { status: 'ok' | 'missing'; overrides: MagicPromptOverrides }
   | { status: 'invalid'; reason: string };
 
 export interface MagicPromptScopesView {
-  /** The registered project the view is about. */
   project: { id: string; path: string; file: string };
   scopes: { global: MagicPromptScopeState; project: MagicPromptScopeState };
 }
 
-/** Selects the scope a mutation writes, in the view of one registered project. */
 interface MagicPromptScopeSelector {
   scope: 'global' | 'project';
   projectId: string;
@@ -953,7 +967,6 @@ interface MagicPromptScopeSelector {
 
 type MagicPromptSource = 'project' | 'global' | 'builtin';
 
-/** The scopes Settings shows one prompt through; `project` is null in the Global scope. */
 interface MagicPromptLayers {
   project: MagicPromptOverrides | null;
   global: MagicPromptOverrides;
@@ -964,7 +977,6 @@ interface ResolvedMagicPrompt {
   source: MagicPromptSource;
 }
 
-/** Every prompt of one operation, rendered from a single read of the overrides. */
 export interface MagicPromptSnapshot {
   render: (id: MagicPromptId, variables?: Record<string, string>) => string;
 }
@@ -988,9 +1000,6 @@ const replaceTemplateVariables = (template: string, variables: Record<string, st
   });
 };
 
-// A scope written before the split stores `git.commit.generate` as one text:
-// its first line is the visible prompt, the rest the instructions. Each part
-// fills only a split key the same scope does not set itself.
 const expandLegacyKeys = (stored: Map<string, string>): MagicPromptOverrides => {
   const result = new Map(stored);
   for (const [legacyKey, splitKeys] of Object.entries(LEGACY_PROMPT_KEY_MAP)) {
@@ -1012,8 +1021,6 @@ const expandLegacyKeys = (stored: Map<string, string>): MagicPromptOverrides => 
 };
 
 const overrideMapSchema = z.preprocess(
-  // The parsed JSON's own entries, taken before an object rebuild could drop
-  // `__proto__`. Anything but an object, an array included, fails the parse.
   (value) => (value instanceof Object && !Array.isArray(value) ? Object.entries(value) : null),
   z.array(z.tuple([z.string(), z.string()])),
 ).transform((entries) => expandLegacyKeys(new Map(entries)));
@@ -1053,7 +1060,6 @@ const request = async <T>(
       : { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: init.body,
     query: init.query,
-    // Each operation reads the files as they are now, hand edits included.
     cache: 'no-store',
   });
   const payload = await response.json().catch(() => null);
@@ -1073,7 +1079,6 @@ const request = async <T>(
 
 const promptPath = (id: MagicPromptId) => `${API_ENDPOINT}/${encodeURIComponent(id)}`;
 
-/** The global overrides, or with a directory the overrides the server resolved for work there. */
 const fetchOverrides = async (sessionDirectory?: string): Promise<MagicPromptOverrides> => (
   (await request(
     API_ENDPOINT,
@@ -1083,7 +1088,6 @@ const fetchOverrides = async (sessionDirectory?: string): Promise<MagicPromptOve
   )).overrides
 );
 
-/** Both scopes of a registered project. A scope that failed to read stays `invalid`, the other is still reported. */
 export const fetchMagicPromptScopes = async (projectId: string): Promise<MagicPromptScopesView> => {
   const view = await request(
     API_ENDPOINT,
@@ -1097,12 +1101,6 @@ export const fetchMagicPromptScopes = async (projectId: string): Promise<MagicPr
   return { project: view.project, scopes: view.scopes };
 };
 
-/**
- * A write goes only to the runtime it was decided on: `runtimeKey` is checked
- * right before the request leaves, so a call made after a runtime switch sends
- * nothing. A switch after the request left does not undo it; the caller drops
- * the answer.
- */
 const mutateScoped = async (
   path: string,
   method: 'PUT' | 'DELETE',
@@ -1148,7 +1146,6 @@ export const getDefaultMagicPromptTemplate = (id: MagicPromptId): string => {
   return getMagicPromptDefinition(id).template;
 };
 
-/** Project, then global, then built-in. Presence decides, so an empty override still wins. */
 export const resolveMagicPromptTemplate = (layers: MagicPromptLayers, id: MagicPromptId): ResolvedMagicPrompt => {
   const projectTemplate = layers.project?.get(id);
   if (projectTemplate !== undefined) return { template: projectTemplate, source: 'project' };
@@ -1157,22 +1154,12 @@ export const resolveMagicPromptTemplate = (layers: MagicPromptLayers, id: MagicP
   return { template: getDefaultMagicPromptTemplate(id), source: 'builtin' };
 };
 
-/** Throws `runtime_changed` when the active runtime is no longer `runtimeKey`. */
 const assertMagicPromptRuntime = (runtimeKey: string): void => {
   if (getRuntimeKey() !== runtimeKey) {
     throw new MagicPromptError('The runtime changed before the magic prompt change was sent', 'runtime_changed');
   }
 };
 
-/**
- * Reads the overrides once for one operation in `directory`, the directory
- * the work happens in; the server merges the owning project's overrides over
- * the global ones. `null` reads the global overrides alone, for work that has
- * no directory yet, such as a new chat. Render every prompt of that operation
- * from the returned snapshot, so a visible prompt and its instructions never
- * come from two different reads. Throws on any read failure: built-in text is
- * never a stand-in for overrides that could not be read.
- */
 export const loadMagicPrompts = async (directory: string | null): Promise<MagicPromptSnapshot> => {
   const overrides = await fetchOverrides(directory ?? undefined);
   return {
@@ -1180,13 +1167,9 @@ export const loadMagicPrompts = async (directory: string | null): Promise<MagicP
   };
 };
 
-// Global-only calls in the legacy response shape. Settings uses them for its
-// Global scope whether or not a project is selected; they never touch a
-// project file.
 
 const toRecord = (overrides: MagicPromptOverrides): Record<string, string> => Object.fromEntries(overrides);
 
-// Checked like `mutateScoped`: nothing is sent once `runtimeKey` is no longer active.
 const mutateGlobal = async (path: string, method: 'PUT' | 'DELETE', runtimeKey: string, failureMessage: string, body?: string): Promise<MagicPromptOverridesPayload> => {
   assertMagicPromptRuntime(runtimeKey);
   const payload = await request(path, { method, body }, globalPayloadSchema, failureMessage);

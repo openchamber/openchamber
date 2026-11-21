@@ -61,12 +61,25 @@ function installGuestScrollbarActivity(doc) {
 }
 var GUEST_SCROLLBAR_SCRIPT = `(${installGuestScrollbarActivity.toString()})(document);`;
 // packages/sdk/src/manifest.ts
+var GUEST_PROVIDER_LOGO_BYTES_MAX = 1024 * 1024;
 var TRACKER_URL_TOKENS = ["{id}", "{segment}", "{segments+}"];
 var TRACKER_URL_TOKEN_SET = new Set(TRACKER_URL_TOKENS);
 // packages/sdk/src/session-events.ts
-var GUEST_SESSION_EVENT_TYPES = ["turn-finished", "turn-failed", "permission-asked", "question-asked"];
+var GUEST_SESSION_EVENT_TYPES = [
+  "turn-finished",
+  "turn-failed",
+  "permission-asked",
+  "question-asked",
+  "turn-started",
+  "session-created",
+  "session-archived",
+  "session-deleted"
+];
 var SESSION_EVENTS_IDLE_MS = 10 * 60000;
 var EVENT_TYPES = new Set(GUEST_SESSION_EVENT_TYPES);
+// packages/sdk/src/service-host.ts
+var SERVICE_SCHEDULE_IDLE_MS = 10 * 60000;
+var MENTIONS_IDLE_MS = 10 * 60000;
 // packages/sdk/src/file-editor.ts
 var patternExpressions = new Map;
 // packages/sdk/src/contract.ts
@@ -111,12 +124,15 @@ var HOST_PUSH_TYPES = new Set([
   "item",
   "resolve",
   "action",
+  "service-event",
   "status-control-event",
   "popover-closed",
   "file-open",
   "file-snapshot",
   "file-saved",
-  "generate-late"
+  "generate-late",
+  "microphone-audio",
+  "microphone-ended"
 ]);
 // packages/sdk/src/service-providers.ts
 var BROWSER_CONTROL_ACTIONS = [
@@ -140,6 +156,7 @@ var SOURCE_CONTROL_PROVIDER_WIRE_VERSION = 1;
 var SOURCE_CONTROL_PROVIDER_METHODS = [
   "auth.verify",
   "auth.probe",
+  "auth.status",
   "changeRequestStatus",
   "listChangeRequests",
   "changeRequestContext",
@@ -171,9 +188,12 @@ var readSessionUser = (user) => {
   if (Object(user) !== user || user === undefined)
     return;
   const { id, login } = user;
-  if (!Number.isSafeInteger(id) || String(login) !== login || login.length === 0)
+  const isPositiveSafeIntegerId = typeof id === "number" && Number.isSafeInteger(id) && id > 0;
+  const isBoundedStringId = typeof id === "string" && id.length > 0 && id.length <= 256;
+  const validId = isPositiveSafeIntegerId || isBoundedStringId;
+  if (!validId || String(login) !== login || login.length === 0)
     return;
-  return { id: Number(id), login };
+  return { id, login };
 };
 var readSession = (session) => {
   if (session === null)
@@ -269,10 +289,15 @@ var createSourceControlForge = ({ env }) => {
 };
 var NOTIFICATIONS_PROVIDER_IDLE_MS = 10 * 60000;
 var TRACKER_PROVIDER_IDLE_MS = 10 * 60000;
+var QUOTA_PROVIDER_IDLE_MS = 10 * 60000;
 // packages/sdk/src/service-surface.ts
 var SURFACE_CONTROLLERS = ["none", "agent", "user"];
 var CONTROLLERS = new Set(SURFACE_CONTROLLERS);
 // packages/sdk/examples/source-control-provider/service/main.ts
+var reviewerStatesPath = `./reviewer-states${".js"}`;
+var { withReviewerStates } = await import(reviewerStatesPath);
+var diffPath = "./diff.js";
+var { mapChangedFile, splitUnifiedDiff } = await import(diffPath);
 var port = Number(process.env.OPENCHAMBER_SERVICE_PORT);
 var serviceToken = process.env.OPENCHAMBER_SERVICE_TOKEN ?? "";
 if (!port || !serviceToken) {
@@ -447,44 +472,11 @@ var mapComment = (call, raw, fallbackUrl) => {
     body: raw.body,
     author: mapUser(call, raw.user)
   };
+  const mine = call.session.user !== null && raw.user !== undefined && call.session.user.login.toLowerCase() === raw.user.login.toLowerCase();
+  comment.canUpdate = mine;
+  comment.canDelete = mine;
   stamp(comment, raw);
   return comment;
-};
-var FILE_STATUSES = new Map([["added", "added"], ["deleted", "removed"], ["removed", "removed"], ["renamed", "renamed"]]);
-var mapChangedFile = (raw) => {
-  const file = { path: raw.filename, status: FILE_STATUSES.get(raw.status ?? "") ?? "modified" };
-  if (raw.additions !== undefined)
-    file.additions = raw.additions;
-  if (raw.deletions !== undefined)
-    file.deletions = raw.deletions;
-  if (raw.changes !== undefined)
-    file.changes = raw.changes;
-  return file;
-};
-var splitUnifiedDiff = (diff) => {
-  const parts = new Map;
-  const chunks = diff.split(/^(?=diff --git )/m).filter((chunk) => chunk.startsWith("diff --git "));
-  for (const chunk of chunks) {
-    const lines = chunk.split(`
-`);
-    const plus = lines.find((line) => line.startsWith("+++ "));
-    const minus = lines.find((line) => line.startsWith("--- "));
-    const renamed = lines.find((line) => line.startsWith("rename to "));
-    let path = "";
-    if (plus && plus !== "+++ /dev/null")
-      path = plus.slice(4).replace(/^b\//, "");
-    else if (renamed)
-      path = renamed.slice("rename to ".length);
-    else if (minus && minus !== "--- /dev/null")
-      path = minus.slice(4).replace(/^a\//, "");
-    else
-      path = lines[0].match(/^diff --git a\/.+? b\/(.+)$/)?.[1] ?? "";
-    if (path)
-      parts.set(path.replace(/\t.*$/, ""), chunk.endsWith(`
-`) ? chunk : `${chunk}
-`);
-  }
-  return parts;
 };
 var listState = (state) => {
   if (state === "closed" || state === "merged")
@@ -546,6 +538,21 @@ var readChangedFiles = async (call, repo, number) => {
   }
   throw new CallError(`The pull request changes more files than this Git host reads (${FILE_SCAN_PAGES * SCAN_SIZE})`, 502, "SCAN_LIMIT");
 };
+var REVIEW_SCAN_PAGES = 10;
+var readReviews = async (call, repo, number) => {
+  const reviews = [];
+  for (let page = 1;page <= REVIEW_SCAN_PAGES; page += 1) {
+    const { data, total } = await api(call, "GET", `${repo}/pulls/${number}/reviews`, {
+      query: { page: String(page), limit: String(SCAN_SIZE) }
+    });
+    if (!Array.isArray(data))
+      return null;
+    reviews.push(...data);
+    if (data.length < SCAN_SIZE || total !== null && reviews.length >= total)
+      return reviews;
+  }
+  return null;
+};
 var COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 var branchRepoId = (ref) => ref.repo_id ?? ref.repo?.id;
 var findBranchPull = async (call, repo, branch) => {
@@ -571,6 +578,7 @@ var unsupported = async (_call, _input, request) => {
   throw new CallError(`${request.method} is not something this Git host offers`, 501, "UNSUPPORTED");
 };
 var handlers = {
+  "auth.status": unsupported,
   "auth.verify": async (call) => {
     const { data } = await api(call, "GET", "/user");
     const user = { id: data.id, login: data.login };
@@ -619,25 +627,22 @@ var handlers = {
   },
   changeRequestContext: async (call, input) => {
     const { project } = await resolveRepo(call, text(input, "directory"), text(input, "remote"), selectorOf(input, "project"));
-    const number = integer(input, "number");
-    const repo = repoPath(project);
-    const includeDiff = input.includeDiff === true;
-    const [raw, { data: comments }, diff, changed] = await Promise.all([
+    const number = integer(input, "number"), repo = repoPath(project), includeDiff = input.includeDiff === true;
+    const [raw, { data: comments }, diff, changed, reviews] = await Promise.all([
       readPull(call, project, number),
       api(call, "GET", `${repo}/issues/${number}/comments`),
       includeDiff ? apiText(call, `${repo}/pulls/${number}.diff`) : Promise.resolve(""),
-      includeDiff ? readChangedFiles(call, repo, number) : Promise.resolve([])
+      includeDiff ? readChangedFiles(call, repo, number) : Promise.resolve([]),
+      input.includeTimeline === true ? readReviews(call, repo, number).catch(() => null) : Promise.resolve(null)
     ]);
-    const pull = mapPull(call, raw, project);
-    const patches = splitUnifiedDiff(diff);
+    const pull = mapPull(call, raw, project), patches = splitUnifiedDiff(diff);
     const files = changed.map((file) => {
-      const mapped = mapChangedFile(file);
-      const patch = patches.get(mapped.path);
+      const mapped = mapChangedFile(file), patch = patches.get(mapped.path);
       if (patch)
         mapped.patch = patch;
       return mapped;
     });
-    return {
+    return withReviewerStates({
       identity: call.identity,
       project,
       changeRequest: pull,
@@ -646,7 +651,7 @@ var handlers = {
       files,
       diff,
       ci: null
-    };
+    }, reviews, raw.requested_reviewers ?? []);
   },
   listIssues: async (call, input) => {
     const { project } = await resolveRepo(call, text(input, "directory"), text(input, "remote"));
@@ -868,6 +873,17 @@ var readResolved = (input) => {
     target: objectOf(resolved, "target")
   };
 };
+var itemCommentPath = async (call, providerTarget, commentId) => {
+  const path = `${repoPath(providerTarget)}/issues/comments/${seg(commentId)}`;
+  const { data } = await api(call, "GET", path);
+  const href = (data.issue_url || data.pull_request_url || "").toLowerCase();
+  const item = `${call.identity.instance.replace(/\/+$/, "")}/${providerTarget.owner}/${providerTarget.name}`.toLowerCase();
+  const match = href.startsWith(`${item}/`) ? /^\/(?:issues|pulls)\/(\d+)\/?$/.exec(href.slice(item.length)) : null;
+  if (!match || Number(match[1]) !== providerTarget.number) {
+    throw new CallError("The comment is not on this item", 409, "SOURCE_CONTROL_MUTATION_TARGET_INVALID");
+  }
+  return path;
+};
 var perform = async (call, input) => {
   const kind = text(input, "kind");
   const normalized = objectOf(input, "input");
@@ -899,6 +915,13 @@ var perform = async (call, input) => {
       await api(call, "PATCH", `${repo}/pulls/${providerTarget.number}`, { body: payload });
       return {};
     }
+    case "issue-update": {
+      const payload = { title: text(normalized, "title") };
+      if (Object.hasOwn(normalized, "body"))
+        payload.body = text(normalized, "body");
+      await api(call, "PATCH", `${repo}/issues/${providerTarget.number}`, { body: payload });
+      return {};
+    }
     case "change-request-merge": {
       const payload = { Do: text(normalized, "method") || "merge" };
       const headSha = text(target, "headSha");
@@ -911,6 +934,14 @@ var perform = async (call, input) => {
     case "change-request-comment":
     case "issue-comment":
       await api(call, "POST", `${repo}/issues/${providerTarget.number}/comments`, { body: { body: text(normalized, "body") } });
+      return {};
+    case "change-request-comment-update":
+    case "issue-comment-update":
+      await api(call, "PATCH", await itemCommentPath(call, providerTarget, text(normalized, "commentId")), { body: { body: text(normalized, "body") } });
+      return {};
+    case "change-request-comment-delete":
+    case "issue-comment-delete":
+      await api(call, "DELETE", await itemCommentPath(call, providerTarget, text(normalized, "commentId")));
       return {};
     case "change-request-state":
     case "issue-state": {
@@ -940,6 +971,11 @@ var reconcile = async (call, input) => {
     case "change-request-update": {
       const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
       const landed = pull.title === text(normalized, "title") && (!Object.hasOwn(normalized, "body") || (pull.body ?? "") === text(normalized, "body"));
+      return landed ? { state: "succeeded", result: {} } : { state: "outcome-unknown" };
+    }
+    case "issue-update": {
+      const { data } = await api(call, "GET", `${repo}/issues/${providerTarget.number}`);
+      const landed = data.title === text(normalized, "title") && (!Object.hasOwn(normalized, "body") || (data.body ?? "") === text(normalized, "body"));
       return landed ? { state: "succeeded", result: {} } : { state: "outcome-unknown" };
     }
     case "change-request-merge": {

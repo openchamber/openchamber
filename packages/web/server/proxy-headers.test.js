@@ -39,6 +39,17 @@ describe('OpenCode proxy header handling', () => {
     expect(headers.accept).toBe('application/json');
   });
 
+  it('keeps a packaged client cross-site fetch metadata away from OpenCode', () => {
+    const headers = collectForwardProxyHeaders({
+      origin: 'capacitor://localhost',
+      'sec-fetch-site': 'cross-site',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-dest': 'empty',
+    });
+
+    expect(headers).toEqual({ origin: 'capacitor://localhost' });
+  });
+
   it('drops content-encoding from forwarded response headers', () => {
     expect(shouldForwardProxyResponseHeader('content-encoding')).toBe(false);
     expect(shouldForwardProxyResponseHeader('Content-Encoding')).toBe(false);

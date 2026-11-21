@@ -28,6 +28,34 @@ export const getAuthoritativeSessionFolderOwnerKey = (
   return chatsRoot ? getSessionFolderOwnerKey(null, chatsRoot) : null;
 };
 
+const WORK_FOLDER_OWNER_PREFIX = 'work:';
+
+export const getWorkFolderOwnerKey = (directory: string): string => `${WORK_FOLDER_OWNER_PREFIX}${directory}`;
+
+export const getGroupFolderOwnerKey = (
+  projectId: string | null | undefined,
+  group: Pick<SessionGroup, 'isMain' | 'isArchivedBucket' | 'directory' | 'worktree' | 'space'>,
+): string | null => {
+  const directory = normalizePath(group.directory ?? null);
+  return !group.isMain && !group.isArchivedBucket && (group.worktree !== null || group.space) && directory
+    ? getWorkFolderOwnerKey(directory)
+    : getSessionFolderOwnerKey(projectId, group.directory);
+};
+
+export const resolveSessionFolderOwnerKey = (
+  session: Session,
+  owner: DirectoryOwner | undefined,
+  isRunLane: boolean,
+): string | null => (
+  owner && owner.kind !== 'project' && !isRunLane
+    ? getWorkFolderOwnerKey(owner.scopeDirectory)
+    : getAuthoritativeSessionFolderOwnerKey(session, owner)
+);
+
+export const getWorkFolderScope = (ownerKey: string | null | undefined): string | null => (
+  ownerKey?.startsWith(WORK_FOLDER_OWNER_PREFIX) ? ownerKey.slice(WORK_FOLDER_OWNER_PREFIX.length) : null
+);
+
 export const getSessionFolderScopes = (
   group: Pick<SessionGroup, 'folderScopes' | 'folderScopeKey' | 'directory'>,
 ): SessionGroupFolderScope[] => {

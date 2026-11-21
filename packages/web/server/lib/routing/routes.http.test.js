@@ -31,6 +31,9 @@ const createApp = ({ routeSend, autoSessions = new Set() } = {}) => {
     setClassifierSource: vi.fn(async () => ({ available: true })),
     setCustomEndpoint: vi.fn(async () => ({ available: true })),
     clearCustomEndpoint: vi.fn(async () => ({ available: true })),
+    setGeminiKey: vi.fn(async () => ({ available: true, geminiKeyPresent: true })),
+    clearGeminiKey: vi.fn(async () => ({ available: true, geminiKeyPresent: false })),
+    testClassifier: vi.fn(async () => ({ ok: true })),
   };
   const app = express();
   registerRoutingRoutes(app, runtime);
@@ -151,6 +154,41 @@ describe('routing send rewrite', () => {
   });
 
 
+  it('routes a form reply in a routed session onto the real model before forwarding the answer', async () => {
+    const order = [];
+    const { app, forwarded } = createApp({
+      autoSessions: new Set(['s1']),
+      routeSend: vi.fn(async () => { order.push(`switched with ${forwarded.length} forwarded`); }),
+    });
+    await request(app)
+      .post('/api/session/s1/form/f1/reply?directory=%2Frepo')
+      .send({ answer: { choice: 'ship it' } })
+      .expect(204);
+    expect(order).toEqual(['switched with 0 forwarded']);
+    expect(forwarded).toEqual([{ path: '/session/s1/form/f1/reply', parsed: true, body: { answer: { choice: 'ship it' } } }]);
+  });
+
+  it('leaves a form unanswered when its reply cannot be routed', async () => {
+    const { app, forwarded } = createApp({
+      autoSessions: new Set(['s1']),
+      routeSend: vi.fn(async () => { throw Object.assign(new Error('no fallback'), { status: 400 }); }),
+    });
+    const response = await request(app).post('/api/session/s1/form/f1/reply').send({ answer: { choice: 'ship it' } });
+    expect(response.status).toBe(400);
+    expect(forwarded).toEqual([]);
+  });
+
+  it('passes a form reply outside a routed session through as a stream', async () => {
+    const { app, runtime, forwarded } = createApp();
+    await request(app)
+      .post('/api/session/global/form/f1/reply')
+      .set('content-type', 'application/json')
+      .send('{"answer":{"choice":"ok"}}')
+      .expect(204);
+    expect(runtime.routeSend).not.toHaveBeenCalled();
+    expect(forwarded).toEqual([{ path: '/session/global/form/f1/reply', parsed: false, raw: '{"answer":{"choice":"ok"}}' }]);
+  });
+
   it('answers with the runtime error instead of forwarding an unroutable send', async () => {
     const { app, forwarded } = createApp({
       autoSessions: new Set(['s1']),
@@ -161,9 +199,48 @@ describe('routing send rewrite', () => {
     expect(response.body).toEqual({ error: 'no fallback' });
     expect(forwarded).toEqual([]);
   });
+
+  it.each([
+    [],
+    { text: 42, files: 'invalid', agent: false },
+  ])('passes an unchecked JSON body through routing unchanged: %j', async (body) => {
+    const { app, runtime, forwarded } = createApp({ autoSessions: new Set(['s1']) });
+    await request(app).post('/api/session/s1/prompt').send(body).expect(204);
+    expect(runtime.routeSend).toHaveBeenCalledWith({ sessionId: 's1', directory: undefined, body });
+    expect(forwarded[0].body).toEqual(body);
+  });
+
+  it.each([
+    [{ status: 409, message: false }, 409, false],
+    [{ status: '400', message: 42 }, 500, 42],
+    [null, 500, 'Routing request failed'],
+  ])('preserves loose thrown error fields: %j', async (error, status, message) => {
+    const { app, forwarded } = createApp({
+      autoSessions: new Set(['s1']),
+      routeSend: vi.fn(async () => { throw error; }),
+    });
+    const response = await request(app).post('/api/session/s1/prompt').send({ text: 'hi' });
+    expect(response.status).toBe(status);
+    expect(response.body).toEqual({ error: message });
+    expect(forwarded).toEqual([]);
+  });
 });
 
 describe('routing routes', () => {
+  it('leaves input validation to the runtime', async () => {
+    const { app, runtime } = createApp();
+    await request(app).put('/api/routing/token').send({ token: false }).expect(200);
+    expect(runtime.setToken).toHaveBeenCalledWith(false);
+    await request(app).put('/api/routing/classifier').send({ source: [] }).expect(200);
+    expect(runtime.setClassifierSource).toHaveBeenCalledWith([]);
+    await request(app).put('/api/routing/classifier/custom').send({ url: 42, model: false }).expect(200);
+    expect(runtime.setCustomEndpoint).toHaveBeenCalledWith({ url: 42, model: false, key: undefined });
+    await request(app).post('/api/routing/classifier/test').send({ custom: 'invalid' }).expect(200);
+    expect(runtime.testClassifier).toHaveBeenCalledWith({ url: undefined, model: undefined, key: undefined });
+    await request(app).post('/api/routing/classifier/test').send({ custom: null }).expect(200);
+    expect(runtime.testClassifier).toHaveBeenLastCalledWith(undefined);
+  });
+
   it('serves state, saves config and manages the token', async () => {
     const { app, runtime } = createApp();
     const state = await request(app).get('/api/routing').expect(200);
@@ -180,6 +257,10 @@ describe('routing routes', () => {
     expect(runtime.setCustomEndpoint).toHaveBeenCalledWith({ url: 'https://jev.example.com/v1', model: 'jev-latest', key: 'k' });
     await request(app).delete('/api/routing/classifier/custom').expect(200);
     expect(runtime.clearCustomEndpoint).toHaveBeenCalled();
+    await request(app).put('/api/routing/classifier/gemini').send({ key: 'g-key', extra: true }).expect(200);
+    expect(runtime.setGeminiKey).toHaveBeenCalledWith('g-key');
+    await request(app).delete('/api/routing/classifier/gemini').expect(200);
+    expect(runtime.clearGeminiKey).toHaveBeenCalled();
   });
 
 });

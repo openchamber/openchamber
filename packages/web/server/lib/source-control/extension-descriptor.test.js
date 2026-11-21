@@ -19,7 +19,7 @@ const contribution = (overrides = {}) => ({
   },
   capabilities: {
     projects: true, issues: true, changeRequests: true, draftChangeRequests: false,
-    merge: { methods: ['merge'] }, ci: false, comments: true, reviews: false,
+    merge: { methods: ['merge'] }, ci: false, comments: true, commentEdit: false, reviews: false,
     state: true, labels: false, reviewers: false, changeRequestPatch: false, liveSummaries: true,
   },
   token: { header: 'authorization', scheme: 'token', scopes: ['repo'], createPath: '/user/settings/applications' },
@@ -49,6 +49,27 @@ const isDeeplyFrozen = (value) => {
 afterEach(() => detachExtensionDescriptors());
 
 describe('extension source-control descriptors', () => {
+  it('publishes the optional service URL path without adding a capability', () => {
+    const presentation = contribution().presentation;
+    const descriptor = build({ presentation: { ...presentation, urls: { ...presentation.urls, resolve: '/handle-url' } } });
+    const published = publicProviderDescriptor(descriptor, 5, { guestId: 'forge', name: guest.name, version: guest.version });
+    expect(sourceControlProviderListSchema.parse([published])[0].urls.resolve).toBe('/handle-url');
+    expect(descriptor.capabilities).toEqual(build().capabilities);
+    expect(publicProviderDescriptor(build(), 5).urls).not.toHaveProperty('resolve');
+  });
+
+  it('publishes a service-owned login and omits token settings only when no token is declared', () => {
+    const login = { kind: 'service', hint: 'Run forge auth login on the server' };
+    const descriptor = build({ login, token: undefined });
+    expect(descriptor.authMethods).toEqual({ device: false, pat: false, cli: login });
+    expect(descriptor.settings.map((field) => field.key)).toEqual(['instance']);
+    expect(descriptor.extension).not.toHaveProperty('token');
+    const published = publicProviderDescriptor(descriptor, 5);
+    expect(published.auth).toEqual({ methods: ['cli'], cliTransport: false, login });
+    expect(sourceControlProviderListSchema.parse([published])[0].auth.login).toEqual(login);
+    expect(build({ login }).settings.map((field) => field.key)).toEqual(['instance', 'token']);
+  });
+
   it('derives the id from the guest and freezes the whole descriptor', () => {
     const descriptor = build();
     expect(descriptor.id).toBe('ext-forge');
@@ -75,9 +96,19 @@ describe('extension source-control descriptors', () => {
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false, projectUploads: false,
       // Starting a thread needs review threads, which stay off.
       startThread: false, authorCanReview: true,
+      // Published from the capability, which is what gates the two routes.
+      commentEdit: false,
     });
     expect(descriptor.terminology).toEqual({ changeRequest: 'pullRequest', ci: 'checks' });
     expect(descriptor.trackedItems).toEqual({ nestedOwners: false, defaultInstance: null, batchLimit: 25 });
+  });
+
+  it('publishes comment editing from the capability that gates its routes, never from a presentation flag', () => {
+    const off = build({ capabilities: { ...contribution().capabilities, commentEdit: false } });
+    expect(off.presentation.features.commentEdit).toBe(false);
+    const on = build({ capabilities: { ...contribution().capabilities, commentEdit: true } });
+    expect(on.presentation.features.commentEdit).toBe(true);
+    expect(on.capabilities.commentEdit).toBe(true);
   });
 
   it('creates through the API only and builds the same descriptor when no change-based field is declared', () => {
@@ -86,6 +117,8 @@ describe('extension source-control descriptors', () => {
     expect(descriptor.capabilities).not.toHaveProperty('createVia');
     expect(descriptor.capabilities).not.toHaveProperty('reviewModel');
     expect(descriptor.capabilities).not.toHaveProperty('revisions');
+    // A host that cannot draft says nothing; the route answers 501 there.
+    expect(descriptor.capabilities).not.toHaveProperty('draftConversion');
     // Branch heads keep the UI's default: an extension cannot turn them off.
     expect(descriptor.presentation.features).not.toHaveProperty('branchHeads');
     expect(descriptor.presentation.features).not.toHaveProperty('submitRequirements');
@@ -95,14 +128,14 @@ describe('extension source-control descriptors', () => {
   it('passes the change-based fields through, and still creates through the API', () => {
     const descriptor = build({
       terminology: { changeRequest: 'change', ci: 'checks' },
-      capabilities: { ...contribution().capabilities, reviews: true, merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true },
+      capabilities: { ...contribution().capabilities, reviews: true, merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true, draftConversion: true },
       token: { header: 'authorization', scheme: 'basic', username: true, scopes: [] },
       presentation: { ...contribution().presentation, features: { authorCanReview: false, issueCloseReason: false, submitRequirements: true } },
     });
     expect(isDeeplyFrozen(descriptor)).toBe(true);
     expect(descriptor.terminology.changeRequest).toBe('change');
     expect(descriptor.capabilities).toMatchObject({
-      merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true, stacks: false,
+      merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true, stacks: false, draftConversion: true,
     });
     expect(descriptor.capabilities).not.toHaveProperty('createVia');
     expect(descriptor.presentation.features.submitRequirements).toBe(true);
@@ -249,6 +282,19 @@ describe('extension source-control descriptors', () => {
     expect(published.features).not.toHaveProperty('createByPush');
     expect(published.features).not.toHaveProperty('branchHeads');
     expect(published.settings.fields).toContainEqual({ id: 'username', kind: 'username', secret: false });
+  });
+
+  it('publishes the text edits an extension declares, and none it does not', () => {
+    const declared = build({
+      presentation: {
+        ...contribution().presentation,
+        features: { authorCanReview: false, issueCloseReason: false, issueEdit: true, changeRequestEdit: true },
+      },
+    });
+    const published = publicProviderDescriptor(declared, 3, declared.extension);
+    expect(published.features).toMatchObject({ issueEdit: true, changeRequestEdit: true });
+    const undeclared = publicProviderDescriptor(build(), 3, build().extension);
+    expect(undeclared.features).toMatchObject({ issueEdit: false, changeRequestEdit: false });
   });
 
   it('is visible through the process-wide facade once attached', () => {

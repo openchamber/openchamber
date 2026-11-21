@@ -7,8 +7,8 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionWorktreeStore } from './session-worktree-store';
 import { expandSlashCommandGoalObjective, materializeOpenDraftSession, resolveSendSelection, routeMessage, useSessionUIStore } from './session-ui-store';
 import { ChildStoreManager } from './child-store';
-import { setSyncRefs } from './sync-refs';
-import { setActionRefs, setOptimisticRefs } from './session-actions';
+import { getAllSyncSessions, setSyncRefs } from './sync-refs';
+import { revertToMessage, setActionRefs, setOptimisticRefs } from './session-actions';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSpaceArchivesStore } from '@/lib/spaces/space-archives';
 import { useCommandsStore } from '@/stores/useCommandsStore';
@@ -36,6 +36,16 @@ import { subscribeSpaceSessionProject } from './space-session-project';
  * These tests focus on the contract layer: that setAttachment/getAttachment work
  * correctly and that the contract helpers produce correct results.
  */
+
+// A send compares its selection with the server's session record. Unless a
+// test says otherwise, the server holds what the sync store holds.
+let serverSessionRead;
+beforeEach(() => {
+  serverSessionRead = spyOn(opencodeClient, 'getSession').mockImplementation(async (id) => (
+    getAllSyncSessions().find((session) => session.id === id) ?? { id }
+  ));
+});
+afterEach(() => serverSessionRead.mockRestore());
 
 describe('session-worktree-store worktree routing', () => {
   beforeEach(() => {
@@ -286,6 +296,71 @@ describe('routeMessage directory scoping', () => {
     expect(calls[0].sessionId).toBe('session-a');
     expect(calls[0].directory).toBe('/session/project');
   });
+
+  // OpenCode records a shell command past a staged revert's boundary, where the
+  // next prompt's commit deletes it (#6319).
+  test('commits a staged revert before running a shell command, and only then', async () => {
+    const childStores = new ChildStoreManager();
+    const store = childStores.ensureChild('/session/project', { bootstrap: false });
+    setActionRefs(childStores, () => '/session/project');
+    const requests = [];
+    let committed = () => undefined;
+    const commit = spyOn(opencodeClient, 'commitRevert').mockImplementation((sessionId, directory) => new Promise((resolve) => {
+      committed = () => { requests.push(['committed', sessionId, directory]); resolve(); };
+    }));
+    const shell = spyOn(opencodeClient, 'shellSession').mockImplementation(async (params) => { requests.push(['shell', params.sessionId]); return 'msg'; });
+    const runShell = () => routeMessage({ sessionId: 'session-a', directory: '/session/project', content: 'pwd', providerID: 'provider-a', modelID: 'model-a', inputMode: 'shell' });
+    try {
+      store.setState({ session: [{ id: 'session-a', revert: { messageID: 'msg_reverted' } }] });
+      const staged = runShell();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(requests).toEqual([]);
+      committed();
+      await staged;
+      store.setState({ session: [{ id: 'session-a' }] });
+      await runShell();
+    } finally {
+      commit.mockRestore();
+      shell.mockRestore();
+      setActionRefs(new ChildStoreManager(), () => '');
+    }
+
+    expect(requests).toEqual([['committed', 'session-a', '/session/project'], ['shell', 'session-a'], ['shell', 'session-a']]);
+  });
+
+  test('admits later input after committing a revert while the shell is still running', async () => {
+    const childStores = new ChildStoreManager();
+    const store = childStores.ensureChild('/session/project', { bootstrap: false });
+    setActionRefs(childStores, () => '/session/project');
+    store.setState({ session: [{ id: 'session-long-shell', revert: { messageID: 'msg_reverted' } }] });
+    let releaseShell = () => {};
+    const shellGate = new Promise((resolve) => { releaseShell = resolve; });
+    const admitted = [];
+    const commit = spyOn(opencodeClient, 'commitRevert').mockImplementation(async () => {
+      store.setState({ session: [{ id: 'session-long-shell' }] });
+    });
+    const shell = spyOn(opencodeClient, 'shellSession').mockImplementation(async (params) => {
+      admitted.push(params.command);
+      if (params.command === 'long-running') await shellGate;
+      return 'msg';
+    });
+    const runShell = (content) => routeMessage({ sessionId: 'session-long-shell', directory: '/session/project', content, providerID: 'provider-a', modelID: 'model-a', inputMode: 'shell' });
+    try {
+      const first = runShell('long-running');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const second = runShell('next');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const admittedBeforeExit = [...admitted];
+      releaseShell();
+      await Promise.all([first, second]);
+      expect(admittedBeforeExit).toEqual(['long-running', 'next']);
+    } finally {
+      releaseShell();
+      commit.mockRestore();
+      shell.mockRestore();
+      setActionRefs(new ChildStoreManager(), () => '');
+    }
+  });
 });
 
 describe('resolveSendSelection thinking level', () => {
@@ -494,6 +569,31 @@ describe('sendMessage captured target', () => {
     expect(calls[0].runtimeKey).toBe(getRuntimeKey());
     expect(calls[0].id).toBe('session-captured');
     expect(calls[0].directory).toBe('/captured/project');
+  });
+
+  // The send path defers a waiting question only after a plain prompt reached its session (#5391).
+  test('reports the route the send took and the session it went to', async () => {
+    const target = { runtimeKey: getRuntimeKey(), sessionId: 'session-captured', directory: '/captured/project' };
+    const send = async (content, inputMode = 'normal') => {
+      let sent;
+      await useSessionUIStore.getState().sendMessage(
+        content, 'provider-a', 'model-a', undefined, undefined, undefined, undefined, undefined, inputMode, { target, onSent: (route) => { sent = route; } },
+      );
+      return sent;
+    };
+    const listCommands = spyOn(opencodeClient, 'listCommands').mockImplementation(async () => [{ name: 'goal-route-test' }]);
+    const sendCommand = spyOn(opencodeClient, 'sendCommand').mockImplementation(async () => {});
+    const shellSession = spyOn(opencodeClient, 'shellSession').mockImplementation(async () => 'msg');
+    try {
+      expect(await send('hello')).toEqual({ route: 'prompt', sessionId: 'session-captured' });
+      expect(await send('/goal-route-test pause')).toEqual({ route: 'command', sessionId: 'session-captured' });
+      expect(await send('pwd', 'shell')).toEqual({ route: 'shell', sessionId: 'session-captured' });
+      expect([calls.length, sendCommand.mock.calls.length, shellSession.mock.calls.length]).toEqual([1, 1, 1]);
+    } finally {
+      listCommands.mockRestore();
+      sendCommand.mockRestore();
+      shellSession.mockRestore();
+    }
   });
 
   test('does not send a captured target through a different runtime', async () => {
@@ -996,6 +1096,27 @@ describe('openNewSessionDraft project binding', () => {
       expect(useConfigStore.getState().currentModelId).toBe('chosen');
     } finally {
       finishActivation();
+      useConfigStore.setState(original);
+    }
+  });
+
+  test('paints the Chats default on a chat draft before discovery, and the project default on a project draft', () => {
+    const original = useConfigStore.getState();
+    useConfigStore.setState({
+      activateDirectory: () => new Promise(() => {}),
+      providers: [], agents: [], settingsDefaultsLoaded: false, isConnected: false,
+      settingsDefaultModel: 'global/model', settingsDefaultAgent: 'build',
+      chatsDefaultModel: 'chat/model', chatsDefaultVariant: 'high', chatsDefaultAgent: 'plan',
+    });
+    useProjectsStore.setState({ projects: [{ ...projectA, defaultModel: 'project/model' }, projectB] });
+    try {
+      useSessionUIStore.getState().openNewSessionDraft({ target: 'chat' });
+      expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'chat', currentModelId: 'model', currentVariant: 'high', currentAgentName: 'plan' });
+      useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectA.id });
+      expect(useConfigStore.getState().currentProviderId).toBe('project');
+      useSessionUIStore.getState().openNewSessionDraft({ target: 'chat' });
+      expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'chat', currentModelId: 'model' });
+    } finally {
       useConfigStore.setState(original);
     }
   });
@@ -1745,6 +1866,32 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-alpha');
   });
 
+  test('a session opened from a chat draft in the app directory reads its own catalog again (#6283)', () => {
+    const originalConfig = useConfigStore.getState();
+    const originalDirectory = useDirectoryStore.getState();
+    const originalProjects = useProjectsStore.getState();
+    const activated = [];
+    try {
+      useProjectsStore.setState({ projects: [{ id: 'alpha', path: '/projects/alpha' }] });
+      useDirectoryStore.setState({ currentDirectory: '/projects/alpha' });
+      useConfigStore.setState({ activateDirectory: async (directory) => { activated.push(directory); } });
+
+      useSessionUIStore.setState({ newSessionDraft: { open: false, directoryOverride: null, parentID: null } });
+      useSessionUIStore.getState().setCurrentSession('session-alpha', '/projects/alpha');
+      expect(useSessionUIStore.getState().currentSessionId).toBe('session-alpha');
+      expect(activated).toEqual([]);
+
+      useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { open: true, target: 'chat', draftId: 1, directoryOverride: null, parentID: null } });
+      useSessionUIStore.getState().setCurrentSession('session-alpha', '/projects/alpha');
+      expect(useSessionUIStore.getState().currentSessionId).toBe('session-alpha');
+      expect(activated).toEqual(['/projects/alpha']);
+    } finally {
+      useConfigStore.setState(originalConfig);
+      useDirectoryStore.setState(originalDirectory);
+      useProjectsStore.setState(originalProjects);
+    }
+  });
+
   test('existing-session send keeps the submit-time target even when selection changes', async () => {
     useSessionUIStore.setState({
       currentSessionId: 'session-project-a',
@@ -2088,6 +2235,119 @@ describe('routeMessage skill invocation', () => {
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendMessageCalls[0].skills.names).toEqual(['grill-with-docs']);
     expect(sendMessageCalls[0].context).toEqual([{ id: expect.stringMatching(/^msg_/), text: additionalParts[0].text, metadata: additionalParts[0].metadata }]);
+  });
+
+  describe('a command with attached context in a session with a revert', () => {
+    const originalCommitRevert = opencodeClient.commitRevert;
+    const commitRevertCalls = [];
+    const part = () => createContextPart({
+      kind: 'code-comment',
+      source: 'file',
+      fileLabel: 'src/auth.ts',
+      startLine: 4,
+      endLine: 4,
+      language: 'ts',
+      code: 'auth();',
+      text: 'check this',
+    });
+    const seedSession = (session) => {
+      const childStores = new ChildStoreManager();
+      childStores.ensureChild('/skills/project', { bootstrap: false }).setState({ session: [session] });
+      setSyncRefs({}, childStores, '/skills/project');
+    };
+    const sendCommandWithContext = () => routeMessage({
+      sessionId: 'session-command',
+      directory: '/skills/project',
+      content: '/inspect auth flow',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      additionalParts: [part()],
+    });
+
+    beforeEach(() => {
+      commitRevertCalls.length = 0;
+      opencodeClient.commitRevert = async (...args) => { commitRevertCalls.push(args); };
+      useCommandsStore.setState({
+        commandsByDirectory: { '/skills/project': [{ name: 'inspect', template: 'Inspect $ARGUMENTS carefully.' }] },
+      });
+    });
+
+    afterEach(() => {
+      opencodeClient.commitRevert = originalCommitRevert;
+      setSyncRefs({}, new ChildStoreManager(), '');
+    });
+
+    test('hands sendCommand the commit of the staged revert, aimed at the session and its directory', async () => {
+      seedSession({ id: 'session-command', directory: '/skills/project', revert: { messageID: 'msg_boundary' } });
+
+      expect(await sendCommandWithContext()).toBe('command');
+
+      await sendCommandCalls[0].commitRevert();
+      expect(commitRevertCalls).toEqual([['session-command', '/skills/project']]);
+    });
+
+    test('waits for a pending revert before sending a slash command with context', async () => {
+      const childStores = new ChildStoreManager();
+      const store = childStores.ensureChild('/skills/project', { bootstrap: false });
+      store.setState({
+        session: [{ id: 'session-command', directory: '/skills/project' }],
+        message: { 'session-command': [{ id: 'msg_boundary', sessionID: 'session-command', role: 'user', time: { created: 1 } }] },
+      });
+      setActionRefs(childStores, () => '/skills/project');
+      setSyncRefs({}, childStores, '/skills/project');
+      let releaseStage = () => {};
+      const stageGate = new Promise((resolve) => { releaseStage = resolve; });
+      let started = () => {};
+      const stageStarted = new Promise((resolve) => { started = resolve; });
+      const stage = spyOn(opencodeClient, 'stageRevert').mockImplementation(async () => {
+        started();
+        await stageGate;
+      });
+      try {
+        const reverting = revertToMessage('session-command', 'msg_boundary');
+        await stageStarted;
+        const sending = sendCommandWithContext();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        const sentBeforeStage = sendCommandCalls.length;
+        releaseStage();
+        await Promise.all([reverting, sending]);
+        expect(sentBeforeStage).toBe(0);
+        expect(sendCommandCalls).toHaveLength(1);
+        await sendCommandCalls[0].commitRevert();
+        expect(commitRevertCalls).toEqual([['session-command', '/skills/project']]);
+      } finally {
+        releaseStage();
+        stage.mockRestore();
+        setActionRefs(new ChildStoreManager(), () => '');
+      }
+    });
+
+    test('reads the marker where the session lives when the send names another directory', async () => {
+      seedSession({ id: 'session-command', directory: '/skills/project', revert: { messageID: 'msg_boundary' } });
+      useCommandsStore.setState({
+        commandsByDirectory: { '/skills/other': [{ name: 'inspect', template: 'Inspect $ARGUMENTS carefully.' }] },
+      });
+
+      await routeMessage({
+        sessionId: 'session-command',
+        directory: '/skills/other',
+        content: '/inspect auth flow',
+        providerID: 'provider-a',
+        modelID: 'model-a',
+        additionalParts: [part()],
+      });
+
+      await sendCommandCalls[0].commitRevert();
+      expect(commitRevertCalls).toEqual([['session-command', '/skills/project']]);
+    });
+
+    test('hands over no commit when nothing is staged', async () => {
+      seedSession({ id: 'session-command', directory: '/skills/project' });
+
+      await sendCommandWithContext();
+
+      expect(sendCommandCalls[0].commitRevert).toBeUndefined();
+    });
   });
 
   test('a command with a quoted selection still runs as a command', async () => {
@@ -2933,5 +3193,46 @@ describe('send does not wait for session knowledge before showing the message', 
       switchRuntimeEndpoint({ apiBaseUrl: originalApiBaseUrl, runtimeKey: originalRuntimeKey });
       opencodeClient.reconnectToRuntimeBaseUrl();
     }
+  });
+});
+
+describe('setSessionDirectory and the model list', () => {
+  const originalLoaded = useConfigStore.getState().providersLoaded;
+  const originalProjects = useProjectsStore.getState().projects;
+  const originalDirectory = useDirectoryStore.getState().currentDirectory;
+  const originalClientDirectory = opencodeClient.getDirectory();
+
+  beforeEach(() => {
+    useDirectoryStore.setState({ currentDirectory: '/projects/gone' });
+    useProjectsStore.setState({ projects: [{ id: 'gone', path: '/projects/gone' }, { id: 'hortai', path: '/projects/hortai' }] });
+    useSessionUIStore.setState({ currentSessionId: 'session-a', currentSessionDirectory: '/projects/gone' });
+  });
+
+  afterEach(() => {
+    useConfigStore.setState({ providersLoaded: originalLoaded });
+    useProjectsStore.setState({ projects: originalProjects });
+    useDirectoryStore.setState({ currentDirectory: originalDirectory });
+    opencodeClient.setDirectory(originalClientDirectory);
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null });
+  });
+
+  test('a session that never loaded the model list takes the new folder for it', () => {
+    useConfigStore.setState({ providersLoaded: false });
+    useSessionUIStore.getState().setSessionDirectory('session-a', '/projects/hortai');
+    expect(useDirectoryStore.getState().currentDirectory).toBe('/projects/hortai');
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe('/projects/hortai');
+  });
+
+  test('a loaded model list stays, and with it the model of the session', () => {
+    useConfigStore.setState({ providersLoaded: true });
+    useSessionUIStore.getState().setSessionDirectory('session-a', '/projects/hortai');
+    expect(useDirectoryStore.getState().currentDirectory).toBe('/projects/gone');
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe('/projects/hortai');
+  });
+
+  test('another session changes nothing', () => {
+    useConfigStore.setState({ providersLoaded: false });
+    useSessionUIStore.getState().setSessionDirectory('session-b', '/projects/hortai');
+    expect(useDirectoryStore.getState().currentDirectory).toBe('/projects/gone');
   });
 });

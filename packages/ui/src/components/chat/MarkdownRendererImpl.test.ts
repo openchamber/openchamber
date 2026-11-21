@@ -6,7 +6,7 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 import { legacyChatQuoteAnchor, resolveChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 
 const browser = new Window({ url: 'http://localhost/' });
-Object.assign(globalThis, { window: browser, document: browser.document, navigator: browser.navigator,
+Object.assign(globalThis, { window: browser, document: browser.document, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage, HTMLElement: browser.HTMLElement,
   HTMLAnchorElement: browser.HTMLAnchorElement, Element: browser.Element, Node: browser.Node, Text: browser.Text,
   SVGElement: browser.SVGElement, MutationObserver: browser.MutationObserver, DOMParser: browser.DOMParser,
@@ -17,12 +17,24 @@ Object.assign(globalThis, { window: browser, document: browser.document, navigat
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
 Object.defineProperty(globalThis, 'customElements', { configurable: true, value: browser.customElements });
 const state = { codeBlockLineWrap: false, tableCellWrap: true, copyMessagesAsPlainText: false, mermaidRenderingMode: 'svg', setCodeBlockLineWrap: () => undefined, setTableCellWrap: () => undefined, openContextFile: (_directory: string, _path: string) => undefined, openContextFileAtLine: (_directory: string, _path: string, _line: number, _column: number) => undefined };
-mock.module('@/stores/useUIStore', () => ({ useUIStore: Object.assign((select: (value: typeof state) => never) => select(state), { getState: () => state }) }));
+mock.module('@/stores/useUIStore', () => ({ useUIStore: Object.assign((select: (value: typeof state) => never) => select(state), { getState: () => state, subscribe: () => () => undefined }), normalizeContextPanelDirectoryKey: (value: string) => value }));
 mock.module('@/lib/router/openSessionFromRoute', () => ({
   openSession: async () => undefined,
   openSessionLink: async () => undefined,
 }));
-mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => '/project' }));
+mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => '/project', resolveEffectiveDirectory: () => '/project' }));
+// Its hooks pull in the session side panel and the stores behind it; these tests draw no tracker chips.
+mock.module('@/components/sourceBoard/openTrackerItem', () => ({
+  trackerTargetOfUrl: () => null,
+  repositoryUrlOfItemLink: () => null,
+  isSameRepositoryItemLink: (left: string, right: string) => left === right,
+  trackerItemLabel: () => null,
+  wasTrackerItemRequested: () => false,
+  settleTrackerItemRequest: () => undefined,
+  useShowTrackerItem: () => null,
+  useOpenProjectOnBoard: () => null,
+  useOpenTrackerItem: () => () => undefined,
+}));
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ runtime: { isVSCode: false }, editor: undefined }) }));
 const openedLinks: string[] = [];
 mock.module('./useOpenChatLink', () => ({ useOpenChatLink: () => (href: string) => { openedLinks.push(href); } }));
@@ -48,6 +60,14 @@ const render = async (content: string, isStreaming = false, allowRawHtml = false
   void isStreaming;
 };
 
+test('chat prose resolves each paragraph, list item and quote by most of its words', async () => {
+  await render('- **nao** — رخصة Apache 2.0 مفتوحة المصدر\n- Run the tests first\n- 42\n\n> Lightdash بيان مفتوح المصدر مبني على dbt\n\nThe Arabic label is مرحبا, and this paragraph is English.');
+  expect(Array.from(host.querySelectorAll('li'), (item) => item.getAttribute('dir'))).toEqual(['rtl', 'ltr', 'auto']);
+  expect(host.querySelector('ul')?.getAttribute('dir')).toBeNull();
+  expect(host.querySelector('blockquote')?.getAttribute('dir')).toBe('rtl');
+  expect(Array.from(host.querySelectorAll('p'), (paragraph) => paragraph.getAttribute('dir'))).toContain('ltr');
+});
+
 test('renders semantic Markdown through native Streamdown code and table components', async () => {
   await render('**bold**\n\n`inline`\n\n```text\nfirst\nsecond\n```\n\n| name | value |\n| --- | --- |\n| [link](https://example.com) | 2 |');
   expect(host.querySelector('[data-streamdown="code-block"]')).not.toBeNull();
@@ -61,6 +81,11 @@ test('renders semantic Markdown through native Streamdown code and table compone
   expect(tableWrapper?.lastElementChild?.querySelector('table')).not.toBeNull();
   expect(Array.from(host.querySelector('pre code')?.children ?? []).map((line) => line.textContent).join('\n')).toBe('first\nsecond');
   expect(host.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe('first\nsecond');
+});
+
+test('each table wrapper follows its content direction', async () => {
+  await render('| الاسم | القيمة |\n| --- | --- |\n| واحد | اثنان |\n\n| Name | Value |\n| --- | --- |\n| one | two |\n\n| 1 | 2 |\n| --- | --- |\n| 3 | 4 |');
+  expect(Array.from(host.querySelectorAll('[data-streamdown="table-wrapper"]'), (wrapper) => wrapper.getAttribute('dir'))).toEqual(['rtl', 'ltr', 'ltr']);
 });
 
 test('legacy quotes cross prose and fenced code in the application renderer', async () => {
@@ -136,9 +161,6 @@ test('file navigation respects disabling, stream settlement and selection-ending
       expect(open.mock.calls).toHaveLength(0);
     }
     await draw(true, true);
-    for (let i = 0; i < 50 && !host.querySelector('pre [data-openchamber-file-ref]'); i++) {
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
-    }
     const targets = host.querySelectorAll<HTMLElement>('a, code[data-openchamber-file-ref], pre [data-openchamber-file-ref]');
     expect(targets.length).toBe(3);
     for (const target of targets) {
@@ -162,12 +184,11 @@ test('on the phone a file link also opens the files drawer (#5486)', async () =>
   const open = spyOn(state, 'openContextFile');
   const { DedicatedMobileAppProvider } = await import('@/apps/mobileAppContext');
   let filesOpened = 0;
-  const actions = { openChanges: () => undefined, openFiles: () => { filesOpened += 1; }, openSourceBoard: () => undefined };
+  const actions = { openChanges: () => undefined, openFiles: () => { filesOpened += 1; }, openSourceBoard: () => undefined, openPlan: () => undefined, openReceivedPage: () => undefined };
   try {
     const content = React.createElement(Renderer.MarkdownContent, { content: '[View README.md](README.md)', directory: '/project', enableFileReferences: true, settled: true });
     await act(() => root.render(React.createElement(I18nProvider, null, React.createElement(DedicatedMobileAppProvider, { actions, children: content }))));
-    host.querySelector<HTMLElement>('a')?.click();
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await act(() => { host.querySelector<HTMLElement>('a')?.click(); });
     expect(open.mock.calls).toEqual([['/project', '/project/README.md']]);
     expect(filesOpened).toBe(1);
   } finally {
@@ -235,6 +256,16 @@ test('links keep the old renderer behaviour: inert when unsafe, bare URLs LTR, f
   footnote?.dispatchEvent(click);
   expect(click.defaultPrevented).toBe(true);
   expect(openedLinks).toEqual([]);
+});
+
+test('a bare link takes the same way as a named one', async () => {
+  openedLinks.length = 0;
+  const url = 'https://github.com/openchamber/openchamber/pull/6206';
+  await render(`${url} and [#6206](${url})`);
+  for (const anchor of host.querySelectorAll('a')) {
+    anchor.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+  }
+  expect(openedLinks).toEqual([url, url]);
 });
 
 test('a code block without a language is labelled text', async () => {

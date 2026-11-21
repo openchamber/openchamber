@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { limitSourceControlDiscoveryCandidates, SOURCE_CONTROL_DISCOVERY_LIMIT } from './sourceControlDiscovery';
+import {
+  limitSourceControlDiscoveryCandidates,
+  readWithConcurrency,
+  SOURCE_CONTROL_DISCOVERY_LIMIT,
+  sourceControlDiscoverySignature,
+} from './sourceControlDiscovery';
 
 describe('source-control sidebar discovery', () => {
   test('keeps at most 50 unique directories in the order they are shown', () => {
@@ -23,5 +28,35 @@ describe('source-control sidebar discovery', () => {
       { directory: '/repo/no-branch', branch: '  ' },
       { directory: '/repo/feature', branch: 'feature' },
     ])).toEqual([{ directory: '/repo/feature', branch: 'feature' }]);
+  });
+
+  test('ignores the order the sidebar shows the candidates in', () => {
+    const candidates = limitSourceControlDiscoveryCandidates([
+      { directory: '/repo/b', branch: 'feature/b' },
+      { directory: '/repo/a', branch: 'feature/a' },
+    ]);
+    const signature = sourceControlDiscoverySignature(candidates);
+
+    expect(sourceControlDiscoverySignature([...candidates].reverse())).toBe(signature);
+    expect(sourceControlDiscoverySignature([candidates[0]])).not.toBe(signature);
+    expect(sourceControlDiscoverySignature([candidates[0], { ...candidates[1], branch: 'feature/other' }])).not.toBe(signature);
+  });
+});
+
+describe('readWithConcurrency', () => {
+  test('reads every item, never more than the limit at once', async () => {
+    let active = 0;
+    let peak = 0;
+    const read: number[] = [];
+    await readWithConcurrency(Array.from({ length: 20 }, (_, index) => index), 8, async (item) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      read.push(item);
+      active -= 1;
+    });
+    expect(peak).toBe(8);
+    expect(read.sort((left, right) => left - right)).toEqual(Array.from({ length: 20 }, (_, index) => index));
+    await readWithConcurrency([], 8, async () => { throw new Error('nothing to read'); });
   });
 });

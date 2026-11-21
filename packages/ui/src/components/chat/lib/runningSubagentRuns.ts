@@ -1,23 +1,12 @@
-/**
- * Background subagent runs that are working right now.
- *
- * A `subagent: true` command leaves nothing in the parent's transcript until
- * the job reports back (see `@/lib/opencode/subagent-run`), so the timeline
- * would show nothing while the subagent works. The live channel that does know
- * is the child session's status: a busy child of this session is a running
- * job. Children a `subagent` tool call already shows as its own row are left to
- * that row, and a child whose report has arrived is shown by the report.
- * Agents of a workflow run are children too; the run's card and the Workflows
- * panel show them, so they are left out here (`excluded`).
- */
 
 import React from 'react';
 
-import { isFinalToolStatus, type Message, type Part, type Session, type SyntheticMessage } from '@/lib/opencode/model';
+import { isFinalToolStatus, type Message, type Part, type SyntheticMessage } from '@/lib/opencode/model';
 import { readSubagentRun, runningSubagentRunMessage } from '@/lib/opencode/subagent-run';
 import { isSubagentTool, subagentSessionId } from '@/lib/opencode/tools';
 import { useSessionWorkflowRuns } from '@/lib/workflows/store';
 import { useDirectorySync } from '@/sync/sync-context';
+import { readChildSessions } from '@/sync/scoped-blocking-requests';
 import type { State } from '@/sync/types';
 
 import type { ChatMessageEntry } from './turns/types';
@@ -30,11 +19,6 @@ const isBusy = (state: Pick<State, 'session_status'>, sessionID: string): boolea
     return status !== undefined && status.type !== 'idle';
 };
 
-/**
- * What the parent's transcript already accounts for: children whose report
- * arrived, children a subagent tool call names, and the time from which a
- * running tool call without its child id yet may own any new child.
- */
 const accountedChildren = (state: Pick<State, 'part'>, messages: readonly Message[]) => {
     const known = new Set<string>();
     let unjoinedCallSince: number | undefined;
@@ -64,10 +48,8 @@ export const selectRunningSubagentRuns = (
     parentSessionID: string,
     excluded: ReadonlySet<string> = NO_EXCLUDED,
 ): SyntheticMessage[] => {
-    const busyChildren: Session[] = [];
-    for (const session of state.session) {
-        if (session.parentID === parentSessionID && !excluded.has(session.id) && isBusy(state, session.id)) busyChildren.push(session);
-    }
+    const busyChildren = readChildSessions(state.session, parentSessionID)
+        .filter((session) => !excluded.has(session.id) && isBusy(state, session.id));
     if (busyChildren.length === 0) return EMPTY_RUNS;
 
     const { known, unjoinedCallSince } = accountedChildren(state, state.message[parentSessionID] ?? []);
@@ -92,7 +74,6 @@ const entryForRun = (run: SyntheticMessage): ChatMessageEntry => {
     return entry;
 };
 
-/** The timeline with each running run placed where its child session started. */
 export const withRunningSubagentRuns = (
     messages: ChatMessageEntry[],
     runs: readonly SyntheticMessage[],
@@ -110,7 +91,6 @@ const sameRuns = (left: readonly SyntheticMessage[], right: readonly SyntheticMe
     left.length === right.length
     && left.every((run, index) => run.id === right[index]?.id && run.description === right[index]?.description);
 
-/** The running subagent runs of a session, stable across unrelated store updates. */
 export const useRunningSubagentRuns = (sessionID: string, directory?: string): SyntheticMessage[] => {
     const workflowRuns = useSessionWorkflowRuns(sessionID || null);
     const workflowAgents = React.useMemo(() => {

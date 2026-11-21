@@ -1,33 +1,27 @@
-import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
-import { Window } from 'happy-dom';
+import { beforeEach, describe, expect, test } from 'bun:test';
+import { directoryEnvironment } from './test-support/directoryEnvironment';
 import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import type { SessionPage } from '@/lib/opencode/client';
 
-const dom = new Window({ url: 'http://a.test' });
-const originalGlobals = new Map<string, PropertyDescriptor | undefined>();
-for (const [name, value] of Object.entries({
-  window: dom, document: dom.document, localStorage: dom.localStorage,
-  sessionStorage: dom.sessionStorage, navigator: dom.navigator, CustomEvent: dom.CustomEvent,
-})) {
-  originalGlobals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
-  Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
-}
-const transport = spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }));
-// Directory-store startup performs unrelated home/location discovery when a window exists.
-mock.module('@/stores/useDirectoryStore', () => ({
-  isDirectoryUnknown: () => false,
-  useDirectoryStore: {
-    getState: () => ({ currentDirectory: '/a/1', homeDirectory: '/home/test', isHomeReady: true }),
-    subscribe: () => () => {},
-  },
-}));
-const chatDirectories = await import('@/lib/chatDirectories');
-mock.module('@/lib/chatDirectories', () => ({ ...chatDirectories, ensureChatsRootDirectory: async () => '/chats' }));
+const environment = directoryEnvironment({ home: '/home/test', lastDirectory: '/a/1' });
+const calls: Array<{ runtime: string; directory?: string | null }> = [];
+let listPage: (directory?: string | null) => Promise<SessionPage> = async () => ({ sessions: [], cursor: {} });
+environment.respond(async (url) => {
+  if (url.pathname === '/api/session') {
+    const directory = url.searchParams.get('directory');
+    if (!directory) return Response.json({ data: [], cursor: {} });
+    calls.push({ runtime: getRuntimeKey(), directory });
+    const page = await listPage(directory);
+    return Response.json({ data: page.sessions, cursor: page.cursor });
+  }
+  if (url.pathname === '/api/fs/home') return Response.json({ home: '/home/test', chatsRoot: '/chats' });
+  if (url.pathname === '/api/fs/directory-stats') return Response.json({ results: [{ path: '/a/1', isDirectory: true }] });
+  if (url.pathname === '/api/location') return Response.json({}, { status: 401 });
+  throw new Error(`Unexpected request: ${url}`);
+});
 const { opencodeClient } = await import('@/lib/opencode/client');
 const { useGlobalSessionsStore } = await import('./useGlobalSessionsStore');
 const { flushPendingSessionWrites } = await import('@/sync/persist-cache');
-const originalList = opencodeClient.listSessionsPage;
-const calls: Array<{ runtime: string; directory?: string | null }> = [];
 const deferred = () => {
   let resolve = (_page: SessionPage) => {};
   const promise = new Promise<SessionPage>(done => { resolve = done; });
@@ -35,28 +29,21 @@ const deferred = () => {
 };
 const empty: SessionPage = { sessions: [], cursor: {} };
 const flush = async () => { for (let i = 0; i < 100; i++) await Promise.resolve(); };
-const switchTo = (key: string, transport = key) => switchRuntimeEndpoint({ apiBaseUrl: `http://${transport}.test`, runtimeKey: key });
+const switchTo = (key: string, transport = key) => {
+  switchRuntimeEndpoint({ apiBaseUrl: `http://${transport}.test`, runtimeKey: key });
+  opencodeClient.reconnectToRuntimeBaseUrl();
+};
 beforeEach(() => {
   flushPendingSessionWrites();
   calls.length = 0;
   switchTo('a');
   useGlobalSessionsStore.getState().resetForRuntimeSwitch();
 });
-afterEach(() => { opencodeClient.listSessionsPage = originalList; });
-afterAll(async () => {
-  await dom.happyDOM.abort();
-  transport.mockRestore();
-  for (const [name, descriptor] of originalGlobals) {
-    if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-    else Reflect.deleteProperty(globalThis, name);
-  }
-});
 
 describe('directory refresh instance ownership', () => {
   test('a multi-directory refresh never starts its remaining directory after an instance round trip', async () => {
     const held = deferred();
-    opencodeClient.listSessionsPage = async ({ directory } = {}) => {
-      calls.push({ runtime: getRuntimeKey(), directory });
+    listPage = async () => {
       return calls.length <= 2 ? held.promise : empty;
     };
     const loading = useGlobalSessionsStore.getState().refreshSessionsForDirectories(['/a/1', '/a/2', '/a/3']);
@@ -74,8 +61,7 @@ describe('directory refresh instance ownership', () => {
   test('new-instance refreshes start before old requests settle and keep their own capacity', async () => {
     const oldGate = deferred();
     const newGate = deferred();
-    opencodeClient.listSessionsPage = async ({ directory } = {}) => {
-      calls.push({ runtime: getRuntimeKey(), directory });
+    listPage = async (directory) => {
       return directory?.startsWith('/a/') ? oldGate.promise : newGate.promise;
     };
     const old = useGlobalSessionsStore.getState().refreshSessionsForDirectories(['/a/1', '/a/2', '/a/3']);
@@ -109,8 +95,7 @@ describe('directory refresh instance ownership', () => {
 
   test('same-instance transport changes retain the directory concurrency limit', async () => {
     const held = deferred();
-    opencodeClient.listSessionsPage = async ({ directory } = {}) => {
-      calls.push({ runtime: getRuntimeKey(), directory });
+    listPage = async () => {
       return held.promise;
     };
     const first = useGlobalSessionsStore.getState().refreshSessionsForDirectories(['/a/1', '/a/2']);

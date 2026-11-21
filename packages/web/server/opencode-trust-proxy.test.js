@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import express from 'express';
 import os from 'os';
 import path from 'path';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'fs/promises';
+import { cp, mkdir, mkdtemp, realpath, rm, writeFile } from 'fs/promises';
 
 import { registerOpenCodeProxy } from './lib/opencode/proxy.js';
 import { createOpenCodeTrust, OPENCODE_TRUST_REQUIRED } from './lib/opencode-trust/index.js';
@@ -106,6 +106,43 @@ describe('OpenCode proxy folder trust', () => {
     expect(upstreamHits).toEqual([]);
 
     expect((await fetch(`${base}/api/session/ses_other/prompt`, { method: 'POST' })).status).toBe(200);
+  });
+
+  it('checks the folder OpenCode decodes from a normalized marked header', async () => {
+    const refused = await fetch(`${base}/api/agent`, { headers: {
+      'x-opencode-directory': encodeURIComponent(path.join(root, '%72epo')),
+      'x-opencode-directory-encoding': 'uri',
+    } });
+
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ code: OPENCODE_TRUST_REQUIRED, directory: repo });
+    expect(upstreamHits).toEqual([]);
+  });
+
+  it('checks a literal-percent folder when a marked header has malformed escapes', async () => {
+    const malformedRepo = path.join(root, 'bad%ZZ');
+    await cp(repo, malformedRepo, { recursive: true });
+    const refused = await fetch(`${base}/api/agent`, { headers: {
+      'x-opencode-directory': malformedRepo,
+      'x-opencode-directory-encoding': 'uri',
+    } });
+
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ code: OPENCODE_TRUST_REQUIRED, directory: malformedRepo });
+    expect(upstreamHits).toEqual([]);
+  });
+
+  it.each([
+    ['marked', { 'x-opencode-directory-encoding': 'uri' }],
+    ['unmarked', {}],
+  ])('checks the raw folder of an %s header that mixes valid and malformed escapes', async (_kind, marker) => {
+    const literalRepo = path.join(root, '1%72epo%ZZ');
+    await cp(repo, literalRepo, { recursive: true });
+    const refused = await fetch(`${base}/api/agent`, { headers: { 'x-opencode-directory': literalRepo, ...marker } });
+
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ code: OPENCODE_TRUST_REQUIRED, directory: literalRepo });
+    expect(upstreamHits).toEqual([]);
   });
 
   it('serves the session list of an untrusted folder', async () => {

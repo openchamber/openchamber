@@ -1,7 +1,7 @@
 import React from 'react';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { isCapacitorApp, isIPadApp } from '@/lib/platform';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import { isMobileSurfaceRuntime, TABLET_LAYOUT_MIN_SHORT_SIDE_PX } from '@/lib/runtimeSurface';
 
 type DeviceType = 'desktop' | 'mobile' | 'tablet';
 
@@ -66,27 +66,15 @@ const setRootDeviceAttributes = (
   }
 
   const root = document.documentElement;
+  const setClass = (name: string, on: boolean) => {
+    if (root.classList.contains(name) !== on) root.classList.toggle(name, on);
+  };
 
-  root.classList.remove('device-mobile', 'device-tablet', 'device-desktop');
-  root.classList.add(
-    deviceType === 'mobile'
-      ? 'device-mobile'
-      : deviceType === 'tablet'
-        ? 'device-tablet'
-        : 'device-desktop'
-  );
-
-  if (isDesktopShellRuntime) {
-    root.classList.add('desktop-runtime');
-    root.classList.remove('mobile-pointer');
-  } else {
-    root.classList.remove('desktop-runtime');
-    if (hasTouchInput) {
-      root.classList.add('mobile-pointer');
-    } else {
-      root.classList.remove('mobile-pointer');
-    }
-  }
+  setClass('device-mobile', deviceType === 'mobile');
+  setClass('device-tablet', deviceType === 'tablet');
+  setClass('device-desktop', deviceType === 'desktop');
+  setClass('desktop-runtime', isDesktopShellRuntime);
+  setClass('mobile-pointer', !isDesktopShellRuntime && hasTouchInput);
 };
 
 export function getDeviceInfo(): DeviceInfo {
@@ -97,14 +85,10 @@ export function getDeviceInfo(): DeviceInfo {
   const prefersCoarsePointer = pointerQuery?.matches ?? false;
   const noHover = hoverQuery?.matches ?? false;
   const maxTouchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints ?? 0 : 0;
-  // Desktop panels are desktop surfaces even when their viewport is narrow.
   const isDesktopShellRuntime = isDesktopShell() || isVSCodeRuntime() || hasDesktopSurfaceOverride();
   const { isExplicitTablet } = getNavigatorDeviceHints(maxTouchPoints);
 
   const hasTouchOnlyPointer = prefersCoarsePointer || noHover;
-  // A desktop shell reports touch points for any touchscreen, pen tablet or
-  // virtual digitizer, even while a hovering mouse drives it; there only the
-  // primary pointer decides touch.
   const hasTouchInput = hasTouchOnlyPointer || (!isDesktopShellRuntime && maxTouchPoints > 0);
 
   const isTabletWidth = width > BREAKPOINTS.md && width <= BREAKPOINTS.lg;
@@ -121,11 +105,6 @@ export function getDeviceInfo(): DeviceInfo {
     isDesktop = true;
     deviceType = 'desktop';
   } else if (isMobileSurfaceRuntime()) {
-    // The mobile surface (Capacitor shell or hosted MobileApp) IS the phone
-    // UI: every component in that tree is built mobile-first, so wide devices
-    // (iPad, Android tablets, rotated phones) must not fall into
-    // tablet/desktop branches scattered across shared components.
-    // Tablet layout upgrades gate on useTabletLayout() (a size class) instead.
     isMobile = true;
     isTablet = false;
     isDesktop = false;
@@ -368,91 +347,49 @@ export function useOrientation(): Orientation {
   return orientation;
 }
 
-/**
- * Smallest viewport side that earns the tablet layout, following Android's
- * long-standing `sw600dp` size class. The SHORT side is what makes this a size
- * question rather than a device question: a phone reports ~360-430 whichever
- * way it is held, a 7"+ tablet or an unfolded book foldable reports ~600+, and
- * a foldable folded shut drops back under it. So a fold is just a resize, and
- * nothing here has to know what a foldable is.
- */
-const TABLET_LAYOUT_MIN_SHORT_SIDE_PX = 600;
-/**
- * Width below which the workspace cannot become a side panel: the sessions
- * sidebar (~320) plus the panel (~380) plus a chat column that is still worth
- * reading. Unfolded book foldables land under this even "landscape", so they
- * keep the full-cover drawer in both orientations — which is the whole point,
- * their wide side is barely wider than a tablet's narrow one.
- */
 const WORKSPACE_PANEL_MIN_WIDTH_PX = 1000;
 
+const ONE_PANEL_MIN_WIDTH_PX = 900;
+
 export interface TabletLayout {
-  /** Sessions become a persistent sidebar, dropdowns become anchored popovers. */
   enabled: boolean;
-  /** There is room for the workspace beside the chat instead of over it. */
   roomyForPanels: boolean;
+  roomyForOnePanel: boolean;
 }
 
-/**
- * The size class holds still while the soft keyboard is up.
- *
- * Android resizes the layout viewport while the soft keyboard is up. On an
- * unfolded book foldable that drop takes the short side under the tablet
- * threshold, so the size class would flip mid-typing and remount the surface
- * that holds the focused field, which closes the keyboard again. Rotating a
- * phone mid-typing does the same the other way (844 wide over a shrunk
- * viewport reads as a tablet). The keyboard is transient, so while it is up
- * the layout computed without it stays, and rotation applies once it closes.
- *
- * The class the native shell sets on `keyboardWillShow` is the signal, with a
- * fallback for the frame where that bridge event and the resize race: an
- * editable field holding focus whose viewport just shrank is the same keyboard.
- */
 let keyboardFreeHeight: number | null = null;
 let keyboardFreeLayout: TabletLayout | null = null;
 
 const keyboardIsUp = (): boolean => {
   const doc = globalThis.document;
   if (!doc) return false;
-  if (doc.documentElement.classList.contains('oc-keyboard-open')) return true;
-  // The bridge event that adds that class and the native resize race each
-  // other, so a focused field whose viewport just shrank in the shell is the
-  // same keyboard. Outside the shell the layout viewport never shrinks for a
-  // keyboard, so this cannot mistake a browser window resize for one.
-  if (!isCapacitorApp()) return false;
   // SAFETY: activeElement is an Element, and every element that can hold the
   // soft keyboard here is an HTMLElement, which is where these flags live.
   const active = doc.activeElement as HTMLElement | null;
   const editing = active !== null
     && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
-  return editing && keyboardFreeHeight !== null && window.innerHeight < keyboardFreeHeight;
+  if (!editing) return false;
+  if (doc.documentElement.classList.contains('oc-keyboard-open')) return true;
+  if (!isCapacitorApp()) return false;
+  return keyboardFreeHeight !== null && window.innerHeight < keyboardFreeHeight;
 };
 
 export const readTabletLayout = (): TabletLayout => {
-  if (typeof window === 'undefined') return { enabled: false, roomyForPanels: false };
+  if (typeof window === 'undefined') return { enabled: false, roomyForPanels: false, roomyForOnePanel: false };
   if (keyboardFreeLayout && keyboardIsUp()) return keyboardFreeLayout;
   const width = window.innerWidth;
   const height = window.innerHeight;
   keyboardFreeHeight = height;
-  // iPads answer this on identity too: iPadOS reports odd viewports in Slide
-  // Over / Split View, and a device we KNOW is a tablet should not flip to the
-  // phone layout because it was given a narrow slice.
   const enabled = isIPadApp() || Math.min(width, height) >= TABLET_LAYOUT_MIN_SHORT_SIDE_PX;
+  const roomyForPanels = enabled && width > height && width >= WORKSPACE_PANEL_MIN_WIDTH_PX;
   keyboardFreeLayout = {
     enabled,
-    roomyForPanels: enabled && width > height && width >= WORKSPACE_PANEL_MIN_WIDTH_PX,
+    roomyForPanels,
+    roomyForOnePanel: enabled && !roomyForPanels && width >= ONE_PANEL_MIN_WIDTH_PX,
   };
   return keyboardFreeLayout;
 };
 
-/**
- * The tablet layout decision, live.
- *
- * Deliberately a hook over a one-shot check: foldables change size class while
- * the app runs, and the Android shell keeps the WebView alive across the fold
- * (`configChanges` covers screenSize), so every consumer has to re-decide
- * rather than remember what it saw at mount.
- */
 export function useTabletLayout(): TabletLayout {
   const [layout, setLayout] = React.useState<TabletLayout>(readTabletLayout);
 
@@ -463,7 +400,9 @@ export function useTabletLayout(): TabletLayout {
       frame = undefined;
       const next = readTabletLayout();
       setLayout((current) => (
-        current.enabled === next.enabled && current.roomyForPanels === next.roomyForPanels
+        current.enabled === next.enabled
+          && current.roomyForPanels === next.roomyForPanels
+          && current.roomyForOnePanel === next.roomyForOnePanel
           ? current
           : next
       ));

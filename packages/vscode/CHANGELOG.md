@@ -1,3 +1,119 @@
+## [2.7.3] - 2026-11-19
+
+### New
+
+- Chat: rename the session from the chat header (thanks to @cemarta7).
+- Chat: a waiting question stays answerable after you send a message of your own (thanks to @sergiopadure).
+
+### Improvements
+
+- Chat: a question folds to its header while you scroll up to read (thanks to @yulia-ivashko).
+
+### Fixes
+
+- Startup: the extension failed to start with "Configured OpenCode binary not found" when OpenChamber's settings still pointed at the OpenCode the desktop app used to carry.
+- Settings: opening Settings from a command without context failed (thanks to @Cyneric).
+- Chat: subagent rows crashed the chat on some cached sessions.
+- Chat: backslashes before a period or a question mark disappeared from your message (thanks to @denishsharma).
+- Chat: a collapsed tool card shows a preview of structured output (thanks to @Cyneric).
+
+## [2.7.2] - 2026-11-15
+
+### New
+
+- Chat: pick the chat width in Settings > Chat > Reading: Default, Wider or Full. The old wide layout is Full.
+- Chat: questions can show as cards in the chat in Settings > Chat > Composer > Questions (thanks to @sergiopadure).
+- Agents: an agent can show you a page and keep working. Your answer comes later and shows as its own row in the chat (thanks to @sergiopadure).
+
+### Improvements
+
+- Chat: typing into a long draft keeps up, and an opened session shows its messages without jumping.
+- Chat: a shell command you stop shows its output so far.
+
+### Fixes
+
+- Chat: a very long reasoning block froze the chat when it finished.
+- Chat: sending a message closed a form whose tool call had already ended (thanks to @sergiopadure).
+- Chat: a background subagent without a report showed its launch notice as the answer.
+
+## [2.7.1] - 2026-11-12
+
+### New
+
+- Sessions: a button in the chat header folds the sessions list, so the chat takes the whole width.
+- Sessions: mark a session as read or unread from its menu, or Alt+click its row.
+- Work status: one button in the chat header opens the Work status panel with MCP servers and Usage (thanks to @gaojunran).
+- Usage: a Mistral card with the monthly Vibe and API allowances.
+- Settings: themes are picked from drawings of the app in each theme, and the theme list has search.
+
+### Improvements
+
+- Work status: the panel docks beside the chat when the editor is wide enough.
+- Sessions: the sessions list has a tidier layout (thanks to @gaojunran), and the session switcher lists your most recent sessions.
+- Chat: Send and Stop share one button, and a streaming reply scrolls as one smooth motion.
+- Chat: Persian, Arabic and Hebrew text runs right to left, also mixed with English in one message (thanks to @nadora35).
+
+### Fixes
+
+- Work status: Usage lists your providers again.
+- Chat: the changed-file chip under a reply opens the diff in the editor (thanks to @yulia-ivashko).
+- Chat: file paths in replies are clickable on Windows (thanks to @catan271).
+- Models: removing a provider no longer breaks every send in projects that defaulted to its model.
+- Chat: the composer could show one model while turns ran on another (thanks to @rebelliard).
+- Chat: your messages show `a<b` and shell variables in code as you typed them.
+- Usage: a Claude setup token says it can't read usage where it used to say the session expired (thanks to @abigfatstone), and an ended Go subscription no longer shows a parse error (thanks to @Eapp1e).
+
+## [2.7.0] - 2026-11-08
+
+### New
+
+- Chat: a waiting form split into tabs has a Next button on each tab and Send on the last one (thanks to @JosueGalRe).
+- Chat: a page that waits for your answer has a Decline button. The agent hears that you declined and doesn't choose for you (thanks to @yulia-ivashko).
+- Chat: an eye button on a secret request shows what you typed before you save it (thanks to @Naputt1).
+- Composer: Shift+Enter continues a numbered list (thanks to @gabrielantoniosilvaoficial).
+- Plugins: a switch on each plugin card turns it off and keeps its config entry and options (thanks to @jwcrystal).
+- Stats: a Today range (thanks to @Eveerme).
+
+### Improvements
+
+- Composer: the thinking level after the model name is coloured by level, and the / list is as wide as @ (thanks to @yulia-ivashko).
+
+### Fixes
+
+- Remote-SSH: an OpenCode path set on your own computer no longer stops OpenChamber from starting on the server (thanks to @yulia-ivashko).
+- Composer: pasted text like @john.doe or @types/node stays text, and a mention of a missing file no longer stops the send.
+- Composer: attached context survives a send after a revert (thanks to @IbrahimKhan12), and so does a form answer or ! command given while a revert is staged (thanks to @yulia-ivashko).
+- Chat: a form in a reply always has Send, and one broken part of a reply's block no longer hides the charts and tables around it.
+- Chat: an answered question stays between the text before it and the reply after it with Activity collapsed.
+- Chat: a collapsed message with many comments takes two lines, and Show more on a long message opens it in place (thanks to @yulia-ivashko).
+- Chat: rendered pages no longer jump between two heights at a fractional display scale, and stay selectable while a form waits (thanks to @ChangeHow).
+- Chat: a finished tool row no longer says "Could not load the result" for a session shown under another folder (thanks to @yangyaofei).
+- Plugins: the page lists plugins from every config file OpenCode reads.
+- Usage: Codex shows numbers when OpenChamber signed in with ChatGPT and the Codex CLI is signed in, and OpenCode Go Teams shows its limits, where it said "no subscription" (thanks to @yulia-ivashko).
+
+## [2.6.1] - 2026-11-04
+
+### New
+
+- Sessions: a session whose folder was renamed or deleted offers Move session above the composer and keeps what you typed (thanks to @yulia-ivashko).
+
+### Improvements
+
+- Performance: the extension asks for less in the background. It refreshes only recent sessions while idle, and usage limits only while they are on screen.
+- Settings/MCP: servers OpenCode adds on its own show as read-only rows with their status (thanks to @DeryFerd).
+- Chat: wrap toggles on tables and code blocks show when they are on (thanks to @DeryFerd).
+
+### Fixes
+
+- Shortcuts: Cmd/Ctrl+P, Cmd/Ctrl+J and Cmd/Ctrl+Shift+F stay with VS Code (thanks to @AlexKutas).
+- Chat: going back to a session restores your place more reliably (thanks to @DeryFerd).
+- Chat: the actions under your message show on machines with no hover, such as a touch screen (thanks to @DeryFerd).
+- Composer: a model you picked holds when you then pick an agent (thanks to @DeryFerd), and a send always switches to the agent shown in the composer (thanks to @IbrahimKhan12).
+- Composer: a long message reference no longer pushes your text past the edge (thanks to @ChangeHow).
+- Multi-run: an armed goal runs in every lane and no longer leaks into your next prompt, and the agent picker stays in parallel mode.
+- MCP: a connected remote server that still needs consent offers sign-in (thanks to @DeryFerd).
+- Settings/Providers: a provider you're signed in to with no models, such as a free Copilot account, keeps its card, so you can remove the account or add another (thanks to @yulia-ivashko).
+
 ## [2.6.0] - 2026-11-02
 
 ### New

@@ -3,28 +3,15 @@ import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { readAssetBlob, runtimeAssetsNeedHeaders } from '@/lib/runtime-asset';
+import { readAssetBlob, runtimeAssetsNeedFetch } from '@/lib/runtime-asset';
 import { MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
 
-/**
- * A PDF, audio, video or font preview is a URL the browser owns, so it carries
- * the short-lived scoped URL token. The URL is made once per file and then
- * held: a new URL reloads the document, which put a PDF back on page 1 and
- * stopped playback every time the shared token rotated. The server checks the
- * token when a request starts, so a held URL keeps loading its document; a
- * player that needs another byte range after the token expired asks `renew`
- * for a URL with a fresh token and resumes where it was.
- */
 
-// `revision` changes when the file's content does and `runtime` when the app
-// switches to another server; either gets a fresh URL and a fresh document.
 type RawAssetRequest = { runtime: string; path: string; directory: string; revision: string; outsideWorkspace: boolean };
 
 type RawAssetUrl = {
-  /** Empty while the first URL is being made. */
   src: string;
   loading: boolean;
-  /** Makes a URL with a valid token for the same file and shows it. */
   renew: () => Promise<string>;
 };
 
@@ -49,7 +36,7 @@ export const useRawAssetUrl = (
   const directory = request?.directory ?? '';
   const revision = request?.revision ?? '';
   const outsideWorkspace = request?.outsideWorkspace ?? false;
-  const needsHeaders = runtimeAssetsNeedHeaders();
+  const needsFetch = runtimeAssetsNeedFetch();
   const key = path ? JSON.stringify([runtime, path, directory, revision, outsideWorkspace]) : '';
   const [held, setHeld] = React.useState<{ key: string; url: string } | null>(null);
 
@@ -66,7 +53,7 @@ export const useRawAssetUrl = (
     const load = async () => {
       try {
         let url: string;
-        if (needsHeaders) {
+        if (needsFetch) {
           const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]);
           const response = await runtimeFetch('/api/fs/raw', {
             query: { path, directory: directory || undefined, allowOutsideWorkspace: outsideWorkspace ? 'true' : undefined },
@@ -85,8 +72,8 @@ export const useRawAssetUrl = (
         reportError(null);
       } catch (error) {
         if (cancelled) return;
-        reportError(needsHeaders ? errorFallback : error instanceof Error ? error.message : errorFallback);
-        setHeld({ key, url: needsHeaders ? '' : rawAssetUrl({ path, directory, outsideWorkspace }) });
+        reportError(needsFetch ? errorFallback : error instanceof Error ? error.message : errorFallback);
+        setHeld({ key, url: needsFetch ? '' : rawAssetUrl({ path, directory, outsideWorkspace }) });
       }
     };
     void load();
@@ -95,14 +82,14 @@ export const useRawAssetUrl = (
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [key, mint, reportError, errorFallback, path, directory, outsideWorkspace, needsHeaders]);
+  }, [key, mint, reportError, errorFallback, path, directory, outsideWorkspace, needsFetch]);
 
   const renew = React.useCallback(async (): Promise<string> => {
-    if (needsHeaders) return held?.key === key ? held.url : '';
+    if (needsFetch) return held?.key === key ? held.url : '';
     const url = await mint();
     setHeld((current) => (current?.key === key ? { key, url } : current));
     return url;
-  }, [key, mint, needsHeaders, held]);
+  }, [key, mint, needsFetch, held]);
 
   const src = key && held?.key === key ? held.url : '';
   return { src, loading: Boolean(key) && held?.key !== key, renew };

@@ -2,8 +2,6 @@ const requests = new WeakMap();
 
 export const isWindowHidePending = (browserWindow) => requests.get(browserWindow)?.hidden === true;
 
-// macOS full-screen transitions are asynchronous. Keep the latest visibility
-// intent until the native transition finishes, including an in-flight entry.
 export const hideWindow = (browserWindow, platform = process.platform, { restoreFullScreen = true } = {}) => {
   if (!browserWindow || browserWindow.isDestroyed()) return;
   if (platform !== 'darwin') {
@@ -36,8 +34,6 @@ export const hideWindow = (browserWindow, platform = process.platform, { restore
   const onEnter = () => {
     if (browserWindow.isDestroyed()) cleanup();
     else if (request.hidden) exitFullScreen();
-    // Electron queues an exit requested during entry. A show cancels hiding,
-    // but restoration must still wait for that queued exit to finish.
     else if (!request.exiting) cleanup();
   };
   const onLeave = () => {

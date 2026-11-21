@@ -45,6 +45,10 @@ Non-user-visible child processes open no console window on Windows.
 - Every quit path goes through `prepareForQuit()` (`main.mjs`), which flushes renderer storage before `app.exit()`: that exit skips the pages' unload handlers, and unwritten localStorage would be lost.
 - Do not infer readiness from stdout when an in-process callback or returned server handle exists.
 
+## Webview Compositing
+
+`webContents.capturePage()` on a `<webview>` guest fails with `UnknownVizError` when Chromium stops compositing it: `visibility: hidden`, clipped to zero by an ancestor (`width: 0` plus overflow clip), or placed outside the window. It captures at `opacity: 0` (an ancestor's counts too) or inside the window behind an opaque layer. The browser panel's screenshot action relies on this (`revealStage` in `BrowserPane.tsx`). Real input sent over the guest's debugger (`Input.dispatchMouseEvent`) has the same need and one more: a hidden guest takes none and the call hangs, and `pointer-events: none` on the view or any ancestor sends a press meant for a cross-origin iframe to the page around it, so for input the stage takes pointer events and sits under the app's content (`z-index: -1`). Inactive panel tabs, browser tabs among them, still hide with `invisible` (`ContextSurfacePanes.tsx`); Electron can leave a macOS webview permanently blank after that, and the remedy, if a tab is ever reported blank after switching, is to park inactive guests offscreen with `visibility: visible` instead.
+
 ## Validation
 
 Before judging any change to the update or quit/install sequence, read `openchamber-change-discipline`'s `references/updater-testing.md`.

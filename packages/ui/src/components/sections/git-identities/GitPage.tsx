@@ -1,4 +1,5 @@
 import { isCompleteIdentity } from '@/lib/api/git-identity';
+import { useDeviceInfo } from '@/lib/device';
 import { identityAccountConnected, identityDisplayName, unavailableAccountReason } from '@/lib/source-control/identity';
 import { useSourceControlDescriptorOf, useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
@@ -52,6 +53,7 @@ const COLOR_MAP: Record<string, string> = {
 
 export const GitPage: React.FC = () => {
   const { t } = useI18n();
+  const { isMobile } = useDeviceInfo();
   const { sourceControl } = useRuntimeAPIs();
   const refreshIdentityAccounts = useSourceControlAuthStore((state) => state.refreshIdentityAccounts);
   const {
@@ -73,8 +75,6 @@ export const GitPage: React.FC = () => {
     loadDefaultGitIdentityId: s.loadDefaultGitIdentityId,
     setDefaultGitIdentityId: s.setDefaultGitIdentityId,
   })));
-  // An identity whose account was disconnected has to say so, so the accounts
-  // of the instances these identities name are read when the page opens.
   React.useEffect(() => {
     void refreshIdentityAccounts(sourceControl, profiles.map((profile) => profile.account));
   }, [refreshIdentityAccounts, sourceControl, profiles]);
@@ -123,6 +123,7 @@ export const GitPage: React.FC = () => {
       <SettingsPageLayout
         title={t('settings.page.git.title')}
         showSaveStatus
+        namedBySidebar
         className="px-4 @xl:px-6 @3xl:px-12"
       >
         <SettingsSection
@@ -134,8 +135,7 @@ export const GitPage: React.FC = () => {
           )}
           settingsItem="git.identities"
         >
-          <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-            {/* Global identity */}
+          <div className={cn('flex flex-col', !isMobile && 'overflow-hidden rounded-lg bg-[var(--surface-elevated)]/70')}>
             {globalIdentity && (
               <IdentityRow
                 profile={globalIdentity}
@@ -147,7 +147,6 @@ export const GitPage: React.FC = () => {
               />
             )}
 
-            {/* Custom profiles */}
             {profiles.map((profile, i) => (
               <IdentityRow
                 key={profile.id}
@@ -160,7 +159,6 @@ export const GitPage: React.FC = () => {
               />
             ))}
 
-            {/* Empty state */}
             {!globalIdentity && profiles.length === 0 && (
               <div className="py-8 px-4 text-center text-muted-foreground">
                 <Icon name="shield-keyhole" className="mx-auto mb-2 h-8 w-8 opacity-40" />
@@ -174,14 +172,12 @@ export const GitPage: React.FC = () => {
         <GitSettings />
       </SettingsPageLayout>
 
-      {/* Editor dialog */}
       <GitIdentityEditorDialog
         open={editorOpen}
         onOpenChange={setEditorOpen}
         profileId={editorProfileId}
       />
 
-      {/* Delete confirmation */}
       <Dialog
         open={deleteDialogProfile !== null}
         onOpenChange={(open) => {
@@ -209,7 +205,6 @@ export const GitPage: React.FC = () => {
   );
 };
 
-// --- Identity row ---
 
 interface IdentityRowProps {
   profile: GitIdentityProfile;
@@ -231,16 +226,14 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
   hasBorder,
 }) => {
   const { t } = useI18n();
+  const { isMobile } = useDeviceInfo();
   const connectedAccountIds = useConnectedAccountIds();
   const authEntries = useSourceControlAuthStore((state) => state.entries);
   const [contextMenuOpen, setContextMenuOpen] = React.useState(false);
   const descriptorOf = useSourceControlDescriptorOf();
   const providers = useSourceControlProviderRegistry((state) => state.byId);
   const iconName = ICON_MAP[profile.icon || 'branch'];
-  // An identity made from a connected account carries its provider's mark: the icon key is the provider id.
   const iconProvider = !iconName && profile.icon ? providers.get(profile.icon) : undefined;
-  // What keeps this identity from being chosen: a missing key, an account
-  // that was disconnected, or the gh CLI login while it is not in use.
   const accountNoteKey = (account: NonNullable<GitIdentityProfile['account']>) => (
     unavailableAccountReason(
       account,
@@ -289,8 +282,11 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
         render={
           <div
             className={cn(
-              'group flex items-center justify-between gap-3 px-4 py-2.5 transition-colors hover:bg-[var(--interactive-hover)]/30 cursor-pointer',
-              hasBorder && 'border-b border-[var(--surface-subtle)]'
+              'group flex cursor-pointer items-center justify-between gap-3',
+              isMobile
+                ? 'min-h-11 rounded-md px-0 py-1.5 active:bg-interactive-hover'
+                : 'px-4 py-2.5 transition-colors hover:bg-[var(--interactive-hover)]/30',
+              !isMobile && hasBorder && 'border-b border-[var(--surface-subtle)]',
             )}
             onClick={onEdit}
             role="button"
@@ -333,10 +329,10 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
           <Button
             size="icon"
             variant="ghost"
-            className="h-6 w-6 shrink-0 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
+            className={cn('shrink-0 opacity-100 transition-opacity pointer-fine:hidden', isMobile ? 'size-9' : 'h-6 w-6 md:opacity-0 md:group-hover:opacity-100')}
             onClick={(e) => e.stopPropagation()}
           >
-            <Icon name="more-2" className="h-3.5 w-3.5" />
+            <Icon name="more" className={isMobile ? 'size-4' : 'h-3.5 w-3.5'} />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-fit min-w-28">

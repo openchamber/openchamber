@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 
-import { composerModelForSpaceAccess, noteSpaceModelAccess, resetSpaceModelAccess, spaceModelRefusal, stoppedSpaceOfTarget } from './space-model-access';
+import { composerModelForSpace, composerModelForSpaceAccess, noteSpaceModelAccess, resetSpaceModelAccess, spaceModelRefusal, stoppedSpaceOfTarget } from './space-model-access';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { SpaceEntry } from './spaces-api';
@@ -59,6 +59,15 @@ describe('spaceModelRefusal', () => {
     expect(spaceModelRefusal(session, 'ollama-local')).toBeNull();
     listed(running({ grants: [anthropic, custom], access: 'needs_access', needsAccess: ['ollama-local'] }));
     expect(spaceModelRefusal(session, 'ollama-local')).toEqual({ spaceId: ID, providerId: 'ollama-local', reason: 'needs_again' });
+  });
+
+  test('a provider of the host\'s catalog counts once the host lists it as one a key can be given for', () => {
+    listed(running());
+    expect(spaceModelRefusal(session, 'opencode-go')).toBeNull();
+    useSpacesStore.getState().noteCatalogProviders('/home/me/app', [{ id: 'opencode-go', name: 'OpenCode Go', supported: true, storedKey: true }, { id: 'amazon-bedrock', name: 'Bedrock', supported: false, storedKey: false }]);
+    expect(spaceModelRefusal(session, 'opencode-go')).toEqual({ spaceId: ID, providerId: 'opencode-go', reason: 'not_granted' });
+    // One no grant can give would send the user to a dialog that cannot help.
+    expect(spaceModelRefusal(session, 'amazon-bedrock')).toBeNull();
   });
 
   test('a key the gatekeeper lost after a restart needs the user again', () => {
@@ -176,5 +185,22 @@ describe('the composer model for a new space', () => {
     useConfigStore.setState({ currentProviderId: 'opencode' });
     expect(composerModelForSpaceAccess(['anthropic'])).toBeNull();
     expect(composerModelForSpaceAccess([])).toBeNull();
+  });
+
+  test('a draft that starts targeting a running space leaves a model the space would refuse, for one of a provider it holds', () => {
+    useSpacesStore.getState().resetForRuntimeSwitch();
+    catalog([{ id: 'opencode', models: ['big-pickle'] }, { id: 'opencode-go', models: ['deepseek-v4.1-flash'] }]);
+    useUIStore.setState({ recentModels: [], hiddenModels: [] });
+    const go = { kind: 'model' as const, id: 'opencode-go', provider: 'opencode-go', upstream: 'https://opencode.ai/inference/go/', source: { kind: 'stored' as const, integration: 'opencode' }, url: 'http://gatekeeper:8080/model/opencode-go' };
+    listed(running({ grants: [go] }));
+    useSpacesStore.getState().noteCatalogProviders('/home/me/app', [{ id: 'opencode-go', name: 'OpenCode Go', supported: true, storedKey: true }]);
+    useConfigStore.setState({ currentProviderId: 'opencode' });
+    expect(composerModelForSpace(DIRECTORY)).toEqual({ providerId: 'opencode-go', modelId: 'deepseek-v4.1-flash' });
+    // A model the space takes stays, and so does any model while the space is not running.
+    useConfigStore.setState({ currentProviderId: 'opencode-go' });
+    expect(composerModelForSpace(DIRECTORY)).toBeNull();
+    useConfigStore.setState({ currentProviderId: 'opencode' });
+    listed(running({ grants: [go], state: 'exited' }));
+    expect(composerModelForSpace(DIRECTORY)).toBeNull();
   });
 });

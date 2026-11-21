@@ -15,6 +15,11 @@ on:
         required: false
         default: false
         type: boolean
+      skip_npm:
+        description: 'Skip npm publishing, for a rerun of a release whose packages are already on npm'
+        required: false
+        default: false
+        type: boolean
       finish_published_release:
         description: 'Finish a release whose macOS build failed: build and add only macOS, rebuild the Windows update manifests from the installers on the release, skip npm, Windows and Linux. Publishes only when everything succeeds'
         required: false
@@ -79,7 +84,7 @@ jobs:
 
   publish-npm:
     needs: create-release
-    if: ${{ github.event.inputs.finish_published_release != 'true' }}
+    if: ${{ github.event.inputs.finish_published_release != 'true' && github.event.inputs.skip_npm != 'true' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -90,7 +95,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24'
+          node-version: '26'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
@@ -110,8 +115,9 @@ jobs:
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Create npm tarball
+      - name: Build server and create npm tarball
         working-directory: packages/web
+        # prepack emits build/server and build/bin before the tarball is read.
         run: bun pm pack
 
       - name: Upload npm tarball to release
@@ -155,25 +161,25 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24'
+          node-version: '26'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Get bundled OpenCode CLI version
-        id: opencode_cli_version
+      - name: Get bundled OpenCode server version
+        id: opencode_server_version
         shell: bash
         run: |
-          VERSION=$(node -p "require('./packages/electron/package.json').opencodeCli.version")
+          VERSION=$(node -p "require('./packages/electron/package.json').devDependencies['@opencode/server']")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Cache bundled OpenCode CLI artifact
+      - name: Cache bundled OpenCode server native packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: packages/electron/.cache/opencode-cli
-          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          path: packages/electron/.cache/opencode-server
+          key: opencode-server-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_server_version.outputs.version }}
           restore-keys: |
-            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+            opencode-server-${{ runner.os }}-${{ matrix.arch }}-
 
       - name: Install Apple Certificate
         env:
@@ -208,8 +214,8 @@ jobs:
           ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
         run: |
           bun run build:web-assets
-          bun run prepare:opencode-cli
-          bun run verify:opencode-cli
+          bun run prepare:opencode-server
+          bun run verify:opencode-server
           bun run prepare:ripgrep
           bun run bundle:main
           # npmRebuild=false in package.json, so electron-builder won't
@@ -218,7 +224,7 @@ jobs:
           # crash on require inside the packaged app.
           bun run rebuild:native
           bunx electron-builder --mac --${{ matrix.arch }} --publish=never
-          bun run verify:opencode-cli:packaged
+          bun run verify:opencode-server:packaged
 
       - name: Verify signature + entitlements + notarization
         run: |
@@ -246,7 +252,19 @@ jobs:
           fi
 
           # Require notary ticket stapled
-          xcrun stapler validate "$APP_PATH"
+          # stapler validate looks the ticket up in Apple CloudKit, which drops
+          # connections now and then (error 68); retry before failing the build.
+          for attempt in 1 2 3 4 5; do
+            if xcrun stapler validate "$APP_PATH"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "Error: stapler validate failed after $attempt attempts"
+              exit 1
+            fi
+            echo "stapler validate failed (attempt $attempt), retrying in 30s"
+            sleep 30
+          done
 
           ENTITLEMENTS=$(codesign -d --entitlements :- "$APP_PATH" 2>&1 || true)
           if echo "$ENTITLEMENTS" | grep -q "com.apple.security.app-sandbox"; then
@@ -308,39 +326,39 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24'
+          node-version: '26'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Get bundled OpenCode CLI version
-        id: opencode_cli_version
+      - name: Get bundled OpenCode server version
+        id: opencode_server_version
         shell: bash
         run: |
-          VERSION=$(node -p "require('./packages/electron/package.json').opencodeCli.version")
+          VERSION=$(node -p "require('./packages/electron/package.json').devDependencies['@opencode/server']")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Cache bundled OpenCode CLI artifact
+      - name: Cache bundled OpenCode server native packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: packages/electron/.cache/opencode-cli
-          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          path: packages/electron/.cache/opencode-server
+          key: opencode-server-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_server_version.outputs.version }}
           restore-keys: |
-            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+            opencode-server-${{ runner.os }}-${{ matrix.arch }}-
 
       - name: Build web assets
         working-directory: packages/electron
         run: bun run build:web-assets
 
-      - name: Prepare bundled OpenCode CLI
+      - name: Prepare bundled OpenCode server
         working-directory: packages/electron
         shell: bash
         env:
           # Windows arm64 builds on an x64 runner; OpenCode and ripgrep need the target arch.
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
         run: |
-          bun run prepare:opencode-cli
-          bun run verify:opencode-cli
+          bun run prepare:opencode-server
+          bun run verify:opencode-server
           bun run prepare:ripgrep
 
       - name: Bundle main process
@@ -362,11 +380,11 @@ jobs:
         working-directory: packages/electron
         shell: bash
         env:
-          # verify:opencode-cli:packaged checks the CLI against the target arch.
+          # verify:opencode-server:packaged checks the bundled server against the target arch.
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
         run: |
           node ./scripts/package.mjs --win --${{ matrix.arch }} --publish=never
-          bun run verify:opencode-cli:packaged
+          bun run verify:opencode-server:packaged
 
       - name: Upload installer to release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
@@ -417,7 +435,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24'
+          node-version: '26'
 
       - name: Verify native Linux architecture
         env:
@@ -434,20 +452,20 @@ jobs:
       - name: Install rpmbuild for the .rpm package
         run: sudo apt-get update && sudo apt-get install -y rpm
 
-      - name: Get bundled OpenCode CLI version
-        id: opencode_cli_version
+      - name: Get bundled OpenCode server version
+        id: opencode_server_version
         shell: bash
         run: |
-          VERSION=$(node -p "require('./packages/electron/package.json').opencodeCli.version")
+          VERSION=$(node -p "require('./packages/electron/package.json').devDependencies['@opencode/server']")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Cache bundled OpenCode CLI artifact
+      - name: Cache bundled OpenCode server native packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: packages/electron/.cache/opencode-cli
-          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          path: packages/electron/.cache/opencode-server
+          key: opencode-server-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_server_version.outputs.version }}
           restore-keys: |
-            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+            opencode-server-${{ runner.os }}-${{ matrix.arch }}-
 
       - name: Run focused Electron release tests
         working-directory: packages/electron
@@ -462,13 +480,13 @@ jobs:
         run: |
           set -euo pipefail
           bun run build:web-assets
-          bun run prepare:opencode-cli
-          bun run verify:opencode-cli
+          bun run prepare:opencode-server
+          bun run verify:opencode-server
           bun run prepare:ripgrep
           bun run bundle:main
           bun run rebuild:native
           node ./scripts/package.mjs --linux --${{ matrix.arch }} --publish=never
-          bun run verify:opencode-cli:packaged
+          bun run verify:opencode-server:packaged
           bun run verify:linux-appimage
 
       - name: Validate Linux update manifest
@@ -560,7 +578,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24'
+          node-version: '26'
 
       - name: Download per-arch update manifests
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -640,6 +658,53 @@ jobs:
             process.exit(1);
           });
           NODE
+
+      # Everything that announces the release (publishing it, the Discord post,
+      # the website rebuild) waits until its files are on the R2 mirror, where
+      # the desktop app and the website download them. A failed upload stops
+      # here with the release still a draft; re-running the job finishes it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+
+      # The draft's files through the API by release id: a draft has no
+      # public download address, and the API keeps working when
+      # github.com/.../releases/download does not.
+      - name: Download the release's desktop files
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ needs.create-release.outputs.version }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release"
+          gh api --paginate "repos/$REPOSITORY/releases/$RELEASE_ID/assets" \
+            -q ".[] | select(.name | startswith(\"OpenChamber-$VERSION-\") or test(\"^latest.*\\\\.yml$\")) | \"\\(.id) \\(.name)\"" |
+            while read -r id name; do
+              gh api -H 'Accept: application/octet-stream' "repos/$REPOSITORY/releases/assets/$id" > "$RUNNER_TEMP/release/$name"
+            done
+          ls -la "$RUNNER_TEMP/release"
+
+      - name: Mirror to R2
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          # R2 rejects the checksums newer AWS CLI versions send by default.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        # The latest published release is what the website links until it is
+        # rebuilt; its files stay even if a release in between never got out.
+        run: |
+          set -euo pipefail
+          LIVE=$(gh release view -R "$REPOSITORY" --json tagName -q .tagName | sed 's/^v//')
+          node scripts/release-mirror/mirror-to-r2.mjs --channel stable --dir "$RUNNER_TEMP/release" --version "$VERSION" --keep "$LIVE"
 
       - name: Publish release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2

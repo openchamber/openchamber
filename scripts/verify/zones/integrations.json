@@ -1,0 +1,289 @@
+{
+  "zone": "integrations",
+  "name": "Integration accounts and extensions",
+  "sources": ["packages/ui/src/components/sections/integrations/IntegrationsPage.tsx"],
+  "features": [
+    {
+      "id": "cards",
+      "name": "Opening integration cards",
+      "sources": [
+        "packages/ui/src/components/sections/integrations/IntegrationsPage.tsx",
+        "packages/ui/src/components/sections/integrations/IntegrationCatalogCard.tsx",
+        "packages/ui/src/components/sections/integrations/SourceControlProviderCard.tsx"
+      ],
+      "what": "Each provider card opens independently, and its header also works from the keyboard.",
+      "reach": "Settings > Integrations > GitHub and GitLab.",
+      "proof": "Enter closes the focused card, Space reopens it, and the other provider's controls stay open.",
+      "scenarios": [{
+        "id": "keyboard",
+        "kind": "path",
+        "title": "Provider cards open independently and Enter and Space toggle the focused header",
+        "steps": [
+          {"do": "network.block", "urls": ["*/api/source-control/*/capabilities*"]},
+          {"do": "open"},
+          {"do": "click", "on": "sidebar.settings"},
+          {"do": "click", "on": "dialog.button", "text": "Integrations", "exact": true, "timeout": 60},
+          {"do": "click", "on": "integrations.card", "item": "integrations.source-control.gitlab"},
+          {"do": "click", "on": "integrations.card", "item": "integrations.source-control.github"},
+          {"do": "see", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Add instance", "exact": true},
+          {"do": "press", "key": "Enter"},
+          {"do": "gone", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Add instance", "exact": true},
+          {"do": "see", "on": "settings.rowButton", "item": "integrations.source-control.gitlab", "text": "Add instance", "exact": true},
+          {"do": "press", "key": " "},
+          {"do": "see", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Add instance", "exact": true}
+        ]
+      }]
+    },
+    {
+      "id": "instances",
+      "name": "Adding source-control instances",
+      "sources": [
+        "packages/ui/src/components/sections/integrations/IntegrationsPage.tsx",
+        "packages/ui/src/components/sections/integrations/IntegrationCatalogCard.tsx",
+        "packages/ui/src/components/sections/integrations/SourceControlProviderCard.tsx"
+      ],
+      "what": "Add instance accepts a valid server address, normalizes it for the provider, refuses unusable addresses and discards cancelled drafts.",
+      "reach": "Settings > Integrations > a source-control card > Add instance.",
+      "proof": "The normalized address appears above its connection status; invalid input stays editable with Operation failed; Cancel clears the draft.",
+      "scenarios": [
+        {
+          "id": "host",
+          "kind": "path",
+          "title": "A GitHub Enterprise URL becomes a normalized host and the instance draft clears",
+          "steps": [
+            {"do": "network.block", "urls": ["*/api/source-control/*/capabilities*"]},
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "dialog.button", "text": "Integrations", "exact": true, "timeout": 60},
+            {"do": "click", "on": "integrations.card", "item": "integrations.source-control.github"},
+            {"do": "click", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Add instance", "exact": true},
+            {"do": "click", "on": "integrations.instanceInput", "provider": "GitHub"},
+            {"do": "type", "text": " https://GitHub.Example.test/ "},
+            {"do": "click", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Use instance", "exact": true},
+            {"do": "see", "on": "integrations.instance", "instance": "github.example.test"},
+            {"do": "gone", "on": "integrations.instanceInput", "provider": "GitHub"},
+            {"do": "click", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Add instance", "exact": true},
+            {"do": "field", "on": "integrations.instanceInput", "provider": "GitHub", "equals": ""}
+          ]
+        },
+        {
+          "id": "origin",
+          "kind": "path",
+          "title": "A Gitea loopback address keeps its HTTP origin and port beside its SSH URL field",
+          "steps": [
+            {"do": "network.block", "urls": ["*/api/source-control/*/capabilities*"]},
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "dialog.button", "text": "Integrations", "exact": true, "timeout": 60},
+            {"do": "click", "on": "integrations.card", "item": "integrations.source-control.gitea"},
+            {"do": "click", "on": "settings.rowButton", "item": "integrations.source-control.gitea", "text": "Add instance", "exact": true},
+            {"do": "click", "on": "integrations.instanceInput", "provider": "Gitea"},
+            {"do": "type", "text": " http://LOCALHOST:8456/ "},
+            {"do": "click", "on": "settings.rowButton", "item": "integrations.source-control.gitea", "text": "Use instance", "exact": true},
+            {"do": "see", "on": "integrations.instance", "instance": "http://localhost:8456"},
+            {"do": "see", "on": "settings.row", "item": "integrations.source-control.gitea.connect", "text": "SSH URL"},
+            {"do": "gone", "on": "integrations.instanceInput", "provider": "Gitea"}
+          ]
+        },
+        {
+          "id": "invalid",
+          "kind": "break",
+          "title": "Blank, insecure, path and reserved GitHub addresses are refused and a corrected address works",
+          "steps": [
+            {"do": "network.block", "urls": ["*/api/source-control/*/capabilities*"]},
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "dialog.button", "text": "Integrations", "exact": true, "timeout": 60},
+            {"do": "click", "on": "integrations.card", "item": "integrations.source-control.github"},
+            {"do": "click", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Add instance", "exact": true},
+            {"do": "click", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Use instance", "exact": true},
+            {"do": "see", "on": "settings.row", "item": "integrations.source-control.github.connect", "text": "Operation failed"},
+            {"do": "click", "on": "integrations.instanceInput", "provider": "GitHub"},
+            {"do": "type", "text": "http://github.example.test"},
+            {"do": "click", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Use instance", "exact": true},
+            {"do": "field", "on": "integrations.instanceInput", "provider": "GitHub", "equals": "http://github.example.test"},
+            {"do": "gone", "on": "integrations.instance", "instance": "github.example.test"},
+            {"do": "click", "on": "integrations.instanceInput", "provider": "GitHub", "clicks": 3},
+            {"do": "press", "key": "Backspace"},
+            {"do": "type", "text": "https://github.example.test/team"},
+            {"do": "click", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Use instance", "exact": true},
+            {"do": "field", "on": "integrations.instanceInput", "provider": "GitHub", "equals": "https://github.example.test/team"},
+            {"do": "click", "on": "integrations.instanceInput", "provider": "GitHub", "clicks": 3},
+            {"do": "press", "key": "Backspace"},
+            {"do": "type", "text": "github.com"},
+            {"do": "click", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Use instance", "exact": true},
+            {"do": "field", "on": "integrations.instanceInput", "provider": "GitHub", "equals": "github.com"},
+            {"do": "click", "on": "integrations.instanceInput", "provider": "GitHub", "clicks": 3},
+            {"do": "press", "key": "Backspace"},
+            {"do": "type", "text": "github.example.test"},
+            {"do": "click", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Use instance", "exact": true},
+            {"do": "see", "on": "integrations.instance", "instance": "github.example.test"}
+          ]
+        },
+        {
+          "id": "cancel",
+          "kind": "path",
+          "title": "Cancel drops the instance address and its validation error",
+          "steps": [
+            {"do": "network.block", "urls": ["*/api/source-control/*/capabilities*"]},
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "dialog.button", "text": "Integrations", "exact": true, "timeout": 60},
+            {"do": "click", "on": "integrations.card", "item": "integrations.source-control.github"},
+            {"do": "click", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Add instance", "exact": true},
+            {"do": "click", "on": "integrations.instanceInput", "provider": "GitHub"},
+            {"do": "type", "text": "http://cancelled.example.test"},
+            {"do": "click", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Use instance", "exact": true},
+            {"do": "see", "on": "settings.row", "item": "integrations.source-control.github.connect", "text": "Operation failed"},
+            {"do": "click", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Cancel", "exact": true},
+            {"do": "gone", "on": "integrations.instanceInput", "provider": "GitHub"},
+            {"do": "gone", "on": "integrations.instance", "instance": "cancelled.example.test"},
+            {"do": "click", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Add instance", "exact": true},
+            {"do": "field", "on": "integrations.instanceInput", "provider": "GitHub", "equals": ""},
+            {"do": "see", "on": "settings.row", "item": "integrations.source-control.github.connect", "text": "Operation failed", "count": 0}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "source-auth",
+      "name": "Source-control connection failures",
+      "sources": [
+        "packages/ui/src/components/sections/integrations/IntegrationsPage.tsx",
+        "packages/ui/src/components/sections/integrations/IntegrationCatalogCard.tsx",
+        "packages/ui/src/components/sections/integrations/SourceControlProviderCard.tsx",
+        "packages/ui/src/components/sections/openchamber/ProviderInstanceAccounts.tsx"
+      ],
+      "what": "An unreadable instance reports the error and offers Retry without offering unverified sign-in methods.",
+      "reach": "Settings > Integrations > GitLab.",
+      "proof": "Operation failed and Retry appear while the token and device sign-in controls stay absent.",
+      "scenarios": [
+        {
+          "id": "read-failure",
+          "kind": "break",
+          "title": "A failed capabilities read reports its error and offers Retry without unverified sign-in controls",
+          "steps": [
+            {"do": "network.block", "urls": ["*/api/source-control/gitlab/capabilities*"]},
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "dialog.button", "text": "Integrations", "exact": true, "timeout": 60},
+            {"do": "click", "on": "integrations.card", "item": "integrations.source-control.gitlab"},
+            {"do": "see", "on": "settings.row", "item": "integrations.source-control.gitlab.connect", "text": "Operation failed"},
+            {"do": "see", "on": "settings.rowButton", "item": "integrations.source-control.gitlab", "text": "Retry", "exact": true, "disabled": false},
+            {"do": "see", "on": "integrations.token", "item": "integrations.source-control.gitlab", "count": 0},
+            {"do": "see", "on": "settings.rowButton", "item": "integrations.source-control.gitlab", "text": "Connect GitLab", "exact": true, "count": 0}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tracker",
+      "name": "Tracker sign-in failures",
+      "sources": [
+        "packages/ui/src/components/sections/integrations/IntegrationsPage.tsx",
+        "packages/ui/src/components/sections/integrations/IntegrationCatalogCard.tsx",
+        "packages/ui/src/components/sections/integrations/TrackerSettings.tsx",
+        "packages/ui/src/components/sections/integrations/trackerSettingsCopy.ts"
+      ],
+      "what": "A browser sign-in that cannot start reports the failure and leaves Connect available.",
+      "reach": "Settings > Integrations > Linear > Connect.",
+      "proof": "The error toast names Linear, the status stays Not connected and Connect is enabled again.",
+      "scenarios": [{
+        "id": "start-failure",
+        "kind": "break",
+        "title": "A failed Linear sign-in start reports the failure and leaves Connect available",
+        "steps": [
+          {"do": "network.block", "urls": ["*/api/tracker/linear/auth/start*"]},
+          {"do": "open"},
+          {"do": "click", "on": "sidebar.settings"},
+          {"do": "click", "on": "dialog.button", "text": "Integrations", "exact": true, "timeout": 60},
+          {"do": "click", "on": "integrations.card", "item": "integrations.linear"},
+          {"do": "click", "on": "settings.rowButton", "item": "integrations.linear", "text": "Connect", "exact": true},
+          {"do": "see", "on": "toast.error", "text": "Linear"},
+          {"do": "see", "on": "integrations.card", "item": "integrations.linear", "text": "Not connected"},
+          {"do": "see", "on": "settings.rowButton", "item": "integrations.linear", "text": "Connect", "exact": true, "disabled": false}
+        ]
+      }]
+    },
+    {
+      "id": "channels",
+      "name": "Notification channel discovery failures",
+      "sources": [
+        "packages/ui/src/components/sections/integrations/IntegrationsPage.tsx",
+        "packages/ui/src/components/sections/integrations/IntegrationCatalogCard.tsx",
+        "packages/ui/src/components/sections/integrations/SourceControlProviderCard.tsx",
+        "packages/ui/src/components/sections/integrations/GuestIntegrationsSection.tsx"
+      ],
+      "what": "A failed notification-channel read reports its error while the other integration cards stay usable.",
+      "reach": "Open Settings > Integrations while the channel request is unavailable.",
+      "proof": "The channel error toast appears and the GitHub card still opens.",
+      "scenarios": [{
+        "id": "read-failure",
+        "kind": "break",
+        "title": "An unavailable channel list reports its error without blocking the built-in integrations",
+        "steps": [
+          {"do": "network.block", "urls": ["*/api/notifications/channels*", "*/api/source-control/*/capabilities*"]},
+          {"do": "open"},
+          {"do": "click", "on": "sidebar.settings"},
+          {"do": "click", "on": "dialog.button", "text": "Integrations", "exact": true, "timeout": 60},
+          {"do": "see", "on": "toast.error", "text": "Could not load the notification channels."},
+          {"do": "click", "on": "integrations.card", "item": "integrations.source-control.github"},
+          {"do": "see", "on": "settings.rowButton", "item": "integrations.source-control.github", "text": "Add instance", "exact": true}
+        ]
+      }]
+    },
+    {
+      "id": "extensions",
+      "name": "Recommended extension installation failures",
+      "sources": [
+        "packages/ui/src/components/sections/integrations/IntegrationsPage.tsx",
+        "packages/ui/src/components/sections/integrations/IntegrationCatalogCard.tsx",
+        "packages/ui/src/components/sections/integrations/CatalogExtensionsSection.tsx",
+        "packages/ui/src/components/sections/integrations/catalogExtensions.ts"
+      ],
+      "what": "Recommended extensions show their installation state, expand independently and remain installable after a failed request.",
+      "reach": "Settings > Integrations > OpenChamber extensions.",
+      "proof": "Both cards offer Install; a refused install reports an error, keeps Not installed and releases its busy state.",
+      "scenarios": [{
+        "id": "install-failure",
+        "kind": "break",
+        "title": "A refused extension install keeps both recommended cards usable and the extension uninstalled",
+        "steps": [
+          {"do": "open"},
+          {"do": "click", "on": "sidebar.settings"},
+          {"do": "click", "on": "dialog.button", "text": "Integrations", "exact": true, "timeout": 60},
+          {"do": "click", "on": "integrations.card", "item": "integrations.extensions.excalidraw"},
+          {"do": "click", "on": "integrations.card", "item": "integrations.extensions.resource-monitor"},
+          {"do": "see", "on": "settings.rowButton", "item": "integrations.extensions.resource-monitor", "text": "Install", "exact": true, "disabled": false},
+          {"do": "network.block", "urls": ["*/api/guests"]},
+          {"do": "click", "on": "settings.rowButton", "item": "integrations.extensions.excalidraw", "text": "Install", "exact": true},
+          {"do": "see", "on": "toast.error"},
+          {"do": "see", "on": "integrations.card", "item": "integrations.extensions.excalidraw", "text": "Not installed"},
+          {"do": "see", "on": "settings.rowButton", "item": "integrations.extensions.excalidraw", "text": "Install", "exact": true, "disabled": false},
+          {"do": "see", "on": "settings.rowButton", "item": "integrations.extensions.resource-monitor", "text": "Install", "exact": true, "disabled": false},
+          {"do": "see", "on": "settings.rowButton", "item": "integrations.extensions.excalidraw", "text": "Remove", "exact": true, "count": 0}
+        ]
+      }]
+    },
+    {
+      "id": "catalog",
+      "name": "Browsing integrations",
+      "what": "Browse integrations leaves Settings and opens the integration catalog.",
+      "reach": "Settings > Integrations > Browse integrations.",
+      "proof": "Settings closes and the catalog's search field appears.",
+      "scenarios": [{
+        "id": "browse",
+        "kind": "path",
+        "title": "Browse integrations closes Settings and opens the catalog",
+        "steps": [
+          {"do": "open"},
+          {"do": "click", "on": "sidebar.settings"},
+          {"do": "click", "on": "dialog.button", "text": "Integrations", "exact": true, "timeout": 60},
+          {"do": "click", "on": "dialog.button", "text": "Browse integrations", "exact": true},
+          {"do": "gone", "on": "settings.search"},
+          {"do": "see", "on": "integrations.catalogSearch"}
+        ]
+      }]
+    }
+  ]
+}

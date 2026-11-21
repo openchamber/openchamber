@@ -1,13 +1,3 @@
-/**
- * Agent memory, as the panel and the send path see it.
- *
- * The server owns the store; this holds the last snapshot read from it and
- * serializes writes so two quick edits cannot land out of order.
- *
- * A failed load never blanks what is already held. An empty list would read as
- * "the agent has forgotten everything", which is the one wrong answer here: the
- * user would go looking for lost memory that is sitting safely on disk.
- */
 
 import { create } from 'zustand';
 
@@ -15,7 +5,9 @@ import {
   AgentMemoryDisabledError,
   deleteAgentMemory,
   fetchAgentMemory,
+  undoAgentMemoryDream,
   updateAgentMemory,
+  type AgentMemoryDream,
   type AgentMemoryEntry,
   type AgentMemoryScope,
 } from '@/lib/agentMemoryApi';
@@ -23,38 +15,31 @@ import {
 interface AgentMemoryState {
   global: AgentMemoryEntry[];
   project: AgentMemoryEntry[];
-  /** The project path the held `project` entries belong to. */
   projectPath: string | null;
   loading: boolean;
   loaded: boolean;
-  /** When the held entries were last read successfully. */
   loadedAt: number | null;
-  /** True once the server has reported the feature switched off. */
   disabled: boolean;
   globalFailed: boolean;
   projectFailed: boolean;
+  dream: AgentMemoryDreams;
   error: string | null;
 
-  /**
-   * `maxAgeMs` skips the read when the same project's entries were loaded
-   * more recently than that; omit it for an unconditional re-read.
-   */
   load: (projectPath: string | null, options?: { maxAgeMs?: number }) => Promise<void>;
-  /** Re-read the store the last load used. */
   refresh: () => Promise<void>;
   saveEntry: (
     scope: AgentMemoryScope,
     memoryId: string,
     patch: { title?: string; body?: string },
   ) => Promise<boolean>;
-  /**
-   * `projectPath` pins a project-scope delete to the project it was asked in;
-   * it defaults to the loaded one. A delete that lands after the panel moved
-   * to another project must not go to that project or touch its list.
-   */
   deleteEntry: (scope: AgentMemoryScope, memoryId: string, projectPath?: string | null) => Promise<boolean>;
+  undoDream: (scope: AgentMemoryScope, projectPath: string | null) => Promise<boolean>;
   reset: () => void;
 }
+
+type AgentMemoryDreams = { global: AgentMemoryDream | null; project: AgentMemoryDream | null };
+
+const NO_DREAMS: AgentMemoryDreams = { global: null, project: null };
 
 const EMPTY_STATE = {
   global: [] as AgentMemoryEntry[],
@@ -65,27 +50,20 @@ const EMPTY_STATE = {
   disabled: false,
   globalFailed: false,
   projectFailed: false,
+  dream: NO_DREAMS,
   error: null as string | null,
   loadedAt: null as number | null,
 };
 
 const EMPTY_MEMORY: AgentMemoryEntry[] = [];
 
-/** Never expose one owner's project entries under another owner's heading. */
 export const selectProjectMemoryForPath = (
   state: AgentMemoryState,
   projectPath: string | null,
 ): AgentMemoryEntry[] => state.projectPath === projectPath ? state.project : EMPTY_MEMORY;
 
-/**
- * Only the newest load may write to the store. Turning the feature back on
- * fires a load before the setting has finished being written, so an older
- * "disabled" answer can arrive after a newer successful one and latch the
- * feature off again.
- */
 let loadSequence = 0;
 
-/** Serializes writes so a slow first request cannot overwrite a later one. */
 let writeChain: Promise<unknown> = Promise.resolve();
 const enqueueWrite = <T>(work: () => Promise<T>): Promise<T> => {
   const next = writeChain.then(work, work);
@@ -125,7 +103,7 @@ export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
     }
     const requestId = ++loadSequence;
     if (ownerChanged) {
-      set({ loading: true, projectPath, project: [], projectFailed: false });
+      set({ loading: true, projectPath, project: [], projectFailed: false, dream: { ...previous.dream, project: null } });
     } else {
       set({ loading: true, projectPath });
     }
@@ -139,6 +117,7 @@ export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
         projectPath,
         globalFailed: snapshot.globalFailed,
         projectFailed: snapshot.projectFailed,
+        dream: snapshot.dream,
         loading: false,
         loaded: true,
         loadedAt: Date.now(),
@@ -148,14 +127,9 @@ export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
     } catch (error) {
       if (requestId !== loadSequence) return;
       if (error instanceof AgentMemoryDisabledError) {
-        // Switched off is not a failure. Clearing the lists is right here and
-        // only here: with the feature off there is nothing for the user to act
-        // on, and the tab that would show them is gone too. The path is kept so
-        // a later refresh knows which store to re-read.
         set({ ...EMPTY_STATE, projectPath, disabled: true, loaded: true });
         return;
       }
-      // Whatever was loaded before stays. Only the error is new.
       set({
         loading: false,
         globalFailed: true,
@@ -194,6 +168,17 @@ export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
       set({ error: errorMessage(error, 'Failed to delete memory') });
       return false;
     }
+  }),
+
+  undoDream: async (scope, projectPath) => enqueueWrite(async () => {
+    try {
+      await undoAgentMemoryDream(scope, projectPath);
+    } catch (error) {
+      set({ error: errorMessage(error, 'Failed to undo the memory tidy-up') });
+      return false;
+    }
+    await get().refresh();
+    return true;
   }),
 
   reset: () => {

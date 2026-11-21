@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Message, Part } from '@/lib/opencode/model';
-import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
+import { HighlightedCode } from '@/components/code/HighlightedCode';
 
 import { Icon } from "@/components/icon/Icon";
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -20,11 +20,13 @@ import {
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { ContextPanelHeaderToolbar } from './contextPanelHeaderSlot';
 import { useInContextPanelHeader } from './contextPanelHeaderSlotContext';
 import { toolContentShellChars } from '@/lib/opencode/toolContentShells';
 import { composeContextBreakdown, type ContextBuckets } from './contextBreakdown';
+import { computeSessionTokenTotals } from '@/components/chat/work-status/contextUsage';
 
 type SessionMessage = { info: Message; parts: Part[] };
 
@@ -103,9 +105,6 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
   const reasoning = toNonNegativeNumber(breakdown.reasoning);
   const cacheRead = toNonNegativeNumber(breakdown.cache?.read);
   const cacheWrite = toNonNegativeNumber(breakdown.cache?.write);
-  // Multi-step turns accumulate the fields across API round-trips (every tool
-  // call re-reads the whole cached prompt), so summing them overstates the
-  // window. The server-reported total is the final round-trip's window.
   const reportedTotal = toNonNegativeNumber(breakdown.total);
 
   return {
@@ -176,7 +175,6 @@ const estimatePartChars = (part: Part, role: 'user' | 'assistant' | 'tool' | 'ot
       + estimateTextLength(partRecord.raw)
       + Math.round(estimateTextLength(partRecord.metadata) * 0.25)
       + Math.round(estimateTextLength(partRecord.state) * 0.1)
-      // A result left out of the page still counts, by the length the server reported.
       + Math.round((toolContentShellChars(part) ?? 0) * 0.1);
 
     return { user: 0, assistant: 0, tool: toolPayloadLength, other: 0 };
@@ -206,6 +204,20 @@ const deriveRoleBucket = (message: SessionMessage): 'user' | 'assistant' | 'tool
   return 'other';
 };
 
+const messageCharsCache = new WeakMap<SessionMessage, ContextBuckets>();
+
+const messageChars = (message: SessionMessage): ContextBuckets => {
+  const cached = messageCharsCache.get(message);
+  if (cached) return cached;
+  const role = deriveRoleBucket(message);
+  let bucket = { ...EMPTY_BUCKETS };
+  for (const part of message.parts) {
+    bucket = addBuckets(bucket, estimatePartChars(part, role));
+  }
+  messageCharsCache.set(message, bucket);
+  return bucket;
+};
+
 const computeContextBreakdown = (
   sessionMessages: SessionMessage[],
   systemPrompt: string,
@@ -214,14 +226,10 @@ const computeContextBreakdown = (
     return { ...EMPTY_BUCKETS };
   }
 
-  const totalChars = sessionMessages.reduce<ContextBuckets>((acc, message) => {
-    const role = deriveRoleBucket(message);
-    let bucket = { ...EMPTY_BUCKETS };
-    for (const part of message.parts) {
-      bucket = addBuckets(bucket, estimatePartChars(part, role));
-    }
-    return addBuckets(acc, bucket);
-  }, { ...EMPTY_BUCKETS });
+  const totalChars = sessionMessages.reduce<ContextBuckets>(
+    (acc, message) => addBuckets(acc, messageChars(message)),
+    { ...EMPTY_BUCKETS },
+  );
 
   totalChars.user += systemPrompt.length;
 
@@ -261,6 +269,157 @@ const resolveProviderAndModel = (
   };
 };
 
+type TokenFigures = {
+  prompt: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cacheHitPercent: number | null;
+};
+
+const TokenFiguresCard: React.FC<{ title: string; figures: TokenFigures | null }> = ({ title, figures }) => {
+  const { t } = useI18n();
+  const items = [
+    { label: t('contextSidebar.tokens.input'), value: figures?.prompt ?? null, format: 'count' },
+    { label: t('contextSidebar.tokens.output'), value: figures?.output ?? null, format: 'count' },
+    { label: t('contextSidebar.tokens.reasoning'), value: figures?.reasoning ?? null, format: 'count' },
+    { label: t('contextSidebar.tokens.cacheRead'), value: figures?.cacheRead ?? null, format: 'count' },
+    { label: t('contextSidebar.tokens.cacheWrite'), value: figures?.cacheWrite ?? null, format: 'count' },
+    { label: t('contextSidebar.tokens.cacheHit'), value: figures?.cacheHitPercent ?? null, format: 'percent' },
+  ] as const;
+
+  return (
+    <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
+      <div className="typography-micro text-muted-foreground mb-2.5">{title}</div>
+      <div className="grid grid-cols-3 gap-x-4 gap-y-2.5">
+        {items.map((item) => (
+          <div key={item.label}>
+            <div className="typography-micro text-muted-foreground">{item.label}</div>
+            <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">
+              {item.value === null
+                ? '—'
+                : item.format === 'percent'
+                  ? `${item.value.toFixed(1)}%`
+                  : formatNumber(item.value)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+type RawMessageRowProps = {
+  message: SessionMessage;
+  isExpanded: boolean;
+  isCopied: boolean;
+  timeFormatPreference: TimeFormatPreference;
+  onToggle: (messageId: string) => void;
+  onCopy: (messageId: string, value: string) => void;
+};
+
+const RawMessageRow = React.memo(function RawMessageRow({
+  message,
+  isExpanded,
+  isCopied,
+  timeFormatPreference,
+  onToggle,
+  onCopy,
+}: RawMessageRowProps) {
+  const { t } = useI18n();
+  const role = message.info.role;
+  const isAssistant = role === 'assistant';
+  const isUser = role === 'user';
+  const messageCreatedAt = (message.info.time?.created ?? null) as number | null;
+  const partsLabel = derivePartsLabel(message.parts);
+  const tokens = isAssistant ? extractTokenBreakdown(message) : null;
+  const userSnippet = isUser ? deriveUserSnippet(message.parts) : '';
+  const previewTime = formatMessagePreviewTime(messageCreatedAt, timeFormatPreference);
+  const assistantLeft = partsLabel || '—';
+  const assistantMiddle = tokens
+    ? formatAssistantTokens(tokens.input, tokens.output, formatNumber)
+    : '';
+  const otherLeft = role || 'unknown';
+  const otherLabel = partsLabel ? `${otherLeft}: ${partsLabel}` : otherLeft;
+
+  const jsonValue = isExpanded
+    ? JSON.stringify({ info: message.info, parts: message.parts }, null, 2)
+    : '';
+
+  return (
+    <div className="overflow-hidden rounded-lg bg-[var(--surface-elevated)]/70">
+      <button
+        type="button"
+        className="w-full cursor-pointer px-3 py-1.5 text-start hover:bg-[var(--interactive-hover)]"
+        aria-expanded={isExpanded}
+        onClick={() => onToggle(message.info.id)}
+      >
+        <div
+          className="grid items-center gap-x-2 whitespace-nowrap typography-micro"
+          style={{ gridTemplateColumns: isAssistant ? 'minmax(0, 1fr) 7.5rem max-content' : 'minmax(0, 1fr) max-content' }}
+        >
+          {isUser ? (
+            <span className="min-w-0 truncate text-muted-foreground">
+              <span className="typography-ui-label text-foreground">user:</span>{' '}
+              {userSnippet}
+            </span>
+          ) : (
+            <>
+              <span className="min-w-0 truncate text-muted-foreground">
+                {isAssistant ? assistantLeft : otherLabel}
+              </span>
+              {isAssistant && (
+                <span className="text-end text-muted-foreground tabular-nums">
+                  {assistantMiddle}
+                </span>
+              )}
+            </>
+          )}
+          <span className="text-end text-muted-foreground">{previewTime}</span>
+        </div>
+      </button>
+
+      {isExpanded && (
+        <div className="border-t border-[var(--surface-subtle)] p-0">
+          <ScrollableOverlay outerClassName="max-h-[26rem] bg-[var(--surface-background)]" className="group relative" disableHorizontal>
+            <div className="absolute top-1 inset-e-2 z-10 opacity-0 transition-opacity group-hover:opacity-100">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onCopy(message.info.id, jsonValue);
+                    }}
+                    aria-label={isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}
+                  >
+                    {isCopied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent sideOffset={6}>{isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}</TooltipContent>
+              </Tooltip>
+            </div>
+            <HighlightedCode
+              language="json"
+              code={jsonValue}
+              style={{
+                margin: 0,
+                padding: '0.75rem',
+                background: 'transparent',
+                fontSize: 'var(--text-micro)',
+                lineHeight: '1.35',
+              }}
+              wrap
+            />
+          </ScrollableOverlay>
+        </div>
+      )}
+    </div>
+  );
+});
+
 export const ContextPanelContent: React.FC = () => {
   const { t } = useI18n();
   const inPanelHeader = useInContextPanelHeader();
@@ -295,6 +454,13 @@ export const ContextPanelContent: React.FC = () => {
     };
   }, []);
 
+  const handleToggleRawMessage = React.useCallback((messageId: string) => {
+    setExpandedRawMessages((prev) => ({
+      ...prev,
+      [messageId]: !(prev[messageId] === true),
+    }));
+  }, []);
+
   const handleCopyRawMessage = React.useCallback(async (messageId: string, value: string) => {
     const result = await copyTextToClipboard(value);
     if (result.ok) {
@@ -317,26 +483,17 @@ export const ContextPanelContent: React.FC = () => {
     const assistantMessages = sessionMessages.filter((entry) => entry.info.role === 'assistant');
     const userMessages = sessionMessages.filter((entry) => entry.info.role === 'user');
 
-    // After a compaction the fill is unknown until a response reports tokens;
-    // the compaction record itself still supplies the last-turn breakdown.
     const contextFill = findLatestContextFill(sessionMessages.map((entry) => entry.info));
     const contextMessage = contextFill ? sessionMessages[contextFill.index] ?? null : null;
     const isCompacted = contextFill?.state === 'compacted';
 
     const tokenBreakdown = contextMessage ? extractTokenBreakdown(contextMessage) : EMPTY_BREAKDOWN;
 
-    // Cache hit rate for the last assistant message. `input` is the non-cached portion
-    // (total input - cache.read - cache.write per SDK's session.ts:getUsage),
-    // so hit rate = cache.read / (input + cache.read + cache.write).
     const cacheHitRate = computeCacheHitRate({
       input: tokenBreakdown.input,
       cache: { read: tokenBreakdown.cacheRead, write: tokenBreakdown.cacheWrite },
     });
 
-    // The session record carries the whole session's cost; the loaded
-    // messages are only its tail once a long chat was opened cold or cut back
-    // (`SessionMessageLoader.trimHistory`). A persisted snapshot strips the
-    // field, so the sum stands in until the live record arrives.
     const totalAssistantCost = Number.isFinite(currentSession?.cost)
       ? toNonNegativeNumber(currentSession?.cost)
       : assistantMessages.reduce((sum, message) => {
@@ -358,23 +515,11 @@ export const ContextPanelContent: React.FC = () => {
         ? Math.min(999, (tokenBreakdown.total / contextLimit) * 100)
         : 0;
 
-    // OpenCode v2 delivers instruction text as its own `system` message
-    // instead of hanging a `system` string off the first user message.
     const systemMessage = [...sessionMessages].reverse().find((entry) => entry.info.role === 'system');
     const systemPrompt = systemMessage?.info.role === 'system' ? systemMessage.info.text : '';
 
     const computedBreakdown = computeContextBreakdown(sessionMessages, systemPrompt);
 
-    // The bar sits under the readout, so it is measured against the same window
-    // the readout reports, not against its own estimate. `other` is then the
-    // real unattributed remainder — prompt, schemas, skills, estimation error —
-    // rather than a leftover clamped to zero.
-    //
-    // A completed compaction record can still carry the summarizing turn's
-    // tokens. The readout shows `—` for that state because the fill is unknown,
-    // so the bar must not denominate against the pre-compaction window either;
-    // zero sends it to the estimate, which is the same fallback the panel
-    // documents for an unknown window.
     const breakdown = composeContextBreakdown(computedBreakdown, { windowTokens: tokenBreakdown.total, compacted: isCompacted });
 
     const firstMessageTs = sessionMessages[0]?.info?.time?.created;
@@ -384,6 +529,7 @@ export const ContextPanelContent: React.FC = () => {
 
     return {
       sessionTitle: currentSession?.title || t('contextSidebar.session.untitled'),
+      sessionTotals: computeSessionTokenTotals(currentSession),
       messagesCount: sessionMessages.length,
       userMessagesCount: userMessages.length,
       assistantMessagesCount: assistantMessages.length,
@@ -417,8 +563,6 @@ export const ContextPanelContent: React.FC = () => {
 
   return (
     <ScrollableOverlay outerClassName="h-full" className="bg-background">
-      {/* In the context panel the session title names the panel itself, in
-          place of the generic "Context" label. */}
       {inPanelHeader ? (
         <ContextPanelHeaderToolbar>
           <div className="flex min-w-0 flex-1 items-center ps-1.5 pe-1">
@@ -428,7 +572,6 @@ export const ContextPanelContent: React.FC = () => {
       ) : null}
       <div className="mx-auto w-full max-w-[52rem] px-5 py-6">
 
-        {/* ── Session header ── */}
         <div className="mb-6">
           {inPanelHeader ? null : (
             <h2 dir="auto" className="typography-ui-header font-semibold text-foreground truncate oc-ui-start-align">{viewModel.sessionTitle}</h2>
@@ -444,7 +587,6 @@ export const ContextPanelContent: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Context usage ── */}
         <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
           <div className="flex items-baseline justify-between">
             <span className="typography-micro text-muted-foreground">{t('contextSidebar.section.context')}</span>
@@ -471,7 +613,6 @@ export const ContextPanelContent: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Stat grid ── */}
         <div className="mb-5 grid grid-cols-2 gap-2">
           {([
             { label: t('contextSidebar.stats.messages'), value: formatNumber(viewModel.messagesCount) },
@@ -486,37 +627,19 @@ export const ContextPanelContent: React.FC = () => {
           ))}
         </div>
 
-        {/* ── Last turn tokens ── */}
-        <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
-          <div className="typography-micro text-muted-foreground mb-2.5">{t('contextSidebar.section.lastAssistantMessage')}</div>
-          <div className="grid grid-cols-3 gap-x-4 gap-y-2.5">
-            {([
-              { label: t('contextSidebar.tokens.input'), value: viewModel.tokenBreakdown.input, format: 'count' },
-              { label: t('contextSidebar.tokens.output'), value: viewModel.tokenBreakdown.output, format: 'count' },
-              { label: t('contextSidebar.tokens.reasoning'), value: viewModel.tokenBreakdown.reasoning, format: 'count' },
-              { label: t('contextSidebar.tokens.cacheRead'), value: viewModel.tokenBreakdown.cacheRead, format: 'count' },
-              { label: t('contextSidebar.tokens.cacheWrite'), value: viewModel.tokenBreakdown.cacheWrite, format: 'count' },
-              {
-                label: t('contextSidebar.tokens.cacheHit'),
-                value: viewModel.cacheHitRate.hasInput ? viewModel.cacheHitRate.percent : null,
-                format: 'percent',
-              },
-            ] as const).map((item) => (
-              <div key={item.label}>
-                <div className="typography-micro text-muted-foreground">{item.label}</div>
-                <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">
-                  {item.value !== null && item.value !== undefined
-                    ? item.format === 'percent'
-                      ? `${item.value.toFixed(1)}%`
-                      : formatNumber(item.value)
-                    : '—'}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <TokenFiguresCard
+          title={t('contextSidebar.section.sessionTotals')}
+          figures={viewModel.sessionTotals}
+        />
+        <TokenFiguresCard
+          title={t('contextSidebar.section.lastAssistantMessage')}
+          figures={{
+            ...viewModel.tokenBreakdown,
+            prompt: viewModel.tokenBreakdown.input + viewModel.tokenBreakdown.cacheRead + viewModel.tokenBreakdown.cacheWrite,
+            cacheHitPercent: viewModel.cacheHitRate.hasInput ? viewModel.cacheHitRate.percent : null,
+          }}
+        />
 
-        {/* ── Context breakdown ── */}
         <div className="mb-6">
           <div className="flex h-1 w-full overflow-hidden rounded-full bg-[var(--surface-subtle)]">
             {segments.map((segment) => {
@@ -547,118 +670,20 @@ export const ContextPanelContent: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Raw messages ── */}
         <div>
           <div className="typography-micro text-muted-foreground">{t('contextSidebar.section.rawMessages')}</div>
           <div className="mt-2.5 space-y-1">
-            {[...sessionMessages].reverse().map((message) => {
-              const role = message.info.role;
-              const isAssistant = role === 'assistant';
-              const isUser = role === 'user';
-              const isExpanded = expandedRawMessages[message.info.id] === true;
-              const isCopied = copiedRawMessageId === message.info.id;
-              const messageCreatedAt = (message.info.time?.created ?? null) as number | null;
-              const partsLabel = derivePartsLabel(message.parts);
-              const tokens = isAssistant ? extractTokenBreakdown({ info: message.info, parts: message.parts }) : null;
-              const userSnippet = isUser ? deriveUserSnippet(message.parts) : '';
-              const previewTime = formatMessagePreviewTime(messageCreatedAt, timeFormatPreference);
-              // Keep token/time columns stable; the message label owns all
-              // remaining space and truncates before it can push metrics.
-              const assistantLeft = partsLabel || '\u2014';
-              const assistantMiddle = tokens
-                ? formatAssistantTokens(tokens.input, tokens.output, formatNumber)
-                : '';
-              const otherLeft = role || 'unknown';
-              const otherLabel = partsLabel ? `${otherLeft}: ${partsLabel}` : otherLeft;
-
-              const jsonValue = isExpanded
-                ? JSON.stringify({ info: message.info, parts: message.parts }, null, 2)
-                : '';
-
-              return (
-                <div
-                  key={message.info.id}
-                  className="overflow-hidden rounded-lg bg-[var(--surface-elevated)]/70"
-                >
-                  <button
-                    type="button"
-                    className="w-full cursor-pointer px-3 py-1.5 text-start hover:bg-[var(--interactive-hover)]"
-                    aria-expanded={isExpanded}
-                    onClick={() => {
-                      setExpandedRawMessages((prev) => ({
-                        ...prev,
-                        [message.info.id]: !(prev[message.info.id] === true),
-                      }));
-                    }}
-                  >
-                    <div
-                      className="grid items-center gap-x-2 whitespace-nowrap typography-micro"
-                      style={{ gridTemplateColumns: isAssistant ? 'minmax(0, 1fr) 7.5rem max-content' : 'minmax(0, 1fr) max-content' }}
-                    >
-                      {isUser ? (
-                        <span
-                          className="min-w-0 truncate text-muted-foreground"
-                        >
-                          <span className="typography-ui-label text-foreground">user:</span>{' '}
-                          {userSnippet}
-                        </span>
-                      ) : (
-                        <>
-                          <span
-                            className={
-                              isAssistant
-                                ? 'min-w-0 truncate text-muted-foreground'
-                                : 'min-w-0 truncate text-muted-foreground'
-                            }
-                          >
-                            {isAssistant ? assistantLeft : otherLabel}
-                          </span>
-                          {isAssistant && (
-                            <span className="text-end text-muted-foreground tabular-nums">
-                              {assistantMiddle}
-                            </span>
-                          )}
-                        </>
-                      )}
-                      <span className="text-end text-muted-foreground">{previewTime}</span>
-                    </div>
-                  </button>
-
-                  {isExpanded && (
-                    <div className="border-t border-[var(--surface-subtle)] p-0">
-                      <ScrollableOverlay outerClassName="max-h-[26rem] bg-[var(--surface-background)]" className="group relative" disableHorizontal>
-                        <div className="absolute top-1 inset-e-2 z-10 opacity-0 transition-opacity group-hover:opacity-100">
-                          <button
-                            type="button"
-                            className="rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleCopyRawMessage(message.info.id, jsonValue);
-                            }}
-                            aria-label={isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}
-                            title={isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copy')}
-                          >
-                            {isCopied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
-                          </button>
-                        </div>
-                        <WorkerHighlightedCode
-                          language="json"
-                          code={jsonValue}
-                          style={{
-                            margin: 0,
-                            padding: '0.75rem',
-                            background: 'transparent',
-                            fontSize: 'var(--text-micro)',
-                            lineHeight: '1.35',
-                          }}
-                          wrap
-                        />
-                      </ScrollableOverlay>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {[...sessionMessages].reverse().map((message) => (
+              <RawMessageRow
+                key={message.info.id}
+                message={message}
+                isExpanded={expandedRawMessages[message.info.id] === true}
+                isCopied={copiedRawMessageId === message.info.id}
+                timeFormatPreference={timeFormatPreference}
+                onToggle={handleToggleRawMessage}
+                onCopy={handleCopyRawMessage}
+              />
+            ))}
           </div>
         </div>
       </div>

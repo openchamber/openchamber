@@ -28,7 +28,6 @@ mock.module('./hooks/useSessionActions', () => ({
       args.setEditingId(id);
       args.setEditTitle(title);
     },
-    handleCopySessionId: () => undefined,
     handleDeleteSession: () => undefined,
     handleRestoreSession: () => undefined,
   }),
@@ -73,8 +72,6 @@ describe('SessionTreeItem public behavior', () => {
         node={rowNode}
         pinnedSessionIds={new Set()}
         expandedParents={new Set()}
-        hasSessionSearchQuery={false}
-        normalizedSessionSearchQuery=""
         editingId={editingId}
         editingRowKey={editingRowKey}
         setEditingId={setEditingId}
@@ -85,7 +82,6 @@ describe('SessionTreeItem public behavior', () => {
         openSidebarMenuKey={menuKey}
         setOpenSidebarMenuKey={setMenuKey}
         allowReselect={false}
-        resetSessionSearch={noop}
         deleteSessionConfirm={null}
         setDeleteSessionConfirm={noop}
         startFolderRename={noop}

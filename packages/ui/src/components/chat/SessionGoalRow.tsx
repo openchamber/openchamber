@@ -7,6 +7,7 @@ import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/session
 import { setSessionGoalStatus } from '@/lib/sessionGoalActions';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { Spinner } from '@/components/ui/spinner';
 
@@ -15,18 +16,12 @@ interface SessionGoalRowProps {
   directory?: string;
 }
 
-// The goal as a top row of the composer: informational only (status icon,
-// objective or the latest audit note, token usage) plus an inline
-// pause/resume action. The manage dialog opens from the composer target
-// button, not from here.
 export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessionId, directory }) => {
   const { t } = useI18n();
   const { goal, enabled } = useSessionGoal(sessionId ?? '', directory);
   const objectiveContent = useGoalObjectiveContent(sessionId ?? '', goal);
   const sessionStatus = useSessionStatus(sessionId ?? '', directory);
   const [busy, setBusy] = React.useState(false);
-  // The agent stopped but the goal is still active: the server is sitting out
-  // the quiet window and running the audit.
   const evaluating = Boolean(sessionId && enabled && goal?.status === 'active' && (!sessionStatus || sessionStatus.type === 'idle'));
 
   const handleToggleStatus = React.useCallback(async (nextStatus: 'active' | 'paused') => {
@@ -46,8 +41,6 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
     return null;
   }
 
-  // Accounting only lands on idle ticks — hide the counter until there is a
-  // real number (or a budget worth tracking against) instead of showing "0".
   const usage = goal.tokenBudget
     ? t('chat.goal.usage.tokensWithBudget', {
         used: formatGoalTokens(goal.tokensUsed),
@@ -55,28 +48,31 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
       })
     : (goal.tokensUsed > 0 ? t('chat.goal.usage.tokens', { used: formatGoalTokens(goal.tokensUsed) }) : null);
 
+  const paused = goal.status === 'paused';
   const pauseResume = goal.status === 'active'
-    ? { icon: 'pause' as const, labelKey: 'chat.goal.action.pause' as const, next: 'paused' as const }
+    ? { icon: 'pause' as const, labelKey: 'chat.goal.action.pause' as const, tooltipKey: 'contextTooltips.chat.goalPause' as const, next: 'paused' as const }
     : (goal.status === 'paused' || goal.status === 'blocked' || goal.status === 'budgetLimited'
-      ? { icon: 'play' as const, labelKey: 'chat.goal.action.resume' as const, next: 'active' as const }
+      ? { icon: 'play' as const, labelKey: 'chat.goal.action.resume' as const, tooltipKey: 'contextTooltips.chat.goalResume' as const, next: 'active' as const }
       : null);
 
   return (
     <div
       role="group"
-      className="flex oc-composer-row min-w-0 items-center gap-2 border-b border-edge ps-3 pe-1.5"
+      className="@container flex oc-composer-row min-w-0 items-center gap-2 border-b border-edge ps-3 pe-1.5"
       aria-label={t('chat.goal.row.aria')}
-      title={objectiveContent ?? undefined}
     >
       <Icon name="target" className="size-3.5 flex-shrink-0" style={{ color: sessionGoalStatusColor[goal.status] }} aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+      <span dir="auto" className={`${paused ? 'min-w-6' : 'min-w-0'} flex-1 truncate oc-ui-start-align text-sm text-foreground`} title={objectiveContent ?? undefined}>
         {objectiveContent || t('chat.goal.dialog.titleManage')}
       </span>
       {evaluating ? (
-        // Show the audit instead of a static "Active" that looks stuck.
         <span className="flex flex-shrink-0 items-center gap-1 typography-meta text-muted-foreground">
           <Spinner className="h-3 w-3" aria-hidden="true" />
           {t('chat.goal.status.evaluating')}
+        </span>
+      ) : paused ? (
+        <span className="shrink-0 whitespace-nowrap typography-meta text-muted-foreground">
+          {t('chat.goal.row.pausedHint')}
         </span>
       ) : (
         <span className="flex-shrink-0 typography-meta text-muted-foreground">
@@ -84,23 +80,30 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
         </span>
       )}
       {usage ? (
-        <span className="flex-shrink-0 typography-meta tabular-nums text-muted-foreground">
+        <span className={`${paused ? 'hidden min-w-0 max-w-fit flex-1 truncate @md:inline' : 'flex-shrink-0'} typography-meta tabular-nums text-muted-foreground`} title={paused ? usage : undefined}>
           {usage}
         </span>
       ) : null}
       {pauseResume ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => void handleToggleStatus(pauseResume.next)}
-          onMouseDown={(event) => event.preventDefault()}
-          disabled={busy}
-          className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
-        >
-          <Icon name={pauseResume.icon} className="size-3" aria-hidden="true" />
-          {t(pauseResume.labelKey)}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex shrink-0">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void handleToggleStatus(pauseResume.next)}
+                onMouseDown={(event) => event.preventDefault()}
+                disabled={busy}
+                className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
+              >
+                <Icon name={pauseResume.icon} className="size-3" aria-hidden="true" />
+                {t(pauseResume.labelKey)}
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t(pauseResume.tooltipKey)}</TooltipContent>
+        </Tooltip>
       ) : null}
     </div>
   );

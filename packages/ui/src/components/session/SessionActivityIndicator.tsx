@@ -7,39 +7,23 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { cn } from '@/lib/utils';
 
-/**
- * What a session row or aggregate is showing: its own turn running
- * (busy/retry), a pause kept open by a workflow run, a background subagent or
- * a background command, an agent waiting on its pull request, or a finished
- * turn the user has not seen.
- */
-type SessionActivityIndicatorState = 'running' | 'workflow' | 'subagent' | 'shell' | 'pullRequest' | 'unread';
+type SessionActivityIndicatorState = 'running' | 'workflow' | 'subagent' | 'shell' | 'image' | 'pullRequest' | 'extensionWait' | 'unread';
 
 const PRESENTATION = {
   running: { icon: 'circle', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.active' },
   workflow: { icon: 'flow-chart', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.workflowRunning' },
-  subagent: { icon: 'robot', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundSubagent' },
+  subagent: { icon: 'robot-2', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundSubagent' },
   shell: { icon: 'terminal', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundCommand' },
-  pullRequest: { icon: 'git-pull-request', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.waitingOnPullRequest' },
+  image: { icon: 'image', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundImage' },
+  pullRequest: { icon: 'circle', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.waitingOnPullRequest' },
+  extensionWait: { icon: 'timer', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.waitingOnExtension' },
   unread: { icon: 'checkbox-circle', colorClass: 'text-status-success', labelKey: 'sessions.sidebar.session.status.unread' },
 } as const satisfies Record<SessionActivityIndicatorState, { icon: IconName; colorClass: string; labelKey: string }>;
 
-/**
- * Live-activity marker for one session row or aggregate. Each state has its
- * own static icon, so a row says why it is busy without motion; motion lives
- * in the 1 Hz elapsed counter (see faa9c243). The opt-in
- * `animatedActivityIndicators` preference replaces every running kind with the
- * shared `Spinner` (four steps a second); the unread icon stays.
- */
 export const SessionActivityIndicator: React.FC<{
   state: SessionActivityIndicatorState;
   className?: string;
-  /** Extra classes for the running kinds only (e.g. the switcher's pulse). */
   runningClassName?: string;
-  /**
-   * Name the state in a tooltip above the mark instead of the native title,
-   * as the sidebar's row marks do.
-   */
   tooltip?: boolean;
 }> = ({ state, className, runningClassName, tooltip = false }) => {
   const { t } = useI18n();

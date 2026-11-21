@@ -6,6 +6,7 @@ import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from "@/li
 import { createPendingDraftWorktreeRequest, resolvePendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useProjectsStore } from "@/stores/useProjectsStore"
+import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
 import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
 import { ChildStoreManager } from "./child-store"
 import { sendRecoveredFormAnswer, setActionRefs, setOptimisticRefs } from "./session-actions"
@@ -14,6 +15,7 @@ import { SessionMessageLoader, setImperativeSessionMessageLoader, type SessionMe
 import { DraftSendError, useSessionUIStore, type NewSessionDraftState, type PendingDraftSend } from "./session-ui-store"
 import { readLastActiveSession } from "./last-session-cache"
 import { setSyncRefs } from "./sync-refs"
+import { useSelectionStore } from "./selection-store"
 
 // The first message of a new session, sent from the draft. The real stores,
 // loader and send path run; only OpenCode's answers are scripted, and the
@@ -124,6 +126,42 @@ test("a recovered answer uses the real send path without consuming the main comp
   } finally {
     useSessionGoalArmStore.getState().setArmed(false)
     resetRecoverableQuestions()
+  }
+})
+
+test("a /btw fork on the main chat's agent and model keeps its own level from one send to the next", async () => {
+  const main = sessionRecord("ses_main", DIRECTORY)
+  const fork = sessionRecord("ses_fork", DIRECTORY)
+  childStores.ensureChild(DIRECTORY, { bootstrap: false }).setState({ session: [main, fork] })
+  useSessionUIStore.setState({ currentSessionId: main.id, currentSessionDirectory: DIRECTORY })
+  // The main chat on Build / low, as its composer shows it.
+  useConfigStore.setState({
+    currentProviderId: "provider",
+    currentModelId: "model",
+    currentAgentName: "build",
+    currentVariant: "low",
+    currentVariantSelection: { override: "low", inherited: "low" },
+  })
+  // The /btw composer picked high for the fork, as `startBtwSession` saves it.
+  const selection = useSelectionStore.getState()
+  selection.saveAgentModelVariantForSession(fork.id, "build", "provider", "model", "high")
+  const forkLevel = () => useSelectionStore.getState().getAgentModelVariantForSession(fork.id, "build", "provider", "model")
+  const sendToFork = (content: string) => useSessionUIStore.getState().sendMessage(
+    content, "provider", "model", "build", undefined, undefined, undefined, forkLevel(), "normal",
+    { userInitiated: true, sessionId: fork.id, directory: DIRECTORY, target: { runtimeKey: getRuntimeKey(), sessionId: fork.id, directory: DIRECTORY } },
+  )
+
+  try {
+    await sendToFork("first")
+    expect(forkLevel()).toBe("high")
+    await sendToFork("second")
+
+    expect(sendCalls.map((call) => [call.id, call.model?.variant])).toEqual([[fork.id, "high"], [fork.id, "high"]])
+    expect(forkLevel()).toBe("high")
+    expect(useConfigStore.getState().currentVariantSelection.override).toBe("low")
+  } finally {
+    selection.clearSessionSelections(fork.id)
+    selection.clearSessionSelections(main.id)
   }
 })
 
@@ -367,6 +405,57 @@ describe("the first message of a draft", () => {
     creation.resolve()
     await retry
     expect(sendCalls).toHaveLength(1)
+  })
+
+  test("a draft opened from a worktree folder lands in that folder when the project starts in a subfolder", async () => {
+    const worktree = "/repo-wt"
+    const refuse = globalThis.fetch
+    // The project sits in `app` inside its repository, so a session in the
+    // worktree starts in `/repo-wt/app`; the folder belongs to the worktree.
+    Object.defineProperty(globalThis, "fetch", { configurable: true, writable: true, value: async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes("/toplevel")) return Response.json({ root: DIRECTORY, prefix: "app" })
+      if (url.includes("/validate-directory")) return Response.json({ valid: true, insideWorktreeRoot: true, resolvedWorktreeRoot: worktree, resolvedCwd: `${worktree}/app` })
+      return refuse(input)
+    } })
+    const previousFolders = useSessionFoldersStore.getState().foldersMap
+    useSessionFoldersStore.setState({ foldersMap: { [worktree]: [{ id: "plans", name: "Plans", sessionIds: [], createdAt: 1 }] } })
+    useSessionUIStore.setState({ availableWorktreesByProject: new Map([["project", [{ path: worktree, projectDirectory: DIRECTORY, branch: "feature", label: "feature" }]]]) })
+    try {
+      const draft: NewSessionDraftState = { ...openDraft(41), selectedProjectId: "project", directoryOverride: worktree, targetFolderId: "plans" }
+      useSessionUIStore.setState({ newSessionDraft: draft, currentSessionId: null, currentSessionDirectory: null })
+      const sending = send("hello", "normal", draft)
+      await flush()
+      creation.resolve()
+      await sending
+
+      const sessionId = createSessionCalls[0]?.id
+      expect(createSessionCalls).toEqual([{ id: sessionId, directory: `${worktree}/app` }])
+      expect(useSessionFoldersStore.getState().foldersMap[worktree]?.[0]?.sessionIds).toEqual([sessionId])
+      expect(useSessionFoldersStore.getState().foldersMap[`${worktree}/app`]).toBeUndefined()
+    } finally {
+      Object.defineProperty(globalThis, "fetch", { configurable: true, writable: true, value: refuse })
+      useSessionFoldersStore.setState({ foldersMap: previousFolders })
+    }
+  })
+
+  test("a session another action creates in the project root while a worktree-folder draft is open stays out of that folder", async () => {
+    const worktree = "/repo-wt"
+    const previousFolders = useSessionFoldersStore.getState().foldersMap
+    useSessionFoldersStore.setState({ foldersMap: { [worktree]: [{ id: "plans", name: "Plans", sessionIds: [], createdAt: 1 }] } })
+    try {
+      useSessionUIStore.setState({ newSessionDraft: { ...openDraft(42), directoryOverride: worktree, targetFolderId: "plans" }, currentSessionId: null })
+      creation.resolve()
+      const elsewhere = await useSessionUIStore.getState().createSession("Memory tidy", DIRECTORY)
+      expect(elsewhere?.directory).toBe(DIRECTORY)
+      expect(useSessionFoldersStore.getState().foldersMap[worktree]?.[0]?.sessionIds).toEqual([])
+
+      useSessionUIStore.setState({ newSessionDraft: { ...openDraft(43), directoryOverride: worktree, targetFolderId: "plans" }, currentSessionId: null })
+      const inside = await useSessionUIStore.getState().createSession(undefined, `${worktree}/app`)
+      expect(useSessionFoldersStore.getState().foldersMap[worktree]?.[0]?.sessionIds).toEqual([inside?.id])
+    } finally {
+      useSessionFoldersStore.setState({ foldersMap: previousFolders })
+    }
   })
 
   test("a send that fails before the create response waits for it: a created session stays, with Send free again", async () => {

@@ -10,10 +10,14 @@ const session = (metadata: Session['metadata']): Session => ({
 
 const factsFor = (record: Session) => buildSidebarWorkFacts(
   { kind: 'session', key: 'session:s1', projectId: 'p', rootSessionId: 's1' },
-  { sessionById: new Map([['s1', record]]), childrenMap: new Map(), runKeyBySessionId: new Map(), live: EMPTY_SIDEBAR_LIVE_FACTS, planSessionIds: new Set() },
+  { sessionById: new Map([['s1', record]]), childrenMap: new Map(), runKeyBySessionId: new Map(), live: EMPTY_SIDEBAR_LIVE_FACTS, planSessionIds: new Set(), folderByMember: new Map([['s1', { folderId: 'folder', projectId: 'p' }]]) },
 );
 
 describe('buildSidebarWorkFacts', () => {
+  test('a session names the folder holding it', () => {
+    expect(factsFor(session({})).folderId).toBe('folder');
+  });
+
   test('a session updated into a new record is read again', () => {
     const before = session({ openchamber: { kind: 'scheduled' } });
     expect(factsFor(before)).toMatchObject({ scheduled: true, inWork: false });
