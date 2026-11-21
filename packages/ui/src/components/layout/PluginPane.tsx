@@ -62,7 +62,7 @@ import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { registerGuestResolver, type GuestResolveOutcome } from '@/lib/guests/resolve';
 import type { GuestBackgroundAction } from '@/lib/guests/run-action';
 import { useGuestFrameUrl } from '@/lib/guests/useGuestFrameUrl';
-import { useGuestItemStore } from '@/lib/guests/item-store';
+import { usePanelItem } from './usePanelItem';
 import { isGuestFileMessage, type GuestFileChannel } from '@/lib/guests/file-editor-channel';
 import { fetchHostLinearIssueGet } from '@/lib/guests/host-linear-request';
 import { loadGuestServiceStatus, proxyGuestServiceRequest } from '@/lib/guests/service';
@@ -109,6 +109,7 @@ type PluginPaneProps = {
   mode: PluginContextPanelMode;
   surface?: GuestHostSurface;
   item?: GuestItem | null;
+  panelOpen?: boolean;
   headless?: boolean;
   backgroundAction?: GuestBackgroundAction;
   onDismiss?: () => void;
@@ -167,6 +168,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   mode,
   surface = 'panel',
   item: itemProp,
+  panelOpen = true,
   headless = false,
   backgroundAction,
   onDismiss,
@@ -218,14 +220,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     () => (trackerProvider ? trackerGuestConnection(trackerStatus) : oauthStatus?.connection ?? EMPTY_GUEST_CONNECTION),
     [oauthStatus?.connection, trackerProvider, trackerStatus],
   );
-  const pendingItem = useGuestItemStore((state) => state.pendingItemByGuest[guestId]);
-  const takePendingItem = useGuestItemStore((state) => state.takePendingItem);
-  const [railItem, setRailItem] = React.useState<GuestItem | null>(null);
-  React.useEffect(() => {
-    if (surface !== 'panel' || headless || itemProp !== undefined || !pendingItem) return;
-    const taken = takePendingItem(guestId);
-    if (taken) setRailItem(taken);
-  }, [guestId, headless, itemProp, pendingItem, surface, takePendingItem]);
+  const railItem = usePanelItem({ guestId, surface, headless, itemProp, panelOpen });
   const item = headless ? null : itemProp !== undefined ? itemProp : railItem;
   const clearBadge = useGuestBadgeStore((state) => state.clearBadge);
   React.useEffect(() => {

@@ -42,6 +42,7 @@ import { useZoneHostsStore } from './zoneHosts';
 import { useRightSlotStore } from './rightSlot';
 import { useOpenUntilSettled, useOpenWhenSettled } from './useOpenUntilSettled';
 import { useClosingZoneTab } from './useClosingZoneTab';
+import { isZoneDisplaced } from './zoneFitWatch';
 import { isZoneExposed, ZoneInteractiveContext } from './zoneInteractiveContext';
 import { PauseClock } from '@/components/ui/pause-clock';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
@@ -672,7 +673,7 @@ export const ContextSurfacePanes: React.FC = () => {
             className={cn('absolute inset-0', shown ? 'block' : 'hidden')}
           >
             <React.Suspense fallback={null}>
-              <GuestPanelContent mode={tab.mode} sharedSurface={sharedSurface} docking={docking ?? null} surfaceMounted={surfaceMounted} />
+              <GuestPanelContent mode={tab.mode} sharedSurface={sharedSurface} docking={docking ?? null} surfaceMounted={surfaceMounted} panelOpen={Boolean(panelState && getZoneView(panelState, pluginZone.zone).isOpen) || isZoneDisplaced(directoryKey, pluginZone.zone)} />
             </React.Suspense>
           </ZonePane>
         );
