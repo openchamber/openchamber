@@ -29,7 +29,7 @@ const failureSchema = z.object({
 
 type ExternalPluginStatus = z.infer<typeof statusSchema>;
 
-export const useExternalOpenCodePlugin = () => {
+export const useExternalOpenCodePlugin = (refreshKey = 0) => {
   const { t } = useI18n();
   const [status, setStatus] = React.useState<ExternalPluginStatus | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -51,7 +51,7 @@ export const useExternalOpenCodePlugin = () => {
 
   React.useEffect(() => {
     void loadStatus();
-  }, [loadStatus]);
+  }, [loadStatus, refreshKey]);
 
   const copyPath = React.useCallback(async () => {
     if (!status?.pluginPath) return;

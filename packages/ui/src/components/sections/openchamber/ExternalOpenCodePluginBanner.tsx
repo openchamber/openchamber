@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { useExternalOpenCodePlugin } from '@/hooks/useExternalOpenCodePlugin';
 
-export const ExternalOpenCodePluginBanner: React.FC = () => {
+export const ExternalOpenCodePluginBanner: React.FC<{ refreshKey?: number }> = ({ refreshKey = 0 }) => {
   const { t } = useI18n();
   const {
     status,
@@ -14,7 +14,7 @@ export const ExternalOpenCodePluginBanner: React.FC = () => {
     copyPath,
     addToGlobalConfig,
     removeFromGlobalConfig,
-  } = useExternalOpenCodePlugin();
+  } = useExternalOpenCodePlugin(refreshKey);
 
   if (!status || status.delivery === 'file' || status.delivery === 'restart') {
     return null;

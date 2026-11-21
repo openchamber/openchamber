@@ -30,6 +30,20 @@ export interface ExternalBridgeToolFlags {
   workflow: boolean;
 }
 
+export interface ExternalBridgeSkillEntry {
+  id: string;
+  name: string;
+  description?: string;
+  path: string;
+  content: string;
+}
+
+export interface ExternalBridgeCommandEntry {
+  name: string;
+  description: string;
+  template: string;
+}
+
 export interface ExternalBridgePayload {
   version: 1;
   pid: number;
@@ -37,16 +51,19 @@ export interface ExternalBridgePayload {
   token: string;
   failoverEnabled: boolean;
   tools: ExternalBridgeToolFlags;
+  skills: ExternalBridgeSkillEntry[];
+  commands: ExternalBridgeCommandEntry[];
 }
 
 export interface ExternalPluginBridgeDependencies {
-  fsPromises: Pick<typeof import('node:fs/promises'), 'mkdir' | 'writeFile' | 'rename' | 'rm' | 'readFile'>;
-  path: Pick<typeof import('node:path'), 'join'>;
+  fsPromises: Pick<typeof import('node:fs/promises'), 'mkdir' | 'writeFile' | 'rename' | 'rm' | 'readFile'> & Partial<Pick<typeof import('node:fs/promises'), 'readdir'>>;
+  path: Pick<typeof import('node:path'), 'join' | 'basename'>;
   dataDir: string;
   pid?: number;
   readSettings: () => ManagedConfigSettings | null | Promise<ManagedConfigSettings | null>;
   ensureCredentials: () => { url: string; token: string } | null;
   isExternalLocal: () => boolean;
+  collectSkillsAndCommands?: () => Promise<{ skills: ExternalBridgeSkillEntry[]; commands: ExternalBridgeCommandEntry[] }>;
 }
 
 const PLUGIN_PACKAGE_JSON = `${JSON.stringify({
@@ -136,6 +153,16 @@ const toolsFingerprint = (connection) => {
   return JSON.stringify(connection.tools)
 }
 
+const skillsFingerprint = (connection) => {
+  if (!connection || !Array.isArray(connection.skills)) return "inactive"
+  return JSON.stringify(connection.skills)
+}
+
+const commandsFingerprint = (connection) => {
+  if (!connection || !Array.isArray(connection.commands)) return "inactive"
+  return JSON.stringify(connection.commands)
+}
+
 ${agentTool.helpers}
 ${LIMIT_FAILOVER_PLUGIN_HELPERS}
 ${SESSION_TITLE_PLUGIN_HELPERS}
@@ -145,6 +172,8 @@ export default {
     const initial = resolveConnection()
     let lastActive = Boolean(initial)
     let lastTools = toolsFingerprint(initial)
+    let lastSkills = skillsFingerprint(initial)
+    let lastCommands = commandsFingerprint(initial)
     let syncing = false
     let syncAgain = false
 
@@ -173,10 +202,16 @@ ${agentTool.transformBody}
           const current = resolveConnection()
           const nextActive = Boolean(current)
           const nextTools = toolsFingerprint(current)
+          const nextSkills = skillsFingerprint(current)
+          const nextCommands = commandsFingerprint(current)
           const toolsChanged = nextTools !== lastTools
+          const skillsChanged = nextSkills !== lastSkills
+          const commandsChanged = nextCommands !== lastCommands
           const activeChanged = nextActive !== lastActive
           lastActive = nextActive
           lastTools = nextTools
+          lastSkills = nextSkills
+          lastCommands = nextCommands
           if (toolsChanged) {
             if (toolRegistration && typeof toolRegistration.dispose === "function") {
               await installToolTransform().catch(() => {})
@@ -184,6 +219,8 @@ ${agentTool.transformBody}
               await ctx.tool.reload().catch(() => {})
             }
           }
+          if (skillsChanged && ctx.skill?.reload) await ctx.skill.reload().catch(() => {})
+          if (commandsChanged && ctx.command?.reload) await ctx.command.reload().catch(() => {})
           if (activeChanged) await ctx.agent.reload().catch(() => {})
         } while (syncAgain)
       } finally {
@@ -192,6 +229,31 @@ ${agentTool.transformBody}
     }
 
     await installToolTransform()
+    if (ctx.skill?.transform) {
+      await ctx.skill.transform((editor) => {
+        const connection = resolveConnection()
+        if (!connection || !Array.isArray(connection.skills)) return
+        for (const skill of connection.skills) editor.add(skill)
+      })
+    }
+    if (ctx.command?.transform) {
+      await ctx.command.transform((editor) => {
+        const connection = resolveConnection()
+        if (!connection || !Array.isArray(connection.commands)) return
+        for (const cmd of connection.commands) {
+          editor.add({
+            name: cmd.name,
+            description: cmd.description,
+            execute: (input) => ctx.session.prompt({
+              ...input.prompt,
+              sessionID: input.sessionID,
+              text: cmd.template.replaceAll("$ARGUMENTS", () => (input.prompt?.text ?? "").trim()),
+              delivery: input.delivery,
+            }),
+          })
+        }
+      })
+    }
 ${agentTool.hooksSetup}
 ${createLimitFailoverSetupCode({ callbackExpr: 'failoverCallback()' })}
 ${createSessionTitleSetupCode({ isActiveExpr: 'Boolean(resolveConnection())' })}
@@ -268,6 +330,56 @@ const isLocalPidAlive = (pid: number) => {
   }
 };
 
+const parseSkillMarkdown = (raw: string, fallbackId: string, filePath: string): ExternalBridgeSkillEntry => {
+  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  let name = fallbackId;
+  let description: string | undefined;
+  let content = raw;
+  if (match && match[1] !== undefined && match[2] !== undefined) {
+    content = match[2];
+    for (const line of match[1].split(/\r?\n/)) {
+      const idx = line.indexOf(':');
+      if (idx <= 0) continue;
+      const key = line.slice(0, idx).trim();
+      const value = line.slice(idx + 1).trim().replace(/^['"]|['"]$/g, '');
+      if (key === 'name' && value) name = value;
+      if (key === 'description' && value) description = value;
+    }
+  }
+  return description
+    ? { id: fallbackId, name, description, path: filePath, content }
+    : { id: fallbackId, name, path: filePath, content };
+};
+
+export const collectSkillEntriesFromRoots = async (
+  fsPromises: Pick<typeof import('node:fs/promises'), 'readFile' | 'readdir'>,
+  pathMod: Pick<typeof import('node:path'), 'join' | 'basename'>,
+  roots: string[],
+): Promise<ExternalBridgeSkillEntry[]> => {
+  const entries: ExternalBridgeSkillEntry[] = [];
+  const seen = new Set<string>();
+  const tryReadSkill = async (dir: string) => {
+    const filePath = pathMod.join(dir, 'SKILL.md');
+    try {
+      const raw = await fsPromises.readFile(filePath, 'utf8');
+      const id = pathMod.basename(dir);
+      if (seen.has(id)) return;
+      seen.add(id);
+      entries.push(parseSkillMarkdown(raw, id, filePath));
+    } catch {
+      return;
+    }
+  };
+  for (const root of roots) {
+    await tryReadSkill(root);
+    const children = await fsPromises.readdir(root, { withFileTypes: true }).catch(() => []);
+    for (const child of children) {
+      if (child.isDirectory()) await tryReadSkill(pathMod.join(root, child.name));
+    }
+  }
+  return entries;
+};
+
 export const createExternalPluginBridgeRuntime = ({
   fsPromises,
   path,
@@ -276,6 +388,7 @@ export const createExternalPluginBridgeRuntime = ({
   readSettings,
   ensureCredentials,
   isExternalLocal,
+  collectSkillsAndCommands,
 }: ExternalPluginBridgeDependencies) => {
   const pluginDirectory = path.join(dataDir, 'plugins', EXTERNAL_PLUGIN_ID);
   const bridgeFilePath = path.join(dataDir, EXTERNAL_BRIDGE_FILE_NAME);
@@ -342,6 +455,12 @@ export const createExternalPluginBridgeRuntime = ({
     if (stopped) {
       return { active: false };
     }
+    const extras = collectSkillsAndCommands
+      ? await collectSkillsAndCommands().catch(() => ({ skills: [], commands: [] }))
+      : { skills: [], commands: [] };
+    if (stopped) {
+      return { active: false };
+    }
     const payload: ExternalBridgePayload = {
       version: 1,
       pid,
@@ -349,6 +468,8 @@ export const createExternalPluginBridgeRuntime = ({
       token: credentials.token,
       failoverEnabled: isLimitFailoverConfigured(settings),
       tools: resolveToolFlags(settings),
+      skills: extras.skills,
+      commands: extras.commands,
     };
     await fsPromises.mkdir(dataDir, { recursive: true });
     if (stopped) {

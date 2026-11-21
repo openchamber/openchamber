@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   EXTERNAL_BRIDGE_FILE_NAME,
+  collectSkillEntriesFromRoots,
   createExternalPluginBridgeRuntime,
   registerExternalPluginBridgeRoutes,
 } from './external-plugin-bridge.js';
@@ -383,6 +384,101 @@ describe('external-plugin-bridge', () => {
       const workflowDraft = { sessionID: 'ses_workflow', tools: { openchamber_workflow_answer: { description: 'x' } } };
       await contextHook(workflowDraft);
       expect(workflowDraft.tools).toHaveProperty('openchamber_workflow_answer');
+    } finally {
+      await cleanup?.();
+    }
+  });
+
+  it('registers extension skills and commands while active and clears them on close', async () => {
+    const dataDir = await createTempDir('oc-ext-skills-');
+    const skillsRoot = await createTempDir('oc-ext-skill-root-');
+    const skillDir = path.join(skillsRoot, 'my-ext-skill');
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      '---\nname: My Extension Skill\ndescription: Helps with extension tasks\n---\nFollow these steps.',
+      'utf8',
+    );
+
+    const collected = await collectSkillEntriesFromRoots(fs, path, [skillsRoot]);
+    expect(collected).toEqual([
+      expect.objectContaining({
+        id: 'my-ext-skill',
+        name: 'My Extension Skill',
+        description: 'Helps with extension tasks',
+        content: 'Follow these steps.',
+      }),
+    ]);
+
+    const runtime = createExternalPluginBridgeRuntime({
+      fsPromises: fs,
+      path,
+      dataDir,
+      readSettings: () => ({ agentControlToolEnabled: true }),
+      ensureCredentials: () => ({ url: 'http://127.0.0.1:41234/api/openchamber/agent-tool', token: 'tok' }),
+      isExternalLocal: () => true,
+      collectSkillsAndCommands: async () => ({
+        skills: collected,
+        commands: [{ name: 'new-extension', description: 'Build an OpenChamber extension', template: 'Build: $ARGUMENTS' }],
+      }),
+    });
+
+    const pluginDir = await runtime.materializePlugin();
+    const mod = await import(`${path.join(pluginDir, 'index.js')}?t=${Date.now()}`);
+    let skillTransform = null;
+    let commandTransform = null;
+    let skillReloads = 0;
+    let commandReloads = 0;
+    const prompts = [];
+    const mock = createMockPluginContext();
+    const ctx = {
+      ...mock.ctx,
+      skill: {
+        transform: async (fn) => { skillTransform = fn; },
+        reload: async () => { skillReloads += 1; },
+      },
+      command: {
+        transform: async (fn) => { commandTransform = fn; },
+        reload: async () => { commandReloads += 1; },
+      },
+      session: {
+        ...mock.ctx.session,
+        prompt: async (input) => { prompts.push(input); },
+      },
+    };
+
+    const cleanup = await mod.default.setup(ctx);
+    try {
+      await runtime.syncBridge();
+      await vi.waitFor(() => {
+        expect(skillReloads).toBeGreaterThanOrEqual(1);
+        expect(commandReloads).toBeGreaterThanOrEqual(1);
+      });
+
+      const addedSkills = [];
+      skillTransform({ add: (s) => addedSkills.push(s) });
+      expect(addedSkills).toHaveLength(1);
+      expect(addedSkills[0].id).toBe('my-ext-skill');
+
+      const addedCommands = [];
+      commandTransform({ add: (c) => addedCommands.push(c) });
+      expect(addedCommands).toHaveLength(1);
+      expect(addedCommands[0].name).toBe('new-extension');
+      await addedCommands[0].execute({ sessionID: 'ses_1', prompt: { text: ' weather widget ' }, delivery: 'steer' });
+      expect(prompts).toEqual([{ sessionID: 'ses_1', text: 'Build: weather widget', delivery: 'steer' }]);
+
+      const reloadsBeforeClose = { skillReloads, commandReloads };
+      await runtime.cleanupBridge();
+      await vi.waitFor(() => {
+        expect(skillReloads).toBeGreaterThan(reloadsBeforeClose.skillReloads);
+        expect(commandReloads).toBeGreaterThan(reloadsBeforeClose.commandReloads);
+      });
+      const afterSkills = [];
+      const afterCommands = [];
+      skillTransform({ add: (s) => afterSkills.push(s) });
+      commandTransform({ add: (c) => afterCommands.push(c) });
+      expect(afterSkills).toEqual([]);
+      expect(afterCommands).toEqual([]);
     } finally {
       await cleanup?.();
     }

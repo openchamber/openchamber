@@ -3,7 +3,7 @@ import { managedPermissionRules } from '../agent-tool/runtime.js';
 import { isLimitFailoverConfigured } from '../limit-failover/policy.js';
 import { isSharingAvailable } from '../share-pages/relay-client.js';
 import { materializeSessionTitlePlugin } from './session-title-plugin.js';
-import { createExternalPluginBridgeRuntime, registerExternalPluginBridgeRoutes } from './external-plugin-bridge.js';
+import { collectSkillEntriesFromRoots, createExternalPluginBridgeRuntime, registerExternalPluginBridgeRoutes } from './external-plugin-bridge.js';
 import { EXTENSION_AUTHORING_COMMAND, materializeAuthoringSkill } from '../guests/agent-context.js';
 import type { OpenCodePluginDelivery } from '../guests/opencode-plugin.js';
 import type { Application } from '../shared/http-contracts.js';
@@ -81,6 +81,13 @@ export const createManagedConfigRuntime = ({
       readSettings,
       ensureCredentials: () => agentToolRuntime.ensureBridgeCredentials?.() ?? null,
       isExternalLocal: () => getOpenCodePluginDelivery() === 'none',
+      collectSkillsAndCommands: async () => {
+        const authoring = await materializeAuthoringSkill({ fsPromises, instanceDir, openchamberVersion });
+        const skillRoots = [authoring.skillsRoot, ...await listExtensionSkillDirectories()];
+        const skills = await collectSkillEntriesFromRoots(fsPromises, path, skillRoots);
+        const commands = [{ name: EXTENSION_AUTHORING_COMMAND, description: authoring.command.description, template: authoring.command.template }];
+        return { skills, commands };
+      },
     })
     : null;
 

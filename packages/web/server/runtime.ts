@@ -212,6 +212,8 @@ import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
 import { createUploadStore, registerUploadRoute } from './lib/browser-control/uploads.js';
 import { createManagedConfigRuntime } from './lib/opencode/managed-config-file.js';
+import { createSharedOpenCodeServiceConnector } from './lib/opencode/shared-service.js';
+import { createAdaptivePluginSwitchStore, createGlobalConfigPluginSwitchStore } from './lib/opencode/global-plugin-switches.js';
 import { openCodePluginDelivery } from './lib/guests/opencode-plugin.js';
 import { createLimitFailoverRuntime } from './lib/limit-failover/runtime.js';
 import { prepareInstanceDir } from './lib/opencode/instance-dir.js';
@@ -1706,13 +1708,9 @@ const featureRoutesRuntime = createFeatureRoutesRuntime({
   clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
   trackers: trackerRegistry,
   trackerSessionStatus,
-  pluginSwitchStore,
-  isPluginSwitchAvailable: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
-  refreshPluginSwitches: async () => (
-    managedConfigRuntime
-      ? managedConfigRuntime.refreshManagedConfigFile()
-      : { updated: false, reason: 'no-managed-opencode' }
-  ),
+  pluginSwitchStore: createAdaptivePluginSwitchStore({ managedStore: pluginSwitchStore, globalStore: createGlobalConfigPluginSwitchStore(), isGlobalMode: () => isExternalOpenCode || ENV_SKIP_OPENCODE_START }),
+  isPluginSwitchAvailable: () => openCodePluginDelivery({ external: isExternalOpenCode || ENV_SKIP_OPENCODE_START, origin: ENV_CONFIGURED_OPENCODE_HOST?.origin || openCodeBaseUrl || null, ownsConfigFile: managedConfigRuntime?.ownsConfigFile() ?? true }) !== 'remote',
+  refreshPluginSwitches: async () => ((isExternalOpenCode || ENV_SKIP_OPENCODE_START) ? { updated: true } : (managedConfigRuntime ? managedConfigRuntime.refreshManagedConfigFile() : { updated: false, reason: 'no-managed-opencode' })),
 });
 const bootstrapRuntime = createBootstrapRuntime({
   createUiAuth,
@@ -1871,7 +1869,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   noProjectDirectory: OPENCHAMBER_CHATS_DIR,
   // external: #2638 A managed restart can change the upstream port, so event readers reconnect to the current endpoint.
   onOpenCodeRestarted: () => {
-    resetOpenCodeRuntimeProviders();
+    resetOpenCodeRuntimeProviders(); if (!isExternalOpenCode && !healthCheckInterval) startHealthMonitoring();
     try {
       messageStreamRuntime?.rebindUpstream();
     } catch (error) {
@@ -1887,6 +1885,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   },
   getManagedOpenCodeEnv: async () => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
   getUserEnvironment: () => environmentRuntime.forOpenCode(),
+  sharedService: createSharedOpenCodeServiceConnector({ readSettings: () => readSettingsFromDiskMigrated(), resolveBinary: () => ensureOpencodeCliEnv(), buildEnv: () => ({ ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() }), setAuthPassword: (password, source) => openCodeAuthStateRuntime.setOpenCodeAuthState(password, source) }),
 });
 
 configureOpenCodeCredentials(openCodeCredentialSource({
