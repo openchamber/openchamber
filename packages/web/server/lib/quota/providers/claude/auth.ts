@@ -1,5 +1,6 @@
 
 import { execFileSync } from 'child_process';
+import { createHash } from 'node:crypto';
 import os from 'os';
 import path from 'path';
 
@@ -42,9 +43,23 @@ const isCredentialBlob = (value: unknown): value is ClaudeCodeBlob =>
 const isOAuthFields = (value: unknown): value is ClaudeOAuthFields =>
   value !== null && typeof value === 'object';
 
-const claudeConfigDirectory = () => {
-  const override = asNonEmptyString(process.env.CLAUDE_CONFIG_DIR);
-  return override ? path.resolve(override) : path.join(os.homedir(), '.claude');
+type ClaudeCredentialEnvironment = { CLAUDE_CONFIG_DIR?: string | undefined };
+export type ClaudeCredentialContext =
+  | { configDir: string | null; error: null }
+  | { configDir: null; error: string };
+
+let readEnvironment: () => ClaudeCredentialEnvironment = () => process.env;
+
+export const configureClaudeCredentialEnvironment = (read: typeof readEnvironment) => {
+  readEnvironment = read;
+};
+
+export const readClaudeCredentialContext = (): ClaudeCredentialContext => {
+  try {
+    return { configDir: readEnvironment().CLAUDE_CONFIG_DIR || null, error: null };
+  } catch {
+    return { configDir: null, error: 'Cannot read Claude usage environment settings.' };
+  }
 };
 
 const parseClaudeCodeBlob = (blob: ClaudeCodeBlob | null, source: ClaudeCredential['source']): ClaudeCredential | null => {
@@ -60,11 +75,14 @@ const parseClaudeCodeBlob = (blob: ClaudeCodeBlob | null, source: ClaudeCredenti
   };
 };
 
-const readKeychainCredential = () => {
+const readKeychainCredential = (configDir: string | null) => {
   if (process.platform !== 'darwin') return null;
   let raw;
   try {
-    raw = execFileSync('security', ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'], {
+    const service = configDir
+      ? `${KEYCHAIN_SERVICE}-${createHash('sha256').update(configDir).digest('hex').slice(0, 8)}`
+      : KEYCHAIN_SERVICE;
+    raw = execFileSync('security', ['find-generic-password', '-s', service, '-w'], {
       encoding: 'utf8',
       timeout: 10_000,
       stdio: ['ignore', 'pipe', 'ignore']
@@ -81,8 +99,8 @@ const readKeychainCredential = () => {
   }
 };
 
-const readCredentialsFile = () => {
-  const blob: unknown = readJsonFile(path.join(claudeConfigDirectory(), '.credentials.json'));
+const readCredentialsFile = (configDir: string | null) => {
+  const blob: unknown = readJsonFile(path.join(configDir ?? path.join(os.homedir(), '.claude'), '.credentials.json'));
   return parseClaudeCodeBlob(isCredentialBlob(blob) ? blob : null, 'credentials-file');
 };
 
@@ -105,14 +123,16 @@ const readEnvCredential = (): ClaudeCredential | null => {
   return { accessToken, refreshToken: null, expiresAt: null, planLabel: null, source: 'env' };
 };
 
-export const findClaudeCredential = (auth: LegacyAuthFile): ClaudeCredential | null =>
-  readKeychainCredential()
-  ?? readCredentialsFile()
-  ?? readOpenCodeCredential(auth)
-  ?? readEnvCredential();
+export const findClaudeCredential = (auth: LegacyAuthFile, context = readClaudeCredentialContext()): ClaudeCredential | null => {
+  if (context.error) return null;
+  const local = readKeychainCredential(context.configDir) ?? readCredentialsFile(context.configDir);
+  if (local || context.configDir) return local;
+  return readOpenCodeCredential(auth) ?? readEnvCredential();
+};
 
-export const loadClaudeCredential = async (): Promise<ClaudeCredential | null> =>
-  readKeychainCredential()
-  ?? readCredentialsFile()
-  ?? readOpenCodeCredential(await readOpenCodeCredentials())
-  ?? readEnvCredential();
+export const loadClaudeCredential = async (context = readClaudeCredentialContext()): Promise<ClaudeCredential | null> => {
+  if (context.error) return null;
+  const local = readKeychainCredential(context.configDir) ?? readCredentialsFile(context.configDir);
+  if (local || context.configDir) return local;
+  return readOpenCodeCredential(await readOpenCodeCredentials()) ?? readEnvCredential();
+};

@@ -15,10 +15,12 @@ export interface EnvironmentRouteApp {
   post: (path: string, handler: EnvironmentHandler) => void;
 }
 
-export const registerEnvironmentRoutes = (app: EnvironmentRouteApp, { store, runtime, listProjects }: {
+export const registerEnvironmentRoutes = (app: EnvironmentRouteApp, { store, runtime, listProjects, readClaudeConfigDir, onClaudeConfigChanged }: {
   store: EnvironmentStore;
   runtime: Pick<EnvironmentRuntime, 'projectStatus' | 'invalidateProject' | 'reloadProject'>;
   listProjects: () => Promise<{ id: string; path: string }[]>;
+  readClaudeConfigDir?: () => string | undefined;
+  onClaudeConfigChanged?: () => void;
 }) => {
   const respondWithError = (res: EnvironmentResponse, cause: unknown, fallback: string) => {
     if (cause instanceof EnvironmentPatchError) return res.status(400).json({ error: cause.message });
@@ -47,7 +49,12 @@ export const registerEnvironmentRoutes = (app: EnvironmentRouteApp, { store, run
 
   app.put('/api/environment', async (req, res) => {
     try {
-      return res.json(await store.updateUser(parseUserPatch(req.body)));
+      const patch = parseUserPatch(req.body);
+      const touchesClaude = Boolean(patch.variables && Object.hasOwn(patch.variables, 'CLAUDE_CONFIG_DIR'));
+      const before = touchesClaude ? readClaudeConfigDir?.() : undefined;
+      const result = await store.updateUser(patch);
+      if (touchesClaude && readClaudeConfigDir?.() !== before) onClaudeConfigChanged?.();
+      return res.json(result);
     } catch (error) {
       return respondWithError(res, error, 'Failed to save environment variables');
     }

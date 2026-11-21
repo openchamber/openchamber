@@ -88,6 +88,7 @@ type SourceControlProvidersChangedEvent = { type: 'source-control-providers-chan
 type TrackerProvidersChangedEvent = { type: 'tracker-providers-changed' };
 
 type QuotaProvidersChangedEvent = { type: 'quota-providers-changed' };
+type QuotaCredentialsChangedEvent = { type: 'quota-credentials-changed' };
 
 type GuestsChangedEvent = { type: 'guests-changed' };
 
@@ -235,6 +236,7 @@ type OpenChamberEvent =
   | SourceControlProvidersChangedEvent
   | TrackerProvidersChangedEvent
   | QuotaProvidersChangedEvent
+  | QuotaCredentialsChangedEvent
   | GuestsChangedEvent
   | GuestMarksChangedEvent
   | GuestServiceEvent
@@ -409,6 +411,15 @@ const getEventProperties = (properties: unknown): Record<string, unknown> | null
 
 const guestServiceEventSchema = z.object({ guestId: z.string().min(1), topic: z.string().min(1), data: z.json() });
 
+const signalEvents = new Map<string, OpenChamberEvent>([
+  ['openchamber:source-control-providers-changed', { type: 'source-control-providers-changed' }],
+  ['openchamber:tracker-providers-changed', { type: 'tracker-providers-changed' }],
+  ['openchamber:quota-providers-changed', { type: 'quota-providers-changed' }],
+  ['openchamber:quota-credentials-changed', { type: 'quota-credentials-changed' }],
+  ['openchamber:guests-changed', { type: 'guests-changed' }],
+  ['openchamber:guest-marks-changed', { type: 'guest-marks-changed' }],
+]);
+
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
   if (envelope.type === 'openchamber:terminal-sessions-changed') {
     for (const listener of listeners) listener({ type: 'terminal-sessions-changed' });
@@ -574,28 +585,9 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
-  if (envelope.type === 'openchamber:source-control-providers-changed') {
-    for (const listener of listeners) listener({ type: 'source-control-providers-changed' });
-    return;
-  }
-
-  if (envelope.type === 'openchamber:tracker-providers-changed') {
-    for (const listener of listeners) listener({ type: 'tracker-providers-changed' });
-    return;
-  }
-
-  if (envelope.type === 'openchamber:quota-providers-changed') {
-    for (const listener of listeners) listener({ type: 'quota-providers-changed' });
-    return;
-  }
-
-  if (envelope.type === 'openchamber:guests-changed') {
-    for (const listener of listeners) listener({ type: 'guests-changed' });
-    return;
-  }
-
-  if (envelope.type === 'openchamber:guest-marks-changed') {
-    for (const listener of listeners) listener({ type: 'guest-marks-changed' });
+  const signal = signalEvents.get(envelope.type);
+  if (signal) {
+    for (const listener of listeners) listener(signal);
     return;
   }
 
