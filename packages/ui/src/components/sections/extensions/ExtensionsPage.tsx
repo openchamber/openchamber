@@ -3,12 +3,7 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import {
-  SETTINGS_HELPER_CLASS,
-  SETTINGS_ICON_BUTTON_CLASS,
-  SettingsFieldRow,
-  SettingsSection,
-} from '@/components/sections/shared/SettingsSection';
+import { SETTINGS_HELPER_CLASS, SETTINGS_ICON_BUTTON_CLASS, SettingsFieldRow, SettingsSection } from '@/components/sections/shared/SettingsSection';
 import {
   SETTINGS_CARD_GRID_CLASS,
   SettingsAddCard,
@@ -20,15 +15,10 @@ import {
   type SettingsCardTone,
 } from '@/components/sections/shared/SettingsCards';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { ExtensionFoldersSection, ExtensionInstallFolders } from './ExtensionFoldersField';
+import { useInstallFolders } from './useInstallFolders';
 import { GuestApprovalDialog } from './GuestApprovalDialog';
 import { OpenCodePluginBanner } from './OpenCodePluginBanner';
 import { toast } from '@/components/ui';
@@ -482,6 +472,7 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
         ) : null}
       </SettingsSection>
 
+      <ExtensionFoldersSection guest={guest} busy={busy} />
       {hasPermissions ? (
         <SettingsSection title={t('settings.extensions.detail.section.permissions')} contentClassName="space-y-3">
           {permissions ? (
@@ -609,6 +600,7 @@ export const ExtensionsPage: React.FC = () => {
   }, [approval]);
   const [dropActive, setDropActive] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
+  const installFolders = useInstallFolders();
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const dragDepth = React.useRef(0);
   const zipInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -743,6 +735,7 @@ export const ExtensionsPage: React.FC = () => {
         const existing = result.id
           ? guests.find((guest) => guest.id === result.id) ?? unreadable.find((guest) => guest.id === result.id)
           : undefined;
+        installFolders.offerStored(guests.find((guest) => guest.id === result.id)?.folders);
         setReinstall({
           source,
           name: existing?.name ?? result.id ?? (source.kind === 'file' ? source.file.name : source.input),
@@ -780,14 +773,16 @@ export const ExtensionsPage: React.FC = () => {
   };
 
   const runInstall = async (source: InstallSource, options: { replace?: boolean } = {}) => {
+    const folders = addOpen ? installFolders.forRequest() : undefined;
+    if (folders === null) return;
     const requestRuntimeKey = getRuntimeKey();
     if (source.kind === 'input') {
       setInstallValue(source.input);
     }
     setBusy(true);
     const result = source.kind === 'file'
-      ? await uploadGuestZip(source.file, options)
-      : await installGuest(source.input, { ...options, gitIdentityId: source.gitIdentityId });
+      ? await uploadGuestZip(source.file, { ...options, folders })
+      : await installGuest(source.input, { ...options, gitIdentityId: source.gitIdentityId, folders });
     setBusy(false);
     if (getRuntimeKey() !== requestRuntimeKey) return;
     await finishInstall(result, source, { allowConflictDialog: !options.replace });
@@ -805,6 +800,7 @@ export const ExtensionsPage: React.FC = () => {
       return;
     }
     setInstallValue(request.source);
+    installFolders.reset();
     setAddOpen(true);
   }, [busy, installRequest, status]);
 
@@ -1065,6 +1061,7 @@ export const ExtensionsPage: React.FC = () => {
             )}
             {identityLoadFailed ? <p className="typography-meta text-destructive">{t('settings.extensions.identity.loadFailed')}</p> : null}
           </div>
+          <ExtensionInstallFolders {...installFolders.field} disabled={busy} />
           <DialogFooter>
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => setAddOpen(false)}>
               {t('settings.common.actions.cancel')}
@@ -1091,6 +1088,7 @@ export const ExtensionsPage: React.FC = () => {
         onOpenChange={(open) => {
           if (!open && !busy) {
             setReinstall(null);
+            installFolders.dropStored();
           }
         }}
       >
@@ -1108,7 +1106,7 @@ export const ExtensionsPage: React.FC = () => {
               size="sm"
               variant="ghost"
               disabled={busy}
-              onClick={() => setReinstall(null)}
+              onClick={() => { setReinstall(null); installFolders.dropStored(); }}
             >
               {t('settings.common.actions.cancel')}
             </Button>
@@ -1207,7 +1205,7 @@ export const ExtensionsPage: React.FC = () => {
               <SettingsAddCard
                 label={t('settings.extensions.grid.addTitle')}
                 hint={t('settings.extensions.grid.addHint')}
-                onClick={() => setAddOpen(true)}
+                onClick={() => { installFolders.reset(); setAddOpen(true); }}
                 settingsItem="extensions.add"
               />
               {guests.map((guest) => (

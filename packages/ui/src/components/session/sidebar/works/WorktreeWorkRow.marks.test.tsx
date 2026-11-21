@@ -169,3 +169,14 @@ test('a click on a mark opens the work and the extension panel in its folder, an
   // A work without sessions opens as a new chat in its folder.
   expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBe(WORKTREE);
 });
+
+test('a mark of an extension limited to folders shows only while the row or its project lies inside them', async () => {
+  const limited = (folders: string[]): InstalledGuest => ({ ...guest('deploy', 'Deploy Log'), folders });
+  const entries = [mark('deploy', { directory: WORKTREE }, 'Preview is up')];
+  showMarks([limited(['/project-a'])], entries);
+  await act(async () => root.render(row(false)));
+  expect(drawn()).toEqual(['Deploy Log: Preview is up']);
+
+  await act(async () => showMarks([limited(['/elsewhere'])], entries));
+  expect(drawn()).toEqual([]);
+});

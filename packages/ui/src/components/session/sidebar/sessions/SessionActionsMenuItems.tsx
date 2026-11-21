@@ -149,7 +149,8 @@ export function SessionActionsMenuItems({
   };
 
   const loadExportRecords = useSessionMessageRecordsForExport();
-  const guestActionEntries = useGuestActions();
+  const projectPath = useProjectsStore((state) => state.projects.find((entry) => entry.id === projectId)?.path ?? null);
+  const guestActionEntries = useGuestActions([directory, projectPath]);
   const guestSessionActionEntries = React.useMemo(() => guestSessionActions(guestActionEntries), [guestActionEntries]);
   const runGuestAction = (entry: GuestActionEntry) => {
     void runGuestSessionAction({

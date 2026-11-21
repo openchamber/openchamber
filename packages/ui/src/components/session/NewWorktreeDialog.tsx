@@ -134,16 +134,16 @@ export function NewWorktreeDialog({
   const trustConfirmation = useConfirmDialog();
   const isMobile = useUIStore((state) => state.isMobile);
   const trackerSources = useTrackerSources();
-  const guestAttachItems = useGuestAttachItems();
-  const dialogGuests = React.useMemo(
-    () => guestAttachItems.filter((item) => item.mode === 'dialog'),
-    [guestAttachItems],
-  );
   const [guestDialogId, setGuestDialogId] = React.useState<string | null>(null);
   const [referencePickerSource, setReferencePickerSource] = React.useState<ReferencePickerSource | null>(null);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   const projectId = project?.id ?? activeProject?.id ?? null;
   const projectDirectory = project?.path ?? activeProject?.path ?? null;
+  const guestAttachItems = useGuestAttachItems([projectDirectory]);
+  const dialogGuests = React.useMemo(
+    () => guestAttachItems.filter((item) => item.mode === 'dialog'),
+    [guestAttachItems],
+  );
   const projectRef: ProjectRef | null = React.useMemo(
     () => (projectId && projectDirectory ? { id: projectId, path: projectDirectory } : null),
     [projectDirectory, projectId],
