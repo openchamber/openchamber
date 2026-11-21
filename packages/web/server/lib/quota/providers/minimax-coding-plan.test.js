@@ -21,6 +21,14 @@ const fetchSequence = (...bodies) => {
 };
 
 describe('MiniMax Coding Plan quota provider', () => {
+  it('reports the method-call failure for a model name that is not text', async () => {
+    const { fetchImpl } = fetchSequence({ model_remains: [{ model_name: 17, current_interval_total_count: 10 }] });
+
+    const result = await fetchQuota({ readAuth, fetchImpl });
+
+    expect(result).toMatchObject({ ok: false, configured: true, error: 'm.model_name.toLowerCase is not a function' });
+  });
+
   it('says MiniMax does not share limits when both endpoints answer 1004', async () => {
     // The body MiniMax returns for a valid Subscription Key (#5839).
     const { fetchImpl, urls } = fetchSequence({

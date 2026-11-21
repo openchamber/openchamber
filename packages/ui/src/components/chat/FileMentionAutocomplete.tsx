@@ -32,13 +32,14 @@ import type { Session } from '@/lib/opencode/model';
 import { ensureGlobalSessionsLoaded, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useAutocompleteSelectionScroll } from './composer/ui/useAutocompleteSelectionScroll';
 import { useHeightMorph } from '@/lib/motion/useSizeMorph';
+import { keepGuestItemsInScope } from '@/lib/guests/folders';
+import { useGuestScopeOf } from '@/hooks/useGuestScopeSync';
 import { guestsOfferMentions, searchGuestMentions, type GuestMention } from '@/lib/guests/mentions';
 import { useGuestsStore } from '@/lib/guests/store';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 
-/** Subagents listed before the user types; the rest are a keystroke away. */
 const AGENTS_SHOWN_WITHOUT_QUERY = 6;
 
 type FileInfo = ProjectFileSearchHit;
@@ -49,7 +50,6 @@ type AgentInfo = {
   mode?: string | null;
 };
 
-/** The rows the list shows, top to bottom, and the search they answer. */
 type MentionRows = {
   key: string | null;
   agents: AgentInfo[];
@@ -57,10 +57,9 @@ type MentionRows = {
   recentFiles: FileInfo[];
   results: FileMentionHit[];
   sessions: Session[];
-  extensions: GuestMention[];
+  extensions: readonly GuestMention[];
 };
 
-/** The extension's own mark, so a row says whose it is before it is read. */
 const ExtensionMentionIcon = ({ guestId }: { guestId: string }) => {
   const icon = useGuestsStore((state) => state.guests.find((guest) => guest.id === guestId)?.icon) ?? '';
   const iconSrc = React.useMemo(
@@ -86,11 +85,8 @@ interface FileMentionAutocompleteProps {
   searchQuery: string;
   onFileSelect: (file: FileInfo) => void;
   onAgentSelect?: (agentName: string) => void;
-  /** Lists other sessions by title once the user types; without it, none. */
   onSessionSelect?: (session: Session) => void;
-  /** Lists rows from extensions that answer `@`; without it, none. */
   onExtensionMentionSelect?: (mention: GuestMention) => void;
-  /** The session being written in, which the session list leaves out. */
   currentSessionId?: string | null;
   onClose: () => void;
   style?: React.CSSProperties;
@@ -129,17 +125,12 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   const removeUnselectedOpenPath = useFilesViewTabsStore((state) => state.removeUnselectedOpenPath);
   const [staleRecentPaths, setStaleRecentPaths] = React.useState<ReadonlySet<string>>(() => new Set());
   const verifiedPathsRef = React.useRef<Set<string>>(new Set());
-  // Subscribed, not read once: the session's directory may still be loading its agents.
   const configAgents = useConfigStore((state) => state.agents);
   const searchFiles = useFileSearchStore((state) => state.searchFiles);
   const debouncedQuery = useDebouncedValue(searchQuery, 180);
   const showHidden = useDirectoryShowHidden();
   const showGitignored = useFilesViewShowGitignored();
-  // The server's hits, with the search they answer: rows from another query
-  // are never shown as this one's.
   const [search, setSearch] = React.useState<{ key: string; files: FileInfo[]; directories: FileInfo[] } | null>(null);
-  // Derived, not stored: the subagent list follows the registry, and only the
-  // ranking follows the query, in the same render as the keystroke.
   const subagents = React.useMemo<AgentInfo[]>(() => filterVisibleAgents(configAgents)
     .filter((agent) => agent.mode && agent.mode !== 'primary')
     .map((agent) => ({
@@ -149,8 +140,6 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       mode: agent.mode,
     }))
     .sort((a, b) => a.name.localeCompare(b.name)), [configAgents]);
-  // The trigger lets a space through only for a session title; paths and
-  // agent names hold none, so such a query lists sessions alone.
   const sessionsOnly = (searchQuery ?? '').includes(' ');
   const agents = React.useMemo(
     () => sessionsOnly ? [] : rankByQuery(subagents, searchQuery ?? '', (agent) => [agent.name, agent.displayName, agent.description]),
@@ -159,24 +148,19 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   const searchOptions = { includeHidden: showHidden, respectGitignore: !showGitignored };
   const wantedSearchKey = mentionSearchKey(currentDirectory, searchQuery ?? '', searchOptions);
   const debouncedSearchKey = mentionSearchKey(currentDirectory, debouncedQuery ?? '', searchOptions);
-  // From the keystroke until its search answers, debounce included.
   const searchPending = wantedSearchKey !== null && search?.key !== wantedSearchKey;
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const selectedIndexRef = React.useRef(0);
   const previousViewRef = React.useRef<MentionRows | null>(null);
   const [marqueeWidth, setMarqueeWidth] = React.useState(360);
-  // Only the selected row scrolls an overflowing path, so only it is measured.
   const [selectedOverflow, setSelectedOverflow] = React.useState<{ index: number; duration: number } | null>(null);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   const { listRef, onKeyboardNavigate } = useAutocompleteSelectionScroll(selectedIndex, itemRefs);
   const labelRefs = React.useRef<(HTMLSpanElement | null)[]>([]);
   const measureRefs = React.useRef<(HTMLSpanElement | null)[]>([]);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
-  // Narrowing as the user types, the box eases into its new height; its
-  // bottom edge stays on the composer (`bottom-full`), so it moves upward.
   useHeightMorph(containerRef);
   const isMobile = useUIStore((state) => state.isMobile);
-  // A caret placement brings its own max-height.
   const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, style?.maxHeight === undefined);
   const normalizedSearchQuery = (searchQuery ?? '').trim();
 
@@ -285,9 +269,6 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     () => normalizedSearchQuery.length > 0 ? agents : agents.slice(0, AGENTS_SHOWN_WITHOUT_QUERY),
     [agents, normalizedSearchQuery.length],
   );
-  // Ranked from a snapshot per query (and once more when the list arrives),
-  // not the live list: other sessions update all the time, which must neither
-  // re-rank thousands of titles nor move the row under the keyboard.
   const sessionsLoaded = useGlobalSessionsStore((state) => state.hasLoaded);
   const listsSessions = onSessionSelect !== undefined;
   React.useEffect(() => {
@@ -310,9 +291,9 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     return rankFileMentionResults(files, settledSearch.directories, normalizedSearchQuery, 20);
   }, [settledSearch, visibleRecentFiles, normalizedSearchQuery]);
   const settledSearchKey = settledSearch?.key ?? null;
-  // Extensions answer on their own time: their rows join the list when they
-  // arrive and never hold the files back.
-  const asksExtensions = useGuestsStore((state) => onExtensionMentionSelect !== undefined && guestsOfferMentions(state.guests));
+  const guests = useGuestsStore((state) => state.guests);
+  const mentionScope = useGuestScopeOf(currentDirectory || null);
+  const asksExtensions = onExtensionMentionSelect !== undefined && guestsOfferMentions(guests, mentionScope);
   const [extensionRows, setExtensionRows] = React.useState<GuestMention[]>([]);
   React.useEffect(() => {
     if (!asksExtensions) {
@@ -334,14 +315,15 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     sessions: visibleSessions,
     extensions: extensionRows,
   }), [agents.length, extensionRows, settledSearchKey, visibleAgents, visibleRecentFiles, visibleResults, visibleSessions]);
-  // While a query searches, the popup keeps the last settled rows, so it does
-  // not collapse and regrow on every keystroke: its height changes once per
-  // answer, by what the answer changed.
   const [heldView, setHeldView] = React.useState(liveView);
   if (!searchPending && heldView !== liveView) {
     setHeldView(liveView);
   }
-  const view = searchPending ? heldView : liveView;
+  const shownView = searchPending ? heldView : liveView;
+  const view = React.useMemo(() => {
+    const extensions = keepGuestItemsInScope(shownView.extensions, guests, mentionScope);
+    return extensions === shownView.extensions ? shownView : { ...shownView, extensions };
+  }, [guests, mentionScope, shownView]);
   const rowCount = view.agents.length + view.recentFiles.length + view.results.length + view.sessions.length + view.extensions.length;
   const listState = mentionListState(rowCount, searchPending);
 
@@ -372,11 +354,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     let answered = false;
     const serverQuery = mentionServerQuery(debouncedQuery ?? '');
     const options = { includeHidden: showHidden, respectGitignore: !showGitignored };
-    // A failed kind lists nothing without taking the other kind's hits with it.
     const directorySearch = searchFiles(currentDirectory, serverQuery, 20, { ...options, type: 'directory' }).catch((): FileInfo[] => []);
-    // OpenCode's index answers at once; the search behind the hidden and
-    // gitignored toggles can walk the project for seconds. Its hits are shown
-    // as soon as there are any, and the toggles' extra rows join them later.
     void Promise.all([
       searchFiles(currentDirectory, serverQuery, 80, { type: 'file' }).catch((): FileInfo[] => []),
       directorySearch,
@@ -385,7 +363,6 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
         setSearch({ key: debouncedSearchKey, files, directories });
       }
     });
-    // A new query or a closed list stops that walk; nobody is left to read it.
     const walk = new AbortController();
     void Promise.all([
       searchFiles(currentDirectory, serverQuery, 80, { ...options, type: 'file', signal: walk.signal }).catch((): FileInfo[] => []),
@@ -403,10 +380,6 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     };
   }, [currentDirectory, debouncedQuery, debouncedSearchKey, searchFiles, showHidden, showGitignored]);
 
-  // A new query's answer starts at its best match; rows held while a query
-  // searches keep the selection where the keyboard put it, and new rows for
-  // the same query leave it on the row the user is on. Before paint and the
-  // next key, so Enter never reads the old position in the new rows.
   React.useLayoutEffect(() => {
     const previous = previousViewRef.current;
     previousViewRef.current = view;
@@ -586,8 +559,6 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
             {t('chat.fileMentionAutocomplete.empty')}
           </div>
         ) : (
-          // Rows held from the last query fade only when the search takes
-          // long enough to notice; a quick answer just replaces them.
           <div
             data-mention-list=""
             aria-busy={searchPending || undefined}
@@ -641,7 +612,6 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                   {getFileIcon(file)}
                   <span
                     ref={(el) => { labelRefs.current[rowIndex] = el; }}
-                    // Paths read left to right in every language; the marquee and its fade assume it.
                     dir="ltr"
                     className="relative flex-1 min-w-0 overflow-hidden file-mention-marquee-container"
                     style={isSelected ? {
@@ -696,7 +666,6 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                     : getFileIcon(file)}
                   <span
                     ref={(el) => { labelRefs.current[rowIndex] = el; }}
-                    // Paths read left to right in every language; the marquee and its fade assume it.
                     dir="ltr"
                     className="relative flex-1 min-w-0 overflow-hidden file-mention-marquee-container"
                     style={isSelected ? {
@@ -734,7 +703,6 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
             {view.sessions.length > 0 && (view.recentFiles.length > 0 || view.results.length > 0) && (
               <div className="my-1 border-t border-edge" />
             )}
-            {/* After the files: Enter on `@pack` keeps choosing the file it always did. */}
             {view.sessions.map((session, index) => {
               const rowIndex = view.agents.length + view.recentFiles.length + view.results.length + index;
               const directory = resolveGlobalSessionDirectory(session);

@@ -1,8 +1,3 @@
-/**
- * Case-insensitive substring match ranges over a single text string, using
- * the same non-overlapping `String.prototype.indexOf` scan semantics as
- * standard find-in-page (e.g. "aaa" in "aaaa" yields a single [0,3]).
- */
 export const findMatchRanges = (text: string, query: string): Array<{ start: number; end: number }> => {
   const normalized = query.trim().toLowerCase();
   const ranges: Array<{ start: number; end: number }> = [];
@@ -13,9 +8,6 @@ export const findMatchRanges = (text: string, query: string): Array<{ start: num
   const starts: number[] = [];
   const ends: number[] = [];
   if (lower.length !== text.length) {
-    // Keep the whole-string lowercase result for context-sensitive casing.
-    // Map each folded UTF-16 unit back to its original code point so a
-    // partial match of an expansion still selects the complete character.
     let offset = 0;
     for (const character of text) {
       const end = offset + character.length;
@@ -44,7 +36,6 @@ export const findMatchRanges = (text: string, query: string): Array<{ start: num
   return ranges;
 };
 
-/** Match within each text node, preserving the preview's existing semantics. */
 export const findPreviewRanges = (container: HTMLElement, query: string): Range[] => {
   if (!query.trim()) return [];
   const document = container.ownerDocument;
@@ -62,7 +53,6 @@ export const findPreviewRanges = (container: HTMLElement, query: string): Range[
   return ranges;
 };
 
-/** Scroll nested code panes and the preview itself to the selected text. */
 export const scrollPreviewRangeIntoView = (container: HTMLElement, range: Range): void => {
   const view = container.ownerDocument.defaultView;
   if (!view || !container.contains(range.startContainer)) return;

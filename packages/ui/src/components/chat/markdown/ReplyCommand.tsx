@@ -1,15 +1,24 @@
 import React from 'react';
-import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
+import { HighlightedCode } from '@/components/code/HighlightedCode';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
+import { toast } from '@/components/ui';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useUIStore } from '@/stores/useUIStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { openMobileWorkspace } from '@/lib/mobileWorkspaceTabs';
 import type { ReplyCommandRun } from '@/lib/opencode/reply-command';
 import { cn } from '@/lib/utils';
 import { useRunningShell } from '@/sync/background-shells';
 import { renderTerminalOutput } from '../message/parts/toolOutput';
 import { keepTail, useShellOutput } from '../message/parts/useShellOutput';
+import { useChatSurfaceMode } from '../useChatSurfaceMode';
+import { replyCommandShell, ReplyTerminalUnsupportedError, startReplyTerminal } from './replyTerminal';
 import { useReplyCommand, type ReplyCommand } from './useReplyCommand';
 
 function ReplyCommandButton({ command }: { command: ReplyCommand }) {
@@ -32,6 +41,66 @@ function ReplyCommandButton({ command }: { command: ReplyCommand }) {
   );
 }
 
+function ReplyTerminalButton({ directory, language, source }: { directory: string; language: string; source: string }) {
+  const { t } = useI18n();
+  const { terminal, runtime } = useRuntimeAPIs();
+  const { currentTheme } = useThemeSystem();
+  const surface = useChatSurfaceMode();
+  const [starting, setStarting] = React.useState(false);
+  const pending = React.useRef(false);
+  const available = !runtime.isVSCode && surface !== 'mini-chat';
+
+  const start = async () => {
+    if (pending.current || !available || !directory.trim() || !source.trim()) return;
+    pending.current = true;
+    setStarting(true);
+    const runtimeKey = getRuntimeKey();
+    const isCurrent = () => runtimeKey === getRuntimeKey();
+    const settings = useUIStore.getState();
+    const conversation = useSessionUIStore.getState().currentSessionId;
+    try {
+      const tabId = await startReplyTerminal({
+        terminal,
+        directory,
+        command: source,
+        shell: replyCommandShell(language, settings.terminalShell),
+        loginShells: settings.terminalLoginShells,
+        createOptions: {
+          cols: 80,
+          rows: 24,
+          themeMode: currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
+          terminalBackground: currentTheme.colors.surface.background,
+          terminalForeground: currentTheme.colors.syntax.base.foreground,
+        },
+        isCurrent,
+      });
+      if (tabId && useSessionUIStore.getState().currentSessionId === conversation && !openMobileWorkspace({ tab: 'terminal' })) {
+        useUIStore.getState().openContextPanelTab(directory, { mode: 'terminal' });
+      }
+    } catch (error) {
+      if (isCurrent()) {
+        toast.error(t('terminalView.error.startSessionFailed'), {
+          description: error instanceof Error && !(error instanceof ReplyTerminalUnsupportedError) ? error.message : undefined,
+        });
+      }
+    } finally {
+      pending.current = false;
+      setStarting(false);
+    }
+  };
+
+  if (!available) return null;
+  const label = t('markdownRenderer.code.actions.runInTerminalTitle');
+  return (
+    <HoverTooltip label={label}>
+      <Button variant="ghost" size="xs" data-export-ignore data-reply-command-terminal
+        disabled={starting} aria-label={label} onClick={() => void start()}>
+        {starting ? <Spinner className="size-3.5" /> : <Icon name="terminal" className="size-3.5" />}
+      </Button>
+    </HoverTooltip>
+  );
+}
+
 type Outcome = { kind: 'running' | 'finished' | 'stopped' } | { kind: 'failed'; code: number };
 
 const outcomeOf = ({ shell, completion }: ReplyCommandRun): Outcome => {
@@ -41,7 +110,6 @@ const outcomeOf = ({ shell, completion }: ReplyCommandRun): Outcome => {
   return code === 0 ? { kind: 'finished' } : { kind: 'failed', code };
 };
 
-// The block is the surface; the highlighter's own code background would be a box inside it.
 const TRANSPARENT: React.CSSProperties = { background: 'transparent', backgroundColor: 'transparent' };
 
 const OUTCOME_LOOK = {
@@ -51,7 +119,6 @@ const OUTCOME_LOOK = {
   failed: { icon: 'error-warning', className: 'text-[var(--status-error)]' },
 } as const;
 
-/** What the command printed, under its code: live while it runs, then the recorded output. */
 function ReplyCommandOutput({ run }: { run: ReplyCommandRun }) {
   const { t } = useI18n();
   const { shell } = run;
@@ -59,7 +126,6 @@ function ReplyCommandOutput({ run }: { run: ReplyCommandRun }) {
   const tracked = useRunningShell(running ? shell.shellID : undefined);
   const live = useShellOutput(shell.shellID, tracked?.directory, running && tracked !== undefined);
   const outcome = outcomeOf(run);
-  // OpenCode drops the output of a command that was stopped, so what was on screen stays.
   const raw = running || outcome.kind === 'stopped' ? live : keepTail(shell.output?.output ?? '');
   const output = React.useMemo(() => renderTerminalOutput(raw).trimEnd(), [raw]);
   const look = OUTCOME_LOOK[outcome.kind];
@@ -88,10 +154,9 @@ function ReplyCommandOutput({ run }: { run: ReplyCommandRun }) {
           ref={scroller}
           className="max-h-80 overflow-auto px-3 py-2.5 font-mono text-[length:var(--text-code)] text-foreground"
         >
-          {/* Like a shell tool row: plain while it streams, highlighted once it settles. */}
           {running
             ? <pre className="m-0 whitespace-pre-wrap break-words">{output}</pre>
-            : <WorkerHighlightedCode language="bash" code={output} style={TRANSPARENT} wrap />}
+            : <HighlightedCode language="bash" code={output} style={TRANSPARENT} wrap />}
         </div>
       ) : null}
     </div>
@@ -100,16 +165,19 @@ function ReplyCommandOutput({ run }: { run: ReplyCommandRun }) {
 
 export type RenderedCommand = { button: React.ReactNode; output: React.ReactNode };
 
-/** A command block's run button and result, handed to the block that draws the code. */
-export function ReplyCommandCode({ reply, directory, source, children }: {
+export function ReplyCommandCode({ reply, directory, language, source, children }: {
   reply: { sessionId: string; messageId: string };
   directory: string;
+  language: string;
   source: string;
   children: (command: RenderedCommand) => React.ReactNode;
 }) {
   const command = useReplyCommand(reply, directory, source);
   return children({
-    button: <ReplyCommandButton command={command} />,
+    button: <>
+      <ReplyCommandButton command={command} />
+      <ReplyTerminalButton directory={directory} language={language} source={source} />
+    </>,
     output: command.run ? <ReplyCommandOutput key={command.run.shell.id} run={command.run} /> : null,
   });
 }

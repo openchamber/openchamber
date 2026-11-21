@@ -13,12 +13,14 @@ import {
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useUIStore } from '@/stores/useUIStore';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
-import { useI18n } from '@/lib/i18n';
+import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { useMarkdownPresentation } from './MarkdownPresentationContext';
 import { cn } from '@/lib/utils';
 import { ColumnResizeHandle } from '@/components/ui/ColumnResizeHandle';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { loadColumnWidths, saveColumnWidths, type ColumnWidths } from '@/lib/columnWidthMemory';
+import { ChatTranscriptContext } from '../column/ChatTranscriptContext';
+import { useChatTableOverflow } from '@/hooks/useChatTableOverflow';
 
 type TableFormat = 'csv' | 'tsv' | 'md';
 const copyFormats = ['csv', 'tsv', 'md'] as const;
@@ -35,12 +37,34 @@ type TableResize = {
 };
 const TableResizing = React.createContext<TableResize | null>(null);
 
+type ChatTableGeometry = { available: number; offset: number; viewport: HTMLElement };
+
+function chatTableGeometry(tableWrapper: HTMLElement, view: Window): ChatTableGeometry | null {
+  const markdownRoot = tableWrapper.closest('.markdown-content');
+  const nested = tableWrapper.parentElement?.closest('blockquote, li, details');
+  if (!markdownRoot || (nested && markdownRoot.contains(nested))) return null;
+  const viewport = tableWrapper.closest<HTMLElement>('[data-scrollbar="chat"]');
+  if (!viewport) return null;
+  const message = tableWrapper.closest<HTMLElement>('[data-message-id]');
+  const column = message?.querySelector<HTMLElement>('.chat-message-column');
+  if (!column) return null;
+
+  const style = view.getComputedStyle(column);
+  const paddingStart = parseFloat(style.paddingInlineStart) || 0;
+  const paddingEnd = parseFloat(style.paddingInlineEnd) || 0;
+  const available = Math.max(0, viewport.clientWidth - paddingStart - paddingEnd - 2);
+  const viewportLeft = viewport.getBoundingClientRect().left + viewport.clientLeft;
+  const targetLeft = viewportLeft + (isRightToLeft(column) ? paddingEnd : paddingStart);
+  const wrapperRect = tableWrapper.getBoundingClientRect();
+  const frameLeft = isRightToLeft(tableWrapper) ? wrapperRect.right - available : wrapperRect.left;
+  return { available, offset: targetLeft - frameLeft, viewport };
+}
+
 const headingText = (node: Element['children'][number]): string => {
   if (node.type === 'text') return node.value;
   return node.type === 'element' ? node.children.map(headingText).join('') : '';
 };
 
-/** A table is named by its headings: an order number would move with every table added above it. */
 const tableHeadings = (table: Element | undefined): string => {
   const head = table?.children.find((child): child is Element => child.type === 'element' && child.tagName === 'thead');
   return head ? headingText(head) : '';
@@ -70,13 +94,9 @@ export function MarkdownTableCell({ node, style, ...props }: React.ComponentProp
   );
 }
 
-// A wrapped column is never squeezed below this; a narrower one (row numbers,
-// short codes) keeps its own width.
 const MIN_COLUMN = 120;
-// A text column in a table that scrolls sideways wraps at this width.
 const WIDE_COLUMN = 280;
 
-// Keep short columns at their natural width and share only the remaining space.
 function fitColumns(natural: number[], available: number, wrap: boolean): number[] {
   const widths = natural.map((width) => Math.min(Math.max(MIN_COLUMN, available || 320), width));
   if (!wrap || available <= 0) return widths;
@@ -86,8 +106,6 @@ function fitColumns(natural: number[], available: number, wrap: boolean): number
     const share = remaining / open.length;
     const fitting = open.filter((index) => widths[index] <= share);
     if (!fitting.length) {
-      // Below the minimum share the table scrolls sideways anyway; squeezing a
-      // long text column to the minimum then only stacks it into a tall cell.
       const width = share < MIN_COLUMN ? WIDE_COLUMN : Math.floor(share);
       for (const index of open) widths[index] = Math.max(Math.min(MIN_COLUMN, natural[index]), Math.min(natural[index], width));
       break;
@@ -98,12 +116,6 @@ function fitColumns(natural: number[], available: number, wrap: boolean): number
   return widths;
 }
 
-/**
- * The widths hidden headings ask of their columns: a short one stays on one
- * line, a long one wraps between words but never splits its longest word.
- * Copies of the cells are measured next to the table, so code, bold and links
- * inside a heading keep their own styles.
- */
 function headingWidths(cells: HTMLTableCellElement[], host: HTMLElement): number[] {
   const holder = host.ownerDocument.createElement('div');
   holder.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;visibility:hidden';
@@ -149,23 +161,30 @@ function serializeMarkdownTable(table: HTMLTableElement, format: TableFormat): s
   const data = { headers: rows[0] ?? [], rows: rows.slice(1) };
   if (format === 'csv') return tableDataToCSV(data);
   if (format === 'tsv') return tableDataToTSV(data);
-  // Cells already contain escaped Markdown links; do not escape them again.
   return [data.headers, data.headers.map(() => '---'), ...data.rows]
     .map((row) => `| ${row.join(' | ')} |`).join('\n');
 }
 
 export function MarkdownTable({ node, className, children, ...props }: React.ComponentProps<'table'> & ExtraProps) {
-  const { purpose, settled, tableWidthScope } = useMarkdownPresentation();
+  const { purpose, settled, tableWidthScope, chatTableExpansion } = useMarkdownPresentation();
+  const inMainChat = React.useContext(ChatTranscriptContext);
   const wrap = useUIStore((state) => state.tableCellWrap);
   const ref = React.useRef<HTMLTableElement>(null);
   const wrapper = React.useRef<HTMLDivElement>(null);
-  const [measurement, setMeasurement] = React.useState<{ node: typeof node; natural: number[]; available: number; font: string } | null>(null);
+  const scrollArea = React.useRef<HTMLElement>(null);
+  const [measurement, setMeasurement] = React.useState<{
+    node: typeof node;
+    natural: number[];
+    available: number;
+    font: string;
+    chat: ChatTableGeometry | null;
+  } | null>(null);
   const measured = measurement?.node === node ? measurement : null;
+  const [expandedTable, setExpandedTable] = React.useState<{ node: typeof node; expanded: boolean } | null>(null);
+  const expanded = expandedTable !== null && expandedTable.node === node && expandedTable.expanded;
   React.useLayoutEffect(() => {
     const table = ref.current;
     const container = wrapper.current?.parentElement;
-    // A streaming table grows on every update; measuring it each time forced
-    // a layout per update. It keeps its natural layout until the reply settles.
     if (!table || !container || !settled) return;
     const view = table.ownerDocument.defaultView;
     if (!view) return;
@@ -173,12 +192,20 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
       const style = view.getComputedStyle(container);
       const available = Math.max(0, container.clientWidth - (parseFloat(style.paddingInlineStart) || 0) - (parseFloat(style.paddingInlineEnd) || 0) - 2);
       const font = view.getComputedStyle(table).font;
+      const chat = chatTableExpansion && inMainChat && wrapper.current
+        ? chatTableGeometry(wrapper.current, view)
+        : null;
       if (measured && measured.font !== font) {
         setMeasurement(null);
         return;
       }
       if (measured) {
-        if (measured.available !== available) setMeasurement({ ...measured, available });
+        const sameChat = measured.chat === chat
+          || (measured.chat !== null && chat !== null
+            && measured.chat.available === chat.available
+            && Math.abs(measured.chat.offset - chat.offset) < 0.5
+            && measured.chat.viewport === chat.viewport);
+        if (measured.available !== available || !sameChat) setMeasurement({ ...measured, available, chat });
         return;
       }
       if (available <= 0) return;
@@ -197,20 +224,33 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
           natural[index] = Math.max(natural[index] ?? 0, width);
         });
       }
-      setMeasurement({ node, natural, available, font });
+      setMeasurement({ node, natural, available, font, chat });
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(container);
+    const chatViewport = chatTableExpansion && inMainChat
+      ? wrapper.current?.closest<HTMLElement>('[data-scrollbar="chat"]')
+      : null;
+    if (chatViewport) observer.observe(chatViewport);
     return () => observer.disconnect();
-  }, [node, measured, settled]);
+  }, [node, measured, settled, chatTableExpansion, inMainChat, props.dir]);
   const tableId = tableWidthScope && !purpose ? `${tableWidthScope}#${tableHeadings(node)}` : null;
   const [userWidths, setUserWidths] = React.useState<ColumnWidths>(() => (tableId ? loadColumnWidths(tableId) : {}));
   const [dragged, setDragged] = React.useState<{ column: number; width: number } | null>(null);
-  const fitted = React.useMemo(
-    () => measured ? fitColumns(measured.natural, measured.available, wrap) : null,
-    [measured, wrap],
+  const canExpand = Boolean(
+    chatTableExpansion
+    && inMainChat
+    && settled
+    && measured?.chat
+    && measured.chat.available > measured.available + 48
+    && measured.natural.reduce((sum, width) => sum + width, 0) > measured.available + 1,
   );
+  const isExpanded = expanded && canExpand;
+  const expandedGeometry = isExpanded ? measured?.chat ?? null : null;
+  const fitted = React.useMemo(() => (
+    measured ? fitColumns(measured.natural, expandedGeometry?.available ?? measured.available, wrap) : null
+  ), [measured, expandedGeometry, wrap]);
   const widths = React.useMemo(() => {
     const shown = dragged ? { ...userWidths, [dragged.column]: dragged.width } : userWidths;
     return fitted?.map((width, column) => shown[column] ?? width) ?? null;
@@ -235,16 +275,20 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
       },
     };
   }, [tableId, fitted, node, userWidths]);
+  const collapsedLayout = React.useMemo(() => {
+    if (!expandedGeometry || !measured) return null;
+    const collapsed = fitColumns(measured.natural, measured.available, wrap).map((width, column) => userWidths[column] ?? width);
+    return {
+      widths: collapsed.join(','),
+      capped: collapsed.map((width, index) => (measured.natural[index] > width ? '1' : '0')).join(''),
+    };
+  }, [expandedGeometry, measured, wrap, userWidths]);
   const columns = widths?.map((width, index) => (
     <col key={index} style={{ width }} />
   ));
-  // Which columns are narrower than their content. Widths change on every
-  // frame of a chat resize, these flags rarely do.
   const cappedColumns = widths && measured
     ? widths.map((width, index) => (measured.natural[index] > width ? '1' : '0')).join('')
     : '';
-  // A new map re-renders every cell, so it changes only with the table's
-  // content or which columns are capped.
   const cellWrap = React.useMemo(() => {
     const result = new Map<Element, boolean>();
     for (const section of node?.children ?? []) {
@@ -263,6 +307,8 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
   React.useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current);
   }, []);
+
+  useChatTableOverflow(wrapper, scrollArea, ref, chatTableExpansion && inMainChat && settled);
 
   const copy = async (format: TableFormat) => {
     if (!ref.current) return;
@@ -284,10 +330,41 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
     URL.revokeObjectURL(url);
   };
 
+  const wrapperStyle = canExpand && measured ? { width: `${measured.available}px` } : undefined;
+  const expandedScrollStyle = expandedGeometry
+    ? {
+      width: `${expandedGeometry.available}px`,
+      transform: `translateX(${expandedGeometry.offset}px)`,
+    }
+    : undefined;
+
   return (
-    <div ref={wrapper} data-streamdown="table-wrapper" data-table-wrap={wrap ? 'true' : 'false'} className="group flex flex-col">
+    <div
+      ref={wrapper}
+      dir={props.dir ?? 'ltr'}
+      data-streamdown="table-wrapper"
+      data-table-wrap={wrap ? 'true' : 'false'}
+      data-table-expanded={isExpanded ? 'true' : undefined}
+      className="group flex flex-col"
+      style={wrapperStyle}
+    >
       {!purpose && (
         <div data-streamdown="table-controls" data-export-ignore className="flex items-center justify-end gap-1">
+          {canExpand && (
+            <HoverTooltip label={t(expanded ? 'markdownRenderer.table.actions.fitMessageWidthTitle' : 'markdownRenderer.table.actions.expandTitle')}>
+              <Button
+                variant="ghost"
+                size="xs"
+                data-table-width-toggle=""
+                className={isExpanded ? PRESSED_CLASS : undefined}
+                aria-label={t(isExpanded ? 'markdownRenderer.table.actions.fitMessageWidthTitle' : 'markdownRenderer.table.actions.expandTitle')}
+                aria-pressed={isExpanded}
+                onClick={() => setExpandedTable({ node, expanded: !isExpanded })}
+              >
+                <Icon name="expand-horizontal" className="size-3.5" />
+              </Button>
+            </HoverTooltip>
+          )}
           <HoverTooltip label={t(wrap ? 'markdownRenderer.table.actions.disableWrapTitle' : 'markdownRenderer.table.actions.enableWrapTitle')}>
             <Button
               variant="ghost"
@@ -334,9 +411,16 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
           </DropdownMenu>
         </div>
       )}
-      <ScrollableOverlay outerClassName="overlay-scrollbar-wrapper--no-gutter min-w-0" fillContainer={false}>
+      <ScrollableOverlay
+        ref={scrollArea}
+        outerClassName="overlay-scrollbar-wrapper--no-gutter min-w-0"
+        outerStyle={expandedScrollStyle}
+        fillContainer={false}
+      >
         <table {...props} ref={ref} data-streamdown="table"
           data-oc-table-layout={widths ? 'fixed' : settled ? 'natural' : 'pending'}
+          data-collapsed-widths={collapsedLayout?.widths}
+          data-collapsed-capped={collapsedLayout?.capped}
           style={widths ? { ...props.style, width: widths.reduce((sum, width) => sum + width, 0), tableLayout: 'fixed' } : props.style}
           className={cn('border-collapse', className)}>
           {columns && <colgroup>{columns}</colgroup>}

@@ -1,64 +1,60 @@
-// A tiny in-memory forge that speaks the subset of Gitea's REST v1 the
-// example service uses: one repository (`mona/teapot`), its pull requests,
-// issues and comments, the files at a few commits (so a pull request has a
-// diff and both sides of a changed file), plus a fork of it (`octo/teapot`) and an unrelated
-// repository (`mona/kettle`) that answer only for themselves and their
-// branches. Tests start it on a loopback port, point the example
-// at it, and read the write log to prove a mutation reached the forge once.
-// It is a test double for the contract, not a Gitea emulator.
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 export const FAKE_FORGE_OWNER = 'mona';
 export const FAKE_FORGE_REPO = 'teapot';
 export const FAKE_FORGE_USER = { id: 7, login: FAKE_FORGE_OWNER, full_name: 'Mona Teapot', email: 'mona@example.com' };
-/** A fork of `mona/teapot` with one branch of its own, `fork-feature`. */
 export const FAKE_FORGE_FORK = { owner: 'octo', name: 'teapot' };
-/** A repository on the same forge that is not part of `mona/teapot`'s network. */
 export const FAKE_FORGE_STRANGER = { owner: 'mona', name: 'kettle' };
 
 type ForgeComment = { id: number; body: string; created_at: string };
+type ForgePerson = { id: number; login: string; full_name?: string; email?: string; avatar_url?: string };
+type ForgeReview = { user: ForgePerson; state: string; stale?: boolean; dismissed?: boolean };
 type ForgeItem = {
   number: number;
   title: string;
   body: string;
   state: 'open' | 'closed';
   comments: ForgeComment[];
-  /** `headRepo` is the id of the repository the head branch lives in. */
-  pull: null | { head: string; headRepo: number; base: string; sha: string; merged: boolean };
+  pull: null | { head: string; headRepo: number; base: string; sha: string; merged: boolean; requestedReviewers?: ForgePerson[]; reviews?: ForgeReview[] };
+};
+
+type ForgeTimelineUser = { id: number; login: string; avatar_url?: string };
+type ForgeTimelineTarget = {
+  number?: number;
+  html_url?: string;
+  title?: string;
+  pull_request?: object | null;
+  repository?: { full_name?: string };
+};
+type ForgeTimelineEvent = {
+  type?: string;
+  created_at?: string;
+  user?: ForgeTimelineUser;
+  ref_issue?: ForgeTimelineTarget;
+  ref_comment?: { created_at?: string; user?: ForgeTimelineUser };
 };
 
 export type FakeForgeWrite = { method: string; path: string };
 
 export type FakeForge = {
-  /** `http://127.0.0.1:<port>`: the instance origin. */
   origin: string;
-  /** Every POST, PUT, PATCH and DELETE the forge accepted, in order. */
   writes: FakeForgeWrite[];
-  /** Answer 401 to every request made with this token. */
   refuseToken(token: string): void;
-  /** Point a branch at a new commit, as a push would. */
   push(branch: string, sha: string): void;
   close(): Promise<void>;
 };
 
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
-/** Every branch here starts from `main`'s first commit, so that is every pull request's merge base. */
 const MERGE_BASE = SHA_A;
 
 type Tree = ReadonlyMap<string, string>;
-/** The files at `main` (`SHA_A`). A commit without its own tree has these. */
 const MAIN_TREE: Tree = new Map([['README.md', 'Steep for two minutes.\n'], ['kettle.txt', 'Whistle at 100°C.\n']]);
-/** `feature` (`SHA_B`), the head of pull request #2: one file changed. */
 const FEATURE_TREE: Tree = new Map([...MAIN_TREE, ['README.md', 'Steep for three minutes.\nThen pour.\n']]);
 
 const linesOf = (content: string) => (content ? content.replace(/\n$/, '').split('\n') : []);
 
-/**
- * One modified file's `diff --git` part, the whole file as one hunk: enough
- * for a reader that splits by file. Trees here only ever modify files.
- */
 const fileDiff = (path: string, before: string, after: string): string => {
   const old = linesOf(before);
   const next = linesOf(after);
@@ -68,7 +64,6 @@ const fileDiff = (path: string, before: string, after: string): string => {
   ].join('\n') + '\n';
 };
 
-/** The files `head` changed from `base`, in path order. */
 const changedPaths = (base: Tree, head: Tree) => [...head.keys()].sort().filter((path) => base.get(path) !== head.get(path));
 
 type RequestBody = { [key: string]: string | number | boolean | null | undefined };
@@ -93,12 +88,27 @@ export const startFakeForge = async (): Promise<FakeForge> => {
   const treeAt = (sha: string) => trees.get(sha) ?? MAIN_TREE;
   const items: ForgeItem[] = [
     { number: 1, title: 'Kettle whistles too early', body: 'It whistles at 80°C.', state: 'open', comments: [], pull: null },
-    { number: 2, title: 'Steep longer', body: 'Three minutes, not two.', state: 'open', comments: [], pull: { head: 'feature', headRepo: 1, base: 'main', sha: SHA_B, merged: false } },
+    {
+      number: 2, title: 'Steep longer', body: 'Three minutes, not two.', state: 'open', comments: [],
+      pull: {
+        head: 'feature', headRepo: 1, base: 'main', sha: SHA_B, merged: false,
+        requestedReviewers: [{ id: 11, login: 'cid' }],
+        reviews: [
+          { user: { id: 9, login: 'ann' }, state: 'APPROVED' },
+          { user: { id: 10, login: 'bob' }, state: 'REQUEST_CHANGES', stale: true },
+          { user: { id: 12, login: 'dee' }, state: 'APPROVED' },
+          ...Array.from({ length: 50 }, () => ({ user: { id: 11, login: 'cid' }, state: 'REQUEST_REVIEW' })),
+          { user: { id: 12, login: 'dee' }, state: 'APPROVED', dismissed: true },
+          { user: { id: 9, login: 'ann' }, state: 'PENDING' },
+        ],
+      },
+    },
   ];
   let commentId = 100;
   let origin = '';
 
   const user = { ...FAKE_FORGE_USER, login: FAKE_FORGE_OWNER, avatar_url: '' };
+  const octo = { ...FAKE_FORGE_USER, id: 9, login: 'octo', avatar_url: 'https://avatars.example.com/octo.png' };
   type RepoJson = {
     id: number; name: string; full_name: string; owner: { id: number; login: string }; html_url: string; clone_url: string;
     default_branch: string; fork: boolean; parent: RepoJson | null;
@@ -133,6 +143,45 @@ export const startFakeForge = async (): Promise<FakeForge> => {
     updated_at: '2026-10-02T10:00:00Z',
     pull_request: item.pull ? { merged: item.pull.merged } : null,
   });
+  const commentJson = (item: ForgeItem, comment: ForgeComment) => {
+    const itemUrl = issueJson(item).html_url;
+    return {
+      ...comment, user, html_url: `${itemUrl}#issuecomment-${comment.id}`,
+      issue_url: item.pull ? '' : itemUrl, pull_request_url: item.pull ? itemUrl : '',
+    };
+  };
+  const timelineJson = (item: ForgeItem): ForgeTimelineEvent[] => {
+    const target = (number: number) => {
+      const linked = items.find((entry) => entry.number === number) ?? item;
+      return {
+        number,
+        html_url: issueJson(linked).html_url,
+        title: linked.title,
+        repository: { full_name: `${FAKE_FORGE_OWNER}/${FAKE_FORGE_REPO}` },
+      };
+    };
+    if (item.number === 1) {
+      const pull = target(2);
+      return [
+        { type: 'pull_ref', created_at: '2026-10-04T10:00:00Z', user, ref_issue: pull },
+        { type: 'comment_ref', created_at: '2026-10-05T10:00:00Z', user, ref_issue: pull, ref_comment: { created_at: '2026-10-03T10:00:00Z', user: octo } },
+        { type: 'issue_ref', created_at: '2026-10-06T10:00:00Z', user, ref_issue: pull },
+        { type: 'issue_ref', created_at: '2026-10-07T10:00:00Z', user, ref_issue: { html_url: `${origin}/${FAKE_FORGE_OWNER}/${FAKE_FORGE_REPO}/issues/9` } },
+        { type: 'issue_ref', created_at: '2026-10-08T10:00:00Z', user, ref_issue: { number: 9 } },
+        { type: 'close', created_at: '2026-10-09T10:00:00Z' },
+      ];
+    }
+    return [
+      { type: 'issue_ref', created_at: '2026-10-06T10:00:00Z', user, ref_issue: target(1) },
+      {
+        type: 'issue_ref', created_at: '2026-10-02T10:00:00Z', user,
+        ref_issue: {
+          number: 5, title: 'Steam wand', html_url: `${origin}/${FAKE_FORGE_STRANGER.owner}/${FAKE_FORGE_STRANGER.name}/issues/5`,
+          repository: { full_name: `${FAKE_FORGE_STRANGER.owner}/${FAKE_FORGE_STRANGER.name}` },
+        },
+      },
+    ];
+  };
   const pullJson = (item: ForgeItem) => {
     const pull = item.pull;
     if (!pull) return null;
@@ -144,6 +193,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       head: branchOf(pull.head, pull.sha, pull.headRepo),
       base: branchOf(pull.base, branches.get(pull.base) ?? SHA_A),
       merge_base: MERGE_BASE,
+      requested_reviewers: pull.requestedReviewers ?? [],
     };
   };
   const byNumber = (value: string | undefined) => items.find((item) => item.number === Number(value));
@@ -170,7 +220,6 @@ export const startFakeForge = async (): Promise<FakeForge> => {
     if (!token || refused.has(token)) return { status: 401, body: { message: 'token is required' } };
     if (method === 'GET' && path === '/api/v1/user') return { status: 200, body: user };
 
-    // The fork and the stranger answer only for themselves and their branches.
     for (const [other, answer, otherBranches] of [
       [FAKE_FORGE_FORK, fork, forkBranches],
       [FAKE_FORGE_STRANGER, stranger, new Map([['main', SHA_A]])],
@@ -200,7 +249,6 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       }
       if (method === 'POST' && rest.length === 1) {
         const body = await readBody(request);
-        // `owner:branch` names a branch of the fork; a bare name one of this repository.
         const [headOwner, forkHead] = textOf(body.head).split(':');
         const fromFork = forkHead !== undefined && headOwner === FAKE_FORGE_FORK.owner;
         const head = fromFork ? forkHead : textOf(body.head);
@@ -228,6 +276,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       }
       const item = byNumber(number);
       if (!item?.pull) return notFound;
+      if (method === 'GET' && action === 'reviews' && rest.length === 3) return { status: 200, body: page(item.pull.reviews ?? [], url, response) };
       if (method === 'GET' && rest.length === 2) return { status: 200, body: pullJson(item) };
       if (method === 'GET' && action === 'files' && rest.length === 3) {
         const base = treeAt(MERGE_BASE);
@@ -264,9 +313,31 @@ export const startFakeForge = async (): Promise<FakeForge> => {
         const list = items.filter((item) => (url.searchParams.get('type') !== 'issues' || !item.pull) && stateFilter(url)(item)).reverse();
         return { status: 200, body: page(list.map(issueJson), url, response) };
       }
+      if (number === 'comments' && rest.length === 3) {
+        const owner = items.find((entry) => entry.comments.some((comment) => String(comment.id) === action));
+        const index = owner ? owner.comments.findIndex((comment) => String(comment.id) === action) : -1;
+        if (!owner || index < 0) return notFound;
+        if (method === 'GET') return { status: 200, body: commentJson(owner, owner.comments[index]) };
+        if (method === 'PATCH') {
+          const text = textOf((await readBody(request)).body);
+          if (!text) return { status: 422, body: { message: 'body is required' } };
+          owner.comments[index].body = text;
+          writes.push({ method, path });
+          return { status: 200, body: commentJson(owner, owner.comments[index]) };
+        }
+        if (method === 'DELETE') {
+          owner.comments.splice(index, 1);
+          writes.push({ method, path });
+          return { status: 204, body: null };
+        }
+        return notFound;
+      }
       const item = byNumber(number);
       if (!item) return notFound;
       if (method === 'GET' && rest.length === 2) return { status: 200, body: issueJson(item) };
+      if (method === 'GET' && action === 'timeline' && rest.length === 3) {
+        return { status: 200, body: page(timelineJson(item), url, response) };
+      }
       if (method === 'PATCH' && rest.length === 2) {
         const body = await readBody(request);
         if (body.state !== 'open' && body.state !== 'closed') return { status: 422, body: { message: 'state is open or closed' } };
@@ -277,7 +348,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       }
       if (action === 'comments' && rest.length === 3) {
         if (method === 'GET') {
-          return { status: 200, body: item.comments.map((comment) => ({ ...comment, user, html_url: `${issueJson(item).html_url}#issuecomment-${comment.id}` })) };
+          return { status: 200, body: item.comments.map((comment) => commentJson(item, comment)) };
         }
         if (method === 'POST') {
           const body = await readBody(request);
@@ -287,7 +358,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
           const comment = { id: commentId, body: text, created_at: '2026-10-03T10:00:00Z' };
           item.comments.push(comment);
           writes.push({ method, path });
-          return { status: 201, body: { ...comment, user } };
+          return { status: 201, body: commentJson(item, comment) };
         }
       }
     }
@@ -309,13 +380,13 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       }
       response.setHeader('content-type', 'application/json');
       response.end(JSON.stringify(answer.body));
-    }, (error: Error) => {
+    }, () => {
       response.statusCode = 500;
-      response.end(JSON.stringify({ message: error.message }));
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ message: 'The fake forge could not handle this request.' }));
     });
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  // A TCP listener's address is `{ port }`; a pipe's would be a string.
   const { port }: Partial<AddressInfo> = Object(server.address());
   if (!Number.isInteger(port)) throw new Error('The fake forge did not get a port');
   origin = `http://127.0.0.1:${port}`;

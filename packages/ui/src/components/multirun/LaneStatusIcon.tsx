@@ -6,9 +6,6 @@ import { useI18n } from '@/lib/i18n';
 import { LANE_STATUS_LABEL_KEYS, type LaneStatus } from '@/lib/multirun/laneStatus';
 import { cn } from '@/lib/utils';
 
-// Blocked states reuse the sidebar's glyphs and colors, so a lane waiting on
-// the user reads the same here as its row does there. A plain finish stays
-// grey: it only means the turn ended, not that the work is good.
 const STATUS_ICON = {
   permission: { name: 'shield', className: 'text-destructive' },
   question: { name: 'question', className: 'text-status-info' },

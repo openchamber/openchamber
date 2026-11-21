@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, expect, jest, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -268,17 +268,21 @@ test('archive rows hide unregistered destinations while preserving raw archived 
 
 test('a session of a worktree that is gone is listed, one in an existing folder of the same OpenCode project is not', async () => {
   const syncProjects = useGlobalSyncStore.getState().projects;
+  jest.useFakeTimers();
+  testRestorers.push(() => {
+    jest.useRealTimers();
+    useGlobalSyncStore.setState({ projects: syncProjects });
+  });
   useGlobalSyncStore.setState({ projects: [{ id: 'project', worktree: '/workspace', time: { created: 1, updated: 1 }, sandboxes: [] }] });
   useGlobalSessionsStore.setState({ archivedSessions: [
     { ...session('gone-worktree', 'Gone worktree'), directory: '/gone/worktree' },
     { ...session('untrusted-clone', 'Untrusted clone'), directory: '/untrusted/clone' },
   ] });
   await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
-  // Directory probes share one request after a short window.
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
+  // The client's DIRECTORY_AVAILABILITY_BATCH_WINDOW_MS batches both directory probes.
+  await act(async () => { jest.advanceTimersByTime(15); });
   expect(document.body.textContent).toContain('Gone worktree');
   expect(document.body.textContent).not.toContain('Untrusted clone');
-  useGlobalSyncStore.setState({ projects: syncProjects });
 });
 
 test('the chats of a deleted space are grouped under its name and cannot be restored', async () => {
@@ -361,6 +365,7 @@ test('every open starts with an empty search', async () => {
 });
 
 test('a subsession archived while its parent stays active is listed under the parent\'s title', async () => {
+  let commits = 0;
   const boss = session('ses_boss', 'Boss', 0);
   const archivedParent = session('ses_old', 'Old run', 5);
   const sub = (id: string, title: string, parentID: string, archived: number): Session => ({ ...session(id, title, archived), parentID });
@@ -375,7 +380,7 @@ test('a subsession archived while its parent stays active is listed under the pa
     ],
     'ready',
   );
-  await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
+  await act(async () => root.render(<React.Profiler id="archive" onRender={() => { commits += 1; }}><I18nProvider><ArchiveView /></I18nProvider></React.Profiler>));
   // The search sits in a column of the same width, so match the list itself.
   const list = document.querySelector('.max-w-3xl.space-y-0\\.5');
   if (!list) throw new Error('Archive list missing');
@@ -387,6 +392,15 @@ test('a subsession archived while its parent stays active is listed under the pa
   expect(lines).toEqual(['Old run', '# Boss', 'Fix capture', 'Review fix', 'Plain chat']);
   expect(document.querySelector('[aria-label="Restore Fix capture"]')).not.toBeNull();
   expect(document.querySelector('[aria-label="Restore Old child"]')).toBeNull();
+  const before = commits;
+  await act(async () => {
+    for (let i = 0; i < 100; i++) useGlobalSessionsStore.getState().noteDeferredSessionUpdate(boss.id);
+  });
+  expect(commits).toBe(before);
+  await act(async () => useGlobalSessionsStore.getState().upsertSession({ ...boss, title: 'Renamed boss' }));
+  expect(list.textContent).toContain('Renamed boss');
+  await act(async () => useGlobalSessionsStore.getState().upsertSession({ ...boss, time: { ...boss.time, archived: 6 } }));
+  expect(document.querySelector('[aria-label="Restore Fix capture"]')).toBeNull();
 });
 
 test('an empty archive is not reported before the session list has loaded, or after it failed to load', async () => {

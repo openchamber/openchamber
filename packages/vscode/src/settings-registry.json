@@ -34,6 +34,9 @@
     "opencodeBinary": {
       "scope": "instance"
     },
+    "useGlobalOpenCodeService": {
+      "scope": "instance"
+    },
     "serverUpdateChannel": {
       "scope": "instance",
       "surfaces": [
@@ -183,6 +186,9 @@
     "agentUsageToolEnabled": {
       "scope": "instance"
     },
+    "agentTerminalToolEnabled": {
+      "scope": "instance"
+    },
     "agentImageToolEnabled": {
       "scope": "instance"
     },
@@ -208,6 +214,12 @@
       "scope": "instance"
     },
     "agentWorkflowToolEnabled": {
+      "scope": "instance"
+    },
+    "agentWorkflowAutoApprove": {
+      "scope": "instance"
+    },
+    "agentWorkflowAutoApproveLeads": {
       "scope": "instance"
     },
     "isolatedSpacesEnabled": {
@@ -292,6 +304,9 @@
     "sttLanguage": {
       "scope": "profile"
     },
+    "sttPrompt": {
+      "scope": "profile"
+    },
     "sttCorrectTranscript": {
       "scope": "profile"
     },
@@ -356,6 +371,9 @@
     "sidebarKeepPinnedInPlace": {
       "scope": "profile",
       "perSurface": true
+    },
+    "sidebarSessionBatchSize": {
+      "scope": "profile"
     },
     "sidebarProjectSortOrder": {
       "scope": "profile"
@@ -440,6 +458,10 @@
       "perSurface": true
     },
     "promptNavigatorEnabled": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "chatWidth": {
       "scope": "profile",
       "perSurface": true
     },
@@ -545,6 +567,12 @@
         "desktop"
       ]
     },
+    "agentBrowserSharesLogins": {
+      "scope": "profile",
+      "surfaces": [
+        "desktop"
+      ]
+    },
     "openTrackerLinksOnBoard": {
       "scope": "profile",
       "surfaces": [
@@ -559,6 +587,13 @@
         "web",
         "desktop",
         "mobile"
+      ]
+    },
+    "terminalOpenOnProjectAction": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop"
       ]
     },
     "autoCreateWorktree": {
@@ -595,6 +630,9 @@
       "scope": "profile"
     },
     "largeTextPasteBehavior": {
+      "scope": "profile"
+    },
+    "documentAttachBehavior": {
       "scope": "profile"
     },
     "savePastedImagesAsFiles": {
@@ -673,6 +711,15 @@
       "scope": "profile"
     },
     "defaultAgent": {
+      "scope": "profile"
+    },
+    "chatsDefaultModel": {
+      "scope": "profile"
+    },
+    "chatsDefaultVariant": {
+      "scope": "profile"
+    },
+    "chatsDefaultAgent": {
       "scope": "profile"
     },
     "smallModelUseDefault": {
@@ -1025,6 +1072,14 @@
       "local": true
     },
     "alwaysShowScrollbars": {
+      "scope": "device",
+      "local": true
+    },
+    "mobileKeepScreenAwake": {
+      "scope": "device",
+      "local": true
+    },
+    "questionsInChat": {
       "scope": "device",
       "local": true
     },

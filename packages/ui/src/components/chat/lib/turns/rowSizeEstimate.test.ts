@@ -30,7 +30,7 @@ const rowsOf = (messages: ChatMessageEntry[], prompt = 'Explain'): TimelineRow[]
         ...messages,
     ]).turns[0]!;
     const entry: TimelineEntry = { kind: 'turn', key: `turn:${turn.turnId}`, turn, isLastTurn: true };
-    return buildTimelineRows([entry], { collapsedActivity: false, expandedTurns: new Map(), showReasoningTraces: true }, []);
+    return buildTimelineRows([entry], { collapsedActivity: false, keepActivityText: false, expandedTurns: new Map(), showReasoningTraces: true }, []);
 };
 
 const messageRow = (rows: TimelineRow[], messageId: string) => rows.find((row) => row.kind === 'turn-message' && row.messageId === messageId)!;
@@ -91,4 +91,22 @@ test('reasoning drawn as text when thinking blocks do not fold', () => {
     const open = estimateTimelineRowSize(messageRow(rows, 'step'), { ...metrics, collapsibleThinkingBlocks: false })!;
     expect(folded).toBe(72);
     expect(open).toBeGreaterThan(400);
+});
+
+test('Show notes adds the kept lines to the answer row, or to the fold row of a turn without an answer', () => {
+    const line = 'A line the agent wrote between its steps.';
+    const build = (messages: ChatMessageEntry[], keepActivityText: boolean): TimelineRow[] => {
+        const turn = projectTurnRecords([
+            { info: { id: 'user', sessionID: 'session', role: 'user', time: { created: 1 } }, parts: [text('prompt', 'Explain')] },
+            ...messages,
+        ]).turns[0]!;
+        const entry: TimelineEntry = { kind: 'turn', key: `turn:${turn.turnId}`, turn, isLastTurn: true, hasLaterAssistant: true };
+        return buildTimelineRows([entry], { collapsedActivity: true, keepActivityText, expandedTurns: new Map(), showReasoningTraces: true }, []);
+    };
+    const size = (rows: TimelineRow[], kind: TimelineRow['kind']) => estimateTimelineRowSize(rows.find((row) => row.kind === kind)!, metrics) ?? 0;
+    const step = { ...assistant('step', [text('note', line), tool('read', 'read')]), info: { ...assistant('step', []).info, finish: 'tool-calls' as const } };
+    const answered = [step, assistant('answer', [text('done', 'Done.')])];
+    expect(size(build(answered, true), 'turn-message')).toBeGreaterThan(size(build(answered, false), 'turn-message'));
+    expect(size(build(answered, true), 'turn-fold')).toBe(size(build(answered, false), 'turn-fold'));
+    expect(size(build([step], true), 'turn-fold')).toBeGreaterThan(size(build([step], false), 'turn-fold'));
 });

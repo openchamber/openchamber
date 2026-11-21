@@ -37,6 +37,17 @@ describe('extension instructions', () => {
     expect(await store.forDirectory('/repo', new Set(['other']))).toEqual([]);
   });
 
+  test('the same text again does not rewrite the file', async () => {
+    await store.set('desk', '/repo', 'text');
+    const file = path.join(dataDir, 'guest-instructions.json');
+    const before = (await fs.stat(file)).ino;
+    await store.set('desk', '/repo', ' text ');
+    await store.remove('absent');
+    expect((await fs.stat(file)).ino).toBe(before);
+    await store.set('desk', '/repo', 'other');
+    expect((await fs.stat(file)).ino).not.toBe(before);
+  });
+
   test('empty text removes it, and a removed extension leaves nothing', async () => {
     await store.set('desk', '/repo', 'text');
     await store.set('desk', '/repo', '   ');

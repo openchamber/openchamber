@@ -1,25 +1,3 @@
-/**
- * The composer's text editor.
- *
- * This replaces the transparent-textarea-over-mirror-div arrangement the
- * composer used before. That arrangement could only paint styles which do not
- * change glyph advance width — colour, background, underline — because any
- * metric change made the mirror drift out from under the caret. Bold, italic
- * and any width-affecting affordance were therefore impossible, and the
- * overlay had to be disabled outright on mobile, where wrapped text drifted
- * anyway.
- *
- * CodeMirror owns the text and the caret together, so there is no second layer
- * to keep aligned. The document remains a plain string — `getValue()` is
- * exactly what gets sent — so nothing downstream has to serialize a rich
- * document model back into a prompt.
- *
- * The component is a controlled primitive: it renders `value`, reports edits,
- * and exposes an imperative handle for the caret-level operations the composer
- * performs (insert a mention, restore a draft, replace a token). Every policy
- * decision — what a key means, which picker opens, when to send — stays with
- * the caller.
- */
 
 import React from 'react';
 import { history, historyKeymap, insertNewline, standardKeymap } from '@codemirror/commands';
@@ -43,6 +21,7 @@ import type { ComposerEditorViewStore } from './viewStore';
 import { ComposerEditorView } from './ComposerEditorView';
 import { composerEditorTheme, composerSelectionExtension, isCodeMirrorIOSNavigator } from './theme';
 import { handleComposerHostMouseDown } from './hostMouseDown';
+import { scriptAwareWordGestures } from './wordBoundaries';
 import { getComposerHeightLimit, isComposerContentCapped } from './heightLimit';
 import { imeNewlineCleanup } from './imeNewline';
 import { restoreDeferredEnterModifiers } from '../keyboardPolicy';
@@ -56,17 +35,9 @@ export interface ComposerSelection {
 export interface ComposerChange {
     value: string;
     selection: ComposerSelection;
-    /** Authoritative old-to-new ranges for composer-local occurrence state. */
     changes: ChangeDesc;
-    /** True when the edit came from a paste rather than typing. */
     fromPaste: boolean;
-    /** The text this edit inserted, empty for deletions. */
     insertedText: string;
-    /**
-     * True when the edit only applied a new `value` prop: text the app put
-     * there (a restored draft, a prepared prompt), not anything the user typed
-     * or pasted. Callers must not open pickers for it.
-     */
     fromValueProp: boolean;
 }
 
@@ -78,26 +49,17 @@ export interface ComposerEditorHandle {
     getSelection(): ComposerSelection;
     setSelection(start: number, end?: number): void;
     selectAll(): void;
-    /** Replace the current selection, leaving the caret after the insertion. */
     insertText(text: string): void;
-    /** Replace a range; selection defaults to a caret after the inserted text. */
     replaceRange(from: number, to: number, text: string, selectionStart?: number, selectionEnd?: number): void;
-    /** Viewport coordinates of the caret, for positioning popups. */
     caretCoords(position?: number): { top: number; bottom: number; left: number } | null;
-    /** The scrollable element, for measuring and scroll compensation. */
     getScrollDOM(): HTMLElement | null;
 }
 
 export interface ComposerEditorProps {
     value: string;
+    valueRevision?: number;
     onChange: (change: ComposerChange) => void;
-    /** Caret or selection moved without the document changing. */
     onSelectionChange?: (selection: ComposerSelection) => void;
-    /**
-     * Key press before CodeMirror handles it. Return true to consume the
-     * event — this is where the composer routes autocomplete navigation,
-     * message history and send.
-     */
     onKeyDown?: (event: KeyboardEvent) => boolean;
     onKeyUp?: (event: KeyboardEvent) => void;
     onFocus?: () => void;
@@ -107,60 +69,23 @@ export interface ComposerEditorProps {
     placeholder?: string;
     editable?: boolean;
     spellCheck?: boolean;
-    /**
-     * Show the mobile keyboard's return key as a send action
-     * (`enterkeyhint="send"`), which also enables IME voice swipe-up send.
-     */
     returnKeySends?: boolean;
-    /**
-     * The content element's autocorrect keyword. See `autocorrect.ts` for the
-     * case-sensitive CodeMirror workaround.
-     */
     autoCorrect?: ComposerAutoCorrect;
     autoCapitalize?: 'none' | 'sentences';
-    /**
-     * Restore the real Shift onto the deferred Enter. Callers gate it on
-     * whether Shift can be trusted: iOS autocapitalization reports a
-     * phantom Shift at sentence starts, which return-key send must treat
-     * as Send rather than newline.
-     */
     preserveDeferredEnterShift?: boolean;
-    /** Fill the available height instead of growing with the content. */
     fillContainer?: boolean;
-    /** Lines of text shown before the editor starts scrolling. */
     maxLines?: number;
-    /**
-     * Selector of the ancestor the composer must never outgrow. The cap is
-     * measured — the ancestor's height minus the chrome around the editor,
-     * both read from the DOM — and the smaller of it and `maxLines` wins.
-     */
     boundSelector?: string;
-    /** Breathing room kept between the grown composer and the bound's edge. */
     boundGapPx?: number;
     className?: string;
     contentClassName?: string;
-    /**
-     * Value of the host's `data-chat-input` attribute. The default `"true"`
-     * marks the composer's prompt editor for global helpers (`focusChatInput`,
-     * shortcut guards); a second editor in the same column — the mobile
-     * comment editor — passes its own marker so those helpers skip it.
-     */
     dataChatInput?: string;
-    /**
-     * Keeps the underlying view alive across unmounts. Supply one from a parent
-     * that outlives the swap; without it the view is built and destroyed with
-     * the component, which is correct but expensive on an interaction path.
-     */
+    scriptAwareWords?: boolean;
     viewStore?: ComposerEditorViewStore;
     'aria-label'?: string;
     'data-testid'?: string;
 }
 
-/**
- * The text inserted by a transaction, used to tell a typed `@` from a pasted
- * one. CodeMirror reports the change set directly, so this needs none of the
- * prefix/suffix diffing a textarea's `onChange` required.
- */
 function insertedTextOf(transaction: { changes: { iterChanges: (fn: (fromA: number, toA: number, fromB: number, toB: number, inserted: { toString(): string }) => void) => void } }): string {
     let inserted = '';
     transaction.changes.iterChanges((_fromA, _toA, _fromB, _toB, text) => {
@@ -169,32 +94,15 @@ function insertedTextOf(transaction: { changes: { iterChanges: (fn: (fromA: numb
     return inserted;
 }
 
-/**
- * True for keydown events CodeMirror re-dispatches after deferring the real
- * one (iOS Enter/Backspace/Delete, Chrome Android Enter): `dispatchKey`
- * stamps the replacement event with a `synthetic` expando. These events are
- * built from the key name alone, so they carry no modifier keys.
- */
+// external: https://code.haverbeke.berlin/codemirror/view/src/tag/6.43.15/src/input.ts Deferred synthetic key events carry no modifiers.
 function isDeferredSyntheticEvent(event: KeyboardEvent): boolean {
     return Boolean((event as unknown as { synthetic?: boolean }).synthetic);
 }
 
-/**
- * Compartments are configuration keys, not per-view state, so one set can serve
- * every editor. They live at module scope because a kept-alive view outlives
- * the component that created it: per-instance compartments would be unknown to
- * the reused view's configuration, and reconfiguring it would throw.
- */
 const editableCompartment = new Compartment();
 const placeholderCompartment = new Compartment();
 const enterKeyHintCompartment = new Compartment();
 
-/**
- * The return-key hint lives in a compartment so a settings flip applies
- * immediately: iOS picks the keycap when the keyboard opens, and a provider
- * that only re-evaluates on the next editor update would lag one keystroke
- * behind the setting.
- */
 const enterKeyHintExtension = (send: boolean): Extension => {
     if (!send) return [];
     const nav = globalThis.navigator;
@@ -205,36 +113,23 @@ const enterKeyHintExtension = (send: boolean): Extension => {
     ];
 };
 
-/**
- * CSS placeholder, not CodeMirror's `placeholder()` widget: a widget at
- * position 0 wraps the caret in a zero-width buffer image and a
- * `contenteditable=false` span, and IMEs that probe the text context before
- * committing — iOS smart-spacing keyboards among them — fail that probe on an
- * empty document, so the first character never arrives. The pseudo-element
- * driven by these attributes is invisible to the probe.
- */
 const composerEmptyClass = EditorView.contentAttributes.of((view) =>
     view.state.doc.length === 0 ? { class: 'cm-composer-empty' } : null);
 
 function placeholderContentAttributes(text: string) {
     return EditorView.contentAttributes.of({
         'aria-placeholder': text,
-        // `content: attr(...)` reads the pseudo-element's own element, so the
-        // text reaches `.cm-line::before` through a custom property instead.
-        // JSON.stringify quotes it as a CSS string.
         style: `--composer-placeholder: ${JSON.stringify(text)}`,
     });
 }
 
-/** Marks the transaction that writes a changed `value` prop into the editor. */
 const valuePropWrite = Annotation.define<true>();
 
-// Memoized: the view is built once and reads its handlers through a ref, so a
-// parent render with equal props has nothing to tell it.
 export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, ComposerEditorProps>(
     function ComposerEditor(props, ref) {
         const {
             value,
+            valueRevision,
             languageContext,
             placeholder,
             editable = true,
@@ -251,12 +146,9 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
         } = props;
 
         const hostRef = React.useRef<HTMLDivElement | null>(null);
-        // The mounted view, for the overlay scrollbar drawn inside its editor element.
         const [mountedView, setMountedView] = React.useState<EditorView | null>(null);
         const viewRef = React.useRef<EditorView | null>(null);
 
-        // CodeMirror defers Enter on iOS and Chrome Android, then re-dispatches
-        // a synthetic keydown. Keep modifiers only for that short handoff.
         const lastRealEnterModsRef = React.useRef({ shiftKey: false, ctrlKey: false, metaKey: false, altKey: false });
         const deferredEnterModsTimeoutRef = React.useRef<number | null>(null);
         const clearDeferredEnterModifiers = () => {
@@ -267,37 +159,19 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
             }
         };
 
-        // Callbacks reach the CodeMirror extensions through a ref: the view is
-        // built once and must not be torn down when a handler identity changes,
-        // which would drop focus mid-typing. When a view store is supplied the
-        // ref lives there, so a kept-alive view keeps calling into whichever
-        // component instance is currently mounted rather than a dead one.
         const localHandlersRef = React.useRef(props);
         const store = props.viewStore ?? null;
         if (store && !store.handlers) store.handlers = { current: props };
         const handlersRef = store?.handlers ?? localHandlersRef;
         handlersRef.current = props;
 
-        // A layout effect, not a passive one: the mobile composer expands with
-        // `flushSync` and focuses the editor on the next line, still inside the
-        // tap's call stack, because that is the only way a mobile browser
-        // raises the keyboard. flushSync commits layout effects but makes no
-        // promise about passive ones, so creating the view there would leave
-        // nothing to focus — the keyboard would rise later, from some other
-        // path, and the composer would appear to transform only once it moved.
         React.useLayoutEffect(() => {
             const host = hostRef.current;
             if (!host) return;
 
-            // A kept view is re-attached rather than rebuilt. Its extensions
-            // already read through the shared handlers ref, so it needs nothing
-            // from this instance beyond a parent to live in; the effects below
-            // re-apply editable, placeholder, value and language context.
             const keptView = store?.view;
             if (keptView) {
                 host.appendChild(keptView.dom);
-                // Measurements taken while detached are meaningless; the view
-                // re-reads its geometry now that it is back in the document.
                 keptView.requestMeasure();
                 viewRef.current = keptView;
                 setMountedView(keptView);
@@ -310,7 +184,6 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
 
             const interceptKeys: KeyBinding[] = [{
                 any: (_view, event) => {
-                    // A deferred Enter loses its modifiers in the re-dispatch.
                     if (event.key === 'Enter' && isDeferredSyntheticEvent(event)) {
                         const preserveShift = handlersRef.current.preserveDeferredEnterShift !== false;
                         restoreDeferredEnterModifiers(event, lastRealEnterModsRef.current, preserveShift);
@@ -325,26 +198,15 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                     doc: handlersRef.current.value,
                     extensions: [
                         history(),
-                        // `drawSelection()` must stay on every platform.
-                        // `composerSelectionExtension()` changes only who
-                        // paints the selection; removing `drawSelection()`
-                        // makes CodeMirror enforce cursor association on the
-                        // native selection, which iOS answers with severe lag.
                         drawSelection(),
-                        // Blinks the drawn caret from a timer; CodeMirror's
-                        // CSS blink keeps the compositor busy every frame.
                         timerCaretBlink(),
                         composerSelectionExtension(),
                         EditorView.lineWrapping,
-                        // Highest precedence: the composer's own keys must win
-                        // over CodeMirror's defaults (Enter sends, ArrowUp
-                        // walks history, Escape closes a picker).
                         Prec.highest(keymap.of(interceptKeys)),
+                        handlersRef.current.scriptAwareWords ? scriptAwareWordGestures : [],
                         keymap.of([
                             { key: 'Alt-Enter', run: insertNewline },
-                            // At a document boundary these commands return false.
-                            // Chromium's native page movement can then scroll
-                            // hidden-overflow ancestors of the empty placeholder.
+                            // external: https://code.haverbeke.berlin/codemirror/view/src/tag/6.43.15/src/input.ts Native page movement can scroll hidden-overflow ancestors when a boundary command yields.
                             ...standardKeymap.map((binding) =>
                                 binding.key === 'PageUp' || binding.key === 'PageDown'
                                     ? { ...binding, preventDefault: true }
@@ -416,12 +278,6 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
             setMountedView(view);
             if (store) store.view = view;
 
-            // Record the real modifier state after CodeMirror decides to defer
-            // the event, before its synthetic dispatch. The state expires if
-            // CodeMirror never dispatches the replacement, so a later Android
-            // keyboard Enter cannot inherit an unrelated earlier keydown. The listener lives on
-            // the kept-alive view's contentDOM, so it stays across mounts and
-            // keeps feeding the same ref the `interceptKeys` closure reads.
             const trackRealEnterMods = (event: KeyboardEvent) => {
                 if (event.key !== 'Enter' || isDeferredSyntheticEvent(event)) return;
                 clearDeferredEnterModifiers();
@@ -439,58 +295,32 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                 clearDeferredEnterModifiers();
                 viewRef.current = null;
                 setMountedView(null);
-                // A stored view is detached, not destroyed: the store owns its
-                // lifetime now, and whoever owns the store ends it.
                 if (store) {
                     view.dom.remove();
                     return;
                 }
                 view.destroy();
             };
-            // Created once: every changing input is applied through a
-            // dispatch below rather than by rebuilding the view.
             // oxlint-disable-next-line react-hooks/exhaustive-deps
         }, []);
 
-        // Controlled value: only write back when the prop and the document
-        // genuinely differ, otherwise every keystroke would round-trip and
-        // reset the caret.
         React.useEffect(() => {
             const view = viewRef.current;
             if (!view) return;
             const current = view.state.doc.toString();
             if (current === value) return;
-            // Skip every controlled writeback while the browser is composing.
-            // A stale value echo can differ from CodeMirror's newer document,
-            // and replacing it would interrupt the IME session and move the caret.
             if (view.compositionStarted) return;
-            // An external rewrite (draft restore, history navigation,
-            // "add to chat", dictation insert) lands the caret at the END,
-            // matching what a plain textarea did when its value was replaced.
-            // Every rewrite that reaches here appends or replaces wholesale;
-            // keeping the old caret instead left it stranded before the
-            // inserted text, and the next insertion or keystroke landed inside
-            // the previous one.
             view.dispatch({
                 ...replaceWithCaret(view.state, 0, current.length, value),
                 annotations: valuePropWrite.of(true),
             });
-            // A large insert can push the caret below the fold, and a
-            // transaction-time `scrollIntoView` cannot reach it: wrapped-line
-            // heights are still estimates during the update, and the
-            // grow-with-content effect applies the scroller's max-height cap
-            // through a ResizeObserver a frame later — at scroll time the
-            // overflow does not exist yet, so the scroller stays at the top.
-            // The caret is at the end here, so once the layout has settled
-            // (two frames: one for the cap, one after it) pin the scroller to
-            // the bottom.
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
                     if (viewRef.current !== view) return;
                     view.scrollDOM.scrollTop = view.scrollDOM.scrollHeight;
                 });
             });
-        }, [value]);
+        }, [value, valueRevision]);
 
         React.useEffect(() => {
             viewRef.current?.dispatch({ effects: setLanguageContext.of(languageContext) });
@@ -516,18 +346,11 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
             });
         }, [returnKeySends]);
 
-        // Grow with the content up to `maxLines`, then scroll. The limit is
-        // measured from the rendered line height rather than assumed, so it
-        // tracks the composer's responsive typography.
         React.useEffect(() => {
             const view = viewRef.current;
             const host = hostRef.current;
             if (!view || !host) return;
 
-            // Filling the container means there is no line limit — and the
-            // limit from the collapsed composer has to be released, or the
-            // expanded editor keeps scrolling inside an invisible eight-line
-            // window while the rest of the surface sits empty.
             if (fillContainer) {
                 view.scrollDOM.style.maxHeight = '';
                 view.scrollDOM.style.overflowY = '';
@@ -535,10 +358,6 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
             }
 
             const boundEl = boundSelector ? host.closest(boundSelector) : null;
-            // The bound's direct child our editor lives in: its height minus
-            // the scroller's is exactly the chrome around the editor — form
-            // paddings, model row, footer, attachment chips — measured live,
-            // so the cap needs no estimate of what surrounds the editor.
             let branch: HTMLElement | null = null;
             if (boundEl) {
                 branch = host;
@@ -561,14 +380,9 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                     boundGapPx,
                 });
                 const next = `${cap}px`;
-                // The scroller growing re-fires the observer with an unchanged
-                // result; writing only on change keeps that loop silent.
                 if (view.scrollDOM.style.maxHeight !== next) {
                     view.scrollDOM.style.maxHeight = next;
                 }
-                // Scroll only once the text is past the cap; below it, a
-                // sub-line overflow would draw a scrollbar with nothing to
-                // scroll (#4004).
                 const overflowY = isComposerContentCapped(
                     view.contentDOM.getBoundingClientRect().height,
                     cap,
@@ -583,8 +397,6 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
             if (typeof ResizeObserver === 'undefined') return;
             const observer = new ResizeObserver(applyLimit);
             observer.observe(host);
-            // Past the cap the host stops growing, so the content is what
-            // reports the text crossing it.
             observer.observe(view.contentDOM);
             if (branch) observer.observe(branch);
             if (boundEl) observer.observe(boundEl);
@@ -600,13 +412,6 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
             content.setAttribute('autocapitalize', autoCapitalize);
         }, [autoCapitalize, autoCorrect, spellCheck]);
 
-        /**
-         * The composer box is bigger than its text: it carries padding, and in
-         * focus mode it fills the surface. Clicking that empty space has always
-         * put the caret in the text — with a textarea the element itself filled
-         * the box, so the browser did it. CodeMirror's content element does not
-         * extend into the padding, so the click has to be forwarded.
-         */
         const handleHostMouseDown = React.useCallback((event: React.MouseEvent) => {
             handleComposerHostMouseDown(viewRef.current, event);
         }, []);
@@ -615,8 +420,6 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
             focus(options) {
                 const view = viewRef.current;
                 if (!view) return;
-                // preventScroll matters on mobile, where the browser's own
-                // scroll-into-view fights the keyboard choreography.
                 view.contentDOM.focus({ preventScroll: options?.preventScroll });
             },
             blur() {
@@ -691,16 +494,12 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                     onMouseDown={handleHostMouseDown}
                     className={cn(
                         'composer-editor w-full',
-                        // The editor fills the host so its content box can cover
-                        // the whole clickable area rather than just the text.
                         '[&_.cm-editor]:h-full',
                         fillContainer && 'flex min-h-0 flex-1 flex-col',
                         className,
                         contentClassName,
                     )}
                 />
-                {/* Inside the editor element, the scroller's positioned parent:
-                    past the line cap the text scrolls under the app's thumb. */}
                 {mountedView ? createPortal(
                     <PopupOverlayScrollbar scroller={mountedView.scrollDOM} disableHorizontal />,
                     mountedView.dom,

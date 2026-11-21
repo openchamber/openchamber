@@ -1,26 +1,19 @@
 import type { Session } from '@/lib/opencode/model';
-import { getMultiRunIdentity, type MultiRunIdentity } from './identity';
+import { resolveMultiRunIdentity, type MultiRunIdentity } from './identity';
 
-/** One member session of a run: a lane (`run`) or a fused result (`fusion`). */
 export type MultiRunMember = {
   sessionId: string;
   identity: MultiRunIdentity;
 };
 
-/** A multi-run as the sidebar, overview and tabs see it, derived from session metadata. */
 export type MultiRunSummary = {
   key: string;
   title: string;
   groupSlug: string;
-  /** Lanes in variant order, then creation order. */
   lanes: readonly MultiRunMember[];
-  /** Fused results, newest first. */
   fusions: readonly MultiRunMember[];
-  /** Fusions first, then lanes: the order rows and cards render in. */
   memberIds: readonly string[];
-  /** Distinct lane providers in lane order, for the stacked logos. */
   providerIDs: readonly string[];
-  /** Distinct prompt variants (`runGroup`) in order; `undefined` is the single-prompt variant. */
   variants: readonly (string | undefined)[];
   createdAt: number;
   lastActivity: number;
@@ -37,46 +30,73 @@ export const EMPTY_MULTI_RUN_INDEX: MultiRunIndex = Object.freeze({
   runKeyBySessionId: new Map(),
 });
 
-// Session records are replaced on every update, so the object is a complete
-// cache key: an unchanged session is never parsed twice. The legacy scope is
-// part of the key because a title-only identity depends on it.
-const identityCache = new WeakMap<Session, { scope: string | null; identity: MultiRunIdentity | null }>();
+const identityCache = new WeakMap<Session, { scoped: boolean; scope: string | null; identity: MultiRunIdentity | null }>();
 
-export const readMultiRunIdentity = (session: Session, scope: string | null): MultiRunIdentity | null => {
+export const readMultiRunIdentityWith = (
+  session: Session,
+  resolveScope: (session: Session) => string | null,
+): MultiRunIdentity | null => {
   const cached = identityCache.get(session);
-  if (cached && cached.scope === scope) return cached.identity;
-  const identity = getMultiRunIdentity(session, scope ?? session.directory);
-  identityCache.set(session, { scope, identity });
+  if (cached && !cached.scoped) return cached.identity;
+  if (cached) {
+    const scope = resolveScope(session);
+    if (cached.scope === scope) return cached.identity;
+  }
+  let scoped = false;
+  let scope: string | null = null;
+  const identity = resolveMultiRunIdentity(session, () => {
+    scoped = true;
+    scope = resolveScope(session);
+    return scope ?? session.directory;
+  });
+  identityCache.set(session, { scoped, scope, identity });
   return identity;
 };
 
+export const readMultiRunIdentity = (session: Session, scope: string | null): MultiRunIdentity | null => (
+  readMultiRunIdentityWith(session, () => scope)
+);
+
 const variantRank = (runGroup: string | undefined): number => (runGroup ? Number(runGroup.slice(1)) : 0);
 
-/** `g1` → `A`, `g2` → `B`; a single-prompt run is `A`. */
 export const multiRunVariantLabel = (runGroup: string | undefined): string => {
   const rank = Math.max(1, variantRank(runGroup));
   return rank <= 26 ? String.fromCharCode(64 + rank) : String(rank);
 };
 
-/**
- * Groups active root sessions into runs. A run needs at least two active
- * members: after "Keep" leaves a single survivor, it is an ordinary session
- * again. Archived sessions never form or join a run.
- */
+type IndexedMember = { session: Session; identity: MultiRunIdentity };
+
+let lastIndexed: { members: IndexedMember[]; index: MultiRunIndex } | null = null;
+
+const sameMembers = (left: readonly IndexedMember[], right: readonly IndexedMember[]): boolean => (
+  left.length === right.length
+  && left.every((member, index) => member.session === right[index].session && member.identity === right[index].identity)
+);
+
 export function buildMultiRunIndex(
   sessions: Iterable<Session>,
   resolveLegacyScope: (session: Session) => string | null,
 ): MultiRunIndex {
-  const members = new Map<string, Array<{ session: Session; identity: MultiRunIdentity }>>();
+  const indexed: IndexedMember[] = [];
   const seen = new Set<string>();
   for (const session of sessions) {
     if (seen.has(session.id) || session.time?.archived || session.parentID) continue;
     seen.add(session.id);
-    const identity = readMultiRunIdentity(session, resolveLegacyScope(session));
-    if (!identity) continue;
-    const list = members.get(identity.key);
-    if (list) list.push({ session, identity });
-    else members.set(identity.key, [{ session, identity }]);
+    const identity = readMultiRunIdentityWith(session, resolveLegacyScope);
+    if (identity) indexed.push({ session, identity });
+  }
+  if (lastIndexed && sameMembers(lastIndexed.members, indexed)) return lastIndexed.index;
+  const index = indexMembers(indexed);
+  lastIndexed = { members: indexed, index };
+  return index;
+}
+
+function indexMembers(indexed: readonly IndexedMember[]): MultiRunIndex {
+  const members = new Map<string, IndexedMember[]>();
+  for (const member of indexed) {
+    const list = members.get(member.identity.key);
+    if (list) list.push(member);
+    else members.set(member.identity.key, [member]);
   }
 
   const runs = new Map<string, MultiRunSummary>();

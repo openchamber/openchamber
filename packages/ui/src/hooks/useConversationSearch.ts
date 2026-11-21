@@ -9,11 +9,11 @@ import type { MatchRange } from '@/lib/search/matchSegments';
 import type { OmniAuthor, OmniLifecycle, OmniSearchIn } from '@/lib/search/omniQuery';
 import { useUIStore } from '@/stores/useUIStore';
 
-export type ConversationResult = { sessionId: string; title: string; titleRanges: ReadonlyArray<MatchRange>; directory: string | null; archived: boolean; /** When the conversation last changed, or when the matched message was written. */ updatedAt: number | null; metadata: MetadataMatch | null; excerpt: { messageId: string; role: MessageSearchRole; snippet: string; createdAt: number } | null; moreMatches: number };
+export type ConversationResult = { sessionId: string; title: string; titleRanges: ReadonlyArray<MatchRange>; directory: string | null; archived: boolean;   updatedAt: number | null; metadata: MetadataMatch | null; excerpt: { messageId: string; role: MessageSearchRole; snippet: string; createdAt: number } | null; moreMatches: number };
 export type ContentSearchStatus =
   | { kind: 'idle' } | { kind: 'off' } | { kind: 'unsupported' } | { kind: 'failed' } | { kind: 'too-short' } | { kind: 'loading' } | { kind: 'ready'; indexing: { done: number; total: number } | null; lifecycleComplete: boolean; hasMore: boolean; pageError?: boolean } | { kind: 'error' };
 
-type Options = { enabled: boolean; text: string; lifecycle: OmniLifecycle; searchIn: OmniSearchIn; author: OmniAuthor; metadataItems: ReadonlyArray<ConversationMetadata>; directories?: readonly string[]; isAdmitted: (directory: string | null) => boolean; /** Besides the title, match the branch only, leaving project and folder names out. */ branchOnly?: boolean; contentDebounceMs?: number; pageSize?: number };
+type Options = { enabled: boolean; text: string; lifecycle: OmniLifecycle; searchIn: OmniSearchIn; author: OmniAuthor; metadataItems: ReadonlyArray<ConversationMetadata>; directories?: readonly string[]; isAdmitted: (directory: string | null) => boolean;   branchOnly?: boolean; contentDebounceMs?: number; pageSize?: number };
 type ContentState = { key: string; hits: ConversationContentHit[]; totals: { sessions: number; byDirectory: Record<string, number> } | null; next: string | null; status: ContentSearchStatus };
 const idle: ContentState = { key: '', hits: [], totals: null, next: null, status: { kind: 'idle' } };
 const EMPTY_MATCHES: MetadataMatch[] = [];
@@ -40,14 +40,10 @@ export function useConversationSearch({ enabled, text, lifecycle, searchIn, auth
   const normalizedAuthor = author === 'reasoning' && !reasoningAvailable ? 'any' : author;
   const [runtimeKey, setRuntimeKey] = React.useState(getRuntimeKey);
   const [content, setContent] = React.useState<ContentState>(idle);
-  // The request key of the next page in flight; `loadingMore` is true only while it is the current key.
   const [pagingKey, setPagingKey] = React.useState<string | null>(null);
-  // Sorted: a match moving up the ranking as its session changes asks for nothing new.
   const metadataIdsKey = canCount ? [...metadataIds].sort().join('\n') : 'too-many';
   const requestKey = `${runtimeKey}\0${enabled}\0${text}\0${lifecycle}\0${searchIn}\0${(directories ?? []).join('\n')}\0${normalizedAuthor}\0${reasoningAvailable}\0${messageSearchEnabled}\0${isVSCodeRuntime()}\0${metadataIdsKey}`;
   const requestKeyRef = React.useRef(requestKey);
-  // The caller rebuilds these lists whenever any session changes. `requestKey` says when what
-  // they hold changed, so a request reads them from here and a rebuilt list starts no new one.
   const scopeRef = React.useRef({ directories, exclude: canCount ? metadataIds : undefined });
   scopeRef.current = { directories, exclude: canCount ? metadataIds : undefined };
   const pagingOperationRef = React.useRef<{ key: string; cursor: string } | null>(null);
@@ -93,7 +89,6 @@ export function useConversationSearch({ enabled, text, lifecycle, searchIn, auth
     };
   }, [enabled, text, lifecycle, searchIn, normalizedAuthor, messageSearchEnabled, pageSize, requestKey, contentDebounceMs, reasoningAvailable]);
 
-  // Content from an earlier key is never shown: it goes away on the render that changes the key.
   const shown = content.key === requestKey ? content : idle;
   const contentHitBySession = React.useMemo(() => {
     const bySession = new Map<string, ConversationContentHit>();
@@ -144,7 +139,6 @@ export function useConversationSearch({ enabled, text, lifecycle, searchIn, auth
       if (pageControllerRef.current === controller) pageControllerRef.current = null;
       setPagingKey((current) => (current === key ? null : current));
     };
-    // A failed or unusable page keeps what is loaded and the cursor, so the same page can be asked again.
     void searchConversations({ query: text, lifecycle, ...scopeRef.current, role, includeReasoning: reasoningAvailable, before: content.next, limit: pageSize, signal: controller.signal }).then((result) => {
       if (controller.signal.aborted || generationRef.current !== generation || requestKeyRef.current !== key) return;
       if (result.status !== 'ok') { failPage(); return; }
@@ -153,7 +147,6 @@ export function useConversationSearch({ enabled, text, lifecycle, searchIn, auth
   }, [content, lifecycle, normalizedAuthor, pageSize, reasoningAvailable, text]);
 
   const contentReady = shown.status.kind === 'ready';
-  // An unscoped request counts the whole index; only directories whose rows can show count here.
   const admittedContentTotals = contentReady && canCount && shown.totals
     ? Object.entries(shown.totals.byDirectory).filter(([directory]) => isAdmitted(directory))
     : null;

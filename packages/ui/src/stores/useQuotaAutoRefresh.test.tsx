@@ -138,6 +138,7 @@ test('quota fetches belong to shown readouts and stop while the document is hidd
     listeners.delete(listener);
     events.removeEventListener(type, listener);
   });
+  const actions = { loadSettings: useQuotaStore.getState().loadSettings, fetchProviderQuota: useQuotaStore.getState().fetchProviderQuota };
   const settings = spyOn(useQuotaStore.getState(), 'loadSettings').mockResolvedValue();
   const fetch = spyOn(useQuotaStore.getState(), 'fetchProviderQuota').mockResolvedValue(true);
   const Readout = ({ visible = true, all = false }: { visible?: boolean; all?: boolean }) => {
@@ -218,6 +219,7 @@ test('quota fetches belong to shown readouts and stop while the document is hidd
   } finally {
     await act(async () => root.unmount());
     for (const spy of [clock, interval, clear, add, remove, settings, fetch]) spy.mockRestore();
+    useQuotaStore.setState(actions);
     useConfigStore.setState({ isInitialized: previousInitialized });
     useQuotaStore.getState().resetForRuntimeSwitch();
     if (locationDescriptor) Object.defineProperty(window, 'location', locationDescriptor);
@@ -248,6 +250,8 @@ test('hidden native windows stop quota requests even when Chromium reports visib
   useConfigStore.setState({ isInitialized: true });
   useQuotaStore.getState().resetForRuntimeSwitch();
   useQuotaStore.setState({ dropdownProviderIds: ['claude'] });
+  // Spies sit on one store snapshot; restore the real actions on the current store explicitly.
+  const actions = { loadSettings: useQuotaStore.getState().loadSettings, fetchProviderQuota: useQuotaStore.getState().fetchProviderQuota };
   let now = 100_000;
   const callbacks: Array<() => void> = [];
   const clock = spyOn(Date, 'now').mockImplementation(() => now);
@@ -283,6 +287,7 @@ test('hidden native windows stop quota requests even when Chromium reports visib
   } finally {
     await act(async () => root.unmount());
     for (const spy of [clock, interval, clear, settings, fetch]) spy.mockRestore();
+    useQuotaStore.setState(actions);
     useConfigStore.setState({ isInitialized: previousInitialized });
     useQuotaStore.getState().resetForRuntimeSwitch();
     for (const [key, descriptor] of descriptors) {

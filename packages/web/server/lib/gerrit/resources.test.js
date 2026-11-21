@@ -120,6 +120,7 @@ describe('Gerrit change context', () => {
     expect(result.changeRequest).toMatchObject({ number: 42, revisionNumber: 3, labels: [{ name: 'ui' }] });
     expect(result.voteLabels.map((label) => [label.name, label.status])).toEqual([['Code-Review', 'recommended'], ['Verified', 'approved']]);
     expect(result.submitRequirements).toEqual([{ name: 'Code-Review', status: 'unsatisfied' }]);
+    expect(result.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([['carol', 'pending'], ['bob', 'commented']]);
     expect(result.revisions.map((revision) => revision.number)).toEqual([1, 2, 3]);
     expect(result.issueComments.map((comment) => comment.revision)).toEqual([1, 2, 3, 3, 3]);
     expect(result.reviewComments).toEqual([expect.objectContaining({ path: 'src/login.js', line: 2, revision: 3, body: 'Nit: name this field.' })]);

@@ -141,6 +141,11 @@ gap.
   5 seconds for the location's plugins. `agent.list` waited in 2.2.0 to 2.2.6
   and answers early again since 2.2.7: the first read of a cold location is an
   empty list, then `agent.updated` follows within a second. The recovery stays.
+  OpenChamber's server session selection works around it by reading
+  `model.list` first, which waits for activation, and `agent.list` after it
+  (`openchamber-sessions/selection-inputs.ts`); a `ServiceUnavailableError`
+  with `service: 'plugin'` from that read refuses default selection with 503.
+  Restore the parallel reads once `agent.list` itself waits for activation.
 - **Plugin providers exist only in the running OpenCode.** Nothing about them
   reaches `opencode.json` or `auth.json`; `/api/provider` is the only view, and
   it strips `options.fetch`, so nothing tells a directly callable provider from
@@ -156,6 +161,34 @@ gap.
   subagent's child session (no job-cancel route) reports "Subagent cancelled".
   Agents relaunch either, so `stopBackgroundShell` and `stopSubagent` post a
   cancellation note to the agent first.
+- **Subagents always run in the background since 2.3.0.** The `subagent`
+  call settles at once with `metadata.status: "running"`, and the parent gets
+  a `<subagent>` report every time the child goes idle. Foreground calls exist
+  only in older history; `readBackgroundSubagentChildID` tells the two apart.
+- **Any session created with `parentID` reports to its parent** (2.3.0):
+  every busy period that ends with an assistant message sends a `<subagent>`
+  report into the parent's inbox and wakes it for a model turn, whoever
+  prompted the child. There is no opt-out (`subagent.notify` was removed in
+  #63413). A session OpenChamber runs and collects itself, such as a workflow
+  agent, is created without `parentID` and linked by metadata
+  (`workflows/DOCUMENTATION.md`).
+- **A plugin tool that reads `context.signal` opts into a cooperative stop**
+  (2.3.0): on the user's Stop the signal aborts and whatever the tool returns
+  is stored as the call's result. The `agent-tool` plugin reads it, so its
+  generated `execute` rethrows once the signal aborted
+  (`agent-tool/DOCUMENTATION.md`).
+- **A shell call the user stops fails with the output so far** (2.3.0):
+  `metadata.interrupted: true` and `metadata.notice` (the model's note at the
+  end of the message). The row shows it as stopped (`toInterruptedShellPart`).
+- **Tool results carry no structured output on the wire.** The UI reads
+  `content` text and `metadata`; a tool's `output` schema change (2.3.0 made
+  edit/write strings and patch `{}`) does not reach it.
+- **`time.firstToken`** on assistant messages (2.3.0, event
+  `session.step.first-token`) marks the first output of any kind, a tool call
+  included, so it is not a text TTFT.
+- **`settings.tls` on a provider** (2.3.0) presents a client certificate on
+  model requests only: web fetch, remote MCP servers and OpenChamber's own
+  requests do not get it, which is why model discovery presents it itself.
 - **`opencode run --agent X` uses the default model**, not the agent's: pass
   `-m provider/model#variant` in batch runs.
 - **A shell allowlist is code execution** for an agent that reads untrusted
@@ -185,18 +218,19 @@ gap.
 - Minimum supported version: `MINIMUM_OPENCODE_VERSION` in
   `packages/web/server/lib/opencode/compatibility.js`; raise it when OpenChamber
   starts depending on a route a newer tag added.
-- Pinned version: `opencodeCli.version` in `packages/electron/package.json`
-  (the bundled binary) and `@opencode/client` / `@opencode/schema` in the
-  root, ui, web and vscode manifests, plus `@opencode/cli@` in the
-  Dockerfile. They move together, including `opencode.url` in `flake.nix`
-  (see the bump steps).
+- Pinned version: the `@opencode/*` devDependencies in
+  `packages/electron/package.json` (`@opencode/server` and the packages the
+  desktop's bundled server imports, `packages/electron/opencode-server`) and
+  `@opencode/client` / `@opencode/schema` in the root, ui, web and vscode
+  manifests, plus `@opencode/cli@` in the Dockerfile. They move together,
+  including `opencode.url` in `flake.nix` (see the bump steps).
 
 ## "What's new in OpenCode 2.x?"
 
 Answer from the diff. Done when every API-facing change between the pinned
 tag and the newest tag is classified.
 
-1. In the reference checkout: `git fetch origin --tags`, pinned = `opencodeCli.version`,
+1. In the reference checkout: `git fetch origin --tags`, pinned = the `@opencode/server` version in `packages/electron/package.json`,
    newest = `git tag -l 'v2.*' | sort -V | tail -1`, then
    `git diff --stat vPINNED..vNEWEST -- packages/schema/src packages/protocol/src packages/server/src packages/client packages/plugin/src`. Ignore `packages/tui`, `packages/app`, `packages/web`.
 2. Classify each change to a route, event, schema or plugin hook:
@@ -214,7 +248,17 @@ checkout (`git checkout vX.Y.Z` in `~/projects/opencode`), `bun install`, then `
 (it covers `packages/ui`, `packages/web` and `packages/vscode`); the isolated ui suites; web vitest; vscode
 tests. A new message `type` or event needs a case in `model.ts` and
 `events.ts` before it renders. Verify `@opencode/cli@<tag>` exists on npm:
-the desktop packaging and the Docker image install it.
+the Docker image installs it.
+
+The desktop bundles OpenCode's server from those npm packages
+(`packages/electron/opencode-server`), and `server.mjs` there copies the
+option mapping of OpenCode's `packages/cli/src/server-process.ts`. Diff that
+file between the tags (`git diff vOLD..vNEW -- packages/cli/src/server-process.ts packages/cli/src/node packages/cli/vite.node.config.ts`)
+and carry over every change to the `default` and `stdio` modes: a new
+environment variable, option or startup step, and a new native loader or
+rewrite in the Node build. Then `bun run --cwd packages/electron prepare:opencode-server`
+and `verify:opencode-server`, and one real turn through the staged server
+(`packages/electron/opencode-server/DOCUMENTATION.md`).
 
 Set `opencode.url` in `flake.nix` to the same `vX.Y.Z` tag and run
 `nix flake update opencode` from the OpenChamber root. Include `flake.nix` and

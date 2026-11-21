@@ -60,6 +60,33 @@ const createMemoryFs = (initial: Record<string, string> = {}) => {
 };
 
 describe('openchamber session state store', () => {
+  it('rejects a stale metadata update without erasing a concurrent pin', async () => {
+    const memory = createMemoryFs();
+    const store = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises });
+    const old = { openchamber: { context_obligatory_messages: [{ id: 'old' }] } };
+    const newer = { openchamber: { context_obligatory_messages: [{ id: 'old' }, { id: 'new' }] } };
+    const { openCode, sessions } = createFakeOpenCode({ ses_a: newer });
+
+    const result = await store.compareAndSetMetadata('ses_a', old, { openchamber: { context_obligatory_messages: [{ id: 'copy' }] } }, openCode);
+
+    assert.deepEqual(result, { metadata: newer, conflict: true });
+    assert.deepEqual(sessions.get('ses_a'), newer);
+  });
+
+  it('serializes concurrent conditional metadata writes for one session', async () => {
+    const memory = createMemoryFs();
+    const store = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises });
+    const { openCode, sessions } = createFakeOpenCode({ ses_a: { initial: true } });
+    const [first, second] = await Promise.all([
+      store.compareAndSetMetadata('ses_a', { initial: true }, { first: true }, openCode),
+      store.compareAndSetMetadata('ses_a', { initial: true }, { second: true }, openCode),
+    ]);
+    assert.equal(first.conflict, false);
+    assert.equal(second.conflict, true);
+    assert.deepEqual(second.metadata, { initial: true, first: true });
+    assert.deepEqual(sessions.get('ses_a'), { initial: true, first: true });
+  });
+
   it('creates the unread baseline once and reads it back, sharing the web server file', async () => {
     const memory = createMemoryFs();
     const store = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises, now: () => 1000 });

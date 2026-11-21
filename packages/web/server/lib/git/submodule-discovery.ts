@@ -1,0 +1,162 @@
+import { isGitString as isString } from './input-guards.js';
+import { normalizeDiscoveryEndpoint } from './discovery-endpoint.js';
+
+export const SUBMODULE_DISCOVERY_LIMITS = Object.freeze({
+  maxManifestBytes: 256 * 1024,
+  maxGitlinkBytes: 256 * 1024,
+  maxModules: 256,
+  maxPathDepth: 16,
+  maxRecursionDepth: 8,
+  maxPublicRecords: 256,
+});
+
+const CONFIG_KEY_PATTERN = /^submodule\.(.+)\.(path|url|update)$/i;
+const GITLINK_PATTERN = /^160000 (?:(?:commit )?([0-9a-f]{40}|[0-9a-f]{64})|([0-9a-f]{40}|[0-9a-f]{64}) 0)\t(.+)$/i;
+const CONTROL_PATTERN = /[^\x20-\x7e\u0080-\uffff]/;
+const UPDATE_MODES = new Set(['checkout', 'merge', 'rebase', 'none']);
+
+type DiscoveryLimits = { [Key in keyof typeof SUBMODULE_DISCOVERY_LIMITS]: number };
+export interface SubmoduleEntry {
+  name: string;
+  path: string;
+  url: string;
+  update: string;
+  gitlink: string;
+}
+export interface SubmoduleManifest {
+  recursionDepth: number;
+  modules: readonly Readonly<SubmoduleEntry>[];
+}
+
+interface ModuleEntry {
+  name: string;
+  [field: string]: string | undefined;
+}
+
+const manifestError = (message: string, code = 'INVALID_SUBMODULE_MANIFEST') => Object.assign(new Error(message), { code });
+
+const boundedText = (value: string | Buffer, maxBytes: number, label: string) => {
+  if (!(isString(value) || Buffer.isBuffer(value))) throw manifestError(`${label} is invalid`);
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
+  if (bytes.byteLength > maxBytes) throw manifestError(`${label} exceeds its byte limit`, 'SUBMODULE_DISCOVERY_LIMIT_EXCEEDED');
+  const text = bytes.toString('utf8');
+  if (text.includes('\ufffd')) throw manifestError(`${label} is not valid UTF-8`);
+  return text;
+};
+
+const nullRecords = (text: string, label: string) => {
+  if (!text) return [];
+  if (!text.endsWith('\0')) throw manifestError(`${label} is incomplete`);
+  const records = text.slice(0, -1).split('\0');
+  if (records.some((record) => !record)) throw manifestError(`${label} contains an empty record`);
+  return records;
+};
+
+const validateModulePath = (value: string, limits: DiscoveryLimits) => {
+  if (!value || value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value)
+    || value.includes('\\') || CONTROL_PATTERN.test(value)) {
+    throw manifestError('Submodule path is unsafe');
+  }
+  const parts = value.split('/');
+  if (parts.length > limits.maxPathDepth) {
+    throw manifestError('Submodule path exceeds its depth limit', 'SUBMODULE_DISCOVERY_LIMIT_EXCEEDED');
+  }
+  if (parts.some((part) => !part || part === '.' || part === '..' || part.toLowerCase() === '.git')) {
+    throw manifestError('Submodule path is unsafe');
+  }
+  return value;
+};
+
+const unsafeModuleUrl = (submodulePath: string) => Object.assign(manifestError('Submodule URL is unsafe'), { submodulePath });
+
+const validateModuleUrl = (value: string, modulePath: string) => {
+  if (/^(?:\.\.?\/)/.test(value)) {
+    if (CONTROL_PATTERN.test(value) || value.includes('\\') || /[?#]/.test(value)) {
+      throw unsafeModuleUrl(modulePath);
+    }
+    return value;
+  }
+  try {
+    return normalizeDiscoveryEndpoint(value, { trailingSlash: true }).endpoint;
+  } catch {
+    throw unsafeModuleUrl(modulePath);
+  }
+};
+
+export function parseSubmoduleManifest({ gitmodulesConfig, gitlinks, recursionDepth = 0 }: {
+  gitmodulesConfig: string | Buffer;
+  gitlinks: string | Buffer;
+  recursionDepth?: number;
+}, limitOverrides: Partial<DiscoveryLimits> = {}): Readonly<SubmoduleManifest> {
+  const limits = { ...SUBMODULE_DISCOVERY_LIMITS, ...limitOverrides };
+  if (!Number.isInteger(recursionDepth) || recursionDepth < 0 || recursionDepth > limits.maxRecursionDepth) {
+    throw manifestError('Submodule recursion exceeds its depth limit', 'SUBMODULE_DISCOVERY_LIMIT_EXCEEDED');
+  }
+  const configRecords = nullRecords(
+    boundedText(gitmodulesConfig, limits.maxManifestBytes, '.gitmodules config output'),
+    '.gitmodules config output',
+  );
+  const entries = new Map<string, ModuleEntry>();
+  for (const record of configRecords) {
+    const separator = record.indexOf('\n');
+    if (separator <= 0) throw manifestError('.gitmodules config record is malformed');
+    const key = record.slice(0, separator);
+    const value = record.slice(separator + 1);
+    const match = key.match(CONFIG_KEY_PATTERN);
+    if (!match || match[1] === undefined || match[2] === undefined || CONTROL_PATTERN.test(match[1])) throw manifestError('.gitmodules config record is malformed');
+    const name = match[1];
+    const field = match[2].toLowerCase();
+    const entry = entries.get(name) || { name };
+    if (entry[field] !== undefined) throw manifestError(`Submodule ${name} has duplicate ${field}`);
+    entry[field] = value;
+    entries.set(name, entry);
+    if (entries.size > limits.maxModules || entries.size > limits.maxPublicRecords) {
+      throw manifestError('Submodule manifest exceeds its record limit', 'SUBMODULE_DISCOVERY_LIMIT_EXCEEDED');
+    }
+  }
+
+  const gitlinkRecords = nullRecords(
+    boundedText(gitlinks, limits.maxGitlinkBytes, 'Gitlink output'),
+    'Gitlink output',
+  );
+  const gitlinksByPath = new Map<string, string>();
+  for (const record of gitlinkRecords) {
+    const match = record.match(GITLINK_PATTERN);
+    if (!match || match[3] === undefined) throw manifestError('Gitlink record is malformed');
+    const modulePath = validateModulePath(match[3], limits);
+    if (gitlinksByPath.has(modulePath)) throw manifestError(`Gitlink path ${modulePath} is duplicated`);
+    const commit = match[1] || match[2];
+    if (commit === undefined) throw manifestError('Gitlink record is malformed');
+    gitlinksByPath.set(modulePath, commit.toLowerCase());
+    if (gitlinksByPath.size > limits.maxModules) {
+      throw manifestError('Gitlink output exceeds its record limit', 'SUBMODULE_DISCOVERY_LIMIT_EXCEEDED');
+    }
+  }
+
+  const seenPaths = new Set<string>();
+  const modules = [];
+  for (const entry of entries.values()) {
+    if (entry.path === undefined) continue;
+    const commit = gitlinksByPath.get(entry.path);
+    if (!commit) continue;
+    if (entry.url === undefined) throw manifestError(`Submodule ${entry.name} is incomplete`);
+    const modulePath = validateModulePath(entry.path, limits);
+    if (seenPaths.has(modulePath)) throw manifestError(`Submodule path ${modulePath} is duplicated`);
+    seenPaths.add(modulePath);
+    const update = entry.update?.toLowerCase() ?? 'checkout';
+    if (entry.update !== undefined) {
+      if (entry.update.startsWith('!') || !UPDATE_MODES.has(update)) {
+        throw manifestError(`Submodule ${entry.name} has an unsafe update mode`);
+      }
+    }
+    modules.push(Object.freeze({
+      name: entry.name,
+      path: modulePath,
+      url: validateModuleUrl(entry.url, modulePath),
+      update,
+      gitlink: commit,
+    }));
+  }
+  if (modules.length !== gitlinksByPath.size) throw manifestError('Gitlink output contains an undeclared submodule');
+  return Object.freeze({ recursionDepth, modules: Object.freeze(modules) });
+}

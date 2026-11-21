@@ -22,7 +22,7 @@ Ohne Anbieter sind das Sicherheitsnetz und Auto ausgeblendet, und Sitzungen in A
 
 ## Einrichtung
 
-Jev ist aus, bis du es einschaltest: Aus deinen Unterhaltungen geht nichts an einen Klassifizierungsanbieter, solange du keinen auswählst. Öffne **Einstellungen → Anbieter → Klassifizierungsanbieter** und wähle, wohin Anfragen an Jev gehen. Neben **Aus** gibt es sechs Möglichkeiten.
+Jev ist aus, bis du es einschaltest: Aus deinen Unterhaltungen geht nichts an einen Klassifizierungsanbieter, solange du keinen auswählst. Öffne **Einstellungen → Anbieter → Klassifizierungsanbieter** und wähle, wohin Anfragen an Jev gehen. Neben **Aus** gibt es sieben Möglichkeiten.
 
 ### OpenCode-Zen-Aktion
 
@@ -52,6 +52,17 @@ Nutzt den in OpenCode gespeicherten AI-Gateway-API-Schlüssel und rechnet über 
 
 1. Öffne **Einstellungen → Anbieter** und füge dem Anbieter **Vercel AI Gateway** einen API-Schlüssel hinzu.
 2. Geh zurück zu **Klassifizierungsanbieter** und wähle **Vercel-AI-Gateway-Schlüssel**.
+
+### Google Gemini
+
+Nutzt Gemini Decision 1, Googles eigenes Entscheidungsmodell, über Googles Decisions API und rechnet über dein Google-Konto ab. OpenChamber stellt ihm dieselben Fragen wie Jev. In Googles kostenloser Stufe darf Google das Empfangene zur Verbesserung seiner Produkte nutzen ([Gemini-API-Nutzungsbedingungen](https://ai.google.dev/gemini-api/terms#data-use-unpaid)).
+
+1. Hol dir einen API-Schlüssel bei [Google AI Studio](https://aistudio.google.com/apikey).
+2. Füge ihn in das Feld **Gemini-API-Schlüssel** ein und klicke auf **Speichern**.
+
+Ein gespeicherter Schlüssel wird gleich ausgewählt. Er bleibt in einer eigenen Datei auf dem OpenChamber-Server und wird nie an den Browser gesendet.
+
+Hat der Anbieter **Google** in OpenCode schon einen API-Schlüssel, kannst du das Feld auslassen und **Google Gemini** wählen. Ein Schlüssel in `GOOGLE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` oder `GEMINI_API_KEY` funktioniert auch. Ein in OpenChamber gespeicherter Schlüssel gewinnt gegen beide. Lass den Schlüssel in OpenChamber, wenn du Gemini nur für Entscheidungen willst: Ein Schlüssel beim Google-Anbieter in OpenCode schaltet dort auch alle Gemini-Chatmodelle frei, und ein Gemini-API-Schlüssel lässt sich nicht auf ein Modell beschränken.
 
 ### TypeSafe-API-Schlüssel
 
@@ -90,7 +101,7 @@ Sobald ein Anbieter funktioniert, zeigt die Karte unter **Einstellungen → Anbi
 
 ## Wenn deine Wahl nicht mehr funktioniert
 
-Lässt sich der gewählte Anbieter nicht nutzen (die Aktion ist vorbei, ein Schlüssel wurde entfernt), weicht OpenChamber auf den ersten deiner eigenen Schlüssel aus, der funktioniert: TypeSafe-Schlüssel, dann dein eigener Endpunkt, dann OpenRouter, dann Vercel AI Gateway, dann Zen-Schlüssel. Auf die Aktion weicht es nie aus, und **Aus** bleibt aus. Die Seite zeigt, welcher gerade benutzt wird.
+Lässt sich der gewählte Anbieter nicht nutzen (die Aktion ist vorbei, ein Schlüssel wurde entfernt), weicht OpenChamber auf den ersten deiner eigenen Schlüssel aus, der funktioniert: TypeSafe-Schlüssel, dann dein eigener Endpunkt, dann OpenRouter, dann Vercel AI Gateway, dann Zen-Schlüssel. Auf die Aktion oder auf Google Gemini weicht es nie aus, und **Aus** bleibt aus. Die Seite zeigt, welcher gerade benutzt wird.
 
 Ist Jev bei einer einzelnen Anfrage langsam oder schlägt fehl, geht nichts kaputt. Jede Funktion hat für diesen Fall eine sichere Antwort:
 
@@ -101,9 +112,9 @@ Ist Jev bei einer einzelnen Anfrage langsam oder schlägt fehl, geht nichts kapu
 
 ## Was Jev sieht
 
-Jev bekommt kurze Auszüge deiner Unterhaltung: deine letzte Nachricht und als Kontext bis zu drei vorherige Züge, gekürzt auf ihre ersten paar hundert Zeichen. Für das Sicherheitsnetz bekommt es außerdem die geprüfte Aktion, so wie OpenCode sie beschreibt: den Befehl, den der Agent ausführen will, oder die Datei und die Änderung bei einer Bearbeitung. Ganze Dateien oder Bilder bekommt es nie.
+Jev bekommt deine letzte Nachricht und als Kontext Auszüge aus der jüngsten Unterhaltung: bis zu drei vorherige Züge, jeweils auf ein paar hundert Zeichen gekürzt, und am Ende eines Zuges die Antwort des Agenten, gekürzt auf Anfang und Ende. Für das Sicherheitsnetz bekommt es außerdem die Aktion, für die der Agent um Erlaubnis fragt, so wie OpenCode sie beschreibt: den Befehl, den der Agent ausführen will, oder die Datei und die Änderung bei einer Bearbeitung. Legt der Agent eine Datei an, ist diese Änderung die ganze Datei, auch ein als Text geschriebenes Bild wie SVG. Prüft Jev ein Ziel, bekommt es das Ziel und die letzte Antwort des Agenten, davon bis zu 10.000 Zeichen.
 
-Anfragen gehen vom OpenChamber-Server direkt an OpenCode Zen, OpenRouter, Vercel AI Gateway, TypeSafe oder deinen eigenen Endpunkt, je nach deiner Wahl.
+Anfragen gehen vom OpenChamber-Server direkt an OpenCode Zen, OpenRouter, Vercel AI Gateway, Google, TypeSafe oder deinen eigenen Endpunkt, je nach deiner Wahl.
 
 ## Wo es funktioniert
 

@@ -1,16 +1,4 @@
-/**
- * Reference-picker reads: searched lists, an item's detail and listed change
- * requests' statuses (discussions where `features.discussions` says the
- * provider keeps them), for providers whose descriptor offers them
- * (`features.referenceSearch`, `referenceDetail`, `listStatuses`,
- * `referencesAcross`).
- *
- * They go through the provider's own source-control routes like every other
- * provider read: the picker's lists and previews carry the repository's read
- * context, so they are read with the account the repository is bound to, and
- * batched summaries name the account their entries were read with. Every
- * item is stamped with the provider it was read from.
- */
+
 import type {
   ChangeRequestListStatusesResult,
   RepositoryItemRef,
@@ -24,6 +12,7 @@ import type { ChangeRequestReviewStateResult } from '@openchamber/ui/lib/source-
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { z } from 'zod';
 import { providerPath } from './source-control-providers';
+import { parseSourceReferenceLinks } from './source-reference-link';
 
 type ReferencesFetch = (input: string, init?: RuntimeFetchOptions) => Promise<Response>;
 
@@ -103,15 +92,26 @@ const referenceCommentFields = {
   body: z.string(),
   createdAt: z.string().nullable(),
   url: z.string(),
+
+  id: z.string().min(1).optional(),
+  canUpdate: z.boolean().optional(),
+  canDelete: z.boolean().optional(),
   path: z.string().nullable(),
   line: z.number().nullable(),
   review: z.enum(['approved', 'changes_requested', 'commented', 'dismissed']).nullable(),
-  // Absent from older servers and other hosts; a malformed one only costs the suggestion its base.
+
   excerpt: z.object({
     startLine: z.number().int().positive(),
     lines: z.array(z.string()).max(200),
   }).optional().catch(undefined),
 };
+
+const reviewerStateSchema = z.object({
+  id: z.string(),
+  login: z.string(),
+  avatarUrl: z.string().optional(),
+  state: z.enum(['pending', 'approved', 'changes_requested', 'commented', 'dismissed']),
+});
 
 const referenceDetailResultSchema = z.discriminatedUnion('connected', [
   z.object({ connected: z.literal(false) }),
@@ -119,7 +119,10 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
     connected: z.literal(true),
     detail: z.object({
       number: z.number(),
-      // A thread's replies are comments without threads of their own.
+
+      body: z.string().optional(),
+      viewerCanUpdate: z.boolean().optional(),
+
       comments: z.array(z.object({
         ...referenceCommentFields,
         thread: z.object({
@@ -132,9 +135,14 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
         answer: z.object({ chosen: z.boolean(), canChange: z.boolean() }).optional(),
       })),
       commentTotal: z.number(),
+      references: z.array(z.unknown()).optional().transform((value) => (value === undefined ? undefined : parseSourceReferenceLinks(value))).catch(undefined),
       pull: z.object({
         reviewDecision: z.enum(['approved', 'changes_requested', 'review_required']).nullable(),
         reviewers: z.array(z.object({ id: z.string(), login: z.string(), avatarUrl: z.string().optional() })).default([]),
+        reviewerStates: z.array(z.unknown()).transform((entries) => entries.flatMap((entry) => {
+          const parsed = reviewerStateSchema.safeParse(entry);
+          return parsed.success ? [parsed.data] : [];
+        })).optional().catch(undefined),
         checks: checksSummarySchema.nullable().optional(),
         additions: z.number(),
         deletions: z.number(),
@@ -148,8 +156,8 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
           url: z.string().nullable(),
         })).default([]),
         commitTotal: z.number().nullable().default(null),
-        // Absent when the host could not say, or said something that does not
-        // hold together; null when the PR is in no stack. Never fails the detail.
+
+
         stack: z.object({
           number: z.number().nullable(),
           base: z.string(),
@@ -211,7 +219,7 @@ const readContextQuery = (context: SourceControlReadContext): URLSearchParams =>
   return query;
 };
 
-/** The parsed answer, or the server's own reason when the request failed. */
+
 const readPayload = async <TSchema extends z.ZodType>(
   response: Response,
   schema: TSchema,
@@ -234,6 +242,7 @@ export const fetchRepositoryReferences = async (
   query.set('kind', options.kind);
   if (options.state) query.set('state', options.state);
   if (options.people) query.set('people', options.people);
+  for (const label of options.labels ?? []) query.append('label', label);
   if (options.query?.trim()) query.set('query', options.query.trim());
   if (options.cursor) query.set('cursor', options.cursor);
   const response = await fetch(providerPath(context, '/references'), { query, headers: { Accept: 'application/json' } });
@@ -246,19 +255,24 @@ export const fetchRepositoryReferenceDetail = async (
   fetch: ReferencesFetch,
   context: SourceControlReadContext,
   item: RepositoryItemRef & { kind?: 'discussion' },
+  options: { includeReferences?: boolean } = {},
 ): Promise<RepositoryReferenceDetailResult> => {
   const query = readContextQuery(context);
   query.set('owner', item.owner);
   query.set('repo', item.repo);
   query.set('number', String(item.number));
   if (item.kind === 'discussion') query.set('kind', 'discussion');
+  if (options.includeReferences) query.set('references', '1');
   const host = item.host?.trim();
-  // The wire's default host is github.com; a ref on any other host names it.
+
   if (host && host !== 'github.com') {
     query.set('host', host);
   }
   const response = await fetch(providerPath(context, '/references/detail'), { query, headers: { Accept: 'application/json' } });
-  return readPayload(response, referenceDetailResultSchema, 'Failed to load issue or pull request detail');
+  const result = await readPayload(response, referenceDetailResultSchema, 'Failed to load issue or pull request detail');
+  if (!result.connected || result.detail === null) return result;
+  if (result.detail.references && result.detail.references.length === 0) delete result.detail.references;
+  return result;
 };
 
 const reviewPersonSchema = z.object({ login: z.string(), avatarUrl: z.string().optional() }).nullable();
@@ -290,7 +304,7 @@ const reviewStateResultSchema = z.discriminatedUnion('connected', [
   }),
 ]);
 
-/** A change request's review as the diff draws it, read with the repository's bound account. */
+
 export const fetchChangeRequestReviewState = async (
   fetch: ReferencesFetch,
   context: SourceControlReadContext,
@@ -304,7 +318,7 @@ export const fetchChangeRequestReviewState = async (
   return readPayload(response, reviewStateResultSchema, 'Failed to load the review');
 };
 
-/** One provider per page: every context must name the same provider, whose route serves the search. */
+
 export const fetchRepositoryReferencesAcross = async (
   fetch: ReferencesFetch,
   contexts: SourceControlReadContext[],
@@ -331,8 +345,8 @@ export const fetchChangeRequestListStatuses = async (
   const query = readContextQuery(context);
   query.set('pulls', refs.map((ref) => {
     const host = ref.host?.trim().toLowerCase();
-    // The server reads `owner/repo#number`, optionally `@host`; a missing or
-    // github.com host is the wire's default, so it is left off.
+
+
     return `${ref.owner}/${ref.repo}#${ref.number}${host && host !== 'github.com' ? `@${host}` : ''}`;
   }).join(','));
   const response = await fetch(providerPath(context, '/references/status'), { query, headers: { Accept: 'application/json' } });

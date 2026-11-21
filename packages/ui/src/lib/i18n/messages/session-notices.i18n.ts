@@ -19,6 +19,9 @@ export const sessionNoticesI18n = {
     'chat.sessionNotice.pullRequest.behind': 'Behind the base branch',
     'chat.sessionNotice.pullRequest.activity': 'New comment or review',
     'chat.sessionNotice.pullRequest.activityNames': 'New comment or review from {names}',
+    'chat.sessionNotice.pageAnswer.answered': 'Answer to {title}: {summary}',
+    'chat.sessionNotice.pageAnswer.declined': 'You declined {title}',
+    'chat.sessionNotice.pageAnswer.notDrawn': 'Could not draw {title}',
   },
   nl: {
     'chat.sessionNotice.restart': 'Gaat verder na herstart',
@@ -39,6 +42,9 @@ export const sessionNoticesI18n = {
     'chat.sessionNotice.pullRequest.behind': 'Loopt achter op de basisbranch',
     'chat.sessionNotice.pullRequest.activity': 'Nieuwe reactie of review',
     'chat.sessionNotice.pullRequest.activityNames': 'Nieuwe reactie of review van {names}',
+    'chat.sessionNotice.pageAnswer.answered': 'Antwoord op {title}: {summary}',
+    'chat.sessionNotice.pageAnswer.declined': 'U hebt {title} geweigerd',
+    'chat.sessionNotice.pageAnswer.notDrawn': 'Kon {title} niet tonen',
   },
   de: {
     'chat.sessionNotice.restart': 'Fortsetzung nach Neustart',
@@ -59,6 +65,9 @@ export const sessionNoticesI18n = {
     'chat.sessionNotice.pullRequest.behind': 'Hinter dem Basis-Branch',
     'chat.sessionNotice.pullRequest.activity': 'Neuer Kommentar oder neues Review',
     'chat.sessionNotice.pullRequest.activityNames': 'Neuer Kommentar oder neues Review von {names}',
+    'chat.sessionNotice.pageAnswer.answered': 'Antwort auf {title}: {summary}',
+    'chat.sessionNotice.pageAnswer.declined': 'Sie haben {title} abgelehnt',
+    'chat.sessionNotice.pageAnswer.notDrawn': '{title} konnte nicht angezeigt werden',
   },
   es: {
     'chat.sessionNotice.restart': 'Continuando tras el reinicio',
@@ -79,6 +88,9 @@ export const sessionNoticesI18n = {
     'chat.sessionNotice.pullRequest.behind': 'Por detrás de la rama base',
     'chat.sessionNotice.pullRequest.activity': 'Nuevo comentario o revisión',
     'chat.sessionNotice.pullRequest.activityNames': 'Nuevo comentario o revisión de {names}',
+    'chat.sessionNotice.pageAnswer.answered': 'Respuesta a {title}: {summary}',
+    'chat.sessionNotice.pageAnswer.declined': 'Rechazaste {title}',
+    'chat.sessionNotice.pageAnswer.notDrawn': 'No se pudo mostrar {title}',
   },
   fr: {
     'chat.sessionNotice.restart': 'Reprise après redémarrage',
@@ -99,6 +111,9 @@ export const sessionNoticesI18n = {
     'chat.sessionNotice.pullRequest.behind': 'En retard sur la branche de base',
     'chat.sessionNotice.pullRequest.activity': 'Nouveau commentaire ou nouvelle revue',
     'chat.sessionNotice.pullRequest.activityNames': 'Nouveau commentaire ou nouvelle revue de {names}',
+    'chat.sessionNotice.pageAnswer.answered': 'Réponse à {title} : {summary}',
+    'chat.sessionNotice.pageAnswer.declined': 'Vous avez refusé {title}',
+    'chat.sessionNotice.pageAnswer.notDrawn': 'Impossible d\'afficher {title}',
   },
   pl: {
     'chat.sessionNotice.restart': 'Kontynuacja po restarcie',
@@ -119,6 +134,9 @@ export const sessionNoticesI18n = {
     'chat.sessionNotice.pullRequest.behind': 'Za gałęzią bazową',
     'chat.sessionNotice.pullRequest.activity': 'Nowy komentarz lub recenzja',
     'chat.sessionNotice.pullRequest.activityNames': 'Nowy komentarz lub recenzja od {names}',
+    'chat.sessionNotice.pageAnswer.answered': 'Odpowiedź na {title}: {summary}',
+    'chat.sessionNotice.pageAnswer.declined': 'Odrzucono {title}',
+    'chat.sessionNotice.pageAnswer.notDrawn': 'Nie udało się wyświetlić {title}',
   },
   'pt-BR': {
     'chat.sessionNotice.restart': 'Continuando após reiniciar',
@@ -139,6 +157,9 @@ export const sessionNoticesI18n = {
     'chat.sessionNotice.pullRequest.behind': 'Atrás da branch base',
     'chat.sessionNotice.pullRequest.activity': 'Novo comentário ou revisão',
     'chat.sessionNotice.pullRequest.activityNames': 'Novo comentário ou revisão de {names}',
+    'chat.sessionNotice.pageAnswer.answered': 'Resposta a {title}: {summary}',
+    'chat.sessionNotice.pageAnswer.declined': 'Você recusou {title}',
+    'chat.sessionNotice.pageAnswer.notDrawn': 'Não foi possível exibir {title}',
   },
   tr: {
     'chat.sessionNotice.restart': 'Yeniden başlatmadan sonra devam ediliyor',
@@ -159,6 +180,9 @@ export const sessionNoticesI18n = {
     'chat.sessionNotice.pullRequest.behind': 'Temel dalın gerisinde',
     'chat.sessionNotice.pullRequest.activity': 'Yeni yorum veya inceleme',
     'chat.sessionNotice.pullRequest.activityNames': '{names} yeni yorum veya inceleme ekledi',
+    'chat.sessionNotice.pageAnswer.answered': '{title} yanıtı: {summary}',
+    'chat.sessionNotice.pageAnswer.declined': '{title} reddedildi',
+    'chat.sessionNotice.pageAnswer.notDrawn': '{title} gösterilemedi',
   },
   uk: {
     'chat.sessionNotice.restart': 'Продовження після перезапуску',
@@ -179,6 +203,9 @@ export const sessionNoticesI18n = {
     'chat.sessionNotice.pullRequest.behind': 'Відстає від базової гілки',
     'chat.sessionNotice.pullRequest.activity': 'Новий коментар або ревʼю',
     'chat.sessionNotice.pullRequest.activityNames': 'Новий коментар або ревʼю від {names}',
+    'chat.sessionNotice.pageAnswer.answered': 'Відповідь на {title}: {summary}',
+    'chat.sessionNotice.pageAnswer.declined': 'Ви відхилили {title}',
+    'chat.sessionNotice.pageAnswer.notDrawn': 'Не вдалося показати {title}',
   },
   ar: {
     'chat.sessionNotice.restart': 'المتابعة بعد إعادة التشغيل',
@@ -199,6 +226,9 @@ export const sessionNoticesI18n = {
     'chat.sessionNotice.pullRequest.behind': 'متأخر عن الفرع الأساسي',
     'chat.sessionNotice.pullRequest.activity': 'تعليق أو مراجعة جديدة',
     'chat.sessionNotice.pullRequest.activityNames': 'تعليق أو مراجعة جديدة من {names}',
+    'chat.sessionNotice.pageAnswer.answered': 'الرد على {title}: {summary}',
+    'chat.sessionNotice.pageAnswer.declined': 'تم رفض {title}',
+    'chat.sessionNotice.pageAnswer.notDrawn': 'تعذّر عرض {title}',
   },
   he: {
     'chat.sessionNotice.restart': 'ממשיך אחרי הפעלה מחדש',
@@ -219,6 +249,9 @@ export const sessionNoticesI18n = {
     'chat.sessionNotice.pullRequest.behind': 'מאחורי ענף הבסיס',
     'chat.sessionNotice.pullRequest.activity': 'תגובה או סקירה חדשה',
     'chat.sessionNotice.pullRequest.activityNames': 'תגובה או סקירה חדשה מאת {names}',
+    'chat.sessionNotice.pageAnswer.answered': 'תשובה ל-{title}: {summary}',
+    'chat.sessionNotice.pageAnswer.declined': 'נדחה: {title}',
+    'chat.sessionNotice.pageAnswer.notDrawn': 'לא ניתן היה להציג את {title}',
   },
   ja: {
     'chat.sessionNotice.restart': '再起動後に続行しています',
@@ -239,6 +272,9 @@ export const sessionNoticesI18n = {
     'chat.sessionNotice.pullRequest.behind': 'ベースブランチより遅れています',
     'chat.sessionNotice.pullRequest.activity': '新しいコメントまたはレビュー',
     'chat.sessionNotice.pullRequest.activityNames': '{names} からの新しいコメントまたはレビュー',
+    'chat.sessionNotice.pageAnswer.answered': '{title} への回答: {summary}',
+    'chat.sessionNotice.pageAnswer.declined': '{title} を辞退しました',
+    'chat.sessionNotice.pageAnswer.notDrawn': '{title} を表示できませんでした',
   },
   ko: {
     'chat.sessionNotice.restart': '재시작 후 계속 진행 중',
@@ -259,6 +295,9 @@ export const sessionNoticesI18n = {
     'chat.sessionNotice.pullRequest.behind': '기본 브랜치보다 뒤처짐',
     'chat.sessionNotice.pullRequest.activity': '새 댓글 또는 리뷰',
     'chat.sessionNotice.pullRequest.activityNames': '{names}의 새 댓글 또는 리뷰',
+    'chat.sessionNotice.pageAnswer.answered': '{title}에 대한 답변: {summary}',
+    'chat.sessionNotice.pageAnswer.declined': '{title} 거절됨',
+    'chat.sessionNotice.pageAnswer.notDrawn': '{title} 표시할 수 없음',
   },
   'zh-CN': {
     'chat.sessionNotice.restart': '重启后继续',
@@ -279,6 +318,9 @@ export const sessionNoticesI18n = {
     'chat.sessionNotice.pullRequest.behind': '落后于基础分支',
     'chat.sessionNotice.pullRequest.activity': '新的评论或审查',
     'chat.sessionNotice.pullRequest.activityNames': '来自 {names} 的新评论或审查',
+    'chat.sessionNotice.pageAnswer.answered': '对 {title} 的回答：{summary}',
+    'chat.sessionNotice.pageAnswer.declined': '已拒绝 {title}',
+    'chat.sessionNotice.pageAnswer.notDrawn': '无法显示 {title}',
   },
   'zh-TW': {
     'chat.sessionNotice.restart': '重新啟動後繼續',
@@ -299,5 +341,8 @@ export const sessionNoticesI18n = {
     'chat.sessionNotice.pullRequest.behind': '落後於基礎分支',
     'chat.sessionNotice.pullRequest.activity': '新的留言或審查',
     'chat.sessionNotice.pullRequest.activityNames': '來自 {names} 的新留言或審查',
+    'chat.sessionNotice.pageAnswer.answered': '對 {title} 的回答：{summary}',
+    'chat.sessionNotice.pageAnswer.declined': '已拒絕 {title}',
+    'chat.sessionNotice.pageAnswer.notDrawn': '無法顯示 {title}',
   },
 } as const;

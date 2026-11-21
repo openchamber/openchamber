@@ -92,7 +92,7 @@ describe('isQuotaGuest and pickCredentials', () => {
 describe('an extension usage provider', () => {
   it('names itself after the guest and is configured when OpenCode holds at least one listed credential, always with an empty list', () => {
     const { provider } = harness();
-    expect(provider).toMatchObject({ providerId: 'ext-teapot-usage', providerName: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage' });
+    expect(provider).toMatchObject({ providerId: 'ext-teapot-usage', providerName: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage', providers: ['teapot', 'openrouter'] });
     expect(provider.isConfigured(AUTH)).toBe(true);
     expect(provider.isConfigured({ teapot: AUTH.teapot })).toBe(true);
     expect(provider.isConfigured({ anthropic: AUTH.anthropic })).toBe(false);
@@ -137,6 +137,15 @@ describe('an extension usage provider', () => {
     expect(empty.calls[0].request.input).toEqual({ credentials: {} });
   });
 
+  it('preserves absent models, an empty model map, and null usage', async () => {
+    for (const usage of [{ windows: {} }, { windows: {}, models: {} }, null]) {
+      const h = harness({ answer: usageAnswer({ usage }) });
+      const result = await h.provider.fetchQuota();
+      expect(result.usage).toEqual(usage);
+      if (usage && !Object.hasOwn(usage, 'models')) expect(result.usage).not.toHaveProperty('models');
+    }
+  });
+
   it('hands over only what the catalog lists now, when a re-approval narrowed the list before the adapter was replaced', async () => {
     const h = harness();
     h.state.catalog = quotaGuest({ quota: { providers: ['teapot'] } });
@@ -160,10 +169,12 @@ describe('an extension usage provider', () => {
 
   it('refuses before sending when the catalog no longer lets the guest serve, and asks for a reconcile', async () => {
     const h = harness();
+    const reconcileRequested = Promise.withResolvers();
+    h.reconcile.mockImplementationOnce(() => { reconcileRequested.resolve(); });
     h.state.catalog = quotaGuest({ capabilityGrants: [], enterpriseBlocked: ['service'] });
     expect(await h.provider.fetchQuota()).toMatchObject({ ok: false, configured: true, error: expect.stringContaining('may no longer report usage') });
     expect(h.calls).toHaveLength(0);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await reconcileRequested.promise;
     expect(h.reconcile).toHaveBeenCalled();
     h.state.catalog = quotaGuest({ enabled: false });
     expect((await h.provider.fetchQuota()).ok).toBe(false);
@@ -183,6 +194,16 @@ describe('an extension usage provider', () => {
     expect(await h.provider.fetchQuota()).toMatchObject({ ok: false, configured: true, error: 'Teapot refused the key.', usage: null });
     h.state.answer = { ok: false, error: { message: 'wrong wire', status: 400 } };
     expect(await h.provider.fetchQuota()).toMatchObject({ ok: false, configured: true, error: 'wrong wire' });
+  });
+
+  it.each([
+    ['offline', 'Teapot Usage could not answer (error): offline'],
+    [7, 'Teapot Usage could not answer (error): 7'],
+    [Object.create({ code: 'INHERITED', message: 'inherited message' }), 'Teapot Usage could not answer (INHERITED): inherited message'],
+  ])('preserves primitive and inherited service errors %#', async (thrown, error) => {
+    const h = harness();
+    h.state.proxyFailure = thrown;
+    expect(await h.provider.fetchQuota()).toMatchObject({ ok: false, configured: true, error });
   });
 
   it('answers 502 MALFORMED_PROVIDER_RESPONSE, never an empty result, for an answer it cannot use', async () => {

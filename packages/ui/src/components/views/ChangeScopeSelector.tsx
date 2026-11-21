@@ -15,6 +15,7 @@ import type { PendingDiffScope } from '@/stores/useUIStore';
 
 interface ChangeScopeSelectorProps {
     scope: PendingDiffScope;
+    historicalTurn?: { count: number | null } | null;
     workingCount: number;
     stagedCount: number;
     turnCount: number | null;
@@ -23,14 +24,13 @@ interface ChangeScopeSelectorProps {
     prCount: number | null;
     showCommitOption: boolean;
     showBranchOption: boolean;
-    /** The host of the project's change requests, for the pull/merge request wording. */
     changeRequestTerm: ChangeRequestTerm;
     onScopeChange?: (scope: PendingDiffScope) => void;
 }
 
-/** The Changes toolbar's view picker: which diff is shown, and how many files it has. */
 export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
     scope,
+    historicalTurn = null,
     workingCount,
     stagedCount,
     turnCount,
@@ -44,13 +44,12 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
 }) => {
     const { t } = useI18n();
     const [open, setOpen] = React.useState(false);
-    // A count not known yet (a file list still loading, a diff the host does
-    // not serve) is left out rather than shown as 0.
-    const currentCount = scope === 'pr' ? prCount : scope === 'staged' ? stagedCount : scope === 'turn' ? turnCount : scope === 'branch' ? branchCount : scope === 'commit' ? commitCount : workingCount;
+    const showsHistoricalTurn = scope === 'turn' && historicalTurn !== null;
+    const currentCount = scope === 'pr' ? prCount : scope === 'staged' ? stagedCount : scope === 'turn' ? (historicalTurn ? historicalTurn.count : turnCount) : scope === 'branch' ? branchCount : scope === 'commit' ? commitCount : workingCount;
     const currentLabel = scope === 'pr' ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestTerm)) : scope === 'staged'
         ? t('diffView.scope.staged')
         : scope === 'turn'
-            ? t('diffView.scope.lastTurn')
+            ? (showsHistoricalTurn ? t('diffView.scope.earlierTurn') : t('diffView.scope.lastTurn'))
             : scope === 'branch'
                 ? t('diffView.scope.branch')
                 : scope === 'commit' ? t('commitComparison.mode') : t('diffView.scope.changed');
@@ -73,7 +72,7 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
             </HoverTooltip>
             <DropdownMenuContent align="start" className="w-40">
                 <DropdownMenuRadioGroup
-                    value={scope}
+                    value={showsHistoricalTurn ? 'historical-turn' : scope}
                     onValueChange={(value) => {
                         if (value === 'working' || value === 'staged' || value === 'turn' || value === 'branch' || value === 'commit' || value === 'pr') {
                             onScopeChange?.(value);
@@ -81,6 +80,14 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
                         }
                     }}
                 >
+                    {showsHistoricalTurn && (
+                        <DropdownMenuRadioItem value="historical-turn">
+                            <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                                <span>{t('diffView.scope.earlierTurn')}</span>
+                                <span className="typography-meta text-muted-foreground">{historicalTurn?.count ?? '…'}</span>
+                            </span>
+                        </DropdownMenuRadioItem>
+                    )}
                     <DropdownMenuRadioItem value="turn">
                         <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
                             <span>{t('diffView.scope.lastTurn')}</span>

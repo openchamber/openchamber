@@ -24,6 +24,7 @@ mock.module("@/lib/runtime-switch", () => ({
 
 const { trackedItemKey } = await import("@/lib/trackedItems/model")
 const {
+  getActiveSourceControlStatusKeys,
   getBoundStatusKeysForBranches,
   getBranchTrackedPull,
   getFreshestActiveSourceControlStatusForBranch,
@@ -406,6 +407,29 @@ describe("GitHub PR status cache ownership", () => {
 
     expect(useGitHubPrStatusStore.getState().activeContextRegistrations[JSON.stringify(["runtime-a", "/repo"])])
       .toEqual({ [newerOwnerId]: { requestId: newerRequest, contexts: [newerContext] } })
+  })
+
+  test("a rediscovery that reads the same contexts keeps the stored registrations", () => {
+    const store = useGitHubPrStatusStore.getState()
+    const commit = (ownerId: string, contexts: SourceControlReadContext[]) => (
+      store.commitActiveContexts("runtime-a", "/repo", ownerId, store.beginActiveContextsLoad("runtime-a", "/repo", ownerId), contexts)
+    )
+    commit("row", [readContext()])
+    const stored = useGitHubPrStatusStore.getState().activeContextRegistrations
+
+    expect(commit("row", [readContext()])).toBe(true)
+    expect(useGitHubPrStatusStore.getState().activeContextRegistrations).toBe(stored)
+
+    // A new owner and changed contexts still publish.
+    commit("panel", [readContext()])
+    expect(Object.keys(useGitHubPrStatusStore.getState().activeContextRegistrations[JSON.stringify(["runtime-a", "/repo"])] ?? {}))
+      .toEqual(["row", "panel"])
+    const changed = readContext({ bindingRevision: 4 })
+    const stale = store.beginActiveContextsLoad("runtime-a", "/repo", "row")
+    commit("panel", [changed])
+    expect(store.commitActiveContexts("runtime-a", "/repo", "row", stale, [readContext()])).toBe(false)
+    expect(getActiveSourceControlStatusKeys(useGitHubPrStatusStore.getState().activeContextRegistrations, [{ directory: "/repo", branch: "feature" }]))
+      .toEqual([getSourceControlStatusKey(changed, "feature")])
   })
 
   test("keeps mounted owners on the newest authoritative contexts", () => {

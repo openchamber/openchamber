@@ -9,28 +9,37 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { formatCompactNumber } from '@/lib/numberFormat';
 import { opencodeClient } from '@/lib/opencode/client';
+import { fetchOpenCodeCompatibility } from '@/lib/opencode/compatibility';
 import type { Config } from '@/lib/opencode/model';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-/** OpenCode's `compaction.keep.tokens` when the config leaves it unset. */
 const OPENCODE_DEFAULT_KEEP_TOKENS = 15_000;
-/** Shares of the model's window kept free, written as OpenCode's `"20%"` form. 15% is OpenCode's default. */
 const BUFFER_PERCENT_STEPS = [5, 10, 20, 25, 30, 40, 50];
 const KEEP_STEPS = [5_000, 10_000, 30_000, 50_000, 100_000];
 const DEFAULT_OPTION = 'default';
 
-/** `compaction.buffer`: a share such as `"20%"`, or a token count from a hand-written config. */
 type CompactionBuffer = string | number;
 
-/** The compaction keys Settings edits; `null` leaves OpenCode's default. */
 type CompactionValues = { auto: boolean; buffer: CompactionBuffer | null; keepTokens: number | null; background: boolean };
 
-const readCompaction = (config: Config): CompactionValues => ({
+// OpenCode 2.3.1 moved background compaction from an experimental flag, off by default, to compaction.background, on by default.
+const readsLegacyBackgroundFlag = (version: string | null | undefined): boolean => {
+  const [major, minor, patch] = (version ?? '').split(/[-+]/, 1)[0].split('.').map(Number);
+  if (![major, minor, patch].every(Number.isFinite)) return false;
+  return major < 2 || (major === 2 && (minor < 3 || (minor === 3 && patch < 1)));
+};
+
+const legacyBackgroundFlag = (config: Config): boolean => {
+  const flags: object = config.experimental ?? {};
+  return 'background_compaction' in flags && flags.background_compaction === true;
+};
+
+const readCompaction = (config: Config, readsLegacyFlag: boolean): CompactionValues => ({
   auto: config.compaction?.auto !== false,
   buffer: config.compaction?.buffer ?? null,
   keepTokens: config.compaction?.keep?.tokens ?? null,
-  background: config.experimental?.background_compaction === true,
+  background: readsLegacyFlag ? legacyBackgroundFlag(config) : config.compaction?.background !== false,
 });
 
 const TokenCountSelect: React.FC<{
@@ -42,7 +51,6 @@ const TokenCountSelect: React.FC<{
   onChange: (next: number | null) => void;
 }> = ({ value, steps, defaultLabel, ariaLabel, disabled, onChange }) => {
   const { t } = useI18n();
-  // A hand-written value outside the steps stays on the list, so it reads as chosen.
   const options = value === null || steps.includes(value) ? steps : [...steps, value].sort((a, b) => a - b);
   const label = (count: number) => t('settings.openchamber.defaults.compaction.tokens', { count: formatCompactNumber(count) });
   return (
@@ -74,10 +82,8 @@ const BufferSelect: React.FC<{
 }> = ({ value, disabled, onChange }) => {
   const { t } = useI18n();
   const steps: CompactionBuffer[] = BUFFER_PERCENT_STEPS.map((percent) => `${percent}%`);
-  // A hand-written value outside the steps, a token count included, stays on the list, so it reads as chosen.
   const options = value === null || steps.includes(value) ? steps : [...steps, value];
   const percentFormat = new Intl.NumberFormat(getCurrentIntlLocale(), { style: 'percent', maximumFractionDigits: 1 });
-  // Labels read the option's select value: a share ends in "%", anything else is a token count.
   const label = (option: CompactionBuffer) => {
     const key = String(option);
     return key.endsWith('%')
@@ -107,30 +113,20 @@ const BufferSelect: React.FC<{
   );
 };
 
-/**
- * OpenCode's compaction settings in the global config: whether it compacts on
- * its own (`compaction.auto`), how early (`compaction.buffer`), how much
- * recent conversation stays beside the summary (`compaction.keep.tokens`), and
- * the experimental background summary (`experimental.background_compaction`).
- * Shows the values OpenCode reports and writes through
- * `PUT /api/config/compaction`. A project config can set any of them for
- * itself; the section says so and does not look for one.
- */
 export const CompactionSettings: React.FC = () => {
   const { t } = useI18n();
   const [values, setValues] = React.useState<CompactionValues | null>(null);
-  // What the config file holds as far as this page knows, and the newest write
-  // per field, so a failed write puts back only the fields no later write changed.
   const saved = React.useRef<CompactionValues | null>(null);
   const writes = React.useRef(0);
   const latestFieldWrite = React.useRef<Partial<Record<keyof CompactionValues, number>>>({});
 
   React.useEffect(() => {
     let cancelled = false;
-    opencodeClient.getConfig(null).then(
-      (config) => {
+    const version = fetchOpenCodeCompatibility().then((compatibility) => compatibility.version, () => null);
+    Promise.all([opencodeClient.getConfig(null), version]).then(
+      ([config, openCodeVersion]) => {
         if (cancelled || writes.current > 0) return;
-        saved.current = readCompaction(config);
+        saved.current = readCompaction(config, readsLegacyBackgroundFlag(openCodeVersion));
         setValues(saved.current);
       },
       (error) => console.warn('[compaction] failed to read config', error),
@@ -140,7 +136,6 @@ export const CompactionSettings: React.FC = () => {
     };
   }, []);
 
-  /** Writes one field; the shown value changes at once and goes back if the write fails. */
   const save = async <K extends keyof CompactionValues>(field: K, value: CompactionValues[K]) => {
     const write = ++writes.current;
     latestFieldWrite.current[field] = write;
@@ -167,7 +162,6 @@ export const CompactionSettings: React.FC = () => {
   };
 
   const loading = values === null;
-  // Buffer and background summaries only matter while OpenCode compacts on its own.
   const autoOff = values?.auto === false;
 
   return (
@@ -214,7 +208,7 @@ export const CompactionSettings: React.FC = () => {
         </SettingsFieldRow>
         <SettingsCheckboxRow
           settingsItem="sessions.background-compaction"
-          checked={values?.background ?? false}
+          checked={values?.background ?? true}
           disabled={loading || autoOff}
           onChange={(background) => void save('background', background)}
           label={t('settings.openchamber.defaults.compaction.background')}

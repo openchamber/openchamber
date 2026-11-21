@@ -47,7 +47,7 @@ Nothing stays open after a decision: an item left open is one the maintainer los
 | `Закрити` (already ships) | close as completed |
 | duplicate | close as not planned, pointing at the kept issue |
 
-- The maintainer's note on a card is the recorded scope: fold it into the issue body and the comment. When he says "робимо самі", write "I'll build this one myself, no PR needed". When the author offered to build it, say it's theirs.
+- The maintainer's note on a card is the recorded scope: fold it into the issue body and the comment. When he says "робимо самі" (or "зробимо самі", "це ми"), add the `in-house` label next to `accepted` and write "I'll build this one myself, no PR needed". When the author offered to build it, say it's theirs.
 - A note that redefines the ask (the real need is different from the request) becomes a new issue; close the original kindly, pointing at it.
 - An interesting idea with no clear approach becomes the maintainer's own feature request: the goal, "no plan yet, the approach is to be explored", "no PR needed".
 - A note that says something is a bug: relabel the issue `bug` and keep it.

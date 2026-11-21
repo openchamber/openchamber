@@ -35,6 +35,7 @@ Nginx、Nginx Proxy Manager、Caddy、Cloudflare、その他のリバースプ�
 - OpenChamber がすでにレスポンスを圧縮している場合、プロキシ側の gzip を無効にします。
 - 圧縮を有効にする層は 1 つだけにします。
 - `Host`、`X-Forwarded-For`、`X-Forwarded-Proto` など通常のプロキシヘッダーを転送します。
+- プロキシが別のマシンや別のコンテナで動いている場合は、そのアドレスを [`OPENCHAMBER_TRUSTED_PROXIES`](/ja/environment/#openchamber_trusted_proxies) に追加してください。追加しないと、背後の全員が失敗したサインインの上限を共有します。
 - ユーザーがファイルをアップロードする場合は body size limit を増やします。
 
 ## クイックチェックリスト

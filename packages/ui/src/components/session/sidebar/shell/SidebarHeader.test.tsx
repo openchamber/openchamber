@@ -218,16 +218,6 @@ describe('SidebarHeader', () => {
     expect(searchInTrigger()).toBeNull();
   });
 
-  test('typing commits after the debounce, and Enter commits at once', async () => {
-    const submitted: string[] = [];
-    await render(<SidebarHeader {...baseProps} setSessionSearchQuery={(value) => submitted.push(value)} />);
-
-    await type('abc');
-    expect(submitted).toEqual([]);
-    await press('Enter');
-    expect(submitted).toEqual(['abc']);
-  });
-
   test('the clear button and Escape empty the field; Escape on an empty field drops the search', async () => {
     let closed = 0;
     await render(<StatefulHeader {...baseProps} initialQuery="draft" closeSessionSearch={() => { closed += 1; }} />);

@@ -164,6 +164,14 @@ describe('readHtmlRenderFrameMessage', () => {
             .toEqual({ kind: 'selection', text: '', rect: none });
     });
 
+    test('reads editor dismissal only on an empty selection', () => {
+        const data = { type: 'openchamber:html-render:selection', text: '', rect: { top: 0, left: 0, width: 0, height: 0 }, dismiss: true };
+        expect(readHtmlRenderFrameMessage({ data })).toEqual({ kind: 'selection', text: '', rect: data.rect, dismiss: true });
+        expect(readHtmlRenderFrameMessage({ data: { ...data, text: 'prose' } }))
+            .toEqual({ kind: 'selection', text: 'prose', rect: data.rect });
+        expect(readHtmlRenderFrameMessage({ data: { ...data, dismiss: 'true' } })).toBeNull();
+    });
+
     test('rejects a malformed or oversized selection', () => {
         const type = 'openchamber:html-render:selection';
         const rect = { top: 0, left: 0, width: 10, height: 10 };

@@ -50,13 +50,11 @@ import { saveFile } from './saveFile';
 import { useHtmlRenderTheme } from './useHtmlRenderTheme';
 import { DeclinePageButton } from './DeclinePageButton';
 import { usePageDecline } from './usePageDecline';
-import { usePageAsk } from './usePageAsk';
+import { pageBlocksTurn, usePageAsk } from './usePageAsk';
 import { PageAskStatus } from './PageAskStatus';
 import { UiPageFrame } from './UiPageFrame';
+import { SharedPageCard } from '../../sharePages/SharedPageCard';
 
-// A timeline row unmounts when it scrolls away and mounts again when it comes
-// back. The page's last height is kept per call, so it comes back at its size
-// instead of growing from the minimum under the reader's scroll.
 const MAX_REMEMBERED_HEIGHTS = 500;
 const rememberedHeights = new Map<string, number>();
 const rememberHeight = (id: string, height: number) => {
@@ -68,12 +66,6 @@ const rememberHeight = (id: string, height: number) => {
     }
 };
 
-/**
- * Replays a chord the page passed on as if it had been pressed on the frame
- * element, so the app's shortcut handling sees an ordinary key outside any
- * text field. The matching keyup follows at once: the real one fires inside
- * the page, and the app tracks held keys for its digit shortcuts.
- */
 function replayKeyChord(frame: HTMLIFrameElement, chord: HtmlRenderKeyChord) {
     for (const type of ['keydown', 'keyup'] as const) {
         frame.dispatchEvent(new KeyboardEvent(type, { ...chord, bubbles: true, cancelable: true, composed: true }));
@@ -84,33 +76,20 @@ const NO_ANSWER: HtmlRenderAnswerState = { waiting: false, answer: null };
 const NO_RECT = { top: 0, left: 0, width: 0, height: 0 };
 
 interface HtmlRenderDocumentProps {
-    /** The `openchamber_render` call this page belongs to: quotes taken in it are anchored to it. */
     partId: string;
     html: string;
     title: string;
     className?: string;
     style?: React.CSSProperties;
-    /** Nothing around the frame scrolls: the page's scrolling stops at its edges without bouncing. */
     contained?: boolean;
     answerState?: HtmlRenderAnswerState;
-    /** Delivers what the page sent with `openchamber.submit`; rejects with the reason it was not delivered. */
     onSubmit?: (submission: HtmlRenderSubmission) => Promise<void>;
-    /** The user clicked the Decline the page shows beside its last button. */
     onDecline?: () => void;
-    /** Whether the page found a button to put its Decline beside. */
     onDeclinePlaced?: (placed: boolean) => void;
     onContentHeight?: (height: number) => void;
-    /** Receives the frame, for a caller that drives the page from outside (annotation). */
     frameRef?: React.RefObject<HTMLIFrameElement | null>;
 }
 
-/**
- * The page in a sandboxed frame. No `allow-same-origin`: the page runs in an
- * opaque origin and cannot reach the app's storage, credentials or DOM. A
- * theme switch is posted to the page instead of rebuilding it, so whatever
- * state its script holds survives. The page's selections, quote marks and
- * reveals pass through here to the chat (see pageQuoteBridge.ts).
- */
 function HtmlRenderDocument({
     partId, html, title, className, style, contained = false, answerState = NO_ANSWER, onSubmit, onDecline, onDeclinePlaced, onContentHeight, frameRef: outerFrameRef,
 }: HtmlRenderDocumentProps) {
@@ -129,14 +108,10 @@ function HtmlRenderDocument({
         if (outerFrameRef) outerFrameRef.current = node;
     }, [outerFrameRef]);
     const handleRef = React.useRef<PageFrameHandle | null>(null);
-    // A reveal that arrives before the page has loaded waits for it.
     const loadedRef = React.useRef(false);
     const pendingRevealRef = React.useRef<ChatQuoteAnchor | null>(null);
 
-    // Theme and answer changes are posted, so whatever the page's script holds
-    // (the user's half-made choice) survives them.
     const postState = React.useCallback(() => {
-        // An opaque-origin page accepts messages only addressed to any origin.
         frameRef.current?.contentWindow?.postMessage(htmlRenderThemeMessage(theme), '*');
         frameRef.current?.contentWindow?.postMessage(htmlRenderAnswerStateMessage(answerState), '*');
     }, [answerState, theme]);
@@ -155,25 +130,12 @@ function HtmlRenderDocument({
         return subscribePageMarks(partId, postMarks);
     }, [partId, postMarks]);
 
-    // The page shows its horizontal scrollbar only while the pointer is over
-    // it; a page loaded under the pointer learns that on load.
     const pointerOverRef = React.useRef(false);
     const postPointer = React.useCallback((over: boolean) => {
         pointerOverRef.current = over;
         frameRef.current?.contentWindow?.postMessage(htmlRenderPointerMessage(over), '*');
     }, []);
 
-    // A page flashed white for a moment each time the timeline mounted it
-    // again while scrolling: what a new frame paints before the page's own
-    // document (an empty document, a frame process without its first frame)
-    // is not the page, and under the app's dark theme it came out white. The
-    // frame stays hidden until the page has drawn itself: its first size
-    // report (sent once it is laid out, before slow images finish) or its
-    // load, whichever comes first. Its space is already held at the page's
-    // remembered height. A later load swaps documents without an empty one
-    // in between, so the frame stays shown. Hidden by opacity: Chromium may
-    // throttle the rendering of a cross-origin frame under visibility:hidden,
-    // and the size report would then wait for the load.
     const [shown, setShown] = React.useState(false);
     const handleLoad = React.useCallback(() => {
         setShown(true);
@@ -199,11 +161,9 @@ function HtmlRenderDocument({
                     pendingRevealRef.current = anchor;
                 }
             },
-            // The page drops its own selection (which does not echo it back),
-            // and the page's selection menu, told it is gone, closes.
-            clearSelection: () => {
+            clearSelection: (dismiss = true) => {
                 frame.contentWindow?.postMessage(htmlRenderClearSelectionMessage(), '*');
-                dispatchFrameSelection(frame, { text: '', rect: NO_RECT, dismiss: true });
+                dispatchFrameSelection(frame, { text: '', rect: NO_RECT, dismiss });
             },
         };
         handleRef.current = handle;
@@ -230,17 +190,12 @@ function HtmlRenderDocument({
                 const reply = (error?: string) => frame.contentWindow?.postMessage(htmlRenderSubmitReply(message.id, error), '*');
                 const { answerState: current, onSubmit: deliver } = submitRef.current;
                 if (!deliver || !current.waiting) return reply('This page is not waiting for an answer');
-                // The page's own check can be skipped by the page, so the
-                // gesture is checked here too: a click in the frame activates
-                // this window as well, and a page that sends on its own does not.
                 if (navigator.userActivation && !navigator.userActivation.isActive) return reply('openchamber.submit works only from a click');
                 if (!message.submission.summary) return reply('summary is required: the choice in a few words');
                 deliver(message.submission).then(() => reply(), (error) => reply(error instanceof Error ? error.message : String(error)));
             }
             if (message?.kind === 'decline') {
                 const { answerState: current, onDecline: decline } = submitRef.current;
-                // Like an answer, only a click while the page waits declines it.
-                // Refused, the page gets its state back, which turns its Decline on again.
                 if (!decline || !current.waiting || (navigator.userActivation && !navigator.userActivation.isActive)) {
                     frame.contentWindow?.postMessage(htmlRenderAnswerStateMessage(current), '*');
                 } else {
@@ -250,11 +205,9 @@ function HtmlRenderDocument({
             if (message?.kind === 'decline-placed') submitRef.current.onDeclinePlaced?.(message.placed);
             if (message?.kind === 'selection') {
                 const handle = handleRef.current;
-                if (message.text) {
-                    // The menu follows one selection: the app's own highlight
-                    // goes, and so does the one in any other page.
+                if (message.text || message.dismiss) {
                     window.getSelection()?.removeAllRanges();
-                    if (handle) clearOtherPageSelections(handle);
+                    if (handle) clearOtherPageSelections(handle, Boolean(message.text));
                 }
                 dispatchFrameSelection(frame, {
                     text: message.text,
@@ -263,15 +216,12 @@ function HtmlRenderDocument({
                     clear: handle?.clearSelection,
                 });
             }
-            // Escape in the page closes the menu for its selection, as it does
-            // for a selection in the chat.
             if (message?.kind === 'selection-escape') handleRef.current?.clearSelection();
             if (message?.kind === 'mark-click') {
                 emitPageMarkClick({
                     partId,
                     markId: message.id,
                     measure: () => frameRectInApp(frame, message.rect),
-                    // In the full-screen dialog the popover must render inside it to be usable.
                     portalTarget: frame.closest<HTMLElement>('[data-slot="dialog-content"]'),
                 });
             }
@@ -290,18 +240,11 @@ function HtmlRenderDocument({
             onPointerEnter={() => postPointer(true)}
             onPointerLeave={() => postPointer(false)}
             className={className}
-            // A frame whose color scheme differs from the page's own paints an
-            // opaque canvas; matching it keeps the page on the chat background.
             style={{ ...style, colorScheme: theme.appearance, opacity: shown ? undefined : 0 }}
         />
     );
 }
 
-/**
- * The page in the full-screen dialog: inset from the dialog's edges, and as
- * tall as it needs. The dialog grows with it up to the window and the page
- * scrolls inside past that, so a short page leaves no empty half-screen.
- */
 function FullscreenPage({ partId, messageId, html, title, initialHeight, answerState, onSubmit, onDecline, decline }: {
     partId: string;
     messageId: string;
@@ -311,7 +254,6 @@ function FullscreenPage({ partId, messageId, html, title, initialHeight, answerS
     answerState: HtmlRenderAnswerState;
     onSubmit: (submission: HtmlRenderSubmission) => Promise<void>;
     onDecline: () => void;
-    /** The host's Decline for a page without a button of its own, so the dialog need not be closed to decline. */
     decline: React.ReactNode;
 }) {
     const [height, setHeight] = React.useState(initialHeight);
@@ -335,13 +277,6 @@ function FullscreenPage({ partId, messageId, html, title, initialHeight, answerS
     );
 }
 
-/**
- * Wraps a page with the selection menu for the text selected in it. Every page
- * owns its menu, so the page works wherever it is drawn: in its message, hoisted
- * into the live turn (outside any message body), or full screen in a dialog.
- * The menu attributes the selection to `messageId`, the message that owns the
- * `openchamber_render` call.
- */
 function PageSelectionScope({
     messageId,
     className,
@@ -371,50 +306,38 @@ function PageSelectionScope({
     );
 }
 
-/** The page an `openchamber_render` call showed, or nothing for any other part. */
 export function ShownPage({ part }: { part: ToolPart }) {
-    // Kept while the call's state is the same object, so the page is not sent
-    // its answer state again on every render.
     const { t } = useI18n();
     const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
     const ask = usePageAsk(part, page?.ask);
     if (!page || !ask) return null;
-    if (page.ui) return <UiPageFrame part={part} source={page.ui} ask={ask} />;
-    return <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={ask} />;
+    const plainPage = page.ui
+        ? <UiPageFrame part={part} source={page.ui} ask={ask} />
+        : <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={ask} />;
+    if (page.share) return <SharedPageCard part={part} page={{ ...page, share: page.share }} plainPage={plainPage} />;
+    return plainPage;
 }
 
 interface HtmlRenderFrameProps {
-    /** The call; selections and quotes in the page are attributed to its message. */
     part: ToolPart;
     html: string;
     title: string;
     ask: RenderedPageAsk;
 }
 
-/**
- * A page an agent showed with `openchamber_render`, inline in the reply. The
- * frame takes the height the page reports, so the page scrolls with the chat;
- * annotation, full screen and download sit in a row above it.
- */
 function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
     const { t } = useI18n();
     const partId = part.id;
     const messageId = part.messageID;
     const theme = useHtmlRenderTheme();
-    // The page with its local images in place; null while they load, and the
-    // frame keeps the page's space meanwhile.
     const loadedHtml = useRenderPageHtml(part, html);
     const pageHtml = loadedHtml ?? html;
     const [height, setHeight] = React.useState(() => rememberedHeights.get(partId) ?? HTML_RENDER_MIN_HEIGHT);
     const [fullscreen, setFullscreen] = React.useState(false);
 
-    // The browser panel's annotation, on the page in its message: the agent
-    // learns which element or area the user means, with a screenshot on the
-    // desktop. Like the panel, a pointer tool: phones and VS Code do not get it.
     const frameRef = React.useRef<HTMLIFrameElement>(null);
     const directory = useEffectiveDirectory() ?? '';
     const describePage = React.useCallback((payload: BrowserAnnotationPayload): BrowserAnnotationPayload => (
-        // The frame's own address is about:srcdoc; the page's title is what names it in the chat.
         { ...payload, pageUrl: '', pageTitle: title }
     ), [title]);
     const annotation = useFrameAnnotation({
@@ -432,15 +355,10 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
         setHeight(next);
     }, [partId]);
 
-    // On a phone the page is already as wide as the screen, so neither a
-    // bigger view nor a saved file helps there. VS Code has no save route for
-    // HTML, so it offers no download either.
     const isMobile = useUIStore((state) => state.isMobile);
     const canDownload = !isVSCodeRuntime();
     const handleDownload = React.useCallback(async () => {
         const fileName = htmlRenderFileName(title);
-        // The saved page carries the theme it was viewed in, so it opens the
-        // same way outside the app.
         const file = new File([buildHtmlRenderDocument(pageHtml, theme)], fileName, { type: 'text/html' });
         try {
             await saveFile(file);
@@ -449,15 +367,12 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
         }
     }, [pageHtml, t, theme, title]);
 
-    // What this client sent, shown until the call completes with the answer
-    // OpenCode stores.
     const [sent, setSent] = React.useState<HtmlRenderSubmission | null>(null);
     const [submitting, setSubmitting] = React.useState(false);
     const [decline, sendDecline] = usePageDecline(part.sessionID, part.callID);
     const answerState = React.useMemo<HtmlRenderAnswerState>(() => {
         if (ask.kind === 'answered') return { waiting: false, answer: ask.data };
         if (sent) return { waiting: false, answer: sent.data };
-        // A decline on its way takes the page out of waiting, so its own button cannot answer too.
         return { waiting: ask.kind === 'waiting' && decline === 'idle', answer: null };
     }, [ask, sent, decline]);
     const handleSubmit = React.useCallback(async (submission: HtmlRenderSubmission) => {
@@ -475,29 +390,21 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
     }, [part.callID, part.sessionID, t]);
     const answeredSummary = ask.kind === 'answered' ? ask.summary : sent?.summary;
     const waiting = ask.kind === 'waiting' && answeredSummary === undefined && decline !== 'declined';
-    // The page puts Decline beside its own last button; only a page without
-    // one gets it under the page. Unknown until the page has loaded.
+    const blocking = waiting && pageBlocksTurn(ask);
     const [declineInPage, setDeclineInPage] = React.useState<boolean | null>(null);
     const declineButton = waiting && declineInPage === false
         ? <DeclinePageButton onDecline={sendDecline} disabled={submitting || decline === 'sending'} />
         : null;
-    // The chat brings a page that waits for an answer into view, and again
-    // as its height arrives: an off-screen frame reports its size only once
-    // it is scrolled into view.
     const blockRef = React.useRef<HTMLDivElement>(null);
     React.useEffect(() => {
-        if (waiting) dispatchPageWaiting(blockRef.current);
-    }, [height, waiting]);
+        if (blocking) dispatchPageWaiting(blockRef.current);
+    }, [height, blocking]);
 
     return (
-        <div ref={blockRef} className="group/html-render my-2" data-waiting-page={waiting ? partId : undefined}>
+        <div ref={blockRef} className="group/html-render my-2" data-waiting-page={blocking ? partId : undefined}>
         {isMobile ? null : (
-            // A row of its own above the page: over the page the buttons
-            // covered its own controls in the top corner. The row keeps its
-            // height while the buttons fade in, so hovering moves nothing.
             <div className={cn(
                 'flex h-6 items-center justify-end gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/html-render:opacity-100 pointer-coarse:opacity-100',
-                // The way out of annotation stays in view while it runs.
                 annotation.isAnnotating && 'opacity-100',
             )}>
                 {canAnnotate ? (

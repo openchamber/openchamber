@@ -12,6 +12,7 @@ import {
   type GuestBlockCall,
   type GuestHostSurface,
   type GuestItem,
+  type GuestMicrophoneEndReason,
   type GuestPopoverClosedEvent,
   type GuestPopoverContext,
   type GuestPopoverRequest,
@@ -42,7 +43,6 @@ import {
   buildSessionMessage,
   buildSettingsMessage,
   guestSessionLifecyclePhase,
-  guestSessionModelId,
   toGuestSessionSnapshot,
 } from '@/lib/guests/host-bridge';
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
@@ -52,17 +52,16 @@ import { useHostDevice } from '@/lib/guests/useHostDevice';
 import { useHostTypography } from '@/lib/guests/useHostTypography';
 import { guestGenerate } from '@/lib/guests/generate';
 import { guestGenerateResults, lateGenerateResult, type GenerateOwner } from '@/lib/guests/generate-results';
-import { useConfigStore } from '@/stores/useConfigStore';
-import { openGuestCommit, readCurrentBranch } from '@/lib/guests/open-commit';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
+import { guestNavigationEffects } from '@/lib/guests/navigation';
 import { openGuestSurface } from '@/lib/guests/open-surface';
 import { openGuestUrl } from '@/lib/guests/open-url';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { registerGuestResolver, type GuestResolveOutcome } from '@/lib/guests/resolve';
 import type { GuestBackgroundAction } from '@/lib/guests/run-action';
 import { useGuestFrameUrl } from '@/lib/guests/useGuestFrameUrl';
-import { useGuestItemStore } from '@/lib/guests/item-store';
+import { usePanelItem } from './usePanelItem';
 import { isGuestFileMessage, type GuestFileChannel } from '@/lib/guests/file-editor-channel';
 import { fetchHostLinearIssueGet } from '@/lib/guests/host-linear-request';
 import { loadGuestServiceStatus, proxyGuestServiceRequest } from '@/lib/guests/service';
@@ -83,6 +82,7 @@ import { linkGuestSession, promptGuestSession, startGuestSession } from '@/lib/g
 import { useGuestsStore } from '@/lib/guests/store';
 import { readGuestWorkspace, observeGuestWorkspace, openGuestSession } from '@/lib/guests/workspace';
 import { observeGuestShells, readGuestShellOutput } from '@/lib/guests/shells';
+import { canCaptureGuestMicrophone, markGuestListening, startGuestMicrophone, type GuestMicrophoneCapture } from '@/lib/guests/microphone';
 import { guestStorageOperation } from '@/lib/guests/storage';
 import { getGuestPopoverController, guestPopoverOwnerBlocked, positionGuestPopover, type GuestPopoverActivation, type GuestPopoverPosition } from '@/lib/guests/popovers';
 import { createGuestStatusControls, type GuestStatusControlBinding } from '@/lib/guests/status-controls';
@@ -98,8 +98,8 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useChatSessionSelection } from '@/components/chat/chatColumnSession';
 import { isForegroundShellStopping } from '@/components/chat/message/parts/foregroundShellStop';
-import { useSessionSelector, useSessionStatus } from '@/sync/sync-context';
-import type { Session } from '@/lib/opencode/model';
+import { useSessionMessagesSelector, useSessionSelector, useSessionStatus } from '@/sync/sync-context';
+import { frameContext, frameContextLimit, frameSessionFields, sameFrameContextReading, sameFrameSessionFields, selectFrameContextReading } from '@/lib/guests/session-usage';
 import { GuestPopover } from './GuestPopover';
 import { GuestPopoverSheet } from './GuestPopoverSheet';
 import { DockedPanelSurfaceContext, usePageColors } from '@/hooks/usePageColors';
@@ -107,58 +107,33 @@ import { DockedPanelSurfaceContext, usePageColors } from '@/hooks/usePageColors'
 type PluginPaneProps = {
   mode: PluginContextPanelMode;
   surface?: GuestHostSurface;
-  /**
-   * The item this surface was opened for (`ready.item`). The dialog passes
-   * it explicitly; the rail pane (`surface="panel"`) takes it from
-   * `useGuestItemStore` when this prop is left undefined. Any other surface
-   * left without it gets `null`.
-   */
   item?: GuestItem | null;
-  /**
-   * Mounted off-screen to answer a command or action: never takes a parked
-   * item and never clears the badge, because the user did not open it.
-   */
+  panelOpen?: boolean;
   headless?: boolean;
   backgroundAction?: GuestBackgroundAction;
   onDismiss?: () => void;
   onAttach?: (issue: AttachIssueRequest) => void;
   onSessionStarted?: () => void;
-  /** `surface="block"` only: what the agent wrote, the page that draws it, and how it answers. */
   block?: { call: GuestBlockCall; entry: string; answer: (text: string) => Promise<void> };
-  /** The guest asked for this content height (`setHeight`). The Work Status section and a chat block size their frames from it. */
   onResize?: (height: number) => void;
   onStatusControls?: (binding: GuestStatusControlBinding | null) => void;
-  /** The Work Status panel's own directory; null deliberately means no project. */
   statusDirectory?: string | null;
-  /**
-   * `surface="file"` only: the editor (`contributes.fileEditors[].id`) to load
-   * and the channel that hands it the file. Required together.
-   */
   fileEditor?: { editorId: string; channel: GuestFileChannel };
-  /** An overlay child inherits its owner's actual directory, never the current selection. */
   pinnedDirectory?: string;
-  /** Host-only context for a sandboxed popover child. */
   popover?: GuestPopoverContext;
-  /** Captured by the owner; guest code cannot select an overlay entry or directory. */
   popoverHost?: { entry: string; directory: string; context: GuestPopoverContext; activation: GuestPopoverActivation; focus: boolean };
-  /** Synchronous owner lifecycle authority for popover children. */
   isActive?: () => boolean;
   onPopoverClosed?: (event: GuestPopoverClosedEvent) => void;
   onPopoverActivity?: (active: boolean) => void;
 };
 
-// Sandboxed frames without allow-same-origin have an opaque origin.
-// The string "null" is not a legal postMessage targetOrigin; browsers throw.
-// Isolation is the unique contentWindow plus event.source on receive.
+// external: https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage Opaque-origin frames require a wildcard target and receive-side contentWindow identity checks.
 const OPAQUE_FRAME_TARGET_ORIGIN = '*';
 
 const HOST_RADIUS_FALLBACK = '0.5625rem';
 
-// The phone has no room to float a card beside its anchor: a popover opens in
-// the app's bottom sheet there, and only the user closes it.
 const popoverOpensAsSheet = (): boolean => isMobileSurfaceRuntime();
 
-// Sent to the guest, not shown by the host; the guest decides how to surface it.
 const NOT_GRANTED_MESSAGE = 'The user has not allowed this capability for the extension.';
 
 const withOwnProviderId = (message: GuestMessage, guestId: string): GuestMessage => {
@@ -175,23 +150,11 @@ const readCssVar = (name: string, fallback: string): string => {
   return value || fallback;
 };
 
-type FrameSessionFields = { id?: string; title?: string; model?: string; agent?: string };
-
-const frameSessionFields = (session: Session | undefined): FrameSessionFields => ({
-  id: session?.id,
-  title: session?.title,
-  model: guestSessionModelId(session?.model),
-  agent: session?.agent,
-});
-
-const sameFrameSessionFields = (left: FrameSessionFields, right: FrameSessionFields): boolean => (
-  left.id === right.id && left.title === right.title && left.model === right.model && left.agent === right.agent
-);
-
 export const PluginPane: React.FC<PluginPaneProps> = ({
   mode,
   surface = 'panel',
   item: itemProp,
+  panelOpen = true,
   headless = false,
   backgroundAction,
   onDismiss,
@@ -212,16 +175,17 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const { t, locale } = useI18n();
   const { currentTheme } = useThemeSystem();
   const effectiveDirectory = useEffectiveDirectory();
-  // A block lives in a chat column, and a pinned column's session is its own.
   const { sessionId: selectedSessionId } = useChatSessionSelection();
   const directory = popoverHost?.directory ?? pinnedDirectory ?? (backgroundAction ? backgroundAction.item.directory ?? ''
     : surface === 'status' && statusDirectory !== undefined ? statusDirectory ?? '' : effectiveDirectory);
   const statusContextKey = surface === 'status' ? directory : null;
   const actionItem = backgroundAction?.item;
   const currentSessionId = actionItem && 'sessionId' in actionItem ? actionItem.sessionId : selectedSessionId;
-  // Only what a frame hears: the record itself changes on every streamed step.
   const session = useSessionSelector(currentSessionId, directory || undefined, frameSessionFields, sameFrameSessionFields);
   const sessionStatus = useSessionStatus(currentSessionId ?? '', directory || undefined);
+  const contextReading = useSessionMessagesSelector(currentSessionId ?? '', directory || undefined, selectFrameContextReading, sameFrameContextReading);
+  const contextLimit = useConfigStore((state) => frameContextLimit(contextReading, selectProvidersForDirectory(state, directory || undefined)));
+  const context = React.useMemo(() => frameContext(contextReading, contextLimit), [contextReading, contextLimit]);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const [activePopover, setActivePopover] = React.useState<{ request: GuestPopoverRequest; position: GuestPopoverPosition; entry: string; directory: string; activation: GuestPopoverActivation } | null>(null);
   const activePopoverRef = React.useRef<typeof activePopover>(null);
@@ -232,14 +196,12 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const guestId = pluginIdFromMode(mode);
   const guest = useGuestsStore((state) => state.guests.find((entry) => entry.id === guestId) ?? null);
   const catalogStatus = useGuestsStore((state) => state.status);
-  // Paused or not yet approved: the frame stays down and every effect refuses.
   const guestEnabled = guest ? isGuestActive(guest) : true;
   const oauthStatus = useGuestOauthStore((state) => state.byId[guestId]);
   const setOauthStatus = useGuestOauthStore((state) => state.setStatus);
   const refreshOauth = useGuestOauthStore((state) => state.refresh);
   const runtimeTrackers = React.useContext(RuntimeAPIContext)?.trackers;
   const refreshTrackerStatus = useTrackerAuthStore((state) => state.refreshStatus);
-  // A tracker extension's account lives on its tracker card; an integration of its own keeps its own link.
   const trackerProvider = guest?.tracker && !guest.integration ? trackerProviderIdOf(guestId) : null;
   const trackerEntry = useTrackerAuthEntry(trackerProvider);
   const trackerStatus = trackerProvider ? trackerEntry.status : null;
@@ -247,45 +209,30 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     () => (trackerProvider ? trackerGuestConnection(trackerStatus) : oauthStatus?.connection ?? EMPTY_GUEST_CONNECTION),
     [oauthStatus?.connection, trackerProvider, trackerStatus],
   );
-  // A chip click parks the item under this guest's id; take it (clearing the
-  // slot) so a later mount of the same pane starts without a stale item. Only
-  // the rail pane takes it: a block, file editor or other frame of the same
-  // guest may mount first and would keep the item from the panel it opened.
-  // A run that finds the slot already empty (Strict Mode runs a mount effect
-  // twice) keeps the item the first run took.
-  const pendingItem = useGuestItemStore((state) => state.pendingItemByGuest[guestId]);
-  const takePendingItem = useGuestItemStore((state) => state.takePendingItem);
-  const [railItem, setRailItem] = React.useState<GuestItem | null>(null);
-  React.useEffect(() => {
-    if (surface !== 'panel' || headless || itemProp !== undefined || !pendingItem) return;
-    const taken = takePendingItem(guestId);
-    if (taken) setRailItem(taken);
-  }, [guestId, headless, itemProp, pendingItem, surface, takePendingItem]);
+  const railItem = usePanelItem({ guestId, surface, headless, itemProp, panelOpen });
   const item = headless ? null : itemProp !== undefined ? itemProp : railItem;
-  // The user opened this guest's panel: whatever it counted is seen.
   const clearBadge = useGuestBadgeStore((state) => state.clearBadge);
   React.useEffect(() => {
     if (surface === 'panel' && !headless) clearBadge(guestId);
   }, [clearBadge, guestId, headless, surface]);
   const sessionBusy = sessionStatus?.type === 'busy' || sessionStatus?.type === 'retry';
   const lifecyclePhase = guestSessionLifecyclePhase(sessionStatus);
-  const sessionSnapshot = React.useMemo(
+  const sessionTitle = session?.title ?? (actionItem && 'sessionTitle' in actionItem ? actionItem.sessionTitle : undefined);
+  const baseSessionSnapshot = React.useMemo(
     () => toGuestSessionSnapshot(
       currentSessionId
-        ? {
-          id: session?.id ?? currentSessionId,
-          title: session?.title ?? (actionItem && 'sessionTitle' in actionItem ? actionItem.sessionTitle : undefined),
-          busy: sessionBusy,
-          model: session?.model,
-          agent: session?.agent,
-        }
+        ? { id: session?.id ?? currentSessionId, title: sessionTitle, busy: sessionBusy, model: session?.model, agent: session?.agent }
         : null,
     ),
-    [actionItem, currentSessionId, session, sessionBusy],
+    [currentSessionId, session?.agent, session?.id, session?.model, sessionBusy, sessionTitle],
+  );
+  const sessionTokens = session?.tokens ?? null;
+  const sessionSnapshot = React.useMemo(
+    () => (baseSessionSnapshot ? { ...baseSessionSnapshot, context, tokens: sessionTokens } : null),
+    [baseSessionSnapshot, context, sessionTokens],
   );
 
   const readableColors = React.useMemo(() => getReadableThemeColors(currentTheme), [currentTheme]);
-  // A frame in a docked panel paints the panel's colour, not the chat's.
   const pageColors = usePageColors();
   const typography = useHostTypography();
   const device = useHostDevice();
@@ -295,8 +242,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     if (surface === 'status' && onStatusControls) features.statusControls = true;
     if (!popoverHost && !popover && !headless && !isVSCodeRuntime()
       && (surface === 'panel' || surface === 'page' || surface === 'status')) features.popovers = true;
-    // A hidden frame is nobody's panel: it neither takes kept answers nor leaves any.
     if (!headless) features.lateGenerateResults = true;
+    if (!headless && canCaptureGuestMicrophone()) features.microphone = true;
     return {
     theme: {
       mode: currentTheme.metadata.variant === 'dark' ? 'dark' : 'light',
@@ -315,7 +262,6 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         elevatedForeground: currentTheme.colors.surface.elevatedForeground,
         active: currentTheme.colors.interactive.active,
         selectionForeground: readableColors.selectionForeground,
-        // Same fallback the app's CSS generator uses for themes without one.
         primaryForeground: currentTheme.colors.primary.foreground ?? '#ffffff',
         primaryText: readableColors.tinted.primary,
         successText: readableColors.tinted.success,
@@ -342,7 +288,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     },
     locale,
     directory: directory || null,
-    session: sessionSnapshot,
+    session: baseSessionSnapshot,
     surface: headless && guest?.backgroundEntry ? 'background' : surface,
     connection,
     settings: oauthStatus?.settings ?? {},
@@ -352,21 +298,16 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     features,
     device,
     };
-  }, [block, connection, currentTheme, device, pageColors, readableColors, typography, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, sessionSnapshot, surface]);
+  }, [block, connection, currentTheme, device, pageColors, readableColors, typography, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, baseSessionSnapshot, surface]);
+  const hostState = React.useMemo<HostReadyContext>(() => ({ ...ready, session: sessionSnapshot }), [ready, sessionSnapshot]);
 
   const fileEditorEntry = surface === 'file' && fileEditor
     ? guest?.fileEditors?.find((editor) => editor.id === fileEditor.editorId)?.entry ?? null
     : null;
-  // Origins the user approved for this list; the frame policy opens them.
   const approvedOrigins = guest?.capabilities.granted.includes('origins') ? guest.origins ?? [] : [];
-  // New package files reload the frame, except a file editor's: a reload there would drop unsaved edits, so it picks them up on its next open.
   const revision = surface === 'file' ? 0 : guest?.revision ?? 0;
   const frameKey = `${guestId}:${guest?.storageId ?? ''}:${guest?.version ?? ''}:rev-${revision}:${guestEnabled}:grants-${guest?.capabilities.granted.join(',') ?? ''}:service-${guest?.service?.granted ? '1' : '0'}:origins-${approvedOrigins.join(',')}:${guest?.entry ?? ''}:${guest?.backgroundEntry ?? ''}:${guest?.statusEntry ?? ''}:${guest?.pageEntry ?? ''}:${guest?.attachEntry ?? ''}:${fileEditorEntry ?? ''}:${block?.entry ?? ''}:popover-${popoverHost?.context.id ?? popover?.id ?? ''}`;
 
-  // Scoped auth is minted per mount/version/grant and renewed if an existing
-  // iframe navigates after expiry. Healthy documents retain their local state.
-  // Visible surfaces only load panel/page entries. Hidden execution prefers
-  // background.entry and falls back to panel.entry for existing extensions.
   const guestEntry = popoverHost?.entry ?? (guest
     ? headless ? guest.backgroundEntry ?? guest.entry ?? null
       : surface === 'page' ? guest.pageEntry ?? null
@@ -379,8 +320,9 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     guestId, entry: guestEntry, instanceKey: frameKey, enabled: guestEnabled, origins: approvedOrigins, reuseDocument: surface === 'block' || headless,
   });
 
-  const readyRef = React.useRef(ready);
-  readyRef.current = ready;
+  const readyRef = React.useRef(hostState);
+  readyRef.current = hostState;
+  const sentSessionRef = React.useRef<HostReadyContext['session'] | undefined>(undefined);
   const directoryRef = React.useRef(directory);
   directoryRef.current = directory;
   const effectiveDirectoryRef = React.useRef(effectiveDirectory);
@@ -424,11 +366,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const fileChannelRef = React.useRef(fileChannel);
   fileChannelRef.current = fileChannel;
   const oauthPollRef = React.useRef<number | null>(null);
-  // Outstanding `resolve` requests this pane sent; answered by `resolve-result`.
   const resolveWaitersRef = React.useRef(new Map<string, (outcome: GuestResolveOutcome) => void>());
   const resolveIdsRef = React.useRef(0);
-  // Counts `hello`s: each one is a new document in the frame, which has no
-  // waiter for a `generate` the previous document sent.
   const frameDocumentRef = React.useRef(0);
 
   const stopOauthPoll = React.useCallback(() => {
@@ -447,8 +386,6 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     if (message) postToGuest(message);
   }, [backgroundAction, postToGuest]);
 
-  // What the extension's service sends its open frames. Nothing is kept for a
-  // frame that has not said hello: it reads the current state when it starts.
   React.useEffect(() => {
     if (!guestEnabled) return undefined;
     return subscribeOpenchamberEvents((event) => {
@@ -457,8 +394,6 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     });
   }, [guestEnabled, guestId, postToGuest]);
 
-  // A file editor gets its file once the frame is listening (hello or load),
-  // not on every host-state push: theme or session changes are no reload.
   const connectFileChannel = React.useCallback(() => {
     fileChannelRef.current?.connect(postToGuest);
   }, [postToGuest]);
@@ -467,9 +402,6 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     return () => fileChannel.disconnect();
   }, [fileChannel, frameKey, src, srcDoc]);
 
-  // Registered once the guest has connected (hello or iframe load), so a
-  // resolve is never posted into a frame that is not listening yet. An explicit
-  // background entry owns commands; older extensions can use a mounted panel.
   const resolverReadyRef = React.useRef(false);
   const unregisterResolverRef = React.useRef<(() => void) | null>(null);
   const registerResolver = React.useCallback(() => {
@@ -514,6 +446,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     postToGuest(buildReadyMessage(readyRef.current));
     postToGuest(buildDirectoryMessage(directoryRef.current || null));
     postToGuest(buildSessionMessage(readyRef.current.session));
+    sentSessionRef.current = readyRef.current.session;
     postToGuest(buildConnectionMessage(readyRef.current.connection));
     postToGuest(buildSettingsMessage(readyRef.current.settings));
     postToGuest(buildItemMessage(readyRef.current.item));
@@ -561,7 +494,6 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       return;
     }
     void refreshOauth(guest.id);
-    // A new package version may want another account; a reparsed catalog row may not.
   }, [guest?.id, guest?.revision, hasIntegration, refreshOauth]);
 
   React.useEffect(() => {
@@ -574,8 +506,6 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     }
   }, [guest, guestEnabled, onDismiss]);
 
-  // Resolve the frame from the ref on every message: auth recovery, version
-  // changes and service grants can replace the element and its contentWindow.
 
   React.useEffect(() => {
     const subscriptions = new Map<string, () => void>();
@@ -616,6 +546,18 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     });
     statusControlsRef.current = statusControls;
     const clearSubscriptions = () => { for (const unsubscribe of subscriptions.values()) unsubscribe(); subscriptions.clear(); };
+    let microphoneTicket = 0;
+    let microphoneOpening = false;
+    let microphoneCapture: GuestMicrophoneCapture | null = null;
+    let releaseListening: (() => void) | null = null;
+    const stopMicrophone = () => {
+      microphoneTicket += 1;
+      microphoneOpening = false;
+      microphoneCapture?.stop();
+      microphoneCapture = null;
+      releaseListening?.();
+      releaseListening = null;
+    };
     const generateOwner = (): GenerateOwner => ({
       runtimeKey,
       guestId: requestingGuestId,
@@ -625,7 +567,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     });
     let stopLateGenerate: (() => void) | null = null;
     const stopLateGenerateListening = () => { stopLateGenerate?.(); stopLateGenerate = null; };
-    const runtimeUnsubscribe = subscribeRuntimeEndpointChanged(() => { disposed = true; closeActivePopover('owner'); statusControls.dispose(); clearSubscriptions(); stopOauthPoll(); });
+    const runtimeUnsubscribe = subscribeRuntimeEndpointChanged(() => { disposed = true; closeActivePopover('owner'); statusControls.dispose(); clearSubscriptions(); stopMicrophone(); stopOauthPoll(); });
     const requireSessions = () => {
       if (!guestMay(currentGuest(), 'sessions')) throw new HostRequestError('NOT_GRANTED', NOT_GRANTED_MESSAGE);
     };
@@ -639,12 +581,11 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       if (!parsed.success) return;
       if (disposed || getRuntimeKey() !== runtimeKey || (backgroundAction && !backgroundAction.isActive())
         || (isActiveRef.current && !isActiveRef.current())) return;
-      // The frame's identity is the guest id; a payload naming another
-      // provider would attach or link under a different guest's name.
       const message = withOwnProviderId(parsed.data, guestIdRef.current);
       const activeGuest = currentGuest();
       if (!activeGuest || !isGuestActive(activeGuest)) {
         clearSubscriptions();
+        stopMicrophone();
         if ('id' in message) postToGuest({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION,
           type: 'result', id: message.id, ok: false, error: 'Extension is unavailable.', code: 'DISABLED' });
         return;
@@ -656,6 +597,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         stopLateGenerateListening();
         acknowledgeHandshake();
         clearSubscriptions();
+        stopMicrophone();
         pushHostState();
         connectFileChannel();
         registerResolver();
@@ -687,8 +629,6 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         return;
       }
 
-      // A generate answer that finds its frame gone, or a new document in
-      // it, is kept for the next frame of this extension that listens.
       const requestOwner = message.type === 'generate' && !headless ? generateOwner() : null;
       const requestDocument = frameDocumentRef.current;
 
@@ -724,7 +664,6 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           requireShells();
           const shell = useBackgroundShellsStore.getState().byId.get(shellId);
           if (!shell) throw new HostRequestError('NOT_FOUND', 'That shell is not running.');
-          // A Stop from the command's chat row owns its note and removal.
           if (isForegroundShellStopping(shellId)) throw new HostRequestError('HOST_REJECTED', 'That shell is already being stopped.');
           const session = useGlobalSessionsStore.getState().entityById.get(shell.sessionID);
           await opencodeClient.stopBackgroundShells({
@@ -734,6 +673,42 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           });
           return { stopped: true as const };
         },
+        microphoneOpen: async (sampleRate) => {
+          if (!guestMay(currentGuest(), 'microphone')) throw new HostRequestError('NOT_GRANTED', NOT_GRANTED_MESSAGE);
+          if (headless) throw new HostRequestError('UNSUPPORTED', 'A hidden frame cannot open the microphone.');
+          if (microphoneCapture || microphoneOpening) throw new HostRequestError('HOST_REJECTED', 'The microphone is already open in this frame.');
+          microphoneTicket += 1;
+          const ticket = microphoneTicket;
+          microphoneOpening = true;
+          const mayHear = () => ticket === microphoneTicket && !disposed && iframeRef.current === frame
+            && guestMay(currentGuest(), 'microphone');
+          const end = (reason: GuestMicrophoneEndReason) => {
+            stopMicrophone();
+            if (iframeRef.current === frame) postToGuest({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION,
+              type: 'microphone-ended', payload: { reason } });
+          };
+          let capture: GuestMicrophoneCapture;
+          try {
+            capture = await startGuestMicrophone({
+              sampleRate,
+              onSamples: (samples) => {
+                if (ticket !== microphoneTicket) return;
+                if (!mayHear()) { end('revoked'); return; }
+                postToGuest({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION, type: 'microphone-audio', payload: { samples } });
+              },
+              onDeviceLost: () => { if (ticket === microphoneTicket) end('device-lost'); },
+            });
+          } finally {
+            if (ticket === microphoneTicket) microphoneOpening = false;
+          }
+          if (!mayHear()) {
+            capture.stop();
+            throw new HostRequestError('DISCONNECTED', 'The microphone closed while it was opening.');
+          }
+          microphoneCapture = capture;
+          releaseListening = markGuestListening(requestingGuestId);
+        },
+        microphoneClose: stopMicrophone,
         storage: (request) => guestStorageOperation(requestingGuestId, request,
           installation?.storageId ? { runtimeKey, storageId: installation.storageId, authorize: ownsFrame } : undefined),
         setStatusControls: (controls) => {
@@ -742,11 +717,9 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         },
         openSession: (id) => { requireSessions(); openGuestSession(id); },
         toast: (request) => {
-          // Full pause: a disabled guest must not spam host toasts while the frame tears down.
           if (!guestEnabledRef.current) return;
           showGuestToast(request, guestIdRef.current);
         },
-        // Local addresses (a dev server, a container port) open in the browser panel, like chat links.
         openUrl: (url) => openGuestUrl(
           url,
           directoryRef.current || effectiveDirectoryRef.current || null,
@@ -754,8 +727,6 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         ),
         openSurface: (surfaceMode) => openGuestSurface({
           mode: surfaceMode,
-          // A status section in a chat draft without a project has no
-          // directory of its own; the rail opens its panels under the chat's.
           directory: directoryRef.current || effectiveDirectoryRef.current || null,
           supported: !isVSCodeRuntime(),
         }),
@@ -894,7 +865,6 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
               message: 'This extension is disabled in Settings → Extensions.',
             });
           }
-          // Mirrors the server: the answer it would give comes back without a round trip.
           const scope = guestFileScope(request.path);
           if (!guestMay(guestRef.current, scope === 'project' ? 'files' : 'filesystem')) {
             return Promise.resolve({ ok: false as const, code: 'NOT_GRANTED' as const, message: NOT_GRANTED_MESSAGE });
@@ -930,25 +900,13 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           if (!guestEnabledRef.current) return;
           useGuestBadgeStore.getState().setBadge(guestIdRef.current, count);
         },
-        openCommit: (sha) => {
-          const git = getRegisteredRuntimeAPIs()?.git ?? null;
-          return openGuestCommit({
-          sha,
-          directory: directoryRef.current || null,
-          git,
-          currentBranch: (dir) => (git ? readCurrentBranch(git, dir) : Promise.resolve(null)),
-          supported: !isVSCodeRuntime(),
-          });
-        },
+        ...guestNavigationEffects(() => directoryRef.current || null),
         resize: (height) => {
           onResizeRef.current?.(height);
         },
         answerBlock: (text) => {
           const answer = blockRef.current?.answer;
           if (!answer) return Promise.reject(new Error('Only a block in the chat can answer the agent.'));
-          // A frame starts an agent turn only from a click the user made in it.
-          // Activation alone is not that: a click or a key anywhere in the app
-          // activates this window too, so the focus has to be in the frame.
           const clicked = !navigator.userActivation || navigator.userActivation.isActive;
           if (!clicked || document.activeElement !== iframeRef.current) return Promise.reject(new Error('answerBlock works only from a click.'));
           return answer(text);
@@ -1018,7 +976,6 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
             onPopoverActivityRef.current?.(active);
             return;
           }
-          // A sheet stays until the user closes it; a phone's anchor has no hover to lose.
           if (activePopoverRef.current?.request.id !== id || popoverOpensAsSheet()) return;
           clearPopoverCloseTimer();
           popoverAnchorActiveRef.current = active;
@@ -1045,14 +1002,13 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       statusControls.dispose();
       if (statusControlsRef.current === statusControls) statusControlsRef.current = null;
       clearSubscriptions();
+      stopMicrophone();
       stopLateGenerateListening();
       runtimeUnsubscribe();
       window.removeEventListener('message', onMessage);
     };
   }, [acknowledgeHandshake, backgroundAction, clearPopoverCloseTimer, closeActivePopover, connectFileChannel, frameKey, guestEnabled, guestEntry, headless, popover, postToGuest, pushHostState, refreshOauth, registerResolver, schedulePopoverClose, sendBackgroundAction, setOauthStatus, src, srcDoc, stopOauthPoll, surface]);
 
-  // A project switch retires header callbacks, not the still-mounted frame's
-  // workspace observers or unrelated in-flight requests.
   React.useLayoutEffect(() => { statusControlsRef.current?.retire(); }, [statusContextKey]);
 
   React.useEffect(() => {
@@ -1066,25 +1022,27 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     backgroundMountedRef.current = true;
     return () => {
       backgroundMountedRef.current = false;
-      // Strict Mode reattaches before this microtask, including while the
-      // frame URL is still loading. A real unmount settles the invocation.
       queueMicrotask(() => {
         if (!backgroundMountedRef.current) backgroundAction?.complete({ ok: false, reason: 'unavailable' });
       });
     };
   }, [backgroundAction]);
 
-  // The OAuth poll outlives listener re-attachment: it only stops when the
-  // frame goes away, otherwise a parent re-render mid-authorization would
-  // leave the panel reporting "not connected" after the browser round trip.
   React.useEffect(() => () => stopOauthPoll(), [frameKey, stopOauthPoll]);
 
+  const pushedReadyRef = React.useRef<{ ready: HostReadyContext; directory: typeof directory } | null>(null);
   React.useEffect(() => {
-    pushHostState();
-  }, [pushHostState, ready, directory]);
+    const pushed = pushedReadyRef.current;
+    if (pushed?.ready !== ready || pushed.directory !== directory) {
+      pushedReadyRef.current = { ready, directory };
+      pushHostState();
+    } else if (sentSessionRef.current !== sessionSnapshot) {
+      sentSessionRef.current = sessionSnapshot;
+      postToGuest(buildSessionMessage(sessionSnapshot));
+    }
+  }, [pushHostState, postToGuest, ready, directory, sessionSnapshot]);
 
   React.useEffect(() => {
-    // A Work Status section, file editor, block or full-screen page is not a rail tab and may be the package's only frame.
     if (headless || surface === 'status' || surface === 'file' || surface === 'popover' || surface === 'block' || surface === 'page' || catalogStatus !== 'ready' || guest?.entry) {
       return;
     }
@@ -1102,8 +1060,6 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     }));
   }, [currentSessionId, lifecyclePhase, postToGuest]);
 
-  // A persisted plugin tab renders before the catalog answers. Silence until
-  // it does; an uninstalled guest's tabs are closed by the effect above.
   if (!guest && catalogStatus !== 'ready' && catalogStatus !== 'error') {
     return null;
   }
@@ -1127,7 +1083,6 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
 
   const sheet = popoverOpensAsSheet();
   const popoverChild = activePopover ? (
-    // Floats over the app, so never on a docked panel's page.
     <DockedPanelSurfaceContext.Provider value={false}>
     <PluginPane
       mode={mode}
@@ -1146,7 +1101,6 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         const frame = iframeRef.current;
         if (!current || current.activation !== activePopover.activation || !frame
           || !getGuestPopoverController(document).authorize(current.activation)) return;
-        // The guest reports content height; a floating card adds its two border pixels, the sheet has none.
         const nextHeight = Math.max(GUEST_POPOVER_HEIGHT_MIN, Math.min(GUEST_POPOVER_HEIGHT_MAX, height + (sheet ? 0 : 2)));
         if (current.request.height === nextHeight) return;
         const request = { ...current.request, height: nextHeight };
@@ -1219,19 +1173,14 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       src={src || undefined}
       srcDoc={srcDoc}
       sandbox="allow-scripts"
-      // A frame in another scheme than its element paints an opaque canvas, and the chat's scroller is dark in a light theme.
       style={{ colorScheme: currentTheme.metadata.variant === 'dark' ? 'dark' : 'light' }}
       className={cn(
         'h-full w-full min-h-0 min-w-0 border-0 overflow-hidden',
-        // The attach window and the Work Status card draw their own chrome behind the page.
         surface === 'dialog' || surface === 'status' || surface === 'popover' || surface === 'block' ? 'bg-transparent' : 'bg-[var(--surface-background)]',
       )}
       onLoad={() => {
         if (!popoverHost && !popover) closeActivePopover('owner');
         if (popoverHost?.focus && isActiveRef.current?.()) iframeRef.current?.focus();
-        // A kept-alive iframe can navigate again after its scoped URL token
-        // expires. Recover on navigation, never by periodically reloading a
-        // healthy extension and discarding its in-memory state.
         if (recoverExpiredNavigation()) return;
         pushHostState();
         connectFileChannel();

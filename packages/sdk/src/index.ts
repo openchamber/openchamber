@@ -1,7 +1,7 @@
 export { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL, OPENCHAMBER_SDK_MANIFEST_API_VERSIONS } from './api-version.ts';
 export { GUEST_SCROLLBAR_CSS, GUEST_SCROLLBAR_SCRIPT } from './scrollbar-style.ts';
 export { guestFramePolicy } from './frame-policy.ts';
-export type { GuestLoadState, GuestProject, GuestWorktree, GuestSessionActivity, GuestSessionRecord, GuestSessionLink, GuestDirectoryCoverage, GuestProjectsSnapshot, GuestWorktreesSnapshot, GuestSessionsSnapshot, GuestWorkspaceSnapshot, GuestWorkspaceQuery, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestStorageRequest, GuestStorageResult, GuestStorageOptions, GuestStorageScope, GuestSessionWorktree } from './workspace.ts';
+export type { GuestLoadState, GuestProject, GuestWorktree, GuestSessionActivity, GuestSessionRecord, GuestSessionLink, GuestSessionContext, GuestSessionTokenTotals, GuestDirectoryCoverage, GuestProjectsSnapshot, GuestWorktreesSnapshot, GuestSessionsSnapshot, GuestWorkspaceSnapshot, GuestWorkspaceQuery, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestStorageRequest, GuestStorageResult, GuestStorageOptions, GuestStorageScope, GuestSessionWorktree } from './workspace.ts';
 export { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_KEYS_MAX, GUEST_STORAGE_VALUE_BYTES, GUEST_STORAGE_TOTAL_BYTES, GUEST_DEVICE_STORAGE_TOTAL_BYTES } from './workspace.ts';
 export type {
   GuestRunningShell,
@@ -20,6 +20,14 @@ export {
   GUEST_SHELLS_MAX,
   GUEST_SHELL_OUTPUT_TAIL_MAX,
 } from './shells.ts';
+export type { GuestMicrophone, GuestMicrophoneEndReason, MicrophoneOpenRequest, MicrophoneOpenResult } from './microphone.ts';
+export {
+  GUEST_MICROPHONE_END_REASONS,
+  GUEST_MICROPHONE_FRAME_MAX,
+  GUEST_MICROPHONE_OPEN_TIMEOUT_MS,
+  GUEST_MICROPHONE_SAMPLE_RATE_MAX,
+  GUEST_MICROPHONE_SAMPLE_RATE_MIN,
+} from './microphone.ts';
 export { GUEST_STATUS_CONTROLS_MAX, GUEST_STATUS_CONTROL_ID, GUEST_STATUS_CONTROL_LABEL_MAX, GUEST_STATUS_CONTROL_OPTIONS_MAX, GUEST_STATUS_CONTROL_VALUE_MAX } from './status-controls.ts';
 export type { GuestStatusControl, GuestStatusControlEvent, GuestStatusControlOption } from './status-controls.ts';
 export {
@@ -393,12 +401,12 @@ export {
   isGuestPopoverRequest,
 } from './popover.ts';
 export type { GuestPopoverAnchor, GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest, GuestPopoverSide } from './popover.ts';
+export { GUEST_COMMIT_SHA, GUEST_WALKTHROUGH_BASE_MAX, isGuestCommitSha } from './navigation.ts';
+export type { OpenCommitRequest, OpenWalkthroughRequest } from './navigation.ts';
 export {
   clampAttachRequest,
   clampBadgeCount,
   clampFrameHeight,
-  isGuestCommitSha,
-  GUEST_COMMIT_SHA,
   clampPromptRequest,
   clampStartSessionRequest,
   guestFileScope,
@@ -441,11 +449,11 @@ export type {
   GuestBadgeMessage,
   GuestResizeMessage,
   GuestOpenCommitMessage,
+  GuestOpenWalkthroughMessage,
   GuestStatusControlsMessage,
   GuestPopoverAnchorMessage,
   GuestPopoverCloseMessage,
   GuestPopoverOpenMessage,
-  OpenCommitRequest,
   ResizeRequest,
   GuestItem,
   GuestItemRole,
@@ -498,6 +506,8 @@ export type {
   GuestShellsSubscribeMessage,
   GuestShellsUnsubscribeMessage,
   GuestShellStopMessage,
+  GuestMicrophoneOpenMessage,
+  GuestMicrophoneCloseMessage,
   GuestAttachMessage,
   GuestClipboardWriteMessage,
   GuestCloseMessage,
@@ -539,6 +549,8 @@ export type {
   HostSessionMessage,
   HostSettingsMessage,
   HostShellsMessage,
+  HostMicrophoneAudioMessage,
+  HostMicrophoneEndedMessage,
   HostTheme,
   HostThemeMode,
   HostThemeTokens,
@@ -713,7 +725,7 @@ export type {
   BrowserTypeParameters,
   BrowserViewportMode,
   BrowserViewportSummary,
-  SourceControlChangeRequestHead,
+  SourceControlChangeRequestContext, SourceControlChangeRequestHead,
   SourceControlChangeRequestSource,
   SourceControlForge,
   SourceControlForgeUser,
@@ -737,7 +749,7 @@ export type {
   SourceControlProviderResult,
   SourceControlProviderSession,
   SourceControlProviderUser,
-  SourceControlReconcileData,
+  SourceControlReconcileData, SourceControlReviewerState,
   SourceControlResourceMethod,
   SourceControlVerifyData,
   SourceControlStatusData,

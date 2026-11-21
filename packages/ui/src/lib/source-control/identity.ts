@@ -1,14 +1,8 @@
 import type { SourceControlProviderDescriptor } from './providers/descriptor';
 import type { GitRemote, PageResult, SourceControlAuthAccount, SourceControlBindingRead, SourceControlIdentity, SourceControlReadContext } from '@/lib/api/types';
 
-/** github.com, for the one path that is GitHub's own: the github.com device flow and its legacy auth wire. */
 export const GITHUB_SOURCE_CONTROL_IDENTITY: SourceControlIdentity = { provider: 'github', instance: 'github.com' };
 
-/**
- * Each provider's default instance (github.com, https://gitlab.com): the
- * instances a remote is recognised on whether or not an account there is
- * connected. Pass them with the connected instances to the resolvers below.
- */
 export const defaultSourceControlIdentities = (descriptors: readonly SourceControlProviderDescriptor[]): SourceControlIdentity[] => (
   descriptors.flatMap((descriptor) => {
     const instance = descriptor.instances.defaultInstance;
@@ -40,21 +34,10 @@ type SourceControlTarget = {
   remote: GitRemote;
 };
 
-/**
- * The accounts a repository's change requests and issues are read with.
- *
- * A bound provider answers first. A repository nobody bound, bound to an
- * identity that names no account, or bound to an account that is gone (signed
- * out, or signed in again as a new credential), still has remotes on hosts the
- * person is signed in to; those are read with the current account of that
- * host, the way they were before bindings existed. `activeAccountFor` says which account
- * that is, and null when none is connected there.
- */
 export const getBoundSourceControlReadContexts = (
   result: SourceControlBindingRead,
   directory: string,
   activeAccountFor: (identity: SourceControlIdentity) => string | null = () => null,
-  /** The instances remotes are recognised on: connected ones and each provider's default instance. */
   knownIdentities: readonly SourceControlIdentity[] = [],
 ): SourceControlReadContext[] => {
   const contexts: SourceControlReadContext[] = (result.binding?.providers ?? []).filter((provider) => provider.readiness === 'ready'
@@ -134,11 +117,6 @@ export const mergeIncompleteSourceControlPage = <T extends { number: number; pro
   );
 };
 
-/**
- * The one provider instance the remotes point at, or null when none or several
- * do. `identities` are the instances to recognise: the connected ones and each
- * provider's default instance (`defaultSourceControlIdentities`).
- */
 export const resolveSourceControlTarget = (
   remotes: GitRemote[],
   identities: readonly SourceControlIdentity[],
@@ -169,13 +147,6 @@ export const getSourceControlBaseUrl = (identity: Pick<SourceControlIdentity, 'i
   identity.instance.includes('://') ? identity.instance : `https://${identity.instance}`
 );
 
-/**
- * One label shape for every account picker: provider @user · instance · source.
- *
- * The credential's own reference is deliberately absent. It is opaque, it is
- * long enough to hide the account name it sits beside, and a person choosing
- * an account means the person, not one of their stored credentials.
- */
 const formatSourceControlAccountLabel = (
   identity: SourceControlIdentity,
   providerLabel: string,
@@ -189,12 +160,6 @@ export const getManagedCredentialSourceLabelKey = (
   source: ManagedCredentialSource,
 ): `settings.sourceControl.accountSource.${ManagedCredentialSource}` => `settings.sourceControl.accountSource.${source}`;
 
-/**
- * The host a git remote points at, for `https://host/owner/repo.git` and for
- * the scp-like `git@host:owner/repo.git` alike. A provider association is
- * about which host answers for the repository, not how the bytes travel, so
- * it must recognise an SSH remote too.
- */
 export const gitRemoteHost = (remoteUrl: string): string | null => {
   const value = remoteUrl.trim();
   if (!value) return null;
@@ -207,19 +172,12 @@ export const gitRemoteHost = (remoteUrl: string): string | null => {
   }
 };
 
-/**
- * Whether a remote URL travels over SSH: an explicit `ssh://`, or the scp-like
- * `git@host:owner/repo.git`. The scp-like form has no scheme, which is what
- * separates it from `https://host/owner/repo.git` — that also reads as
- * `<word>:<rest>` and would otherwise pass for an SSH remote.
- */
 export const isSshRemoteUrl = (remoteUrl: string): boolean => {
   const value = remoteUrl.trim();
   if (value.startsWith('ssh://')) return true;
   return !value.includes('://') && /^(?:[^@/:\s]+@)?[^/:\s]+:[^\s]+$/.test(value);
 };
 
-/** What a remote URL allows: which host answers for it, its SSH port, and how it can be reached. */
 export type RemoteTraits = { host: string | null; https: boolean; ssh: boolean; sshPort?: number };
 
 export const remoteTraits = (remoteUrl: string): RemoteTraits => {
@@ -239,7 +197,6 @@ export const remoteTraits = (remoteUrl: string): RemoteTraits => {
   return traits;
 };
 
-/** The host and port a stored instance SSH address names, or null. */
 export const sshInstanceTraits = (sshUrl: string): { host: string; port: number } | null => {
   const value = sshUrl.trim();
   if (!value) return null;
@@ -252,11 +209,9 @@ export const sshInstanceTraits = (sshUrl: string): { host: string; port: number 
   }
 };
 
-/** The host a provider instance names, whether stored bare or as a URL. */
 export const instanceHost = (instance: string): string | null =>
   gitRemoteHost(instance.includes('://') ? instance : `https://${instance}`);
 
-/** Each provider instance's separate SSH address, keyed by instance, for the identity pickers. */
 export const instanceSshHostsFrom = (identities: readonly SourceControlIdentity[]) => {
   const addresses: Record<string, string> = {};
   for (const identity of identities) {
@@ -265,25 +220,8 @@ export const instanceSshHostsFrom = (identities: readonly SourceControlIdentity[
   return addresses;
 };
 
-/**
- * The identity to offer for a repository on this host.
- *
- * An identity that already names an account on the host is the answer the
- * person has effectively given: it says both whose repository this is and how
- * to reach it. Failing that, the one marked default, and failing that nothing —
- * proposing an unrelated identity would be a guess wearing a name.
- */
-/** The id the identities store gives the person's own Git configuration. */
 export const GLOBAL_IDENTITY_ID = 'global';
 
-/**
- * Whether the account an identity names is still connected.
- *
- * Removing an account leaves every identity that named it pointing at a
- * credential that no longer exists; binding a repository to one would produce
- * a grant nothing can answer. An instance whose accounts have not been read
- * yet answers `true`, because "not loaded" is not "not connected".
- */
 export const identityAccountConnected = (
   profile: { account?: (SourceControlIdentity & { accountId: string }) | null },
   connectedAccountIds: (account: SourceControlIdentity) => string[] | null,
@@ -294,14 +232,6 @@ export const identityAccountConnected = (
   return known === null || known.includes(account.accountId);
 };
 
-/**
- * The identities a repository may be given.
- *
- * The System identity is what OpenChamber discovered on this machine, and it
- * is always offered: it is how a person says no override applies here. Stored
- * identities are offered only when they are complete, because an identity that
- * names no account cannot authenticate as anyone.
- */
 export const selectableIdentities = <T extends { id: string }>(
   profiles: T[],
   systemIdentity: T | null | undefined,
@@ -315,27 +245,11 @@ export const selectableIdentities = <T extends { id: string }>(
   return [...unique.values()];
 };
 
-/**
- * The identity a repository is currently acting as.
- *
- * The repository's own author decides it: a stored identity with that
- * signature, else the machine's if it matches, else the author itself shown as
- * it is. A repository that names no author is on the System identity, which is
- * what having no override means — and is why every surface has to answer this
- * the same way.
- */
 export const activeIdentityFor = <T extends { id: string; name: string; userName: string; userEmail: string; account?: { accountId: string } | null }>(
   profiles: T[],
   systemIdentity: T | null | undefined,
   author: { userName?: string | null; userEmail?: string | null } | null | undefined,
   fromAuthor: (author: { userName: string; userEmail: string }) => T,
-  /**
-   * The account the repository is bound to, when it is bound to one. Two
-   * identities can share an author — the machine's own and an account with
-   * the same email — and the author alone cannot tell them apart; the
-   * binding can. Null means the repository answers to no account, which is
-   * the System identity when the author is the machine's.
-   */
   boundAccountId?: string | null,
 ): T | null => {
   const userName = author?.userName ?? '';
@@ -355,7 +269,6 @@ export const activeIdentityFor = <T extends { id: string; name: string; userName
   return fromAuthor({ userName, userEmail });
 };
 
-/** What an identity is called on screen. The System one is named by the product, not by a record. */
 export const identityDisplayName = (
   profile: { id: string; name: string } | null | undefined,
   t: (key: 'gitView.identity.system') => string,
@@ -381,8 +294,6 @@ export const proposeIdentityForHost = <T extends { id: string; account?: { insta
   if (matching) return matching;
   const preferred = defaultIdentityId?.trim();
   return (preferred && identities.find((identity) => identity.id === preferred))
-    // The System identity is what a repository has before anyone chooses; it
-    // is the default rather than a guess.
     || identities.find((identity) => identity.id === GLOBAL_IDENTITY_ID)
     || null;
 };
@@ -394,47 +305,22 @@ type ManagedAccountOption = {
   source: SourceControlAuthAccount['source'];
 };
 
-/**
- * Whether an identity can answer with this account.
- *
- * The server uses a provider's CLI login for Git transport only where the
- * provider says so (`auth.cliTransport`: the gh CLI), and only while it is the
- * active account in Integrations, so such an account counts only while it is
- * current. Any other CLI login never does: Git transport reads only the
- * credentials OpenChamber stores (the glab login).
- */
 export const accountUsableByIdentity = (
-  account: Pick<SourceControlAuthAccount, 'source' | 'current'>,
+  account: Pick<SourceControlAuthAccount, 'source' | 'current' | 'usable'>,
   cliTransport: boolean,
-): boolean => account.source !== 'cli' || (cliTransport && account.current);
+): boolean => account.source !== 'cli'
+  || (cliTransport && (account.usable ?? account.current));
 
-/**
- * Why an identity's account cannot be used, for its Git Settings row: it names
- * a CLI login usable for transport (`github.com#cli:<user id>`) while no CLI
- * account is in use, so switching to it in Integrations fixes it; otherwise
- * the account is gone. A CLI login in use as another person is gone too, since
- * switching cannot help.
- */
 export const unavailableAccountReason = (
   account: SourceControlIdentity & { accountId: string },
-  listedAccounts: Pick<SourceControlAuthAccount, 'source' | 'current'>[] | null,
+  listedAccounts: Pick<SourceControlAuthAccount, 'source' | 'current' | 'usable'>[] | null,
   cliTransport: boolean,
 ): 'cli-not-in-use' | 'gone' => cliTransport
   && account.accountId.includes('#cli:')
-  && !listedAccounts?.some((listed) => listed.source === 'cli' && listed.current)
+  && !listedAccounts?.some((listed) => listed.source === 'cli' && (listed.usable ?? listed.current))
   ? 'cli-not-in-use'
   : 'gone';
 
-/**
- * Selectable managed HTTPS credential accounts: one per person and source.
- *
- * Re-authenticating keeps the credential it replaces, so one account can hold
- * several. Offering each of them separately asks a question nobody can answer
- * — they carry the same name — so the current credential represents the
- * person, and the others stay valid for identities that already name them.
- * The gh CLI login of the same person is a different credential with its own
- * source label, so it stays a separate option.
- */
 export const buildManagedAccountOptions = (
   identity: SourceControlIdentity,
   descriptor: Pick<SourceControlProviderDescriptor, 'label' | 'auth'>,

@@ -18,24 +18,17 @@ const KIND_ICON = {
     heading: 'text',
 } satisfies Record<DocumentSymbolKind, IconName>;
 
-/** Marks the control that opens and closes the panel (the editor toolbar button). */
 const DOCUMENT_SYMBOLS_TOGGLE_ATTRIBUTE = 'data-document-symbols-toggle';
 
 type DocumentSymbolsPanelProps = {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    /** A ref, never the view itself; see `GoToLineDialog` for why (react#34840). */
+    // external: https://github.com/facebook/react/issues/34840 Editor refs keep dev profiling from traversing cross-origin frames.
     viewRef: React.RefObject<EditorView | null>;
 };
 
-/**
- * The open file's functions, classes, types or headings, filtered as you
- * type; picking one puts the cursor on its name. Read from the syntax tree
- * when the panel opens, so it describes the file as it is now.
- */
 export function DocumentSymbolsPanel({ open, onOpenChange, viewRef }: DocumentSymbolsPanelProps) {
     const { t } = useI18n();
-    // The owner re-renders when its editor mounts or goes away.
     const view = viewRef.current;
     const panelRef = React.useRef<HTMLDivElement | null>(null);
     const [symbols, setSymbols] = React.useState<DocumentSymbol[]>([]);
@@ -57,8 +50,6 @@ export function DocumentSymbolsPanel({ open, onOpenChange, viewRef }: DocumentSy
         const handlePointerDown = (event: PointerEvent) => {
             const target = event.target;
             if (!(target instanceof Element) || !panelRef.current || panelRef.current.contains(target)) return;
-            // The button that toggles the panel closes it with its own click;
-            // closing here first would let that click open it again.
             if (target.closest(`[${DOCUMENT_SYMBOLS_TOGGLE_ATTRIBUTE}]`)) return;
             onOpenChange(false);
         };
@@ -82,8 +73,6 @@ export function DocumentSymbolsPanel({ open, onOpenChange, viewRef }: DocumentSy
         <div
             ref={panelRef}
             data-editor-overlay
-            // `Command` leaves the background to its container (a dialog or a
-            // menu does it elsewhere), so the panel paints it here.
             className="absolute inset-s-3 top-3 z-40 w-[min(28rem,calc(100%-1.5rem))] overflow-hidden rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] shadow-lg"
             onKeyDown={(event) => {
                 if (event.key !== 'Escape') return;
@@ -94,7 +83,6 @@ export function DocumentSymbolsPanel({ open, onOpenChange, viewRef }: DocumentSy
         >
             <Command
                 loop
-                // Values are `name\u0000offset`; only the name is matched.
                 filter={(value, search) => (value.split('\u0000')[0].toLowerCase().includes(search.trim().toLowerCase()) ? 1 : 0)}
                 className="[&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-1 [&_[cmdk-item]]:typography-meta"
             >
@@ -105,7 +93,6 @@ export function DocumentSymbolsPanel({ open, onOpenChange, viewRef }: DocumentSy
                     placeholder={t('filesView.symbols.placeholder')}
                     aria-label={t('filesView.symbols.placeholder')}
                 />
-                {/* The panel fits its content; a long outline scrolls. */}
                 <CommandList className="max-h-[min(20rem,calc(100vh-16rem))]">
                     <CommandEmpty className="px-3 py-4 typography-meta text-muted-foreground">
                         {symbols.length === 0 ? t('filesView.symbols.noneInFile') : t('filesView.symbols.noMatches')}
@@ -113,7 +100,6 @@ export function DocumentSymbolsPanel({ open, onOpenChange, viewRef }: DocumentSy
                     {symbols.map((symbol) => (
                         <CommandItem
                             key={`${symbol.from}:${symbol.name}`}
-                            // Unique per row; the name leads so filtering matches it.
                             value={`${symbol.name}\u0000${symbol.from}`}
                             onSelect={() => select(symbol)}
                             className="gap-2"

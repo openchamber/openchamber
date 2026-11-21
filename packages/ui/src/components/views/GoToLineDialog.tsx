@@ -12,12 +12,7 @@ import { cn } from '@/lib/utils';
 type GoToLineDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /**
-   * The editor arrives as a ref, never as the view itself: React's dev
-   * profiling walks changed props deep enough to reach the view's window and
-   * its frames, and a cross-origin extension frame there throws mid-commit,
-   * which leaves the whole app unable to render (react#34840).
-   */
+  // external: https://github.com/facebook/react/issues/34840 Editor refs keep dev profiling from traversing cross-origin frames.
   viewRef: React.RefObject<EditorView | null>;
   variant?: 'overlay' | 'inline';
 };
@@ -63,7 +58,6 @@ const moveSelectionToLine = (view: EditorView, lineNumber: number, preferredChar
 
 export function GoToLineDialog({ open, onOpenChange, viewRef, variant = 'overlay' }: GoToLineDialogProps) {
   const { t } = useI18n();
-  // The owner re-renders when its editor mounts or goes away.
   const view = viewRef.current;
   const [inputValue, setInputValue] = React.useState('');
   const initialCursorRef = React.useRef<CursorSnapshot | null>(null);
@@ -86,15 +80,13 @@ export function GoToLineDialog({ open, onOpenChange, viewRef, variant = 'overlay
     setInputValue('');
   }, [open, view]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!open) {
       return;
     }
 
-    window.requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    });
+    inputRef.current?.focus();
+    inputRef.current?.select();
   }, [open]);
 
   React.useEffect(() => {
@@ -126,8 +118,6 @@ export function GoToLineDialog({ open, onOpenChange, viewRef, variant = 'overlay
     });
   }, [view]);
 
-  // Closed from outside (the toolbar button) without going to a line: put
-  // the cursor back, as Escape and an outside click do.
   const wasOpenRef = React.useRef(open);
   React.useEffect(() => {
     if (wasOpenRef.current && !open) restoreInitialSelection();
@@ -163,8 +153,6 @@ export function GoToLineDialog({ open, onOpenChange, viewRef, variant = 'overlay
       if (!panel || !(target instanceof Element) || panel.contains(target)) {
         return;
       }
-      // The toolbar button closes the panel with its own click; closing here
-      // first would let that click open it again.
       if (target.closest('[data-go-to-line-toggle]')) return;
       handleOpenChange(false);
     };
@@ -231,7 +219,6 @@ export function GoToLineDialog({ open, onOpenChange, viewRef, variant = 'overlay
         />
         <Tooltip>
           <TooltipTrigger asChild>
-            {/* The span keeps the tooltip on a disabled button, which takes no pointer events. */}
             <span className="inline-flex">
               <Button
                 variant="outline"

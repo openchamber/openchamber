@@ -78,8 +78,6 @@ interface SkillsCatalogState {
 export const useSkillsCatalogStore = create<SkillsCatalogState>()(
   devtools(
     (set, get) => ({
-      // Empty until the server answers: it decides which catalogs exist, and a
-      // machine policy can hide the built-in ones.
       sources: [],
       itemsBySource: {},
       selectedSourceId: null,
@@ -103,7 +101,6 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
         const cacheKey = getSkillsCatalogCacheKey(currentDirectory);
         const now = Date.now();
         const loadedAt = skillsCatalogLastLoadedAt.get(cacheKey) ?? 0;
-        // An empty list can be the answer, so freshness alone decides.
         const hasCachedCatalog = loadedAt > 0;
         if (!options?.refresh && hasCachedCatalog && now - loadedAt < SKILLS_CATALOG_LOAD_CACHE_TTL_MS) {
           return true;
@@ -143,8 +140,6 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
                 throw new Error(lastError.message);
               }
 
-              // The server's list is the answer, empty included: a machine
-              // policy can hide every built-in catalog.
               const sources = payload.sources ?? previous.sources;
               const itemsBySource = options?.refresh ? {} : (get().itemsBySource || {});
               const loadedSourceIds = options?.refresh ? {} : (get().loadedSourceIds || {});
@@ -195,9 +190,6 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
           return false;
         }
 
-        // Deduplicate concurrent loads of the same source: the background
-        // loader effect can restart while a request for this source is
-        // already in flight.
         if (!options?.refresh) {
           const inFlight = sourceLoadInFlight.get(sourceId);
           if (inFlight) {

@@ -388,7 +388,7 @@ describe('a service-owned source-control login through the running host', () => 
     contribution.login = { kind: 'service', hint: 'Run forge auth login on the OpenChamber server' };
     fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify(manifest));
     const build = spawnSync('bun', [fileURLToPath(new URL('../../../../sdk/scripts/bundle-guest.ts', import.meta.url)), '--node',
-      fileURLToPath(new URL('./test-support/service-login.js', import.meta.url)), path.join(packageRoot, 'main.js')], { encoding: 'utf8' });
+      fileURLToPath(new URL('./test-support/service-login.ts', import.meta.url)), path.join(packageRoot, 'main.js')], { encoding: 'utf8' });
     if (build.status !== 0) throw new Error(build.stderr);
     const user = { id: '90071992547409931234567', login: 'mona' };
     const writeState = (patch = {}) => fs.writeFileSync(path.join(packageRoot, 'login-state.json'), JSON.stringify({ origin: forge.origin, user, ...patch }));

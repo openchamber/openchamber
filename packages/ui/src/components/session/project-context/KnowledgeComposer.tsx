@@ -10,21 +10,12 @@ import { useUIStore } from '@/stores/useUIStore';
 import { KNOWLEDGE_ICON_BUTTON_CLASS } from './knowledgeRowStyle';
 import { useI18n } from '@/lib/i18n';
 
-/** The counter appears only once the text gets close to the limit. */
 const COUNTER_THRESHOLD = 0.8;
 
-/** The chat composer's debounce, for the same store. */
 const DRAFT_SAVE_DEBOUNCE_MS = 500;
 
 type KnowledgeDraftKind = 'note' | 'todo' | 'plan';
 
-/**
- * The field's text, kept with the chat composer's drafts: one per project and
- * section, under a composer key no session id can take. Unsaved text survives
- * the field unmounting (another tab, another rail surface)
- * and a reload. Typing saves after a pause; leaving the field, hiding the page
- * and unloading it save at once, as the chat composer does.
- */
 const useKnowledgeDraft = (projectPath: string, kind: KnowledgeDraftKind) => {
   const identity = React.useMemo(
     () => createChatDraftIdentity(getRuntimeKey(), projectPath, `knowledge:${kind}`),
@@ -44,7 +35,6 @@ const useKnowledgeDraft = (projectPath: string, kind: KnowledgeDraftKind) => {
     savedRef.current = latest;
   }, []);
 
-  // A field that has unmounted writes nothing: a newer field may own the draft.
   const mountedRef = React.useRef(false);
 
   const setText = React.useCallback((value: string, saveNow = false) => {
@@ -56,14 +46,8 @@ const useKnowledgeDraft = (projectPath: string, kind: KnowledgeDraftKind) => {
     else timerRef.current = setTimeout(save, DRAFT_SAVE_DEBOUNCE_MS);
   }, [save]);
 
-  /** The text as typed so far, for appending without waiting for a render. */
   const currentText = React.useCallback(() => latestRef.current.text, []);
 
-  /**
-   * Starts an add: clears the field and its draft, and returns how to put the
-   * text back if the add fails. It goes back only into an empty draft of the
-   * same project and section, the field's if it is still that one's on screen.
-   */
   const takeForAdd = React.useCallback((value: string) => {
     const owner = latestRef.current.identity;
     setText('', true);
@@ -76,7 +60,6 @@ const useKnowledgeDraft = (projectPath: string, kind: KnowledgeDraftKind) => {
     };
   }, [setText]);
 
-  // Another project in the same field: keep the outgoing draft, show its own.
   React.useLayoutEffect(() => {
     if (latestRef.current.identity === identity) return;
     save();
@@ -106,29 +89,16 @@ const useKnowledgeDraft = (projectPath: string, kind: KnowledgeDraftKind) => {
   return { text, setText, currentText, takeForAdd };
 };
 
-/**
- * The one way every section adds an entry: a single line that grows with its
- * text. Enter adds. A multiline field follows the chat composer: Shift+Enter
- * starts a new line on desktop, and on a phone, whose keyboard has no
- * Shift+Enter, Return starts a new line and the Add button adds. A one-line
- * field turns pasted line breaks into spaces.
- *
- * The draft lives here, so dictation can continue it and a failed add can
- * put it back, and it is stored per project and section (`useKnowledgeDraft`).
- */
 export const KnowledgeComposer: React.FC<{
   placeholder: string;
   addLabel: string;
   maxLength: number;
-  /** Whose draft the field keeps: the project and the section. */
   projectPath: string;
   draftKind: KnowledgeDraftKind;
   multiline?: boolean;
   dictation?: boolean;
   disabled?: boolean;
-  /** Resolves false when the entry was not added; the text then stays. */
   onSubmit: (text: string) => Promise<boolean> | boolean;
-  /** Extra controls before the Add button, such as an import action. */
   extraActions?: React.ReactNode;
 }> = ({ placeholder, addLabel, maxLength, projectPath, draftKind, multiline = false, dictation = true, disabled = false, onSubmit, extraActions }) => {
   const { t } = useI18n();
@@ -145,8 +115,6 @@ export const KnowledgeComposer: React.FC<{
   const submit = React.useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed || submitting) return;
-    // Cleared at once so the next entry can be typed while this one saves; a
-    // failed add puts the text back unless something new was typed meanwhile.
     const putBack = takeForAdd(trimmed);
     setSubmitting(true);
     try {
@@ -157,8 +125,6 @@ export const KnowledgeComposer: React.FC<{
   }, [onSubmit, submitting, takeForAdd, text]);
 
   const showCounter = text.length >= maxLength * COUNTER_THRESHOLD;
-  // The field itself stays enabled while an entry saves: disabling it would
-  // drop the focus, and the next entry typed right away would go nowhere.
   const blocked = disabled || submitting;
   const canSend = !blocked && text.trim().length > 0;
 
@@ -166,7 +132,6 @@ export const KnowledgeComposer: React.FC<{
     <div
       className={cn(
         'flex items-end gap-1 py-1 pe-1',
-        // On a phone it reads as the surface's other fields: flat, over a hairline.
         isMobile ? 'border-b border-edge-muted ps-1' : 'oc-surface-elevated oc-raised oc-field rounded-lg bg-[var(--surface-elevated)] ps-3',
         disabled && 'opacity-50',
       )}
@@ -204,8 +169,6 @@ export const KnowledgeComposer: React.FC<{
         </span>
       ) : null}
       {dictation ? (
-        // Dictation continues the draft instead of adding it, so a misheard
-        // word can be fixed before it lands.
         <InlineDictationButton
           onTranscript={(spoken) => {
             const current = currentText();
@@ -216,9 +179,6 @@ export const KnowledgeComposer: React.FC<{
         />
       ) : null}
       {extraActions}
-      {/* A word, because an icon here meant something else every time: a plus
-          read as "attach a file", the chat's send glyph as "send to the agent",
-          the same glyph a todo row uses for exactly that. */}
       <button
         type="button"
         onClick={() => void submit()}

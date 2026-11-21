@@ -10,24 +10,18 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { useGitStore, useGitBranches, useGitLoadingBranches, useGitLoadingStatus, useIsGitRepo } from '@/stores/useGitStore';
+import { useGitStore, useGitBranches, useGitBranchesFetchedAt, useGitLoadingBranches, useGitLoadingStatus, useIsGitRepo } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { resolveDefaultSourceBranch } from '@/lib/worktrees/worktreeSourceBranchPreference';
 import { useI18n } from '@/lib/i18n';
 
 interface BranchSelectorProps {
-  /** Current directory to check for git repository */
   directory: string | null;
-  /** Currently selected branch */
   value: string;
-  /** Called when branch selection changes */
   onChange: (branch: string) => void;
-  /** Optional className for the trigger */
   className?: string;
-  /** Whether the selector is disabled */
   disabled?: boolean;
-  /** ID for accessibility */
   id?: string;
 }
 
@@ -38,10 +32,6 @@ export interface BranchSelectorState {
   isGitRepository: boolean | null;
 }
 
-/**
- * Hook to load available git branches for a directory.
- * Uses the shared useGitStore (same as NewWorktreeDialog).
- */
 // oxlint-disable-next-line react/only-export-components -- Hook is tightly coupled with BranchSelector
 export function useBranchOptions(directory: string | null): BranchSelectorState {
   const { git } = useRuntimeAPIs();
@@ -57,17 +47,17 @@ export function useBranchOptions(directory: string | null): BranchSelectorState 
     void fetchStatus(directory, git, { silent: true });
   }, [directory, git, fetchStatus, isGitRepo, isLoadingStatus]);
 
-  // Fetch branches if not cached
+  const branchesFetchedAt = useGitBranchesFetchedAt(directory);
+  const hasFetchedBranches = Boolean(branches?.all) && branchesFetchedAt > 0;
   React.useEffect(() => {
     if (!directory || !git) return;
     if (isGitRepo !== true) return;
-    if (branches?.all) return; // Already cached
+    if (hasFetchedBranches) return;
     void fetchBranches(directory, git);
-  }, [directory, git, isGitRepo, branches?.all, fetchBranches]);
+  }, [directory, git, isGitRepo, hasFetchedBranches, fetchBranches]);
 
   const isLoading = isLoadingStatus || (isGitRepo === true && isLoadingBranches);
 
-  // Compute local and remote branch lists (same as NewWorktreeDialog)
   const localBranches = React.useMemo(() => {
     if (!branches?.all) return [];
     return branches.all
@@ -83,7 +73,6 @@ export function useBranchOptions(directory: string | null): BranchSelectorState 
       .sort();
   }, [branches]);
 
-  // isGitRepository: true if we got branches, false if fetch returned empty, null if not yet loaded
   const isGitRepository = React.useMemo<boolean | null>(() => {
     if (!directory) return null;
     if (isGitRepo !== null) return isGitRepo;
@@ -94,10 +83,6 @@ export function useBranchOptions(directory: string | null): BranchSelectorState 
   return { localBranches, remoteBranches, isLoading, isGitRepository };
 }
 
-/**
- * Branch selector dropdown for selecting a source branch for worktree creation.
- * Matches the NewWorktreeDialog source branch selector exactly.
- */
 export const BranchSelector: React.FC<BranchSelectorProps> = ({
   directory,
   value,
@@ -113,7 +98,6 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
     [localBranches, remoteBranches],
   );
 
-  // Resolve default source branch (same priority as NewWorktreeDialog)
   React.useEffect(() => {
     if (disabled || isLoading || allBranches.length === 0) return;
     if (value && allBranches.includes(value)) return;

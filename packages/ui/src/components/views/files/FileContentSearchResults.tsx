@@ -13,7 +13,6 @@ import { fileContentMatchKey, type FileContentSearchState } from './useFileConte
 
 type Props = {
   state: FileContentSearchState;
-  /** The one result marked as open; other lines of the same file stay plain. */
   activeMatchKey: string | null;
   onOpen: (match: FileContentSearchMatch, options?: { pin?: boolean }) => void;
   onDragStart?: (event: React.DragEvent<HTMLButtonElement>, match: FileContentSearchMatch) => void;
@@ -31,11 +30,6 @@ const splitRelativePath = (relativePath: string): { name: string; directory: str
     : { name: relativePath.slice(slash + 1), directory: relativePath.slice(0, slash) };
 };
 
-/**
- * Find-in-files results as rows of a files tree list: one card per matching
- * line, the file on top and the line with its matches marked below. Renders
- * `<li>` elements, so it sits inside the tree's own `<ul>`.
- */
 export const FileContentSearchResults: React.FC<Props> = ({ state, activeMatchKey, onOpen, onDragStart, onDragEnd }) => {
   const { t } = useI18n();
 
@@ -65,7 +59,6 @@ export const FileContentSearchResults: React.FC<Props> = ({ state, activeMatchKe
   }
 
   if (state.matches.length === 0) {
-    // A search cut short by the deadline found nothing yet; that is not "no matches".
     return state.stopped === 'deadline'
       ? <Note>{t('sidebarFilesTree.contentSearch.deadline')}</Note>
       : <Note>{t('sidebarFilesTree.contentSearch.empty')}</Note>;
@@ -100,7 +93,6 @@ export const FileContentSearchResults: React.FC<Props> = ({ state, activeMatchKe
                     className="oc-ui-start-align min-w-0 flex-1 truncate typography-micro text-muted-foreground"
                     style={{ direction: 'rtl' }}
                   >
-                    {/* Left-to-right marks keep a leading "." in place inside the rtl box. */}
                     {`‎${directory}‎`}
                   </span>
                 ) : <span className="flex-1" />}

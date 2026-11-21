@@ -63,7 +63,12 @@ expected=$author_head
 if [ -s "$STATE/pushed.txt" ]; then
   expected=$(cat "$STATE/pushed.txt")
 fi
-if ! git push -q --force-with-lease="refs/heads/$branch:$expected" "https://github.com/$owner/openchamber.git" "HEAD:refs/heads/$branch"; then
+if ! push_err=$(git push -q --force-with-lease="refs/heads/$branch:$expected" "https://github.com/$owner/openchamber.git" "HEAD:refs/heads/$branch" 2>&1); then
+  printf '%s\n' "$push_err" >&2
+  if printf '%s' "$push_err" | grep -qiE 'permission .* denied|error: 403'; then
+    echo "PUSH DENIED: GitHub refuses writes to $owner:$branch (an organization fork ignores maintainerCanModify); nothing was pushed. Land the commit on main as the author and close the PR with a comment." >&2
+    exit 4
+  fi
   echo "PUSH REFUSED: $owner:$branch moved since prep.sh (the author pushed?); nothing was overwritten. Read their new commits, then prepare the PR again (TRIAGE_DISCARD=1 prep.sh $n drops this landing commit)." >&2
   exit 3
 fi

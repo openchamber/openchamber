@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import type { GitStatus } from '@/lib/api/types';
 import { useGitStore } from './useGitStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
+import { getDeferredSafeStorage, getSafeStorage } from '@/stores/utils/safeStorage';
 import { notifyGitStatusInvalidated } from '@/lib/gitStatusInvalidation';
 import { GitRepositoryUnreadableError } from '@/lib/gitRepositoryUnreadable';
 import { clearWorktreeBootstrapState, markWorktreeBootstrapPending } from '@/lib/worktrees/worktreeBootstrap';
@@ -567,6 +567,59 @@ describe('useGitStore', () => {
     await first;
 
     expect(useGitStore.getState().getDirectoryState('/repo')?.branches?.current).toBe('new');
+  });
+
+  test('persists local branches per directory and seeds them back after a reload', async () => {
+    const runtime = getRuntimeKey();
+    const storage = getDeferredSafeStorage();
+    storage.setItem('oc.gitBranchCache.v2', JSON.stringify({ version: 2, legacyClaimed: true, runtimes: {} }));
+    const detail = { current: false, name: '', commit: '', label: '' };
+    const answers = new Map([
+      ['/repo', ['main', 'feature', 'remotes/origin/main', 'remotes/origin/feature']],
+      ['/other', ['trunk', 'remotes/origin/trunk']],
+    ]);
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitBranches: async (directory: string) => {
+        const all = answers.get(directory) ?? [];
+        return {
+          all,
+          current: all[0] ?? '',
+          branches: Object.fromEntries(all.map((name) => [name, detail])),
+          defaultBranches: { origin: 'main' },
+        };
+      },
+    };
+
+    await useGitStore.getState().fetchBranches('/repo', git);
+    // The store keeps the live answer, remotes included.
+    expect(useGitStore.getState().getDirectoryState('/repo')?.branches?.all).toContain('remotes/origin/main');
+    const repoEntryKey = `oc.gitBranchCache.v3:${JSON.stringify([runtime, '/repo'])}`;
+    const repoEntry = storage.getItem(repoEntryKey);
+
+    // A write for another directory leaves the first directory's entry untouched.
+    await useGitStore.getState().fetchBranches('/other', git);
+    expect(storage.getItem(repoEntryKey)).toBe(repoEntry);
+    expect(storage.getItem('oc.gitBranchCache.v2')).toBeNull();
+
+    useGitStore.getState().resetForRuntimeSwitch(runtime);
+    const seeded = useGitStore.getState().getDirectoryState('/repo');
+    expect(seeded?.isGitRepo).toBe(true);
+    expect(seeded?.lastBranchesFetch).toBe(0);
+    expect(seeded?.branches?.all).toEqual(['main', 'feature']);
+    expect(Object.keys(seeded?.branches?.branches ?? {})).toEqual(['main', 'feature']);
+    expect(seeded?.branches?.current).toBe('main');
+    expect(seeded?.branches?.defaultBranches).toEqual({ origin: 'main' });
+    expect(useGitStore.getState().getDirectoryState('/other')?.branches?.all).toEqual(['trunk']);
+
+    // An entry whose index write never persisted is removed on the next seed.
+    const orphanKey = `oc.gitBranchCache.v3:${JSON.stringify([runtime, '/orphan'])}`;
+    // Written durably, past the deferred layer, as a flushed entry would be.
+    getSafeStorage().setItem(orphanKey, JSON.stringify({ all: ['main'], current: 'main', branches: {} }));
+    useGitStore.getState().resetForRuntimeSwitch(runtime);
+    expect(storage.getItem(orphanKey)).toBeNull();
+    expect(useGitStore.getState().getDirectoryState('/orphan')).toBeNull();
+    expect(storage.getItem(repoEntryKey)).toBe(repoEntry);
   });
 
   test('asks the remotes only for an explicit live request, and a later local refresh keeps what they reported', async () => {

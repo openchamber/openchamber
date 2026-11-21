@@ -29,11 +29,6 @@ function lineDirections(view: EditorView): DecorationSet {
     return builder.finish();
 }
 
-// Each logical line takes the direction most of its words run, so a
-// Latin-first Arabic line runs right to left; a line without letters keeps
-// dir=auto. CodeMirror reads the same direction for cursor movement and
-// selection. The content root stays LTR: dir=auto there would change its
-// direction as virtualization replaces lines.
 export const composerBidi: Extension = [
     EditorView.contentAttributes.of({ dir: 'ltr' }),
     EditorView.perLineTextDirection.of(true),

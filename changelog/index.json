@@ -1,5 +1,180 @@
 [
   {
+    "version": "2.7.3",
+    "date": "2026-11-19",
+    "title": "See what your subagents do",
+    "intro": null,
+    "app": {
+      "new": [
+        "**Subagents: see what each one is doing.** Every subagent row in Work status has a second line with its current step, and a Subagents panel lists them all, so one that stalled or went the wrong way shows without opening its chat.",
+        "**Chat: select several messages and share them together.** Select messages in a prompt's or an answer's menu puts checkboxes beside the chat (Shift adds a range), and the selection copies as Markdown or saves as one image.",
+        "**Composer: everything you attach is a chip in the text.** Files, images, issues, pull requests and shared pages sit where you put them in the sentence, and deleting the chip removes the attachment. Quotes, review comments and terminal selections show as rows you can read and edit.",
+        "Chat: a PDF in a message opens in a document dialog.",
+        "Chat: a waiting question stays answerable after you send a message of your own (thanks to @sergiopadure).",
+        "Chat: Context sources lists the skills a session has loaded (thanks to @cemarta7).",
+        "Agents: an operator agent's worker sessions nest under it in the sidebar instead of mixing with your own sessions.",
+        "Agents: an agent can wait on a pull request the same way it waits on a timer, and waits read in your language.",
+        "Agents: an agent can read the terminal panel (thanks to @ArdaEkiz0).",
+        "Workflows: \"Start runs without my approval\" in Settings > General > OpenChamber Tools lets an agent start a workflow run while you are away. It is off by default.",
+        "Board: filter repository lists by labels, with the filter remembered. An item's title, description and conversation comments can be edited in the preview (thanks to @gaojunran).",
+        "Projects: notes and todos can live in the repository, so they travel with it (thanks to @cemarta7).",
+        "Files: a file tab's menu copies its path and reveals the file (thanks to @Cyneric).",
+        "GitHub: Settings lists every gh login a host holds (thanks to @ArdaEkiz0).",
+        "Git: the comparison picker lists each remote's default branch first (thanks to @Cyneric).",
+        "Browser: the panel names the process behind each dev server (thanks to @Cyneric).",
+        "Mobile: the screen stays awake while a session works, and Instances shows the connected server's latency (thanks to @JosueGalRe).",
+        "Mobile: preview the agent's remote dev server on the phone (thanks to @chaosmanage).",
+        "Mobile: Settings > About on Android shows the app's release notes (thanks to @JosueGalRe).",
+        "Notifications: a device paired for the home network only gets no push notifications, since a push leaves the home network.",
+        "Language: the app opens in your browser's language the first time (thanks to @Cyneric)."
+      ],
+      "improvements": [
+        "**Desktop: a much smaller app.** The desktop app ships OpenCode's server instead of its full command-line program, which takes about 170 MB off the install. Terminals and agent shells use your own `opencode`.",
+        "Performance: a streaming reply costs the app less work, most of all with thousands of sessions in the sidebar, and the sidebar settles sooner after the page loads.",
+        "Settings: an offered update shows as a strip at the top of About.",
+        "Chat: a question folds to its header while you scroll up to read (thanks to @yulia-ivashko).",
+        "Dictation: local dictation uses all of the machine's cores (thanks to @JeremyKennedy).",
+        "Git: status and checkout stay responsive in very large repositories (thanks to @ykai55 and @makhalin)."
+      ],
+      "fixes": [
+        "Startup: the desktop app and the VS Code extension failed to start with \"Configured OpenCode binary not found\" when Settings still pointed at the OpenCode the app used to carry.",
+        "Startup: a damaged projects list in the settings file stopped the server from starting.",
+        "Composer: a prompt you sent just before the page reloaded or closed comes back instead of being lost, and an unsent draft no longer leaves an empty chat folder behind.",
+        "Composer: an empty item ends a numbered list.",
+        "Chat: an image sent to a model that reads only text reaches it as a file path instead of failing the message.",
+        "Chat: subagent rows crashed the chat on some cached sessions.",
+        "Chat: sending right after a revert could go out before the revert finished (thanks to @Cyneric).",
+        "Chat: backslashes before a period or a question mark disappeared from your message (thanks to @denishsharma).",
+        "Chat: a collapsed tool card shows a preview of structured output, and saved images include UI blocks (thanks to @Cyneric and @IbrahimKhan12).",
+        "Chat: a message queued for an idle session waited while its subagents were still running.",
+        "Sessions: a session an agent started in another folder shows and opens, and its composer stays read-only until you take it over.",
+        "Sessions: a fork shows its earlier messages when a live update arrives first.",
+        "Sessions: deleting a session removes its chat folder (thanks to @IbrahimKhan12).",
+        "Connection: a server that went away no longer leaves the app showing itself connected (thanks to @JosueGalRe).",
+        "Git: every git action took one to three seconds longer on machines with GnuPG installed and no SSH agent.",
+        "Git: a stash with only new files showed as empty.",
+        "Git: a saved SSH key that is not a file path stopped a clone with an internal error.",
+        "Git: repository bindings survive a remount (thanks to @Cyneric).",
+        "GitHub: `gh` kept running while the github.com account was disabled in Settings.",
+        "Files: the side panel's file tree went blank after switching tabs, Go to line took focus too late to type into, and file tabs scroll with the mouse wheel (thanks to @IbrahimKhan12).",
+        "Files: a large spreadsheet reports its real row and column count past the preview limit.",
+        "Settings: opening Settings while a session link was still loading closed it again.",
+        "Usage: model checkboxes show what the panel shows, and Cursor Enterprise and ChatGPT dollar allowances read correctly (thanks to @DaKheera47).",
+        "Usage: the Codex credits balance looks like the other credit rows (thanks to @JeremyKennedy).",
+        "Providers: the Zen provider is named OpenCode Zen, and bundled OpenCode packages stay in place (thanks to @IbrahimKhan12).",
+        "Worktrees: a worktree honors OpenCode configuration from the folders above it, and a removed worktree folder no longer blocks the app (thanks to @Cyneric and @ArdaEkiz0).",
+        "Share pages: a shared page scrolls inside the viewer, and pages shared from a Windows build opened blank.",
+        "Layout: the context rail scrolls when the window is too short for it.",
+        "Terminal: zoom shortcuts change the focused terminal's font size in the web app (thanks to @Cyneric).",
+        "Markdown: tables follow the direction of their content (thanks to @Cyneric).",
+        "Board: the phone list keeps its position when an item preview closes (thanks to @gaojunran).",
+        "Mobile: a detailed row no longer scrolls inside itself (thanks to @gaojunran).",
+        "Desktop: Linux asks for SSH one-time codes and can read answers aloud (thanks to @y10ab1 and @Cyneric).",
+        "Server: an external OpenCode server that was slow to start is checked again instead of being given up on (thanks to @DeryFerd).",
+        "Server: Cloudflare Access headers pass the browser's preflight check (thanks to @Nhandos).",
+        "Memory: an invalid memory document is rejected without stopping the other scopes (thanks to @mpeter).",
+        "CLI: `openchamber stop` gives the server time to finish shutting down before it is killed."
+      ],
+      "misc": [
+        "Bundled OpenCode updated to 2.3.2.",
+        "The server and the CLI are written in TypeScript now."
+      ]
+    },
+    "vscode": {
+      "new": [
+        "Chat: rename the session from the chat header (thanks to @cemarta7).",
+        "Chat: a waiting question stays answerable after you send a message of your own (thanks to @sergiopadure)."
+      ],
+      "improvements": [
+        "Chat: a question folds to its header while you scroll up to read (thanks to @yulia-ivashko)."
+      ],
+      "fixes": [
+        "Startup: the extension failed to start with \"Configured OpenCode binary not found\" when OpenChamber's settings still pointed at the OpenCode the desktop app used to carry.",
+        "Settings: opening Settings from a command without context failed (thanks to @Cyneric).",
+        "Chat: subagent rows crashed the chat on some cached sessions.",
+        "Chat: backslashes before a period or a question mark disappeared from your message (thanks to @denishsharma).",
+        "Chat: a collapsed tool card shows a preview of structured output (thanks to @Cyneric)."
+      ],
+      "misc": []
+    }
+  },
+  {
+    "version": "2.7.2",
+    "date": "2026-11-15",
+    "title": "Share pages with your teammates",
+    "intro": null,
+    "app": {
+      "new": [
+        "**Share pages: an agent can ask your teammates.** When an answer has to come from someone else, the agent [sends them a page](https://docs.openchamber.dev/agent-pages/), and the chat shows a link and PIN for each person. Their answers come back into the session with a notification.",
+        "Share pages: a shared link pasted into the composer opens the page in your own OpenChamber, so your agent sees it too. Pages on the rail lists every page you received, and Add to chat attaches one to your message.",
+        "**Browser: dictate into annotation comments and mark up PDFs.** The comment field takes your voice and shows the microphone level, and a PDF in the panel takes Region and Draw marks.",
+        "Browser: the agent clicks, types, drags and uploads files in the panel the way a person does, also inside embedded frames. It answers page dialogs itself and browses in a profile of its own unless you share yours.",
+        "Chat: pick the chat width in Settings > Chat > Reading: Default, Wider or Full. The old wide layout is Full.",
+        "Chat: questions can show as cards in the chat in Settings > Chat > Composer > Questions (thanks to @sergiopadure).",
+        "Agents: an agent can show you a page and keep working. Your answer comes later and shows as its own row in the chat (thanks to @sergiopadure).",
+        "Agents: an agent can wait on a timer from 1 minute to 24 hours, and its session wakes up when the time is up (thanks to @sergiopadure).",
+        "Agents: /btw sees the turn that is still running, so a side question asked mid-turn knows what the agent is doing right now.",
+        "Agents: your messages tell the agent which project actions are already running and on which address, so it doesn't start a second copy of your dev server.",
+        "Terminal: Settings > General > Terminal can keep the terminal closed when a project action starts.",
+        "Sidebar: \"Sessions before Show more\" in the sections manager sets how many sessions a project, worktree, Pinned or your own section shows at first. New section offers a Recent template for the last 7 days.",
+        "Auto routing: Google's Gemini Decision 1 as the classification model, with its own key or the Google key from OpenCode (thanks to @sergiopadure).",
+        "Providers: a custom provider takes a client certificate in its Client certificate section.",
+        "Mobile: Sessions and Usage home screen widgets on Android (thanks to @chaosmanage).",
+        "Mobile: Settings > About on Android offers the app update, also after you dismissed its toast.",
+        "Turn stats: an Average first output row next to the time to first token.",
+        "CLI: `openchamber schedule update` changes only the fields you name, and `--target-session` runs a scheduled task in an existing session (thanks to @sergiopadure)."
+      ],
+      "improvements": [
+        "**Performance: the desktop app starts sooner and uses less memory.** The window is usable about 0.3 s sooner on launch, both of its processes hold tens of MB less, and a long agent turn no longer keeps the sidebar busy at every step.",
+        "Chat: an opened session shows at once without a fade, and typing into a long draft keeps up.",
+        "Side panel: a long diff, a rendered file and a browser page open and resize without stutter.",
+        "Mobile: over the relay the app connects sooner after launch and opens your last session about 2 s sooner. The sessions list and terminal history load faster on a slow connection.",
+        "Connection: after a short drop the chat catches up on what it missed without reloading every open session.",
+        "Mini chat: the window opens at once, and its messages show without jumping.",
+        "Browser: the panel waits for a project action's dev server as long as the action runs. Cmd/Ctrl+R reloads the page, and the mouse side buttons go back and forward.",
+        "Chat: a shell command you stop shows its output so far.",
+        "Themes: chat text is brighter in the built-in themes, bold text uses the text color, and inline code in the OpenChamber themes is green again."
+      ],
+      "fixes": [
+        "**Folder trust: a repository could send values from your environment or files to its own server, or allow actions you set to ask, without asking you.** The trust prompt now lists both, and repositories whose agent files change nothing for you no longer ask.",
+        "Sessions: a session moved into a folder behind a symlink, such as /tmp on macOS, vanished from the sidebar and opened empty.",
+        "Chat: a link to an old message could leave you at the end of the chat without finding it.",
+        "Chat: a very long reasoning block froze the chat when it finished.",
+        "Chat: sending a message closed a form whose tool call had already ended, and the status said the agent was waiting for you while it worked (thanks to @sergiopadure).",
+        "Chat: a waiting page or secret card closed when another agent, a schedule or the queue sent a prompt (thanks to @sergiopadure), and a stopped one vanished from the chat.",
+        "Chat: a background subagent without a report showed its launch notice as the answer.",
+        "Git: after a branch in a stack was rebased onto a new layer, Changes showed the lower layer's commits as its own.",
+        "Sidebar: deleting the last chat hid the Chats section and its + button.",
+        "Layout: collapsing an expanded side panel next to the Work status card moved twice and squeezed the chat.",
+        "Relay: a frame lost on the way could make a cut-off message look complete (thanks to @sergiopadure).",
+        "Themes: Catppuccin Light draws bold text again."
+      ],
+      "sdk": [
+        "Microphone: declare `microphone` under `contributes.capabilities` and call `host.openMicrophone()` to record audio in an extension panel. The rail icon shows a red dot while the extension listens."
+      ],
+      "misc": [
+        "Bundled OpenCode updated to 2.3.0."
+      ]
+    },
+    "vscode": {
+      "new": [
+        "Chat: pick the chat width in Settings > Chat > Reading: Default, Wider or Full. The old wide layout is Full.",
+        "Chat: questions can show as cards in the chat in Settings > Chat > Composer > Questions (thanks to @sergiopadure).",
+        "Agents: an agent can show you a page and keep working. Your answer comes later and shows as its own row in the chat (thanks to @sergiopadure)."
+      ],
+      "improvements": [
+        "Chat: typing into a long draft keeps up, and an opened session shows its messages without jumping.",
+        "Chat: a shell command you stop shows its output so far."
+      ],
+      "fixes": [
+        "Chat: a very long reasoning block froze the chat when it finished.",
+        "Chat: sending a message closed a form whose tool call had already ended (thanks to @sergiopadure).",
+        "Chat: a background subagent without a report showed its launch notice as the answer."
+      ],
+      "misc": []
+    }
+  },
+  {
     "version": "2.7.1",
     "date": "2026-11-12",
     "title": "Extensions in your pocket",

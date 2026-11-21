@@ -3,12 +3,6 @@ import { applyHostReady, mountButton, mountEmpty } from '@openchamber/sdk/ui';
 
 import { checklistVersion, insertItem, parseChecklist, serializeChecklist, type ChecklistLine } from './checklist.ts';
 
-// A file editor never reads or writes the file. The host hands it the text
-// (`onFileOpen`), asks for the edited text when it saves or moves it to its
-// source view (`onFileSnapshot`), and says which snapshot reached the disk
-// (`onFileSaved`). The editor reports its state (`reportFileChange`), and
-// Cmd/Ctrl+S inside the frame already asks the host to save.
-
 const host = connectHost();
 const root = document.querySelector<HTMLElement>('#root');
 if (!root) throw new Error('Missing root');
@@ -39,7 +33,6 @@ let tracker = createFileSaveTracker(null);
 
 const content = (): string => serializeChecklist(lines);
 
-// Typing changes the text only; structural edits redraw. Both report.
 const reportChange = (): void => {
   host.reportFileChange(tracker.observe(checklistVersion(content())));
 };
@@ -111,15 +104,12 @@ const render = (): void => {
 };
 
 host.onFileOpen((file) => {
-  // A text editor (the default `content`) is always handed text.
   if (file.encoding !== 'text') {
     host.reportFileUnsupported();
     return;
   }
   lines = parseChecklist(file.content);
   readOnly = file.readOnly;
-  // The baseline is the text this editor would write back, so opening a file
-  // that spells `[X]` does not count as an edit.
   tracker = createFileSaveTracker(checklistVersion(content()));
   render();
 });
@@ -129,7 +119,6 @@ host.onFileSnapshot(() => {
   return { content: text, version: checklistVersion(text) };
 });
 
-// Edits made while the host was writing leave the file dirty.
 host.onFileSaved((version) => {
   host.reportFileChange({ dirty: tracker.markSaved(version), edited: false });
 });

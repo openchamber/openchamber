@@ -1,39 +1,25 @@
-/**
- * Drives one annotation session end to end.
- *
- * The overlay resolves only after tearing its own chrome down and waiting for a
- * repaint, so the capture that follows shows the page and none of our UI. The
- * page itself is never modified: annotation marks what is there, it does not
- * edit it.
- */
 import {
   ANNOTATION_TEARDOWN_SCRIPT,
   buildAnnotationOverlayScript,
   type BrowserAnnotationOverlayLabels,
   type BrowserAnnotationOverlayTheme,
+  type BrowserAnnotationVoice,
 } from './annotationOverlay';
 import { isBrowserAnnotationPayload, type BrowserAnnotationPayload, type BrowserRect } from './contract';
 import { renderAnnotationScreenshot } from './annotationScreenshot';
+import type { JsonValue } from '@openchamber/sdk';
 
 export type PageCapture = {
   readonly mime: string;
   readonly base64: string;
   readonly width: number;
   readonly height: number;
-  /**
-   * The part of the page's viewport the capture shows, in CSS pixels. Absent
-   * when it shows the whole viewport; a page in the chat is often taller than
-   * the window, and only the part on screen can be photographed.
-   */
   readonly viewportArea?: BrowserRect;
 };
 
-/**
- * The capabilities an annotation session needs from its host, named so the
- * session can be exercised without a live `<webview>`.
- */
 export type AnnotationHost = {
   readonly executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
+  readonly runIsolated?: (script: string) => Promise<JsonValue>;
   readonly capturePage: () => Promise<PageCapture | null>;
 };
 
@@ -57,7 +43,6 @@ const readViewport = async (host: AnnotationHost): Promise<{ width: number; heig
   }
 };
 
-/** Best-effort cleanup of an overlay left behind by a previous session. */
 export const cancelAnnotationSession = async (host: AnnotationHost): Promise<void> => {
   try {
     await host.executeJavaScript(ANNOTATION_TEARDOWN_SCRIPT, false);
@@ -66,26 +51,45 @@ export const cancelAnnotationSession = async (host: AnnotationHost): Promise<voi
   }
 };
 
-export const runAnnotationSession = async ({
-  host,
-  theme,
-  labels,
-}: {
-  host: AnnotationHost;
-  theme: BrowserAnnotationOverlayTheme;
-  labels: BrowserAnnotationOverlayLabels;
-}): Promise<AnnotationSessionResult | null> => {
-  const script = buildAnnotationOverlayScript(theme, labels);
-  const raw = await host.executeJavaScript(script, true);
+const runOverlay = async (
+  host: AnnotationHost,
+  theme: BrowserAnnotationOverlayTheme,
+  labels: BrowserAnnotationOverlayLabels,
+  voice: BrowserAnnotationVoice | null,
+): Promise<BrowserAnnotationPayload | null> => {
+  let raw;
+  let started = false;
+  if (host.runIsolated) {
+    try {
+      raw = await host.runIsolated(buildAnnotationOverlayScript(theme, labels, voice));
+      started = true;
+    } catch {
+      // A desktop app older than this UI, or a page the debugger cannot attach to.
+    }
+  }
+  if (!started) raw = await host.executeJavaScript(buildAnnotationOverlayScript(theme, labels), true);
 
-  // Cancelled from inside the page.
   if (raw === null || raw === undefined) return null;
-
   if (!isBrowserAnnotationPayload(raw)) {
     await cancelAnnotationSession(host);
     return null;
   }
-  const payload = raw;
+  return raw;
+};
+
+export const runAnnotationSession = async ({
+  host,
+  theme,
+  labels,
+  voice = null,
+}: {
+  host: AnnotationHost;
+  theme: BrowserAnnotationOverlayTheme;
+  labels: BrowserAnnotationOverlayLabels;
+  voice?: BrowserAnnotationVoice | null;
+}): Promise<AnnotationSessionResult | null> => {
+  const payload = await runOverlay(host, theme, labels, voice);
+  if (!payload) return null;
 
   try {
     const viewport = await readViewport(host) ?? payload.viewport;

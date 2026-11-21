@@ -16,7 +16,7 @@ const ALLOWED = [
   { file: 'index.css', declaration: 'animation: webkit-spin 1s linear infinite !important;' },
   { file: 'index.css', declaration: 'animation: oc-trailing-expand-spin 0.8s linear infinite;' },
   { file: 'index.css', declaration: 'animation: marquee-scroll 5s linear infinite alternate;' },
-  { file: 'components/views/PierreDiffViewer.tsx', declaration: 'animation: oc-expand-spin 0.8s linear infinite;' },
+  { file: 'components/views/pierreDiff/css.ts', declaration: 'animation: oc-expand-spin 0.8s linear infinite;' },
 ];
 
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));

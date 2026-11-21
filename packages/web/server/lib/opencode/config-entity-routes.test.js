@@ -18,6 +18,7 @@ const createApp = () => {
     createAgent: record('createAgent'),
     deleteAgent: record('deleteAgent'),
     createCommand: record('createCommand'),
+    getCommandConfig: (name, directory) => ({ read: name, directory }),
     deleteCommand: record('deleteCommand'),
   });
   return { app, calls };
@@ -82,6 +83,18 @@ describe('config entity names', () => {
     const response = await request(app)[method](url).send({});
     expect(response.status).toBe(400);
     expect(calls).toEqual([]);
+  });
+
+  it('answers every named command entry at once, and refuses the request when one name is unsafe', async () => {
+    const { app } = createApp();
+    const answer = await request(app).get('/api/config/command-configs?name=review&name=git%2Fcommit');
+    expect(answer.status).toBe(200);
+    expect(answer.body).toEqual({ commands: [
+      { name: 'review', entry: { read: 'review', directory: '/work/project' } },
+      { name: 'git/commit', entry: { read: 'git/commit', directory: '/work/project' } },
+    ] });
+    expect((await request(app).get('/api/config/command-configs')).body).toEqual({ commands: [] });
+    expect((await request(app).get('/api/config/command-configs?name=review&name=..%2F..%2Fescape')).status).toBe(400);
   });
 
   it('accepts plain and nested names', async () => {

@@ -2,10 +2,10 @@ import React from 'react';
 import { matchesFileEditorPattern, type FileEditorContribution } from '@openchamber/sdk';
 
 import { isGuestActive } from './capabilities.ts';
+import { guestsInScope, useGuestScopeStore } from './folders.ts';
 import { useGuestsStore } from './store.ts';
 import type { InstalledGuest } from './types.ts';
 
-/** The extension editor a file opens in. */
 type GuestFileEditorMatch = {
   guestId: string;
   editor: FileEditorContribution;
@@ -13,12 +13,6 @@ type GuestFileEditorMatch = {
 
 const fileNameOf = (filePath: string): string => filePath.slice(filePath.replace(/\\/g, '/').lastIndexOf('/') + 1);
 
-/**
- * The first active guest's first editor whose patterns match the file's name,
- * in catalog order. `null` when none does. VS Code keeps the catalog empty,
- * so files there always stay with the host's own views. The phone needs no
- * opt-in: the editor owns the whole Files view there as on the desktop.
- */
 export const findGuestFileEditor = (
   guests: readonly InstalledGuest[],
   filePath: string,
@@ -36,7 +30,31 @@ export const findGuestFileEditor = (
   return null;
 };
 
-export const useGuestFileEditor = (filePath: string | null | undefined): GuestFileEditorMatch | null => {
+export const findOpenGuestFileEditor = (filePath: string): GuestFileEditorMatch | null => (
+  findGuestFileEditor(guestsInScope(useGuestsStore.getState().guests, useGuestScopeStore.getState().paths), filePath)
+);
+
+const findScopedGuestFileEditor = (
+  guests: InstalledGuest[],
+  paths: readonly string[],
+  filePath: string,
+  held: string | null,
+): GuestFileEditorMatch | null => {
+  const inScope = guestsInScope(guests, paths);
+  const heldGuest = held ? guests.find((guest) => guest.id === held && !inScope.includes(guest)) : undefined;
+  return findGuestFileEditor(heldGuest ? [heldGuest, ...inScope] : inScope, filePath);
+};
+
+export const useGuestFileEditor = (filePath: string | null | undefined, dirty = false): GuestFileEditorMatch | null => {
   const guests = useGuestsStore((state) => state.guests);
-  return React.useMemo(() => (filePath ? findGuestFileEditor(guests, filePath) : null), [filePath, guests]);
+  const paths = useGuestScopeStore((state) => state.paths);
+  const [shown, setShown] = React.useState<{ filePath: string; guestId: string; held: boolean } | null>(null);
+  const held = shown && shown.filePath === filePath && (dirty || shown.held) ? shown.guestId : null;
+  const match = React.useMemo(
+    () => (filePath ? findScopedGuestFileEditor(guests, paths, filePath, held) : null),
+    [filePath, guests, held, paths],
+  );
+  const next = filePath && match ? { filePath, guestId: match.guestId, held: held !== null && match.guestId === held } : null;
+  if (next?.filePath !== shown?.filePath || next?.guestId !== shown?.guestId || next?.held !== shown?.held) setShown(next);
+  return match;
 };

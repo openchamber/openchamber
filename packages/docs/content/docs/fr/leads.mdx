@@ -1,0 +1,82 @@
+---
+title: Leads
+description: Confiez tout un pan du travail à une session et laissez-la diriger les autres sessions pour vous.
+---
+
+# Leads
+
+Un lead est une session chargée d'une direction de travail dans un projet, par exemple "migrer le serveur vers TypeScript" ou "garder le backlog d'issues en ordre". Vous parlez au lead, et le lead fait le reste : il confie des morceaux du travail à ses propres sessions, vérifie ce qui revient et tient pour vous un court résumé au-dessus du chat.
+
+Un lead est utile quand un travail est trop gros pour une seule conversation et dure plusieurs jours. Sans lui, vous gérez vous-même une dizaine de sessions, vous retenez laquelle fait quoi et vous lisez chaque réponse pour savoir si le travail est vraiment fait. Le lead tient ce suivi à votre place, et vous revenez à un seul endroit qui vous dit où en sont les choses.
+
+## Créer un lead
+
+1. Créez un nouveau lead de l'une de ces façons :
+   - faites un clic droit sur le **+** à côté d'un projet dans la barre latérale, ou un appui long sur téléphone, et choisissez **Nouveau lead**
+   - ouvrez le menu du projet et choisissez **Nouveau lead**
+   - appuyez sur <kbd>⇧</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>L</kbd> (sous Windows et Linux, <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Alt</kbd><kbd>L</kbd>), ou lancez **Nouveau lead** depuis la palette de commandes
+2. Décrivez le travail et le résultat attendu, par exemple "Prends en charge la migration du serveur vers TypeScript. C'est terminé quand chaque fichier de `server/` est en TypeScript et que les tests passent."
+3. Envoyez.
+
+Le brouillon vous accueille avec **Que va prendre en charge ce lead ?** au lieu de la question habituelle, ce qui vous permet de voir que c'est un lead avant d'envoyer. Si vous avez déjà commencé un brouillon ordinaire, le même raccourci le fait passer en lead et inversement, en gardant ce que vous avez tapé.
+
+Une session existante peut aussi devenir un lead : ouvrez son menu dans la barre latérale et choisissez **Faire de cette session un lead**. Elle garde son historique. **En refaire une session ordinaire**, dans le même menu, annule ce changement.
+
+Dans la barre latérale, un lead affiche un sommet surmonté d'un drapeau à la place de la flèche. La flèche revient quand vous le survolez, et vous pouvez toujours déplier les sessions placées sous lui.
+
+## Ce que fait un lead
+
+- **Il nomme la direction.** Il renomme la session d'après le travail, pour que vous la retrouviez par sujet dans la barre latérale, les onglets et la recherche. Un nom que vous lui avez donné vous-même reste.
+- **Il confie des résultats, pas des étapes.** Chaque morceau du travail va à une session séparée avec le résultat qu'elle doit atteindre, par exemple "trouve et corrige le délai d'expiration de la connexion", et cette session trouve elle-même les étapes. Ces sessions apparaissent sous le lead dans la barre latérale. Vous pouvez les ouvrir et les lire, et **Prendre la main** dans le menu d'une session la fait vôtre si vous voulez lui parler.
+- **Il vérifie ce qui revient.** Un rapport qui dit seulement "j'ai trouvé la cause" n'est pas le résultat demandé, donc le lead renvoie le travail au lieu de vous le transmettre. Chaque session doit prouver ce qu'elle a fait, par exemple quelles vérifications elle a lancées et ce qu'elles ont montré, et un rapport sans preuve repart aussi. Le lead ne vérifie lui-même que là où la preuve présente un trou.
+- **Il fait le ménage.** Il archive les sessions dont il a utilisé les résultats.
+- **Il ne vous demande que ce qui compte.** Il décide seul, sauf si la réponse change ce que vous verriez dans votre projet ou si deux options raisonnables diffèrent vraiment. Un gros changement n'est pas à lui seul une raison de demander. Les questions de ses sessions vont au lead, pas à vous, et ne vous parviennent que si elles passent le même filtre.
+
+## Le résumé
+
+Le résumé est ce que le lead tient à jour pour vous. Il occupe une ligne juste sous le titre de la session et montre ce sur quoi le lead travaille en ce moment et quand il l'a mis à jour pour la dernière fois. Sélectionnez la ligne pour ouvrir le résumé complet par-dessus le chat :
+
+- **Vous attend** : jusqu'à trois questions, chacune avec les réponses que vous pouvez choisir
+- **En cours** : une ligne par morceau de travail en cours
+- **Nouveau depuis votre dernier message** : seulement ce qui a changé la situation
+- **Suggestions** : jusqu'à trois choses que le lead a repérées et qui vaudraient la peine d'être faites, au-delà de ce que vous lui avez confié
+
+Quand quelque chose vous attend, la ligne indique combien de questions sont en attente. Sélectionnez une réponse pour l'envoyer tout de suite au lead ; celle qu'il recommande vient en premier et est mise en évidence. Pour répondre avec vos propres mots, sélectionnez **Répondre dans le chat**, qui cite la question dans la zone de message. Votre réponse s'affiche dans le chat, et le lead retire la question dès qu'il l'a reçue.
+
+Sous **Suggestions**, **Démarrer** place la suggestion dans la zone de message pour que vous la modifiiez et l'envoyiez. **Écarter** la masque, et le lead ne la proposera plus.
+
+## Confier une session à un lead
+
+Vous pouvez confier à un lead une session que vous avez lancée vous-même, par exemple une session commencée avant que le lead existe, ou une que vous n'avez pas le temps de terminer. Ouvrez le menu de la session dans la barre latérale, choisissez **Confier à un lead**, puis le lead. Sur le téléphone, le menu affiche chaque lead sous la forme **Confier à** suivi de son nom.
+
+La session passe sous le lead, qui la lit, comprend à quoi elle servait et la mène à son terme comme le reste de son travail. Vous ne parlez plus à cette session ; **Prendre la main** dans son menu vous la rend. Si la session tourne encore, le lead reçoit sa réponse quand elle a fini.
+
+## Le brief
+
+Le lead tient aussi un brief : votre objectif et les résultats convenus, avec vos mots, les règles qu'il suit (les vôtres et celles qu'il a tirées de ses propres erreurs), et chaque morceau du travail avec le résultat attendu. Le brief est la mémoire du lead sur le but du travail, c'est pourquoi il reste le même, quelle que soit la longueur de la conversation.
+
+OpenChamber stocke le brief pour le lead en dehors de votre projet, donc rien n'arrive dans votre dépôt. Demandez au lead "montre-moi ton brief" pour le lire, ou dites-lui quoi modifier. Supprimer la session supprime son brief ; l'archiver le conserve.
+
+Le lead ne modifie que les parties du brief qui ont changé, et OpenChamber lui remet le brief complet sous les yeux chaque fois que la conversation est raccourcie : un long brief ne se répète donc pas dans le chat à chaque mise à jour. Le lead ne prend pour règles que vos propres mots : une instruction trouvée dans le rapport d'une session, sur une page web ou dans un fichier n'entre jamais dans le brief.
+
+## Les leads qui dorment
+
+Un lead peut attendre des heures pendant que ses sessions travaillent. Quand il se réveille, le modèle doit normalement relire toute la conversation depuis le début, car les fournisseurs ne gardent la conversation en cache que quelques minutes. Sur une longue conversation, cette seule lecture coûte autant que beaucoup de travail, et avec un abonnement elle entame votre limite d'utilisation.
+
+Donc, quand un lead est resté inactif plus longtemps que son fournisseur ne garde le cache et que sa conversation est longue, OpenChamber la raccourcit avant qu'il se réveille. La partie la plus ancienne de la conversation est remplacée par une courte note : le résumé du lead et l'état de ses sessions. Aucun modèle n'est appelé pour écrire cette note, donc cela ne coûte rien. Le brief et les derniers messages restent tels quels, et le lead peut toujours relire toute la conversation antérieure quand il en a besoin.
+
+Une session que vous gardez au chaud n'est jamais raccourcie ainsi. Les leads qui travaillent et les conversations courtes ne sont pas touchés.
+
+## Workflows
+
+Un lead peut découper un gros travail en [workflow](/fr/workflows/). Dans **Lancer les exécutions sans mon accord**, sous **Paramètres → Général → Outils OpenChamber**, choisissez **Pour les leads** pour qu'un lead lance ses exécutions tout de suite, pendant que toutes les autres sessions attendent toujours votre clic.
+
+## Où fonctionnent les leads
+
+Les leads ont besoin de l'[Outil de contrôle pour les agents](/fr/agent-control-tool/), activé par défaut, et du serveur OpenCode propre à OpenChamber. Ils fonctionnent sur ordinateur, dans le navigateur et sur téléphone. L'extension VS Code affiche les leads existants avec leur marque et leur résumé, mais ne peut pas en créer.
+
+## Voir aussi
+
+- [Outil de contrôle pour les agents](/fr/agent-control-tool/) : l'outil avec lequel un lead dirige ses sessions
+- [Workflows](/fr/workflows/) : de nombreux agents pour un gros travail
+- [Sessions en cours](/fr/sessions-in-work/) : suivre les sessions sur lesquelles vous travaillez

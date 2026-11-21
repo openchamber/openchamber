@@ -35,7 +35,8 @@ import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compareVersions } from '../../packages/web/server/lib/version-order.js';
+if (!process.versions.bun) await import('../../packages/web/scripts/register-server-sources.mjs');
+const { compareVersions } = await import('../../packages/web/server/lib/version-order.js');
 import { NIGHTS_KEPT } from '../changelog/canary-notes.mjs';
 
 const BUCKET = 'openchamber-releases';

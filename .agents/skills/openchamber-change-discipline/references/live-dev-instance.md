@@ -11,9 +11,11 @@ Sections: *Isolate*, *Seed it*, *Drive the page*, *Stop*.
 ```
 HOME=$D/home XDG_CONFIG_HOME=$D/xdg XDG_DATA_HOME=$D/data XDG_CACHE_HOME=$D/cache XDG_STATE_HOME=$D/state
 BUN_INSTALL_CACHE_DIR=$D/cache OPENCHAMBER_DATA_DIR=$D/oc
-OPENCODE_BINARY=/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode
+OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR=<checkout>/packages/electron/resources/opencode-server
 OPENCHAMBER_HMR_UI_PORT=<ui> OPENCHAMBER_HMR_API_PORT=<api> bun run dev
 ```
+
+That folder is the OpenCode the desktop app bundles, at the version this checkout pins: stage it once with `bun run --cwd packages/electron prepare:opencode-server`. `OPENCODE_BINARY=<a CLI>` instead runs a CLI you name.
 
 The variables go because a shell opened inside the desktop app (an agent's, the integrated terminal) inherits the app's server env: the LAN UI password, `OPENCHAMBER_RUNTIME=desktop`, `OPENCHAMBER_DIST_DIR`, the managed OpenCode's `OPENCODE_*`, with their names recorded in `OPENCHAMBER_INJECTED_ENV`. `bun run dev` drops every recorded name, an inline override included, so while that record survives, `OPENCODE_CONFIG=/tmp/x.json bun run dev` silently writes the user's real `opencode.json`. Never print the password variable.
 
@@ -25,6 +27,8 @@ All on the API port, `localhost`:
 
 - **Project:** `git init` a folder in `D`, then `PUT /api/config/settings {projects:[{id,path,label}],activeProjectId}`.
 - **Session:** `POST /api/session` (header `x-opencode-directory`, body `{title, location:{directory}, model:{providerID:'opencode', id:'big-pickle'}}`; Big Pickle needs no login), `POST /api/session-knowledge/sync {sessionId, directory}`, then `POST /api/session/:id/prompt {text}`. Sending a prompt puts the session in In work.
+- **More providers** (a check "on several providers", or when Big Pickle answers 429 because the free Zen limit is spent): provider keys in the shell environment and in `~/.local/share/opencode/auth.json` are often stale, so probe each model with a one-word prompt before a long run. Working keys live in the user's OpenCode database: copy an API-key row into the instance's with `sqlite3 <D>/data/opencode/opencode.db "attach 'file:$HOME/.local/share/opencode/opencode.db?mode=ro' as src; insert or replace into credential select * from src.credential where integration_id='openrouter'"`, then restart the instance. Copy API-key rows only, never OAuth ones: a token refresh in the copy can rotate the user's own token. OpenRouter alone covers the Anthropic, Gemini and OpenAI model families.
+- **Seeded content a model reads** (a lead's digest, a brief, a prompt): made-up items only, never real paths, branches or issue numbers. The isolation covers OpenChamber's data, not the machine: a lead that gets "accepted: clean up /tmp/x" goes and works on the real `/tmp/x` with its shell.
 - **Extension:** `POST /api/guests {path}` installs from a folder, `PUT /api/guests/<id>/capabilities {granted:[...]}` approves it. The dev build reports the released version, so a package whose `openchamber.engines` asks for the next one fails with `host-too-old`: install a copy with the range lowered.
 - **Fixture session** (exact tool rows without running a model): `opencode session export <id> > s.json` from the user's own data, append an assistant message whose parts copy an existing completed tool part (`state.content`, `state.metadata`), give it an id that sorts after the last message, set `info.location.directory` to the isolated project, then `opencode session import s.json --directory <project> --standalone` with the instance's `HOME`/`XDG_*` env. Message ids are global, so importing the same session again fails with Internal Server Error: `DELETE /api/session/<id>` first. History pages arrive with shell tool results, so a collapsed row shows only what its metadata carries until it opens.
 - **Image model** (OpenCode's image jobs without a paid provider): a local Node server answering `POST /v1/images/generations` after a delay with `{data:[{b64_json:<1x1 PNG>}]}`, declared in `$XDG_CONFIG_HOME/opencode/opencode.json`:

@@ -1,0 +1,43 @@
+import { createThemeFolderWatch } from '../appearance/theme-watch.js';
+import type { createSettingsRuntime } from '../settings/settings-runtime.js';
+import type { SettingsFileChange } from '../settings/settings-file-state.js';
+
+type SettingsRuntime = ReturnType<typeof createSettingsRuntime>;
+type ThemeWatchOptions = Parameters<typeof createThemeFolderWatch>[0];
+type FolderWatchDependencies = Pick<ThemeWatchOptions, 'fsPromises' | 'path'> & {
+  settingsRuntime: Pick<SettingsRuntime, 'watchSettingsFiles' | 'reconcileExternalSettings'>;
+  customThemesDir?: string | null;
+};
+
+export const createFeatureFolderWatches = () => {
+  let themeWatch: ReturnType<typeof createThemeFolderWatch> | null = null;
+  let settingsWatch: ReturnType<SettingsRuntime['watchSettingsFiles']> | null = null;
+  const stop = () => {
+    themeWatch?.stop();
+    themeWatch = null;
+    settingsWatch?.stop();
+    settingsWatch = null;
+  };
+  const start = async (
+    dependencies: FolderWatchDependencies,
+    announceChange: (type: string, properties?: SettingsFileChange) => void,
+  ) => {
+    stop();
+    const { fsPromises, path, customThemesDir } = dependencies;
+    themeWatch = customThemesDir ? createThemeFolderWatch({
+      fsPromises, path, themesDir: customThemesDir,
+      onChange: () => announceChange('openchamber:themes-changed'),
+    }) : null;
+    const next = dependencies.settingsRuntime.watchSettingsFiles({
+      onChange: async (properties) => {
+        const additionalChanges = await dependencies.settingsRuntime.reconcileExternalSettings(properties);
+        if (settingsWatch !== next) return;
+        announceChange('openchamber:settings-changed', properties);
+        for (const change of additionalChanges) announceChange('openchamber:settings-changed', change);
+      },
+    });
+    settingsWatch = next;
+    await next.ready;
+  };
+  return { start, stop };
+};

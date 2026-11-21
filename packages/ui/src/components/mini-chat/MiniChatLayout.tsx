@@ -225,7 +225,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       {controlsAtStart ? (
         <WindowsWindowControls visible position={windowControlsSide} />
       ) : null}
-      <SessionSwitcherDropdown>
+      <SessionSwitcherDropdown recentOnly>
         <button
           type="button"
           aria-label={t('sessions.switcher.openAria')}

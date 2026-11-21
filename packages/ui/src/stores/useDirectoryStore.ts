@@ -25,45 +25,23 @@ interface DirectoryStore {
   goBack: () => void;
   goForward: () => void;
   goToParent: () => void;
-  /** Where the app goes once the last project is removed: see `noProjectDirectory`. */
   goToNoProjectDirectory: () => Promise<void>;
   synchronizeHomeDirectory: (path: string, chatsRoot?: string | null) => void;
-  /**
-   * Forgets a working directory that belonged to another host. The directory
-   * is unknown until the host now connected names its home, which then becomes
-   * the directory through `synchronizeHomeDirectory`.
-   */
   resetForRuntimeSwitch: () => void;
 }
 
-/**
- * No working directory yet: the host has not named its home and nothing else
- * set one (`/`, at a browser's first visit before login and after
- * `resetForRuntimeSwitch`), or no project is open and the server has not
- * named the chats root yet (empty).
- */
 export const isDirectoryUnknown = (state: Pick<DirectoryStore, 'currentDirectory' | 'isHomeReady'>): boolean =>
   !state.isHomeReady && (state.currentDirectory === '/' || state.currentDirectory === '');
 
-/**
- * The directory the app works in while no project is open: the managed chats
- * root, where a chat draft works anyway. Every OpenCode read names the app's
- * directory, and with the home there OpenCode started over the whole home
- * folder, file watcher and MCP servers included. The home stays the answer
- * only when the server cannot name the chats root, or VS Code has a workspace.
- */
 const noProjectDirectory = (home: string, chatsRoot: string | null | undefined): string =>
   isVSCodeWithoutWorkspace() ? chatsRoot || '' : (!isVSCodeRuntime() && chatsRoot) || home;
 
-/** The chats root the host names; workspace windows keep their existing directory. */
 const resolveChatsRoot = async (): Promise<string | null> => {
   if (isVSCodeRuntime() && !isVSCodeWithoutWorkspace()) return null;
   const runtimeKey = getRuntimeKey();
   try {
     const root = await resolveChatsRootDirectory();
     if (getRuntimeKey() !== runtimeKey) return null;
-    // The host's home lookup is read-only. Bootstrap owns making its working
-    // directory exist before any directory-scoped OpenCode reads can start.
     if (isVSCodeWithoutWorkspace()) await opencodeClient.createDirectory(root);
     return root;
   } catch {
@@ -73,9 +51,6 @@ const resolveChatsRoot = async (): Promise<string | null> => {
 
 let cachedHomeDirectory: string | null = null;
 let homeResolveGeneration = 0;
-// Whether a home may be guessed when the host does not name one. The guesses
-// (system info, the desktop shell's home, the one stored in this window) all
-// describe the host this window booted on, so a switch to another host ends it.
 let bootHomeFallbacksApply = true;
 const safeStorage = getDeferredSafeStorage();
 const persistedLastDirectory = safeStorage.getItem('lastDirectory');
@@ -187,8 +162,6 @@ const normalizeHomeCandidate = (value?: string | null) => {
   return normalized && normalized !== '/' ? normalized : null;
 };
 
-// Stores nothing: an answer can arrive after a runtime switch, and only the
-// generation-checked commit in resolveHomeDirectory may store a home.
 const initializeHomeDirectory = async () => {
   try {
     const fsHome = await opencodeClient.getFilesystemHome();
@@ -200,11 +173,6 @@ const initializeHomeDirectory = async () => {
     console.warn('Failed to obtain filesystem home directory:', filesystemError);
   }
 
-  // Everything below is a guess: system info derives a home from the stored
-  // last directory, and the fallbacks after it describe the host this window
-  // booted on. After a switch to another host only that host's own answer
-  // counts. Until it gives one (before login it answers 401) the home stays
-  // unknown, and it is resolved again once the user is authenticated there.
   if (!bootHomeFallbacksApply) {
     return '/';
   }
@@ -256,9 +224,6 @@ const initialCurrentDirectory = (() => {
   if (persisted && !isVSCodeRuntime()) {
     return resolveDirectoryPath(persisted, initialHomeDirectory);
   }
-  // No project open: no directory until the server names the chats root
-  // (noProjectDirectory). Nothing is read for an empty directory, and the app
-  // stays unmounted until then because the home is not ready either.
   return isVSCodeRuntime() && !isVSCodeWithoutWorkspace() ? initialHomeDirectory : '';
 })();
 
@@ -365,9 +330,6 @@ export const useDirectoryStore = create<DirectoryStore>()(
         if (parent) setDirectory(parent);
       },
 
-      // Where the app goes once the last project is removed. The removed
-      // project stops being the last directory, and nothing is stored in its
-      // place, for the same reason as in synchronizeHomeDirectory.
       goToNoProjectDirectory: async () => {
         const runtimeKey = getRuntimeKey();
         const leaving = get().currentDirectory;
@@ -375,7 +337,6 @@ export const useDirectoryStore = create<DirectoryStore>()(
           cachedHomeDirectory || get().homeDirectory || initializeHomeDirectory(),
           resolveChatsRoot(),
         ]);
-        // A directory opened while the lookup ran is the user's newer choice.
         if (getRuntimeKey() !== runtimeKey || get().currentDirectory !== leaving) return;
         const directory = noProjectDirectory(homeDir, chatsRoot);
         opencodeClient.setDirectory(directory);
@@ -404,8 +365,6 @@ export const useDirectoryStore = create<DirectoryStore>()(
         const savedLastDirectory = safeStorage.getItem('lastDirectory');
         const hasSavedLastDirectory = typeof savedLastDirectory === 'string' && savedLastDirectory.length > 0;
         const fallbackDirectory = noProjectDirectory(resolvedHome, chatsRoot);
-        // An unknown directory adopts the fallback whatever is stored: after a
-        // host switch the stored last directory is the previous host's.
         const shouldReplaceCurrent =
           isDirectoryUnknown(state) ||
           (!hasSavedLastDirectory &&
@@ -432,10 +391,6 @@ export const useDirectoryStore = create<DirectoryStore>()(
         const historyChanged = resolvedHistory.some((entry, index) => entry !== state.directoryHistory[index]);
         const currentChanged = Boolean(resolvedCurrent && resolvedCurrent !== state.currentDirectory);
 
-        // No project and no chats root: the server did not answer, as before
-        // login on a server with a UI password while the home is known from
-        // storage. It stays not ready, so the session gate resolves again after
-        // login; marked ready, the app would work in the home all session.
         const awaitingChatsRoot = shouldReplaceCurrent && (!isVSCodeRuntime() || isVSCodeWithoutWorkspace()) && !chatsRoot;
         const updates: Partial<DirectoryStore> = {
           homeDirectory: resolvedHome,
@@ -461,10 +416,6 @@ export const useDirectoryStore = create<DirectoryStore>()(
           const nextDirectory = shouldReplaceCurrent ? fallbackDirectory : (resolvedCurrent as string);
           opencodeClient.setDirectory(nextDirectory);
           invalidateFileSearchCache();
-          // The fallback is not the user opening a directory, so it is not
-          // stored as the last directory: the server turns a stored last
-          // directory into a project when there is none and warms it on every
-          // start, which put the home in the sidebar and started OpenCode there.
           if (!shouldReplaceCurrent) {
             safeStorage.setItem('lastDirectory', nextDirectory);
             void updateDesktopSettings({ lastDirectory: nextDirectory });
@@ -475,8 +426,6 @@ export const useDirectoryStore = create<DirectoryStore>()(
       },
 
       resetForRuntimeSwitch: () => {
-        // Nothing is stored or sent: the stored last directory is the previous
-        // host's to keep, and the new host's settings are not this path's.
         opencodeClient.setDirectory(undefined);
         invalidateFileSearchCache();
         set({
@@ -498,12 +447,8 @@ export const useDirectoryStore = create<DirectoryStore>()(
 
 let pendingHomeResolution: Promise<void> | null = null;
 
-// Only the newest resolution may commit: an older one can finish later with a
-// worse answer (the previous host's home after a runtime switch).
 const resolveHomeDirectory = (): Promise<void> => {
   const generation = ++homeResolveGeneration;
-  // The chats root comes along: with no project open it is the directory the
-  // app starts in, and the app stays unmounted until both are known.
   const resolution: Promise<void> = Promise.all([initializeHomeDirectory(), resolveChatsRoot()])
     .then(([home, chatsRoot]) => {
       if (generation !== homeResolveGeneration) return;
@@ -518,14 +463,6 @@ const resolveHomeDirectory = (): Promise<void> => {
   return resolution;
 };
 
-/**
- * Resolves the home directory again when the startup attempt could not. A
- * server with a UI password answers /api/fs/home only after login, so on a
- * browser's first visit the attempt at page load falls back to "/". The
- * session gate calls this right after authentication, before the app mounts.
- * A resolution still in flight is awaited first rather than superseded: on a
- * server without a password it is the one that succeeds.
- */
 export const ensureHomeDirectoryResolved = async (): Promise<void> => {
   if (pendingHomeResolution) await pendingHomeResolution;
   if (useDirectoryStore.getState().isHomeReady) return;
@@ -535,17 +472,10 @@ export const ensureHomeDirectoryResolved = async (): Promise<void> => {
 if (typeof window !== 'undefined') {
   void resolveHomeDirectory();
 
-  // Host switches happen in place (no page reload), so the home directory
-  // must be re-resolved from the new runtime's authoritative source instead
-  // of keeping the previous host's value cached.
   subscribeRuntimeEndpointChanged((detail) => {
     if (detail.runtimeKey !== detail.previousRuntimeKey) bootHomeFallbacksApply = false;
     cachedHomeDirectory = null;
-    // A lookup still in flight belongs to the previous endpoint from here on.
     homeResolveGeneration += 1;
-    // Other subscribers of this same event rebind the client to the new
-    // endpoint. A lookup started here would still reach the previous host and
-    // take its home for the new one's, so it starts once they have all run.
     queueMicrotask(() => void resolveHomeDirectory());
   });
 }

@@ -8,13 +8,12 @@ import { Toaster } from '@/components/ui/sonner';
 import { MiniChatLayout } from '@/components/mini-chat/MiniChatLayout';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { SnippetQuickCreateDialog } from '@/components/snippets/SnippetQuickCreateDialog';
-import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
+import { GlobalQuestionDialogs } from '@/components/layout/GlobalQuestionDialogs';
 import { OpenCodeTrustDialog } from '@/components/projects/OpenCodeTrustDialog';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useRoutingSync } from '@/hooks/useRoutingSync';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
-import { useGlobalSessionsPolling } from '@/hooks/useGlobalSessionsPolling';
 import { opencodeClient } from '@/lib/opencode/client';
 import { openSession } from '@/lib/router/openSessionFromRoute';
 import type { RuntimeAPIs } from '@/lib/api/types';
@@ -23,6 +22,9 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitStore } from '@/stores/useGitStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { seedGlobalSessionStatusFromHost } from '@/sync/host-session-status-seed';
+import { refreshRecentGlobalSessions } from '@/stores/useGlobalSessionsStore';
+import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { SyncProvider, useSessions } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { SyncRuntimeEffects } from './AppEffects';
@@ -38,24 +40,14 @@ import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { openSessionInOwningHostWindow } from '@/lib/desktop';
+import { readMiniChatConfig, type MiniChatConfig } from './miniChatConfig';
 
 const MINI_CHAT_PRESENCE_CHANNEL = 'openchamber:mini-chat-presence';
-
-type MiniChatMode = 'session' | 'draft';
-
-type MiniChatConfig = {
-  mode: MiniChatMode;
-  sessionId: string | null;
-  directory: string | null;
-  projectId: string | null;
-};
 
 type ElectronMiniChatAppProps = {
   apis: RuntimeAPIs;
 };
 
-// `openchamber:open-session` from the desktop shell: a tray pick, a deep link
-// or a notification click. A malformed optional field is dropped on its own.
 const optionalTrimmedString = z.string().trim().optional().catch(undefined);
 const openSessionDetailSchema = z.object({
   sessionId: z.string().trim().min(1),
@@ -63,15 +55,6 @@ const openSessionDetailSchema = z.object({
   messageId: optionalTrimmedString,
   runtimeKey: optionalTrimmedString,
 });
-
-const readMiniChatConfig = (): MiniChatConfig => {
-  const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
-  const mode = params.get('mode') === 'session' ? 'session' : 'draft';
-  const sessionId = params.get('sessionId')?.trim() || null;
-  const directory = params.get('directory')?.trim() || null;
-  const projectId = params.get('projectId')?.trim() || null;
-  return { mode, sessionId, directory, projectId };
-};
 
 const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => {
   const sessions = useSessions();
@@ -154,7 +137,6 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
       return;
     }
     if (currentSessionId) {
-      // User already has a different session selected (e.g. from a prior switch); don't override.
       sessionBootstrappedRef.current = true;
       return;
     }
@@ -168,10 +150,6 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
     sessionBootstrappedRef.current = true;
   }, [config, currentSessionId, sessions, setCurrentSession, sync]);
 
-  // Switch this mini-chat to another session in place (e.g. picked from the
-  // tray while this window was focused) instead of spawning a new window.
-  // With the main window closed, a link or a notification click for another
-  // instance lands here too; that session opens in its instance's window.
   React.useEffect(() => {
     const onOpenSession = (event: Event) => {
       const parsed = openSessionDetailSchema.safeParse(event instanceof CustomEvent ? event.detail : null);
@@ -181,8 +159,6 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
       const sessionDirectory = (sessions.find((entry) => entry.id === sessionId) as { directory?: string | null } | undefined)?.directory?.trim();
       const directory = sessionDirectory || parsed.data.directory || null;
       void sync.ensureSessionRenderable(sessionId);
-      // Same resolver as the main window: a `/btw` fork opens as its parent,
-      // with that parent's panel showing.
       void openSession(sessionId, { directory, messageId: messageId || null });
       sessionBootstrappedRef.current = true;
     };
@@ -227,7 +203,6 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
 
       const partitionedWorktreesByProject = partitionWorktreesByRegisteredProject(projects, worktreesByProject);
 
-      // Skip update if nothing changed — see worktreeMapsEqual JSDoc.
       const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
       if (!worktreeMapsEqual(partitionedWorktreesByProject, currentByProject)) {
         useSessionUIStore.setState({
@@ -244,9 +219,6 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
     };
   }, [projects]);
 
-  // The main window (or an agent, or a terminal) may add or remove a worktree
-  // while this window is open; the server's control event names the affected
-  // repository so only its projects are re-listed.
   React.useEffect(() => {
     if (projects.length === 0) return;
     let cancelled = false;
@@ -259,29 +231,6 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
       unsubscribe();
     };
   }, [projects]);
-
-  // Dismiss the HTML splash (see mini-chat.html) once the real content is ready,
-  // so the window doesn't flash through white/connecting states. Fades out when
-  // the target session is active (or the draft is open); a grace timer ensures
-  // it never hangs (e.g. an unavailable session renders its own state).
-  const splashDismissedRef = React.useRef(false);
-  React.useEffect(() => {
-    if (splashDismissedRef.current || !isInitialized) return;
-    const dismiss = () => {
-      if (splashDismissedRef.current) return;
-      splashDismissedRef.current = true;
-      const el = typeof document !== 'undefined' ? document.getElementById('initial-loading') : null;
-      if (el) {
-        el.classList.add('fade-out');
-        window.setTimeout(() => el.remove(), 300);
-      }
-    };
-    const ready = config.mode === 'session'
-      ? currentSessionId === config.sessionId
-      : draftOpen;
-    const timer = window.setTimeout(dismiss, ready ? 100 : 1500);
-    return () => window.clearTimeout(timer);
-  }, [isInitialized, config.mode, config.sessionId, currentSessionId, draftOpen]);
 
   return null;
 };
@@ -341,6 +290,16 @@ const useSessionUnavailable = (config: MiniChatConfig): boolean => {
   return timedOut;
 };
 
+const useRecentSessions = (): void => {
+  React.useEffect(() => {
+    const load = () => {
+      void refreshRecentGlobalSessions().then(() => seedGlobalSessionStatusFromHost()).catch(() => undefined);
+    };
+    load();
+    return subscribeRuntimeEndpointChanged(load);
+  }, []);
+};
+
 export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   const config = React.useMemo(() => readMiniChatConfig(), []);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
@@ -359,9 +318,7 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   useWindowTitle();
   useRoutingSync();
   useRootScrollLock();
-  // The header session switcher lists the global session list; this window
-  // is its own app root, so it loads that list itself.
-  useGlobalSessionsPolling(true);
+  useRecentSessions();
 
   return (
     <ErrorBoundary>
@@ -372,7 +329,7 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
               <ElectronMiniChatContent config={config} />
               <AppLinkConfirmDialog />
               <SnippetQuickCreateDialog />
-              <SharedTrustConfirmDialog />
+              <GlobalQuestionDialogs />
               <OpenCodeTrustDialog />
               <Toaster />
             </div>
@@ -383,9 +340,6 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   );
 }
 
-// Under SyncProvider: the shortcuts read the session's activity (double Escape
-// stops a running turn), which needs the sync runtime. Called in the app root
-// above the provider, opening Mini Chat threw.
 const MiniChatKeyboardShortcuts: React.FC = () => {
   useMiniChatKeyboardShortcuts();
   return null;

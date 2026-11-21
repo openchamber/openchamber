@@ -17,6 +17,11 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   surfaces through `extras` on `sortContextSurfaces` /
   `getVisibleContextRailSurfaces`. Do not copy guest types out of
   `@openchamber/sdk`.
+- The rail's icons scroll when the window is too short for them, without a
+  scrollbar, with the scroll fades drawn as bands in the rail's background
+  colour (`ScrollShadow` with `surface`), never a mask, which would keep a
+  GPU texture the height of the rail. Its configure button stays under the
+  scroller, always in reach.
 - `availability: 'always'` surfaces are always present on the rail.
   `availability: 'has-content'` surfaces (chat) are hidden from the
   rail until a tab of their mode exists, and stay visible for as long as one
@@ -135,6 +140,9 @@ keep the full height). The chat is always the centre and cannot move.
   the sidebar has folded, so it grows in one move with it.
 - Another window's move is adopted through the `storage` event
   (`zoneSync.ts`); each window keeps its own open zones.
+- A surface moves between zones whole; its tabs never split across zones.
+  Showing a reference page beside a form by dragging one `pages` tab to
+  another zone was weighed and rejected as not worth building.
 
 ### Why an expanded zone stays in the layout and not over the chat
 
@@ -273,6 +281,32 @@ Code, or the workflow tool off) it is absent from the rail and from the rail's
 surfaces dialog, and turning the tool off closes open Workflows tabs, as
 memory's tab goes with its tool.
 
+## Shared pages
+
+The `pages` surface holds pages other people shared with the user by link
+(`components/chat/sharePages/received/`). It is on
+the rail while the server holds any received page (`receivedPagesShown`, the
+list fed by `receivedPagesStore.ts`), or a tab of it is open. Opened with no
+tab, it shows the list tab (no `targetPath`): every received page, newest
+first, with its title, the link's host (until pages carry a sender's name)
+and where it stands: not opened (sent without its PIN), waiting for your
+answer, answer sent, read only, expired, withdrawn, locked after wrong PINs,
+already answered elsewhere, or a link that no longer works
+(`received/status.ts`); a row opens the page's tab. A page tab keeps its
+`receivedId` as `targetPath` and its title as the label (a tab opened before
+the PIN takes the title once the page opens), so persisted tabs reopen from
+the server's store. Each page tab is a keep-alive pane in
+`ContextSurfacePanes`, mounted the first time it shows, so a form's unsent
+choices survive switching away; the list tab is rendered by the zone and
+remounts. Received pages belong to the server, not a project: a link names
+no folder, so every project lists them all.
+
+On the phone the list is a tab of the workspace drawer (`pages` in
+`lib/mobileWorkspaceTabs.ts`, never stored in the user's order), shown while
+the server holds any page, always right after Status (first when Status is
+hidden) so the strip, which scrolls past five tabs, never hides it; a row opens the page full screen with Back to the
+drawer, as a card's Open does from the chat.
+
 ## Panel header
 
 The panel has one header row. A single-instance surface with its own toolbar
@@ -316,3 +350,6 @@ chat/palette go through the `openContext*` actions in `useUIStore`.
   Trackers have no rail surface: their items list on the issues and PRs board
   (`components/sourceBoard`). A Linear tab persisted by an older version is
   dropped on load, like any unknown mode.
+
+- User ordering keeps surfaces together in groups at each group's first position, preserving saved pre-group orders. Missing known surfaces append in default order, and unknown IDs drop.
+- Walkthrough visibility requires room for a stop list beside code and OpenChamber's Git routes. VS Code exposes no browser surface because its host lacks Chromium annotation, agent control and remote-preview capabilities.

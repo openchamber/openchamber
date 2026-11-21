@@ -12,20 +12,36 @@ The client sends a prompt. This server forwards it to OpenCode, which owns the
 credentials, the provider dispatch and the token refresh. Routes live under
 `/api/*` and are gated by the ui-auth middleware like every other runtime API.
 
+Folder-trust refusals from the guarded OpenCode fetch retain their directory
+and reach the generation and preview routes as a 403 with instructions to trust the folder.
+The SDK otherwise discards the body of undeclared 403 responses; unrelated
+403s keep their normal error handling.
+
+### Why trust handling returns the underlying error
+
+The SDK wraps fetch-hook errors in `cause`, while service callers can receive
+an already unwrapped refusal. The shared lookup returns that refusal so routes
+read its message, code and directory together; a boolean check would still
+leave each caller responsible for choosing the right error object.
+
 ## Files
 
-- `client.js` — the connection to the running OpenCode. `server/index.js` wires
+- `client.ts` — the connection to the running OpenCode. `server/index.js` wires
   it once with `buildOpenCodeUrl` and `getOpenCodeAuthHeaders`; the client is
   built per call because the port and the server password both change across an
-  OpenCode restart. Scoping is the `x-opencode-directory` header, URI-encoded.
+  OpenCode restart. Building its URL throws while OpenCode is still starting,
+  which the module reports as no client. Scoping is the `x-opencode-directory`
+  header, URI-encoded: a call without a directory carries the server default,
+  because OpenCode would otherwise start its own working directory with the MCP
+  servers in it.
   Also caches the model list for 30 seconds — a generation needs the model's
   context and output limits, and a round trip per session title is the wrong
   trade. An unreachable OpenCode keeps the previous answer rather than
   retracting it. An empty list is never cached: OpenCode 2 answers with one
   while it starts, and caching it hid every provider from the pickers.
-- `index.js` — `generateSmallModelText()`, `describeSmallModel()`,
+- `index.ts` — `generateSmallModelText()`, `describeSmallModel()`,
   `listAuthenticatedProviders(directory?)`.
-- `routes.js` — `GET /api/small-model` (resolution preview, including the
+- `routes.ts` — `GET /api/small-model` (resolution preview, including the
   thinking variant) and `POST /api/small-model/generate` (`{ prompt, system?,
   maxOutputTokens?, model?, directory? }` → `{ text, providerID, modelID,
   source }`).
@@ -108,7 +124,9 @@ Five things are decided here, in order:
    `SMALL_MODEL_TIER_PRIORITY` (`flash-lite`, `flash`, `luna`, `haiku`) that
    the provider has. When the caller's own model is already in one of these
    tiers, it is used as is (`source: 'session-model'`) and the scan does not
-   run. The tiers are OpenCode's own for its session titles
+   run: another small model on the same gateway can belong to a lab the user
+   did not pick, with its own retention terms, so the model they work with
+   stays. The tiers are OpenCode's own for its session titles
    (`Catalog.model.small`), repeated here because OpenCode does not expose
    them over HTTP. A tier is matched as a name in the models.dev `family` and
    the model id together (`smallModelTierOf`), so every lab's flash counts:
@@ -142,6 +160,12 @@ requests at OpenAI for 30 days, while the flash models are open models with
 larger allowances and no retention. A session on DeepSeek V4.1 Flash had its
 goal checks sent to GPT 6 Luna; it now stays on its own model, and a session
 on a large model gets the provider's flash before its luna.
+
+### Why a model reference matches `id` before `modelID`
+
+A reference holds the catalog `id`. The provider API name is `modelID`, and
+derived entries (`gpt-6-luna` and `gpt-6-luna-fast`) share it, so an exact `id`
+match wins and the `modelID` match is the fallback.
 
 ## Thinking variants
 
@@ -204,7 +228,9 @@ pace-setter: prefill dominates, and issue #5017 measured local-model prefill at
 is ~4x headroom that also absorbs the answer decode and one structured-output
 retry. A blown deadline (not caller cancellation) throws `504` with
 `code: 'generation-timeout'`, naming the model and the budget; the route maps it
-to that message instead of the generic "choose another model" text.
+to that message instead of the generic "choose another model" text. The check
+reads the deadline signal, whose reason is always the timeout, because a
+composed signal's reason propagation varies by runtime.
 
 OpenCode 2 can reject an explicit model before its cold catalog finishes loading;
 plugin-provided models (Claude Code) stay unavailable for 20-40 s after OpenCode
@@ -280,3 +306,62 @@ Returns `null` when OpenCode is not reachable.
 
 Mounted lazily from `feature-routes-runtime.js` (same pattern as quota): the
 module is imported on first request, not at server startup.
+
+## TypeScript boundary
+
+`client.ts` owns the runtime connection and configured model reference types.
+Directory checks remain at this boundary because the generation
+route forwards an unchecked request-body directory. Non-string directories
+still select the server default and the empty cache key.
+
+Default-model responses retain both the SDK envelope and the direct-response
+fallback. Only a string `id` is checked. The inferred return type therefore
+includes an envelope with an `id` when `data` is null, without promising a
+`providerID`. Trust refusals likewise check only `code`; their message and
+directory remain unchecked values, including inherited properties.
+
+### Why generation identifiers remain unchecked
+
+`GenerationOptions` describes the route's unchecked fields. The existing prompt
+check still rejects non-strings, and non-string directories still select the
+server default and empty catalog-cache key. Preferred identifiers pass through
+unchanged. The default-model fallback checks only `id` and can also forward an
+absent or non-string provider. Resolution and generation results therefore keep
+both identifiers as `unknown`. Catalog lookup compares identifiers by identity
+and accepts generic comparison values without asserting that they are strings.
+
+`opencode-client.d.ts` describes the pinned Promise client's forwarding behavior.
+In `@opencode/client` 2.3.0, `experimental.generate.text` copies the prompt and
+model into a request body, serializes it with `JSON.stringify`, and reads the
+response's `data`. It does not validate model identifiers. The local declaration
+retains the published client contracts except for accepting unchecked model
+identifiers on that method. The published request schema stays unchanged.
+Contract tests keep the default envelope distinct from that schema and prevent
+generation results from promising checked identifiers.
+
+### Why route guards preserve primitive and inherited properties
+
+Optional unknown-valued fields describe readable properties without promising
+their presence or type. The guards retain primitive boxing and inherited
+properties. A record or own-property check would reject values the JavaScript
+handlers previously read. Truthy request bodies still supply their properties;
+falsy bodies still use an empty object.
+
+The preview handler logs a null or undefined service rejection and throws the
+same `TypeError` with the same message as its former direct property access.
+Node and Bun use different native messages, so the throw preserves each
+runtime's wording.
+Other primitive rejections still produce the existing fallback response. The
+generation handler retains optional property reads and its generic failure
+response for null or undefined rejections.
+
+### Why response checks remain
+
+OpenCode's Promise client parses JSON without validating its declared response
+types. String checks for generated text, catalog provider identifiers and
+endpoint settings therefore remain at the response boundary. Variant lists still
+require `Array.isArray`; an object, including a dictionary with a `constructor`
+member, means no listed variants. JSON extraction receives an internally
+validated string and no longer repeats the string check. Output reserve values
+retain the function discriminator because callers can supply either a number
+or a resolver.

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { Message, Part } from '@/lib/opencode/model'
 
 import { shouldFetchSessionForRenderableSync, hasUserMessage } from './use-sync'
-import { mergeOptimisticPage } from './optimistic'
+import { confirmedOptimisticIDs } from './optimistic'
 import { materializeSessionSnapshots } from './materialization'
 
 describe('shouldFetchSessionForRenderableSync', () => {
@@ -38,7 +38,7 @@ describe('shouldFetchSessionForRenderableSync', () => {
 //      to the expansion loop so the skeleton stays instead of an empty chat).
 //   2. Incremental materialization of superset pages preserves references for
 //      already-committed messages (no re-render churn, no reference breaks).
-//   3. mergeOptimisticPage + clearOptimistic is idempotent across commits.
+//   3. An optimistic record is confirmed only when the page holds it with all its parts.
 
 function assistantMessage(id: string, created = 1): Message {
   return { id, sessionID: 'ses_1', role: 'assistant', time: { created } } as Message
@@ -174,46 +174,18 @@ describe('incremental materialization of superset pages (#2084)', () => {
   })
 })
 
-describe('mergeOptimisticPage idempotency across commits (#2084)', () => {
-  test('places a post-rollover optimistic message at the chronological tail', () => {
-    const legacy = userMessage('msg_ffffffffffffLegacy', 100)
-    const current = userMessage('msg_000000000000Current', 200)
-    const page = { session: [legacy], part: [], cursor: undefined, complete: true }
+describe('confirmedOptimisticIDs', () => {
+  test('confirms an optimistic record once the page returns it with every optimistic part', () => {
+    const optimistic = { message: userMessage('opt_1'), parts: [textPart('p_opt_1', 'opt_1')] }
+    const page = (parts: Part[]) => ({ session: [userMessage('u_1'), userMessage('opt_1')], partsByMessageID: new Map([['opt_1', parts]]) })
 
-    const merged = mergeOptimisticPage(page, [{ message: current, parts: [] }])
-
-    expect(merged.session).toEqual([legacy, current])
+    expect(confirmedOptimisticIDs(page([]), [optimistic])).toEqual([])
+    expect(confirmedOptimisticIDs(page([textPart('p_opt_1', 'opt_1')]), [optimistic])).toEqual(['opt_1'])
   })
 
-  test('second call after clearOptimistic returns the page unchanged', () => {
-    // Simulate: first commit confirmed an optimistic item, clearOptimistic
-    // removed it; second commit (expansion) finds no optimistic items.
-    const page = { session: [userMessage('u_1')], part: [{ id: 'u_1', part: [] }], cursor: 'c1', complete: false }
-
-    // First merge with one optimistic item.
-    const optimisticItem = { message: userMessage('opt_1'), parts: [textPart('p_opt_1', 'opt_1')] }
-    const merged1 = mergeOptimisticPage(page, [optimisticItem])
-    expect(merged1.confirmed).toEqual([]) // opt_1 is not in page.session → not confirmed
-
-    // After clearOptimistic (simulated by passing empty items), merge is a no-op.
-    const merged2 = mergeOptimisticPage(page, [])
-    expect(merged2.confirmed).toEqual([])
-    expect(merged2.session).toEqual(page.session)
-    expect(merged2.cursor).toBe('c1')
-    expect(merged2.complete).toBe(false)
-  })
-
-  test('mergeOptimisticPage with empty items is a fast no-op path', () => {
-    const page = {
-      session: [assistantMessage('a_1')],
-      part: [{ id: 'a_1', part: [textPart('p_a_1', 'a_1')] }],
-      cursor: undefined,
-      complete: true,
-    }
-    const merged = mergeOptimisticPage(page, [])
-    expect(merged.session).toEqual(page.session)
-    expect(merged.confirmed).toEqual([])
-    expect(merged.complete).toBe(true)
+  test('leaves a record the page does not hold outstanding', () => {
+    const page = { session: [userMessage('u_1')], partsByMessageID: new Map([['u_1', [] as Part[]]]) }
+    expect(confirmedOptimisticIDs(page, [{ message: userMessage('opt_1'), parts: [] }])).toEqual([])
   })
 })
 
@@ -232,30 +204,4 @@ describe('first-commit gating invariant (#2084)', () => {
     expect(hasUserMessage(pageWithUser)).toBe(true)
   })
 
-  test('complete page triggers an early commit even without a user message', () => {
-    // page.complete means there are no older messages to expand into.
-    // Committing immediately is correct — the skeleton should disappear.
-    // This mirrors the `hasUserMessage(page.session) || page.complete` gate.
-    const completeAssistantOnlyPage = [assistantMessage('a_1')]
-    const isComplete = true
-    expect(hasUserMessage(completeAssistantOnlyPage) || isComplete).toBe(true)
-  })
-
-  test('prepend mode always commits — deferral does not apply', () => {
-    // The deferred init path exists to keep the skeleton visible for an
-    // assistant-only initial fetch. Prepend mode (loading older history)
-    // has no skeleton to protect and must always write to the store —
-    // otherwise the fetched older messages would be silently dropped.
-    //
-    // This test pins the gate condition: deferral requires `!options.before`.
-    // An assistant-only, incomplete page in prepend mode must NOT defer.
-    const assistantOnlyPage = [assistantMessage('a_1'), assistantMessage('a_2')]
-    const hasBefore = true // prepend mode
-    const isComplete = false
-
-    // The actual gate in loadMessages is:
-    //   const deferFirstCommit = !options?.before && !page.complete && !hasUserMessage(page.session)
-    const deferFirstCommit = !hasBefore && !isComplete && !hasUserMessage(assistantOnlyPage)
-    expect(deferFirstCommit).toBe(false) // prepend must not defer
-  })
 })

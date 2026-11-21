@@ -31,10 +31,8 @@ import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import { useSessionKnowledgePins } from './useSessionKnowledgePins';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
-/** Opens at once, the way a tooltip with no trigger of its own has to. */
 const ROW_TOOLTIP_CLASS = 'transition-none data-[starting-style]:opacity-100 data-[starting-style]:scale-100 data-[ending-style]:opacity-100 data-[ending-style]:scale-100';
 
-/** Lazy: the plan editor is a large view, and most panel visits never open it. */
 const PlanView = React.lazy(() => import('@/components/views/PlanView').then((module) => ({ default: module.PlanView })));
 
 interface ProjectNotesTodoPanelProps {
@@ -43,9 +41,6 @@ interface ProjectNotesTodoPanelProps {
   projectLabel?: string | null;
   canCreateWorktree?: boolean;
   onActionComplete?: () => void;
-  /** When provided, opening a plan calls this instead of the desktop context
-      panel tab — hosts without ContextPanel (mobile) render their own viewer.
-      The plan carries its owner so the host's viewer cannot guess wrong. */
   onOpenPlan?: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
   className?: string;
 }
@@ -54,28 +49,8 @@ type ProjectContextTab = 'notes' | 'todos' | 'plans' | 'memory';
 
 const TAB_ORDER: ProjectContextTab[] = ['notes', 'todos', 'plans', 'memory'];
 
-/**
- * Panel width from which entries open beside the list instead of over it: the
- * 380px list column plus about 640px for the entry. At 900 the entry got some
- * 500px, narrower than the list it sat beside.
- */
 const SPLIT_MIN_WIDTH = 1040;
 
-/**
- * Notes, todos, plans and agent memory for the active project.
- *
- * The lists are tabs rather than one stacked column: stacking gave each
- * list its own scroller inside the panel's scroller, which only got worse as
- * lists grew and forced the todo list to carry a manual resize handle just to
- * stay usable.
- *
- * Search sits above the tabs and stays panel-wide. Tabs divide, and search is
- * the one thing that division would hurt — you do not always remember whether
- * something was written as a note or lives in a plan — so the section strip
- * doubles as the result summary by showing per-section match counts.
- *
- * Storage is server-owned and reached through `useProjectContextStore`.
- */
 export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   projectRef,
   visible = true,
@@ -95,8 +70,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const saveTodos = useProjectContextStore((state) => state.saveTodos);
   const { pinnedNoteIds, pinnedPlanIds, togglePin: toggleSessionPin } = useSessionKnowledgePins();
 
-  // The whole feature is one switch: with memory off there is nothing for the
-  // agent to manage, so showing the user what is stored would be pointless.
   const memoryEnabled = useUIStore((state) => (
     state.agentMemoryFeatureAvailable && state.agentMemoryToolEnabled
   ));
@@ -108,13 +81,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   );
 
   const isMobile = useUIStore((state) => state.isMobile);
-  /**
-   * The panel's own width decides the layout, whether it got wide through the
-   * expand button or by being dragged: from SPLIT_MIN_WIDTH the list and the
-   * open entry sit side by side. Touch layouts always stack.
-   */
-  // A node in state rather than a ref: the panel first renders without its
-  // root while no project is selected, and must start measuring once it has one.
   const [rootNode, setRootNode] = React.useState<HTMLDivElement | null>(null);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const attachRoot = React.useCallback((node: HTMLDivElement | null) => {
@@ -134,12 +100,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     return () => observer.disconnect();
   }, [rootNode]);
   const wide = !isMobile && panelWidth >= SPLIT_MIN_WIDTH;
-  /**
-   * Tabs drop their labels as the strip narrows: first the inactive ones, then
-   * the active one too, so every tab stays in view as icon and count. Measured
-   * against invisible copies of the row, because the counts and the
-   * translated labels decide its width.
-   */
   const [sectionsNode, setSectionsNode] = React.useState<HTMLElement | null>(null);
   const [allLabelsMeasureNode, setAllLabelsMeasureNode] = React.useState<HTMLDivElement | null>(null);
   const [activeLabelMeasureNode, setActiveLabelMeasureNode] = React.useState<HTMLDivElement | null>(null);
@@ -166,19 +126,14 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const requestedTab = TAB_ORDER.includes(storedTab as ProjectContextTab)
     ? storedTab as ProjectContextTab
     : 'notes';
-  // A persisted 'memory' must not survive the feature being turned off, or the
-  // panel would open on a tab that no longer exists.
   const activeTab: ProjectContextTab = requestedTab === 'memory' && !memoryVisible
     ? 'notes'
     : requestedTab;
-  // Todos open nothing, so they never split.
   const split = wide && activeTab !== 'todos';
 
   const [query, setQuery] = React.useState('');
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [searchFocusRequest, setSearchFocusRequest] = React.useState(0);
-  // Closing the search clears it, so a list never stays filtered by text
-  // nobody can see.
   const closeSearch = React.useCallback(() => {
     setSearchOpen(false);
     setQuery('');
@@ -191,23 +146,11 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     setSearchOpen(true);
     setSearchFocusRequest((request) => request + 1);
   }, [closeSearch, searchOpen]);
-  /**
-   * The entry being read, shown in place of its section's list. Plans used to
-   * open as a separate context-panel tab, and notes and memories expanded
-   * inside the list, pushing every card below them around. Every section now
-   * opens an entry the same way, and the panel owns which one so the back
-   * control in the section strip can close it.
-   */
   const [openEntry, setOpenEntry] = React.useState<{ section: ProjectContextTab; id: string } | null>(null);
   const openIdIn = (section: ProjectContextTab): string | null => (
     openEntry?.section === section && activeTab === section ? openEntry.id : null
   );
   const openPlanId = openIdIn('plans');
-  /**
-   * Where the list was when an entry opened, so going back lands on the same
-   * card instead of the top. The list unmounts while the entry is open, so the
-   * position is kept here and put back once the list renders again.
-   */
   const listScrollerRef = React.useRef<HTMLDivElement | null>(null);
   const returnPointRef = React.useRef<{ section: ProjectContextTab; id: string; scrollTop: number } | null>(null);
   const openEntryIn = React.useCallback((section: ProjectContextTab, id: string | null) => {
@@ -219,8 +162,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const openNote = React.useCallback((id: string | null) => openEntryIn('notes', id), [openEntryIn]);
   const openMemory = React.useCallback((id: string | null) => openEntryIn('memory', id), [openEntryIn]);
   const openPlan = React.useCallback((plan: { id: string }) => openEntryIn('plans', plan.id), [openEntryIn]);
-  // A todo an agent filed under a plan opens that plan: in the host's own
-  // viewer where it has one (mobile), else in the Plans tab.
   const openPlanFromTodo = React.useCallback((planId: string) => {
     const plan = contextEntry.plans.find((entry) => entry.id === planId);
     if (!plan || !projectRef) return;
@@ -231,14 +172,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     setStoredTab('plans');
     openEntryIn('plans', plan.id);
   }, [contextEntry.plans, onOpenPlan, openEntryIn, projectRef, setStoredTab]);
-  /**
-   * A plan moved while open beside the list. Its file moved and its id may
-   * have changed, so the view opens again on the plan as it is now; the view
-   * wrote its typing before the move (`openPlanViews`).
-   */
   const [planViewGeneration, setPlanViewGeneration] = React.useState(0);
-  // Read when the move ends, which can be after the user opened something else
-  // or another project, where the same plan id may name another plan.
   const openEntryRef = React.useRef({ entry: openEntry, projectContextId });
   openEntryRef.current = { entry: openEntry, projectContextId };
   const handlePlanMoved = React.useCallback((projectId: string, previousId: string, movedId: string) => {
@@ -249,16 +183,12 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   }, []);
   const trimmedQuery = query.trim().toLowerCase();
 
-  // Completed items sink to the bottom in the list; storage order is untouched.
   const todos = React.useMemo(
     () => sortTodosWithCompletedLast(contextEntry.todos),
     [contextEntry.todos],
   );
   const isLoading = contextEntry.loading && !contextEntry.loaded;
 
-  // Counted the way the sections filter, fuzzy match included, and without
-  // entries whose delete is waiting out its undo window: the strip must agree
-  // with the list it opens.
   const pendingDeletes = usePendingKnowledgeDeletes();
   const counts = React.useMemo(() => ({
     notes: contextEntry.notes.filter((note) => (
@@ -274,9 +204,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     ].filter((entry) => matchesRankQuery([entry.title, entry.body], query)).length,
   }), [contextEntry.notes, contextEntry.plans, globalMemory, pendingDeletes, projectMemory, projectRef, query, todos]);
 
-  // Counted across both scopes against their own marks: a new global memory is
-  // the one the user most needs to see, and it would be invisible behind the
-  // project scope.
   const globalViewedAt = useUIStore((state) => state.agentMemoryViewedAt[memoryViewKey('global', null)] ?? 0);
   const projectViewedAt = useUIStore(
     (state) => state.agentMemoryViewedAt[memoryViewKey('project', projectRef?.path ?? null)] ?? 0,
@@ -296,8 +223,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     return observeProjectContext(projectRef);
   }, [projectRef, visible]);
 
-  // Surface a load failure once. The store keeps whatever it already had, so
-  // the panel never blanks out over an unreachable server.
   const reportedErrorRef = React.useRef<string | null>(null);
   React.useEffect(() => {
     if (!contextEntry.error) {
@@ -313,9 +238,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     }
   }, [contextEntry.error, contextEntry.loaded, t]);
 
-  // Back on the list: the same scroll position, and focus on the card that was
-  // open, so the keyboard continues from there too. Only for the section the
-  // entry came from; leaving for another section forgets the spot.
   const listShown = openEntry === null || openEntry.section !== activeTab;
   React.useLayoutEffect(() => {
     const point = returnPointRef.current;
@@ -327,14 +249,10 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     scroller.scrollTop = point.scrollTop;
     const card = Array.from(scroller.querySelectorAll<HTMLElement>('[data-knowledge-entry-id]'))
       .find((element) => element.dataset.knowledgeEntryId === point.id);
-    // Note and memory cards take focus themselves; a plan row's target is the
-    // button that opened it.
     const target = card && card.tabIndex >= 0 ? card : card?.querySelector<HTMLElement>('button');
     target?.focus({ preventScroll: true });
   }, [activeTab, listShown]);
 
-  // An entry belongs to its project and to its section; leaving either must
-  // not leave it open over a list it no longer matches.
   React.useEffect(() => {
     setOpenEntry(null);
   }, [projectContextId]);
@@ -343,9 +261,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     setOpenEntry((current) => (current && current.section !== activeTab ? null : current));
   }, [activeTab]);
 
-  // A plan an agent asked to show. Declared after the resets above so a request
-  // that switched the tab or mounted the panel is not closed again by them. A
-  // request for another project waits for that project's panel.
   const planRequest = useUIStore((state) => state.projectKnowledgePlanRequest);
   React.useEffect(() => {
     if (!planRequest || planRequest.projectContextId !== projectContextId || activeTab !== 'plans') return;
@@ -353,17 +268,10 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     openEntryIn('plans', planRequest.planId);
   }, [activeTab, openEntryIn, planRequest, projectContextId]);
 
-  // Reset the filter when the project changes: a query that matched the old
-  // project would silently hide everything in the new one.
   React.useEffect(() => {
     closeSearch();
   }, [closeSearch, projectContextId]);
 
-  // Follow the search to where the matches are. Without this, typing a query
-  // whose hits are all in another tab shows an empty list and the user has to
-  // guess which tab to try. Only moves off a tab that has nothing, and only
-  // when the query changes: a tab the user picks by hand while searching
-  // stays picked, even when it has no matches.
   const followedQueryRef = React.useRef('');
   React.useEffect(() => {
     if (trimmedQuery === followedQueryRef.current) {
@@ -384,8 +292,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       if (!projectRef) {
         return;
       }
-      // The store owns per-project write serialization and rollback; the panel
-      // only decides what to persist and how to report a failure.
       void saveTodos(projectRef, nextTodos, change).then((saved) => {
         if (!saved) {
           toast.error(t('rightSidebar.contextNotesTodo.toast.saveNotesFailed'));
@@ -405,8 +311,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       label: t('rightSidebar.contextNotesTodo.tabs.memory'),
       tooltip: t('contextTooltips.workspace.section.memory'),
       count: counts.memory,
-      // What the agent stored without asking deserves the glance, so it gets
-      // its own mark beside the total instead of hiding inside it.
       unseen: highlightedMemoryCount,
     }] : []),
   ]), [counts, highlightedMemoryCount, memoryVisible, t]);
@@ -422,14 +326,11 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   }
 
   const entryOpen = openIdIn(activeTab) !== null;
-  // Beside the list the search still has a list to filter.
   const showSearchBar = searchOpen && (split || !entryOpen);
 
   const projectTitle = projectLabel?.trim()
     || projectRef.path.split('/').filter(Boolean).pop()
     || projectRef.path;
-  // The search names the project it searches: that is where the panel says
-  // whose notes these are, Chats included, without a row of its own.
   const searchLabel = t('rightSidebar.contextNotesTodo.search.placeholderInProject', { project: projectTitle });
   const nothingFound = trimmedQuery.length > 0 && sections.every((section) => section.count === 0);
 
@@ -452,7 +353,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         )}
       >
         <Icon name={section.icon} className="h-3.5 w-3.5 flex-shrink-0" />
-        {/* A hidden label stays for screen readers, which would hear only the count. */}
         <span className={showLabel ? 'whitespace-nowrap typography-meta' : 'sr-only'}>{section.label}</span>
         <span className="typography-micro opacity-70">{section.count}</span>
         {section.unseen > 0 ? (
@@ -465,7 +365,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         ) : null}
       </button>
     );
-    // The strip measured for fit is never shown, so it needs no tooltips.
     if (!interactive) return tab;
     return (
       <Tooltip key={section.id}>
@@ -478,9 +377,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     );
   };
 
-  // Sections are the panel's header; the search is a toggle beside the
-  // panel's own buttons. In the mobile drawer, which has no panel header, the
-  // same row sits at the top of the panel.
   const toolbar = (
     <div className="relative flex min-w-0 flex-1 items-center gap-1 pe-1">
       <nav
@@ -496,8 +392,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           true,
         ))}
       </nav>
-      {/* The row with every label and with the active label only, laid out
-          but never shown: their widths say which one fits the strip. */}
       <div aria-hidden="true" className="pointer-events-none invisible absolute start-0 top-0 h-0 w-0 overflow-hidden">
         <div ref={setAllLabelsMeasureNode} className="flex w-max items-center gap-1">
           {sections.map((section) => renderSectionTab(section, true, false))}
@@ -534,16 +428,12 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       onTogglePinned={(planId, pinned) => toggleSessionPin('plan', planId, pinned)}
       selectedPlanId={split ? openPlanId : null}
       onPlanMoved={handlePlanMoved}
-      // Hosts that own a fullscreen plan surface (mobile) keep it; on the
-      // desktop panel the plan opens here, in place of the list or beside it.
       onOpenPlan={onOpenPlan ?? openPlan}
     />
   );
 
   const planView = (planId: string, withBack: boolean) => (
     <React.Suspense fallback={null}>
-      {/* The panel header belongs to this panel's tabs; the plan keeps its
-          own title row inside the panel body. */}
       <ContextPanelHeaderSlotProvider value={null}>
         <PlanView
           key={planViewGeneration}
@@ -572,8 +462,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
 
       <div className="relative min-h-0 min-w-0 flex-1">
       {showSearchBar ? (
-        // Over the list column in the split layout, so it never covers the
-        // open entry's toolbar.
         <div className={cn('pointer-events-none absolute top-2 z-20', split ? 'inset-s-3' : 'inset-e-3')}>
           <KnowledgeSearchBar
             query={query}
@@ -585,9 +473,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           />
         </div>
       ) : null}
-      {/* An open entry scrolls itself; nesting it in this scroller would give
-          the panel two scrollbars for one document. In the split layout each
-          column scrolls itself. */}
       <ScrollableOverlay
         ref={listScrollerRef}
         outerClassName="h-full min-w-0"
@@ -609,8 +494,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         ) : null}
 
         {activeTab === 'todos' ? (
-          // Todos open nothing, so a wide panel gets one column of readable
-          // width instead of rows stretched edge to edge.
           <div className={cn(wide && 'mx-auto max-w-3xl')}>
             <TodosSection
               projectPath={projectRef.path}

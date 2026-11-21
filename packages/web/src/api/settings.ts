@@ -3,10 +3,10 @@ import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import { SETTINGS_SURFACE_QUERY, getSettingsSurface } from '@openchamber/ui/lib/settings/surface';
 
 const SETTINGS_ENDPOINT = '/api/config/settings';
-// The server resolves per-surface profile fields for this surface kind. It is
-// a query parameter, not a header, so the request needs no CORS preflight
-// (the packaged desktop shell and the phone app are cross-origin, and an
-// older instance would refuse an unknown header).
+
+
+
+
 const settingsEndpoint = (): string => `${SETTINGS_ENDPOINT}?${SETTINGS_SURFACE_QUERY}=${getSettingsSurface()}`;
 const RELOAD_ENDPOINT = '/api/config/reload';
 
@@ -33,9 +33,10 @@ export const createWebSettingsAPI = (): SettingsAPI => ({
     };
   },
 
-  async save(changes: Partial<SettingsPayload>): Promise<SettingsPayload> {
+  async save(changes: Partial<SettingsPayload>, options?: { keepalive?: boolean }): Promise<SettingsPayload> {
     const response = await runtimeFetch(settingsEndpoint(), {
       method: 'PUT',
+      keepalive: options?.keepalive === true,
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',

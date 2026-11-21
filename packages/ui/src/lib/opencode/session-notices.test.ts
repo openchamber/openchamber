@@ -25,6 +25,22 @@ const instructionsUpdate = (sources: string[], text = "updated"): Message => ({
 })
 
 describe("readSessionNotice: shown", () => {
+  test("an answer from a lead's digest and a hand-over read from their metadata, with or without a description", () => {
+    expect(readSessionNotice(synthetic(undefined, { openchamberLeadAnswer: { question: "Which license?", answer: "MIT" } }, "answer text"))).toEqual({
+      kind: "lead-answer",
+      answers: [{ question: "Which license?", answer: "MIT" }],
+      suggestions: [],
+      text: "answer text",
+    })
+    const reply = { answers: [], suggestions: [{ item: "Speed up CI", accepted: true }] }
+    expect(readSessionNotice(synthetic(undefined, { openchamberLeadAnswer: reply }, "reply text"))).toEqual({ kind: "lead-answer", ...reply, text: "reply text" })
+    expect(readSessionNotice(synthetic("Handed over: README intro", { source: "openchamber-lead-handover", sessionID: "ses_2", title: "README intro" }))).toEqual({
+      kind: "lead-handover",
+      title: "README intro",
+      text: "model text",
+    })
+  })
+
   test("a move reads the new working folder from the text", () => {
     const text = "The environment you are running in is now:\n<env>\n  Working directory: /repo/.worktrees/fix-login\n</env>"
     expect(readSessionNotice(instructionsUpdate(["core/environment", "core/skill-guidance"], text))).toEqual({
@@ -91,6 +107,16 @@ describe("readSessionNotice: shown", () => {
       const notice = readSessionNotice(message)!
       expect(notice).toEqual({ kind: "extension-wait", subject: "Timer (8 s)", outcome: "fired", summary, text })
       expect(readSessionNoticePart(sessionNoticePart(message, notice, "assistant_1", "after"))).toEqual(notice)
+    })
+
+    test("marks the built-in timer by its minutes, so the row names it in the user's language", () => {
+      const builtIn = { ...metadata, extension: null, minutes: 6, subject: "Timer (6 min)", summary: "6 minutes passed." }
+      const message = synthetic("Timer (6 min): 6 minutes passed.", builtIn, text)
+      const notice = readSessionNotice(message)!
+      expect(notice).toMatchObject({ kind: "extension-wait", timerMinutes: 6 })
+      expect(readSessionNoticePart(sessionNoticePart(message, notice, "assistant_1", "after"))).toEqual(notice)
+      // An extension's own timer keeps its own words.
+      expect(readSessionNotice(synthetic("Timer (8 s): 8 seconds passed", { ...metadata, minutes: 6 }, text))).not.toHaveProperty("timerMinutes")
     })
 
     test("an outcome this build does not know stays a plain notice", () => {

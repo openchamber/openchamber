@@ -98,8 +98,9 @@ describe('openchamber events', () => {
       expect(MockEventSource.instances).toHaveLength(0);
       expect(controller).toBeDefined();
       controller?.enqueue(new TextEncoder().encode('data: {"type":"openchamber:event-stream-ready"}\n\n'));
-      for (let i = 0; i < 20 && !events.length; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(events).toEqual(['event-stream-ready']);
+      controller?.enqueue(new TextEncoder().encode('data: {"type":"openchamber:quota-credentials-changed","properties":{}}\n\n'));
+      for (let i = 0; i < 20 && events.length < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(events).toEqual(['event-stream-ready', 'quota-credentials-changed']);
     } finally {
       unsubscribe();
       fetchSpy.mockRestore();
@@ -178,18 +179,21 @@ describe('openchamber events', () => {
 
     Object.assign(window, { __OPENCHAMBER_ELECTRON__: { runtime: 'electron' } });
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let markStreamOpened!: () => void;
+    const streamOpened = new Promise<void>((resolve) => { markStreamOpened = resolve; });
     const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
       if (!String(_input).includes('/api/openchamber/events')) return new Response('Unexpected fixture HTTP request', { status: 501 });
       return new Response(new ReadableStream<Uint8Array>({
         start(value) {
           controller = value;
+          markStreamOpened();
           init?.signal?.addEventListener('abort', () => value.close(), { once: true });
         },
       }), { headers: { 'content-type': 'text/event-stream' } });
     });
     const drivingUnsubscribe = subscribeOpenchamberEvents(() => undefined);
     try {
-      for (let i = 0; i < 20 && fetchSpy.mock.calls.length === 0; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+      await streamOpened;
       expect(MockEventSource.instances).toHaveLength(1);
       const streamCalls = fetchSpy.mock.calls.filter(([input]) => String(input).includes('/api/openchamber/events'));
       expect(streamCalls).toHaveLength(1);

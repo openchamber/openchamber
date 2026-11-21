@@ -3,32 +3,13 @@ import { IMAGE_JOB_LIFETIME_MS, readImageJobEnd, readImageJobStart, type Running
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import type { SyncEvent } from '@/lib/opencode/events';
 
-// Index of the images OpenCode is generating in the background for a session.
-// Like a background command, an image job outlives the turn that started it:
-// the session goes idle and runs again when the image is saved, so this index
-// keeps that pause visible as work (see `useSessionTurnActivity`) and lists
-// the job above the composer.
-//
-// OpenCode announces no image job on the event stream. Its live start is the
-// `image_generate` call settling with the job in its metadata, and its live end
-// the synthetic message reporting the image (see `background-image.ts`). The
-// job list (OpenCode 2.2.6+) is authoritative for every session at once; it is
-// read at startup and after the stream reconnects, which clears jobs whose end
-// fell into a gap. An older OpenCode has no job list, and the events alone
-// keep the index. The list is the host OpenCode's: an isolated space runs its
-// own, so a space's images are kept by its events alone.
-//
-// A job outlives OpenCode's 30-minute image timeout only when the OpenCode
-// generating it stopped, so the index drops it then.
 
 type TrackedImageJob = RunningImageJob & {
-  /** Started in an isolated space, which the host's job list does not cover. */
   inSpace: boolean;
 };
 
 type BackgroundImagesState = {
   byId: ReadonlyMap<string, TrackedImageJob>;
-  /** Sessions with at least one image in progress. */
   sessionIds: ReadonlySet<string>;
 };
 
@@ -40,18 +21,12 @@ export const useBackgroundImagesStore = create<BackgroundImagesState>()(() => ({
   sessionIds: EMPTY_SESSION_IDS,
 }));
 
-// A list read reflects OpenCode as it was when the read started: a job an
-// event started or ended since then keeps what the event said.
 let revision = 0;
 let generation = 0;
-// A read that answers after a newer one applied would undo it, so it is
-// dropped; one whose newer reads failed still applies.
 let readCount = 0;
 let appliedRead = 0;
 let expiryTimer: ReturnType<typeof setTimeout> | null = null;
 const touchedAt = new Map<string, number>();
-// An end that arrives before its start (or for a job the index never saw)
-// keeps a later start or list read from bringing the job back.
 const ended = new Set<string>();
 
 const remember = (set: Set<string> | Map<string, number>, id: string): void => {
@@ -78,7 +53,6 @@ const sessionIdsOf = (byId: ReadonlyMap<string, TrackedImageJob>, previous: Read
 
 const expiresAt = (job: RunningImageJob): number => job.startedAt + IMAGE_JOB_LIFETIME_MS;
 
-/** Arms one timer for the job that expires first. */
 const scheduleExpiry = (byId: ReadonlyMap<string, TrackedImageJob>): void => {
   if (expiryTimer) clearTimeout(expiryTimer);
   expiryTimer = null;
@@ -101,7 +75,6 @@ const publish = (byId: Map<string, TrackedImageJob>): void => {
   scheduleExpiry(byId);
 };
 
-/** Applies image job starts and ends from one directory's stream. Other event types are ignored cheaply. */
 export const applyBackgroundImageEvents = (directory: string, payloads: readonly SyncEvent[]): void => {
   let draft: Map<string, TrackedImageJob> | null = null;
   const current = (): ReadonlyMap<string, TrackedImageJob> => draft ?? useBackgroundImagesStore.getState().byId;
@@ -130,10 +103,6 @@ export const applyBackgroundImageEvents = (directory: string, payloads: readonly
   if (draft) publish(draft);
 };
 
-/**
- * Replaces the host's jobs in the index with its complete job list. `since`
- * is the revision the read started at (`backgroundImageRevision()`).
- */
 export const replaceImageJobs = (jobs: readonly RunningImageJob[], since: number): void => {
   const state = useBackgroundImagesStore.getState();
   let draft: Map<string, TrackedImageJob> | null = null;
@@ -151,10 +120,6 @@ export const replaceImageJobs = (jobs: readonly RunningImageJob[], since: number
   if (draft) publish(draft);
 };
 
-/**
- * Reads the job list and applies it. A failed read rejects and changes
- * nothing; an OpenCode without a job list leaves the index to the events.
- */
 export const refreshBackgroundImages = async (
   listRunningImageJobs: () => Promise<RunningImageJob[] | null>,
 ): Promise<void> => {
@@ -184,7 +149,6 @@ export const resetBackgroundImages = (): void => {
   useBackgroundImagesStore.setState({ byId: new Map(), sessionIds: EMPTY_SESSION_IDS });
 };
 
-/** Images the given sessions are generating, oldest first. */
 export const backgroundImagesOfSessions = (
   byId: ReadonlyMap<string, TrackedImageJob>,
   sessionIds: ReadonlySet<string>,

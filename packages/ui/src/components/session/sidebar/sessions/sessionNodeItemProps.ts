@@ -1,0 +1,62 @@
+import type React from 'react';
+import type { Session } from '@/lib/opencode/model';
+import type { WorktreeMetadata } from '@/types/worktree';
+import type { SessionNode } from '../types';
+import type { SessionSidebarRenderContext } from '../sessionSidebarRowModel';
+import type { StartSessionWorktreeMenuLoadResult } from '../sessionWorktreeMenu';
+import type { BlockingBadgeSessionScope } from './sessionNodeItemUtils';
+
+export type SecondaryMeta = {
+  projectLabel?: string | null;
+  branchLabel?: string | null;
+  inSpace?: boolean;
+};
+
+export type SessionNodeItemProps = {
+  node: SessionNode;
+  depth?: number;
+  ownsWork: boolean;
+  groupDirectory?: string | null;
+  projectId?: string | null;
+  folderOwnerKey?: string | null;
+  ownerProjectId?: string | null;
+  selectionScopeKey?: string | null;
+  archivedBucket?: boolean;
+  pinnedSessionIds: Set<string>;
+  expandedParents: Set<string>;
+  editingId: string | null;
+  editingRowKey: string | null;
+  setEditingId: (id: string | null) => void;
+  setEditingRowKey: (key: string | null) => void;
+  editTitle: string;
+  setEditTitle: (value: string) => void;
+  handleSaveEdit: (titleOverride?: string) => void;
+  handleCancelEdit: () => void;
+  toggleParent: (expansionKey: string) => void;
+  handleSessionSelect: (sessionId: string, sessionDirectory: string | null) => void;
+  handleSessionDoubleClick: (sessionId: string, sessionTitle: string) => void;
+  openSidebarMenuKey: string | null;
+  setOpenSidebarMenuKey: (key: string | null) => void;
+  createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
+  handleDeleteSession: (session: Session, source?: { archivedBucket?: boolean; hardDelete?: boolean; skipConfirm?: boolean }) => void;
+  handleRestoreSession: (session: Session) => void;
+  startSessionWorktreeMenuLoad: (args: {
+    projectId: string | null;
+    sourceDirectory: string | null;
+    currentWorktree: WorktreeMetadata | null;
+  }) => StartSessionWorktreeMenuLoadResult;
+  mobileVariant: boolean;
+  alwaysShowActions: boolean;
+  secondaryMeta?: SecondaryMeta | null;
+  renderContext?: SessionSidebarRenderContext;
+  detailed?: boolean;
+  repeat?: boolean;
+  blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[];
+  rowKey?: string;
+  dragKey?: string;
+  subtreeContainsEditing: Set<string>;
+  menuOpenSessionId: string | null;
+  relativeTimeTick?: number;
+  nodeStructureKey: string;
+  children?: React.ReactNode;
+};

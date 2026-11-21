@@ -1,8 +1,3 @@
-// Reads an `openchamber://connect?v=2&p=…` pairing link for the confirmation
-// prompt. It only validates the link and names what it connects to: after the
-// user confirms, the renderer redeems it with the same code as
-// Settings > Remote Instances > Import Link, which knows both direct and relay
-// transports and stores every leg on the host entry.
 
 const decodePayload = (value) => {
   if (!value) return null;
@@ -25,8 +20,6 @@ const directCandidateUrl = (candidate) => {
   }
 };
 
-// Same shape the host's buildRelayPairingCandidate emits and the renderer's
-// connectionPayload accepts: a ws(s) relay URL, a server id, an EC public key.
 const relayCandidateServerId = (candidate) => {
   const serverId = readText(candidate.serverId);
   const jwk = candidate.hostEncPubJwk;

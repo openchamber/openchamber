@@ -1,14 +1,29 @@
+import { getNormalizedParentDirectory, isFilesystemRoot } from '@/lib/pathNormalization';
+
 const toSlashes = (value: string): string => value.trim().replace(/\\/g, '/').replace(/\/+$/, '');
 
 const ROOTED_PATH = /^(?:~(?:\/|$)|\/|[a-zA-Z]:\/)/;
 
 export const isRootedBrowseQuery = (query: string): boolean => ROOTED_PATH.test(query.trimStart());
 
-/**
- * What the path field means. A name without a root belongs to the folder being
- * browsed: the server would otherwise resolve it against its own working
- * directory, which is nowhere the person is looking.
- */
+const withTrailingSeparator = (value: string): string => (value.endsWith('/') ? value : `${value}/`);
+
+// external: https://learn.microsoft.com/en-us/dotnet/standard/io/file-path-formats A bare drive letter resolves relative to that drive; drive roots retain their slash.
+export const trimTrailingSeparators = (value: string): string => {
+  const trimmed = value.replace(/\/+$/u, '');
+  if (!trimmed) return value ? '/' : value;
+  return isFilesystemRoot(trimmed) && /:$/u.test(trimmed) ? `${trimmed}/` : trimmed;
+};
+
+export const joinBrowsePath = (folder: string, name: string): string => `${withTrailingSeparator(trimTrailingSeparators(folder))}${name}`;
+
+export const getBrowseParentPath = (value: string): string | null => {
+  const trimmed = trimTrailingSeparators(value.trim());
+  if (!trimmed || trimmed === '~' || isFilesystemRoot(trimmed)) return null;
+  const parent = getNormalizedParentDirectory(trimmed);
+  return parent === null ? null : withTrailingSeparator(parent);
+};
+
 export const resolveBrowseQuery = (query: string, browsedFolder: string): string => (
   isRootedBrowseQuery(query) ? query.trimStart() : `${browsedFolder}${query.trimStart()}`
 );
@@ -16,20 +31,17 @@ export const resolveBrowseQuery = (query: string, browsedFolder: string): string
 type ProjectPlace = { path: string; addedAt?: number };
 
 const parentBrowseQuery = (projectPath: string, homeDirectory: string): string => {
-  const path = toSlashes(projectPath);
-  const parent = path.slice(0, path.lastIndexOf('/'));
+  const path = trimTrailingSeparators(projectPath.trim().replace(/\\/g, '/'));
+  if (isFilesystemRoot(path)) return withTrailingSeparator(path);
+  const parent = getNormalizedParentDirectory(path);
   if (!parent) return '~/';
+  if (isFilesystemRoot(parent)) return withTrailingSeparator(parent);
   const home = toSlashes(homeDirectory);
   if (home && parent === home) return '~/';
   if (home && parent.startsWith(`${home}/`)) return `~${parent.slice(home.length)}/`;
   return `${parent}/`;
 };
 
-/**
- * Where the add-project picker starts: the folder holding the most recently
- * added project, since a new project usually sits beside the previous ones.
- * Home when there is none, shown as `~/...` when it lies under home.
- */
 export const initialBrowseQuery = (
   projects: ReadonlyArray<ProjectPlace>,
   homeDirectory: string,
@@ -44,7 +56,6 @@ export const initialBrowseQuery = (
 
 const PROJECT_PLACES = 3;
 
-/** The folders projects live in, latest first, as path-field values. Home has its own entry. */
 export const projectBrowsePlaces = (
   projects: ReadonlyArray<ProjectPlace>,
   homeDirectory: string,
@@ -55,4 +66,24 @@ export const projectBrowsePlaces = (
   const places = new Set(latestFirst.map((project) => parentBrowseQuery(project.path, homeDirectory)));
   places.delete('~/');
   return [...places].slice(0, PROJECT_PLACES);
+};
+
+type BrowseListMemory = { key: string | null; ready: boolean };
+
+export const browseListMemory = ({ runtimeKey, openCodeView, browseDirectory, filter = '', showHidden = false, listedDirectory, loading, failed }: {
+  runtimeKey: string;
+  openCodeView: boolean;
+  browseDirectory: string;
+  filter?: string;
+  showHidden?: boolean;
+  listedDirectory: string;
+  loading: boolean;
+  failed: boolean;
+}): BrowseListMemory => {
+  if (openCodeView) return { key: `explorer:${runtimeKey}:opencode`, ready: true };
+  const folder = trimTrailingSeparators(browseDirectory.trim().replace(/\\/g, '/'));
+  if (!folder) return { key: null, ready: false };
+  const listed = trimTrailingSeparators(listedDirectory.trim().replace(/\\/g, '/'));
+  const rows = `${showHidden ? ':hidden' : ''}${filter ? `:filter:${filter}` : ''}`;
+  return { key: `explorer:${runtimeKey}:${folder}${rows}`, ready: !loading && !failed && listed === folder };
 };

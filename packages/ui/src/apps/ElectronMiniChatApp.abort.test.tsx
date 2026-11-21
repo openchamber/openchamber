@@ -1,20 +1,7 @@
-import { plugin } from 'bun';
 import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-
-
-// Bun does not implement Vite's worker asset-query imports.
-plugin({
-  name: 'mini-chat-abort-worker-url',
-  setup(build) {
-    build.onLoad({ filter: /\.worker\.ts\?worker&url$/ }, ({ path }) => ({
-      contents: `export default ${JSON.stringify(`blob:${path}`)};`,
-      loader: 'js',
-    }));
-  },
-});
 
 const directory = '/workspace/mini-chat-abort';
 const sessionId = 'ses_mini';
@@ -26,10 +13,14 @@ const sessionId = 'ses_mini';
 test('Mini Chat mounts its shortcuts under the sync provider, and double Escape stops its own run', async () => {
   const dom = new Window({ url: `http://mini-chat.test/?mode=session&sessionId=${sessionId}&directory=${encodeURIComponent(directory)}` });
   const requests: { method: string; path: string }[] = [];
+  let onInterrupt = () => {};
+  const interrupted = new Promise<void>((resolve) => { onInterrupt = resolve; });
   const fetchResponse = async (input: Request | URL | string, init?: RequestInit) => {
     const request = input instanceof Request ? input : null;
     const path = new URL(request ? request.url : input.toString(), 'http://mini-chat.test').pathname;
-    requests.push({ method: request?.method ?? init?.method ?? 'GET', path });
+    const method = request?.method ?? init?.method ?? 'GET';
+    requests.push({ method, path });
+    if (method === 'POST' && path.endsWith(`/session/${sessionId}/interrupt`)) onInterrupt();
     if (path.endsWith('/event')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
     return new Promise<Response>(() => undefined);
   };
@@ -41,8 +32,8 @@ test('Mini Chat mounts its shortcuts under the sync provider, and double Escape 
     HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event,
     KeyboardEvent: dom.KeyboardEvent, CustomEvent: dom.CustomEvent, MutationObserver: dom.MutationObserver,
     ResizeObserver: dom.ResizeObserver, customElements: dom.customElements, getComputedStyle: dom.getComputedStyle.bind(dom),
-    requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(Date.now()), 0),
-    cancelAnimationFrame: (handle: number) => clearTimeout(handle),
+    requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
+    cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
     IS_REACT_ACT_ENVIRONMENT: true,
     fetch: fetchResponse,
   })) {
@@ -87,13 +78,11 @@ test('Mini Chat mounts its shortcuts under the sync provider, and double Escape 
         session_status: { [sessionId]: { type: 'busy' } },
         sessionStatusReady: true,
       });
-      await new Promise((resolve) => setTimeout(resolve, 0));
     });
     const { useProjectsStore } = await import('@/stores/useProjectsStore');
     await act(async () => {
       useProjectsStore.setState({ projects: [{ id: 'project', path: directory }], activeProjectId: 'project' });
       useSessionUIStore.getState().setCurrentSession(sessionId, directory);
-      await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(useSessionUIStore.getState().currentSessionId).toBe(sessionId);
 
@@ -112,7 +101,7 @@ test('Mini Chat mounts its shortcuts under the sync provider, and double Escape 
     expect((await pressEscape()).defaultPrevented).toBe(true);
     expect(aborts()).toBe(0);
     await pressEscape();
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await act(async () => { await interrupted; });
     expect(aborts()).toBe(1);
     expect(composer.textContent).toBe('a draft typed during the run');
   } finally {

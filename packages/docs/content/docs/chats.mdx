@@ -13,6 +13,10 @@ The direct way is **+** on the **Chats** section in the sidebar. On the phone, t
 
 **Mod+N** (Cmd+N on macOS, Ctrl+N elsewhere) and **New Session** in the command palette open a new session on the side you used last: a chat if your last new session was a chat, otherwise your project. You can switch it to Chats before you send the first message.
 
+## Model and agent
+
+New chats start on the model, thinking level and agent set in **Settings → Sessions → Chats**. Chats that an agent starts use them too, and so do chats from a scheduled task set to use session defaults. An empty field uses **New sessions** on the same page. A thinking level belongs to its model: with the Chats model empty, a chat takes the New sessions model with its level. With only the Chats level empty, a chat uses the level you last picked for that model, then the New sessions level when both name the same model. You can still pick another model or agent in a chat before you send.
+
 ## Where chats live
 
 Chats have their own section at the top of the sidebar, above [In work](/sessions-in-work/) and your projects. They're sorted like other sessions, newest activity first, and pinned chats stay on top. The section shows the three most recent chats; **Show more** loads the rest. The section folds away like any other.
@@ -40,7 +44,7 @@ Archive a chat to hide it from the list. Delete it to remove it for good, togeth
 
 Chat folders live in `~/.config/openchamber/chats`, one dated folder per day. If you moved OpenChamber's data with `OPENCHAMBER_DATA_DIR`, they're under that folder instead. To keep chats somewhere else, set `OPENCHAMBER_CHATS_DIR`; see [Environment Variables](/environment/). That matters when OpenCode runs as a different user and can't read your home folder.
 
-> VS Code has no chats. The extension always works in the folder you have open.
+> VS Code has no chats. The extension always works in the folder you have open. Chats defaults are set in the app; the extension has no Chats section.
 
 ## Related
 

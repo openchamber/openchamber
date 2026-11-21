@@ -5,6 +5,8 @@ import { Window } from 'happy-dom';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
 import { MobileTwoLineLayout } from '@/apps/mobileSidebar/mobileRowParts';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { compile } from 'tailwindcss';
+import { resolveSessionRowActionLayout } from './sessionRowLayout';
 
 let browser: Window;
 let root: Root;
@@ -68,6 +70,32 @@ test('an empty detailed line disappears and returns when metadata arrives', asyn
   }
   await act(async () => renderRow(false, true));
   expect(document.querySelector('div.h-4')).not.toBeNull();
+});
+
+test('covered row metadata stays invisible while its menu is open and returns when closed', async () => {
+  const utilities = await compile('@tailwind utilities;');
+  const stylesheet = document.createElement('style');
+  document.head.append(stylesheet);
+  for (const open of [false, true, false]) {
+    const layout = resolveSessionRowActionLayout({
+      isVSCode: false, alwaysShowActions: false, archivedBucket: false,
+      mobileVariant: false, canTrackWork: false, isTimelineRow: true,
+      isOneLineTimelineRow: true, isSessionMenuOpen: open,
+    });
+    stylesheet.textContent = utilities.build(layout.coveredMetaFadeClass.split(' '));
+    await act(async () => renderRow(true, false, {
+      timeSlot: <span data-duration>1m</span>,
+      hideMetaOnHoverClass: layout.coveredMetaFadeClass,
+    }));
+    const duration = document.querySelector('[data-duration]');
+    expect(duration).not.toBeNull();
+    let opacity = 1;
+    for (let node = duration; node; node = node.parentElement) {
+      const value = window.getComputedStyle(node).opacity || '1';
+      opacity *= parseFloat(value) / (value.endsWith('%') ? 100 : 1);
+    }
+    expect(opacity).toBe(open ? 0 : 1);
+  }
 });
 
 // An extension's mark comes and goes while the app runs, so it must not

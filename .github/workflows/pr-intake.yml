@@ -5,10 +5,14 @@ name: pr-intake
 # - the contribution gate: a PR from outside the team with no linked bug report
 #   or accepted feature request is closed with `needs-accepted-issue`, and
 #   reopens when it qualifies, either because its description now links such an
-#   issue or because the linked issue was marked `accepted` or `bug`;
+#   issue or because the linked issue was marked `accepted` or `bug`. A PR
+#   linking an issue labeled `in-house` (the team builds it) is closed the same
+#   way and reopens if that label comes off;
 # - visual evidence: `evidence-in-branch` while the branch adds screenshots or
 #   logs, `needs-visual-evidence` while a UI change has no screenshot in its
-#   description. Both come off on their own once fixed.
+#   description. Both come off on their own once fixed;
+# - live run: `needs-live-run` while the change touches code of a runtime its
+#   description does not say it was run in, or lists a known problem.
 
 on:
   pull_request_target:
@@ -59,7 +63,7 @@ jobs:
               // The issue gained or lost what lets a PR through: recheck every PR
               // that mentions it. Gated ones reopen if they now qualify; open ones
               // whose bug report became a feature request close.
-              if (!["accepted", "bug"].includes(context.payload.label?.name)) {
+              if (!["accepted", "bug", "in-house"].includes(context.payload.label?.name)) {
                 core.setOutput("targets", "[]");
                 return;
               }
@@ -149,7 +153,9 @@ jobs:
               GATE_MARKER,
               MISSING_SCREENSHOTS,
               TEAM_LABEL,
+              UNPROVEN_RUNTIME,
               evaluateContributionGate,
+              evaluateRuntimeProof,
               evaluateVisualEvidence,
               hasMarkerComment,
               isMaintainer,
@@ -188,7 +194,7 @@ jobs:
                 }
               }
             };
-            for (const label of [...sizeLabels, GATE_LABEL, COMMITTED_MEDIA.label, MISSING_SCREENSHOTS.label, TEAM_LABEL]) {
+            for (const label of [...sizeLabels, GATE_LABEL, COMMITTED_MEDIA.label, MISSING_SCREENSHOTS.label, UNPROVEN_RUNTIME.label, TEAM_LABEL]) {
               await ensureLabel(label);
             }
 
@@ -291,7 +297,10 @@ jobs:
               if (pr.state === "open") await github.rest.pulls.update({ owner, repo, pull_number: number, state: "closed" });
             } else if (blocked && !gateWaived && pr.state === "open" && process.env.POST_COMMENTS === "true") {
               const unaccepted = gate.issues.map((issue) => `#${issue.number}`);
-              const reason = unaccepted.length > 0
+              const inHouse = (gate.inHouse ?? []).map((issueNumber) => `#${issueNumber}`);
+              const reason = inHouse.length > 0
+                ? [`Thanks for picking this up. Closing it automatically: ${inHouse.join(", ")} ${inHouse.length === 1 ? "is" : "are"} marked \`in-house\`, which means the team is building it. If that changes, this PR reopens on its own.`]
+                : unaccepted.length > 0
                 ? [`Closing this automatically: ${unaccepted.join(", ")} ${unaccepted.length === 1 ? "is a feature request that isn't" : "are feature requests that aren't"} accepted yet, and a feature gets built after it is. If the maintainer marks it \`accepted\`, this PR reopens on its own.`]
                 : [
                     "Closing this automatically: a PR here needs a linked issue.",
@@ -322,6 +331,7 @@ jobs:
             const closedByGate = blocked && !gateWaived;
             const howToAttach = "Drag screenshots into the PR description editor and GitHub hosts them, or run `node scripts/pr-evidence.mjs --title \"openchamber #" + number + " evidence\" <files>`, which uploads images to a secret gist and prints the Markdown to paste.";
             const evidence = evaluateVisualEvidence({ pr, files });
+            const proof = evaluateRuntimeProof({ pr, files });
             const evidenceChecks = [
               {
                 check: COMMITTED_MEDIA,
@@ -344,6 +354,23 @@ jobs:
                   "Review starts once the description has them. If the change really shows nothing on screen, say why in the description and the maintainer will lift the label.",
                 ],
               },
+              {
+                check: UNPROVEN_RUNTIME,
+                failing: proof.unproven.length > 0 || proof.knownProblems,
+                body: () => [
+                  ...(proof.unproven.length > 0 ? [
+                    `This PR changes code that runs in ${proof.unproven.join(", ")}, and the *Affected surfaces* table does not say it was run there. Run the change in ${proof.unproven.length === 1 ? "that runtime" : "each of them"} and write what you did and saw in its row.`,
+                    "",
+                    "If you have no way to run it there, this change is not one to send as a PR: open a bug report or feature request instead, and someone who can run it picks it up.",
+                    "",
+                  ] : []),
+                  ...(proof.knownProblems ? [
+                    "The *Known problems* section lists something. A problem you found is fixed in the same PR, with how you checked it; the section reads `None` when the PR is ready.",
+                    "",
+                  ] : []),
+                  "Review starts once the description is updated; the label comes off on its own.",
+                ],
+              },
             ];
             for (const { check, failing, body } of evidenceChecks) {
               const labeled = currentLabelNames.includes(check.label.name);
@@ -356,4 +383,4 @@ jobs:
               }
             }
 
-            core.info(`PR #${number}: ${effectiveLines} counted lines (${totalLines} total) -> ${sizeLabel}; gate=${gate.exempt ? `exempt (${gate.exempt})` : gate.passes ? "passes" : "fails"}; committed media=${evidence.committedMedia.length}; missing screenshots=${evidence.missingScreenshots}`);
+            core.info(`PR #${number}: ${effectiveLines} counted lines (${totalLines} total) -> ${sizeLabel}; gate=${gate.exempt ? `exempt (${gate.exempt})` : gate.passes ? "passes" : "fails"}; committed media=${evidence.committedMedia.length}; missing screenshots=${evidence.missingScreenshots}; unproven runtimes=${proof.unproven.join(",") || "none"}; known problems=${proof.knownProblems}`);
