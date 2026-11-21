@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { DEFAULT_LOCALE, type Locale } from './runtime';
-import { resetI18nDictionaryCacheForTests, useI18nStore } from './store';
+import { DEFAULT_LOCALE, getLocaleDirection, type Locale } from './runtime';
+import { resetI18nDictionaryCacheForTests, setDictionaryLoaderForTests, useI18nStore } from './store';
 
 const defaultDictionary = useI18nStore.getState().dictionary;
 
@@ -50,6 +50,21 @@ describe('i18n store', () => {
       expect(useI18nStore.getState().loadingLocale).toBe('fr');
       await waitForLocaleLoadToSettle('fr');
       expect(useI18nStore.getState().dictionary['common.language.french']).toBe('Français');
+    } finally {
+      resetStore();
+    }
+  });
+
+  test('keeps the previous locale when the dictionary chunk fails to load', async () => {
+    setDictionaryLoaderForTests(() => Promise.reject(new Error('locale chunk failed')));
+
+    try {
+      useI18nStore.getState().setLocale('ar');
+      await waitForLocaleLoadToSettle('ar');
+
+      expect(useI18nStore.getState().locale).toBe(DEFAULT_LOCALE);
+      expect(getLocaleDirection(useI18nStore.getState().locale)).toBe('ltr');
+      expect(useI18nStore.getState().dictionary).toBe(defaultDictionary);
     } finally {
       resetStore();
     }

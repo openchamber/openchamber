@@ -18,6 +18,13 @@ const dictionaries = new Map<Locale, I18nDictionary>([[DEFAULT_LOCALE, enDict]])
 export function resetI18nDictionaryCacheForTests(): void {
   dictionaries.clear();
   dictionaries.set(DEFAULT_LOCALE, enDict);
+  loadDictionaryForLocale = loadDictionary;
+}
+
+let loadDictionaryForLocale = loadDictionary;
+
+export function setDictionaryLoaderForTests(loader: (locale: Locale) => Promise<I18nDictionary>): void {
+  loadDictionaryForLocale = loader;
 }
 
 async function loadDictionary(locale: Locale): Promise<I18nDictionary> {
@@ -70,6 +77,9 @@ export const useI18nStore = create<I18nState>()((set, get) => ({
       return;
     }
 
+    const previousLocale = current.locale;
+    const previousDictionary = current.dictionary;
+
     writeStoredLocale(locale);
 
     set({
@@ -82,7 +92,7 @@ export const useI18nStore = create<I18nState>()((set, get) => ({
       return;
     }
 
-    void loadDictionary(locale).then((dictionary) => {
+    void loadDictionaryForLocale(locale).then((dictionary) => {
       if (get().locale !== locale) {
         return;
       }
@@ -90,7 +100,8 @@ export const useI18nStore = create<I18nState>()((set, get) => ({
     }).catch((error) => {
       console.error(`[i18n] failed to load locale ${locale}`, error);
       if (get().locale === locale) {
-        set({ dictionary: enDict, loadingLocale: null });
+        writeStoredLocale(previousLocale);
+        set({ locale: previousLocale, dictionary: previousDictionary, loadingLocale: null });
       }
     });
   },
