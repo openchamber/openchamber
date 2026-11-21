@@ -2,7 +2,7 @@ import type { StoreApi } from "zustand"
 import type { FormRequest, PermissionRequest } from "@/lib/opencode/model"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
-import { noteQuestionFormSnapshot } from "./recoverable-questions"
+import { noteQuestionFormSnapshot, readLiveForms } from "./recoverable-questions"
 import { opencodeClient } from "@/lib/opencode/client"
 import { processVSCodeReconciledPermissionAutoAccept } from "./vscode-permission-auto-accept"
 import { toast } from "@/components/ui"
@@ -44,52 +44,55 @@ export async function resyncBlockingRequestsForDirectory(
     const beforeSignatures = new Map(
       candidates.map((sessionId) => [sessionId, requestSignature(before.form[sessionId])]),
     )
-    const pendingForms = await opencodeClient.listPendingForms({ directories: [directory] })
-    if (!isCurrentRuntime()) return false
-    noteQuestionFormSnapshot(directory, pendingForms)
-    const grouped: Record<string, FormRequest[]> = {}
-    for (const form of pendingForms) {
-      if (!form?.id || !form.sessionID) continue
-      if (!candidateIds.has(form.sessionID)) continue
-      const list = grouped[form.sessionID]
-      if (list) list.push(form)
-      else grouped[form.sessionID] = [form]
-    }
-    for (const sessionId of Object.keys(grouped)) {
-      grouped[sessionId].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    }
-
-    for (const [sessionId, forms] of Object.entries(grouped)) {
-      const knownIds = new Set((before.form[sessionId] ?? []).map((item) => item.id))
-      const isViewed = isViewedInCurrentSession(directory, sessionId)
-      if (isViewed) continue
-      for (const form of forms) {
-        if (knownIds.has(form.id)) continue
-        const toastKey = getFormToastKey(sessionId, form.id)
-        if (!toastKey || pendingFormToastIds.has(toastKey)) continue
-        pendingFormToastIds.add(toastKey)
-        toast.info(form.title, {
-          id: `form-${toastKey}`,
-          description: FORM_TOAST_DESCRIPTION,
-          action: formToastAction(sessionId, directory, form.id),
-        })
+    const applied = await readLiveForms(() => opencodeClient.listPendingForms({ directories: [directory] }), (liveForms) => {
+      if (!isCurrentRuntime()) return false
+      noteQuestionFormSnapshot(directory, liveForms)
+      const grouped: Record<string, FormRequest[]> = {}
+      for (const form of liveForms) {
+        if (!form?.id || !form.sessionID) continue
+        if (!candidateIds.has(form.sessionID)) continue
+        const list = grouped[form.sessionID]
+        if (list) list.push(form)
+        else grouped[form.sessionID] = [form]
       }
-    }
+      for (const sessionId of Object.keys(grouped)) {
+        grouped[sessionId].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      }
 
-    store.setState((state: DirectoryStore) => {
-      const merged = { ...state.form }
       for (const [sessionId, forms] of Object.entries(grouped)) {
-        merged[sessionId] = forms
+        const knownIds = new Set((before.form[sessionId] ?? []).map((item) => item.id))
+        const isViewed = isViewedInCurrentSession(directory, sessionId)
+        if (isViewed) continue
+        for (const form of forms) {
+          if (knownIds.has(form.id)) continue
+          const toastKey = getFormToastKey(sessionId, form.id)
+          if (!toastKey || pendingFormToastIds.has(toastKey)) continue
+          pendingFormToastIds.add(toastKey)
+          toast.info(form.title, {
+            id: `form-${toastKey}`,
+            description: FORM_TOAST_DESCRIPTION,
+            action: formToastAction(sessionId, directory, form.id),
+          })
+        }
       }
-      for (const sessionId of candidates) {
-        if (grouped[sessionId]) continue
-        const beforeSignature = beforeSignatures.get(sessionId) ?? ""
-        const currentSignature = requestSignature(state.form[sessionId])
-        if (currentSignature !== beforeSignature) continue
-        delete merged[sessionId]
-      }
-      return { form: merged }
+
+      store.setState((state: DirectoryStore) => {
+        const merged = { ...state.form }
+        for (const [sessionId, forms] of Object.entries(grouped)) {
+          merged[sessionId] = forms
+        }
+        for (const sessionId of candidates) {
+          if (grouped[sessionId]) continue
+          const beforeSignature = beforeSignatures.get(sessionId) ?? ""
+          const currentSignature = requestSignature(state.form[sessionId])
+          if (currentSignature !== beforeSignature) continue
+          delete merged[sessionId]
+        }
+        return { form: merged }
+      })
+      return true
     })
+    if (!applied) return false
   } catch {
     succeeded = false
   }

@@ -2275,7 +2275,7 @@ export async function cancelForm(sessionId: string, formId: string, message?: st
       throw new Error("Form cancellation failed")
     }
     removeFormRequestFromChildStores(sessionId, formId)
-    if (message === undefined) noteLocalFormCancelled(sessionId, formId)
+    noteLocalFormCancelled(sessionId, formId, message)
   } catch (error) {
     if (isFormRequestNotFoundError(error)) {
       removeFormRequestFromChildStores(sessionId, formId)
