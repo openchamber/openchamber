@@ -977,6 +977,21 @@ describe('message queue runtime', () => {
     });
   });
 
+  it('delivers a path note and hands its original back only to take', async () => {
+    const { runtime, openCode, emit } = createRuntime();
+    runtime.start();
+    const original = { mimeType: 'application/pdf', dataUrl: 'data:application/pdf;base64,JVBERg==', saveOnSend: true };
+    const note = { id: 'a', filename: 'manual.pdf', mimeType: 'text/plain', size: 4, source: 'local', dataUrl: 'data:text/plain,saved', original };
+    const kept = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'keep', attachments: [note] }));
+    expect(runtime.sessionSnapshot(SESSION).items[0].attachments[0]).not.toHaveProperty('original');
+    expect((await runtime.take(SESSION, kept.itemId)).item.attachments[0].original).toEqual(original);
+
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'send', text: 'send', attachments: [note] }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await vi.waitFor(() => expect(openCode.state.sent).toHaveLength(1));
+    expect(openCode.state.sent[0].body.files).toEqual([{ uri: 'data:text/plain,saved', name: 'manual.pdf' }]);
+  });
+
   // OpenCode's commit deletes everything admitted past the revert's boundary (#6244).
   it('commits a staged revert before admitting captured context', async () => {
     const { runtime, openCode, emit, replayAfterSend } = createRuntime();

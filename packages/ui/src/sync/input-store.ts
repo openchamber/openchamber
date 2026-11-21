@@ -4,7 +4,7 @@ import type { AttachIssueRequest } from '@openchamber/sdk'
 import type { ContextPartMetadata } from '@/lib/messages/contextParts'
 import type { AttachedFile } from "@/stores/types/sessionTypes"
 import type { InlineCommentDraftTarget } from "@/stores/useInlineCommentDraftStore"
-import { HeicConversionError, prepareAttachmentFiles } from "./attachment-files"
+import { HeicConversionError, isDocumentAttachmentFilename, PATH_NOTE_MEDIA_TYPE, prepareAttachmentFiles } from "./attachment-files"
 import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
 import { pathForDroppedFile } from "@/lib/desktop"
 import { assignFileAttachmentFilenames, attachmentBasename } from "@/lib/attachmentIdentity"
@@ -116,6 +116,19 @@ export const prepareLocalAttachments = async (
   return attachedFiles
 }
 
+const prepareBinaryAttachment = async (file: File): Promise<AttachedFile> => {
+  const mimeType = file.type.split(";", 1)[0]?.trim() || "application/octet-stream"
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    file,
+    dataUrl: await readFileAsDataUrl(file, mimeType),
+    mimeType,
+    filename: file.name,
+    size: file.size,
+    source: "local",
+  }
+}
+
 const prepareFileReference = async (file: File, path: string): Promise<AttachedFile> => {
   const note = new File(
     [`File on disk: ${path} (${formatFileSize(file.size)}). Its content is not in this message. Read what you need from it with your tools.\n`],
@@ -125,7 +138,7 @@ const prepareFileReference = async (file: File, path: string): Promise<AttachedF
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     file: note,
-    dataUrl: await readFileAsDataUrl(note, "text/plain"),
+    dataUrl: await readFileAsDataUrl(note, PATH_NOTE_MEDIA_TYPE),
     mimeType: "text/plain",
     filename: file.name,
     size: file.size,
@@ -483,7 +496,12 @@ export const useInputStore = create<InputState>()((set, get) => ({
         }))
       }
       if (isStale()) return false
-      if (!attachedFiles) return referencePath ? attachReference(referencePath) : false
+      if (!attachedFiles) {
+        if (referencePath) return attachReference(referencePath)
+        if (INTAKE_REDACTED_FILENAME.test(file.name) || isDocumentAttachmentFilename(file.name)) return false
+        attachedFiles = [await prepareBinaryAttachment(file)]
+        if (isStale()) return false
+      }
 
       const generatedFilenames = attachedFiles.slice(1).map((attachment) => attachment.filename)
       if (hasGeneratedFilenameCollision(generatedFilenames, attachedFilesFor(get(), target))) continue
@@ -526,7 +544,12 @@ export const useInputStore = create<InputState>()((set, get) => ({
         failed.push(file.filename)
         continue
       }
-      const reference = { ...await prepareFileReference(file.file, path), id: file.id, filename: file.filename }
+      const reference: AttachedFile = {
+        ...await prepareFileReference(file.file, path),
+        id: file.id,
+        filename: file.filename,
+        original: { mimeType: file.mimeType, dataUrl: file.dataUrl, saveOnSend: true },
+      }
       const files = attachedFilesFor(get(), target)
       if (!files.some((entry) => entry.id === file.id)) continue
       get().setAttachedFiles(files.map((entry) => (entry.id === file.id ? reference : entry)), target ?? undefined)
