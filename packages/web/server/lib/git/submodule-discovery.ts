@@ -67,17 +67,19 @@ const validateModulePath = (value: string, limits: DiscoveryLimits) => {
   return value;
 };
 
-const validateModuleUrl = (value: string) => {
+const unsafeModuleUrl = (submodulePath: string) => Object.assign(manifestError('Submodule URL is unsafe'), { submodulePath });
+
+const validateModuleUrl = (value: string, modulePath: string) => {
   if (/^(?:\.\.?\/)/.test(value)) {
     if (CONTROL_PATTERN.test(value) || value.includes('\\') || /[?#]/.test(value)) {
-      throw manifestError('Submodule URL is unsafe');
+      throw unsafeModuleUrl(modulePath);
     }
     return value;
   }
   try {
-    return normalizeDiscoveryEndpoint(value).endpoint;
+    return normalizeDiscoveryEndpoint(value, { trailingSlash: true }).endpoint;
   } catch {
-    throw manifestError('Submodule URL is unsafe');
+    throw unsafeModuleUrl(modulePath);
   }
 };
 
@@ -150,7 +152,7 @@ export function parseSubmoduleManifest({ gitmodulesConfig, gitlinks, recursionDe
     modules.push(Object.freeze({
       name: entry.name,
       path: modulePath,
-      url: validateModuleUrl(entry.url),
+      url: validateModuleUrl(entry.url, modulePath),
       update,
       gitlink: commit,
     }));

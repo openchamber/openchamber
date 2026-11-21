@@ -52,6 +52,12 @@ export type Completion = {
   stepResults?: { step: string; status: string; error?: PublicFailure }[];
 };
 export type HydrationFailure = { status: string; error: { code: string; message: string } };
+type HydrationFailurePart = HydrationFailure & { path: string };
+export type CheckoutHydrationFailure = Readonly<{
+  status: string;
+  submodules: HydrationFailurePart[];
+  lfs: HydrationFailurePart[];
+}>;
 export type RepositoryAuthority = {
   directory?: string;
   repositoryId: string;
@@ -74,7 +80,7 @@ export type HydrationPlan = HydrationInput & {
   plannedRequirements?: HydrationRequirement[];
   plannedSourceRequired?: boolean | undefined;
   expectedHeadSha?: string;
-  preparedHydrationFailure?: HydrationFailure;
+  preparedHydrationFailure?: CheckoutHydrationFailure;
   hydrateSubmodules?: boolean;
 };
 export type AuxiliaryAuthority = {

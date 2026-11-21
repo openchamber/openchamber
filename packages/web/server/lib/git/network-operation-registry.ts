@@ -158,7 +158,7 @@ function isHydrationPart(value: unknown, pathRequired: boolean): value is Omit<S
       ? value.error === undefined
       : value.error !== undefined);
 }
-const expectedHydrationStatus = (parts: StoredHydrationPart[]) => {
+export const expectedHydrationStatus = (parts: readonly { status: string }[]) => {
   const statuses = parts.map((entry) => entry.status);
   if (!statuses.length || statuses.every((status) => status === 'not-needed')) return 'not-needed';
   for (const status of ['cancelled', 'invalid', 'client-missing', 'authorization-required', 'failed']) {
@@ -197,7 +197,7 @@ const isSafeDisplayEndpoint = (value: unknown): value is string => {
     return false;
   }
 };
-const isRelativeCheckoutPath = (value: unknown): value is string => isBoundedString(value, 4096)
+export const isRelativeCheckoutPath = (value: unknown): value is string => isBoundedString(value, 4096)
   && /^[\x20-\x7e\u0080-\uffff]*$/.test(value)
   && value !== '..' && !value.startsWith('../') && !value.includes('/../')
   && !value.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(value) && !value.includes('\\');
