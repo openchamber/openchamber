@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import { I18nProvider } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { setTranscriptionPrompt } from '@/stores/useTranscriptionPromptStore';
 import { useI18nStore } from '@/lib/i18n/store';
 import { dict as ukDict } from '@/lib/i18n/messages/uk';
 import { buildSettingsSearchResults } from '@/lib/settings/search';
@@ -19,7 +20,7 @@ describe('VoiceSettings endpoint paths', () => {
   let initialConfig: ReturnType<typeof useConfigStore.getState>;
   let initialI18n: ReturnType<typeof useI18nStore.getState>;
 
-  const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node', 'ResizeObserver', 'localStorage', 'sessionStorage', 'IS_REACT_ACT_ENVIRONMENT', 'fetch'];
+  const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node', 'ResizeObserver', 'localStorage', 'sessionStorage', 'IS_REACT_ACT_ENVIRONMENT', 'fetch', 'requestAnimationFrame', 'cancelAnimationFrame'];
 
   beforeEach(() => {
     windowInstance = new Window();
@@ -37,6 +38,9 @@ describe('VoiceSettings endpoint paths', () => {
       sessionStorage: windowInstance.sessionStorage,
       IS_REACT_ACT_ENVIRONMENT: true,
       fetch: async () => ({ ok: false, status: 503, json: async () => ({}), text: async () => '' }),
+      // The prompt textarea's overlay scrollbar measures on animation frames.
+      requestAnimationFrame: windowInstance.requestAnimationFrame.bind(windowInstance),
+      cancelAnimationFrame: windowInstance.cancelAnimationFrame.bind(windowInstance),
     });
     host = document.createElement('div');
     document.body.append(host);
@@ -48,6 +52,7 @@ describe('VoiceSettings endpoint paths', () => {
       await act(async () => root.unmount());
     } finally {
       useConfigStore.setState(initialConfig);
+      setTranscriptionPrompt('');
       useI18nStore.setState(initialI18n);
       windowInstance.close();
       for (const [name, descriptor] of globalDescriptors) {
@@ -113,5 +118,29 @@ describe('VoiceSettings endpoint paths', () => {
     expect(results()).toEqual([]);
     expect(host.querySelector('[data-settings-item="voice.tts-endpoint-path"]')).toBeNull();
     expect(host.querySelector('[data-settings-item="voice.stt-endpoint-path"]')).toBeNull();
+  });
+
+  test('shows the saved transcription prompt only for a server provider, and search finds it there', async () => {
+    const prompt = 'Español e inglés.\nTérminos: OpenChamber, Kubernetes';
+    useConfigStore.setState({ dictationEnabled: true, sttProvider: 'openai-compatible' });
+    setTranscriptionPrompt(prompt);
+    const results = () => buildSettingsSearchResults({
+      query: 'vocabulary',
+      t: (key) => key, getPageTitle: (page) => page,
+      runtimeCtx: {
+        isVSCode: false, isWeb: true, isDesktop: false, isMobile: false,
+        isDesktopLocalOrigin: false, isMac: false, isWindows: false, isLinux: false,
+        routingAvailable: false, enterpriseMode: false, jevBlockedByEnterprise: false,
+      },
+    }).map((result) => result.id);
+    await act(async () => root.render(<I18nProvider><VoiceSettings /></I18nProvider>));
+
+    const field = host.querySelector<HTMLTextAreaElement>('[data-settings-item="voice.stt-prompt"] textarea');
+    expect(field?.value).toBe(prompt);
+    expect(results()).toContain('voice.stt-prompt');
+
+    await act(async () => { useConfigStore.setState({ sttProvider: 'local' }); });
+    expect(host.querySelector('[data-settings-item="voice.stt-prompt"]')).toBeNull();
+    expect(results()).not.toContain('voice.stt-prompt');
   });
 });

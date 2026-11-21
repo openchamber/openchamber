@@ -34,12 +34,11 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useI18n } from '@/lib/i18n';
 import { useLocalTTS } from '@/hooks/useLocalTTS';
 import { disposePreviewAudio } from './voicePreviewAudio';
+import { TranscriptionPromptField } from './TranscriptionPromptField';
+import { TranscriptCorrectionRow } from './TranscriptCorrectionRow';
 import { toast } from '@/components/ui';
 import type { VoiceApiKeyKind } from '@/lib/voiceKeysApi';
 import { Spinner } from '@/components/ui/spinner';
-import { SettingsInlineLink } from '@/components/sections/classification/JevAccessNote';
-import { selectSmallModelAvailability, useSmallModelStore } from '@/stores/useSmallModelStore';
-import { useUIStore } from '@/stores/useUIStore';
 
 const VOICE_TEXT_INPUT_CLASS = 'oc-surface-elevated oc-raised oc-field w-full min-w-0 h-8 rounded-md bg-surface-elevated px-3 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none';
 
@@ -300,43 +299,6 @@ const LocalModelPicker = ({
                 );
             })}
         </div>
-    );
-};
-
-const openSmallModelSettings = (): void => {
-    useUIStore.getState().requestSettingsJump('sessions', 'sessions.small-model');
-};
-
-const TranscriptCorrectionRow = () => {
-    const { t } = useI18n();
-    const enabled = useConfigStore((state) => state.sttCorrectTranscript);
-    const setEnabled = useConfigStore((state) => state.setSttCorrectTranscript);
-    const ensureSmallModel = useSmallModelStore((state) => state.ensureFresh);
-    const smallModel = useSmallModelStore((state) => selectSmallModelAvailability(state, null));
-
-    useEffect(() => {
-        if (enabled) {
-            void ensureSmallModel(null);
-        }
-    }, [enabled, ensureSmallModel]);
-
-    return (
-        <SettingsCheckboxRow
-            checked={enabled}
-            onChange={setEnabled}
-            label={t('settings.voice.page.field.correctTranscript')}
-            info={t('settings.voice.page.field.correctTranscriptInfo')}
-            footer={enabled ? (
-                <p className={SETTINGS_HELPER_CLASS}>
-                    {smallModel === 'unavailable' ? (
-                        <>{t('settings.voice.page.field.correctTranscriptUnavailable')}{' '}</>
-                    ) : null}
-                    <SettingsInlineLink onClick={openSmallModelSettings}>
-                        {t('settings.voice.page.field.correctTranscriptModelLink')}
-                    </SettingsInlineLink>
-                </p>
-            ) : null}
-        />
     );
 };
 
@@ -1110,6 +1072,7 @@ export const VoiceSettings: React.FC = () => {
                                         className={VOICE_TEXT_INPUT_CLASS}
                                     />
                                 </SettingsStackedField>
+                                <TranscriptionPromptField />
                             </div>
                         )}
 

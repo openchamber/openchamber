@@ -17,6 +17,12 @@ This module owns OpenChamber's settings persistence: the instance and profile fi
 
 ## Decisions
 
+### Why settings preserve the transcription prompt as typed
+
+`settings-dictation.ts` keeps `sttPrompt` untrimmed because the client applies
+the save response to the field as the user types. Dictation trims it when
+starting a transcription.
+
 ### Why request values and sanitized settings have separate types
 
 `settings-helpers.ts` keeps unchecked settings fields schema-derived and unknown;

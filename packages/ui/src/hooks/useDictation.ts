@@ -5,6 +5,7 @@ import { dictationClient, type DictationStartOptions } from '@/lib/dictation/dic
 import { DictationStreamSender } from '@/lib/dictation/dictation-stream-sender';
 import { useDictationAudioSource, type DictationLevelListener } from '@/lib/dictation/use-dictation-audio-source';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { readTranscriptionPrompt } from '@/stores/useTranscriptionPromptStore';
 
 export type DictationStatus = 'idle' | 'recording' | 'uploading' | 'failed';
 
@@ -41,15 +42,18 @@ export const getDictationStartOptions = (): DictationStartOptions => {
     const language = state.sttLanguage?.trim();
     const correct = state.sttCorrectTranscript ? { correct: true } : {};
     if (state.sttProvider === 'openai-compatible') {
+        const openaiCompatible: NonNullable<DictationStartOptions['openaiCompatible']> = {
+            baseUrl: state.sttServerUrl,
+            model: state.sttModel,
+            endpointPath: state.sttEndpointPath || undefined,
+        };
+        const prompt = readTranscriptionPrompt().trim();
+        if (prompt) openaiCompatible.prompt = prompt;
         return {
             provider: 'openai-compatible',
             ...(language ? { language } : {}),
             ...correct,
-            openaiCompatible: {
-                baseUrl: state.sttServerUrl,
-                model: state.sttModel,
-                endpointPath: state.sttEndpointPath || undefined,
-            },
+            openaiCompatible,
         };
     }
     return {
