@@ -196,13 +196,19 @@ Quels fournisseurs de modèles peuvent être utilisés, c’est OpenCode qui le 
 }
 ```
 
-Un fournisseur interdit disparaît même si quelqu’un ajoute une clé pour lui. Placez les politiques dans le fichier global `~/.config/opencode/opencode.jsonc`, où un projet ne peut pas les lever, ou diffusez-les depuis un espace de travail OpenCode Console, qui a le dernier mot. Le mode entreprise couvre en plus ce qu’OpenChamber envoie lui-même.
+Un fournisseur interdit disparaît même si quelqu’un ajoute une clé pour lui. Placez les politiques dans la configuration système d’OpenCode (`/etc/opencode/opencode.jsonc` sous Linux, `%ProgramData%\opencode\opencode.jsonc` sous Windows, `/Library/Application Support/opencode/opencode.jsonc` sous macOS) et ne laissez que les administrateurs écrire dans son dossier, comme dans l’exemple Windows ci-dessus, ou diffusez-les depuis un espace de travail OpenCode Console. Le chemin de la configuration système se trouve sur la machine qui exécute OpenCode. Dans l’installation Docker ci-dessus, OpenCode tourne dans le conteneur, donc montez-y le fichier en lecture seule, sous `volumes` dans `docker-compose.yml` : `- ./opencode-policy.jsonc:/etc/opencode/opencode.jsonc:ro`. Les deux l’emportent sur le fichier global `~/.config/opencode/opencode.jsonc` de l’utilisateur et sur les fichiers du projet, et la configuration système l’emporte aussi sur la Console. Les politiques de la Console ne s’appliquent que tant que l’espace de travail est connecté et sont effacées à la déconnexion, donc les restrictions qui doivent tenir après une déconnexion vont dans la configuration système. Le fichier global empêche un projet de les lever, mais l’utilisateur peut le modifier. Le mode entreprise couvre en plus ce qu’OpenChamber envoie lui-même.
 
-Les recherches web et les récupérations de pages de l’agent passent aussi par OpenCode, vers le service de recherche et vers les pages elles-mêmes. Si elles ne doivent pas quitter votre réseau, interdisez-les avec le même type de politique :
+Les recherches web et les récupérations de pages de l’agent passent aussi par OpenCode, vers le service de recherche et vers les pages elles-mêmes. Si elles ne doivent pas quitter votre réseau, interdisez-les avec le même type de politique. Si la configuration a déjà des politiques, ajoutez les deux entrées `tool.use` à la fin de leur liste et gardez les entrées des fournisseurs et toutes les autres politiques. Si le fichier a à la fois un tableau `policies` de premier niveau et `experimental.policies`, ajoutez-les au premier : OpenCode lit `experimental.policies` d’abord, et la dernière entrée correspondante l’emporte. Pour une nouvelle configuration, l’exemple fonctionne tel quel :
 
 ```jsonc
-{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
-{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+{
+  "experimental": {
+    "policies": [
+      { "action": "tool.use", "resource": "websearch:*", "effect": "deny" },
+      { "action": "tool.use", "resource": "webfetch:*", "effect": "deny" }
+    ]
+  }
+}
 ```
 
 ## Pages liées

@@ -196,13 +196,19 @@ Which model providers may be used at all is decided by OpenCode, not OpenChamber
 }
 ```
 
-A denied provider disappears even if someone adds a key for it. Put the policies in the global `~/.config/opencode/opencode.jsonc`, where a project can't lift them, or deliver them from an OpenCode Console workspace, which has the final say. Enterprise mode covers what OpenChamber itself sends on top of that.
+A denied provider disappears even if someone adds a key for it. Put the policies in OpenCode's system config (`/etc/opencode/opencode.jsonc` on Linux, `%ProgramData%\opencode\opencode.jsonc` on Windows, `/Library/Application Support/opencode/opencode.jsonc` on macOS) and let only administrators write to its folder, as in the Windows example above, or deliver them from an OpenCode Console workspace. The system config path is on the machine that runs OpenCode; in the Docker setup above OpenCode runs inside the container, so mount the file there read-only, under `volumes` in `docker-compose.yml`: `- ./opencode-policy.jsonc:/etc/opencode/opencode.jsonc:ro`. Both outrank the user's global `~/.config/opencode/opencode.jsonc` and the project's files, and the system config also outranks the Console. Console policies apply only while the workspace is connected and are cleared when it disconnects, so restrictions that must hold after a disconnect go in the system config. The global file keeps a project from lifting them, but the user can edit it. Enterprise mode covers what OpenChamber itself sends on top of that.
 
-The agent's web searches and page fetches also go through OpenCode, to the search service and to the pages themselves. If they shouldn't leave your network, deny them with the same kind of policy:
+The agent's web searches and page fetches also go through OpenCode, to the search service and to the pages themselves. If they shouldn't leave your network, deny them with the same kind of policy. If the config already has policies, add the two `tool.use` entries at the end of its list and keep the provider entries and any other policies there. When the file has both a top-level `policies` array and `experimental.policies`, add them to the top-level one: OpenCode reads `experimental.policies` first, and the last matching entry wins. For a new config, the example works on its own:
 
 ```jsonc
-{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
-{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+{
+  "experimental": {
+    "policies": [
+      { "action": "tool.use", "resource": "websearch:*", "effect": "deny" },
+      { "action": "tool.use", "resource": "webfetch:*", "effect": "deny" }
+    ]
+  }
+}
 ```
 
 ## Related
