@@ -693,32 +693,32 @@ export const registerAuthAndAccessRoutes = (app: Application, dependencies: Auth
     res.status(statusCode).json({ error: 'Invalid or expired pairing session' });
   };
 
-  const selfAuthenticatedApiPaths = new Set(['/api/git/repository-credential']);
+  const selfAuthenticatedApiPaths = new Set(['/git/repository-credential']);
 
-  const isGuestOauthCallback = (req: Request) => (
+  const isGuestOauthCallback = (req: Request, pathname: string) => (
     req.method === 'GET'
-    && /^\/(?:guests\/[a-z][a-z0-9-]*|tracker\/ext-[a-z][a-z0-9-]*)\/oauth\/callback$/.test(req.path || '')
+    && /^\/(?:guests\/[a-z][a-z0-9-]*|tracker\/ext-[a-z][a-z0-9-]*)\/oauth\/callback$/.test(pathname)
   );
 
-  const isMcpOauthCallback = (req: Request) => (
+  const isMcpOauthCallback = (req: Request, pathname: string) => (
     req.method === 'GET'
-    && /^\/mcp\/oauth\/[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?\/callback$/.test(req.path || '')
+    && /^\/mcp\/oauth\/[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?\/callback$/.test(pathname)
   );
 
-  const isFilePreviewRead = (req: Request) => (
+  const isFilePreviewRead = (req: Request, pathname: string) => (
     req.method === 'GET'
-    && /^\/fs\/preview\/[^/]+\/./.test(req.path || '')
+    && /^\/fs\/preview\/[^/]+\/./.test(pathname)
   );
 
-  const isGuestFrameFileRead = (req: Request) => (
+  const isGuestFrameFileRead = (req: Request, pathname: string) => (
     req.method === 'GET'
-    && /^\/guest-files\/[^/]+\/./.test(req.path || '')
+    && /^\/guest-files\/[^/]+\/./.test(pathname)
   );
 
   const requireApiAuth: RequestHandler = async (req, res, next) => {
-    const pathname = (req.originalUrl || '').split('?', 1).join('');
+    const pathname = (req.originalUrl || '').split('?', 1).join('').replace(/^\/api(?=\/|$)/, '') || '/';
     if (selfAuthenticatedApiPaths.has(pathname)) return next();
-    if (isGuestOauthCallback(req) || isMcpOauthCallback(req) || isFilePreviewRead(req) || isGuestFrameFileRead(req)) {
+    if (isGuestOauthCallback(req, pathname) || isMcpOauthCallback(req, pathname) || isFilePreviewRead(req, pathname) || isGuestFrameFileRead(req, pathname)) {
       return next();
     }
     const requestScope = tunnelAuthController.classifyRequestScope(req);
