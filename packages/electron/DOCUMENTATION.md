@@ -120,7 +120,7 @@ Tray image changes cost CPU in both the main process and WindowServer throughout
 
 ### Why a downloaded update waits in the desktop process
 
-The countdown and the installer handoff exist only in the desktop app. The embedded server is the place that already sees every client's sessions, terminals, and scheduled work, so it answers whether this process is idle and the desktop process keeps the queue. The queue is memory for this run and this downloaded release. Quit drops it. `autoInstallOnAppQuit` stays off, so closing the app does not install on its own.
+The countdown and the installer handoff exist only in the desktop app. The embedded server is the place that already sees every client's sessions, terminals, and scheduled work, so it answers whether this process is idle and the desktop process keeps the queue. The queue stays in memory for the current app run and downloaded release. Quit drops it. `autoInstallOnAppQuit` stays off, so closing the app does not install on its own.
 
 ### Why the countdown is its own window
 
