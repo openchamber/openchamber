@@ -1,7 +1,7 @@
 // packages/sdk/examples/tools-only/mcp.ts
 import { createInterface } from "node:readline";
 
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function getEnumValues(entries) {
   const numericValues = Object.values(entries).filter((v) => typeof v === "number");
   const values = Object.entries(entries).filter(([k, _]) => numericValues.indexOf(+k) === -1).map(([_, v]) => v);
@@ -556,7 +556,7 @@ function constantCatch(value) {
   return fn;
 }
 
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/core.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/core.js
 var _a;
 var _zodDesc = { value: undefined, enumerable: false };
 var _E = "captureStackTrace" in Error ? Error : null;
@@ -674,7 +674,7 @@ function config(newConfig) {
     Object.assign(globalConfig, newConfig);
   return globalConfig;
 }
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/errors.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/errors.js
 function _getMessage() {
   const internals = this._zod;
   internals.message ?? (internals.message = JSON.stringify(internals.def, jsonStringifyReplacer, 2));
@@ -789,7 +789,7 @@ function formatError(error, mapper = (issue) => issue.message) {
   return fieldErrors;
 }
 
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/parse.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/parse.js
 function finalizeParams(callee, params) {
   return { callee: params?.callee ?? callee, Err: params?.Err };
 }
@@ -936,7 +936,7 @@ var _safeEncodeAsync = (_Err) => async (schema, value, _ctx) => {
 var _safeDecodeAsync = (_Err) => async (schema, value, _ctx) => {
   return _safeParseAsync(_Err)(schema, value, _ctx);
 };
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/regexes.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/regexes.js
 var cuid = /^[cC][0-9a-z]{6,}$/;
 var cuid2 = /^[0-9a-z]+$/;
 var ulid = /^[0-7][0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{25}$/;
@@ -992,7 +992,7 @@ var number = /^-?\d+(?:\.\d+)?$/;
 var lowercase = /^[^A-Z]*$/;
 var uppercase = /^[^a-z]*$/;
 
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/checks.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/checks.js
 var $ZodCheck = /* @__PURE__ */ $constructor("$ZodCheck", (inst, def) => {
   var _a;
   inst._zod ?? (inst._zod = {});
@@ -1308,7 +1308,7 @@ var $ZodCheckOverwrite = /* @__PURE__ */ $constructor("$ZodCheckOverwrite", (ins
   };
 });
 
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/doc.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/doc.js
 class Doc {
   constructor(args = [], closed = {}) {
     this.content = [];
@@ -1350,14 +1350,14 @@ ${content.join(`
   }
 }
 
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/versions.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/versions.js
 var version = {
   major: 4,
   minor: 6,
   patch: 7
 };
 
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/schemas.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/schemas.js
 var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
   var _a;
   inst ?? (inst = {});
@@ -2711,7 +2711,7 @@ function handleRefineResult(result, payload, input, inst) {
     payload.issues.push(issue(_iss));
   }
 }
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/memoizer.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/memoizer.js
 class $ZodCyclicError extends Error {
   constructor() {
     super(`Cannot parse a reference cycle that closes through a transform`);
@@ -2980,7 +2980,7 @@ function isBackEdge(ctx, value) {
   const backEdges = ctx[STATE]?.backEdges;
   return backEdges !== undefined && isRef(value) && backEdges.has(value);
 }
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/locales/en.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/locales/en.js
 var error = () => {
   const Sizable = {
     string: { unit: "characters", verb: "to have" },
@@ -3102,7 +3102,7 @@ function en_default() {
     localeError: error()
   };
 }
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/registries.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/registries.js
 var _a2;
 class $ZodRegistry {
   constructor() {
@@ -3149,7 +3149,7 @@ function registry() {
 }
 (_a2 = globalThis).__zod_globalRegistry ?? (_a2.__zod_globalRegistry = registry());
 var globalRegistry = globalThis.__zod_globalRegistry;
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/api.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/api.js
 function snapshotChecks(def) {
   if (def.checks)
     def.checks = [...def.checks];
@@ -3591,7 +3591,7 @@ function _check(fn, params) {
   ch._zod.check = fn;
   return ch;
 }
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/to-json-schema.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/to-json-schema.js
 function assignProps(target, ...sources) {
   for (const source of sources) {
     for (const key of Reflect.ownKeys(source)) {
@@ -4114,7 +4114,7 @@ var createStandardJSONSchemaMethod = (schema, io, processors = {}) => (params) =
   extractDefs(ctx, schema);
   return finalize(ctx, schema);
 };
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/json-schema-processors.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/json-schema-processors.js
 var narrowMin = (agg, key, value) => {
   if (agg[key] === undefined || value > agg[key])
     agg[key] = value;
@@ -4531,7 +4531,7 @@ var optionalProcessor = (schema, ctx, _json, params) => {
   const seen = ctx.seen.get(schema);
   seen.ref = def.innerType;
 };
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/classic/errors.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/classic/errors.js
 var _installedErrorProtos = /* @__PURE__ */ new WeakSet([Object.prototype, Error.prototype]);
 function _lazyMethod(proto, key, make) {
   Object.defineProperty(proto, key, {
@@ -4576,7 +4576,7 @@ var ZodRealError = /* @__PURE__ */ $constructor("ZodError", initializer2, undefi
   Parent: Error
 });
 
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/classic/parse.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/classic/parse.js
 var parse2 = /* @__PURE__ */ _parse(ZodRealError);
 var parseAsync = /* @__PURE__ */ _parseAsync(ZodRealError);
 var safeParse = /* @__PURE__ */ _safeParse(ZodRealError);
@@ -4590,7 +4590,7 @@ var safeDecode = /* @__PURE__ */ _safeDecode(ZodRealError);
 var safeEncodeAsync = /* @__PURE__ */ _safeEncodeAsync(ZodRealError);
 var safeDecodeAsync = /* @__PURE__ */ _safeDecodeAsync(ZodRealError);
 
-// ../../../../Users/btriapitsyn/projects/openchamber/node_modules/.bun/zod@4.6.7/node_modules/zod/v4/classic/schemas.js
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/classic/schemas.js
 function _ensureDefaultLocale() {
   if (!globalConfig.localeError)
     config(en_default());
