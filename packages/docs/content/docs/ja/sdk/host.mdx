@@ -36,6 +36,8 @@ const host = connectHost();
 
 アクセストークンはここにも `request` の結果にも決して現れません。
 
+`ready.session` と `onSession` には、オプションの `context` と `tokens` も含まれます。`context: { tokens, limit } | null` は直近のアシスタントのステップ後のコンテキスト使用量で、モデルの上限が不明な場合は `limit` が `null` です。圧縮後は次の計測まで `context` が `null` になります。`tokens: { prompt, output, reasoning, cacheRead, cacheWrite, cacheHitPercent } | null` はセッション全体の累積トークン数です。`prompt` にはキャッシュされていない入力に加え、キャッシュの読み書きが含まれます。プロンプトトークンがない場合、`cacheHitPercent` は `null` です。未計測時はどちらも `null` で、古いホストではフィールドが省略されます。変更は `onSession` で通知されます。
+
 `onDirectory`、`onSession`、`onSessionLifecycle`、`onConnection`、`onSettings`、`onItem` は、遅れて購読しても最新の値を再送し、その後は変化のたびに発火し続けます。
 
 `theme.tokens` には `primaryText`、`successText`、`warningText`、`errorText`、`infoText` が含まれます。これらは必須フィールドで、ホストが計算した文字色を持ちます。ニュートラルな背景や UI キットの淡い色付きコントロール用で、濃い単色の塗りつぶし用ではありません。`applyHostReady` はスナップショットごとにこれらを適用します。CSS 変数については [UI キット](/sdk/ui/)を参照してください。

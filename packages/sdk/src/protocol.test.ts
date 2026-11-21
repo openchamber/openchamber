@@ -174,6 +174,25 @@ describe('parseHostMessage', () => {
     expect(older.payload.device).toBeUndefined();
   });
 
+  test('passes context and token totals to guests on ready and session updates', () => {
+    const session = { id: 'ses-1', title: 'Hello', busy: false,
+      context: { tokens: 12_000, limit: 200_000 },
+      tokens: { prompt: 120_000, output: 5_000, reasoning: 800, cacheRead: 90_000, cacheWrite: 10_000, cacheHitPercent: 75 },
+    };
+    const ready = parseHostMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1,
+      type: 'ready', payload: { ...readyPayload, session } });
+    const push = parseHostMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1,
+      type: 'session', payload: { session } });
+    expect(ready?.type === 'ready' ? ready.payload.session : null).toEqual(session);
+    expect(push?.type === 'session' ? push.payload.session : null).toEqual(session);
+    const unknown = { ...session, context: null, tokens: null };
+    expect(parseHostMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1,
+      type: 'session', payload: { session: unknown } })).toMatchObject({ payload: { session: unknown } });
+    const invalid = { ...session, tokens: { ...session.tokens, prompt: -1 } };
+    expect(hostMessageSchema.safeParse({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1,
+      type: 'session', payload: { session: invalid } }).success).toBe(false);
+  });
+
   test('accepts a null directory', () => {
     const message = parseHostMessage({
       channel: OPENCHAMBER_SDK_CHANNEL,

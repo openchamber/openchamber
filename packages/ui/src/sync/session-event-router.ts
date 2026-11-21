@@ -64,7 +64,7 @@ export const readDeferredGlobalUpdates = (): ReadonlyMap<string, DeferredGlobalS
   return next
 }
 
-const subscribeDeferredGlobalUpdates = (listener: () => void): (() => void) => {
+export const subscribeDeferredGlobalUpdates = (listener: () => void): (() => void) => {
   deferredListeners.add(listener)
   return () => { deferredListeners.delete(listener) }
 }

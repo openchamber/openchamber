@@ -36,6 +36,8 @@ No es un callback de montaje único. Monta la UI y registra suscripciones una ve
 
 Los tokens de acceso nunca aparecen aquí ni en el resultado de un `request`.
 
+`ready.session` y `onSession` también incluyen los campos opcionales `context` y `tokens`. `context: { tokens, limit } | null` muestra la ocupación de la ventana de contexto tras el último paso del asistente; `limit` es `null` si se desconoce el límite del modelo. Después de compactar, `context` sigue siendo `null` hasta una nueva medición. `tokens: { prompt, output, reasoning, cacheRead, cacheWrite, cacheHitPercent } | null` contiene los totales acumulados de la sesión. `prompt` incluye la entrada sin caché y las lecturas y escrituras de caché. `cacheHitPercent` es `null` si no hay tokens de prompt. Ambos valores son `null` antes de conocerse; los hosts antiguos omiten los campos. Los cambios llegan por `onSession`.
+
 `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` y `onItem` reproducen el último valor si te suscribes tarde, y luego siguen disparándose cada vez que cambia.
 
 `theme.tokens` incluye `primaryText`, `successText`, `warningText`, `errorText` e `infoText`. Estos campos obligatorios contienen colores de texto calculados por el host para fondos neutros y controles con tintes suaves del UI kit, no para rellenos de color sólido. `applyHostReady` los aplica en cada instantánea. Consulta [UI kit](/sdk/ui/) para las variables CSS.
