@@ -2304,6 +2304,7 @@ export const dict = {
   'session.newWorktree.noMatchingBranches': 'אין ענפים תואמים',
   'session.newWorktree.localBranches': 'ענפים מקומיים',
   'session.newWorktree.remoteBranches': 'ענפים מרוחקים',
+  'session.newWorktree.defaultBranches': 'ענפי ברירת מחדל',
   'session.newWorktree.branchName': 'שם הענף',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.startFromRepository.pullRequest': 'Issue או בקשת משיכה ב-{provider}',

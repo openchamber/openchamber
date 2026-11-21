@@ -2305,6 +2305,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.noMatchingBranches': 'لا توجد فروع مطابقة',
   'session.newWorktree.localBranches': 'الفروع المحلية',
   'session.newWorktree.remoteBranches': 'الفروع البعيدة',
+  'session.newWorktree.defaultBranches': 'الفروع الافتراضية',
   'session.newWorktree.branchName': 'اسم الفرع',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.startFromRepository.pullRequest': 'مشكلة أو طلب سحب في {provider}',

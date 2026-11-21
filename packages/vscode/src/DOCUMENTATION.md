@@ -71,6 +71,7 @@ The animated logo already indicates startup activity, so normal connection state
 - Batch staging retries unmatched paths individually because queued optimistic mutations can already have staged a deleted file, and one unmatched path would fail the whole batch. Stash apply first restores the index split and falls back to plain apply when that split cannot be reinstated.
 - Stash file counts use `stash show --include-untracked --name-only`, matching the server. The flag includes the third parent's untracked files without another Git process per stash.
 - Log base resolution prefers a local ref and falls back to `origin/<ref>` only when the local ref is missing. A newly initialized branch without commits has empty history. Remote URL parsing accepts CRLF and ignores suffix decorations after the URL-kind marker, preserves the first URL, and uses Git's name-as-URL fallback when no fetch URL exists.
+- Branch listing returns `defaultBranches` like the web server: each remote's default as its local `refs/remotes/<remote>/HEAD` records it, without contacting the remote or guessing one for a remote with no known HEAD. The raw `git branch` path (no Git extension) names remote branches `remotes/<remote>/<branch>` like the extension path and leaves out a remote's HEAD symref, so the shared UI can split local from remote and lift the defaults in the New Worktree base picker.
 
 ### Process, session and quota state
 

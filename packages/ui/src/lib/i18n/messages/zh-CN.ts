@@ -2370,6 +2370,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.noMatchingBranches': '没有匹配分支',
   'session.newWorktree.localBranches': '本地分支',
   'session.newWorktree.remoteBranches': '远程分支',
+  'session.newWorktree.defaultBranches': '默认分支',
   'session.newWorktree.branchName': '分支名',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.startFromRepository.pullRequest': '从 {provider} Issue/PR 开始',

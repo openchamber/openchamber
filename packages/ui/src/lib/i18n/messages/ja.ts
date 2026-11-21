@@ -2400,6 +2400,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.noMatchingBranches': '一致するブランチがありません',
   'session.newWorktree.localBranches': 'ローカルブランチ',
   'session.newWorktree.remoteBranches': 'リモートブランチ',
+  'session.newWorktree.defaultBranches': 'デフォルトブランチ',
   'session.newWorktree.branchName': 'ブランチ名',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.startFromRepository.pullRequest': '{provider} Issue/PRから開始',

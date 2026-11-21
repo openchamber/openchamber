@@ -2267,6 +2267,7 @@ export const dict = {
   'session.newWorktree.noMatchingBranches': 'Eşleşen branch yok',
   'session.newWorktree.localBranches': 'Yerel branch\'ler',
   'session.newWorktree.remoteBranches': 'Uzak branch\'ler',
+  'session.newWorktree.defaultBranches': 'Varsayılan branch\'ler',
   'session.newWorktree.branchName': 'Branch Adı',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.startFromRepository.pullRequest': "{provider} Issue/PR'dan başla",

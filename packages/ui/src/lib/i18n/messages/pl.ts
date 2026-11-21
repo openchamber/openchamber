@@ -3326,6 +3326,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.noBranchesFound': 'Nie znaleziono gałęzi',
   'session.newWorktree.noMatchingBranches': 'Brak pasujących gałęzi',
   'session.newWorktree.remoteBranches': 'Zdalne gałęzie',
+  'session.newWorktree.defaultBranches': 'Domyślne gałęzie',
   'session.newWorktree.resetToMatchBranchName': 'Zresetuj do nazwy zgodnej z gałęzią',
   'session.newWorktree.searchBranches': 'Szukaj gałęzi...',
   'session.newWorktree.selectBranch': 'Wybierz gałąź',

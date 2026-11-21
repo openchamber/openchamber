@@ -2149,6 +2149,7 @@ export const dict = {
   'session.newWorktree.noMatchingBranches': 'Aucune branche correspondante',
   'session.newWorktree.localBranches': 'Branches locales',
   'session.newWorktree.remoteBranches': 'Branches du dépôt distant',
+  'session.newWorktree.defaultBranches': 'Branches par défaut',
   'session.newWorktree.branchName': 'Nom de la branche',
   'session.newWorktree.branchNamePlaceholder': 'fonctionnalité/ma-fonctionnalité-géniale',
   'session.newWorktree.actions.startFromRepository.pullRequest': "À partir d'une issue/PR {provider}",
