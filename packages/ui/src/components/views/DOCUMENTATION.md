@@ -233,6 +233,12 @@ edge, or past it, the editor scrolls and the range follows. The click that
 ends a drag lands on whatever the pointer ended over, so each view's
 click-outside handler skips it (`isDragReleaseClick`) and the range stays.
 
+A text selection in the `FilesView` editor gets a Comment action from
+`comments/useCodeSelectionComment.tsx`: `useFileComments` passes the Files
+view's visibility as the scope that closes the action when it changes.
+`useFileEditorExtensions` adds the stable extension to the editor, so a scope
+change does not reconfigure the editor.
+
 ### Why a comment's annotation keeps one DOM node
 
 Pierre keys its annotation wrappers by index in the list, so an annotation that comes or goes rebuilds every one after it. A card is portalled into its annotation's node, so a new node would unmount the card and drop its height for a frame, which moves the diff and the scroll. `renderAnnotation` hands back the same node per annotation id, and the open comment field goes last in the list, so opening or closing it shifts nothing.
