@@ -1875,7 +1875,7 @@ export function createNetworkOperations({
         } else {
           temporaryRef = plan.target.operation === 'pull' ? `refs/openchamber/network/${plan.operationId}` : plan.target.destinationRef;
           await commandResult(plan, controls, [
-            'fetch', '--no-tags', ...(plan.target.operation === 'pull' ? ['--no-recurse-submodules'] : []),
+            'fetch', '--no-tags', '--no-recurse-submodules',
             '--', occupied(plan.rawEndpoint), singleRefFetchRefspec(occupied(plan.target.sourceRef), occupied(temporaryRef)),
           ], context, deadline, { transfer: true });
           await controls.markStepCompleted('transferred');
