@@ -59,6 +59,18 @@ height estimates.
   resolved and assistant messages supply no working directory; a write without
   a result diff still obtains its path from the input. Renames preserve an
   already touched file's identity and first-touch order.
+- Activity holds its fold open and stops moving its row window while the
+  reader acts on its text: a shown selection menu or an open inline comment
+  editor holds it, and the last release returns it to the turn's current state.
+  A turn that settles under an open comment keeps the step it quotes mounted,
+  steps below a shown page stay outside the collapse instead of joining it, and
+  no row leaves the seven-row live window between the selection and its
+  release. The hold holds on the phone too, where the comment is written in the
+  composer. When the answer lands, the page moves to the answer row and steps
+  below it shift up without a scroll; the fold's hold context reports that
+  (`pagesShown`) so an open menu remeasures its position and quote highlight.
+  When the quoted step itself becomes the final answer it moves to its own
+  row, and the comment moves with it (message module).
 - Answer chunk offsets are valid only when parsed Markdown blocks reconstruct
   the source exactly. Row cutting and size estimation agree with the parts
   MessageBody actually renders, including hoisted pages and settled forms, so
@@ -95,3 +107,14 @@ terminal notices for unmatched messages.
 A top-level patch describes the whole call, so adding its counts to per-file
 numbers double-counts edits. Its counts belong to a single file only when the
 call touches one file; multi-file calls retain unknown per-file numbers.
+
+### Why Activity yields while the reader acts on it, and not the other way round
+
+Both automatic behaviours unmount content: a settled fold renders nothing under
+its header, and the live window drops the messages older than its newest rows.
+The inline comment editor lives in the message body it quotes, so folding under
+it closed the box and lost what was typed. Holding the fold instead of moving
+the editor into the composer keeps one comment surface and one draft, and it
+keeps a plain text selection mounted while the reader copies it. The hold
+freezes the window where it was rather than clearing the trim, because letting
+the dropped rows back in would move the content the reader is pointing at.

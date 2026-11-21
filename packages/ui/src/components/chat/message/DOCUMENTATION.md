@@ -38,6 +38,16 @@ turn projection and scroll-follow policy.
   its voice overlay owns focus. Mobile composer comment mode keeps the quote
   until attach, cancel or a scope change; changing sessions or starting a new
   draft closes the menu even when no selection event fires.
+- An open desktop comment on message text follows its message when the timeline
+  remounts the body in another row, as when a working step becomes the final
+  answer: the leaving menu hands its quote, typed text and pasted images to the
+  next menu of the same session and message that can resolve the quote
+  (`selectionCommentHandoff.ts`), within two seconds; every leave and take
+  drops the drafts past that deadline, so abandoned ones do not pile up. The next menu takes the draft in a
+  passive effect, because it renders inside the body whose ref it reads and
+  React attaches that ref after the menu's layout effects. A menu hidden with
+  its session and shown again does not take back its own draft, so hiding
+  still closes the comment.
 - Attachment focus belongs to the column's composer before comment images are
   attached. Images from an abandoned comment never enter the composer.
 - Hidden user continuations are determined by display normalization, keeping
