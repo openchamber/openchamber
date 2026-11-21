@@ -2207,6 +2207,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.toast.actionFailed': 'ゴールの更新に失敗しました',
   'chat.goal.toast.distillFallback': '目標が上限を超え、要約もできませんでした — 監査には抜粋版を使用します',
   'chat.goal.row.aria': 'セッションゴール — 詳細を開く',
+  'chat.goal.row.pausedHint': 'チャット中も一時停止',
   'chat.goal.button.createAria': 'セッションゴールを設定',
   'chat.goal.button.manageAria': 'セッションゴールを管理',
   'chat.goal.button.armAria': '次のメッセージでゴールを開始',

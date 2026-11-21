@@ -2177,6 +2177,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.toast.actionFailed': '目标更新失败',
   'chat.goal.toast.distillFallback': '目标超出限制且无法提炼 — 审核将使用节选版本',
   'chat.goal.row.aria': '会话目标 — 打开详情',
+  'chat.goal.row.pausedHint': '聊天时保持暂停',
   'chat.goal.button.createAria': '设置会话目标',
   'chat.goal.button.manageAria': '管理会话目标',
   'chat.goal.button.armAria': '用下一条消息启动目标',

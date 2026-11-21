@@ -2188,6 +2188,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.toast.actionFailed': '目標更新失敗',
   'chat.goal.toast.distillFallback': '目標超出限制且無法提煉 — 稽核將使用節錄版本',
   'chat.goal.row.aria': '工作階段目標 — 開啟詳細資訊',
+  'chat.goal.row.pausedHint': '聊天時保持暫停',
   'chat.goal.button.createAria': '設定工作階段目標',
   'chat.goal.button.manageAria': '管理工作階段目標',
   'chat.goal.button.armAria': '用下一則訊息啟動目標',

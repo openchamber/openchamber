@@ -2921,6 +2921,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.toast.actionFailed': 'Nie udało się zaktualizować celu',
   'chat.goal.toast.distillFallback': 'Cel przekroczył limit i nie udało się go skondensować — audytor używa skróconej wersji',
   'chat.goal.row.aria': 'Cel sesji — otwórz szczegóły',
+  'chat.goal.row.pausedHint': 'Wstrzymany w czacie',
   'chat.goal.button.createAria': 'Ustaw cel sesji',
   'chat.goal.button.manageAria': 'Zarządzaj celem sesji',
   'chat.goal.button.armAria': 'Rozpocznij cel następną wiadomością',

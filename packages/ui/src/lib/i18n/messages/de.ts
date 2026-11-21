@@ -1950,6 +1950,7 @@ export const dict = {
   'chat.goal.action.start': 'Ziel starten',
   'chat.goal.toast.actionFailed': 'Aktualisierung des Ziels fehlgeschlagen',
   'chat.goal.row.aria': 'Sitzungsziel — Details öffnen',
+  'chat.goal.row.pausedHint': 'Pausiert im Chat',
   'chat.goal.button.createAria': 'Sitzungsziel festlegen',
   'chat.goal.button.manageAria': 'Sitzungsziel verwalten',
   'chat.goal.button.armAria': 'Ein Ziel mit der nächsten Nachricht starten',

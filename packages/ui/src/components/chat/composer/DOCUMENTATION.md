@@ -230,6 +230,17 @@ the "looks done" hint or the review offer, the suggestion
 queue, composer content and a new-session draft hide the suggestion; a
 new-session draft also hides the queue.
 
+A paused goal's row shows a hint ("Paused during chat") in place of the status
+word, because sending a message moves the chat on while the goal stays paused.
+While paused, the hint and Resume own the row: below a 28rem row (a phone,
+Mini Chat) the token count leaves it, and the goal dialog keeps the full
+used/budget numbers; on a wider row the count gives up its width first. The
+objective keeps 40px either way. Other statuses keep their layout.
+`scripts/perf/session-goal-row.browser.test.mjs` checks that every translation
+shows whole beside Resume at 360, 375 and 390px with a long objective and a
+token budget, in Liberation Sans and in a wider face standing in for DejaVu
+Sans, and that a wide row shows the whole count.
+
 While a session's first send is pending (`pendingDraftSends` in
 `session-ui-store`, from Enter in the draft until the request that starts the
 turn has left), the composer keeps what is typed and sends nothing: Send is
