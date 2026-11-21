@@ -1,36 +1,26 @@
 export type DesktopUpdateIdle = { state: 'idle' | 'busy' | 'unknown' };
+type State = DesktopUpdateIdle['state'];
 
-export type DesktopUpdateTerminal = { status: string; mode?: string | null };
-
-export type DesktopUpdateIdleInput = {
-  sessions: Record<string, { type: string }> | null;
-  terminals: readonly DesktopUpdateTerminal[] | null;
-  scheduledRunning: number;
-  scheduledQueued: number;
-  workflowLive: boolean;
-  goalLive: boolean;
-  queueLive: boolean;
-  waitLive: boolean;
-  reviewLive: boolean;
+export type SessionStateReader = {
+  getSessionStateSnapshot: () => Readonly<Record<string, { status: string }>>;
+  getSessionActivitySnapshot: () => Readonly<Record<string, { type: string }>>;
+  getPendingBlockingRequestsSnapshot: () => Readonly<Record<string, {
+    permissions: readonly unknown[]; forms: readonly unknown[]; pages: readonly unknown[];
+  }>>;
 };
 
-const IDLE: DesktopUpdateIdle = { state: 'idle' };
-const BUSY: DesktopUpdateIdle = { state: 'busy' };
-const UNKNOWN: DesktopUpdateIdle = { state: 'unknown' };
-const RUNNING = new Set(['running', 'retry', 'retrying']);
-
-export const decideDesktopUpdateIdle = (input: DesktopUpdateIdleInput): DesktopUpdateIdle => {
-  if (!input.sessions || !input.terminals) return UNKNOWN;
-  const sessions = Object.values(input.sessions);
-  if (sessions.some((session) => !session?.type || (!RUNNING.has(session.type) && session.type !== 'idle'))) return UNKNOWN;
-  if (sessions.some((session) => RUNNING.has(session.type))) return BUSY;
-
-  const terminals = input.terminals.filter((terminal) => terminal.status === 'running');
-  if (terminals.some((terminal) => terminal.mode != null && terminal.mode !== '' && terminal.mode !== 'interactive' && terminal.mode !== 'command')) return UNKNOWN;
-  if (terminals.length > 0) return BUSY;
-
-  if (![input.scheduledRunning, input.scheduledQueued].every(Number.isFinite)) return UNKNOWN;
-  if (input.scheduledRunning > 0 || input.scheduledQueued > 0 ||
-    input.workflowLive || input.goalLive || input.queueLive || input.waitLive || input.reviewLive) return BUSY;
-  return IDLE;
-};
+export function readSessionActivity(runtime: SessionStateReader): State {
+  const sessions = runtime.getSessionStateSnapshot();
+  const active = new Set<string>();
+  for (const [id, phase] of Object.entries(runtime.getSessionActivitySnapshot())) {
+    if (phase.type === 'busy') active.add(id);
+  }
+  for (const [id, pending] of Object.entries(runtime.getPendingBlockingRequestsSnapshot())) {
+    if (pending.permissions.length || pending.forms.length || pending.pages.length) active.add(id);
+  }
+  for (const [id, { status }] of Object.entries(sessions)) {
+    if (status === 'busy' || status === 'retry') active.add(id);
+    else if (status !== 'idle' && !active.has(id)) return 'unknown';
+  }
+  return active.size ? 'busy' : 'idle';
+}

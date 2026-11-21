@@ -1,58 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { decideDesktopUpdateIdle, type DesktopUpdateIdleInput } from './desktop-update-idle.js';
 import { collectDesktopUpdateIdle, createDesktopUpdateActiveSessionReadiness, type DesktopUpdateIdleParts } from './desktop-update-idle-status.js';
-
-const idleInput = (overrides: Partial<DesktopUpdateIdleInput> = {}): DesktopUpdateIdleInput => ({
-  sessions: {},
-  terminals: [],
-  scheduledRunning: 0,
-  scheduledQueued: 0,
-  workflowLive: false,
-  goalLive: false,
-  queueLive: false,
-  waitLive: false,
-  reviewLive: false,
-  ...overrides,
-});
-
-describe('decideDesktopUpdateIdle', () => {
-  const state = (overrides: Partial<DesktopUpdateIdleInput> = {}) => decideDesktopUpdateIdle(idleInput(overrides)).state;
-
-  it('accepts verified empty or idle session state', () => {
-    expect(state()).toBe('idle');
-    expect(state({ sessions: { s: { type: 'idle' } } })).toBe('idle');
-  });
-
-  it('blocks running, retrying, or unknown sessions and unreadable session lists', () => {
-    for (const type of ['running', 'retry', 'retrying']) {
-      expect(state({ sessions: { s: { type } } })).toBe('busy');
-    }
-    for (const type of ['paused', '']) {
-      expect(state({ sessions: { s: { type } } })).toBe('unknown');
-    }
-    expect(state({ sessions: null })).toBe('unknown');
-  });
-
-  it('blocks running terminals, regardless of whether an interactive shell is at its prompt', () => {
-    for (const mode of ['command', 'interactive', '']) {
-      expect(state({ terminals: [{ status: 'running', mode }] })).toBe('busy');
-    }
-    expect(state({ terminals: [{ status: 'running' }] })).toBe('busy');
-    expect(state({ terminals: [{ status: 'exited', mode: 'interactive' }] })).toBe('idle');
-    expect(state({ terminals: null })).toBe('unknown');
-    expect(state({ terminals: [{ status: 'running', mode: 'unknown' }] })).toBe('unknown');
-  });
-
-  it('blocks scheduled tasks and every kind of tracked background work', () => {
-    expect(state({ scheduledRunning: 1 })).toBe('busy');
-    expect(state({ scheduledQueued: 1 })).toBe('busy');
-    expect(state({ scheduledRunning: Number.NaN })).toBe('unknown');
-    for (const key of ['workflowLive', 'goalLive', 'queueLive', 'waitLive', 'reviewLive'] as const) {
-      expect(state({ [key]: true })).toBe('busy');
-    }
-  });
-});
 
 const quiet = (live = false) => ({ load: async () => undefined, hasLiveWork: () => live });
 
@@ -120,6 +68,35 @@ describe('desktop update active-session reconciliation', () => {
 });
 
 describe('collectDesktopUpdateIdle', () => {
+  const state = async (overrides: Partial<DesktopUpdateIdleParts> = {}) =>
+    (await collectDesktopUpdateIdle(owners(overrides))).state;
+
+  it('accepts verified idle sessions and blocks busy, retrying or unknown sessions', async () => {
+    expect(await state()).toBe('idle');
+    for (const [status, expected] of Object.entries({ idle: 'idle', busy: 'busy', retry: 'busy', paused: 'unknown', '': 'unknown' })) {
+      expect(await state({ sessionRuntime: { ...owners().sessionRuntime, getSessionStateSnapshot: () => ({ s: { status } }) } })).toBe(expected);
+    }
+  });
+
+  it('requires a readable terminal list and waits for running terminals', async () => {
+    expect(await state({ terminalRuntime: null })).toBe('unknown');
+    expect(await state({ terminalRuntime: { listTerminals: () => [{ status: 'running' }] } })).toBe('busy');
+    for (const mode of ['command', 'interactive', '', 'other']) {
+      expect(await state({ terminalRuntime: { listTerminals: () => [{ status: 'running', mode }] } })).toBe(mode === 'other' ? 'unknown' : 'busy');
+    }
+    expect(await state({ terminalRuntime: { listTerminals: () => [{ status: 'exited' }] } })).toBe('idle');
+  });
+
+  it('counts queued and running tasks and each live work catalog', async () => {
+    for (const [runningScheduledTasksCount, queuedScheduledTasksCount] of [[1, 0], [0, 1], [NaN, 0]] as const) {
+      expect(await state({ scheduledTasksRuntime: { getStatus: () => ({ runningScheduledTasksCount, queuedScheduledTasksCount }) } }))
+        .toBe(Number.isNaN(runningScheduledTasksCount) ? 'unknown' : 'busy');
+    }
+    for (const key of ['messageQueueRuntime', 'extensionWaitsRuntime', 'prWatchRuntime', 'autoReviewRuntime', 'sessionGoalRuntime'] as const) {
+      expect(await state({ [key]: quiet(true) })).toBe('busy');
+    }
+    expect(await state({ workflowRuntime: { hasLiveRun: () => true } })).toBe('busy');
+  });
   it('cannot authorize an install on an empty disconnected session snapshot', async () => {
     expect(await collectDesktopUpdateIdle(owners({ canReadSessions: () => false })))
       .toEqual({ state: 'unknown' });

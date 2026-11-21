@@ -1,6 +1,3 @@
-const IDLE_UPDATE_COUNTDOWN_MS = 30_000;
-const IDLE_UPDATE_POLL_MS = 2_000;
-
 export const createIdleUpdateQueue = ({
   readIdle,
   onChange,
@@ -8,8 +5,8 @@ export const createIdleUpdateQueue = ({
   updateCountdown,
   closeCountdown,
   install,
-  countdownMs = IDLE_UPDATE_COUNTDOWN_MS,
-  pollMs = IDLE_UPDATE_POLL_MS,
+  countdownMs = 30_000,
+  pollMs = 2_000,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
 }) => {
@@ -22,7 +19,6 @@ export const createIdleUpdateQueue = ({
   let countTimer = null;
   let chain = Promise.resolve();
   let installPromise = null;
-  let restartRequest = null;
   let suspended = false;
   let stopped = false;
 
@@ -37,178 +33,105 @@ export const createIdleUpdateQueue = ({
   const emit = () => onChange?.(snapshot());
 
   const later = (fn) => {
-    const run = chain.then(fn, fn);
-    chain = run.then(() => {}, () => {});
+    const run = chain.then(fn);
+    chain = run.catch(() => {});
     return run;
   };
 
-  const clearPoll = () => { if (pollTimer !== null) clearTimer(pollTimer); pollTimer = null; };
-  const clearCount = () => { if (countTimer !== null) clearTimer(countTimer); countTimer = null; };
-
-  const clearQueueTimers = () => {
-    clearPoll();
-    clearCount();
+  const transition = (next, release = null) => {
+    generation += 1;
+    clearTimer(pollTimer);
+    clearTimer(countTimer);
     if (phase === 'counting') closeCountdown();
-    reason = null;
-    remainingMs = 0;
-  };
-
-  const schedulePoll = (gen) => {
-    clearPoll();
-    pollTimer = setTimer(() => { void later(() => tick(gen)); }, pollMs);
-  };
-
-  const scheduleCount = (gen) => {
-    clearCount();
-    const step = Math.min(1_000, remainingMs);
-    countTimer = setTimer(() => { void later(() => onSecond(gen, step)); }, step);
-  };
-
-  const isIdle = async () => {
-    try { return (await readIdle())?.state === 'idle'; }
-    catch { return false; }
-  };
-
-  const becomeWaiting = (gen) => {
-    clearCount();
-    if (phase === 'counting') closeCountdown();
-    phase = 'waiting';
+    queued = release;
+    phase = next;
     reason = null;
     remainingMs = 0;
     emit();
-    schedulePoll(gen);
   };
 
-  const tick = async (gen) => {
-    if (gen !== generation || suspended || !queued || phase === 'installing') return;
-    const idle = await isIdle();
-    if (gen !== generation || !queued || phase === 'installing') return;
+  const scheduleCount = (gen) => {
+    const step = Math.min(1_000, remainingMs);
+    countTimer = setTimer(() => later(() => {
+      if (gen !== generation) return;
+      remainingMs -= step;
+      if (!remainingMs) return checkIdle(gen, true);
+      updateCountdown(snapshot());
+      emit();
+      scheduleCount(gen);
+    }), step);
+  };
+
+  const checkIdle = async (gen, final = false) => {
+    if (gen !== generation || suspended) return;
+    let idle = false;
+    try { idle = (await readIdle())?.state === 'idle'; } catch {}
+    if (gen !== generation) return;
     if (!idle) {
-      becomeWaiting(gen);
-      return;
-    }
-    if (phase !== 'counting') {
+      transition('waiting', queued);
+    } else if (final) {
+      return beginInstall();
+    } else if (phase !== 'counting') {
       phase = 'counting';
       remainingMs = countdownMs;
       openCountdown(snapshot());
       emit();
       scheduleCount(gen);
     }
-    schedulePoll(gen);
-  };
-
-  const startInstall = () => {
-    if (installPromise) return installPromise;
-    generation += 1;
-    clearQueueTimers();
-    queued = null;
-    phase = 'installing';
-    emit();
-    installPromise = Promise.resolve().then(install).then(
-      () => { phase = 'idle'; emit(); },
-      (error) => { phase = 'idle'; reason = 'install-failed'; emit(); throw error; },
-    ).finally(() => { installPromise = null; });
-    return installPromise;
-  };
-
-  const onSecond = async (gen, step) => {
-    if (gen !== generation || phase !== 'counting') return;
-    remainingMs = Math.max(0, remainingMs - step);
-    if (remainingMs > 0) {
-      updateCountdown(snapshot());
-      emit();
-      scheduleCount(gen);
-      return;
-    }
-    const idle = await isIdle();
-    if (gen !== generation || !queued) return;
-    if (!idle) {
-      becomeWaiting(gen);
-      return;
-    }
-    await startInstall();
-  };
-
-  const drop = (gen) => {
-    clearQueueTimers();
-    queued = null;
-    phase = 'idle';
-    generation = gen;
-    emit();
-  };
-
-  const queue = (release) => later(async () => {
-    if (stopped || phase === 'installing') return snapshot();
-    const version = typeof release?.version === 'string' ? release.version : '';
-    const channel = typeof release?.channel === 'string' ? release.channel : '';
-    if (!version || !channel) throw new Error('No downloaded update');
-    if (queued?.version === version && queued?.channel === channel && (phase === 'waiting' || phase === 'counting')) {
-      return snapshot();
-    }
-    generation += 1;
-    const gen = generation;
-    clearQueueTimers();
-    queued = { version, channel };
-    phase = 'waiting';
-    emit();
-    await tick(gen);
-    return snapshot();
-  });
-
-  const cancel = () => {
-    generation += 1;
-    return later(() => {
-      if (phase !== 'installing') drop(generation + 1);
-      return snapshot();
-    });
-  };
-
-  const resetCountdown = (nextSuspended) => {
-    suspended = nextSuspended;
-    const gen = ++generation;
-    return later(async () => {
-      if (gen !== generation || !queued || phase === 'installing') return snapshot();
-      becomeWaiting(gen);
-      if (!suspended) await tick(gen);
-      return snapshot();
-    });
-  };
-
-  const matchesRelease = (release) => release?.version === queued?.version && release?.channel === queued?.channel;
-  const noteRelease = (release) => {
-    if (queued && !matchesRelease(release)) generation += 1;
-    return later(() => {
-      if (queued && !matchesRelease(release)) drop(generation + 1);
-      return snapshot();
-    });
+    const current = generation;
+    pollTimer = setTimer(() => later(() => checkIdle(current)), pollMs);
   };
 
   const beginInstall = () => {
     if (installPromise) return installPromise;
-    if (restartRequest) return restartRequest;
-    generation += 1;
-    restartRequest = later(() => {
+    if (stopped) return Promise.reject(new Error('OpenChamber is quitting'));
+    transition('installing');
+    installPromise = Promise.resolve().then(() => {
       if (stopped) throw new Error('OpenChamber is quitting');
-      return startInstall();
+      return install();
+    }).catch((error) => {
+      reason = 'install-failed';
+      throw error;
     }).finally(() => {
-      restartRequest = null;
+      phase = 'idle';
+      installPromise = null;
+      emit();
     });
-    return restartRequest;
+    return installPromise;
   };
 
-  const stop = () => {
-    stopped = true;
-    return cancel();
+  const cancel = () => {
+    if (phase !== 'installing') transition('idle');
+    return snapshot();
   };
 
+  const checkCurrent = () => {
+    const gen = generation;
+    return later(() => checkIdle(gen)).then(snapshot);
+  };
+  const resetCountdown = (nextSuspended) => {
+    suspended = nextSuspended;
+    if (!queued) return snapshot();
+    transition('waiting', queued);
+    return suspended ? snapshot() : checkCurrent();
+  };
+
+  const matchesRelease = (release) => release?.version === queued?.version && release?.channel === queued?.channel;
   return {
-    queue,
+    queue: async (release) => {
+      if (stopped || phase === 'installing') return snapshot();
+      const { version, channel } = release ?? {};
+      if (typeof version !== 'string' || !version || typeof channel !== 'string' || !channel) throw new Error('No downloaded update');
+      if (matchesRelease(release)) return snapshot();
+      transition('waiting', { version, channel });
+      return checkCurrent();
+    },
     cancel,
     noteSuspend: () => resetCountdown(true),
     noteResume: () => resetCountdown(false),
-    noteRelease,
+    noteRelease: (release) => queued && !matchesRelease(release) ? cancel() : snapshot(),
     beginInstall,
-    stop,
+    stop: () => { stopped = true; return cancel(); },
     snapshot,
     settled: () => chain,
   };

@@ -2,41 +2,30 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createIdleUpdateQueue } from './idle-update.mjs';
-import { IDLE_UPDATE_LOCALES, idleUpdateDictionaries, idleUpdateWindowHtml } from './idle-update-locales.mjs';
+import { idleUpdateWindowHtml } from './idle-update-locales.mjs';
+import { LOCALES } from '../ui/src/lib/i18n/runtime.ts';
 
 const harness = ({ install, readIdle } = {}) => {
-  const timers = [];
-  let nextId = 1;
+  const timers = new Map();
   const events = [];
-  let status = { state: 'idle', reason: null };
+  let status = { state: 'idle' };
   const queue = createIdleUpdateQueue({
     readIdle: readIdle ?? (async () => status),
     countdownMs: 1_000,
     pollMs: 5_000,
-    setTimer: (fn, ms) => {
-      const id = nextId;
-      nextId += 1;
-      timers.push({ id, fn, ms });
-      return id;
-    },
-    clearTimer: (id) => {
-      const index = timers.findIndex((timer) => timer.id === id);
-      if (index >= 0) timers.splice(index, 1);
-    },
+    setTimer: (fn, ms) => { timers.set(fn, ms); return fn; },
+    clearTimer: (fn) => timers.delete(fn),
     openCountdown: () => events.push('open'),
     updateCountdown: (snapshot) => events.push(`update:${snapshot.remainingMs}`),
     closeCountdown: () => events.push('close'),
-    install: install ?? (async () => {
-      events.push('install');
-    }),
-    onChange: () => {},
+    install: install ?? (() => events.push('install')),
   });
 
   const fire = async (ms) => {
-    const timer = timers.find((entry) => entry.ms === ms);
-    assert.ok(timer, `missing ${ms}ms timer`);
-    timers.splice(timers.indexOf(timer), 1);
-    timer.fn();
+    const fn = [...timers].find(([, delay]) => delay === ms)?.[0];
+    assert.ok(fn, `missing ${ms}ms timer`);
+    timers.delete(fn);
+    fn();
     await queue.settled();
   };
 
@@ -88,13 +77,16 @@ test('work that starts during the countdown closes it, and the next idle period 
   await fire(5_000);
   assert.equal(events.filter((event) => event === 'open').length, opened + 1);
   assert.equal(queue.snapshot().remainingMs, 1_000);
-  assert.ok(timers.some((timer) => timer.ms === 1_000));
+  assert.ok([...timers.values()].includes(1_000));
 });
 
 test('waking from sleep starts a fresh countdown instead of finishing the old one', async () => {
-  const { queue, events } = harness();
+  const { queue, events, timers } = harness();
   await queue.queue({ version: '2.0.0', channel: 'stable' });
   events.length = 0;
+  await queue.noteSuspend();
+  assert.equal(queue.snapshot().phase, 'waiting');
+  assert.equal([...timers.values()].includes(1_000), false);
   await queue.noteResume();
   assert.ok(events.includes('close'));
   assert.ok(events.includes('open'));
@@ -102,17 +94,31 @@ test('waking from sleep starts a fresh countdown instead of finishing the old on
   assert.equal(events.includes('install'), false);
 });
 
+test('a failed final read waits and a later successful poll starts over', async () => {
+  let reads = 0;
+  const { queue, events, fire } = harness({ readIdle: () => {
+    if (++reads === 2) throw new Error('server unavailable');
+    return { state: 'idle' };
+  } });
+  await queue.queue({ version: '2.0.0', channel: 'stable' });
+  await fire(1_000);
+  assert.equal(queue.snapshot().phase, 'waiting');
+  await fire(5_000);
+  assert.equal(queue.snapshot().remainingMs, 1_000);
+  assert.deepEqual(events, ['open', 'close', 'open']);
+});
+
 test('cancel, and a different release, drop the queue and keep the watcher off', async () => {
   const { queue, timers } = harness();
   await queue.queue({ version: '2.0.0', channel: 'stable' });
   await queue.cancel();
   assert.equal(queue.snapshot().phase, 'idle');
-  assert.equal(timers.length, 0);
+  assert.equal(timers.size, 0);
 
   await queue.queue({ version: '2.0.0', channel: 'stable' });
   await queue.noteRelease({ version: '2.0.1', channel: 'stable' });
   assert.equal(queue.snapshot().phase, 'idle');
-  assert.equal(timers.length, 0);
+  assert.equal(timers.size, 0);
 });
 
 const finalReadHarness = (install) => {
@@ -198,17 +204,11 @@ test('a failed install is left unqueued', async () => {
 });
 
 test('countdown copy exists in every locale and the window escapes its text', () => {
-  const english = idleUpdateDictionaries.en;
-  const keys = Object.keys(english);
-  for (const locale of IDLE_UPDATE_LOCALES) {
-    const translated = idleUpdateDictionaries[locale];
-    assert.deepEqual(Object.keys(translated), keys);
-    for (const key of keys) {
-      assert.ok(translated[key]);
-      if (locale !== 'en') assert.notEqual(translated[key], english[key]);
-    }
-    assert.match(translated.countdown, /\{seconds\}/);
-    assert.match(translated.countdownOne, /\{seconds\}/);
+  for (const locale of LOCALES) {
+    const html = idleUpdateWindowHtml({ locale, seconds: 30 });
+    assert.match(html, /<title>[^<]+<\/title>/);
+    if (locale !== 'en') assert.doesNotMatch(html, /<title>Install update<\/title>/);
+    assert.match(html, /<p id="countdown">[^<]*30[^<]*<\/p>/);
   }
   const html = idleUpdateWindowHtml({ locale: 'en', seconds: 1 });
   assert.match(html, /Installing in 1 second/);

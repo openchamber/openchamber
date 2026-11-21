@@ -1,7 +1,7 @@
 import { BrowserWindow } from 'electron';
 
 import { createIdleUpdateQueue } from './idle-update.mjs';
-import { idleUpdateText, idleUpdateWindowHtml } from './idle-update-locales.mjs';
+import { countdownText, idleUpdateWindowHtml } from './idle-update-locales.mjs';
 
 export const createDesktopIdleUpdate = ({
   state,
@@ -12,7 +12,6 @@ export const createDesktopIdleUpdate = ({
 }) => {
   let idleUpdateWindow = null;
   let idleUpdateWindowSuppressClose = false;
-  let controller = null;
 
   const windowRuntimeUnverified = (window) => {
     if (!window || window.isDestroyed() || window.__ocIdleUpdate) return false;
@@ -40,21 +39,18 @@ export const createDesktopIdleUpdate = ({
   };
 
   const paint = (snapshot, { reload = false } = {}) => {
-    if (!idleUpdateWindow || idleUpdateWindow.isDestroyed()) return;
-    const seconds = Math.max(0, Math.ceil(Number(snapshot?.remainingMs || 0) / 1000));
-    const countKey = seconds === 1 ? 'countdownOne' : 'countdown';
-    const body = idleUpdateText(locale(), countKey, { seconds });
-    if (reload || idleUpdateWindow.webContents.isLoading()) {
+    const window = idleUpdateWindow;
+    if (!window || window.isDestroyed()) return;
+    const seconds = Math.ceil(snapshot.remainingMs / 1000);
+    const load = () => {
+      if (window.isDestroyed()) return;
       const html = idleUpdateWindowHtml({ locale: locale(), seconds });
-      void idleUpdateWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-      return;
-    }
-    void idleUpdateWindow.webContents.executeJavaScript(
-      `document.getElementById('countdown').textContent = ${JSON.stringify(body)}`,
-    ).catch(() => {
-      const html = idleUpdateWindowHtml({ locale: locale(), seconds });
-      void idleUpdateWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-    });
+      void window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    };
+    if (reload || window.webContents.isLoading()) return load();
+    void window.webContents.executeJavaScript(
+      `document.getElementById('countdown').textContent = ${JSON.stringify(countdownText(locale(), seconds))}`,
+    ).catch(load);
   };
 
   const openCountdown = (snapshot) => {
@@ -102,7 +98,7 @@ export const createDesktopIdleUpdate = ({
     idleUpdateWindow.focus();
   };
 
-  controller = createIdleUpdateQueue({
+  const controller = createIdleUpdateQueue({
     readIdle,
     onChange: (snapshot) => emitToAllWindows('openchamber:idle-update', snapshot),
     openCountdown,

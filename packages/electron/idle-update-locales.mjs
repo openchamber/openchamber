@@ -1,6 +1,5 @@
 import { updateIdleI18n } from '../ui/src/lib/i18n/messages/update-idle.i18n.ts';
-
-export const IDLE_UPDATE_LOCALES = Object.keys(updateIdleI18n);
+import { getLocaleDirection } from '../ui/src/lib/i18n/runtime.ts';
 
 const titles = {
   "en": "Install update",
@@ -20,35 +19,24 @@ const titles = {
   "he": "התקנת עדכון"
 };
 
-export const idleUpdateDictionaries = Object.fromEntries(Object.entries(updateIdleI18n).map(([locale, messages]) => [
-  locale,
-  {
-    title: titles[locale],
-    countdownOne: messages['updateDialog.idle.countingOne'],
-    countdown: messages['updateDialog.idle.counting'],
-    cancel: messages['updateDialog.actions.cancelIdleInstall'],
-  },
-]));
+const messages = (locale) => Object.hasOwn(updateIdleI18n, locale) ? updateIdleI18n[locale] : updateIdleI18n.en;
 
-export const idleUpdateText = (locale, key, values = {}) => {
-  const dictionary = idleUpdateDictionaries[locale] ?? idleUpdateDictionaries.en;
-  const template = dictionary[key] ?? idleUpdateDictionaries.en[key] ?? key;
-  return template.replace(/\{(\w+)\}/g, (_, name) => String(values[name] ?? ''));
+export const countdownText = (locale, seconds) => {
+  const key = seconds === 1 ? 'updateDialog.idle.countingOne' : 'updateDialog.idle.counting';
+  return messages(locale)[key].replace('{seconds}', () => String(seconds));
 };
 
 export const idleUpdateWindowHtml = ({ locale, seconds }) => {
-  const countKey = seconds === 1 ? 'countdownOne' : 'countdown';
-  const rtl = locale === 'ar' || locale === 'he';
   const escape = (value) => String(value)
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;');
-  const title = escape(idleUpdateText(locale, 'title'));
-  const body = escape(idleUpdateText(locale, countKey, { seconds }));
-  const cancel = escape(idleUpdateText(locale, 'cancel'));
+  const title = escape(Object.hasOwn(titles, locale) ? titles[locale] : titles.en);
+  const body = escape(countdownText(locale, seconds));
+  const cancel = escape(messages(locale)['updateDialog.actions.cancelIdleInstall']);
   return `<!doctype html>
-<html lang="${escape(locale)}" dir="${rtl ? 'rtl' : 'ltr'}">
+<html lang="${escape(locale)}" dir="${getLocaleDirection(locale)}">
 <meta charset="utf-8">
 <title>${title}</title>
 <style>

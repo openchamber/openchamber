@@ -1,15 +1,7 @@
-import { decideDesktopUpdateIdle, type DesktopUpdateIdle, type DesktopUpdateTerminal } from './desktop-update-idle.js';
 import type { SessionActivityProbe } from './opencode/session-activity.js';
+import { readSessionActivity, type SessionStateReader, type DesktopUpdateIdle } from './desktop-update-idle.js';
 
-type SessionStateReader = {
-  getSessionStateSnapshot: () => Readonly<Record<string, { status: string }>>;
-  getSessionActivitySnapshot: () => Readonly<Record<string, { type: string }>>;
-  getPendingBlockingRequestsSnapshot: () => Readonly<Record<string, {
-    permissions: readonly unknown[];
-    forms: readonly unknown[];
-    pages: readonly unknown[];
-  }>>;
-};
+type DesktopUpdateTerminal = { status: string; mode?: string | null };
 
 type LiveWork = {
   load: () => Promise<void>;
@@ -64,36 +56,25 @@ export type DesktopUpdateIdleParts = {
 export const collectDesktopUpdateIdle = async (parts: DesktopUpdateIdleParts): Promise<DesktopUpdateIdle> => {
   const unreadable: DesktopUpdateIdle = { state: 'unknown' };
   try {
-    const { messageQueueRuntime, extensionWaitsRuntime, prWatchRuntime, autoReviewRuntime } = parts;
-    await Promise.all([messageQueueRuntime, extensionWaitsRuntime, prWatchRuntime, autoReviewRuntime].map((owner) => owner.load()));
+    const catalogs = [parts.messageQueueRuntime, parts.extensionWaitsRuntime, parts.prWatchRuntime, parts.autoReviewRuntime];
+    await Promise.all(catalogs.map((owner) => owner.load()));
     if (!parts.canReadSessions()) return unreadable;
-    const sessions: Record<string, { type: string }> = {};
-    for (const [sessionId, state] of Object.entries(parts.sessionRuntime.getSessionStateSnapshot())) {
-      sessions[sessionId] = {
-        type: state.status === 'busy' || state.status === 'retry' ? 'running' : state.status === 'idle' ? 'idle' : 'unknown',
-      };
-    }
-    for (const [sessionId, phase] of Object.entries(parts.sessionRuntime.getSessionActivitySnapshot())) {
-      if (phase.type === 'busy') sessions[sessionId] = { type: 'running' };
-    }
-    for (const [sessionId, pending] of Object.entries(parts.sessionRuntime.getPendingBlockingRequestsSnapshot())) {
-      if (pending.permissions.length > 0 || pending.forms.length > 0 || pending.pages.length > 0) {
-        sessions[sessionId] = { type: 'running' };
-      }
-    }
+    const sessions = readSessionActivity(parts.sessionRuntime);
     if (parts.sessionAssistRuntime.hasLiveWork()) return { state: 'busy' };
     const scheduled = parts.scheduledTasksRuntime.getStatus();
-    return decideDesktopUpdateIdle({
-      sessions,
-      terminals: parts.terminalRuntime ? parts.terminalRuntime.listTerminals() : null,
-      scheduledRunning: scheduled.runningScheduledTasksCount,
-      scheduledQueued: scheduled.queuedScheduledTasksCount,
-      workflowLive: parts.workflowRuntime.hasLiveRun(),
-      goalLive: parts.sessionGoalRuntime.hasLiveWork(),
-      queueLive: messageQueueRuntime.hasLiveWork(),
-      waitLive: extensionWaitsRuntime.hasLiveWork() || prWatchRuntime.hasLiveWork(),
-      reviewLive: autoReviewRuntime.hasLiveWork(),
-    });
+    const terminals = parts.terminalRuntime?.listTerminals();
+    const background = [
+      parts.workflowRuntime.hasLiveRun(), parts.sessionGoalRuntime.hasLiveWork(), parts.messageQueueRuntime.hasLiveWork(),
+      parts.extensionWaitsRuntime.hasLiveWork() || parts.prWatchRuntime.hasLiveWork(), parts.autoReviewRuntime.hasLiveWork(),
+    ];
+    if (!terminals) return unreadable;
+    if (sessions !== 'idle') return { state: sessions };
+    const running = terminals.filter((terminal) => terminal.status === 'running');
+    if (running.some(({ mode }) => mode && mode !== 'command' && mode !== 'interactive')) return unreadable;
+    if (running.length) return { state: 'busy' };
+    const counts = [scheduled.runningScheduledTasksCount, scheduled.queuedScheduledTasksCount];
+    if (!counts.every(Number.isFinite)) return unreadable;
+    return { state: counts.some(count => count > 0) || background.some(Boolean) ? 'busy' : 'idle' };
   } catch {
     return unreadable;
   }
