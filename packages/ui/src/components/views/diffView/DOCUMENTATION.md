@@ -14,6 +14,12 @@ remain in their existing neighbouring modules.
 
 - Hunk mutations require live working-tree or index data. Turn snapshots and
   comparison ranges never authorize stage or discard actions.
+- A changed-file chip under an older reply carries its user-turn ID into
+  Changes; the newest reply's chip opens Last turn itself. A selected turn stays
+  scoped to its session, directory and user message after the navigation
+  request is consumed; choosing a scope in the picker resets it. Last turn
+  always means, and counts, the latest turn. A new range never displays the
+  previous turn's diffs or fetch error.
 - A live diff's refresh revision includes changes that preserve its status row's
   line counts. Refresh keeps the previous diff visible until replacement, but
   switching between staged and unstaged clears that side's old content even

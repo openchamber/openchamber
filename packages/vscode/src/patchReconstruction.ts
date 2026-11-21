@@ -1,35 +1,46 @@
 
 type ParsedDiffHunk = {
+  oldStart: number;
   newStart: number;
   oldLines: string[];
   newLines: string[];
+  oldEndsWithoutNewline: boolean;
+  newEndsWithoutNewline: boolean;
 };
 
-const parseUnifiedDiffHunks = (patch: string): ParsedDiffHunk[] => {
-  const lines = patch.split(/\r?\n/);
+const parseUnifiedDiffHunks = (patch: string, keepCarriageReturns = false): ParsedDiffHunk[] => {
+  const lines = patch.split(keepCarriageReturns ? '\n' : /\r?\n/);
   const hunks: ParsedDiffHunk[] = [];
 
   let current: ParsedDiffHunk | null = null;
+  let previous = '';
 
   for (const line of lines) {
-    const headerMatch = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+    const headerMatch = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
     if (headerMatch) {
       if (current) {
         hunks.push(current);
       }
       current = {
-        newStart: Number(headerMatch[1] || 1),
+        oldStart: Number(headerMatch[1] || 1),
+        newStart: Number(headerMatch[2] || 1),
         oldLines: [],
         newLines: [],
+        oldEndsWithoutNewline: false,
+        newEndsWithoutNewline: false,
       };
+      previous = line;
       continue;
     }
 
     if (!current) continue;
 
-    if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('\\ No newline')) {
+    if (line.startsWith('\\ No newline')) {
+      if (!previous.startsWith('+')) current.oldEndsWithoutNewline = true;
+      if (!previous.startsWith('-')) current.newEndsWithoutNewline = true;
       continue;
     }
+    previous = line;
 
     if (line.startsWith('-')) {
       current.oldLines.push(line.slice(1));
@@ -105,4 +116,17 @@ export const reconstructOriginalContentFromPatch = (modifiedContent: string, pat
   }
 
   return lines.join('\n');
+};
+
+const joinLines = (lines: string[], endsWithoutNewline: boolean): string =>
+  lines.length === 0 ? '' : `${lines.join('\n')}${endsWithoutNewline ? '' : '\n'}`;
+
+export const fileSidesFromFullPatch = (patch: string): { original: string; modified: string } | null => {
+  const hunks = parseUnifiedDiffHunks(patch, true);
+  const hunk = hunks.length === 1 ? hunks[0] : undefined;
+  if (!hunk || hunk.oldStart > 1 || hunk.newStart > 1) return null;
+  return {
+    original: joinLines(hunk.oldLines, hunk.oldEndsWithoutNewline),
+    modified: joinLines(hunk.newLines, hunk.newEndsWithoutNewline),
+  };
 };
