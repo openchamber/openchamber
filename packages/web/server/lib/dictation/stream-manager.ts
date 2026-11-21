@@ -5,6 +5,7 @@ import {
   pcm16leFrameRms,
   pcm16lePeakAbs,
 } from './audio.js';
+import { resumeOptionsOf, sameResumeOptions } from './stream-resume-options.js';
 import { CORRECTION_TIMEOUT_MS } from './transcript-correction.js';
 import type { CorrectionOptions } from './transcript-correction.js';
 
@@ -61,6 +62,7 @@ export interface DictationStreamManagerOptions {
 export interface DictationStreamState {
   dictationId: string;
   inputFormat: string;
+  resumeOptions: ReturnType<typeof resumeOptionsOf>;
   stt: StreamingTranscriptionSession;
   inputRate: number;
   outputRate: number;
@@ -200,6 +202,7 @@ export class DictationStreamManager {
   declare segmentMinSeconds: number | undefined;
   declare segmentMaxSeconds: number | undefined;
   declare streams: Map<string, DictationStreamState>;
+  declare starting: Map<string, { format: string; resumeOptions: ReturnType<typeof resumeOptionsOf> }>;
 
   constructor({ emit, createSttSession, correctTranscript, finalTimeoutMs, segmentMinSeconds, segmentMaxSeconds }: DictationStreamManagerOptions) {
     this.emit = emit;
@@ -209,15 +212,40 @@ export class DictationStreamManager {
     this.segmentMinSeconds = segmentMinSeconds;
     this.segmentMaxSeconds = segmentMaxSeconds;
     this.streams = new Map();
+    this.starting = new Map();
   }
 
   cleanupAll() {
-    for (const dictationId of Array.from(this.streams.keys())) {
+    for (const dictationId of new Set([...this.streams.keys(), ...this.starting.keys()])) {
       this.cleanupStream(dictationId);
     }
   }
 
+  resumeStream(dictationId: string, format: string, startOptions: DictationStartOptions) {
+    const state = this.streams.get(dictationId);
+    if (!state) {
+      return false;
+    }
+    if (state.inputFormat !== format) {
+      return false;
+    }
+    if (!sameResumeOptions(state.resumeOptions, resumeOptionsOf(startOptions))) {
+      return false;
+    }
+    this.emitAck(dictationId, state.ackSeq);
+    return true;
+  }
+
   async handleStart(dictationId: string, format: string, startOptions: DictationStartOptions = {}) {
+    if (this.resumeStream(dictationId, format, startOptions)) {
+      return;
+    }
+    const resumeOptions = resumeOptionsOf(startOptions);
+    const inFlight = this.starting.get(dictationId);
+    if (inFlight && inFlight.format === format && sameResumeOptions(inFlight.resumeOptions, resumeOptions)) {
+      return;
+    }
+
     this.cleanupStream(dictationId);
 
     const inputRate = parsePcmRateFromFormat(format, 16000) ?? 16000;
@@ -226,13 +254,27 @@ export class DictationStreamManager {
       return;
     }
 
+    const attempt = { format, resumeOptions };
+    this.starting.set(dictationId, attempt);
     let resolved;
     try {
       resolved = await this.createSttSession(startOptions);
     } catch (error) {
-      this.failStream(dictationId, (hasMessage(error) && error.message) || String(error), true);
+      if (this.starting.get(dictationId) === attempt) {
+        this.starting.delete(dictationId);
+        this.failStream(dictationId, (hasMessage(error) && error.message) || String(error), true);
+      }
       return;
     }
+    if (this.starting.get(dictationId) !== attempt) {
+      try {
+        resolved?.session?.close();
+      } catch {
+        void 0;
+      }
+      return;
+    }
+    this.starting.delete(dictationId);
     if (!resolved || resolved.error) {
       this.failStream(
         dictationId,
@@ -298,6 +340,7 @@ export class DictationStreamManager {
     this.streams.set(dictationId, {
       dictationId,
       inputFormat: format,
+      resumeOptions,
       stt,
       inputRate,
       outputRate: stt.requiredSampleRate,
@@ -400,10 +443,10 @@ export class DictationStreamManager {
     }
 
     state.finishRequested = true;
-    state.finalSeq = finalSeq;
+    state.finalSeq = state.finalSeq === null ? finalSeq : Math.max(state.finalSeq, finalSeq);
 
     if (
-      finalSeq >= 0 &&
+      state.finalSeq >= 0 &&
       state.ackSeq < 0 &&
       state.nextSeqToForward === 0 &&
       state.receivedChunks.size === 0
@@ -463,6 +506,7 @@ export class DictationStreamManager {
   }
 
   cleanupStream(dictationId: string) {
+    this.starting.delete(dictationId);
     const state = this.streams.get(dictationId);
     if (!state) {
       return;
