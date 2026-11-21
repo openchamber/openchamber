@@ -2,6 +2,7 @@ import { create } from "zustand"
 import { z } from "zod"
 import type { SyncEvent } from "@/lib/opencode/events"
 import type { FormRequest, Message, Metadata, Part, ToolPart } from "@/lib/opencode/model"
+import { getRuntimeKey } from "@/lib/runtime-switch"
 
 type QuestionToolLink = { messageID: string; toolID: string }
 export type QuestionAskOutcome = "answered" | "dismissed" | "deferred" | "turn-death" | "shutdown" | "pending" | "unresolved"
@@ -185,8 +186,41 @@ function closeQuestion(sessionID: string, formID: string, outcome: ClosedOutcome
   })
 }
 
-export const noteLocalFormReplied = (sessionID: string, formID: string): void => closeQuestion(sessionID, formID, "answered")
-export const noteLocalFormCancelled = (sessionID: string, formID: string): void => closeQuestion(sessionID, formID, "dismissed")
+let liveFormRemovalClock = 0
+const liveFormRemovals = new Map<string, number>()
+const liveFormReadStarts: number[] = []
+
+const liveFormKey = (runtimeKey: string, sessionID: string, formID: string): string =>
+  `${runtimeKey}\u0000${sessionID}\u0000${formID}`
+
+function noteLiveFormRemoved(sessionID: string, formID: string): void {
+  if (liveFormReadStarts.length === 0) return
+  liveFormRemovals.set(liveFormKey(getRuntimeKey(), sessionID, formID), ++liveFormRemovalClock)
+}
+
+export function noteLocalFormReplied(sessionID: string, formID: string): void {
+  noteLiveFormRemoved(sessionID, formID)
+  closeQuestion(sessionID, formID, "answered")
+}
+
+export function noteLocalFormCancelled(sessionID: string, formID: string, message?: string): void {
+  noteLiveFormRemoved(sessionID, formID)
+  if (message === undefined) closeQuestion(sessionID, formID, "dismissed")
+}
+
+export async function readLiveForms<T>(read: () => Promise<FormRequest[]>, apply: (forms: FormRequest[]) => T): Promise<T> {
+  const startedAt = liveFormRemovalClock
+  liveFormReadStarts.push(startedAt)
+  try {
+    const forms = await read()
+    const runtimeKey = getRuntimeKey()
+    return apply(forms.filter((form) => !liveFormRemovals.has(liveFormKey(runtimeKey, form.sessionID, form.id))))
+  } finally {
+    liveFormReadStarts.splice(liveFormReadStarts.indexOf(startedAt), 1)
+    const oldestRead = liveFormReadStarts.length > 0 ? Math.min(...liveFormReadStarts) : Infinity
+    for (const [key, removedAt] of liveFormRemovals) if (removedAt <= oldestRead) liveFormRemovals.delete(key)
+  }
+}
 
 export const deferredAnswerMetadata = (formID: string): Metadata => ({ openchamber: { deferredAnswer: { formID } } })
 
