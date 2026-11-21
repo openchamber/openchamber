@@ -1,4 +1,3 @@
-
 export const OPEN_CHAMBER_LOGO_ART = {
   shell: [
     'M0 -48 L-41.568 -24 L0 0 L41.568 -24 Z',

@@ -4,6 +4,7 @@ import type { GuestStatusControl, GuestStatusControlEvent } from './status-contr
 import { isGuestStatusControls } from './status-controls.ts';
 import type { GuestBlockCall, JsonValue } from './contract.ts';
 import { isGuestPopoverRequest, type GuestPopoverClosedEvent, type GuestPopoverRequest } from './popover.ts';
+import { guestNavigationCalls, type GuestNavigationClient } from './navigation.ts';
 import {
   GUEST_FILE_EDITOR_CONTENT_MAX,
   GUEST_FILE_EDITOR_VERSION_MAX,
@@ -32,7 +33,6 @@ import {
   clampAttachRequest,
   clampBadgeCount,
   clampFrameHeight,
-  isGuestCommitSha,
   clampPromptRequest,
   clampStartSessionRequest,
   readHostMessage,
@@ -138,7 +138,6 @@ export type HostClient = {
   onAction: (handler: (item: GuestActionItem) => void | Promise<void>) => () => void;
   toast: (request: ToastRequest) => Promise<void>;
   openUrl: (url: string) => Promise<void>;
-  openCommit: (sha: string) => Promise<void>;
   openSurface: (surfaceId: string) => Promise<void>;
   writeClipboard: (text: string) => Promise<void>;
   compose: (request: ComposeRequest) => Promise<void>;
@@ -168,7 +167,7 @@ export type HostClient = {
   requestFileSave: () => void;
   reportFileUnsupported: () => void;
   dispose: () => void;
-};
+} & GuestNavigationClient;
 
 // external: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/instanceof#instanceof_and_multiple_realms Event constructors belong to their realm; non-browser runtimes may have none.
 const isKeyEvent = (event: Event): event is KeyboardEvent => 'key' in event && 'metaKey' in event && 'ctrlKey' in event;
@@ -926,13 +925,7 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       id: nextId(ids),
       payload: { url },
     }),
-    openCommit: (sha) => (isGuestCommitSha(sha) ? request({
-      channel: OPENCHAMBER_SDK_CHANNEL,
-      v: OPENCHAMBER_SDK_API_VERSION,
-      type: 'open-commit',
-      id: nextId(ids),
-      payload: { sha },
-    }) : Promise.reject(new HostRequestError('HOST_REJECTED', 'Commit id must be 7 to 64 hex characters.'))),
+    ...guestNavigationCalls(request, () => nextId(ids), (message) => Promise.reject(new HostRequestError('HOST_REJECTED', message))),
     answerBlock: (text) => request({
       channel: OPENCHAMBER_SDK_CHANNEL,
       v: OPENCHAMBER_SDK_API_VERSION,

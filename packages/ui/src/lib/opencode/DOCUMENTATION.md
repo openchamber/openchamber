@@ -6,6 +6,8 @@ This module owns official OpenCode SDK calls and translation from wire records
 to the shared UI domain model. Sync owns transcript membership and store writes.
 Wire session and message shapes stay inside this adapter. Stores and rendering
 consume the domain model across web, desktop, VS Code and both mobile clients.
+The domain model also exports integration connections, authentication methods,
+form fields, answers and conditions, and permission effects for shared UI consumers.
 Tool-name branching belongs in `tools.ts`; unknown plugin and MCP tools retain
 generic rendering.
 
@@ -68,8 +70,9 @@ generic rendering.
 
 ### Identity, projection and event ordering
 
-- Client-minted IDs share OpenCode's lexical time ordering so optimistic records
-  reconcile in place and sort with server records. ID and JSON helpers stay
+- Client-minted IDs use OpenCode's ID format so optimistic records reconcile in
+  place with server records by identity; transcript order never comes from IDs
+  (`sync/DOCUMENTATION.md`, rule 10). ID and JSON helpers stay
   independent of the client so local state creation does not load transport or
   inherit a mocked client.
 - Domain agent `name` holds the wire ID used for writes; `displayName` holds the
@@ -166,6 +169,12 @@ generic rendering.
 
 ## Decisions
 
+### Why unchanged catalog and form types use domain aliases
+
+Integration, form and permission contracts retain their complete SDK shapes
+through aliases in `model.ts`. Consumers import these names from the adapter so
+an upstream API change has one owning folder without adding runtime conversion.
+
 ### Why fresh provider reads wait for post-call requests
 
 Provider, model and default-model reads share one catalog promise per directory
@@ -233,3 +242,8 @@ buckets, and a project filter names an OpenCode project ID.
 OpenCode's temp directory is on the machine its agents can read, including when
 the UI and OpenChamber server run elsewhere. Each upload uses a fresh folder to
 prevent repeated filenames from overwriting earlier attachments.
+`temp-files.ts` writes a batch one file at a time. A file's bytes may be a
+reader called right before its own write, so a batch of large documents holds
+one in memory at a time. A caller that passes `runtimeKey` gets a batch that
+stops before its next request once the runtime switched, so the rest of one
+draft's files never reach the new runtime.

@@ -14,6 +14,7 @@ interface MobileComposerHolders {
     referencePickerOpen: boolean;
     promptHistorySearchOpen: boolean;
     isDragging: boolean;
+    choicePending: boolean;
 }
 
 export interface MobileComposerShellOptions {
@@ -212,7 +213,8 @@ export function useMobileComposerShell(
         || holders.draftPickerOpen
         || holders.referencePickerOpen
         || holders.promptHistorySearchOpen
-        || holders.isDragging;
+        || holders.isDragging
+        || holders.choicePending;
 
     React.useEffect(() => {
         if (!isMobile || !expanded || busy || alwaysExpanded) return;

@@ -4,7 +4,7 @@ import type { SheetDifference } from './workbook/workbookDiff';
 
 export type TableChunk = { rows: string[][] };
 
-export type DataTableEnd = { columns: string[]; totalRows: number; columnCount?: number };
+export type DataTableEnd = { columns: string[]; totalRows: number; columnCount?: number; dataColumnCount?: number };
 
 export type SheetInfo = { name: string; protected: boolean };
 

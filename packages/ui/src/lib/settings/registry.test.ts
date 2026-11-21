@@ -83,7 +83,7 @@ describe('settings registry', () => {
     }
   });
 
-  test('round-trips all large text paste modes through settings and local persistence', async () => {
+  test('round-trips all large text paste and office document modes through settings and local persistence', async () => {
     const options = useUIStore.persist.getOptions();
     const original = useUIStore.getState();
     let saved: Parameters<NonNullable<typeof options.storage>['setItem']>[1] = { state: original, version: options.version };
@@ -104,6 +104,21 @@ describe('settings registry', () => {
         useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
       }
       expect(parseSettingsDocument({ largeTextPasteBehavior: 'invalid' })).toEqual({});
+      for (const mode of ['ask', 'save', 'convert']) {
+        const parsed = parseSettingsDocument(JSON.parse(JSON.stringify({ documentAttachBehavior: mode })));
+        expect(parsed).toEqual({ documentAttachBehavior: mode });
+        if (!parsed) throw new Error('Expected valid mode');
+        applySettingsToStores(parsed);
+        expect(useUIStore.getState().documentAttachBehavior).toBe(mode);
+        expect(readAutoSaveSnapshot().documentAttachBehavior).toBe(mode);
+        const persisted = saved;
+        useUIStore.persist.setOptions({ storage: { getItem: () => persisted, setItem: () => undefined, removeItem: () => undefined } });
+        useUIStore.getState().setDocumentAttachBehavior('ask');
+        await useUIStore.persist.rehydrate();
+        expect(useUIStore.getState().documentAttachBehavior).toBe(mode);
+        useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
+      }
+      expect(parseSettingsDocument({ documentAttachBehavior: 'attach' })).toEqual({});
     } finally {
       useUIStore.persist.setOptions(options);
       useUIStore.setState(original, true);

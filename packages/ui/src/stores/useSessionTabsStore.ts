@@ -16,7 +16,7 @@ interface SessionTabsStore {
   closeTab: (sessionId: string) => void;
   closeOtherTabs: (sessionId: string) => void;
   reorderTabs: (activeId: string, overId: string) => void;
-  removeTabs: (sessionIds: readonly string[]) => void;
+  removeTabs: (sessionIds: readonly string[], runtimeKey?: string) => void;
   followSessionMove: (sessionId: string, scope: string, scopePrefix: string, seed: () => readonly string[] | null) => void;
   enterScope: (scope: string, seed: () => readonly string[]) => void;
 }
@@ -25,7 +25,7 @@ type SessionTabSet = { tabIds: string[]; previewTabId: string | null };
 
 export const GLOBAL_SESSION_TAB_SCOPE = 'global';
 
-const MAX_PINNED_SESSION_TABS = 10;
+const MAX_SEEDED_SESSION_TABS = 10;
 const MAX_STORED_SCOPES = 40;
 
 type PersistedSessionTabs = { tabIds: string[]; previewTabId: string | null; scope: string; sets: Record<string, SessionTabSet> };
@@ -37,16 +37,6 @@ const persistedSchema = z.object({
   scope: z.string().catch(GLOBAL_SESSION_TAB_SCOPE),
   sets: z.record(z.string(), tabSetSchema).catch({}),
 });
-
-const capPinnedTabs = (tabIds: string[], previewTabId: string | null): string[] => {
-  let excess = tabIds.filter((id) => id !== previewTabId).length - MAX_PINNED_SESSION_TABS;
-  if (excess <= 0) return tabIds;
-  return tabIds.filter((id) => {
-    if (excess <= 0 || id === previewTabId) return true;
-    excess -= 1;
-    return false;
-  });
-};
 
 export const useSessionTabsStore = create<SessionTabsStore>()(
   devtools(
@@ -81,7 +71,7 @@ export const useSessionTabsStore = create<SessionTabsStore>()(
 
           if (pinned) {
             set({
-              tabIds: capPinnedTabs([...tabIds, sessionId], currentPreview),
+              tabIds: [...tabIds, sessionId],
               previewTabId: currentPreview,
               pinOnOpenIds: nextPinOnOpenIds,
             });
@@ -100,7 +90,7 @@ export const useSessionTabsStore = create<SessionTabsStore>()(
           const { tabIds, previewTabId, pinOnOpenIds } = get();
           if (tabIds.includes(sessionId)) {
             if (previewTabId !== sessionId) return;
-            set({ tabIds: capPinnedTabs(tabIds, null), previewTabId: null });
+            set({ previewTabId: null });
             return;
           }
           if (pinOnOpenIds.includes(sessionId)) return;
@@ -131,22 +121,23 @@ export const useSessionTabsStore = create<SessionTabsStore>()(
           const next = [...tabIds];
           next.splice(to, 0, ...next.splice(from, 1));
           const nextPreview = previewTabId === activeId ? null : previewTabId;
-          set({ tabIds: capPinnedTabs(next, nextPreview), previewTabId: nextPreview });
+          set({ tabIds: next, previewTabId: nextPreview });
         },
 
-        removeTabs: (sessionIds) => {
+        removeTabs: (sessionIds, runtimeKey) => {
           if (sessionIds.length === 0) return;
+          const inRuntime = (scope: string) => runtimeKey === undefined || scope === GLOBAL_SESSION_TAB_SCOPE || scope.startsWith(`${runtimeKey}|`);
           const gone = new Set(sessionIds);
           const without = (tabSet: SessionTabSet): SessionTabSet | null => {
             const next = tabSet.tabIds.filter((id) => !gone.has(id));
             if (next.length === tabSet.tabIds.length) return null;
             return { tabIds: next, previewTabId: tabSet.previewTabId && gone.has(tabSet.previewTabId) ? null : tabSet.previewTabId };
           };
-          const { tabIds, previewTabId, sets } = get();
-          const shown = without({ tabIds, previewTabId });
+          const { scope: shownScope, tabIds, previewTabId, sets } = get();
+          const shown = inRuntime(shownScope) ? without({ tabIds, previewTabId }) : null;
           let nextSets: Record<string, SessionTabSet> | null = null;
           for (const [scope, tabSet] of Object.entries(sets)) {
-            const next = without(tabSet);
+            const next = inRuntime(scope) ? without(tabSet) : null;
             if (!next) continue;
             nextSets ??= { ...sets };
             nextSets[scope] = next;
@@ -172,11 +163,13 @@ export const useSessionTabsStore = create<SessionTabsStore>()(
           }
           if (Object.keys(next).length === 0) return;
           const seeded = all[scope] ? null : seed();
-          const target = all[scope] ?? (seeded ? { tabIds: [...new Set(seeded)].slice(0, MAX_PINNED_SESSION_TABS), previewTabId: null } : null);
+          const seededTabs = seeded ? [...new Set(seeded)] : [];
+          const seedLimit = seededTabs.slice(0, MAX_SEEDED_SESSION_TABS).includes(sessionId) ? MAX_SEEDED_SESSION_TABS : MAX_SEEDED_SESSION_TABS - 1;
+          const target = all[scope] ?? (seeded ? { tabIds: seededTabs.slice(0, seedLimit), previewTabId: null } : null);
           if (target) {
             next[scope] = target.tabIds.includes(sessionId)
               ? target
-              : { tabIds: capPinnedTabs([...target.tabIds, sessionId], target.previewTabId), previewTabId: target.previewTabId };
+              : { tabIds: [...target.tabIds, sessionId], previewTabId: target.previewTabId };
           }
           const { [shownScope]: shown, ...stored } = next;
           set({
@@ -192,7 +185,7 @@ export const useSessionTabsStore = create<SessionTabsStore>()(
           const { [scope]: stored, ...others } = sets;
           const kept = Object.entries({ ...others, [shownScope]: { tabIds, previewTabId } });
           const nextSets = Object.fromEntries(kept.slice(Math.max(0, kept.length - MAX_STORED_SCOPES)));
-          const next = stored ?? { tabIds: [...new Set(seed())].slice(0, MAX_PINNED_SESSION_TABS), previewTabId: null };
+          const next = stored ?? { tabIds: [...new Set(seed())].slice(0, MAX_SEEDED_SESSION_TABS), previewTabId: null };
           set({ scope, tabIds: next.tabIds, previewTabId: next.previewTabId, sets: nextSets });
         },
       }),

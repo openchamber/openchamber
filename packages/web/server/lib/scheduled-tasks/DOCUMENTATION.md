@@ -5,10 +5,10 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 ## Scope
 
 - Per-project scheduled task persistence is owned by `packages/web/server/lib/projects/project-config.js`.
-- Markdown loop discovery/parsing is owned by `packages/web/server/lib/scheduled-tasks/loops.js`.
-- Runtime orchestration and execution is owned by `packages/web/server/lib/scheduled-tasks/runtime.js`.
+- Markdown loop discovery/parsing is owned by `packages/web/server/lib/scheduled-tasks/loops.ts`.
+- Runtime orchestration and execution is owned by `packages/web/server/lib/scheduled-tasks/runtime.ts`.
 - This module is OpenChamber feature logic; it is intentionally separate from OpenCode proxy/runtime internals.
-- The chats scope is owned by `packages/web/server/lib/scheduled-tasks/chats-scope.js`.
+- The chats scope is owned by `packages/web/server/lib/scheduled-tasks/chats-scope.ts`.
 
 ## Invariants
 
@@ -189,7 +189,7 @@ dispatches still skip disabled tasks, and completion never re-arms a paused task
 ## Existing-session tasks
 
 `targetSessionId` sends to an existing session instead of creating one.
-`existing-session.js` validates changed or enabled targets on save, and all
+`existing-session.ts` validates changed or enabled targets on save, and all
 targets on admission and send. A paused task can keep a stale target. The
 target must be active and belong to the task project or its linked worktree.
 Another registered project owns its exact checkout. Chats targets must remain
@@ -198,7 +198,7 @@ return 409, including through Run now.
 
 `resolveExecutionDirectory` on the task service returns the project checkout
 or Chats root after scope ID normalization. For a target task it reuses
-`existing-session.js` target validation and returns the session's own directory.
+`existing-session.ts` target validation and returns the session's own directory.
 The task service uses this directory for named-model catalog checks, so a
 target in a linked worktree uses that worktree's configuration.
 
@@ -258,8 +258,17 @@ and rejoining tokens would discard line breaks and collapse argument spacing.
 A task either pins them (`execution.providerID`, `modelID`, `variant`, `agent`)
 or sets `execution.useDefaults: true`. Such a task reads the session defaults
 when each run starts (`session-defaults.js`: the project's `defaultModel` /
-`defaultVariant` / `defaultAgent`, then the global ones), so changing a default
-reaches it on its next run without editing it. With nothing set, the session is
+`defaultVariant` / `defaultAgent`, then the global ones; a Chats-scope task
+reads the Chats defaults from `readChatsDefaults` in `chats-scope.js` in the
+project's place; `createReadSessionDefaults` matches the Chats storage id, the
+one runs carry, not `CHATS_SCOPE_PUBLIC_ID`), so changing a default
+reaches it on its next run without editing it. Each such run reads the run
+directory's model list first: a default model that list lacks or disables is
+skipped for the next one, and a thinking level the chosen model doesn't offer
+is dropped. A failed or empty read keeps the configured model, because only a
+catalog that was read proves a model gone. Auto is OpenChamber's routing
+choice and never in that list, so it passes the check and the run routes. An empty project or Chats level on
+the global model takes the global level. With nothing set, the session is
 created without a model or agent and OpenCode applies its own. A pinned value
 stored next to `useDefaults` is kept only for when the task is pinned again.
 
@@ -363,7 +372,7 @@ directory at the old path.
 ### Why owners include a process instance
 
 `ownerPID` is paired with `ownerInstance`, a native creation fingerprint from
-`process-instance.js`. Linux uses the boot UUID and `/proc/<pid>/stat` start
+`process-instance.ts`. Linux uses the boot UUID and `/proc/<pid>/stat` start
 ticks; macOS uses the boot-session UUID and the process creation time from `ps`
 in UTC; Windows uses the process's UTC creation ticks through hidden PowerShell.
 Native commands have a 2-second deadline. No heartbeat or periodic owner writes
@@ -377,21 +386,127 @@ Startup reads each distinct owner PID once. Only this process's immutable
 identity and boot identity are retained beyond that scan; other PIDs are read
 fresh before a removal claim.
 
+Linux start ticks are field 22 of `/proc/<pid>/stat`. The process name in
+parentheses can contain spaces and parentheses, so parsing starts after the
+last closing parenthesis before selecting the start-time field.
+
+### TypeScript boundaries
+
+`loops.ts` imports `parseMdFile`, `writeMdFile`, `getAncestors` and
+`findWorktreeRoot` from `../opencode/markdown-files.js` and
+`../opencode/config-files.js`. Those owners' declarations expose
+these helpers, with unvalidated YAML frontmatter and a parsed string body.
+The frontmatter guard preserves the original acceptance of any non-null object,
+including arrays, and leaves every field unknown until its individual check.
+Enabling a loop reads the file again after validation. That second read remains
+unchecked and its enumerable fields are spread as before, including scalar
+string indices if the file changes between reads. Nullish frontmatter contributes
+no properties.
+
+`existing-session.ts` consumes the normalized task and state-write contracts
+exported by `../projects/contracts.ts`. The project-config normalizers check
+schedule, execution and state fields before returning tasks. State patches
+remain unchecked until that normalizer reads each field, including a queue
+error's unvalidated `message`. Admission returns `message`, `status` and
+`statusCode` as unknown values. The error guard establishes only that property
+access is possible; inherited fields and non-string messages retain their
+original behavior. Nullish thrown values still fail on the required message
+read, and the admission slot is released.
+
+Target validation uses the successful string schema result without transforming
+it. Candidate discovery retains its array check and checks individual candidate
+fields; a candidate may be a primitive, an array or an object. The membership
+cache contains promises of directory ownership, not session records.
+
+`service.ts` checks the task container before project-config normalizes it.
+Model validation reads the raw execution fields with the same nullish fallback
+as optional chaining. Target validation accepts the raw session id and parses
+it with Zod. Cancellation compares the raw task id against stored string ids
+without coercion. Public operations still reject missing ids through the
+existing string parser.
+
+`ScheduledTaskRunResult.error` and `statusCode` remain unknown because
+existing-session admission forwards unchecked thrown fields. The control error
+lets `Error` coerce the message and stores the status unchanged. Guest service
+callbacks use the specific session actions' result contracts; general control
+execution can still return unchecked results from other actions.
+
+Status falls back to reading project configs when the injected runtime has no
+callable status reader. The worktree resolver normally reports the input
+directory when Git cannot resolve a checkout. A resolver that throws also
+falls through to the directory-not-found response.
+
+### Which thrown status values a route forwards
+
+`routes.ts` reads thrown fields through `controlErrorFields`, preserving inherited
+properties, primitive property reads and nullish fallbacks. A thrown `statusCode`
+is used only when it is an integer; anything else is answered as the route's
+generic failure, as it was when Express rejected the value.
+Task body object checks still accept arrays. Candidate and enabled reads retain
+primitive property access. SSE connection metadata is attached to the original
+response object, which remains the client set's identity until close or a failed
+heartbeat removes it.
+
+### Why the runtime uses the project owner's task contracts
+
+`ScheduledTaskStore`, `ScheduledTaskInput` and `ScheduledWorktreeCleanup` live
+in `../projects/contracts.ts`. Project-config normalizes stored tasks and
+parses cleanup records before returning them. Its lock wrapper still infers
+unchecked callback results; the injected contract records those actual
+normalized results without copying storage types into the scheduler.
+Cleanup records preserve the schema's optional owner instance and nullable
+branch. State writes retain their nullable task result.
+
+### Why public scheduling helpers retain input checks
+
+The exported schedule and title helpers also serve JavaScript callers with
+partial definitions. A missing timezone uses the server zone, and daily or
+weekly schedules may use the legacy single `time` field. Primitive string,
+object and array checks retain their existing acceptance and fallbacks.
+Only private, already typed time values, Luxon weekdays and injected function
+dependencies lose redundant `typeof` checks.
+
+### Why metadata fields remain unchecked
+
+The metadata store returns its loose schema result. Cleanup reads
+`openchamber.goal.status` through non-null property-access guards, including
+inherited fields and primitive property reads, without asserting a validated
+goal interface. Native errors use the control owner's unchecked field reader,
+which preserves inherited error properties and nullish fallback behavior.
+
+### Why command templates are narrowed at lookup
+
+The pinned client's command type omits `template`. Lookup reads an existing
+property, including an inherited property, and checks for a primitive string.
+A missing or non-string template retains the original prompt-objective fallback.
+The client still receives command arguments through its `name` and `text`
+fields. Goal introductions use `resume: false`, and goals persist through the
+OpenChamber metadata store. `createSessionGoal` already declares its raw
+input fields, including the budget and persistence callback, as unchecked.
+
+### Why the runtime has local dependency declarations
+
+`dependencies.d.ts` declares only the Luxon methods used here because the
+installed package supplies no declarations. It adds no dependency and replaces
+no server implementation. Empty catch bodies use a no-op expression so their
+existing ignored failures need no product-code comments. Cleanup failures
+retain the journal when absence cannot be confirmed.
+
 ## Files
 
-- `packages/web/server/lib/scheduled-tasks/runtime.js`
+- `packages/web/server/lib/scheduled-tasks/runtime.ts`
   - Next-run computation (daily/weekly/cron compatibility)
   - Timer scheduling and queueing
   - Concurrency controls
   - Session create + prompt_async execution
   - Emits OpenChamber task-run events
 
-- `packages/web/server/lib/scheduled-tasks/loops.js`
+- `packages/web/server/lib/scheduled-tasks/loops.ts`
   - Discovery of `.agents/loops/*.md` (project scope, ancestors up to the worktree root) and `~/.agents/loops/*.md` (user scope)
   - Frontmatter parsing into scheduled-task definitions
   - `syncProject` reconciles discovered loops with the persisted task list on every project sync (startup, task list load, task save/delete)
 
-- `packages/web/server/lib/scheduled-tasks/routes.js`
+- `packages/web/server/lib/scheduled-tasks/routes.ts`
   - Scheduled task CRUD endpoints
   - Listing tasks reconciles loop files first, so opening the Scheduled Tasks UI discovers file additions, edits, and removals without a server restart
   - Loop-file endpoints toggle `enabled` in frontmatter or delete the authoritative markdown file, then reconcile the project

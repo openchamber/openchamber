@@ -1,7 +1,7 @@
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
 import { useSession } from '@/sync/sync-context';
@@ -20,7 +20,8 @@ export const useColumnPromptReadOnly = ({
     readOnly: boolean;
 }) => {
     const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
-    const currentSession = useSession(currentSessionId, effectiveSessionDirectory);
+    const listedSession = useGlobalSessionsStore((state) => (currentSessionId ? state.entityById.get(currentSessionId) : undefined));
+    const currentSession = useSession(currentSessionId, effectiveSessionDirectory) ?? listedSession;
     React.useEffect(() => {
         ensureSpaceArchives();
     }, []);

@@ -2,13 +2,27 @@
 
 ## Ownership
 
-`index.js` composes the HTTP server and feature runtimes for web, desktop and
+`index.js` enables source maps before dynamically loading `runtime.ts` (through its `.js` specifier). Node collects maps only for modules loaded after `setSourceMapsSupport` is called, which is why the runtime is a dynamic import; Bun handles maps itself and does not expose that API, hence the optional call. In a source checkout, the Node entry also registers source resolution before that import.
+`runtime.ts` composes the HTTP server and feature runtimes for web, desktop and
 mobile clients. Each feature owns its contract in `lib/<feature>/DOCUMENTATION.md`.
 This document covers composition, process-wide helpers, enterprise policy and
 server update ownership. VS Code runs its own host and shares only the helpers
 it imports.
 
 ## Invariants
+
+- Installed server and CLI code runs from `build/server` and `build/bin`.
+  Sibling assets retain their relative locations. The server enables Node source
+  maps so emitted stack traces identify the original source and line.
+- Source CLI commands resolve their sibling server directly, so checkout
+  development does not depend on generated output or the package's published
+  entry fields.
+
+- Package-owned paths come from `lib/web-package-paths.js`, which locates the
+  ancestor manifest named `@openchamber/web` and caches the resolved paths.
+  Server and CLI entries follow that manifest; UI assets remain in package-root
+  `dist`, with `OPENCHAMBER_DIST_DIR` taking precedence. Importer-relative sibling
+  assets and the built-in extensions override retain their own contracts.
 
 - The fetch trust guard is installed before feature runtimes capture `fetch`.
   Every server-side OpenCode client follows the proxy's directory trust checks.
@@ -134,7 +148,251 @@ it imports.
   integrations catalog and Claude Code install card stay hidden. VS Code uses
   this same policy reader for its own supported operations.
 
+## Converting a folder to TypeScript
+
+One worker owns the implementation files directly inside one assigned folder.
+Nested folders are separate assignments. Run in an isolated checkout. In a
+shared checkout, workers run focused tests only and the coordinator runs the
+combined checks and builds serially.
+
+1. Read this document, the folder's documentation and every caller of its
+   exports. Run its existing tests before changing code. List its imports and
+   externally read inputs so defaults, missing values and failure behavior
+   remain explicit.
+2. Rename each implementation with `git mv file.js file.ts`. Keep `.js` in
+   relative imports and re-exports, including type-only imports. Tests stay
+   JavaScript unless a compile-time contract needs a TypeScript test. Delete
+   every paired `file.d.ts` as its implementation converts. Declaration-only
+   contracts remain until their owning assignment moves them.
+3. Declare each boundary data type once, export it from its owning module or a
+   folder-local contract module, and import it with `import type`. Give
+   parameters and state their actual domain types. Keep inferred return types
+   when they already express the contract; name public result shapes shared
+   by callers. Preserve the existing optional-versus-null contract.
+   Use `shared/http-contracts.js` for Express `Request`, `Response`,
+   `RequestHandler`, `Router` and `Application`. Its request body and query
+   fields remain unchecked until the route validates them. `shared/express.d.ts`
+   connects the installed Express factory to these structural contracts.
+   WebSocket constructors, frame data and events live in
+   `shared/websocket-contracts.js`, connected to `ws` by `shared/ws.d.ts`.
+   Import constructors from `ws` at runtime and contracts with `import type`.
+   Import these owner contracts rather than declaring another folder's copy.
+   `shared/object-guards.js` supplies record, boolean and string predicates,
+   also re-exported from the `shared/guards.js` entry. `isString` is true only
+   for primitive strings and narrows to `string`.
+   OpenCode's declaration-only boundary exposes markdown frontmatter as
+   `unknown` and optional activity-probe signals; the settings module's
+   exposes merged settings as unchecked records. The matching implementations
+   remain owned by those modules.
+4. Keep runtime validation at HTTP, file, environment and process-message
+   boundaries. Parse external values before using them. Use a small type guard
+   when a runtime check establishes a shape. Remove `typeof` branches that
+   merely recheck an internally typed value. No explicit `any`, non-null
+   assertions, blind casts, widened escape types or suppression without a
+   concrete reason. Product-code explanations belong in documentation.
+5. Run the worker proof below, inspect the diff for behavior changes and obtain the
+   `review-changes` second look. Hand over the folder, removed declaration paths,
+   commands and results, and any boundary mismatch outside the assignment.
+   A mismatch in another folder is a coordinator handoff, never permission to
+   weaken this folder's types.
+
+### Mixed JavaScript and TypeScript
+
+Keep server and bin implementation imports inside `packages/web`, including
+`import type`; shared packages must supply built declarations rather than
+workspace sources. Both `type-check:server` and `build:server` inspect the
+compiler's file list and reject escaping implementation sources before emit.
+
+Before converting a folder, trace its importers through to process entrypoints.
+Node links static imports before executing any module body. Each owned
+server/bin process entry keeps a `.js` bootstrap with Node builtin static imports,
+registers the source hook, then dynamically imports its implementation. Keep
+these bootstrap files JavaScript when converting their containing folder.
+The CLI implementation detects execution against `bin/cli.js`, so moving the
+implementation does not change package-bin or symlink behavior.
+
+For a Node script outside server/bin, register the hook before dynamically
+importing server/bin modules. A fork or spawn starts a separate resolver scope:
+use a bootstrapped process target, or preload the hook with `--import` when a
+test intentionally imports a helper directly. Changing the parent's imports
+alone does not protect the child.
+
+Run the entry regression with the folder tests:
+
+```sh
+bun run --cwd packages/web test scripts/node-source-entries.test.mjs
+node packages/web/bin/cli.js --version
+```
+
+The regression copies sources into a disposable checkout and gives every listed
+entry a static dependency on a type-bearing `.ts` module through a `.js`
+specifier. It starts plain Node without inherited `NODE_OPTIONS`, runs the
+worker over IPC, and covers direct-helper tests with explicit preloads. Add any
+new owned Node process target or direct-source test target to that inventory.
+The regular CLI suite separately checks exit codes and output modes.
+
+The launch audit groups callers by their actual process target:
+
+- `bin/cli.js`: package scripts, verify stand, perf/design tools, session seed
+  scripts, startup services and update/restart commands. Bun callers retain
+  their arguments; plain Node callers now use the same self-bootstrapping entry.
+- `server/index.js`: direct server tests, daemon fallback and standalone server
+  startup. Its source bootstrap runs before the runtime graph.
+- Git's credential, repository-credential and SSH helpers: `process.execPath`
+  through `helper-launch.js`, with `ELECTRON_RUN_AS_NODE` retained for desktop.
+- Dictation's worker: `fork` of `worker-process.js`, with the existing IPC,
+  serialization and native-addon boundary unchanged.
+- Build extensions, release mirror, tool-use bench and dev-server watcher:
+  Node scripts register the hook before their server imports. Electron's dev
+  launcher already preloads the hook and passes it to Electron; packaged
+  Electron and the VS Code bundle consume emitted or bundled JavaScript.
+- Direct-source tests: storage fixtures, outbound proxy, provider registry,
+  disabled providers, auth stores, model installation and guest service registry
+  preload the hook. Tests of emitted bundles and standalone copied-JavaScript
+  fixtures keep their no-source-hook contract.
+- Guest service entries, generated CJS programs, container scripts and inline
+  `node -e` programs own their own code; the server resolver does not extend to
+  external guest packages or container files.
+
+`tsconfig.server-check.json` checks every `.ts` under server and bin with
+`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,
+`noImplicitOverride` and `erasableSyntaxOnly`. It emits nothing. `allowJs` and
+`checkJs: false` let TypeScript read unconverted implementations and infer their
+exports. Import those modules through their existing `.js` specifiers. Use a
+remaining handwritten declaration when one exists; do not create a replacement
+shim or convert a dependency outside the assignment.
+
+`type-check:server` rejects an implementation that still has its paired
+declaration. `lint:server` enforces the TypeScript rules and the existing
+OpenChamber rules on all converted implementations, independently of the
+changed-file backlog. Both checks run through the normal package/root gate.
+TypeScript suppressions require a reason of at least 10 characters. External
+input guards with an explicit `value is DomainType` predicate may accept
+`unknown` and use `typeof`; unparsed helper parameters and internal `typeof`
+   branches remain lint errors.
+   Exported input parsers in `lib/shared/*.ts` may also accept one `unknown`
+   parameter and declare a nullable union result. Both rules scope this exception
+   through `allowInParsers`; other folders and internal callbacks remain checked.
+The dictionary rule also admits an unknown-valued dictionary in a type
+predicate's result. A record predicate establishes the container only;
+each property still needs its own check. Ordinary dictionary parameters,
+returns and stored values remain subject to the rule.
+
+Bun, Vitest and the VS Code esbuild bundle resolve `.js` imports to converted
+`.ts` files. Node source consumers, including Electron development, preload
+`packages/web/scripts/register-server-sources.mjs` and use the
+`openchamber-source` export condition. The hook falls back only for a missing
+`.js` whose real `.ts` file belongs to this package's server or bin. Installed
+Node and Electron read emitted JavaScript and never use this hook. The source
+server entry automatically loads it before its runtime graph, so plain Node
+foreground CLI, daemon fallback and perf/design launchers remain supported.
+Tests that import a converted helper directly under Node preload the same hook.
+Perf/design launchers also preload it before the source CLI, so converting a
+CLI dependency cannot break its static import graph. Older comparison
+checkouts without this hook keep their original launch arguments.
+
+### Pilot judgments
+
+- Diagnostics has a fixed privacy vocabulary. HTTP JSON is still parsed at
+  the boundary; an invalid or failed read remains `null`, while a valid empty
+  list remains zero. An integer pid uses `Number.isInteger`, preserving the
+  old acceptance rule rather than adding safe-integer or positive-only limits.
+- An absent optional field stays absent. `exactOptionalPropertyTypes` is on
+  from the first file. Add `| undefined` only when a real caller intentionally
+  supplies an explicit undefined value; do not add it to every optional field.
+- The diagnostic ring buffer has occupied and empty slots. Its local
+  `retainedEntry` accessor checks occupancy before returning the entry,
+  preserving an invariant failure without a cast or non-null assertion.
+  Public data types live once in `diagnostics/contracts.ts`.
+
+### Worker proof commands
+
+Run from the repository root, replacing the folder in the first command.
+The package test argument is relative to `packages/web`.
+
+```sh
+folder=server/lib/diagnostics
+bun run --cwd packages/web test "$folder"
+bun run --cwd packages/web type-check:server
+bun run --cwd packages/web lint:server
+```
+
+These commands establish the baseline, preserve behavior after conversion and
+check all currently converted consumers. In a shared checkout, run only the
+focused test command; the coordinator runs the two all-folder checks.
+
+### Coordinator proof commands
+
+Run these once on the combined wave, after workers stop editing.
+
+Knip 5.80 applies `.gitignore` patterns to absolute package-export globs.
+A checkout below a directory named `.local` can therefore lose TypeScript
+importers through the `*.local` ignore pattern and report live JavaScript
+exports as unused. Validate the identical diff in a checkout outside `.local`;
+keep those exports and the dead-code rules intact.
+
+```sh
+bun run --cwd packages/web test
+bun run --cwd packages/vscode type-check
+bun run --cwd packages/vscode test
+bun run --cwd packages/vscode build:extension
+bun run build:server
+bun run --cwd packages/web smoke:server-build
+bun run verify -- --changed
+bun run check:changed
+```
+
+The focused tests compare the folder's behavior before and after conversion.
+The strict check includes all converted server and CLI consumers. Lint checks
+every converted implementation without a backlog allowance. The web suite
+checks JavaScript consumers, source resolution and build regressions. VS Code's
+checks and extension build exercise its cross-package contracts and bundler.
+`build:server` proves declaration and JavaScript emission; `smoke:server-build`
+starts that emitted entry under Node with isolated data, checks UI, health and
+the diagnostic routes, then stops it. The behavior net selects mapped user
+flows; report any uncovered files it prints. The final gate also runs knip and
+the existing file-size and changed-file rules.
+
+For the pilot, `scripts/server-types-bundle.test.mjs` additionally bundles and
+executes diagnostics with VS Code's esbuild flags, and
+`scripts/register-server-sources.test.mjs` executes its unchanged package import
+from the Electron workspace under Node.
+
+Never change behavior, defaults, error handling or acceptance rules to make a
+type pass. Never touch another folder's files beyond an import specifier.
+Shared gate configuration, emitted output, package exports and generated files
+belong to the coordinator. A folder assignment does not authorize a dependency
+addition, a branch change, a commit, a push, or a wider refactor. The `git mv`
+rename in step 2 is the assignment's only authorized git write.
+
+### The conversion is closed
+
+Every implementation module under `server` and `bin` is TypeScript, and
+`type-check:server` fails on a new `.js` one. Six files stay JavaScript because
+Node, git or a child process runs each by file name, without a loader:
+`bin/cli.js`, `server/index.js`, `lib/git/credential-helper.js`,
+`lib/git/repository-credential-helper.js`, `lib/git/ssh-wrapper.js` and
+`lib/dictation/local/worker-process.js`. They hold no logic of their own; each
+imports its typed runtime. The list is `JAVASCRIPT_ENTRIES` in
+`packages/web/scripts/check-server-types.mjs`. Tests, fixtures and the
+gatekeeper's `.cjs` program are outside the rule.
+
 ## Decisions
+
+### Why the entry loads the runtime dynamically
+
+Node collects maps while loading modules. Enabling maps inside the full static
+import graph misses that graph, and dependencies under `node_modules` also need
+explicit inclusion. The small entry enables both before loading the runtime,
+while keeping the same exports and CLI entry identity.
+
+### Why package discovery follows the manifest
+
+Server files can run at different depths in a checkout or an installed package.
+The named ancestor manifest establishes ownership without counting parent folders.
+Checkout-only tools and the registry user agent recognize `openchamber-monorepo`
+only when it owns this package at `packages/web`. An npm install has no local
+tools checkout and keeps the registry user agent's `dev` fallback.
 
 ### Why streaming paths bypass compression and not only content negotiation
 
@@ -145,6 +403,9 @@ Accept, so explicit SSE paths also bypass compression to keep events streaming.
 
 UI client bearer tokens authenticate this server. Forwarding them to managed
 OpenCode replaces its own authentication and turns valid upstream calls into 401s.
+Browser fetch-metadata headers also stop at this hop. OpenCode 2.2.6 rejects
+cross-site fetch metadata, while packaged clients terminate that request at
+OpenChamber.
 
 ### Why HTTP defaults account for proxies and not only direct browser traffic
 
@@ -178,6 +439,21 @@ check. An exact target pins the install and reads the global version afterward;
 a zero exit status alone does not prove the requested update landed. pnpm build
 approvals stay aligned with `scripts/install.sh` and the package's blocked
 dependencies so unattended updates do not wait for an approval prompt.
+
+On Windows, npm, pnpm and yarn are `.cmd` shims, so their probes (`--version`,
+global root, prefix and listing, the post-update version readback) run through
+`cmd.exe`. `cmd.exe` would look in the working directory before `PATH`, so
+`lib/package-manager-probe.ts` first resolves the shim itself: it walks only
+drive-rooted or UNC `PATH` entries, in `PATHEXT` order, and runs the quoted
+absolute path. A manager found nowhere else is reported unavailable, never run
+from the working directory. The `cmd.exe` running the probe is named by an
+absolute path too, from `ComSpec` or `SystemRoot`, because Node's fallback to the
+bare name would find one in the working directory first; without either the
+probe fails. The probe arguments must remain server-controlled
+literals because `cmd.exe` parses the joined command string. Bun and every POSIX
+probe keep argument-array spawning without a shell. The install command itself
+is a shell string on every platform and still names the manager by its bare
+name.
 
 ### Why update channels belong to the installed runtime and not every client
 

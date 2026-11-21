@@ -11,9 +11,12 @@ export type ToggleTurnActivity = (turnId: string) => void;
 
 export type RetryOverlay = {
     sessionId: string;
-    message: string;
-    confirmedAt?: number;
-    fallbackTimestamp?: number;
+    lastIdleAt: number | null;
+    notice?: {
+        message: string;
+        confirmedAt?: number;
+        fallbackTimestamp?: number;
+    };
 };
 
 export type ListMetrics = { readonly headerSize: number; readonly footerSize: number };

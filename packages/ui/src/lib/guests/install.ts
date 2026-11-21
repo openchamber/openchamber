@@ -27,6 +27,7 @@ const errorSchema = z.object({
     'extract-failed',
     'too-large',
     'enterprise-mode',
+    'invalid-folders',
   ]),
   required: z.string().trim().min(1).max(64).optional(),
   id: z.string().trim().min(1).max(128).optional(),
@@ -50,6 +51,7 @@ export type InstallGuestErrorCode =
   | 'extract-failed'
   | 'too-large'
   | 'enterprise-mode'
+  | 'invalid-folders'
   | 'unreadable'
   | 'failed';
 
@@ -61,7 +63,7 @@ type UninstallGuestResult =
   | { ok: true }
   | { ok: false; code: InstallGuestErrorCode };
 
-type InstallGuestRequest = ({ path: string } | { url: string }) & { replace?: boolean; gitIdentityId?: string };
+type InstallGuestRequest = ({ path: string } | { url: string }) & { replace?: boolean; gitIdentityId?: string; folders?: string[] };
 
 type ParseInstallInputResult =
   | { ok: true; request: InstallGuestRequest }
@@ -117,6 +119,7 @@ const readInstallError = async (
 type InstallGuestOptions = {
   replace?: boolean;
   gitIdentityId?: string;
+  folders?: readonly string[] | undefined;
 };
 
 const readInstallResponse = async (response: Response, path: GuestRequestFailure['path']): Promise<InstallGuestResult> => {
@@ -146,6 +149,7 @@ export const installGuest = async (
   const body: InstallGuestRequest = { ...parsed.request };
   if (options.replace) body.replace = true;
   if ('url' in body && options.gitIdentityId) body.gitIdentityId = options.gitIdentityId;
+  if (options.folders) body.folders = [...options.folders];
   try {
     const response = await runtimeFetch('/api/guests', {
       method: 'POST',
@@ -168,6 +172,7 @@ export const uploadGuestZip = async (
       query: {
         replace: options.replace ? 'true' : undefined,
         name: file.name || undefined,
+        folders: options.folders ? JSON.stringify(options.folders) : undefined,
       },
       headers: { 'Content-Type': 'application/octet-stream', Accept: 'application/json' },
       body: file,
@@ -206,6 +211,19 @@ export const setGuestEnabled = async (id: string, enabled: boolean): Promise<boo
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
+export const setGuestFolders = async (id: string, folders: readonly string[]): Promise<boolean> => {
+  try {
+    const response = await runtimeFetch(`/api/guests/${id}/folders`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folders }),
     });
     return response.ok;
   } catch {

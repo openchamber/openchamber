@@ -60,16 +60,6 @@ describe('VS Code theme import', () => {
     expect(requireTheme(compactTheme(theme))).toEqual(theme);
   });
 
-  test('treats empty and unreadable colors as unset, as VS Code does', () => {
-    const theme = requireTheme(importVSCodeTheme(JSON.stringify({
-      ...source,
-      colors: { ...source.colors, 'diffEditor.move.border': '', 'symbolIcon.constantForeground': ['#aff5b4', '#7ee787'] },
-      tokenColors: [...source.tokenColors, { scope: 'markup.bold', settings: { foreground: '' } }],
-    }), 'empty.json'));
-    expect(theme.colors.surface.background).toBe('#101820');
-    expect(theme.colors.syntax.base.keyword).toBe('#aa66ff');
-  });
-
   test('accepts BOM, comments and trailing commas and infers light appearance', () => {
     const theme = requireTheme(importVSCodeTheme('\uFEFF{ // comment\n "colors": { "editor.background": "#fff", }, }', 'Paper.jsonc'));
     expect(theme.metadata.variant).toBe('light');

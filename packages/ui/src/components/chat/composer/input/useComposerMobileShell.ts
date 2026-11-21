@@ -5,6 +5,7 @@ import type { useComposerHistorySearchState } from './useComposerHistorySearchSt
 import type { useComposerExpansion } from './useComposerExpansion';
 import type { useComposerEditorState } from './useComposerEditorState';
 import type { useComposerDropState } from './useComposerDropState';
+import type { useComposerLargePasteState } from './useComposerLargePasteState';
 import { useMobileComposerShell } from '../../composer/state/useMobileComposerShell';
 
 type Dependencies = {
@@ -15,11 +16,13 @@ type Dependencies = {
     mobilePanels: Pick<ReturnType<typeof useComposerMobilePanels>, 'mobileControlsPanel' | 'mobileAttachMenuOpen' | 'mobileDraftPicker'>;
     historySearchState: Pick<ReturnType<typeof useComposerHistorySearchState>, 'promptHistorySearch' | 'historyFocusPending'>;
     dropState: Pick<ReturnType<typeof useComposerDropState>, 'isDragging'>;
+    largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteOffer'>;
 };
 
 export function useComposerMobileShell({
-    preferences, expansion, referencePickerState, editorState, mobilePanels, historySearchState, dropState,
+    preferences, expansion, referencePickerState, editorState, mobilePanels, historySearchState, dropState, largePasteState,
 }: Dependencies) {
+    const { largeTextPasteOffer } = largePasteState;
     const { isMobile, hasHardwareKeyboard, isTabletLayout, roomyForOnePanel } = preferences;
     const { setExpandedInput } = expansion;
     const { referencePicker } = referencePickerState;
@@ -29,24 +32,20 @@ export function useComposerMobileShell({
     const { isDragging } = dropState;
 
 
-    // The paste-toast tap may need to reopen the collapsed mobile composer.
     const mobileShell = useMobileComposerShell({
         isMobile,
         editorRef: composerRef,
         formRef: composerFormRef,
         setExpandedInput,
-        // Without a soft keyboard, keep the full composer up. So does a tablet,
-        // except where only one side panel fits (an unfolded iPhone Duo, a
-        // 13-inch iPad in portrait), which keeps the phone's pill.
         alwaysExpanded: hasHardwareKeyboard || (isTabletLayout && !roomyForOnePanel),
         holders: {
             controlsPanelOpen: Boolean(mobileControlsPanel),
             attachMenuOpen: mobileAttachMenuOpen,
             draftPickerOpen: mobileDraftPicker !== null,
             referencePickerOpen: referencePicker !== null,
-            // Keep the editor mounted until the closing search hands focus back.
             promptHistorySearchOpen: promptHistorySearch !== null || historyFocusPending,
             isDragging,
+            choicePending: largeTextPasteOffer !== null,
         },
     });
 

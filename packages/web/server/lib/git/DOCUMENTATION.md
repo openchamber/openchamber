@@ -27,16 +27,182 @@ This module provides Git repository operations for the web server runtime, inclu
 
 ## Invariants
 
+- Source TypeScript retains `.js` import specifiers. The Git helper bootstraps
+  register the source resolver before loading their runtime modules; emitted
+  helpers use ordinary JavaScript resolution.
+- Each serial-refresh instance has one request and result type. Runs still
+  share one follow-up per key and preserve the widest requested work.
+- The submodule control-character expression matches UTF-16 code units 0
+  through 31 and 127. Its complement excludes the same units without an inline
+  lint suppression.
+- Redaction accepts arbitrary input and inspects subprocess output only after
+  the existing `Error` check. An error's optional output fields remain
+  unchecked until the existing string filter runs.
+- LFS discovery keeps its canonical filter names as a closed key set. The
+  executable-config check still rejects inherited names such as `constructor`
+  and `__proto__`; duplicate canonical-filter acceptance requires an own name.
+  Its control-character expression excludes the same UTF-16 code units as the
+  submodule parser.
+- `service.ts` passes `spawnOptions: { windowsHide: true }` to simple-git.
+  Simple-git 4.0.2 declares `SimpleGitOptions.spawnOptions` as
+  `Pick<SpawnOptions, 'uid' | 'gid'>`. The folder-local `simple-git.d.ts`
+  adds a factory overload for `windowsHide`, which the spawn plugin accepts at
+  runtime. The runtime import and options remain unchanged.
+  Its log overload also retains explicit `undefined` values for `from`, `to`
+  and `file`: simple-git's parser treats those values as absent and excludes
+  these recognized option names from raw Git arguments.
+- `service-contracts.ts` owns service inputs, injected callbacks and result
+  shapes. Bootstrap error metadata remains unchecked: errors can carry arbitrary
+  `hydration` and `errorCode` values, and the durable bootstrap store owns their
+  validation. An in-memory state must not promise that validation already ran.
+  Rebase-parent JSON likewise retains unchecked fields until the existing
+  truthiness checks and string conversion.
+- Git subprocess output retains its runtime parsing, including numeric exit-code
+  checks, optional upstream fields, quoted patch paths and archive schemas.
+  Dictionary lookups retain their original truthiness and undefined tests;
+  inherited names do not acquire new acceptance or rejection rules.
+- Network planning keeps request fields unchecked until their existing parser
+  validates them. The sync internal target retains the original remote and ref
+  fields rather than substituting the trimmed public target. Those copied fields
+  retain the unchecked JSON domain in its inferred return type.
+- The planner's recursive freeze preserves input types through an overload.
+  Its implementation still copies arrays and plain objects recursively and
+  leaves other values untouched. Matched regex captures and occupied selection
+  slots have invariant accessors because the strict checker also models absent
+  indexed entries.
+- Provider-instance normalization declares a string input but already maps a
+  non-string to `''` before rejecting it. The planner passes that same empty
+  value for unchecked non-string instance fields, preserving its existing
+  provider-account error mapping without changing the neighbouring module.
+- A nonempty integration queue and a matched Git record establish occupied
+  array slots. A missing submodule status field still throws instead of
+  returning an apparently clean submodule.
+- The service's primitive-string predicate and `shared/guards.js` both preserve
+  `typeof value === 'string'`. MIME lookup runs only after the image/office-extension
+  check, so its closed key set excludes inherited object names.
+- Network execution contracts live in `network-execution-contracts.ts`.
+  Sync planning copies the original JSON refs and remote record; execution
+  narrows those copied values without trimming or replacing them with the
+  normalized public target. Contributor-source resolution remains JSON until
+  the existing field comparisons run. Non-null field access establishes no
+  promise about a provider response's individual values.
+- The operation registry keeps in-memory snapshots separate from validated
+  durable snapshots. Runtime identity and transport may be absent before
+  persistence validates them, and progress callbacks can return either shape.
+  Audit result construction copies the current state without establishing that
+  it is terminal; the audit store validates that requirement before writing.
+  Registry completion keeps the state-specific optional `has` call and the
+  existing plain-object, string and exact-key checks. Its checkout-path
+  expression excludes UTF-16 code units 0 through 31 and 127.
+- Execution errors retain unchecked metadata and the original thrown value.
+  Completion validation remains the registry's responsibility. Redaction
+  accepts undefined secret entries because its existing string conversion
+  maps them to empty strings and omits them.
+- Clone binding receives explicit undefined credential, confirmation and
+  provider-account fields. Its owner contract permits these values because
+  the binding implementation checks their values, not property presence.
+- Local integration retains the host line-ending settings and canonical LFS
+  clean filter so a clean checkout stays recognizable during rebase.
+- Credential subprocess options and resolver dependencies are declared in
+  `credential-contracts.ts`; the snapshot implementation exports `SshKeySnapshot`.
+  Endpoint parsing keeps the original prototype-inclusive protocol lookup and
+  validates the resulting port as an integer before accepting it.
+- Credential error metadata remains unchecked until compared with the existing
+  error codes. Membership checks read the error's code once, including when the
+  field is a getter. Missing passphrase dependencies retain their property-access
+  `TypeError` instead of silently omitting passphrase creation, reading or removal.
+  A missing snapshot root still fails after reading the key, with Node's path
+  argument `TypeError` and `ERR_INVALID_ARG_TYPE` code.
+- SSH key verification ignores stdin `EPIPE`: ssh-keygen may close stdin after
+  reading the key, and its exit code and verified output remain authoritative.
+  Async directory iteration closes its directory before inventory cleanup;
+  cleanup ignores only `ERR_DIR_CLOSED` and preserves every other close failure.
+  Import cleanup failures still replace a pending result or failure.
+
+- The 3 process-launched Git helper paths stay JavaScript bootstraps with only
+  Node builtin static imports. They register source resolution before loading
+  their sibling `*-runtime.js` modules. Electron unpacks both halves so helpers
+  launched from `app.asar.unpacked` retain their sibling implementation.
+- The repository credential helper validates an endpoint with `new URL` and
+  still passes the original JSON field to `http.request`. A single-element URL
+  array passes the first step but fails the second with `ERR_INVALID_ARG_TYPE`;
+  the two native calls keep separate boundaries so parsing does not validate
+  the original field's type. A response's username and password likewise
+  remain unchecked JSON until the existing truthiness checks and interpolation.
+- `worktreeBootstrapFailureMessage` performs a prototype-inclusive dictionary
+  lookup on an unchecked code. Its result can be an inherited Object member,
+  so its runtime contract is broader than a string-or-null return. Scrubbing's
+  own-key checks are separate and must remain.
+- The change request's read context comes from source-control authority. It
+  carries the working directory and binding revision. It does not require a
+  config revision; the service-login fetch gets that revision from a separate
+  repository binding read. Worktree hydration retains the explicit `null`
+  authority when there was no binding read.
+
 ### Identity and provenance
 
 - Identity records store account references; provider auth stores own the credentials. A disconnected account cannot resolve through a cached secret.
+- VS Code imports `isContributorForkGitDirectory` from its implementation.
+  Provenance storage imports the typed `../shared/object-guards.js` owner
+  directly, so this import does not expose the JavaScript guard entry or
+  unrelated repository-service implementations to VS Code's checker.
+- Provenance validates `sourceSha` with a coercing regular expression. It stays
+  unchecked in the stored record type: a single-element array containing a SHA
+  also passes that expression. The regular-expression overload preserves the
+  native conversion without promising that the original value is a string.
+  The checkout-trust routes narrow it before inspection and before it becomes
+  the trusted operation's `headSha`: a non-string answers the same 409
+  `STALE_CONFIG` the inspection's strict HEAD comparison already gave, and
+  `CheckoutTrustInput.headSha` stays a string.
+- Sparse listing inputs retain their undefined slots. Identity resolvers receive
+  those slots unchanged; the Git-directory probe's overload preserves the native
+  `path.join` argument failure before the filesystem catch.
+- Identity-file validation establishes only `id`, `userName`, and `userEmail`,
+  so `StoredGitIdentityProfile` types every other field, legacy `sshKey`
+  included, as `unknown`. Readers narrow a field before use:
+  `toPublicGitIdentityProfile` drops what it cannot read, and
+  `prepareGuestGitNetwork` in `../guests/clone.ts` treats a non-string `sshKey`
+  as no key, so the clone falls back to the host SSH configuration.
+- A stored state is a fresh `{ profiles }` object holding the validated
+  profile records themselves, so retained migration fields round-trip
+  unchanged.
+- Provisioning accepts partial provider account/user metadata. Legacy stored
+  account fields remain unchecked until their existing equality comparisons.
+  The provider descriptor permits the absent user id passed to `noReplyEmail`.
 - Reading a legacy identity file makes it private. Earlier releases use the host's umask, so refusing an existing permissive file would discard usable identities.
 - Account provisioning skips providers this build cannot describe and accounts without a usable signature. One incomplete account leaves the other accounts available.
 - Provenance listing tolerates an entry whose Git directory no longer resolves; action-time identity reads remain strict. Relative `gitdir:` targets preserve `..` until filesystem resolution so symlink traversal matches Git.
 
+### Route boundary
+
+- Routes parse request strings before the typed service sees them. A query or
+  body field that arrives as a non-string, such as a repeated query
+  parameter, counts as absent: a required one gets the route's existing 400,
+  and an optional one gets the service default.
+- Service inputs that the service validates from raw values keep that
+  validation and are declared unchecked: integrate plans and states, commit
+  summary SHAs, stash refs and options, revert scope, staged paths, commit
+  file lists, snapshot refs, archive ids, titles and session ids, and the
+  commit-files hash. The routes pass those fields through unchanged.
+- The network planner and contributor destination parser take JSON. A body
+  that is not JSON, including a missing one, reaches them as `null`, which
+  both reject exactly as they reject a missing body.
+- `StatusBatchDirectoryResult` distinguishes the non-repository status the
+  batch route returns from a repository's full status.
+
 ### Network execution and recovery
 
+- The durable network store exports its validated record and snapshot shapes
+  from `network-storage-contracts.ts`. Snapshot scrubbing and JSON cloning stay
+  unchecked until the existing record parser validates them. Unknown operation
+  names retain their opaque JSON targets instead of acquiring a known-operation
+  target type. Error-message replacement still requires an own dictionary key;
+  state-specific error-code lookup keeps its existing optional method call.
+- Stored nullable timestamps keep JavaScript's numeric-null behavior in
+  expiration and eviction arithmetic. Persisted input still passes the original
+  boolean, integer, endpoint, exact-key and vocabulary checks.
 - Server-generated digests are opaque values, never CLI arguments. Base64url digests may begin with `-`, so option-shaped argument validation does not apply to them.
+- The transport revision ignores one thing: the value of a command-line `http.extraheader` (global or URL-scoped) whose header is `traceparent` or `tracestate`. A wrapper adds a fresh one to every Git run. The entry's key, header name and position still count, and every other command-scope entry, including trace headers a command-line include loads, still moves the revision.
 - Expiring an unstarted operation cancels its durable record before dropping it from memory. Otherwise its persisted `planned` state holds a capacity slot indefinitely.
 - Durable recovery identifies the process that claims an operation. Multiple servers can share the data directory, and another live server's operation is still running.
 - Structured operation codes and statuses override subprocess details. A subprocess `code` can be an exit status and cannot replace the operation's error code.
@@ -197,7 +363,7 @@ which every tool words differently.
 
 ### Worktree location
 - New worktrees go under OpenCode's `worktree.directory` when it is set: relative paths resolve against the project's canonical checkout, absolute paths are used as-is, and a leading `~` means the user's home directory. OpenCode appends the worktree name to that folder, so only the name is added.
-- Both runtimes use `readWorktreeDirectorySetting` in `packages/web/server/lib/opencode/shared.js` on the canonical checkout, so a linked worktree sees the project's saved value. It merges global configs, `OPENCODE_CONFIG`, then direct and `.opencode` configs from the filesystem root through the checkout, in OpenCode order. Ancestor settings above the repository apply, and relative directories still resolve against the canonical checkout.
+- Both runtimes use `readWorktreeDirectorySetting` in `packages/web/server/lib/opencode/config-files.js` on the canonical checkout, so a linked worktree sees the project's saved value. It merges global configs, `OPENCODE_CONFIG`, then direct and `.opencode` configs from the filesystem root through the checkout, in OpenCode order. Ancestor settings above the repository apply, and relative directories still resolve against the canonical checkout.
 - When the setting is absent, or names no usable directory, worktrees keep landing in OpenChamber's data-dir folder keyed by project ID. Changing the setting only affects worktrees created afterwards; nothing is moved.
 - `removeWorktree` deletes an unregistered leftover only under the data-dir root, so worktrees created before the setting was set stay removable while a shared configured folder such as `".."` can never make a sibling project eligible for deletion; a config read failure there falls back to the data-dir root instead of blocking the removal. Creation still fails loudly on an unreadable config so a worktree is never created in an unchosen folder.
 - Both the web and VS Code readers merge a secondary user config file (`opencode.jsonc` beside `opencode.json`) as an override layer, as OpenCode does, so `worktree.directory` set there applies in every runtime.
@@ -503,11 +669,15 @@ Public snapshots contain `operationId`, `runtimeIdentity`, transport verificatio
 
 ### Exact-ref transport authority
 
-Push, fetch, pull, remote-branch deletion, and sync accept only full refs. Sources are `refs/heads/*` or `refs/tags/*` (and a change host's `refs/changes/*` for a single-ref fetch, see *Review refs on a change host*); push destinations are heads or tags, deletion destinations are heads, fetch destinations are remote refs, heads, or tags, and pull destinations are heads. Sync narrows its fetch destination to `refs/remotes/*`, names its checked-out pull destination, and requires that destination to equal the exact push source. Planning accepts authoritative HTTPS, `ssh://`, and strict SCP endpoints only, under the same endpoint rule as Clone. Plain HTTP passes in one case: a loopback host (`localhost`, `127.0.0.0/8`, `::1`) when a registered provider allows loopback HTTP instances (Gitea's and Gerrit's local development sites); a managed credential additionally reaches it only when that loopback origin is its own provider's instance (`endpointIsInstanceOrigin`, `loopback-http.js`). The durable operation store accepts such an endpoint, and the terminal credential helper (`repository-credential-runtime.js`) answers shell Git for it under the same managed-credential rule; plain HTTP to any other host is refused everywhere. Anonymous transport stays HTTPS-only. A refused push's error leads with the remote's `! [remote rejected]` and `remote: error` lines, redacted, without the progress and hints around them. An `ssh://` endpoint may name its login user, and so may an HTTP(S) endpoint of a repository on System transport (*Why an HTTPS name passes only on System transport*); any other HTTP(S) userinfo, any password, and query or fragment data fail before plan registration or Git argv construction. A repository remote refused for userinfo on a non-SSH URL answers with its own public code, `REMOTE_URL_USERINFO`, so the client can tell the user to remove the name before `@`; the message never repeats the userinfo, which may be a token. Every other refused endpoint keeps the generic `INVALID_REQUEST` reason. The SSH user stays in the internal raw endpoint: display URLs and fingerprints drop it, and URL display endpoints with userinfo fail. Planning validates the repository ID, binding and config revisions, remote, redacted endpoint fingerprint and display URL, transport mode, and opaque credential reference against source-control authority before resolving refs. Execution repeats authority validation before any subprocess or credential resolution and again immediately before each transfer Git process starts. It also compares a server-internal transport revision derived from effective system, global, local, worktree, and included Git configuration. The revision covers credential helpers and URL-scoped credential settings, SSH commands, URL rewrites, HTTP settings, and remote proxies. Values and origin paths never enter public plans or errors.
+Push, fetch, pull, remote-branch deletion, and sync accept only full refs. Sources are `refs/heads/*` or `refs/tags/*` (and a change host's `refs/changes/*` for a single-ref fetch, see *Review refs on a change host*); push destinations are heads or tags, deletion destinations are heads, fetch destinations are remote refs, heads, or tags, and pull destinations are heads. Sync narrows its fetch destination to `refs/remotes/*`, names its checked-out pull destination, and requires that destination to equal the exact push source. Planning accepts authoritative HTTPS, `ssh://`, and strict SCP endpoints only, under the same endpoint rule as Clone. Plain HTTP passes in one case: a loopback host (`localhost`, `127.0.0.0/8`, `::1`) when a registered provider allows loopback HTTP instances (Gitea's and Gerrit's local development sites); a managed credential additionally reaches it only when that loopback origin is its own provider's instance (`endpointIsInstanceOrigin`, `loopback-http.js`). The durable operation store accepts such an endpoint, and the terminal credential helper (`repository-credential-runtime.js`) answers shell Git for it under the same managed-credential rule; plain HTTP to any other host is refused everywhere. Anonymous transport stays HTTPS-only. A refused push's error leads with the remote's `! [remote rejected]` and `remote: error` lines, redacted, without the progress and hints around them. An `ssh://` endpoint may name its login user, and so may an HTTP(S) endpoint of a repository on System transport (*Why an HTTPS name passes only on System transport*); any other HTTP(S) userinfo, any password, and query or fragment data fail before plan registration or Git argv construction. A repository remote refused for userinfo on a non-SSH URL answers with its own public code, `REMOTE_URL_USERINFO`, so the client can tell the user to remove the name before `@`; the message never repeats the userinfo, which may be a token. Every other refused endpoint keeps the generic `INVALID_REQUEST` reason. The SSH user stays in the internal raw endpoint: display URLs and fingerprints drop it, and URL display endpoints with userinfo fail. Planning validates the repository ID, binding and config revisions, remote, redacted endpoint fingerprint and display URL, transport mode, and opaque credential reference against source-control authority before resolving refs. Execution repeats authority validation before any subprocess or credential resolution and again immediately before each transfer Git process starts. It also compares a server-internal transport revision derived from effective system, global, local, worktree, and included Git configuration. The revision covers credential helpers and URL-scoped credential settings, SSH commands, URL rewrites, HTTP settings, and remote proxies. Command-scope trace headers are left out (*Why the transport revision leaves trace headers out*). Values and origin paths never enter public plans or errors.
 
 Push resolves and stores the source commit SHA while planning, rechecks it during both execution authority passes, and sends exactly `<pinned-sha>:<destination-ref>`. New-branch publication can request local upstream configuration; only after push success does the executor write the exact branch remote and merge ref, and a local configuration failure returns `partial`. An optional force lease is exactly `--force-with-lease=<destination-ref>:<expected-remote-sha>`. Remote deletion sends exactly `:<destination-ref>` and has the same uncertain-outcome rules as push. Fetch sends exactly `<source-ref>:<destination-ref>` with `--no-tags`. Pull pins the checked-out full HEAD ref and its commit SHA during planning, rechecks both before authentication, before fetch, and before merge, fetches to `refs/openchamber/network/<operationId>`, merges the fetched SHA with `--no-edit --no-verify`, then deletes the temporary ref. Remote names select authority; Git receives only the server-resolved raw endpoint.
 
 Remote-branch deletion never deletes the remote's default branch. Right before the push, the executor asks the remote with `ls-remote --symref <endpoint> HEAD` through the same transport, and refuses with `INVALID_REQUEST` when HEAD names the destination. Some hosts refuse that deletion and some carry it out, so the check cannot be left to the remote. A worktree can end up on `main`, and deleting its branch would then delete main.
+
+### Why the transport revision leaves trace headers out
+
+The revision is compared between planning and execution, so it has to stay the same while the repository does. Some `git` wrappers add a W3C trace context header (`http.extraheader=traceparent: ...`) with a fresh ID to every invocation, through `-c` or `GIT_CONFIG_*`. Hashed as is, that value changes on every read and refuses every planned transfer with `REMOTE_CHANGED` although nothing changed. `git config --null --show-scope --show-origin` puts each record's scope, origin, and key with value in NUL-terminated fields, so the read replaces the header value with nothing in exactly the records whose scope is `command`, whose origin is `command line:` (both `-c` and `GIT_CONFIG_*` report it), whose key is `http.extraheader` or `http.<url>.extraheader`, and whose header name is `traceparent` or `tracestate`. The record itself stays in place with its key and header name: Git picks which extra headers to send by their URL scope and order, so adding, removing or moving even a trace entry can change the other headers and still moves the revision. A trace value only labels the request and moves no authority. Everything else stays in the revision, including command-scope values: a proxy, SSH command, credential helper, other extra header, or any setting a command-line include loads (Git reports those as scope `command` with a `file:` origin, trace headers included) still stops a planned transfer when it changes. Output that does not split into whole records is hashed unfiltered.
 
 ### Why the remote is asked and not `refs/remotes/<remote>/HEAD`
 
@@ -583,7 +753,7 @@ Clone is the one parent raw-endpoint input boundary because a new checkout has n
 
 Every clone intent chooses `transportMode` explicitly. System requires `unverifiedConfirmed: true`, and managed HTTPS requires an independently selected `credentialAccount` with provider, instance, and exact credential ID. The planner checks the account instance against the approved HTTPS endpoint, reads that exact valid persisted credential without active-account or CLI fallback, and constructs a host-owned `ocgit:v2` reference pinned to its immutable ID and revision. Reauthentication or replacement cannot retarget the plan or the binding created after checkout. Managed SSH requires a selected existing host `sshCredentialId`, validated against the managed inventory and an SSH endpoint before planning. It rejects provider accounts; HTTPS, anonymous and System requests reject SSH references. Execution derives the actual key fingerprint again. Parent `credentialId`, tokens, and key paths are not accepted from clients. Provider associations and author profiles never choose clone transport. Anonymous HTTPS clone selects only `transportMode: 'anonymous'`, with no account or System confirmation. The same exact-endpoint callback persists the chosen grant at revision 1, and binding failure retains the completed checkout as partial.
 
-Git clones with `--no-checkout`, hooks disabled, and `GIT_LFS_SKIP_SMUDGE=1` into the temporary directory. The shared UI requires transport selection before planning and sends no operation on cancellation before planning. Closing during planning cancels the returned plan before execution; closing during execution requests cancellation of that operation ID. The older filesystem route remains an explicitly confirmed System compatibility adapter. A selected commit identity is validated before plan registration or spawn, then applied as repository-local `user.name` and `user.email` in that checkout. The host resolves a global author independently of managed transport's isolated Git configuration. The operation performs a filter-disabled forced checkout, attempts bounded submodule and LFS hydration, and then claims the absent destination with an exclusive `mkdir` and copies checkout entries with no-replace operations. Successful or unnecessary hydration returns success. Incomplete non-cancelled hydration publishes the checked-out repository as `partial` so setup can be repaired in place. This is not an atomic rename or atomic publication. Before each publication filesystem mutation it checks cancellation and the operation deadline, then waits for that mutation to settle and records any new ownership before returning a timeout or cancellation result. Directory ownership identifies a pathname by device and inode, plus creation time where the filesystem keeps a real one. The operation establishes that by changing each directory it creates once on purpose and checking that the reported creation time sits still; Node otherwise fills that field from the change time, which every clone moves as it writes its own checkout. Where creation time holds, a directory removed and recreated in place is detected even though Linux reuses the inode number. Where it does not, ownership falls back to device and inode rather than failing every clone. Cleanup mutations run after terminal intent and are also awaited to settlement.
+Git clones with `--no-checkout`, hooks disabled, and `GIT_LFS_SKIP_SMUDGE=1` into the temporary directory. The shared UI requires transport selection before planning and sends no operation on cancellation before planning. Closing during planning cancels the returned plan before execution; closing during execution requests cancellation of that operation ID. The older filesystem route remains an explicitly confirmed System compatibility adapter. A selected commit identity is validated before plan registration or spawn, then applied as repository-local `user.name` and `user.email` in that checkout. The host resolves a global author independently of managed transport's isolated Git configuration. The operation performs a filter-disabled forced checkout, attempts bounded submodule and LFS hydration, and then claims the absent destination with an exclusive `mkdir` and copies checkout entries with no-replace operations. Successful or unnecessary hydration returns success. Incomplete non-cancelled hydration publishes the checked-out repository as `partial` so setup can be repaired in place. This is not an atomic rename or atomic publication. Before each publication filesystem mutation it checks cancellation and the operation deadline, then waits for that mutation to settle and records any new ownership before returning a timeout or cancellation result. Directory ownership identifies a pathname by device and inode, plus creation time where the filesystem keeps a real one. The operation establishes that by changing each directory it creates on purpose, again up to four times while the change time has not moved yet, and checking that the reported creation time sits still; Node otherwise fills that field from the change time, which every clone moves as it writes its own checkout. Where creation time holds, a directory removed and recreated in place is detected even though Linux reuses the inode number. Where it does not, ownership falls back to device and inode rather than failing every clone. Cleanup mutations run after terminal intent and are also awaited to settlement.
 
 After publication, `bindClonedRepository` resolves the new repository and compares both actual `origin` fetch and push endpoints with the captured approved endpoint, including fingerprints. Only an exact match permits a revision-zero CAS creating binding revision 1 with the selected System grant or exact managed credential reference. The binding also retains only auxiliary grants that matched an endpoint and kind actually discovered during this hydration attempt; unused client grants are discarded. Provider associations remain empty and local authorship stays separate. Persistence is awaited to settlement. Endpoint verification or binding persistence failure returns `partial` with `checked-out`, a redacted finish-setup message, and the completed destination retained. Later cleanup failure also returns partial when checkout is complete. The shared parser rejects partial clone results without `checked-out`; the dialog registers the retained project and opens Git setup with warning feedback, not clone success or full failure. Retry uses setup on that checkout, never another clone into its existing destination. Temporary cleanup still runs, and incomplete publication retains the operation-owned cleanup rules below.
 
@@ -591,7 +761,19 @@ Clone publication creates every directory, file, and symlink exclusively and rec
 
 #### Why clone and repository identity share the birthtime probe
 
-`directory-birthtime.js` owns the stability check used by clone ownership and saved repository IDs. Both must reject a positive birthtime that follows ctime, or normal Git writes look like a replaced directory. The probe uses exclusive temporary-directory creation and removes only that empty directory, so existing checkout entries cannot be overwritten or recursively deleted by the check. Clone ownership falls back to device and inode when the probe fails or is inconclusive. Source control permits that fallback only without an established identity record; an uncertain replacement must not regain an old credential grant.
+`directory-birthtime.js` owns the stability check used by clone ownership and saved repository IDs. Both must reject a positive birthtime that follows ctime, or normal Git writes look like a replaced directory. The probe uses exclusive temporary-directory creation and removes only that empty directory, so existing checkout entries cannot be overwritten or recursively deleted by the check. A probe that leaves ctime unchanged is inconclusive rather than failed: Linux moves ctime on a kernel clock tick, so a probe in the same tick as the last write shows no change. The check then probes again, up to four probes 10 ms apart, and gives up only if ctime still has not moved. Clone ownership falls back to device and inode when the probe fails or stays inconclusive. Source control permits that fallback only without an established identity record; an uncertain replacement must not regain an old credential grant.
+
+### Why failed secret encoding retains earlier variants
+
+URI encoding can reject an unpaired surrogate. Redaction keeps the raw secret
+and every variant encoded before the failure, so a failed encoding cannot
+prevent removal of the original secret.
+
+### Why relative discovery URLs treat repositories as directories
+
+Git's relative submodule URL rule resolves against the repository endpoint
+itself, including its final path component. Filesystem-style parent resolution
+would choose a different repository.
 
 ### Anonymous reads
 
@@ -605,7 +787,7 @@ The loopback HTTPS canary exercises real clone, fetch, pull and an authenticatio
 
 ### Checkout hydration
 
-The operation executor reads `.gitmodules` from the selected commit with `git config --blob --null` and pairs it with mode-`160000` entries from `git ls-tree`. Relative URLs resolve against the exact parent fetch endpoint that produced the checkout. Worktree hydration carries that source from the fetch itself; it never infers one from provider bindings, upstream configuration, `origin`, or remote order. If no exact source can be proved, hydration returns `AUTHENTICATION_REQUIRED` before starting a child process. The executor never invokes `git submodule update`, recursive update, or repository-defined update commands. Children initialize sequentially with `clone --no-checkout`, hooks and LFS smudge disabled, and a forced detached checkout of the exact gitlink. Each child HEAD must equal that gitlink before success is recorded or recursion starts. Recursion, paths, modules, command output, pointer samples, and public results have hard limits.
+The operation executor reads `.gitmodules` from the selected commit with `git config --blob --null` and pairs it with mode-`160000` entries from `git ls-tree`. An entry whose path has no gitlink at that commit is skipped. Relative URLs resolve against the exact parent fetch endpoint that produced the checkout. Worktree hydration carries that source from the fetch itself; it never infers one from provider bindings, upstream configuration, `origin`, or remote order. If no exact source can be proved, hydration returns `AUTHENTICATION_REQUIRED` before starting a child process. The executor never invokes `git submodule update`, recursive update, or repository-defined update commands. Children initialize sequentially with `clone --no-checkout`, hooks and LFS smudge disabled, and a forced detached checkout of the exact gitlink. Each child HEAD must equal that gitlink before success is recorded or recursion starts. Recursion, paths, modules, command output, pointer samples, and public results have hard limits.
 
 `checkout-hydration` is an existing-repository planned operation. Planning pins repository ID, binding and config revisions, exact parent remote and endpoint fingerprint, HEAD, and the bounded transfers found through local inspection. Existing exact submodule checkouts are inspected recursively but do not become transfer requirements. The server resolves each transfer-capable endpoint's auxiliary grant during planning and pins only grants that validate against the discovered raw endpoint; missing grants remain authorization failures and a grant added after planning cannot retarget the operation. A child checkout the run clones itself did not exist during planning, so the submodule and LFS endpoints read inside it cannot be pinned; execution checks each of them against the repository authority planning pinned, binding revision included, so a grant added after planning still cannot authorize one. Planning starts no network process. Execution repeats repository, inspection, and exact auxiliary-grant checks before transfer. Public plans and results contain only repository-relative paths and redacted endpoint metadata. Process-local operation recovery stores the operation ID, but restart reconciliation never executes or resumes hydration automatically.
 
@@ -626,6 +808,10 @@ An in-flight audit start write settles before cancellation or timeout closes the
 #### Why an SSH Git remote derives its HTTPS LFS endpoint
 
 Git LFS already reads an SSH checkout's objects from the same host over HTTPS; `git lfs pull` works in an SSH clone with no `lfs.url`. Refusing to derive that endpoint made worktree hydration fail with `INVALID_REQUEST` for an ordinary SSH clone, even though the person's own Git LFS could hydrate it. Discovery now builds the endpoint Git LFS falls back to when the server does not answer `git-lfs-authenticate`: same host, SSH port dropped, `.git` added when the repository path lacks it, and each decoded path segment encoded again before the URL parser sees it. The result goes through the same HTTPS checks as an explicit `lfs.url`, so plain HTTP, userinfo, query, fragment, and unsafe paths still fail. A remote-specific or committed LFS endpoint still wins, and an SSH checkout that needs no LFS transfer keeps the unresolved state. An SSH host alias or a server authenticate response naming another host or path still needs an explicit `lfs.url`. Deriving the endpoint does not relax the executable checks: custom transfer agents and non-canonical filters still fail before any transfer.
+
+#### Why a `.gitmodules` entry without a gitlink is skipped and not rejected
+
+Git builds submodules from the gitlinks in the tree, so `git submodule` ignores an entry whose path has no gitlink. Replacing a submodule with its own files through `git rm --cached` leaves such an entry behind, and rejecting it failed every worktree setup, Pull, and Sync in that repository with `INVALID_REQUEST` (#7148). The parser looks up the gitlink first and skips an entry without one before any of its values are checked, because nothing reads that entry. An entry with a gitlink keeps every check, and a gitlink without an entry still fails, because there is no URL to clone it from.
 
 ### Managed LFS publication
 
@@ -688,7 +874,9 @@ VS Code runs existing-repository network operations as plain Git commands on the
 
 ### Stash Operations
 - `listStashes(directory)`: List stash entries with ref, message, relative time, and hash.
-- `countStashFiles(directory, refs)`: Batch-count changed files for stash refs with bounded concurrency.
+- `countStashFiles(directory, refs)`: Batch-count tracked and untracked files for stash refs with bounded concurrency.
+  `stash show --include-untracked --name-only` includes the third parent's files
+  in the same Git process per ref; the VS Code runtime uses the same command.
 - `stashPush(directory, options)`: Stash changes, always including untracked files, with optional message.
 - `stashApply(directory, options)`: Apply a stash by ref without removing it.
 - `stashPop(directory, options)`: Apply a stash by ref and drop it only after a successful apply.
@@ -877,7 +1065,11 @@ The store persists path fingerprints, so it cannot scan old records for missing 
 
 ### SSH Key Handling
 - Managed SSH transport owns key validation and operation-local selection as described under Transport authority. Author profiles do not build SSH commands.
-- SSH_AUTH_SOCK is automatically resolved via `resolveSshAuthSock` (checks GPG agent, gpgconf).
+- SSH_AUTH_SOCK is automatically resolved via `resolveSshAuthSock` (`ssh-auth-sock.ts`; checks GPG agent, gpgconf).
+
+### Why a gpg agent launch that leaves no SSH socket is not retried
+
+`buildGitEnv` runs for every Git command. Without `SSH_AUTH_SOCK`, on a machine with GnuPG whose agent does not serve SSH, `gpgconf --launch gpg-agent` took about a second and never produced the socket, so every status, stage and unstage paid it again. The server tries the launch once per socket path; the cheap `--list-dirs` check still runs each time, so an agent the user starts later is found.
 
 ### Working directory (simple-git)
 - Repository operations always pass an explicit `baseDir` (the opened project/directory path) into simple-git. Omitting `baseDir` would default to `process.cwd()`, which breaks when the server was launched from a neutral directory (e.g. `$HOME`) while the opened project lives elsewhere.

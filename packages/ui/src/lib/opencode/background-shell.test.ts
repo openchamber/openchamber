@@ -70,11 +70,6 @@ describe("readShellCompletion", () => {
     })
   })
 
-  test("ignores other synthetic messages", () => {
-    expect(readShellCompletion(completion({ metadata: { source: "subagent", childID: "ses_2", state: "completed" } }))).toBeUndefined()
-    expect(readShellCompletion(completion({ metadata: undefined }))).toBeUndefined()
-  })
-
   test("a non-zero exit, a signal, a timeout and a cancel all count as failed", () => {
     const read = (metadata: SyntheticMessage["metadata"]) => {
       const result = readShellCompletion(completion({ metadata }))

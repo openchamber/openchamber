@@ -8,7 +8,9 @@ Target: Forgejo 7.0 or newer (7.0 answers as Gitea 1.21, the oldest the Gitea mo
 
 ## Invariants
 
-- The descriptor is Gitea's with the id `forgejo`, the label, the mark (Forgejo's logo, CC BY-SA 4.0, credited where the path is defined), a placeholder, the pull request template paths Forgejo looks up, and one default instance, `https://codeberg.org`. Capabilities, auth methods, transport, limits, terminology and settings fields are Gitea's by construction (`...giteaDescriptor`), so the two providers cannot drift apart by accident.
+- The descriptor is Gitea's with the id `forgejo`, the label, the mark, a placeholder, the pull request template paths Forgejo looks up, and one default instance, `https://codeberg.org`. Capabilities, transport, limits, terminology and settings fields are Gitea's by construction (`...giteaDescriptor`), so the two providers cannot drift apart by accident. CLI authentication is disabled because [gt](https://gitea.com/gitea/gt) requires Gitea 28 or newer, which Forgejo does not report.
+- `FORGEJO_PATH` in `descriptor.ts` is Forgejo's logo by Caesar Schinas, scaled from 512x512 to 24x24 with adjusted inset and line weight, and remains [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+- Pull request templates follow [Forgejo's lookup ordering](https://forgejo.org/docs/latest/user/issue-pull-request-templates/). YAML templates are forms.
 - Codeberg is a default instance: a `codeberg.org` remote is recognised before any account is connected (the client's default identities, `GET /api/source-control/instances`, `auth.ownsHost` in the server's change-request worktree), the Forgejo card lists it without the user typing it, and `builtInDefaultHosts` keeps an extension from claiming it. Nothing reaches Codeberg until the user opens the card (the card reads `GET /api/v1/version` for its capabilities, as the GitLab card does for gitlab.com) or connects an account.
 - Accounts live in `section('forgejo')` of `source-control-auth.json`; mutation kinds and digest fields are the standard table's, as Gitea's are, with Forgejo's actor in the digest (`mutation-digest-freeze.test.js` holds them).
 - An instance belongs to one card: the one Forgejo's own API namespace names, else the one its `/version` names. Forgejo serves `/api/forgejo/v1/version`, which no Gitea release serves, and that answer is Forgejo whatever it says; Forgejo 16 answers the Gitea-compatible `/version` with its own version alone (`16.0.6`), while the namespace still carries the Gitea version it is compatible with (`16.0.6+gitea-1.22.0`). A Gitea `/version` never carries that suffix. Connecting a token on the other card refuses with `409 SOURCE_CONTROL_INSTANCE_OTHER_PROVIDER` and `provider: '<id>'` before anything is stored, and the Settings card names the right provider in its own words (`SourceControlInstanceOtherProviderError` in the web adapter).
@@ -48,3 +50,9 @@ Both providers accept any origin, so a server connected on both cards would be c
 ### Why Codeberg is a default instance
 
 Codeberg is the public Forgejo instance, the way gitlab.com is GitLab's: recognising its remotes without an account lets the app offer to connect, and listing it on the card means a token is all a Codeberg user enters.
+
+### Why provider options come from Gitea
+
+Forgejo selects the edition and defaults the descriptor. The Gitea family
+owns every other option, including the choice between supplying an auth store
+or a provider-specific store.

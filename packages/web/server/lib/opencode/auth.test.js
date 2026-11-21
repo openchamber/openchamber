@@ -31,8 +31,8 @@ describe('projectCredentialEntries', () => {
 
     expect(projected).toEqual({
       'zai-coding-plan': { type: 'api', key: 'zai-key' },
-      openai: { type: 'oauth', access: 'at', refresh: 'rt', expires: 42, accountId: 'acc_1' },
-      'github-copilot': { type: 'oauth', access: 'gh', refresh: 'gh-r', expires: 0, enterpriseUrl: 'https://ghe.example' },
+      openai: { type: 'oauth', methodID: 'chatgpt-browser', access: 'at', refresh: 'rt', expires: 42, accountId: 'acc_1' },
+      'github-copilot': { type: 'oauth', methodID: 'device', access: 'gh', refresh: 'gh-r', expires: 0, enterpriseUrl: 'https://ghe.example' },
       custom: { type: 'api', key: 'k', metadata: { region: 'eu' } },
     });
   });
@@ -58,6 +58,7 @@ describe('projectCredentialEntries', () => {
     expect(projected).toEqual({
       opencode: {
         type: 'oauth',
+        methodID: 'console',
         access: 'console-access',
         refresh: 'console-refresh',
         expires: 42,

@@ -30,12 +30,26 @@ function cachedRoots(): ChatRoots | undefined {
   return chatsRootCacheByRuntime.get(getRuntimeKey());
 }
 
-export function getChatsRootFromDirectory(directory: string | null | undefined): string | null {
+const resolveChatsRoot = (directory: string, roots: ChatRoots): string | null => {
   const normalized = normalizePath(directory);
-  const roots = cachedRoots();
-  if (!normalized || !roots) return null;
+  if (!normalized) return null;
   if (isWithinRoot(normalized, roots.configured) || isWithinRoot(normalized, roots.canonicalConfigured)) return roots.configured;
   return isWithinRoot(normalized, roots.legacy) || isWithinRoot(normalized, roots.canonicalLegacy) ? roots.legacy : null;
+};
+
+const CHATS_ROOT_CACHE_LIMIT = 5000;
+let chatsRootByDirectory: { roots: ChatRoots; byDirectory: Map<string, string | null> } | null = null;
+
+export function getChatsRootFromDirectory(directory: string | null | undefined): string | null {
+  const roots = cachedRoots();
+  if (!directory || !roots) return null;
+  if (chatsRootByDirectory?.roots !== roots) chatsRootByDirectory = { roots, byDirectory: new Map() };
+  const { byDirectory } = chatsRootByDirectory;
+  const cached = byDirectory.get(directory);
+  if (cached !== undefined) return cached;
+  const root = resolveChatsRoot(directory, roots);
+  if (byDirectory.size < CHATS_ROOT_CACHE_LIMIT) byDirectory.set(directory, root);
+  return root;
 }
 
 export function isChatDirectoryPath(directory: string | null | undefined): boolean {

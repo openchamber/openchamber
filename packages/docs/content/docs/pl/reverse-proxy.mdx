@@ -35,6 +35,7 @@ Skorzystaj z tej strony, jeśli uruchamiasz OpenChamber za Nginx, Nginx Proxy Ma
 - Wyłącz gzip na proxy, jeśli OpenChamber już kompresuje odpowiedzi.
 - Utrzymuj kompresję włączoną tylko w jednej warstwie.
 - Przekazuj zwykłe nagłówki proxy, takie jak `Host`, `X-Forwarded-For` i `X-Forwarded-Proto`.
+- Jeśli proxy działa na innej maszynie lub w innym kontenerze, dodaj jego adres do [`OPENCHAMBER_TRUSTED_PROXIES`](/pl/environment/#openchamber_trusted_proxies). W przeciwnym razie wszyscy za nim dzielą jeden limit nieudanych prób logowania.
 - Zwiększ limity rozmiaru treści, jeśli użytkownicy przesyłają pliki.
 
 ## Szybka lista kontrolna

@@ -30,6 +30,11 @@ beforeAll(() => {
   for (const skillDir of ['skills/alpha', 'skills/beta', 'plugins/bundle/skills/gamma', 'other/delta']) {
     writeSkill(work, skillDir);
   }
+  for (const [name, metadata] of [['scalar', 'plain text'], ['loose', 'name: 42\ndescription: [unchecked]']]) {
+    const dir = path.join(work, 'metadata', name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), `---\n${metadata}\n---\nBody\n`);
+  }
   git(work, 'add', '.');
   git(work, 'commit', '-qm', 'skills');
   const bare = path.join(root, 'remote', 'acme', 'skills.git');
@@ -51,6 +56,18 @@ afterAll(() => {
 });
 
 describe('scanSkillsRepository', () => {
+  it('leaves scalar and non-string YAML metadata unset without adding warnings', async () => {
+    const result = await scanSkillsRepository({ source: 'acme/skills', subpath: 'metadata' });
+
+    expect(result.ok).toBe(true);
+    expect(result.items).toHaveLength(2);
+    for (const item of result.items) {
+      expect(item.frontmatterName).toBeUndefined();
+      expect(item.description).toBeUndefined();
+      expect(item.warnings).toBeUndefined();
+    }
+  });
+
   it('lists only the skills under the source subpath', async () => {
     const result = await scanSkillsRepository({ source: 'acme/skills', defaultSubpath: 'skills' });
 
@@ -65,6 +82,8 @@ describe('scanSkillsRepository', () => {
 
     expect(result.ok).toBe(true);
     expect(result.items.map((item) => item.skillDir).sort()).toEqual([
+      'metadata/loose',
+      'metadata/scalar',
       'other/delta',
       'plugins/bundle/skills/gamma',
       'skills/alpha',

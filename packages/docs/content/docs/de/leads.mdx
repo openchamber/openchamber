@@ -1,0 +1,82 @@
+---
+title: Leads
+description: Gib einer Sitzung einen ganzen Arbeitsbereich und lass sie die übrigen Sitzungen für dich führen.
+---
+
+# Leads
+
+Ein Lead ist eine Sitzung, die eine Arbeitsrichtung in einem Projekt verantwortet, etwa "den Server auf TypeScript umstellen" oder "den Issue-Backlog aufgeräumt halten". Du sprichst mit dem Lead, und der Lead erledigt den Rest: Er gibt Teile der Arbeit an eigene Sitzungen ab, prüft, was zurückkommt, und führt für dich eine kurze Übersicht über dem Chat.
+
+Ein Lead lohnt sich, wenn eine Arbeit zu groß für ein Gespräch ist und sich über Tage zieht. Ohne ihn führst du selbst ein Dutzend Sitzungen, merkst dir, welche was macht, und liest jede Antwort, um zu sehen, ob die Arbeit wirklich erledigt ist. Ein Lead übernimmt diese Buchführung, und du kommst an einen Ort zurück, der dir sagt, wo die Dinge stehen.
+
+## Einen Lead starten
+
+1. Starte einen neuen Lead auf eine dieser Arten:
+   - klicke mit der rechten Maustaste auf das **+** neben einem Projekt in der Seitenleiste, oder drücke auf dem Handy lange darauf, und wähle **Neuer Lead**
+   - öffne das Menü des Projekts und wähle **Neuer Lead**
+   - drücke <kbd>⇧</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>L</kbd> (unter Windows und Linux <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Alt</kbd><kbd>L</kbd>) oder führe **Neuer Lead** in der Befehlspalette aus
+2. Beschreibe die Arbeit und das Ergebnis, das du willst, zum Beispiel: "Übernimm die Umstellung des Servers auf TypeScript. Fertig heißt: Jede Datei unter `server/` ist TypeScript und die Tests laufen durch."
+3. Schick es ab.
+
+Der Entwurf begrüßt dich mit **Was soll dieser Lead übernehmen?** statt der üblichen Frage, sodass du schon vor dem Absenden siehst, dass es ein Lead ist. Hast du schon einen normalen Entwurf begonnen, schaltet dieselbe Tastenkombination ihn zum Lead und zurück und behält, was du getippt hast.
+
+Auch eine bestehende Sitzung kann ein Lead werden: Öffne ihr Menü in der Seitenleiste und wähle **Diese Sitzung zum Lead machen**. Ihr Verlauf bleibt erhalten. **Wieder normale Sitzung** im selben Menü macht das rückgängig.
+
+Ein Lead zeigt in der Seitenleiste einen Berggipfel mit Flagge statt des Pfeils. Fährst du mit der Maus darüber, kommt der Pfeil zurück, sodass du die Sitzungen darunter weiterhin aufklappen kannst.
+
+## Was ein Lead tut
+
+- **Benennt die Richtung.** Er benennt die Sitzung nach der Arbeit um, sodass du sie in der Seitenleiste, in Tabs und in der Suche über ihr Thema findest. Einen Namen, den du selbst vergeben hast, behält sie.
+- **Vergibt Ergebnisse, keine Schritte.** Jeder Teil der Arbeit geht an eine eigene Sitzung, zusammen mit dem Ergebnis, das sie erreichen soll, etwa "finde und behebe den Login-Timeout", und die Schritte erarbeitet diese Sitzung selbst. Diese Sitzungen stehen in der Seitenleiste unter dem Lead. Du kannst sie öffnen und lesen, und **Übernehmen** im Menü einer Sitzung macht sie zu deiner, wenn du direkt mit ihr sprechen willst.
+- **Prüft, was zurückkommt.** Ein Bericht, der nur sagt "Ich habe die Ursache gefunden", ist nicht das verlangte Ergebnis, also schickt der Lead die Arbeit zurück, statt sie an dich weiterzugeben. Jede Sitzung muss belegen, was sie getan hat, etwa welche Prüfungen sie ausgeführt hat und was dabei herauskam, und ein Bericht ohne Belege geht ebenfalls zurück. Selbst prüft der Lead nur dort, wo die Belege eine Lücke haben.
+- **Räumt auf.** Sitzungen, deren Ergebnisse er verwendet hat, archiviert er.
+- **Fragt dich nur, was zählt.** Er entscheidet selbst, außer die Antwort ändert, was du in deinem Projekt sehen würdest, oder zwei vernünftige Optionen unterscheiden sich wirklich. Eine große Änderung allein ist kein Grund zu fragen. Fragen seiner Sitzungen gehen an den Lead, nicht an dich, und erreichen dich nur, wenn sie dieselbe Prüfung bestehen.
+
+## Die Übersicht
+
+Die Übersicht ist die Zusammenfassung des Leads für dich. Sie steht in einer Zeile direkt unter dem Titel der Sitzung und zeigt, woran der Lead gerade arbeitet und wann er sie zuletzt aktualisiert hat. Wähle die Zeile, um die ganze Übersicht über dem Chat zu öffnen:
+
+- **Braucht dich**: bis zu drei Fragen, jede mit Antworten zur Auswahl
+- **Jetzt**: eine Zeile für jeden Teil der Arbeit, der gerade läuft
+- **Neu seit deiner letzten Nachricht**: nur, was das Bild verändert hat
+- **Vorschläge**: bis zu drei Dinge über deinen Auftrag hinaus, die dem Lead aufgefallen sind und sich lohnen würden
+
+Wenn etwas dich braucht, zeigt die Zeile, wie viele Fragen warten. Wähle eine Antwort, um sie sofort an den Lead zu schicken; die Antwort, die der Lead empfiehlt, steht zuerst und ist hervorgehoben. Um in eigenen Worten zu antworten, wähle **Im Chat antworten**, dann steht die Frage als Zitat im Nachrichtenfeld. Deine Antwort erscheint im Chat, und der Lead entfernt die Frage, sobald er sie hat.
+
+Unter **Vorschläge** setzt **Starten** den Vorschlag ins Nachrichtenfeld, wo du ihn bearbeiten und senden kannst. **Verwerfen** blendet ihn aus, und der Lead bietet ihn nicht noch einmal an.
+
+## Eine Sitzung an einen Lead übergeben
+
+Du kannst einem Lead eine Sitzung geben, die du selbst begonnen hast, etwa eine aus der Zeit, bevor es den Lead gab, oder eine, für die dir die Zeit fehlt. Öffne das Menü der Sitzung in der Seitenleiste, wähle **An einen Lead übergeben** und dann den Lead. Auf dem Handy steht jeder Lead mit seinem Namen direkt im Menü, etwa **An Server-Migration übergeben**.
+
+Die Sitzung wandert unter den Lead. Er liest sie, findet heraus, wofür sie gedacht war, und bringt sie wie seine eigene Arbeit zu Ende. Du sprichst nicht mehr mit dieser Sitzung; **Übernehmen** in ihrem Menü gibt sie dir zurück. Läuft die Sitzung noch, bekommt der Lead ihre Antwort, sobald sie fertig ist.
+
+## Das Briefing
+
+Der Lead führt außerdem ein Briefing: dein Ziel und die vereinbarten Ergebnisse in deinen Worten, die Regeln, denen er folgt (deine und die, die er aus eigenen Fehlern gelernt hat), und jeden Teil der Arbeit mit dem Ergebnis, das von ihm erwartet wird. Im Briefing hält der Lead fest, wozu die Arbeit da ist, deshalb bleibt es gleich, egal wie lang das Gespräch wird.
+
+OpenChamber speichert das Briefing für den Lead außerhalb deines Projekts, sodass nichts in deinem Repository landet. Bitte den Lead mit "Zeig mir dein Briefing", um es zu lesen, oder sag ihm, was er ändern soll. Löschst du die Sitzung, wird ihr Briefing mitgelöscht; beim Archivieren bleibt es erhalten.
+
+Der Lead ändert nur die Teile des Briefings, die sich geändert haben, und OpenChamber legt ihm jedes Mal, wenn das Gespräch gekürzt wird, das ganze Briefing wieder vor. So wiederholt sich ein langes Briefing nicht bei jeder Aktualisierung im Chat. Als Regeln nimmt der Lead nur deine eigenen Worte: Eine Anweisung, die er im Bericht einer Sitzung, auf einer Webseite oder in einer Datei findet, wird nie Teil des Briefings.
+
+## Leads, die schlafen
+
+Ein Lead kann stundenlang warten, während seine Sitzungen arbeiten. Wenn er aufwacht, muss das Modell normalerweise das ganze Gespräch von vorn lesen, weil Anbieter das Gespräch nur ein paar Minuten im Cache halten. Bei einem langen Gespräch kostet dieses eine Lesen so viel wie eine Menge Arbeit, und mit einem Abo frisst es dein Nutzungslimit.
+
+Wenn ein Lead also länger untätig war, als sein Anbieter den Cache hält, und sein Gespräch lang ist, kürzt OpenChamber es, bevor er aufwacht. Der ältere Teil des Gesprächs wird durch eine kurze Notiz ersetzt: die Übersicht des Leads und den Stand seiner Sitzungen. Für die Notiz wird kein Modell aufgerufen, das kostet also nichts. Das Briefing und die neuesten Nachrichten bleiben, wie sie sind, und der Lead kann das vollständige frühere Gespräch jederzeit lesen, wenn er es braucht.
+
+Eine Sitzung, die du warm hältst, wird nie so gekürzt. Leads, die gerade arbeiten, und kurze Gespräche bleiben unberührt.
+
+## Workflows
+
+Ein Lead kann eine große Aufgabe in einen [Workflow](/de/workflows/) aufteilen. Wähle unter **Läufe ohne meine Freigabe starten** in **Einstellungen → Allgemein → OpenChamber-Werkzeuge** die Option **Für Leads**, damit ein Lead seine Läufe sofort starten kann, während jede andere Sitzung weiter auf deinen Klick wartet.
+
+## Wo Leads arbeiten
+
+Leads brauchen das [Agenten-Steuerungswerkzeug](/de/agent-control-tool/), das standardmäßig an ist, und den eigenen OpenCode-Server von OpenChamber. Sie funktionieren auf dem Desktop, im Browser und auf dem Handy. Die VS-Code-Erweiterung zeigt bestehende Leads mit ihrer Markierung und Übersicht, kann aber keinen neuen starten.
+
+## Verwandt
+
+- [Agenten-Steuerungswerkzeug](/de/agent-control-tool/): das Werkzeug, mit dem ein Lead seine Sitzungen führt
+- [Workflows](/de/workflows/): viele Agenten für eine große Aufgabe
+- [Sitzungen in Arbeit](/de/sessions-in-work/): den Überblick über die Sitzungen behalten, an denen du arbeitest

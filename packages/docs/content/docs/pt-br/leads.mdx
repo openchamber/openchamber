@@ -1,0 +1,82 @@
+---
+title: Leads
+description: Entregue uma área inteira de trabalho a uma sessão e deixe que ela conduza as outras sessões por você.
+---
+
+# Leads
+
+Um lead é uma sessão que cuida de uma frente de trabalho em um projeto, como "migrar o servidor para TypeScript" ou "manter o backlog de issues em ordem". Você conversa com o lead, e o lead faz o resto: entrega partes do trabalho a sessões próprias, confere o que volta e mantém um resumo curto para você acima do chat.
+
+Use um lead quando um trabalho é grande demais para uma conversa só e se estende por dias. Sem ele, você acaba tocando uma dúzia de sessões sozinho, lembrando qual faz o quê e lendo cada resposta para ver se ela realmente fez o trabalho. O lead cuida desse controle, e você volta a um único lugar que mostra como as coisas estão.
+
+## Criar um lead
+
+1. Crie um novo lead de uma destas formas:
+   - clique com o botão direito no **+** ao lado de um projeto na barra lateral, ou mantenha pressionado no celular, e escolha **Novo lead**
+   - abra o menu do projeto e escolha **Novo lead**
+   - pressione <kbd>⇧</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>L</kbd> (no Windows e no Linux, <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Alt</kbd><kbd>L</kbd>), ou execute **Novo lead** na paleta de comandos
+2. Descreva o trabalho e o resultado que você quer, por exemplo: "Cuide da migração do servidor para TypeScript. Está pronto quando todos os arquivos em `server/` forem TypeScript e os testes passarem."
+3. Envie.
+
+O rascunho recebe você com **Do que este lead vai cuidar?** no lugar da pergunta de sempre, então você sabe que é um lead antes de enviar. Se você já começou um rascunho comum, o mesmo atalho o transforma em lead e de volta, mantendo o que você digitou.
+
+Uma sessão existente também pode virar lead: abra o menu dela na barra lateral e escolha **Tornar esta sessão um lead**. Ela mantém o histórico. **Voltar a ser uma sessão comum**, no mesmo menu, desfaz a mudança.
+
+Um lead mostra um pico com uma bandeira na barra lateral no lugar da seta. A seta volta quando você passa o mouse por cima, então você ainda consegue abrir as sessões que ficam abaixo dele.
+
+## O que um lead faz
+
+- **Dá nome à frente de trabalho.** Renomeia a sessão de acordo com o trabalho, para você encontrá-la pelo assunto na barra lateral, nas abas e na busca. Um nome que você mesmo deu continua.
+- **Entrega resultados, não passos.** Cada parte do trabalho vai para uma sessão separada com o resultado que ela deve alcançar, como "encontre e corrija o timeout do login", e essa sessão define os passos sozinha. Essas sessões ficam abaixo do lead na barra lateral. Você pode abri-las e lê-las, e **Assumir** no menu de uma sessão a torna sua, se quiser conversar com ela.
+- **Confere o que volta.** Um relatório que só diz "encontrei a causa" não é o resultado pedido, então o lead devolve o trabalho em vez de repassá-lo a você. Cada sessão precisa mostrar provas do que fez, como quais verificações rodou e o que elas mostraram, e um relatório sem provas também volta. O lead só confere algo pessoalmente quando falta alguma coisa nas provas.
+- **Arruma a casa.** Arquiva as sessões cujos resultados já usou.
+- **Pergunta só o que importa.** Decide sozinho, a menos que a resposta mude o que você veria no seu projeto ou que duas opções razoáveis sejam de fato diferentes. Uma mudança grande, por si só, não é motivo para perguntar. As perguntas das sessões dele vão para o lead e só chegam a você se passarem pelo mesmo critério.
+
+## O resumo
+
+O resumo é o que o lead mantém para você. Ele fica em uma linha logo abaixo do título da sessão e mostra no que o lead está trabalhando agora e quando atualizou pela última vez. Selecione a linha para abrir o resumo completo sobre o chat:
+
+- **Precisa de você**: até três perguntas, cada uma com as respostas que você pode escolher
+- **Agora**: uma linha para cada parte do trabalho em andamento
+- **Novidades desde sua última mensagem**: só o que mudou o quadro
+- **Sugestões**: até três coisas que o lead percebeu que valem a pena fazer, além do que você passou para ele
+
+Quando algo precisa de você, a linha mostra quantas perguntas estão esperando. Selecione uma resposta para enviá-la ao lead na hora; a que o lead recomenda vem primeiro e aparece destacada. Para responder com suas próprias palavras, selecione **Responder no chat**, que cita a pergunta na caixa de mensagem. Sua resposta aparece no chat, e o lead tira a pergunta assim que a recebe.
+
+Em **Sugestões**, **Começar** coloca a sugestão na caixa de mensagem para você editar e enviar. **Dispensar** a esconde, e o lead não volta a oferecê-la.
+
+## Passar uma sessão para um lead
+
+Você pode entregar a um lead uma sessão que você mesmo começou, por exemplo uma que abriu antes de o lead existir ou uma que não tem tempo de terminar. Abra o menu da sessão na barra lateral, escolha **Passar para um lead** e selecione o lead. No celular, o menu mostra cada lead como **Passar para** seguido do nome dele.
+
+A sessão passa a ficar abaixo do lead, que a lê, entende para que ela servia e a leva até o fim como qualquer trabalho dele. Você deixa de conversar com essa sessão; **Assumir** no menu dela a devolve a você. Se a sessão ainda estiver trabalhando, o lead recebe a resposta dela quando terminar.
+
+## O brief
+
+O lead também mantém um brief: seu objetivo e os resultados combinados, com as suas palavras, as regras que ele segue (as suas e as que aprendeu com os próprios erros) e cada parte do trabalho com o resultado esperado dela. É a memória do lead sobre para que serve o trabalho, então continua igual por mais que a conversa cresça.
+
+O OpenChamber guarda o brief do lead fora do seu projeto, então nada vai parar no seu repositório. Peça ao lead "me mostre seu brief" para lê-lo, ou diga a ele o que mudar. Excluir a sessão exclui o brief; arquivar mantém.
+
+O lead muda só as partes do brief que mudaram, e o OpenChamber coloca o brief inteiro de volta na frente dele toda vez que a conversa é encurtada, então um brief longo não se repete no chat cada vez que o lead o atualiza. O lead só trata como regra as suas próprias palavras: uma instrução que ele encontre no relatório de uma sessão, em uma página da web ou em um arquivo nunca entra no brief.
+
+## Leads em repouso
+
+Um lead pode esperar horas enquanto as sessões dele trabalham. Quando ele acorda, o modelo normalmente precisa ler a conversa inteira de novo do zero, porque os provedores guardam a conversa em cache só por alguns minutos. Em uma conversa longa, essa leitura sozinha custa tanto quanto muito trabalho, e em uma assinatura consome seu limite de uso.
+
+Por isso, quando um lead fica ocioso por mais tempo do que o provedor mantém o cache e a conversa é longa, o OpenChamber a encurta antes de ele acordar. A parte mais antiga da conversa é trocada por uma nota curta: o resumo do lead e o estado das sessões dele. Nenhum modelo é chamado para escrever a nota, então isso não custa nada. O brief e as mensagens mais recentes ficam como estão, e o lead ainda pode ler a conversa anterior completa sempre que precisar.
+
+Uma sessão que você mantém aquecida nunca é encurtada assim. Leads que estão trabalhando e conversas curtas ficam como estão.
+
+## Workflows
+
+Um lead pode dividir um trabalho grande em um [workflow](/pt-br/workflows/). Em **Iniciar execuções sem minha aprovação**, dentro de **Configurações → Geral → Ferramentas do OpenChamber**, escolha **Para leads** para que um lead inicie as execuções dele na hora, enquanto todas as outras sessões continuam esperando seu clique.
+
+## Onde os leads funcionam
+
+Leads precisam da [Ferramenta de controle para agentes](/pt-br/agent-control-tool/), que vem ativada por padrão, e do servidor OpenCode do próprio OpenChamber. Eles funcionam no desktop, no navegador e no celular. A extensão do VS Code mostra os leads existentes com a marca e o resumo, mas não consegue criar um.
+
+## Relacionado
+
+- [Ferramenta de controle para agentes](/pt-br/agent-control-tool/): a ferramenta que um lead usa para conduzir as sessões dele
+- [Workflows](/pt-br/workflows/): muitos agentes para um trabalho grande
+- [Sessões em andamento](/pt-br/sessions-in-work/): acompanhe as sessões em que você está trabalhando

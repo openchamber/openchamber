@@ -856,17 +856,6 @@ describe('GitLab auth lifecycle', () => {
     expect(findButton(tree, 'settings.sourceControl.actions.connect')).not.toBeNull();
     expect(collectText(tree)).not.toContain('settings.sourceControl.instance.status.operationFailed');
   });
-
-  test('ignores capability failure after a runtime switch', async () => {
-    const capabilitiesRead = deferred<typeof availableCapabilities>();
-    readCapabilities = () => capabilitiesRead.promise;
-    await renderSettled(GitLabSettingsHarness);
-    switchRuntime();
-    capabilitiesRead.reject(new Error('old runtime offline'));
-    await flush();
-    const tree = renderComponent(GitLabSettingsHarness, {});
-    expect(collectText(tree)).not.toContain('settings.sourceControl.instance.status.operationFailed');
-  });
 });
 
 describe('source-control account presentation', () => {

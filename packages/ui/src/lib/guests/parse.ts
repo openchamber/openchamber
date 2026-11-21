@@ -251,6 +251,7 @@ const installedGuestSchema = z.object({
   source: z.enum(['bundled', 'path', 'zip', 'git']).optional(),
   path: z.string().nullable().optional(),
   enabled: z.boolean().optional(),
+  folders: z.array(z.string().min(1)).optional(),
   origin: z.object({
     url: z.string().trim().min(1),
     ref: z.string().trim().min(1).optional(),

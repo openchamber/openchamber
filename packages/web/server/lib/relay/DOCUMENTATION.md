@@ -19,15 +19,20 @@ Traffic is modeled as three stacked layers. The relay understands only Layer 1; 
 ## Entrypoints and structure
 
 Host side (`packages/web/server/lib/relay/`):
+
+Paths below use the runtime `.js` import specifiers. All host implementations
+directly in this folder are TypeScript.
+
 - `service.js` — thin entrypoint: relay config (enabled flag + relay URL), the management routes (`GET/POST /api/openchamber/relay/{status,enable,disable,reset-identity}`), a `getPairingCandidate()` accessor (the relay transport candidate folded into pairing-v2 links when enabled, consumed by the pairing-session route in `core-routes.js`), and lifecycle wiring. Started from `packages/web/server/index.js` only when the user has explicitly enabled the relay. The relay endpoint defaults to the OpenChamber-hosted relay but can be pinned to a self-hosted relay (`pinnedRelayUrl`: `relayUrl` in the machine policy file, else the `OPENCHAMBER_RELAY_URL` env var; see `../enterprise-mode.js`; must be `ws://`/`wss://`, an invalid value pins nothing); when set it overrides the stored setting for the host connection, the pairing candidate, and status, so paired clients inherit the endpoint automatically. In enterprise mode (`../enterprise-mode.js`) the relay runs only with that pin (`relayBlockedByEnterprise`): `start()` refuses otherwise (every path in passes through it), `enable` answers 403, `getPairingCandidate()` is null, `ensureEnabledForPairing()` throws (the pairing route drops the candidate and direct pairing still works), status carries `blockedByEnterprise`, and `resolvePairingTransports` in `index.js` reports `relayAvailable: false`.
 - `identity.js` — the host's stable identity: the long-lived signing keypair (shared with the push relay, defines the routing id) plus a long-lived encryption keypair (the E2EE trust anchor). Reused across restarts; never rotated implicitly. The only rotation is the user's: Settings shows a notice while the host reports `identityConflict` (two `4001` evictions within 10 minutes, so another copy of the data dir, usually on another machine, keeps taking the slot), and its button calls `reset-identity`. That drops both keypairs through `key-store.js`, restarts the host if it was running, and leaves the other copy with the old identity: devices paired through the relay keep reaching it until they are paired here again, and devices paired for the home network only are unaffected. Callers that cache derived keys (this runtime and the push relay's) compare the store's `generation()`, so the reset reaches both without a restart.
 - `signing-key.js` — the signing keypair and the routing id derivation, shared with the notifications runtime.
 - `key-store.js` — where both keypairs live: `<data-dir>/relay-identity.json` (`0600`), never `settings.json`, so the private keys do not travel with every copy of the settings file. Installs that kept them in `settings.json` (`relaySigningKey` / `relayEncryptionKey`) have them moved on first load, unchanged so `serverId` and the trust anchor survive, then stripped from settings; an older build sharing the data dir then mints its own identity. A key is minted only when neither file holds it, and both are read strictly so a corrupt or unreadable file fails instead of reading as first run. `index.js` builds one store for the push relay and the private relay, so their concurrent first loads mint one key.
 - `host-client.js` — the long-lived connection manager: one outbound control connection to the relay, a per-client data connection for each connected device, reconnect/backoff, and the E2EE responder handshake per connection. A control socket the relay closes with `4001: Control replaced` waits 60 s before reconnecting: another host holding the same identity took the slot (a copied data dir, a second machine, a container replica), and the usual 1 s reconnect would evict it in turn, so the pair would trade the slot every second for as long as both run. The relay also answers a host that reconnects its control socket more than 10 times a minute with HTTP 429, which older builds treat as a failed dial and back off from. A control connection dial whose upgrade gets no response within 15 s is terminated and redialed on the usual backoff: such a dial stays connecting without an error or close, and the ping keepalive only watches an open socket, so without the timeout the host stays unregistered until it restarts. The host times the open itself because Bun's `ws` ignores the `handshakeTimeout` option. A data connection dial that never opens (refused, or no answer within 5 s, doubling to 15 s per failure) is retried after 1 s, doubling to 8 s, for as long as the relay still reports that client and the control connection is up. The relay sends no second `connected` for a waiting client, so without the retry the device waits for the relay's 15 s stuck-control reset or its own 30 s handshake timeout. A data connection that opened and then closed is not retried: the relay closes the client with it, and the client's reconnect arrives as a new `connected`. Every control and data socket close is logged at info level with its close code and lifetime (`[Relay] control socket closed`, `[Relay] data socket closed`), so a host whose devices keep dropping shows the pattern in its log. The control socket also carries the relay's `{ type: 'share-state', shareId }` nudge when a page this host shared was opened or answered; it goes to `onShareState` (`../share-pages/`, which reads the share at once) and never touches the tunnel. Shares themselves are plain signed HTTPS calls with the same signing identity (`../share-pages/relay-client.js`), made whether or not the private relay host runs.
 - `host-lock.js` — the host claim shared through the data dir. Every instance using the data dir shares the relay identity (same serverId), so concurrent relay hosts evict each other at the relay worker (`4001: Control replaced`) and paired devices land on whichever process won last. The claim file (`<data-dir>/relay-host.lock`, `{ pid, instance, host, refreshedAt }`) makes this deterministic: `service.js` only starts the host when no LIVE process holds the claim, goes to `standby` otherwise, and a 30s watcher both takes over when the claimant dies and stands down when another process claims; while hosting, the same check refreshes the claim. The holder is named by a random per-process instance id, never by pid alone, because a data dir is not always private to one process table: containers mounting one volume all run as pid 1, and a synced or network folder is shared with processes on other machines. A claimant is live only while its `refreshedAt` is under 90 s old; one on this host must also still answer on its pid, so a holder that exits is replaced without waiting for the claim to age. The pid alone proves nothing: Windows reuses a dead host's pid for unrelated processes (`svchost.exe` in #4953), and a claim judged by pid alone held the relay in `standby` until the user re-enabled it. A claim from an older build has no `refreshedAt` and reads as stale; an older build still hosting sees the newer claim by its pid and stands down. A standby watcher waits a 2-minute grace after the claim frees before taking over, so a cleanly restarting host (app update/relaunch) — which reclaims at boot with no wait — always wins the restart window over a bystander instance. Explicit user intent — creating a pairing link or hitting `/relay/enable` — force-claims; the previous holder's watcher sees the takeover and backs off instead of fighting. Instances created with `allowPassiveHost: false` (dev servers via `OPENCHAMBER_RELAY_HOST=off`, the Electron dev shell via `OPENCHAMBER_ELECTRON_DEV`; `OPENCHAMBER_RELAY_HOST=on` overrides) never start the host passively at all — boot, demand reconcile, and watcher takeover leave them in `standby`; only explicit enable/pairing hosts there. The claim is cooperative (the relay worker still enforces the single host slot); it only decides which process keeps retrying.
-- `tunnel-host.js` — the per-connection dispatcher: decrypts tunnel frames and forwards HTTP/SSE/WS to the local server over loopback, then streams responses back. Enforces a path allowlist and never injects credentials.
+- `tunnel-host.js` — the per-connection dispatcher: decrypts tunnel frames and forwards HTTP/SSE/WS to the local server over loopback, then streams responses back. Enforces a path allowlist and never injects credentials. Every forwarded request and WebSocket dial carries `x-openchamber-relay-connection` and the relay proof from `provenance.js`, replacing any value the client sent. It does not follow redirects: a followed redirect would resend the proof to whatever origin the `Location` names, so the device receives the redirect response itself.
+- `provenance.js` — the relay proof: a random secret minted per process, never persisted or sent to a client. `hasRelayProvenance` is the only way the server tells a relay-carried request from a direct one where that changes stored state (`../client-auth/`). `consumeRelayProof` runs as the server's first `request` and `upgrade` listener, prepended by `service.js` `registerRoutes`, which `runtime.ts` calls after every other prepended listener (the spaces upgrade handler); a listener prepended later would see the proof: it deletes the header and remembers a matching request, so no proxy (OpenCode, spaces, http-proxy's `Expect` path that skips `proxyReq` hooks) ever sees the proof, and `hasRelayProvenance(req)` reads that memory, not the headers.
 - `downstream-scheduler.js` owns end-client delivery credit and round-robin transmission across response streams. It selects plaintext frames before encryption.
-- `e2ee.js`, `tunnel-codec.js` — host-side (JS) mirrors of the shared crypto and framing (see "Two implementations" below).
+- `e2ee.js`, `tunnel-codec.js` are host-side mirrors of the shared crypto and framing. See "Two implementations".
 
 Client side (`packages/ui/src/lib/relay/`):
 - `protocol.ts` — the shared contract: constants, frame types, message shapes. The normative source both implementations follow.
@@ -176,7 +181,7 @@ belong to a different machine.
 
 ## Two implementations, kept in sync
 
-The E2EE and framing logic exists twice: TypeScript in `packages/ui/src/lib/relay/` (shared by the client and the normative reference) and a JavaScript mirror in this module (the host, which is plain JS ESM). They **must stay byte-compatible** — a client encrypted by one must decrypt on the other. A cross-compatibility test (`cross-compat.test.js`) imports the TS modules directly and exercises a full TS-client ↔ JS-host exchange. Any change to the wire format, frame codec, handshake, or batching must update both sides and keep that test green.
+The E2EE and framing logic exists twice, in `packages/ui/src/lib/relay/` and in this module. Both implementations are TypeScript; the client implementation is the normative reference. They must stay byte-compatible. A client encrypted by one must decrypt on the other. `cross-compat.test.js` imports both implementations directly and exercises a full client-to-host exchange. A wire-format, frame-codec, handshake or batching change must update both sides and keep that test green.
 
 ## Runtime integration (client)
 
@@ -260,8 +265,96 @@ A URL the browser loads itself (`<img src>`, `<video src>`, an iframe) never ent
 - Relay management routes precede the generic OpenCode proxy and remain behind the global UI auth gate. Hosting belongs to the web server, including Electron's embedded server; shared UI treats these routes as web-runtime capabilities because VS Code does not host a relay.
 - Device and pending-pairing demand drives lifecycle reconciliation, and creating a relay pairing link supplies that demand without a separate toggle. Relay candidates have last-resort priority after direct LAN and tunnel candidates. Enterprise pinning keeps routing metadata and the access path inside the deployment even though traffic is encrypted on either endpoint.
 - A request body sink exists before body frames arrive and stops accepting bytes after completion or abort. `StreamEnd` half-closes the request body while the response continues. Synthetic HTTP responses include an explicit reason and `source: 'relay-tunnel-host'` so callers can distinguish a host-generated error from an upstream response.
+- Tunneled HTTP requests keep the remote client's headers, `X-Forwarded-For` included, and reach the server from loopback. The host stamps each request with the relay proof (`provenance.ts`), and the sign-in limit (`../security/client-address.ts`) keys every request with relay provenance to one shared relay budget, so forwarding headers from a relay client never pick a bucket. `x-openchamber-relay-connection` is not proof of relay provenance: a same-host reverse proxy can pass it through.
 
 ## Decisions
+
+### Host conversion contracts
+
+`host-client.js` and `tunnel-host.js` use the constructors, lifecycle events,
+raw-data union and backpressure methods in `../shared/websocket-contracts.js`.
+`service.js` uses the application, handler, request and response contracts in
+`../shared/http-contracts.js`. The shared package declarations supply the
+existing `ws` imports and Express JSON middleware factory.
+
+The socket contract retains the full raw-data union for sockets whose mode is
+unspecified. Newly constructed sockets use `nodebuffer` mode, so their message
+contract is `Buffer`; the generic mode also constrains `binaryType`. The relay
+never changes that mode. The existing Buffer check in the loopback dispatcher
+remains unchanged.
+
+`describeRelayError` reads a thrown value's unchecked `message` field and applies
+the redactor's existing `String(value || '')` coercion before calling its
+string-typed boundary. This preserves primitive, nullish and non-string error
+messages without changing the source-control module.
+
+`platform.d.ts` connects server-native streams to the installed Node contracts
+for BYOB readers and `pipeThrough`. DOM and Node stream declarations disagree
+on BYOB readers and completed read results even though native `fetch` supplies
+the same runtime stream that `Readable.fromWeb` accepts. The overloads use the
+Node-owned reader, transform and result types without replacing constructors or
+declaring another stream implementation. Loopback fetch options retain the existing explicit undefined
+`duplex` value. The downstream scheduler preserves each submitted frame's buffer
+type through its queue, so ArrayBuffer-backed frames reach WebCrypto without
+assertions or copies.
+
+The dispatcher also accepts arbitrary entries in a
+wire `protocols` array and lets `ws` validate them. A `string[]` type would claim
+validation the dispatcher does not perform; tightening its validator changes
+the wire acceptance rules. The shared constructor accepts unchecked protocol
+arrays and retains the library's runtime validation.
+
+### Why service inputs retain optional property reads
+
+Settings and HTTP bodies remain unchecked at their read boundaries. Guards for
+optional fields exclude only null and undefined, preserving JavaScript's boxed
+property access on primitive values and leaving each field unknown until its
+own check. Relay URL checks retain their non-string fallback, whitespace
+normalization and protocol validation. Thrown values likewise keep an unchecked
+`message` field so route errors retain the existing nullish fallback.
+
+Host options include the existing share-state callback, batching controls and
+socket factory. The optional legacy local port stays undefined when neither port
+source is supplied. Package version data remains unchecked until URL string
+coercion. Loggers may omit `info` on the optional close-log paths; idle reaping
+retains its existing TypeError when that method is absent.
+
+Wire guards retain their object, string and array checks, including array-valued
+header containers and unchecked protocol-array elements. Header names from
+`Object.entries` are already strings, but header values and WebSocket close
+reasons still require their original primitive-string checks. Node/Bun timer
+handles provide `unref`; an internally supplied port accessor is already typed
+as a function.
+
+The request-body controller is installed synchronously by `ReadableStream.start`.
+A checked accessor expresses that invariant, and a failure accessor exposes
+closure writes made while awaiting body completion. Empty scheduler batches and
+dispatch before tunnel establishment remain invariant failures. Ignored cleanup
+and listener errors stay ignored.
+
+### Why key and handshake types preserve partial input
+
+The identity-file schema requires only each JWK's nonempty `kty`; WebCrypto and
+Node crypto validate key material when importing it. Public-point extraction
+explicitly supplies `kty`, `crv`, `x` and `y`, including undefined when a field
+is absent. The public-point contract preserves those explicit values. Legacy
+settings and identity rewrites preserve fields owned by other modules or newer
+versions. Schema-derived settings types retain those fields without interpreting
+them here.
+
+Handshake guards preserve the existing object and string checks, including
+ignored unknown messages, absent capability flags and malformed keys rejected
+during import. File and process errors retain their original `code` and
+`message` handling. An `EPERM` pid probe keeps a claimant live, and a failed
+claim release remains best effort.
+
+### Why occupied entries have checked accessors
+
+Frame-length checks, loop bounds, queued-frame insertion and key creation
+establish occupied byte, queue, acknowledgement and key slots. Checked reads
+express those invariants under `noUncheckedIndexedAccess` without assertions
+or fallback data. The batcher's unchecked empty-frame type byte retains its
+existing bitwise-zero behavior.
 
 ### Why separate control and data liveness checks and not socket state alone
 

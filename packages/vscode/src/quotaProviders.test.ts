@@ -116,6 +116,55 @@ const stubFetchFailing = (json: () => Promise<unknown>, init: MockResponseInit):
   globalThis.fetch = (async () => ({ json, ...init }) as unknown as Response) as typeof fetch;
 };
 
+describe('Google plugin credentials', () => {
+  afterEach(() => configureOpenCodeCredentials({ list: async () => baseCredentialList() }));
+
+  test('still discovers a direct Google OAuth login', async () => {
+    configureOpenCodeCredentials({ list: async () => [{
+      id: 'cred_google', integrationID: 'google', label: 'direct', active: true,
+      value: { type: 'oauth', methodID: 'oauth', access: 'test-token', refresh: 'test-refresh', expires: Date.now() + 3_600_000 },
+    }] });
+    assert.equal((await listConfiguredQuotaProviders()).includes('google'), true);
+  });
+
+  test('still discovers a Gemini CLI Google login', async () => {
+    configureOpenCodeCredentials({ list: async () => [{
+      id: 'cred_google', integrationID: 'google', label: 'gemini', active: true,
+      value: { type: 'oauth', methodID: 'gemini-cli', access: 'test-token', refresh: 'test-refresh', expires: Date.now() + 3_600_000 },
+    }] });
+    assert.equal((await listConfiguredQuotaProviders()).includes('google'), true);
+  });
+
+  test('keeps a legacy Google login without a method ID', async () => {
+    // Credentials saved before OpenCode recorded login methods carry no method ID.
+    const legacy: CredentialEntry = {
+      id: 'cred_google', integrationID: 'google', label: 'legacy', active: true,
+      value: { type: 'oauth', methodID: 'oauth', access: 'test-token', refresh: 'test-refresh', expires: Date.now() + 3_600_000 },
+    };
+    Reflect.deleteProperty(legacy.value, 'methodID');
+    configureOpenCodeCredentials({ list: async () => [legacy] });
+    const requests: string[] = [];
+    stubFetchReturning(async (url) => { requests.push(url); return Response.json({ buckets: [] }); });
+    assert.equal((await listConfiguredQuotaProviders()).includes('google'), true);
+    assert.equal((await fetchQuotaForProvider('google')).configured, true);
+    assert.equal(requests.some((url) => url.includes('googleapis.com')), true);
+  });
+
+  for (const expires of [1, Date.now() + 3_600_000]) {
+    test(`does not discover or request plugin credentials with expiry ${expires}`, async () => {
+      configureOpenCodeCredentials({ list: async () => [{
+        id: 'cred_google', integrationID: 'google', label: 'plugin', active: true,
+        value: { type: 'oauth', methodID: 'antigravity', access: 'placeholder', refresh: 'placeholder', expires },
+      }] });
+      let requests = 0;
+      stubFetchReturning(async () => { requests++; throw new Error('Unexpected request'); });
+      assert.equal((await listConfiguredQuotaProviders()).includes('google'), false);
+      assert.equal((await fetchQuotaForProvider('google')).configured, false);
+      assert.equal(requests, 0);
+    });
+  }
+});
+
 test('dispatches Charm Hyper through the generic quota API', async () => {
   stubFetchReturning(async () => Response.json({ balance: 100 }));
   const result = await fetchQuotaForProvider('hyper');
@@ -763,10 +812,13 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
     assert.equal(new Headers(requestInit?.headers).get('Authorization'), 'Bearer test-token');
     assert.equal(new Headers(requestInit?.headers).get('Accept-Encoding'), 'identity');
     assert.ok(requestInit?.signal instanceof AbortSignal);
-    assert.deepEqual(Object.keys(result.usage!.windows), ['daily']);
+    assert.deepEqual(Object.keys(result.usage!.windows), ['daily', 'monthly_total', 'monthly_credits', 'monthly_byok']);
     assert.equal(result.usage!.windows.daily!.windowSeconds, 86400);
     assert.equal(result.usage!.windows.daily!.valueLabel, '$0.00 / $30.00');
     assert.ok(typeof result.usage!.windows.daily!.resetAt === 'number');
+    assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: null, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_credits!.value, { kind: 'spend', spent: 3.17561396, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_byok!.value, { kind: 'spend', spent: null, limit: null });
   });
 
   const withStubbedConfigFile = async (configJson: string, run: () => Promise<void>): Promise<void> => {
@@ -884,19 +936,161 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
     assert.equal(requested.url, 'https://openrouter.ai/api/v1/key');
   });
 
-  test('maps an unlimited null-limit key to a monthly spent window', async () => {
+  test('maps an unlimited null-limit key to monthly total and category windows', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({
-      data: { limit: null, limit_remaining: null, limit_reset: null, usage_monthly: 12.5, is_management_key: false },
+      data: { limit: null, limit_remaining: null, limit_reset: null, usage_monthly: 12.5, byok_usage_monthly: 5, is_management_key: false },
     })));
 
     const result = await fetchQuotaForProvider('openrouter');
 
     assert.equal(result.ok, true);
-    assert.deepEqual(Object.keys(result.usage!.windows), ['monthly']);
+    assert.deepEqual(Object.keys(result.usage!.windows), ['monthly_total', 'monthly_credits', 'monthly_byok']);
+    const total = result.usage!.windows.monthly_total!;
+    assert.equal(total.usedPercent, null);
+    assert.equal(total.windowSeconds, 30 * 86400);
+    assert.deepEqual(total.value, { kind: 'spend', spent: 17.5, limit: null });
+    assert.equal(total.valueLabel, undefined);
+    assert.ok(typeof total.resetAt === 'number');
+    assert.deepEqual(result.usage!.windows.monthly_credits!.value, { kind: 'spend', spent: 12.5, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_byok!.value, { kind: 'spend', spent: 5, limit: null });
+  });
+
+  test('shows a set cap as unknown beside the monthly rows when its remaining amount is unreadable', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { limit: 30, limit_remaining: null, limit_reset: 'monthly', usage_monthly: 5, byok_usage_monthly: 2, is_management_key: false },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.equal(result.ok, true);
+    const cap = result.usage!.windows.monthly!;
+    assert.equal(cap.usedPercent, null);
+    assert.equal(cap.valueLabel, undefined);
+    assert.deepEqual(cap.value, { kind: 'spend', spent: null, limit: 30 });
+    assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: 7, limit: null });
+  });
+
+  test('treats a blank remaining amount as unreadable rather than a fully spent cap', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { limit: 30, limit_remaining: '  ', limit_reset: 'monthly', usage_monthly: 5, byok_usage_monthly: 2, is_management_key: false },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.equal(result.ok, true);
     assert.equal(result.usage!.windows.monthly!.usedPercent, null);
-    assert.equal(result.usage!.windows.monthly!.windowSeconds, 30 * 86400);
-    assert.equal(result.usage!.windows.monthly!.valueLabel, '$12.50 spent');
-    assert.ok(typeof result.usage!.windows.monthly!.resetAt === 'number');
+    assert.deepEqual(result.usage!.windows.monthly!.value, { kind: 'spend', spent: null, limit: 30 });
+  });
+
+  test('sums the captured monthly counters before display rounding', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: {
+        usage_monthly: 14.297788398,
+        byok_usage_monthly: 212.345956722,
+        limit: null,
+        limit_remaining: null,
+        limit_reset: null,
+        include_byok_in_limit: false,
+        is_management_key: false,
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: 226.64374512, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_credits!.value, { kind: 'spend', spent: 14.297788398, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_byok!.value, { kind: 'spend', spent: 212.345956722, limit: null });
+  });
+
+  test('hides exact-zero categories while the zero total stays visible', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { usage_monthly: 0, byok_usage_monthly: 0, limit: null, limit_remaining: null, limit_reset: null },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.deepEqual(Object.keys(result.usage!.windows), ['monthly_total']);
+    assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: 0, limit: null });
+  });
+
+  for (const [label, counters, credits, byok] of [
+    ['BYOK', { usage_monthly: 4, byok_usage_monthly: 'nope' }, 4, null],
+    ['Credits', { usage_monthly: null, byok_usage_monthly: 7 }, null, 7],
+    ['blank BYOK', { usage_monthly: 4, byok_usage_monthly: ' ' }, 4, null],
+    ['blank Credits', { usage_monthly: '', byok_usage_monthly: 7 }, null, 7],
+  ] as const) {
+    test(`keeps a valid category and marks an unreadable ${label} amount unknown`, async () => {
+      stubFetchReturning(() => Promise.resolve(mockResponse({
+        data: { ...counters, limit: null, limit_remaining: null, limit_reset: null },
+      })));
+
+      const result = await fetchQuotaForProvider('openrouter');
+
+      assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: null, limit: null });
+      assert.deepEqual(result.usage!.windows.monthly_credits!.value, { kind: 'spend', spent: credits, limit: null });
+      assert.deepEqual(result.usage!.windows.monthly_byok!.value, { kind: 'spend', spent: byok, limit: null });
+    });
+  }
+
+  for (const [includeByok, limitRemaining, capUsed] of [[false, 25, 5], [true, -75, 105]] as const) {
+    test(`keeps cap usage at limit minus remaining when include_byok_in_limit is ${includeByok}`, async () => {
+      stubFetchReturning(() => Promise.resolve(mockResponse({
+        data: {
+          limit: 30,
+          limit_remaining: limitRemaining,
+          limit_reset: 'monthly',
+          include_byok_in_limit: includeByok,
+          usage_monthly: 5,
+          byok_usage_monthly: 100,
+        },
+      })));
+
+      const result = await fetchQuotaForProvider('openrouter');
+      const cap = result.usage!.windows.monthly!;
+
+      assert.equal(cap.valueLabel, `$${capUsed.toFixed(2)} / $30.00`);
+      assert.equal(cap.usedPercent, Math.min(100, (capUsed / 30) * 100));
+      assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: 105, limit: null });
+    });
+  }
+
+  test('keeps usable monthly counters when the cap is malformed', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { limit: 30, limit_remaining: null, usage_monthly: 5, byok_usage_monthly: 2 },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.monthly, undefined);
+    assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: 7, limit: null });
+  });
+
+  test('keeps a usable cap and shows both monthly counters unknown', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { limit: 30, limit_remaining: 25, limit_reset: 'monthly', usage_monthly: 'bad', byok_usage_monthly: -1 },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.deepEqual(Object.keys(result.usage!.windows), ['monthly', 'monthly_total', 'monthly_credits', 'monthly_byok']);
+    assert.equal(result.usage!.windows.monthly!.valueLabel, '$5.00 / $30.00');
+    assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: null, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_credits!.value, { kind: 'spend', spent: null, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_byok!.value, { kind: 'spend', spent: null, limit: null });
+  });
+
+  test('keeps a usable cap when both monthly counters are missing', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { limit: 30, limit_remaining: 25, limit_reset: 'monthly' },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.deepEqual(Object.keys(result.usage!.windows), ['monthly', 'monthly_total', 'monthly_credits', 'monthly_byok']);
+    assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: null, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_credits!.value, { kind: 'spend', spent: null, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_byok!.value, { kind: 'spend', spent: null, limit: null });
   });
 
   test('maps a lifetime cap to a key_limit window without reset metadata', async () => {
@@ -910,6 +1104,7 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
     assert.ok(window);
     assert.equal(window!.windowSeconds, null);
     assert.equal(window!.resetAt, null);
+    assert.ok(result.usage!.windows.monthly_total);
   });
 
   test('maps an unrecognized reset period to a key_limit window', async () => {
@@ -922,6 +1117,7 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
     assert.ok(result.usage!.windows.key_limit);
     assert.equal(result.usage!.windows.key_limit!.windowSeconds, null);
     assert.equal(result.usage!.windows.key_limit!.resetAt, null);
+    assert.ok(result.usage!.windows.monthly_total);
   });
 
   test('clamps percent at 100 while leaving the money label unclamped', async () => {
@@ -947,6 +1143,7 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
     assert.ok(window);
     assert.equal(window!.windowSeconds, 604800);
     assert.equal(new Date(window!.resetAt!).getUTCDay(), 1);
+    assert.ok(result.usage!.windows.monthly_total);
   });
 
   test('rejects management keys with an inference-key error', async () => {

@@ -20,7 +20,6 @@ const BinaryDiffPlaceholder = React.memo(() => {
         </div>
     );
 });
-// Image diff viewer for binary image files
 interface InlineImageDiffViewerProps {
     filePath: string;
     diff: DiffData;
@@ -54,7 +53,6 @@ const InlineImageDiffViewer = React.memo<InlineImageDiffViewerProps>(({
                             src={diff.original}
                             alt={t('diffView.image.originalAlt', { path: filePath })}
                             variant="large"
-                            // Room for the loading and failed states before the image has a size.
                             className="flex min-h-40 min-w-40 max-w-full items-center justify-center"
                             imgClassName={renderSideBySide ? "max-w-full max-h-[70vh] object-contain" : "max-w-full object-contain"}
                             imgStyle={{ imageRendering: 'auto' }}
@@ -70,7 +68,6 @@ const InlineImageDiffViewer = React.memo<InlineImageDiffViewerProps>(({
                             src={diff.modified}
                             alt={t('diffView.image.modifiedAlt', { path: filePath })}
                             variant="large"
-                            // Room for the loading and failed states before the image has a size.
                             className="flex min-h-40 min-w-40 max-w-full items-center justify-center"
                             imgClassName={renderSideBySide ? "max-w-full max-h-[70vh] object-contain" : "max-w-full object-contain"}
                             imgStyle={{ imageRendering: 'auto' }}
@@ -85,7 +82,6 @@ const InlineImageDiffViewer = React.memo<InlineImageDiffViewerProps>(({
 interface InlineDiffViewerProps {
   filePath: string;
   diff: DiffData;
-  /** The diff this is, for comments; absent for uncommitted changes. */
   commentOrigin?: DiffCommentOrigin;
   staged: boolean;
   renderSideBySide: boolean;
@@ -95,9 +91,7 @@ interface InlineDiffViewerProps {
   onExpandContextRequest?: (request: ContextExpansionRequest) => void;
   pendingContextExpansion?: ContextExpansionRequest | null;
   contextLoading?: boolean;
-  /** Find-in-diff handle for this file's rendered diff. */
   viewerRef?: React.Ref<PierreDiffViewerHandle>;
-  /** Reports a primary-modifier word click so the owner can open find on it. */
   onFindWordRequest?: (request: DiffFindWordRequest) => void;
 }
 

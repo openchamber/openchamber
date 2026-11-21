@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { EventEmitter, once } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -17,21 +18,20 @@ const createHarness = async ({ enabled = true, now } = {}) => {
   const directory = path.join(root, 'secrets');
   // An absent `now` takes the module's default clock.
   const files = createSecretFiles({ directory, now });
-  const onWaitChange = vi.fn();
+  const events = new EventEmitter();
+  const onWaitChange = vi.fn((change) => events.emit(change.type));
   const requests = createSecretRequests({ isEnabled: async () => enabled, files, onWaitChange });
-  return { directory, files, requests, onWaitChange };
+  return { directory, files, requests, onWaitChange, waitForCard: () => once(events, 'waiting') };
 };
 
 const ask = { label: 'Cloudflare API token', reason: 'To deploy the worker with wrangler.' };
 const call = { sessionId: 'ses_1', callId: 'call_1', directory: '/repo' };
-// The call starts waiting once its checks have run.
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('secret.request', () => {
   it('writes the saved value to a private file and gives the call only its path', async () => {
-    const { directory, requests, onWaitChange } = await createHarness();
+    const { directory, requests, onWaitChange, waitForCard } = await createHarness();
     const pending = requests.request(ask, call);
-    await settle();
+    await waitForCard();
     expect(onWaitChange).toHaveBeenCalledWith({ type: 'waiting', sessionId: 'ses_1', callId: 'call_1', title: 'Cloudflare API token', directory: '/repo' });
 
     await expect(requests.answer({ sessionId: 'ses_1', callId: 'call_1', value: 'cf-token-123' })).resolves.toEqual({ status: 'saved' });
@@ -48,9 +48,9 @@ describe('secret.request', () => {
   });
 
   it('writes nothing when the user declines', async () => {
-    const { directory, requests } = await createHarness();
+    const { directory, requests, waitForCard } = await createHarness();
     const pending = requests.request(ask, call);
-    await settle();
+    await waitForCard();
 
     await expect(requests.answer({ sessionId: 'ses_1', callId: 'call_1', declined: true })).resolves.toEqual({ status: 'declined' });
 
@@ -59,10 +59,10 @@ describe('secret.request', () => {
   });
 
   it('refuses an answer for a call that stopped waiting and leaves no file behind', async () => {
-    const { directory, requests } = await createHarness();
+    const { directory, requests, waitForCard } = await createHarness();
     const controller = new AbortController();
     const pending = requests.request(ask, { ...call, signal: controller.signal });
-    await settle();
+    await waitForCard();
     controller.abort();
     await expect(pending).rejects.toBeTruthy();
 
@@ -72,9 +72,9 @@ describe('secret.request', () => {
   });
 
   it('keeps waiting after an empty value', async () => {
-    const { requests } = await createHarness();
+    const { requests, waitForCard } = await createHarness();
     const pending = requests.request(ask, call);
-    await settle();
+    await waitForCard();
 
     await expect(requests.answer({ sessionId: 'ses_1', callId: 'call_1', value: '   ' })).rejects.toMatchObject({ statusCode: 400 });
     await requests.answer({ sessionId: 'ses_1', callId: 'call_1', value: 'v' });

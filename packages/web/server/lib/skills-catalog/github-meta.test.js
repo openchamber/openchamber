@@ -22,6 +22,20 @@ afterEach(() => {
 });
 
 describe('fetchGitHubRepoMetas', () => {
+  it('retains object-shaped disk metadata without validating its fields', async () => {
+    const value = { stars: 'unchecked', repoUpdatedAt: 42 };
+    fs.writeFileSync(path.join(tempDataDir, 'skills-github-meta.json'), JSON.stringify({
+      'a/b': { expiresAt: Date.now() + 60_000, value },
+    }));
+    vi.resetModules();
+    const freshMeta = await import('./github-meta.js');
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+
+    expect(await freshMeta.fetchGitHubRepoMetas(['a/b'])).toEqual({ 'a/b': value });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('returns stars and pushed_at from the GitHub API', async () => {
     const fetchMock = vi.fn(async () => new Response(
       JSON.stringify({ stargazers_count: 42, pushed_at: '2026-08-01T00:00:00Z' }),

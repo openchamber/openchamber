@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { ToolInput } from '@/lib/opencode/model';
+import { openRouterSpendSelection } from '@/lib/quota/windowKeys';
 import { workflowRunSchema, workflowRunStateSchema } from '@/lib/workflows/model';
 import { waitArgsSchema } from '@/sync/extension-waits';
 
@@ -174,6 +175,11 @@ const windowSchema = z.object({
   resetAt: z.number().nullable().catch(null),
   resetAtFormatted: z.string().nullable().optional().catch(null),
   resetAfterFormatted: z.string().nullable().optional().catch(null),
+  valueLabel: z.string().nullable().optional().catch(undefined),
+  value: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('requests'), count: z.number().finite().nonnegative() }),
+    z.object({ kind: z.literal('spend'), spent: z.number().finite().nonnegative().nullable(), limit: z.number().finite().positive().nullable() }),
+  ]).optional().catch(undefined),
 }).passthrough();
 
 export const usageSchema = z.object({
@@ -191,11 +197,16 @@ type UsageWindowRow = z.infer<typeof windowSchema>;
 
 export const tightestWindow = (provider: UsageProviderRow): { key: string; window: UsageWindowRow } | null => {
   let best: { key: string; window: UsageWindowRow } | null = null;
-  for (const [key, window] of Object.entries(provider.usage?.windows ?? {})) {
+  const windows = provider.usage?.windows ?? {};
+  for (const [key, window] of Object.entries(windows)) {
     if (window.usedPercent === null) continue;
     if (!best || window.usedPercent > (best.window.usedPercent ?? -1)) best = { key, window };
   }
-  return best;
+  if (best) return best;
+  const openRouter = openRouterSpendSelection(provider.providerId, windows);
+  if (!openRouter) return null;
+  const key = openRouter.capKeys[0] ?? openRouter.fallbackKey;
+  return { key, window: windows[key] };
 };
 
 export const memoryReadSchema = z.object({
@@ -407,6 +418,7 @@ const secretRunSchema = z.object({
   stdout: z.string().optional().catch(undefined),
   stderr: z.string().optional().catch(undefined),
   error: z.string().optional().catch(undefined),
+  notSaved: z.array(z.string()).optional().catch(undefined),
 });
 
 type SecretRunVerbKey =
@@ -431,7 +443,7 @@ const secretRequestSchema = z.object({
 
 export const secretRowView = (
   envelope: Pick<OpenChamberEnvelope, 'ok' | 'action'> & { data?: unknown } | null,
-): { key: SecretRunVerbKey; code?: number; output?: string; file?: string } | null => {
+): { key: SecretRunVerbKey; code?: number; output?: string; file?: string; notSaved?: string[] } | null => {
   if (envelope?.ok !== true) return null;
   if (envelope.action === 'secret.request') {
     const request = secretRequestSchema.safeParse(envelope.data);
@@ -444,15 +456,16 @@ export const secretRowView = (
   if (envelope.action !== 'secret.run') return null;
   const parsed = secretRunSchema.safeParse(envelope.data);
   if (!parsed.success) return null;
-  const { answer, stdout = '', stderr = '', error = '' } = parsed.data;
+  const { answer, stdout = '', stderr = '', error = '', notSaved = [] } = parsed.data;
   const output = [stdout, stderr, error].map((part) => part.trimEnd()).filter(Boolean).join('\n');
   if ('answered' in answer) return { key: 'chat.toolPart.openchamber.action.secretRunNotRun', output };
   if (answer.status === 'declined') return { key: 'chat.toolPart.openchamber.action.secretRunDeclined', output };
-  if (answer.outcome === 'timeout') return { key: 'chat.toolPart.openchamber.action.secretRunTimedOut', output };
-  if (answer.outcome === 'not-started') return { key: 'chat.toolPart.openchamber.action.secretRunNotStarted', output };
-  if (answer.outcome === 'killed' || answer.exitCode === null) return { key: 'chat.toolPart.openchamber.action.secretRunStopped', output };
-  if (answer.exitCode !== 0) return { key: 'chat.toolPart.openchamber.action.secretRunFailed', code: answer.exitCode, output };
-  return { key: 'chat.toolPart.openchamber.action.secretRun', output };
+  const saveFailed = notSaved.length > 0 ? { notSaved } : {};
+  if (answer.outcome === 'timeout') return { key: 'chat.toolPart.openchamber.action.secretRunTimedOut', output, ...saveFailed };
+  if (answer.outcome === 'not-started') return { key: 'chat.toolPart.openchamber.action.secretRunNotStarted', output, ...saveFailed };
+  if (answer.outcome === 'killed' || answer.exitCode === null) return { key: 'chat.toolPart.openchamber.action.secretRunStopped', output, ...saveFailed };
+  if (answer.exitCode !== 0) return { key: 'chat.toolPart.openchamber.action.secretRunFailed', code: answer.exitCode, output, ...saveFailed };
+  return { key: 'chat.toolPart.openchamber.action.secretRun', output, ...saveFailed };
 };
 
 export const OPENCHAMBER_ACTION_VERB_KEYS = {

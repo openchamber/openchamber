@@ -1,4 +1,5 @@
-import type { FileEditorKeymap, LargeTextPasteBehavior } from './types';
+import { z } from 'zod';
+import type { DocumentAttachBehavior, FileEditorKeymap, LargeTextPasteBehavior } from './types';
 
 export const clampContextEditorTreeWidth = (width: number): number =>
   Math.min(480, Math.max(200, Math.round(width)));
@@ -11,6 +12,10 @@ export const normalizeLargeTextPasteBehavior = (value: unknown): LargeTextPasteB
   }
   return DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR;
 };
+
+export const DEFAULT_DOCUMENT_ATTACH_BEHAVIOR: DocumentAttachBehavior = 'ask';
+
+export const documentAttachBehaviorSchema = z.enum(['ask', 'save', 'convert']).catch(DEFAULT_DOCUMENT_ATTACH_BEHAVIOR);
 
 export function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
   return value === 'vim' ? 'vim' : 'default';

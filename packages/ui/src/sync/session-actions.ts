@@ -1,11 +1,12 @@
 
-import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
+import type { FilePart, FormRequest, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
 import { compact, partIds } from "@/lib/opencode/model"
 import { readSubagentRun } from "@/lib/opencode/subagent-run"
 import { attachmentBasename, withMissingCitations } from "@/lib/attachmentIdentity"
 import { isAutoModel } from "@/lib/routing/autoModel"
 import { Binary } from "./binary"
 import { dropSessionCaches } from "./session-cache"
+import { buildMetadataMergePatch, readForkMessages } from "./session-metadata-helpers"
 import { forkAtTranscriptCut, isTurnBoundary, transcriptCutAfterMessage, transcriptCutForMessage } from "./transcript-cut"
 import { useSessionUIStore, type SentMessage } from "./session-ui-store"
 import { useSelectionStore } from "./selection-store"
@@ -1105,40 +1106,32 @@ function isStaleRuntime(expectedRuntimeKey: string | undefined): boolean {
   return expectedRuntimeKey !== undefined && getRuntimeKey() !== expectedRuntimeKey
 }
 
-const isMetadataRecord = (value: JsonValue | undefined): value is Metadata =>
-  value !== null && value !== undefined && typeof value === "object" && !Array.isArray(value)
-
-// external: https://www.rfc-editor.org/rfc/rfc7386 Metadata merge patches delete keys with null and preserve untouched nested siblings.
-function buildMetadataMergePatch(current: Metadata, next: Metadata): Metadata {
-  const patch: Metadata = {}
-  for (const key of Object.keys(current)) {
-    if (!(key in next)) patch[key] = null
-  }
-  for (const [key, value] of Object.entries(next)) {
-    const previous = current[key]
-    if (isMetadataRecord(value) && isMetadataRecord(previous)) {
-      const nested = buildMetadataMergePatch(previous, value)
-      if (Object.keys(nested).length > 0) patch[key] = nested
-      continue
-    }
-    if (JSON.stringify(previous) !== JSON.stringify(value)) patch[key] = value
-  }
-  return patch
-}
+export type MetadataWriteCondition = "preferred" | "required"
 
 export async function patchSessionMetadata(
   sessionId: string,
   directory: string | null | undefined,
   updater: (metadata: SessionMetadataRecord) => SessionMetadataRecord,
   expectedRuntimeKey?: string,
+  condition?: MetadataWriteCondition,
 ): Promise<Session> {
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   const targetDirectory = directory ?? getSessionDirectory(sessionId)
   const current = await opencodeClient.getSession(sessionId, targetDirectory)
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
-  const currentMetadata = getSessionMetadata(current)
-  const nextMetadata = updater(currentMetadata)
-  const result = await requestSessionMetadataUpdate(sessionId, buildMetadataMergePatch(currentMetadata, nextMetadata), targetDirectory)
+  let currentMetadata = getSessionMetadata(current)
+  let result: Awaited<ReturnType<typeof requestSessionMetadataUpdate>>
+  for (let attempt = 1; ; attempt += 1) {
+    const patch = buildMetadataMergePatch(currentMetadata, updater(currentMetadata))
+    result = await requestSessionMetadataUpdate(sessionId, patch, targetDirectory, condition ? currentMetadata : undefined)
+    if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+    if (result.outcome === "unavailable" && result.status === 404 && condition === "preferred") {
+      result = await requestSessionMetadataUpdate(sessionId, patch, targetDirectory)
+    }
+    if (result.outcome !== "conflict") break
+    if (attempt >= 5) throw new Error("session metadata changed repeatedly")
+    currentMetadata = result.metadata
+  }
   if (result.outcome !== "updated") throw new Error(`session metadata update failed: ${result.reason}`)
   const updated = withSessionMetadata(current, result.metadata)
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
@@ -1230,9 +1223,11 @@ export async function setContextObligatoryMessage(
   directory: string | null | undefined,
   message: ContextObligatoryMessage,
   pinned: boolean,
-): Promise<Session> {
+): Promise<Session | null> {
+  const runtimeKeyAtClick = getRuntimeKey()
   return patchSessionMetadata(sessionId, directory, (metadata) =>
-    withContextObligatoryMessage(metadata, message, pinned, sessionId))
+    withContextObligatoryMessage(metadata, message, pinned, sessionId), runtimeKeyAtClick, "preferred")
+    .catch((error: unknown) => { if (isStaleRuntime(runtimeKeyAtClick)) return null; throw error })
 }
 
 async function cleanupReviewMetadataBeforeDelete(
@@ -2028,7 +2023,7 @@ async function fetchRecentSendConfirmationRecords(
       )
       const records = page.items.filter((record) => !!record.info?.id)
       if (records.some((record) => record.info.id === messageID)) {
-        return records
+        return records.reverse()
       }
     } catch {
       // Confirmation is best-effort; if it fails, keep the original send error path.
@@ -2044,13 +2039,13 @@ function materializeConfirmedSendRecords(
   records: Array<{ info: Message; parts: Part[] }>,
 ): void {
   const optimistic = new Set(optimisticIDs)
+  const confirmed = new Map(records.map((record) => [record.info.id, record.info]))
   store.setState((state) => {
     const currentMessages = state.message[sessionId]
     const message = { ...state.message }
     const part = { ...state.part }
     if (currentMessages) {
-      const nextMessages = currentMessages.filter((message) => !optimistic.has(message.id))
-      message[sessionId] = nextMessages
+      message[sessionId] = currentMessages.flatMap((info) => optimistic.has(info.id) ? confirmed.get(info.id) ?? [] : [info])
     }
     for (const optimisticID of optimisticIDs) delete part[optimisticID]
 
@@ -2647,7 +2642,7 @@ export async function refetchSessionMessages(sessionId: string): Promise<void> {
   }
 
   const page = await opencodeClient.getSessionMessages(sessionId, { limit: MESSAGE_REFETCH_LIMIT }, directory)
-  const records = page.items.filter((record) => !!record.info?.id)
+  const records = page.items.filter((record) => !!record.info?.id).reverse()
   if (records.length === 0) return
 
   store.setState((state) => {
@@ -2656,14 +2651,17 @@ export async function refetchSessionMessages(sessionId: string): Promise<void> {
   })
 }
 
-function openForkedSession(store: DirectoryStoreApi, forkedSession: Session, directory: string | null | undefined) {
+async function openForkedSession(store: DirectoryStoreApi, sourceSessionId: string, forkedSession: Session, directory: string | null | undefined, expectedRuntimeKey: string): Promise<boolean> {
   const sessions = [...store.getState().session]
   const searchResult = Binary.search(sessions, forkedSession.id, (s) => s.id)
   if (!searchResult.found) {
     sessions.splice(searchResult.index, 0, forkedSession)
     store.setState({ session: sessions })
   }
+  await inheritForkState(sourceSessionId, forkedSession, directory, expectedRuntimeKey)
+  if (isStaleRuntime(expectedRuntimeKey)) return false
   useSessionUIStore.getState().setCurrentSession(forkedSession.id, directory)
+  return true
 }
 
 async function inheritForkState(sourceSessionId: string, forkedSession: Session, directory: string | null | undefined, expectedRuntimeKey: string) {
@@ -2686,8 +2684,10 @@ async function inheritForkState(sourceSessionId: string, forkedSession: Session,
     readGoalId: async (sessionId) => getSessionGoal(await opencodeClient.getSession(sessionId, directory))?.id ?? null,
     readObjective: fetchGoalObjectiveContent,
     writeObjective: writeGoalObjectiveFile,
-    patchMetadata: async (sessionId, updater) => { await patchSessionMetadata(sessionId, directory, updater, expectedRuntimeKey) },
+    patchMetadata: async (sessionId, updater, condition) => { await patchSessionMetadata(sessionId, directory, updater, expectedRuntimeKey, condition) },
+    isCurrent: () => !isStaleRuntime(expectedRuntimeKey),
     setPermissions: (sessionId, permissions) => opencodeClient.setSessionPermissions(sessionId, permissions, directory),
+    readMessages: (sessionId) => readForkMessages(sessionId, directory, () => isStaleRuntime(expectedRuntimeKey)),
   })
 }
 
@@ -2699,8 +2699,7 @@ export async function forkAfterMessage(sessionId: string, messageId: string): Pr
   const forkedSession = await forkAtTranscriptCut(sessionId, transcriptCutAfterMessage(messages, messageId), directory, expectedRuntimeKey)
   if (isStaleRuntime(expectedRuntimeKey)) return null
   const forkDirectory = resolveSessionOwnedDirectory(forkedSession) ?? directory
-  openForkedSession(store, forkedSession, forkDirectory)
-  await inheritForkState(sessionId, forkedSession, forkDirectory, expectedRuntimeKey)
+  if (!await openForkedSession(store, sessionId, forkedSession, forkDirectory, expectedRuntimeKey)) return null
   return forkedSession
 }
 
@@ -2768,7 +2767,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   const target = createChatDraftIdentity(expectedRuntimeKey, resolveSessionOwnedDirectory(forkedSession) ?? directory, forkedSession.id)
   if (!target) throw new Error("Forked session has no composer directory")
 
-  openForkedSession(store, forkedSession, target.directory)
+  if (!await openForkedSession(store, sessionId, forkedSession, target.directory, expectedRuntimeKey)) return
 
   useInputStore.setState({
     pendingComposerRestore: {
@@ -2785,7 +2784,6 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     contextCarriersForMessage(state.message[sessionId] ?? [], messageId),
     { directory: target.directory, sessionKey: forkedSession.id },
   )
-  await inheritForkState(sessionId, forkedSession, target.directory, expectedRuntimeKey)
 }
 
 export async function fetchMessagesForSession(sessionID: string, directory?: string | null): Promise<void> {

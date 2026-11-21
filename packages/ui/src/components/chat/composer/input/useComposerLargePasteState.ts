@@ -1,13 +1,13 @@
 import React from 'react';
 import { LargeTextPasteGesture } from '../../composer/largeTextPaste';
-import { type LargeTextPasteChoiceAction } from '../../composer/ui/LargeTextPasteChoice';
+import { type LargeTextPasteChoiceAction, type LargeTextPasteChoiceKind } from '../../composer/ui/LargeTextPasteChoice';
 
 
 
 export function useComposerLargePasteState() {
-    // The unanswered large-paste choice; `resolve` applies the answer once.
     const [largeTextPasteOffer, setLargeTextPasteOffer] = React.useState<{
         id: number;
+        kind: LargeTextPasteChoiceKind;
         resolve: (action: LargeTextPasteChoiceAction, explicitlyChosen: boolean, typedText?: string) => void;
     } | null>(null);
 

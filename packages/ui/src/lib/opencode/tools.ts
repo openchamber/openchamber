@@ -2,6 +2,11 @@
 import { z } from "zod"
 
 import type { JsonValue, Metadata, ToolInput, ToolState } from "./model"
+import { opencodeNamespaceTool } from "./opencode-namespace-tools"
+import { normalizeToolName, type ToolName } from "./tool-name"
+import { booleanish, optionalCount, optionalText } from "./toolInputSchemas"
+
+export { normalizeToolName, opencodeNamespaceTool, type ToolName }
 
 export const OPENCODE_TOOLS = {
   edit: "edit",
@@ -25,16 +30,6 @@ export const OPENCODE_TOOLS = {
 
 type OpencodeToolName = (typeof OPENCODE_TOOLS)[keyof typeof OPENCODE_TOOLS]
 
-export type ToolName = string | undefined
-
-export function normalizeToolName(toolName: ToolName): string {
-  const trimmed = toolName?.trim().toLowerCase()
-  if (!trimmed) return ""
-  const withoutIndex = trimmed.replace(/:\d+$/, "")
-  if (!withoutIndex.includes(".")) return withoutIndex
-  const segments = withoutIndex.split(".").filter(Boolean)
-  return segments[segments.length - 1] ?? withoutIndex
-}
 
 const is = (name: OpencodeToolName) => (toolName: ToolName): boolean => normalizeToolName(toolName) === name
 
@@ -72,13 +67,6 @@ export const isWebTool = (toolName: ToolName): boolean => WEB_TOOLS.has(normaliz
 export const isWebSearchTool = (toolName: ToolName): boolean => normalizeToolName(toolName) === OPENCODE_TOOLS.websearch
 
 
-const optionalText = z.string().trim().min(1).optional().catch(undefined)
-const optionalCount = z.number().int().nonnegative().optional().catch(undefined)
-
-const booleanish = z
-  .union([z.boolean(), z.enum(["true", "false"]).transform((value) => value === "true")])
-  .optional()
-  .catch(undefined)
 
 const inputSchema = z
   .object({
@@ -521,6 +509,9 @@ export function requestedSecretRun(toolName: ToolName, state: ToolState): Reques
   }
 }
 
+export const requestedSecretForget = (toolName: ToolName, state: ToolState): boolean => toolName === OPENCHAMBER_SECRET_TOOL && state.status === "running"
+  && forgetsSavedSecrets(openChamberCallSchema.parse(state.input ?? {}))
+
 export function requestedSecret(toolName: ToolName, state: ToolState): RequestedSecret | null {
   if (toolName !== OPENCHAMBER_SECRET_TOOL || state.status !== "running") return null
   const action = secretRunInputSchema.parse(state.input ?? {}).action
@@ -608,46 +599,21 @@ export const isShownInPlace = (toolName: ToolName, state: ToolState): boolean =>
   || generatedImagePaths(toolName, state).length > 0
   || requestedSecret(toolName, state) !== null
   || requestedSecretRun(toolName, state) !== null
+  || requestedSecretForget(toolName, state)
 )
 
 const openChamberCallSchema = z
   .object({
     action: optionalText,
     awaitAnswer: booleanish,
-    parameters: z.object({ awaitAnswer: booleanish }).optional().catch(undefined),
+    saved: booleanish,
+    parameters: z.object({ awaitAnswer: booleanish, saved: booleanish }).optional().catch(undefined),
   })
   .catch({})
+const forgetsSavedSecrets = (call: z.infer<typeof openChamberCallSchema>) => isSecretForget(call.action) && (call.parameters?.saved ?? call.saved) === true
 
 export type OpenChamberToolCall = { tool: string; action?: string; awaitsAnswer: boolean }
 
-const OPENCODE_NAMESPACE_TOOLS = new Set([
-  "session_rename",
-  "session_move",
-  "worktree_create",
-  "worktree_list",
-  "worktree_remove",
-  "models",
-  "list_mcp_resources",
-  "read_mcp_resource",
-  "schedule_create",
-  "schedule_list",
-  "schedule_pause",
-  "schedule_resume",
-  "schedule_delete",
-  "artifact_create",
-  "artifact_read",
-  "artifact_update",
-  "artifact_delete",
-])
-const OPENCODE_NAMESPACE_PREFIX = "opencode_"
-
-export function opencodeNamespaceTool(toolName: ToolName): string | undefined {
-  const trimmed = toolName?.trim().toLowerCase() ?? ""
-  const name = trimmed.startsWith(OPENCODE_NAMESPACE_PREFIX)
-    ? trimmed.slice(OPENCODE_NAMESPACE_PREFIX.length)
-    : normalizeToolName(trimmed)
-  return OPENCODE_NAMESPACE_TOOLS.has(name) ? name : undefined
-}
 
 export function mcpToolServer(toolName: ToolName, servers: readonly string[]): string | undefined {
   const trimmed = toolName?.trim() ?? ""
@@ -665,7 +631,7 @@ export function openChamberToolCall(toolName: ToolName, input: JsonValue | undef
   const parsed = openChamberCallSchema.parse(input ?? {})
   const spilledWait = tool === OPENCHAMBER_RENDER_TOOL ? spilledCallFields(input).awaitAnswer : undefined
   const waits = parsed.parameters?.awaitAnswer ?? parsed.awaitAnswer ?? spilledWait
-  const awaitsAnswer = (tool === OPENCHAMBER_SECRET_TOOL && !isSecretForget(parsed.action)) || waits === true
+  const awaitsAnswer = (tool === OPENCHAMBER_SECRET_TOOL && (!isSecretForget(parsed.action) || forgetsSavedSecrets(parsed))) || waits === true
   return { tool, action: parsed.action, awaitsAnswer }
 }
 

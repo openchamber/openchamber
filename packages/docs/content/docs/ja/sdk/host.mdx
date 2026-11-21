@@ -36,6 +36,8 @@ const host = connectHost();
 
 アクセストークンはここにも `request` の結果にも決して現れません。
 
+`ready.session` と `onSession` には、オプションの `context` と `tokens` も含まれます。`context: { tokens, limit } | null` は直近のアシスタントのステップ後のコンテキスト使用量で、モデルの上限が不明な場合は `limit` が `null` です。圧縮後は次の計測まで `context` が `null` になります。`tokens: { prompt, output, reasoning, cacheRead, cacheWrite, cacheHitPercent } | null` はセッション全体の累積トークン数です。`prompt` にはキャッシュされていない入力に加え、キャッシュの読み書きが含まれます。プロンプトトークンがない場合、`cacheHitPercent` は `null` です。未計測時はどちらも `null` で、古いホストではフィールドが省略されます。変更は `onSession` で通知されます。
+
 `onDirectory`、`onSession`、`onSessionLifecycle`、`onConnection`、`onSettings`、`onItem` は、遅れて購読しても最新の値を再送し、その後は変化のたびに発火し続けます。
 
 `theme.tokens` には `primaryText`、`successText`、`warningText`、`errorText`、`infoText` が含まれます。これらは必須フィールドで、ホストが計算した文字色を持ちます。ニュートラルな背景や UI キットの淡い色付きコントロール用で、濃い単色の塗りつぶし用ではありません。`applyHostReady` はスナップショットごとにこれらを適用します。CSS 変数については [UI キット](/sdk/ui/)を参照してください。
@@ -67,6 +69,7 @@ const host = connectHost();
 | `onResolve(handler)` | スラッシュコマンドのハンドラーを登録する。`{ command, args }` を受け取り、添付する項目または `null` を返す。 |
 | `setBadge(count)` | レールのアイコンにドットを付け、数字(0 から 999)をツールチップに表示する。`null` で消す |
 | `openCommit(sha)` | 現在のプロジェクトのそのコミットで Diff ビューを開く。`sha` は 7〜64 文字の 16 進数で、コミットは OpenChamber 自身が読み込みます。 |
+| `openWalkthrough({ base })` | 現在のプロジェクトの「このブランチ」でウォークスルーを開き、`base`（`main`、`origin/main`、または完全な ref）と比較する。base はそのブランチで選んだベースになり、ユーザーは引き続き変更でき、「ウォークスルーを生成」は自分で押します。リポジトリにない base は `NOT_FOUND` で拒否され、何も変わりません。スマートフォン、Mini Chat、VS Code では `UNSUPPORTED` です。 |
 | `setHeight(px)` | Work Status セクションの高さを設定する。OpenChamber は 24〜480 ピクセルに収め、それより高い内容はページ内でスクロールします。他の場所では無視されます。 |
 | `onFileOpen(listener)` | ファイルエディター: 編集するファイルを受け取る。`{ path, name, readOnly }` に加えて、`encoding: "text"` なら `content`、`encoding: "binary"` なら `bytes` が入ります。ページ内の Cmd/Ctrl+S でも保存されるようになります。 |
 | `onFileSnapshot(handler)` | ファイルエディター: 編集済みのファイル全体を `{ content, version }`(バイナリエディターなら `{ bytes, version }`)で返す。OpenChamber は保存時と、ソース表示や全画面に切り替える前に呼び出します。 |

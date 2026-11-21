@@ -14,6 +14,15 @@ describe('OpenCode compatibility', () => {
     await expect(readOpenCodeCliVersion(cli('error, requires 2.0.19'))).rejects.toThrow();
   });
 
+  it('runs the version check with the environment a launch needs', async () => {
+    const launch = {
+      binary: process.execPath,
+      args: ['-e', 'console.log(process.env.OPENCHAMBER_TEST_VERSION ?? "missing")', '--'],
+      env: { OPENCHAMBER_TEST_VERSION: '2.3.0' },
+    };
+    expect(await readOpenCodeCliVersion(launch)).toBe('2.3.0');
+  });
+
   it('does not accept HTTP 200 HTML or malformed JSON as readiness', async () => {
     expect(await readOpenCodeInfo(new Response('<html>OpenCode</html>'))).toBeNull();
     expect(await readOpenCodeInfo(Response.json({ healthy: true }))).toBeNull();

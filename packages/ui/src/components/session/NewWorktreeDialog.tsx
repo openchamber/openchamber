@@ -35,6 +35,7 @@ import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { handleWorktreeCreateKeyDown } from './worktreeCreateKeyboard';
 import { NewWorktreeBranchPicker } from './NewWorktreeBranchPicker';
 import { resolveBranchOnTopSource, resolveDefaultSourceBranch } from '@/lib/worktrees/worktreeSourceBranchPreference';
+import { remoteDefaultBranches, splitBranchList } from '@/lib/worktrees/branchSearch';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitBranches, useGitBranchesFetchedAt, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
 import { ReferencePickerDialog, type ReferencePickerConfirmFailure } from '@/components/references/ReferencePickerDialog';
@@ -134,16 +135,16 @@ export function NewWorktreeDialog({
   const trustConfirmation = useConfirmDialog();
   const isMobile = useUIStore((state) => state.isMobile);
   const trackerSources = useTrackerSources();
-  const guestAttachItems = useGuestAttachItems();
-  const dialogGuests = React.useMemo(
-    () => guestAttachItems.filter((item) => item.mode === 'dialog'),
-    [guestAttachItems],
-  );
   const [guestDialogId, setGuestDialogId] = React.useState<string | null>(null);
   const [referencePickerSource, setReferencePickerSource] = React.useState<ReferencePickerSource | null>(null);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   const projectId = project?.id ?? activeProject?.id ?? null;
   const projectDirectory = project?.path ?? activeProject?.path ?? null;
+  const guestAttachItems = useGuestAttachItems([projectDirectory]);
+  const dialogGuests = React.useMemo(
+    () => guestAttachItems.filter((item) => item.mode === 'dialog'),
+    [guestAttachItems],
+  );
   const projectRef: ProjectRef | null = React.useMemo(
     () => (projectId && projectDirectory ? { id: projectId, path: projectDirectory } : null),
     [projectDirectory, projectId],
@@ -173,18 +174,7 @@ export function NewWorktreeDialog({
   const isLoadingBranches = useGitLoadingBranches(projectDirectory);
   const fetchBranches = useGitStore((state) => state.fetchBranches);
 
-  const localBranches = React.useMemo(() => {
-    if (!branches?.all) return [];
-    return branches.all.filter((branchName: string) => !branchName.startsWith('remotes/')).sort();
-  }, [branches]);
-
-  const remoteBranches = React.useMemo(() => {
-    if (!branches?.all) return [];
-    return branches.all
-      .filter((branchName: string) => branchName.startsWith('remotes/'))
-      .map((branchName: string) => branchName.replace(/^remotes\//, ''))
-      .sort();
-  }, [branches]);
+  const { localBranches, remoteBranches } = React.useMemo(() => splitBranchList(branches?.all), [branches]);
 
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const existingWorktreeNames = React.useMemo(() => {
@@ -251,6 +241,10 @@ export function NewWorktreeDialog({
   const startsNewBranch = mode === 'new-branch' || (mode === 'from-item' && !linkedPr);
 
   const onTopRemote = repositoryContext && repositoryContext !== 'missing' ? repositoryContext.primaryRemote : 'origin';
+  const remoteDefaults = React.useMemo(
+    () => remoteDefaultBranches({ defaultBranches: branches?.defaultBranches, remoteBranches, primaryRemote: onTopRemote }),
+    [branches?.defaultBranches, remoteBranches, onTopRemote],
+  );
   React.useEffect(() => {
     if (!open || !initialSourceBranch || !fetchedBranchList || sourceBranch) return;
     setSourceBranch(resolveBranchOnTopSource(fetchedBranchList, initialSourceBranch) || `remotes/${onTopRemote}/${initialSourceBranch}`);
@@ -771,6 +765,7 @@ export function NewWorktreeDialog({
       title={t('session.newWorktree.selectSourceBranch')}
       localBranches={localBranches}
       remoteBranches={remoteBranches}
+      remoteDefaults={remoteDefaults}
       isLoading={isLoadingBranches}
       isMobile={isMobile}
       disabled={!startsNewBranch}

@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, test } from 'bun:test';
 import { runInNewContext } from 'node:vm';
+import assert from 'node:assert/strict';
 
 // ---------------------------------------------------------------------------
 // Mock the `vscode` module surface used by SessionEditorPanelProvider and its
@@ -83,6 +84,8 @@ mock.module('vscode', () => ({
 }));
 
 const { SessionEditorPanelProvider } = await import('./SessionEditorPanelProvider.ts');
+const { ChatViewProvider } = await import('./ChatViewProvider');
+const { getWebviewHtml } = await import('./webviewHtml');
 
 const createContext = () => ({
   extensionMode: 2, // Production: no dev-server HMR URL
@@ -93,6 +96,55 @@ const createContext = () => ({
 });
 
 const createProvider = () => new SessionEditorPanelProvider(createContext(), { fsPath: '/ext' });
+
+describe('VS Code webview content security policy', () => {
+  const extensionUri = { fsPath: '/extension' };
+  const webviewStub = {
+    cspSource: 'vscode-webview://test',
+    asWebviewUri: (value) => value,
+    postMessage: async () => true,
+    onDidReceiveMessage: () => ({ dispose() {} }),
+  };
+
+  test('allows blob URLs for workers without allowing blob scripts', () => {
+    const html = getWebviewHtml({ webview: webviewStub, extensionUri,
+      workspaceFolder: '/workspace', initialStatus: 'connecting', cliAvailable: true });
+    const policy = html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)?.[1];
+    assert.ok(policy);
+    const directives = new Map(policy.split(';').map((directive) => {
+      const [name, ...values] = directive.trim().split(/\s+/);
+      return [name, values];
+    }));
+    assert.ok(directives.get('worker-src')?.includes('blob:'));
+    assert.ok(directives.has('script-src'));
+    assert.ok(!directives.get('script-src')?.includes('blob:'));
+  });
+
+  test('installs a CSP document before changing sidebar webview options', () => {
+    let html = '';
+    const writes = [];
+    const webview = {
+      ...webviewStub,
+      get html() { return html; },
+      set html(value) { html = value; writes.push('html'); },
+      set options(_value) {
+        assert.match(html, /http-equiv="Content-Security-Policy" content="default-src 'none';"/);
+        writes.push('options');
+      },
+    };
+    let dispose = () => {};
+    const view = { webview, visible: true, onDidChangeVisibility: () => ({ dispose() {} }),
+      onDidDispose: (listener) => { dispose = listener; return { dispose() {} }; },
+    };
+    try {
+      new ChatViewProvider(createContext(), extensionUri).resolveWebviewView(view);
+      assert.deepEqual(writes, ['html', 'options', 'html']);
+      assert.match(html, /id="root"/);
+    } finally {
+      dispose();
+    }
+  });
+});
 
 afterEach(() => {
   for (const entry of panels) entry.dispose();

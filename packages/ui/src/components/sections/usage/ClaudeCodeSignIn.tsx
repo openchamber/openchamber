@@ -1,5 +1,5 @@
 import React from 'react';
-import type { IntegrationInfo } from '@opencode/client';
+import type { Integration as IntegrationInfo } from '@/lib/opencode/model';
 import { ProviderOAuthMethods } from '@/components/sections/providers/ProviderOAuthMethods';
 import { findIntegrationForProvider, getSignInMethods } from '@/components/sections/providers/providerAuth';
 import { loadIntegrationCatalog, peekIntegrationCatalog } from '@/lib/opencode/integration-catalog';

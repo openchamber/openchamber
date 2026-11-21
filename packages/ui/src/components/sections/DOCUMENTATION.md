@@ -65,6 +65,11 @@ on disk. Once the entity exists, the page switches to the autosave rules above.
 `skills/` follows the same split for supporting files: editing an existing file
 writes when the dialog closes, while a new file is only created on confirm.
 
+The skill page fills its create form from the draft once per draft and editor
+(`skills/useDraftFill.ts`). Its details effect also runs on every skill list
+refresh, so filling on each run reset a typed name, location and pending files
+back to the draft's `new-skill` in User when a list read landed mid-form.
+
 ## Providers
 
 Source-control cards whose descriptor carries `auth.login` show its service-owned sign-in hint when that instance has no account. With no PAT method, the instance renders its signed-in user without token, add-account or CLI-switch controls. The service owns sign-in outside the app. Opening that card rechecks status; a failed read keeps the auth store's prior account metadata and reports an error, while only a successful empty result removes the displayed login. The same card is used by the web, desktop and mobile Integrations pages.
@@ -174,7 +179,7 @@ the message footer agree. The status chip and footer used to draw the logo
 URL themselves, which skipped a chosen icon.
 
 Any provider can also carry an uploaded logo image (`lib/customProviderLogos.ts`,
-routes in `packages/web/server/lib/opencode/provider-logo-routes.js`).
+routes in `packages/web/server/lib/appearance/provider-logo-routes.js`).
 `ProviderLogo` draws it first, then a chosen icon, an active extension's logo
 (`contributes.providerLogos`, `lib/guests/provider-logos.ts`), the bundled logo,
 the models.dev logo and the generic fallback. An upload or an extension's logo

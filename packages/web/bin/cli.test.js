@@ -1666,6 +1666,48 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
     });
   });
 
+  it.each([
+    { shutdownMs: 6000, forced: false },
+    { shutdownMs: Infinity, forced: true },
+  ])('waits for accepted shutdown and bounds a stuck server: $shutdownMs ms', async ({ shutdownMs, forced }) => {
+    await withTempOpenChamberDataDir(async () => {
+      vi.useFakeTimers();
+      const pid = 987654321;
+      const port = 52073;
+      let shutdownAt = null;
+      let killedAt = null;
+      const kill = vi.spyOn(process, 'kill').mockImplementation((target, signal) => {
+        expect(target).toBe(pid);
+        if (signal !== 0) killedAt = Date.now();
+        if (killedAt !== null || (shutdownAt !== null && Date.now() - shutdownAt >= shutdownMs)) {
+          throw Object.assign(new Error('Process exited'), { code: 'ESRCH' });
+        }
+        return true;
+      });
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, options) => {
+        if (String(url).endsWith('/api/system/shutdown')) {
+          expect(options.method).toBe('POST');
+          shutdownAt = Date.now();
+          return createMockJsonResponse({ ok: true });
+        }
+        return createMockJsonResponse({ status: 'ok', runtime: 'web', pid });
+      });
+      try {
+        const stop = captureStdout(() => commands.stop({ explicitPort: true, port, host: '127.0.0.1', json: true }));
+        await vi.runAllTimersAsync();
+        const output = await stop;
+        expect(shutdownAt).not.toBeNull();
+        expect(killedAt !== null).toBe(forced);
+        if (forced) expect(killedAt - shutdownAt).toBe(30_000);
+        expect(JSON.parse(output).stoppedCount).toBe(1);
+      } finally {
+        kill.mockRestore();
+        fetchMock.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it('stop --port can recover a matched pid-file instance whose HTTP endpoint is unresponsive', async () => {
     await withTempOpenChamberDataDir(async () => {
       const port = await allocateLoopbackPort();

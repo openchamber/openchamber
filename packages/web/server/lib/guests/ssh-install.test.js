@@ -186,5 +186,11 @@ describe('SSH extension installs', () => {
     const [preserved] = await listInstalledGuests({ persistPath });
     expect(preserved.version).toBe('1.1.0');
   });
+
+  test('an identity whose stored SSH key is not a path clones with the host SSH configuration', async () => {
+    await writeProfiles(42);
+    expect(await cloneGitRepository(source, path.join(root, 'non-path-key-clone'), { gitIdentityId: 'work', lookup })).toEqual({ ok: true });
+    expect((await sshCalls()).at(-1).args).toContain(globalKey);
+  });
 });
 }

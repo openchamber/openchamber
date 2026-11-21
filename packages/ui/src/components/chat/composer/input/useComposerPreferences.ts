@@ -31,7 +31,6 @@ export function useComposerPreferences() {
     ), [cycleAgentShortcutOverride]);
 
     const { currentTheme } = useThemeSystem();
-    // Rounder composer on mobile (touch UI reads better with a softer corner).
     const chatInputRadius = isMobile ? '1.25rem' : 'var(--radius-xl)';
 
     return {

@@ -5,15 +5,18 @@ This module provides skill discovery, scanning, and installation capabilities fo
 
 ## Entrypoints and structure
 - `packages/web/server/lib/skills-catalog/`: Skills catalog module directory containing all skill-related functionality.
-  - `cache.js`: In-memory cache for scan results with TTL support.
-  - `curated-sources.js`: Predefined skill sources (Anthropic, OpenAI, Cursor, Matt Pocock).
-  - `github-meta.js`: Best-effort GitHub repository metadata (stars, last push) with in-memory TTL cache.
-  - `git.js`: Git operations helpers for cloning and auth error detection.
-  - `install.js`: Skills installation from git repositories.
-  - `installed-sources.js`: Which source and repo subpath each catalog-installed skill came from, for the Installed badge.
-  - `remove-directory.js`: Deletes a clone or skill folder, retrying a delete Windows refuses for a moment.
-  - `scan.js`: Skills scanning from git repositories.
-  - `source.js`: Source string parsing for git repositories.
+  - `cache.ts`: In-memory cache for scan results with TTL support.
+  - `curated-sources.ts`: Predefined skill sources (Anthropic, OpenAI, Cursor, Matt Pocock).
+  - `disk-cache.ts`: Shared disk persistence and cache-entry validation.
+  - `github-meta.ts`: Best-effort GitHub repository metadata (stars, last push) with in-memory TTL cache.
+  - `git.ts`: Git operations helpers for cloning and auth error detection.
+  - `install.ts`: Skills installation from git repositories.
+  - `installed-sources.ts`: Which source and repo subpath each catalog-installed skill came from, for the Installed badge.
+  - `remove-directory.ts`: Deletes a clone or skill folder, retrying a delete Windows refuses for a moment.
+  - `scan.ts`: Skills scanning from git repositories.
+  - `source.ts`: Source string parsing for git repositories.
+
+Relative imports and the API headings retain `.js` specifiers for emitted JavaScript and the source resolver.
 
 ## Invariants
 
@@ -22,6 +25,35 @@ This module provides skill discovery, scanning, and installation capabilities fo
 - A scan of a subpath that does not exist returns `ok: true` with no items. A failed `ls-tree` reads as an empty catalog, so a mistyped or removed subpath shows no skills instead of an error.
 - A root-level `SKILL.md` is dropped from scan results. OpenCode names a skill after the folder that holds it, and a file at the repository root has no such folder name.
 - A source `#ref` is limited to letters, digits and `._/-`, never starts with `-` (it becomes a git argument) and never contains `..`.
+
+## Decisions
+
+### Why persisted values retain their checked shape
+
+Disk cache entries validate only a numeric expiry and a non-null object value, including arrays. Cache reads therefore expose `object`, without promising scan or GitHub metadata fields the reader never checks. HTTP consumers own the narrowing they need. Install provenance validates only the 3 non-empty identity strings, retains their original whitespace, and passes optional metadata through unchecked. Its entry type leaves that metadata `unknown` so reading a file cannot promise valid scope or source enums.
+
+The provenance guard checks and narrows those strings locally. The shared JavaScript `asNonEmptyString` helper has no declaration, so importing it into this TypeScript implementation would break the VS Code consumer, whose compiler does not enable `allowJs`.
+
+### Why external checks remain at parsing boundaries
+
+Source strings and subpaths retain their runtime string checks. Disk JSON, expiry, object values, GitHub payloads and push timestamps, installed-source records, and YAML name and description fields remain checked at their input boundaries. Internally generated skill names and file contents need no repeated string checks; Node and Bun timers expose `unref` directly. Array checks that govern fallback or dictionary acceptance remain unchanged.
+
+### Installation conversion contracts
+
+`../opencode/config-files.d.ts` exposes the existing `OPENCODE_CONFIG_DIR` string used
+by `install.ts`. Its implementation derives the path from environment variables
+and the home directory. Conversion imports that owner value.
+
+Install results expose the validated scope and generated target source, with
+separate success and failure shapes. Scope, target source, selections and the
+default subpath retain their input checks. Skill names come from
+`path.posix.basename`, which already returns a string. Conflict decisions retain
+ordinary dictionary lookup and truthiness behavior, including inherited keys.
+Copying a skill keeps file permissions best-effort if `chmod` fails.
+
+### Why the Git home probe uses config path expansion
+
+`git config --path` expands `~` using Git's own home setting. A shell alias starts Git Bash on Windows, which rewrites `HOME=NUL` into a checkout-relative path before printing it. The config probe checks the unchanged isolated environment without that shell transformation.
 
 ## Public API
 

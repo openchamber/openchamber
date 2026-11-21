@@ -4,17 +4,18 @@ import type { UsageProviderGroup } from '@/components/usage/usageGroups';
 
 const HOUR = 3600;
 
-const window = (windowSeconds: number | null) => ({
-  usedPercent: 10,
-  remainingPercent: 90,
+const window = (windowSeconds: number | null, usedPercent: number | null = 10, valueLabel?: string) => ({
+  usedPercent,
+  remainingPercent: usedPercent === null ? null : 100 - usedPercent,
   windowSeconds,
   resetAfterSeconds: null,
   resetAt: null,
   resetAtFormatted: null,
   resetAfterFormatted: null,
+  valueLabel: valueLabel ?? null,
 });
 
-const group = (providerId: string, rows: Array<{ key: string; label: string; subtitle?: string; seconds: number | null }>): UsageProviderGroup => ({
+const group = (providerId: string, rows: Array<{ key: string; label: string; subtitle?: string; seconds: number | null; used?: number | null; valueLabel?: string }>): UsageProviderGroup => ({
   providerId: providerId as UsageProviderGroup['providerId'],
   providerName: providerId,
   status: null,
@@ -22,7 +23,7 @@ const group = (providerId: string, rows: Array<{ key: string; label: string; sub
     key: row.key,
     label: row.label,
     subtitle: row.subtitle,
-    window: window(row.seconds),
+    window: window(row.seconds, row.used === undefined ? 10 : row.used, row.valueLabel),
   })),
 });
 
@@ -101,5 +102,72 @@ describe('pickUsageHeadline', () => {
 
   test('returns null for a matched provider that reported no rows', () => {
     expect(pickUsageHeadline([group('codex', [])], 'codex')).toBeNull();
+  });
+
+  test('keeps a lifetime cap ahead of monthly spending rows', () => {
+    const openrouter = group('openrouter', [
+      { key: 'window-monthly_total', label: 'Monthly Total', seconds: 30 * 24 * HOUR, used: null },
+      { key: 'window-monthly_credits', label: 'Monthly Credits', seconds: null, used: null },
+      { key: 'window-monthly_byok', label: 'Monthly BYOK', seconds: null, used: null },
+      { key: 'window-key_limit', label: 'Key Limit', seconds: null, used: null, valueLabel: '$5.00 / $30.00' },
+    ]);
+
+    expect(pickUsageHeadline([openrouter], 'openrouter')?.row.key).toBe('window-key_limit');
+  });
+
+  test('keeps a monthly cap ahead of the monthly total with the same duration', () => {
+    const openrouter = group('openrouter', [
+      { key: 'window-monthly', label: 'Monthly', seconds: 30 * 24 * HOUR, used: 40 },
+      { key: 'window-monthly_total', label: 'Monthly Total', seconds: 30 * 24 * HOUR, used: null },
+      { key: 'window-monthly_credits', label: 'Monthly Credits', seconds: null, used: null },
+      { key: 'window-monthly_byok', label: 'Monthly BYOK', seconds: null, used: null },
+    ]);
+
+    expect(pickUsageHeadline([openrouter], 'openrouter')?.row.key).toBe('window-monthly');
+  });
+
+  test('keeps a set cap with an unreadable amount ahead of the monthly total', () => {
+    const openrouter = group('openrouter', [
+      { key: 'window-monthly_total', label: 'Monthly Total', seconds: 30 * 24 * HOUR, used: null },
+      { key: 'window-key_limit', label: 'Key Limit', seconds: null, used: null },
+    ]);
+    openrouter.rows[1]!.window.value = { kind: 'spend', spent: null, limit: 30 };
+
+    expect(pickUsageHeadline([openrouter], 'openrouter')?.row.key).toBe('window-key_limit');
+  });
+
+  test('falls back to the monthly total when an OpenRouter key has no cap', () => {
+    const openrouter = group('openrouter', [
+      { key: 'window-monthly_total', label: 'Monthly Total', seconds: 30 * 24 * HOUR, used: null },
+      { key: 'window-monthly_credits', label: 'Monthly Credits', seconds: 30 * 24 * HOUR, used: null },
+      { key: 'window-monthly_byok', label: 'Monthly BYOK', seconds: 30 * 24 * HOUR, used: null },
+    ]);
+
+    expect(pickUsageHeadline([openrouter], 'openrouter')?.row.key).toBe('window-monthly_total');
+  });
+
+  test('shows the readable OpenRouter counter under its own label when the total is unknown', () => {
+    // An uncapped key whose gateway omits the BYOK counter: the total stays unknown,
+    // and the headline shows the credits it can read instead of "Unknown".
+    const openrouter = group('openrouter', [
+      { key: 'window-monthly_total', label: 'Monthly Total', seconds: 30 * 24 * HOUR, used: null },
+      { key: 'window-monthly_credits', label: 'Monthly Credits', seconds: null, used: null },
+    ]);
+    openrouter.rows[0]!.window.value = { kind: 'spend', spent: null, limit: null };
+    openrouter.rows[1]!.window.value = { kind: 'spend', spent: 3.17561396, limit: null };
+
+    expect(pickUsageHeadline([openrouter], 'openrouter')?.row.key).toBe('window-monthly_credits');
+  });
+
+  test('keeps the generic selection for another provider with a monthly_total window', () => {
+    // The quota SDK lets an extension name a window `monthly_total`; that name is not reserved.
+    const extension = group('ext-quota', [
+      { key: 'window-daily', label: 'Daily', seconds: 24 * HOUR, used: null },
+      { key: 'window-monthly_total', label: 'Monthly Total', seconds: 30 * 24 * HOUR, used: null },
+    ]);
+    extension.rows[0]!.window.value = { kind: 'requests', count: 12 };
+    extension.rows[1]!.window.value = { kind: 'requests', count: 300 };
+
+    expect(pickUsageHeadline([extension], 'ext-quota')?.row.key).toBe('window-daily');
   });
 });

@@ -10,7 +10,6 @@ import { Icon } from '@/components/icon/Icon';
 import { ToolbarButton } from '@/components/ui/action-toolbar';
 import type { DiffViewMode } from '@/components/chat/message/types';
 
-/** View options of the diff toolbar: in its "More actions" menu at every width. */
 const DIFF_TOOLBAR_VIEW_OPTIONS = ['tree', 'wrap', 'whitespace', 'layout'] as const;
 type DiffToolbarMenuOption = 'walkthrough' | typeof DIFF_TOOLBAR_VIEW_OPTIONS[number];
 
@@ -40,17 +39,12 @@ export function DiffViewToolbar({
     const inPanelHeader = useInContextPanelHeader();
     const toolbarRef = React.useRef<HTMLDivElement | null>(null);
     useDiffToolbarFit(toolbarRef);
-    // "More actions": the view options, set now and then and so kept out of
-    // the row at every width, plus the walkthrough while the fit has moved it
-    // there (an attribute on the row, read when the menu opens).
     const [toolbarMenuOptions, setToolbarMenuOptions] = React.useState<ReadonlyArray<DiffToolbarMenuOption>>(DIFF_TOOLBAR_VIEW_OPTIONS);
     const handleToolbarMenuOpenChange = React.useCallback((open: boolean) => {
         if (!open) return;
         const walkthroughMoved = toolbarRef.current?.hasAttribute(DIFF_TOOLBAR_MENU_STEPS.walkthrough) ?? false;
         setToolbarMenuOptions(walkthroughMoved ? ['walkthrough', ...DIFF_TOOLBAR_VIEW_OPTIONS] : DIFF_TOOLBAR_VIEW_OPTIONS);
     }, []);
-    // A control moved into "More actions" as a menu item; a view option shows
-    // a check while it is on. Null when the row does not show that control.
     const toolbarMenuItem = (option: DiffToolbarMenuOption) => {
         switch (option) {
             case 'walkthrough':

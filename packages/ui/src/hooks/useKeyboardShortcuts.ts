@@ -55,6 +55,7 @@ import { useComposerAbortEscape } from './useComposerAbortEscape';
 import { getNextFavoriteModel } from '@/lib/modelRefs';
 import { dispatchPromptHistorySearch } from '@/components/chat/composer/state/promptHistorySearchRoute';
 import { isLinuxPlatform } from '@/lib/platform';
+import { openOrToggleLeadDraft } from '@/sync/session-lead';
 import { canUseDigitShortcut, hasActiveBtwComposer, hasOpenDropdown, isEditableEventTarget, shouldStopDropdownImeEscape } from './keyboard-shortcut-dom';
 
 const dropdownTargetSelector = [
@@ -224,6 +225,11 @@ export const useKeyboardShortcuts = () => {
         return;
       }
       openNewSessionDraft();
+    },
+    new_lead: () => {
+      if (isVSCodeRuntime()) return false;
+      useUIStore.getState().setSessionSwitcherOpen(false);
+      openOrToggleLeadDraft(currentSessionId && currentDirectory ? { directoryOverride: currentDirectory } : undefined);
     },
     cycle_theme: () => {
       const modes: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system'];

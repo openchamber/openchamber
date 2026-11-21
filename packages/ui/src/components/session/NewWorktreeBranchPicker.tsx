@@ -28,6 +28,8 @@ export type PickedBranch = { value: string; label: string };
 
 type BranchSection = { heading: string; branches: PickedBranch[] };
 
+const RENDER_STEP = 200;
+
 const findScrollableAncestor = (start: HTMLElement | null): HTMLElement | null => {
   let node = start;
   while (node && node !== document.body) {
@@ -44,6 +46,7 @@ export function NewWorktreeBranchPicker({
   title,
   localBranches,
   remoteBranches,
+  remoteDefaults,
   isLoading,
   isMobile,
   disabled = false,
@@ -54,6 +57,7 @@ export function NewWorktreeBranchPicker({
   title: string;
   localBranches: string[];
   remoteBranches: string[];
+  remoteDefaults?: readonly string[];
   isLoading: boolean;
   isMobile: boolean;
   disabled?: boolean;
@@ -62,22 +66,44 @@ export function NewWorktreeBranchPicker({
   const { t } = useI18n();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
+  const [renderLimit, setRenderLimit] = React.useState(RENDER_STEP);
   const desktopContentRef = React.useRef<HTMLDivElement | null>(null);
   const mobileListRef = React.useRef<HTMLDivElement | null>(null);
 
   const searching = query.trim().length > 0;
   const sections = React.useMemo((): BranchSection[] => {
-    const ranked = rankBranchesForQuery({ localBranches, remoteBranches, query });
+    const ranked = rankBranchesForQuery({ localBranches, remoteBranches, remoteDefaults, query });
     if (searching) {
       return ranked.matching.length > 0
         ? [{ heading: t('session.newWorktree.matchingBranches'), branches: ranked.matching.map(({ value: branch, label }) => ({ value: branch, label })) }]
         : [];
     }
+    const remote = (branch: string): PickedBranch => ({ value: `remotes/${branch}`, label: branch });
     return [
+      { heading: t('session.newWorktree.defaultBranches'), branches: ranked.remoteDefaults.map(remote) },
       { heading: t('session.newWorktree.localBranches'), branches: ranked.otherLocal.map((branch) => ({ value: branch, label: branch })) },
-      { heading: t('session.newWorktree.remoteBranches'), branches: ranked.otherRemote.map((branch) => ({ value: `remotes/${branch}`, label: branch })) },
+      { heading: t('session.newWorktree.remoteBranches'), branches: ranked.otherRemote.map(remote) },
     ].filter((section) => section.branches.length > 0);
-  }, [localBranches, remoteBranches, query, searching, t]);
+  }, [localBranches, remoteBranches, remoteDefaults, query, searching, t]);
+
+  const total = sections.reduce((count, section) => count + section.branches.length, 0);
+  let offset = 0;
+  const visibleSections = sections.map((section) => {
+    const end = Math.max(0, renderLimit - offset);
+    offset += section.branches.length;
+    return { ...section, branches: section.branches.slice(0, end) };
+  }).filter((section) => section.branches.length > 0);
+  const hasMore = renderLimit < total;
+
+  const observeListEnd = React.useCallback((node: HTMLDivElement | null) => {
+    if (!node) return undefined;
+    const root = node.closest<HTMLElement>('[data-slot="command-list"]') ?? findScrollableAncestor(node.parentElement);
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setRenderLimit((limit) => limit + RENDER_STEP);
+    }, { root, rootMargin: '200px' });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   React.useEffect(() => {
     if (!open) return;
@@ -92,12 +118,15 @@ export function NewWorktreeBranchPicker({
 
   const changeOpen = (next: boolean) => {
     setOpen(next);
-    if (!next) setQuery('');
+    if (!next) { setQuery(''); setRenderLimit(RENDER_STEP); }
   };
   const choose = (branch: PickedBranch) => {
     onSelect(branch);
     changeOpen(false);
   };
+
+  const changeQuery = (next: string) => { setRenderLimit(RENDER_STEP); setQuery(next); };
+  const listEndMarker = open && hasMore ? <div ref={observeListEnd} aria-hidden="true" className="h-px" /> : null;
 
   const noBranches = localBranches.length === 0 && remoteBranches.length === 0;
   const status = isLoading
@@ -122,12 +151,12 @@ export function NewWorktreeBranchPicker({
           open={open}
           title={title}
           onClose={() => changeOpen(false)}
-          subheader={<MobileSheetSearch value={query} onChange={setQuery} placeholder={t('session.newWorktree.searchBranches')} />}
+          subheader={<MobileSheetSearch value={query} onChange={changeQuery} placeholder={t('session.newWorktree.searchBranches')} />}
         >
           <div ref={mobileListRef}>
             {status ? (
               <div className="px-2 py-8 text-center typography-meta text-muted-foreground">{status}</div>
-            ) : sections.map((section) => (
+            ) : visibleSections.map((section) => (
               <MobileSheetSection key={section.heading} title={section.heading}>
                 {section.branches.map((branch) => (
                   <MobileSheetRow key={branch.value} selected={value === branch.value} onClick={() => choose(branch)}>
@@ -136,6 +165,7 @@ export function NewWorktreeBranchPicker({
                 ))}
               </MobileSheetSection>
             ))}
+            {status ? null : listEndMarker}
           </div>
         </MobileOverlayPanel>
       </>
@@ -165,12 +195,12 @@ export function NewWorktreeBranchPicker({
             autoFocus
             placeholder={t('session.newWorktree.searchBranches')}
             value={query}
-            onValueChange={setQuery}
+            onValueChange={changeQuery}
           />
           <CommandList disableHorizontal>
             {status ? (
               <CommandEmpty>{status}</CommandEmpty>
-            ) : sections.map((section, index) => (
+            ) : visibleSections.map((section, index) => (
               <React.Fragment key={section.heading}>
                 {index > 0 ? <CommandSeparator /> : null}
                 <CommandGroup heading={section.heading}>
@@ -182,6 +212,7 @@ export function NewWorktreeBranchPicker({
                 </CommandGroup>
               </React.Fragment>
             ))}
+            {status ? null : listEndMarker}
           </CommandList>
         </Command>
       </DropdownMenuContent>

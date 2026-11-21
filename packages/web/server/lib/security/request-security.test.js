@@ -151,4 +151,57 @@ describe('request security runtime', () => {
     // Anything that is not a plain origin stays out of the policy.
     expect(buildFrameAncestorsPolicy({ extra: "https://a.test; script-src 'unsafe-inline'" })).not.toContain('script-src');
   });
+
+  test('validates stored origins and preserves candidates when reading settings fails', async () => {
+    const request = { headers: { origin: 'https://public.example', host: 'internal:3000' }, socket: {} };
+    for (const settings of [null, {}, { publicOrigin: 123 }, { publicOrigin: 'invalid' }]) {
+      const runtime = createRequestSecurityRuntime({ readSettingsFromDiskMigrated: async () => settings });
+      expect(await runtime.isRequestOriginAllowed(request)).toBe(false);
+    }
+    const runtime = createRequestSecurityRuntime({
+      readSettingsFromDiskMigrated: async () => ({ publicOrigin: ' https://public.example/path ' }),
+    });
+    expect(await runtime.isRequestOriginAllowed(request)).toBe(true);
+    const failed = createRequestSecurityRuntime({
+      readSettingsFromDiskMigrated: async () => { throw new Error('unreadable'); },
+    });
+    expect(await failed.isRequestOriginAllowed({
+      headers: { origin: 'http://127.0.0.1:3000', host: 'localhost:3000' },
+      socket: {},
+    })).toBe(true);
+  });
+
+  test('keeps header array handling and malformed cookie escapes', async () => {
+    const runtime = createRuntime();
+    expect(await runtime.isRequestOriginAllowed({
+      headers: { origin: 'https://public.example', 'x-forwarded-host': ['public.example', 'other.example'] },
+    })).toBe(true);
+    expect(runtime.isRequestOriginAllowed({ headers: { origin: ['https://public.example'] } })).toBe(false);
+    expect(() => runtime.isRequestOriginAllowed({
+      headers: { origin: 'https://public.example', 'x-forwarded-host': [] },
+    })).toThrow(TypeError);
+    expect(runtime.getUiSessionTokenFromRequest({ headers: { cookie: ['oc_ui_session=value'] } })).toBeNull();
+    expect(runtime.getUiSessionTokenFromRequest({ headers: { cookie: 'oc_ui_session=%bad' } })).toBe('%bad');
+  });
+
+  test('keeps upgrade rejection fallbacks and tolerates socket failures', () => {
+    const runtime = createRuntime();
+    const writes = [];
+    let destroyed = false;
+    const socket = {
+      destroyed: false,
+      write: (value) => writes.push(value),
+      destroy: () => { destroyed = true; },
+    };
+    runtime.rejectWebSocketUpgrade(socket, 503, ' ');
+    expect(writes[0]).toContain('HTTP/1.1 503 Bad Request\r\n');
+    expect(writes[1].toString()).toBe('Bad Request');
+    expect(destroyed).toBe(true);
+    destroyed = false;
+    socket.write = () => { throw new Error('closed'); };
+    runtime.rejectWebSocketUpgrade(socket, 403, 'Denied');
+    expect(destroyed).toBe(true);
+    socket.destroy = () => { throw new Error('closed'); };
+    expect(() => runtime.rejectWebSocketUpgrade(socket, 403, 'Denied')).not.toThrow();
+  });
 });

@@ -35,6 +35,7 @@ Use esta página se você executa o OpenChamber atrás do Nginx, Nginx Proxy Man
 - Desative o gzip no proxy se o OpenChamber já comprime as respostas.
 - Mantenha a compressão ativada em apenas uma camada.
 - Encaminhe os cabeçalhos de proxy normais, como `Host`, `X-Forwarded-For` e `X-Forwarded-Proto`.
+- Se o proxy roda em outra máquina ou em outro contêiner, coloque o endereço dele em [`OPENCHAMBER_TRUSTED_PROXIES`](/pt-br/environment/#openchamber_trusted_proxies). Caso contrário, todos atrás dele dividem um único limite de tentativas de login com falha.
 - Aumente os limites de tamanho do corpo se os usuários enviarem arquivos.
 
 ## Checklist rápido

@@ -29,9 +29,15 @@ Los agentes de un workflow en ejecución no pueden iniciar un workflow propio.
 
 ## Iniciar ejecuciones sin aprobación
 
-En **Herramienta de workflows**, activa **Iniciar ejecuciones sin mi aprobación** para que una ejecución que inicia el agente empiece enseguida. Su tarjeta la muestra en curso, sin el botón **Ejecutar workflow**, y aún puedes terminarla con **Detener**. Sirve para trabajo que acordaste y luego dejaste en marcha: por ejemplo, le pides al agente que pruebe algunos modelos en un piloto pequeño y ejecute todo el trabajo con el mejor, y puede iniciar esa ejecución mientras no estás.
+En **Herramienta de workflows**, **Iniciar ejecuciones sin mi aprobación** decide si una ejecución que inicia el agente espera tu clic:
 
-El agente sigue proponiendo el plan y los modelos en el chat antes de iniciar una ejecución. El ajuste solo se salta el clic. El servidor lo lee en cada ejecución, así que con la casilla desmarcada cada ejecución vuelve a esperarte. Los límites de abajo no cambian.
+- **No**: cada ejecución espera hasta que selecciones **Ejecutar workflow**
+- **Para leads**: las ejecuciones que inicia un [lead](/es/leads/) empiezan enseguida, las demás sesiones siguen esperando
+- **Siempre**: cada ejecución empieza enseguida
+
+Una ejecución que empieza enseguida aparece en curso en su tarjeta, sin el botón **Ejecutar workflow**, y aún puedes terminarla con **Detener**. Sirve para trabajo que acordaste y luego dejaste en marcha: por ejemplo, le pides al agente que pruebe algunos modelos en un piloto pequeño y ejecute todo el trabajo con el mejor, y puede iniciar esa ejecución mientras no estás.
+
+Una sesión normal sigue proponiendo el plan y los modelos en el chat antes de iniciar una ejecución; el ajuste solo se salta el clic. Un lead lleva su trabajo por su cuenta, así que con **Para leads** puede iniciar una ejecución sin preguntar antes. El servidor lee el ajuste en cada ejecución, así que al volver a **No** cada ejecución vuelve a esperarte. Los límites de abajo no cambian.
 
 ## Modelos y coste
 

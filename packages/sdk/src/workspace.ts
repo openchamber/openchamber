@@ -10,6 +10,25 @@ export type GuestWorktree = {
 };
 export type GuestSessionActivity = 'unknown' | 'idle' | 'running' | 'retrying' | 'waiting-permission' | 'waiting-question';
 export type GuestSessionLink = { title: string; url: string; kind: 'issue' | 'change'; linkedAt: number };
+export type GuestSessionContext = { tokens: number; limit: number | null };
+export type GuestSessionTokenTotals = {
+  prompt: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cacheHitPercent: number | null;
+};
+export type SessionSnapshot = {
+  id: string;
+  title: string;
+  busy: boolean;
+  model?: string;
+  agent?: string;
+  context?: GuestSessionContext | null;
+  tokens?: GuestSessionTokenTotals | null;
+};
+
 export type GuestSessionRecord = {
   id: string;
   title: string;
@@ -28,7 +47,8 @@ export type GuestSessionRecord = {
   inWork?: boolean;
   unread?: boolean;
   tool?: { name: string; target: string | null } | null;
-  context?: { tokens: number; limit: number | null } | null;
+  context?: GuestSessionContext | null;
+  tokens?: GuestSessionTokenTotals | null;
 };
 export type GuestDirectoryCoverage = { directory: string; state: GuestLoadState };
 export type GuestProjectsSnapshot = { kind: 'projects'; state: GuestLoadState; projects: GuestProject[] };

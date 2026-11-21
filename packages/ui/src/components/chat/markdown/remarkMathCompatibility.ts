@@ -10,13 +10,118 @@ declare module 'micromark-util-types' {
     ocMath: 'ocMath';
     ocMathMarker: 'ocMathMarker';
     ocMathValue: 'ocMathValue';
+    ocMathBlock: 'ocMathBlock';
+    ocMathBlockValue: 'ocMathBlockValue';
+    ocMathBlockMarker: 'ocMathBlockMarker';
   }
 }
+
+const tokenizeBracketMathBlock: Tokenizer = function (effects, ok, nok) {
+  const parser = this.parser;
+  const now = this.now;
+  const interrupt = this.interrupt;
+  let crossedBlankLine = false;
+  let lineBlank = true;
+  const continuation: Construct = { partial: true, tokenize(effects, ok, nok) {
+    return start;
+    function start(code: Code): State | undefined {
+      if (code === null) return nok(code);
+      effects.enter('lineEnding');
+      effects.consume(code);
+      effects.exit('lineEnding');
+      return next;
+    }
+    function next(code: Code): State | undefined {
+      return parser.lazy[now().line] ? nok(code) : ok(code);
+    }
+  } };
+  const close: Construct = { partial: true, tokenize(effects, ok, nok) {
+    return start;
+    function start(code: Code): State | undefined {
+      effects.enter('ocMathBlockMarker');
+      return prefix(code);
+    }
+    function prefix(code: Code): State | undefined {
+      if (code === 32 || code === -1 || code === -2) { effects.consume(code); return prefix; }
+      if (code !== 92) return nok(code);
+      effects.consume(code);
+      return bracket;
+    }
+    function bracket(code: Code): State | undefined {
+      if (code !== 93) return nok(code);
+      effects.consume(code);
+      return end;
+    }
+    function end(code: Code): State | undefined {
+      if (code === 32 || code === -1 || code === -2) { effects.consume(code); return end; }
+      if (code !== null && code > -3) return nok(code);
+      effects.exit('ocMathBlockMarker');
+      return ok(code);
+    }
+  } };
+  function start(code: Code): State | undefined {
+    effects.enter('ocMathBlock');
+    effects.enter('ocMathBlockMarker');
+    effects.consume(code);
+    return opening;
+  }
+  function opening(code: Code): State | undefined {
+    if (code !== 91) return nok(code);
+    effects.consume(code);
+    return openingEnd;
+  }
+  function openingEnd(code: Code): State | undefined {
+    if (code === 32 || code === -1 || code === -2) { effects.consume(code); return openingEnd; }
+    if (code === null || code > -3) return nok(code);
+    effects.exit('ocMathBlockMarker');
+    return effects.attempt(continuation, lineStart, nok)(code);
+  }
+  function lineStart(code: Code): State | undefined {
+    if (code === null) return nok(code);
+    lineBlank = true;
+    return effects.attempt(close, done, contentStart)(code);
+  }
+  function contentStart(code: Code): State | undefined {
+    if (code === null) return nok(code);
+    if (code <= -3) {
+      crossedBlankLine = true;
+      return effects.attempt(continuation, lineStart, nok)(code);
+    }
+    effects.enter('ocMathBlockValue');
+    return content(code);
+  }
+  function content(code: Code): State | undefined {
+    if (code === null) return nok(code);
+    if (code <= -3) {
+      if (lineBlank) crossedBlankLine = true;
+      effects.exit('ocMathBlockValue');
+      return effects.attempt(continuation, lineStart, nok)(code);
+    }
+    if (code !== 32 && code !== -1 && code !== -2) lineBlank = false;
+    if (code === 92) return effects.check(close, closeInLine, consumeContent)(code);
+    return consumeContent(code);
+  }
+  function consumeContent(code: Code): State | undefined {
+    effects.consume(code);
+    return content;
+  }
+  function closeInLine(code: Code): State | undefined {
+    effects.exit('ocMathBlockValue');
+    return effects.attempt(close, done, nok)(code);
+  }
+  function done(code: Code): State | undefined {
+    if (interrupt && !crossedBlankLine) return nok(code);
+    effects.exit('ocMathBlock');
+    return ok(code);
+  }
+  return start;
+};
 
 const tokenizeBackslashMath: Tokenizer = function (effects, ok, nok) {
   const lineStart = this.previous === null || this.previous < -2;
   let bracket = false;
   let hasContent = false;
+  let valueOpen = false;
   function start(code: number | null) {
     effects.enter('ocMath');
     effects.enter('ocMathMarker');
@@ -29,7 +134,6 @@ const tokenizeBackslashMath: Tokenizer = function (effects, ok, nok) {
     if (bracket && !lineStart) return nok(code);
     effects.consume(code);
     effects.exit('ocMathMarker');
-    effects.enter('ocMathValue');
     return inside;
   }
   function inside(code: number | null): State | undefined {
@@ -40,32 +144,39 @@ const tokenizeBackslashMath: Tokenizer = function (effects, ok, nok) {
   function content(code: number | null) {
     hasContent = true;
     if (code !== null && code <= -3) {
+      if (valueOpen) { effects.exit('ocMathValue'); valueOpen = false; }
       effects.enter('lineEnding');
       effects.consume(code);
       effects.exit('lineEnding');
       return inside;
     }
+    if (!valueOpen) { effects.enter('ocMathValue'); valueOpen = true; }
     effects.consume(code);
     return inside;
   }
   const close: Construct = { tokenize(closeEffects, closeOk, closeNok) {
     return slash;
     function slash(code: Code) {
+      closeEffects.enter('ocMathMarker');
       closeEffects.consume(code);
       return marker;
     }
     function marker(code: Code) {
       if (!hasContent || code !== (bracket ? 93 : 41)) return closeNok(code);
       closeEffects.consume(code);
-      return bracket ? lineEnd : closeOk;
+      return bracket ? lineEnd : end;
     }
     function lineEnd(code: Code): State | undefined {
-      if (code === 32 || code === 9) { closeEffects.consume(code); return lineEnd; }
-      return code === null || code < 0 ? closeOk(code) : closeNok(code);
+      if (code === 32 || code === -1 || code === -2) { closeEffects.consume(code); return lineEnd; }
+      return code === null || code <= -3 ? end(code) : closeNok(code);
+    }
+    function end(code: Code): State | undefined {
+      closeEffects.exit('ocMathMarker');
+      return closeOk(code);
     }
   } };
   function closing(code: number | null) {
-    effects.exit('ocMathValue');
+    if (valueOpen) effects.exit('ocMathValue');
     effects.enter('ocMathMarker');
     effects.consume(code);
     return endMarker;
@@ -118,6 +229,12 @@ const tokenizeDollarMath: Tokenizer = function (effects, ok, nok) {
 
 const fromMarkdown: Extension = {
   enter: {
+    ocMathBlock(token) {
+      this.enter({ type: 'math', meta: null, value: '', data: {
+        hName: 'pre', hChildren: [{ type: 'element', tagName: 'code', properties: { className: ['language-math', 'math-display'] }, children: [] }],
+      } }, token);
+      this.buffer();
+    },
     ocMath(token) {
       const display = this.sliceSerialize(token).startsWith('\\[');
       this.enter({ type: 'inlineMath', value: '', data: {
@@ -127,6 +244,19 @@ const fromMarkdown: Extension = {
     },
   },
   exit: {
+    ocMathBlockValue(token) {
+      this.config.enter.data.call(this, token);
+      this.config.exit.data.call(this, token);
+    },
+    ocMathBlock(token) {
+      const value = this.resume();
+      const node = this.stack[this.stack.length - 1];
+      if (node.type === 'math') {
+        node.value = value;
+        if (node.data) node.data.hChildren = [{ type: 'element', tagName: 'code', properties: { className: ['language-math', 'math-display'] }, children: [{ type: 'text', value }] }];
+      }
+      this.exit(token);
+    },
     ocMath(token) {
       const raw = this.sliceSerialize(token);
       const width = raw.startsWith('$') ? 1 : 2;
@@ -154,7 +284,9 @@ function dollarMathIsFormula(node: InlineMath | MathNode, source: string): boole
 
 export function remarkMathCompatibility(this: Processor) {
   const data = this.data();
-  (data.micromarkExtensions ??= []).push({ text: {
+  (data.micromarkExtensions ??= []).push({ flow: {
+    92: { name: 'ocMathBlock', concrete: true, tokenize: tokenizeBracketMathBlock },
+  }, text: {
     92: { name: 'ocMath', tokenize: tokenizeBackslashMath },
     36: { name: 'ocDollarMath', tokenize: tokenizeDollarMath },
   } });

@@ -1,5 +1,5 @@
-import type { SourceControlProviderId } from './providers/descriptor';
-import type { RepositoryReferenceReview } from './reviewSummary';
+import type { SourceControlProviderId } from './providers/descriptor.js';
+import type { RepositoryReferenceReview } from './reviewSummary.js';
 
 export type { RepositoryReferenceReview };
 

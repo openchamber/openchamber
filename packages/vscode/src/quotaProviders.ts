@@ -36,7 +36,7 @@ type UsageWindow = {
   resetAtFormatted: string | null;
   resetAfterFormatted: string | null;
   valueLabel?: string | null;
-  value?: { kind: 'requests'; count: number } | { kind: 'spend'; spent: number; limit: number | null };
+  value?: { kind: 'requests'; count: number } | { kind: 'spend'; spent: number | null; limit: number | null };
   creditsUsed?: number;
   giftReset?: UsageWindowGiftReset | null;
 };
@@ -487,10 +487,10 @@ const calculateResetAfterSeconds = (resetAt: number | null) => {
   return delta < 0 ? 0 : delta;
 };
 
-const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number | null; resetAt: number | null; valueLabel?: string | null; creditsUsed?: number }) => {
+const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number | null; resetAt: number | null; valueLabel?: string | null; value?: UsageWindow['value']; creditsUsed?: number }) => {
   const resetAfterSeconds = calculateResetAfterSeconds(data.resetAt);
   const resetFormatted = data.resetAt ? formatResetTime(data.resetAt) : null;
-  return {
+  const window: UsageWindow = {
     usedPercent: data.usedPercent,
     remainingPercent: data.usedPercent !== null ? Math.max(0, 100 - data.usedPercent) : null,
     windowSeconds: data.windowSeconds ?? null,
@@ -500,7 +500,9 @@ const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number
     resetAfterFormatted: resetFormatted,
     ...(data.valueLabel ? { valueLabel: data.valueLabel } : {}),
     ...(data.creditsUsed !== undefined ? { creditsUsed: data.creditsUsed } : {}),
-  } satisfies UsageWindow;
+  };
+  if (data.value) window.value = data.value;
+  return window;
 };
 
 const buildResult = (data: {
@@ -1074,7 +1076,7 @@ const resolveGeminiCliAuth = (auth: AuthFile): GoogleAuthSource | null => {
   const accessToken = asNonEmptyString(oauthObject.access) ?? asNonEmptyString(oauthObject.token);
   const refreshParts = parseGoogleRefreshToken(oauthObject.refresh);
 
-  if (!accessToken && !refreshParts.refreshToken) {
+  if ((oauthObject.methodID !== undefined && !['oauth', 'gemini-cli'].includes(String(oauthObject.methodID))) || (!accessToken && !refreshParts.refreshToken)) {
     return null;
   }
 
@@ -2577,6 +2579,8 @@ const isOpenRouterPeriod = (value: unknown): value is OpenRouterPeriod => (
   typeof value === 'string' && Object.prototype.hasOwnProperty.call(PERIOD_SECONDS, value)
 );
 
+const openRouterSpendWindow = (spent: number | null) => toUsageWindow({ usedPercent: null, windowSeconds: null, resetAt: null, value: { kind: 'spend', spent, limit: null } });
+
 const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
 
 const resolveOpenRouterConfigBase = (): string | null => {
@@ -2657,47 +2661,27 @@ const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
       });
     }
 
-    const limit = toNumber(data.limit);
-    const limitRemaining = toNumber(data.limit_remaining);
-    if (limit !== null && limitRemaining === null) {
-      return buildResult({
-        providerId: 'openrouter',
-        providerName: 'OpenRouter',
-        ok: false,
-        configured: true,
-        error: 'No quota data in response',
-      });
-    }
+    const toAmount = (value: unknown) => (String(value).trim() === '' ? null : toNumber(value));
+    const toSpendAmount = (value: unknown) => {
+      const amount = toAmount(value);
+      return amount !== null && amount >= 0 ? amount : null;
+    };
+    const limit = toAmount(data.limit);
+    const limitRemaining = toAmount(data.limit_remaining);
+    const usageMonthly = toSpendAmount(data.usage_monthly);
+    const byokMonthly = toSpendAmount(data.byok_usage_monthly);
 
-    const usageMonthly = toNumber(data.usage_monthly);
-    if (limit === null && usageMonthly === null) {
-      return buildResult({
-        providerId: 'openrouter',
-        providerName: 'OpenRouter',
-        ok: false,
-        configured: true,
-        error: 'No quota data in response',
-      });
+    if ((limit === null || limitRemaining === null) && usageMonthly === null && byokMonthly === null) {
+      return buildResult({ providerId: 'openrouter', providerName: 'OpenRouter', ok: false, configured: true, error: 'No quota data in response' });
     }
 
     const nowMs = Date.now();
-    let windowKey: string;
-    let windowSeconds: number | null;
-    let resetAt: number | null;
-    let usedPercent: number | null;
-    let valueLabel: string;
+    const windows: Record<string, ReturnType<typeof toUsageWindow>> = {};
 
-    if (limit === null) {
-      windowKey = 'monthly';
-      windowSeconds = PERIOD_SECONDS.monthly;
-      resetAt = openRouterResetAt('monthly', nowMs);
-      usedPercent = null;
-      valueLabel = `$${formatMoney(usageMonthly)} spent`;
-    } else {
-      const used = Math.max(0, limit - (limitRemaining ?? 0));
-      const percent = limit > 0 ? (used / limit) * 100 : null;
-      usedPercent = percent === null ? null : Math.min(100, percent);
-      valueLabel = `$${formatMoney(used)} / $${formatMoney(limit)}`;
+    if (limit !== null && (limitRemaining !== null || limit > 0)) {
+      let windowKey: string;
+      let windowSeconds: number | null;
+      let resetAt: number | null;
 
       if (isOpenRouterPeriod(data.limit_reset)) {
         windowKey = data.limit_reset;
@@ -2708,23 +2692,33 @@ const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
         windowSeconds = null;
         resetAt = null;
       }
+
+      const used = limitRemaining === null ? null : Math.max(0, limit - limitRemaining);
+      const percent = used !== null && limit > 0 ? Math.min(100, (used / limit) * 100) : null;
+      windows[windowKey] = toUsageWindow(used === null
+        ? { usedPercent: null, windowSeconds, resetAt, value: { kind: 'spend', spent: null, limit } }
+        : { usedPercent: percent, windowSeconds, resetAt, valueLabel: `$${formatMoney(used)} / $${formatMoney(limit)}` });
     }
+
+    windows.monthly_total = toUsageWindow({
+      usedPercent: null,
+      windowSeconds: PERIOD_SECONDS.monthly,
+      resetAt: openRouterResetAt('monthly', nowMs),
+      value: {
+        kind: 'spend',
+        spent: usageMonthly !== null && byokMonthly !== null ? usageMonthly + byokMonthly : null,
+        limit: null,
+      },
+    });
+    if (usageMonthly !== 0) windows.monthly_credits = openRouterSpendWindow(usageMonthly);
+    if (byokMonthly !== 0) windows.monthly_byok = openRouterSpendWindow(byokMonthly);
 
     return buildResult({
       providerId: 'openrouter',
       providerName: 'OpenRouter',
       ok: true,
       configured: true,
-      usage: {
-        windows: {
-          [windowKey]: toUsageWindow({
-            usedPercent,
-            windowSeconds,
-            resetAt,
-            valueLabel,
-          }),
-        },
-      },
+      usage: { windows },
     });
   } catch (error) {
     const isTimeout = error instanceof DOMException && (error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted));

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Session } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
-import { filterManagedChatsForRuntime, listGlobalSessionPages, splitGlobalSessionsByArchived, type SessionPageLister } from '@/stores/globalSessions';
+import { addUnlistedLiveSessions, filterManagedChatsForRuntime, listGlobalSessionPages, splitGlobalSessionsByArchived, type SessionPageLister } from '@/stores/globalSessions';
 import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/reviewFlow';
 import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMetadata';
 import { normalizePath } from '@/lib/pathNormalization';
@@ -381,17 +381,6 @@ const mergeSessionLists = (existing: Session[], incoming?: Session[]): Session[]
   });
 
   return ordered;
-};
-
-const addUnlistedLiveSessions = (active: Session[], archived: Session[], live?: Session[]): Session[] => {
-  if (!live || live.length === 0) return active;
-  const listed = new Set([...active, ...archived].map((session) => session.id));
-  const unlisted = live.filter((session) => {
-    if (listed.has(session.id)) return false;
-    listed.add(session.id);
-    return true;
-  });
-  return unlisted.length > 0 ? [...active, ...unlisted] : active;
 };
 
 const applySnapshot = (

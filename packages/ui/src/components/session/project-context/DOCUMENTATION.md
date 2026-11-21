@@ -511,6 +511,9 @@ matched the old project would silently hide everything in the new one.
 - **An external note change is adopted only while the open note is untouched** since
   its last save. "Add to notes" from a chat selection must reach an open panel,
   but must never overwrite what the user is typing.
+- **A save echo leaves the open draft's whitespace intact.** The store trims
+  note bodies for persistence, so the editor compares the stored body with the
+  trimmed last-saved draft before treating it as an external change.
 - **List cards never change height.** A note card shows its title and a short
   clamped preview; editing happens in the opened note, never inside the list.
 - **A blanked note body is never persisted.** The server rejects it, so the row

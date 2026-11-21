@@ -120,7 +120,7 @@ const ACTIVITY_KEY = {
   stalled: 'sessions.sidebar.sections.activity.stalled',
 } as const satisfies Record<SidebarSectionActivity, I18nKey>;
 
-const SECTIONS_PANEL_CLASS = 'oc-surface-floating oc-glass-floating oc-popup-motion app-region-no-drag rounded-xl origin-[var(--transform-origin)] data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95';
+const SECTIONS_PANEL_CLASS = 'bg-surface-elevated oc-glass-floating oc-popup-motion app-region-no-drag rounded-xl origin-[var(--transform-origin)] data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95';
 
 const toggleIn = <T extends string>(list: readonly T[], value: T): T[] => (
   list.includes(value) ? list.filter((entry) => entry !== value) : [...list, value]

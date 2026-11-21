@@ -33,7 +33,6 @@ export type ResolvedStarter = {
     label: string;
     icon: IconName;
     submitText: string;
-    /** Pinned by the team in the repo's shared config; not removable here. */
     shared: boolean;
 };
 
@@ -60,9 +59,7 @@ export type UseDraftStartersResult = {
     addStarter: (item: PinnableItem) => void;
     removeStarter: (group: StarterGroup, ref: DraftStarterRef) => void;
     reorder: (group: StarterGroup, fromId: string, toId: string) => void;
-    /** Move one of the user's project starters into the repo's shared file. */
     shareStarter: (ref: DraftStarterRef) => void;
-    /** Move a shared project starter back into the user's own list. */
     unshareStarter: (ref: DraftStarterRef) => void;
 };
 
@@ -86,8 +83,6 @@ export function useDraftStarters(): UseDraftStartersResult {
         return { id: found.id, path: found.path };
     }, [activeProjectId, projects]);
 
-    // Merged: the team's shared starters first, then the user's own. Only the
-    // personal ones are ever written back.
     const [projectStarters, setProjectStarters] = React.useState<ProjectDraftStarter[]>([]);
     const personalProjectStarters = React.useMemo<DraftStarterRef[]>(
         () => projectStarters.filter((r) => r.source === 'personal').map(({ type, name }) => ({ type, name })),
@@ -104,8 +99,6 @@ export function useDraftStarters(): UseDraftStartersResult {
             .then((refs) => { if (!cancelled) setProjectStarters(refs); })
             .catch(() => { if (!cancelled) setProjectStarters([]); });
         return () => { cancelled = true; };
-        // Keyed on project id to avoid reloading when the memoized ref object
-        // changes identity but still points at the same project.
         // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, [projectRef?.id]);
 
@@ -115,10 +108,6 @@ export function useDraftStarters(): UseDraftStartersResult {
         void useSkillsStore.getState().loadSkills(directory);
     }, [directory]);
 
-    // Preload commands and skills on mount so that pinned command/skill starters
-    // resolve immediately without requiring the user to open the add dialog first.
-    // Both loaders are TTL-cached and in-flight-deduped, so this is a cheap no-op
-    // if they were already loaded.
     React.useEffect(() => {
         ensureLoaded();
     }, [ensureLoaded]);
@@ -126,8 +115,6 @@ export function useDraftStarters(): UseDraftStartersResult {
     const commandNames = React.useMemo(() => new Set(commands.map((c) => c.name)), [commands]);
     const skillNames = React.useMemo(() => new Set(skills.map((s) => s.name)), [skills]);
 
-    // Only a managed OpenCode has this command, and only where extensions load:
-    // the phone too, where the agent builds it and Settings installs it.
     const offersNewExtension = !isVSCode && commandNames.has('new-extension');
 
     const resolve = React.useCallback((ref: DraftStarterRef, group: StarterGroup, shared = false): ResolvedStarter | null => {
@@ -181,15 +168,11 @@ export function useDraftStarters(): UseDraftStartersResult {
         for (const sk of skills) {
             items.push({ type: 'skill', name: sk.name, label: normalizeStarterLabel(sk.name), icon: SKILL_FALLBACK_ICON, section: 'skill', scope: sk.scope === 'project' ? 'project' : 'user' });
         }
-        // Only offer items that are not already pinned (removed built-ins reappear here).
         return items.filter((item) => !pinnedKeys.has(`${item.type}:${item.name}`));
     }, [t, commands, skills, pinnedKeys, isVSCode]);
 
     const persistGlobal = React.useCallback((next: DraftStarterRef[]) => {
         useUIStore.getState().setGlobalDraftStarters(next);
-        // The markers make a deliberate removal of a built-in starter durable:
-        // without them the load path re-inserts Craft a Goal / Schedule a Task.
-        // They travel with the user's edit, never with a bootstrap.
         void updateDesktopSettings({
             draftStarters: next,
             draftStartersCraftGoalAdded: true,
@@ -197,7 +180,6 @@ export function useDraftStarters(): UseDraftStartersResult {
         });
     }, []);
 
-    // `next` is the user's own list; the shared ones stay in front, untouched.
     const persistProject = React.useCallback((next: DraftStarterRef[]) => {
         setProjectStarters((current) => [
             ...current.filter((r) => r.source === 'shared'),
@@ -220,7 +202,6 @@ export function useDraftStarters(): UseDraftStartersResult {
 
     const removeStarter = React.useCallback((group: StarterGroup, ref: DraftStarterRef) => {
         if (group === 'project') {
-            // A shared starter is the team's; it leaves only through the repo file.
             if (!personalProjectStarters.some((r) => sameStarter(r, ref))) return;
             persistProject(personalProjectStarters.filter((r) => !sameStarter(r, ref)));
         } else {
@@ -229,8 +210,6 @@ export function useDraftStarters(): UseDraftStartersResult {
         }
     }, [personalProjectStarters, globalRaw, persistProject, persistGlobal]);
 
-    // Sharing moves a starter between the two files: into the repo file first,
-    // then out of the personal list; the merged list is reloaded from the server.
     const reloadProjectStarters = React.useCallback(() => {
         if (!projectRef) return;
         void getProjectDraftStarters(projectRef).then(setProjectStarters).catch(() => undefined);
@@ -259,7 +238,6 @@ export function useDraftStarters(): UseDraftStartersResult {
     }, [personalProjectStarters, projectRef, projectStarters, reloadProjectStarters]);
 
     const reorder = React.useCallback((group: StarterGroup, fromId: string, toId: string) => {
-        // Project chips reorder among the user's own; shared ones keep their place in front.
         const base = group === 'project' ? personalProjectStarters : (globalRaw ?? DEFAULT_GLOBAL_STARTERS);
         const from = base.findIndex((r) => chipId(group, r) === fromId);
         const to = base.findIndex((r) => chipId(group, r) === toId);

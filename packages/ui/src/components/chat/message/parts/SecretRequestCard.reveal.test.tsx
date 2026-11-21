@@ -21,9 +21,9 @@ Object.assign(globalThis, {
   IS_REACT_ACT_ENVIRONMENT: true,
 });
 
-mock.module('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+mock.module('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }), isRightToLeft: () => false }));
 mock.module('@/sync/sync-context', () => ({ useSessionDirectory: () => '/project' }));
-mock.module('@/lib/secretRequestAnswer', () => ({ answerSecretRequest: async () => undefined, readSecretRunFields: async () => null }));
+mock.module('@/lib/secretRequestAnswer', () => ({ answerSecretRequest: async () => undefined, readSecretRunFields: async () => null, forgetSavedSecret: async () => null }));
 mock.module('@/components/ui', () => ({ toast: { error: () => undefined } }));
 mock.module('@/components/chat/lib/scroll/timelineScrollIntent', () => ({ dispatchPageWaiting: () => undefined }));
 mock.module('@/stores/useUIStore', () => ({ useUIStore: () => false }));

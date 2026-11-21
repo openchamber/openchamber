@@ -11,6 +11,7 @@ import type { useComposerInlineContext } from './useComposerInlineContext';
 import type { useComposerEditorState } from './useComposerEditorState';
 import type { useComposerDraftText } from './useComposerDraftText';
 import type { useComposerAttachmentWork } from './useComposerAttachmentWork';
+import type { useComposerLargePasteState } from './useComposerLargePasteState';
 import type { ComposerSendHandlers } from './composerSendHandlers';
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
@@ -18,6 +19,7 @@ import { type QueuedContextPart, type QueuedMessageGoal } from '@/stores/message
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
+import { attachedImagesAsPathNotes, ImageSaveForTextModelError, modelCannotReadImages } from '@/sync/text-model-images';
 import { useInputStore, type SyntheticContextPart } from '@/sync/input-store';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
@@ -45,6 +47,7 @@ import { recordLinkedReferences } from './recordLinkedReferences';
 type Dependencies = {
     inlineContext: Pick<ReturnType<typeof useComposerInlineContext>, 'isMobileCommentOpen' | 'hasDrafts' | 'attachmentsToSend' | 'inlineDraftTarget' | 'consumeDrafts'>;
     attachmentWork: Pick<ReturnType<typeof useComposerAttachmentWork>, 'waitForPendingAttachments'>;
+    largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteOffer'>;
     i18n: Pick<ReturnType<typeof useI18n>, 't'>;
     draftText: Pick<ReturnType<typeof useComposerDraftText>, 'setMessage' | 'confirmedMentionsRef' | 'composerText'>;
     editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
@@ -61,12 +64,13 @@ type Dependencies = {
 };
 
 export function useComposerQueueActions({
-    inlineContext, attachmentWork, i18n, draftText, editorState, sendHandlers, sendAvailability,
+    inlineContext, attachmentWork, largePasteState, i18n, draftText, editorState, sendHandlers, sendAvailability,
     sessionScope, queueState, language, selection, mentionAttachments, props, referenceDrafts,
     preferences,
 }: Dependencies) {
     const { isMobileCommentOpen, hasDrafts, attachmentsToSend, inlineDraftTarget, consumeDrafts } = inlineContext;
     const { waitForPendingAttachments } = attachmentWork;
+    const { largeTextPasteOffer } = largePasteState;
     const { t } = i18n;
     const { setMessage, confirmedMentionsRef, composerText } = draftText;
     const { composerRef } = editorState;
@@ -90,12 +94,9 @@ export function useComposerQueueActions({
     const { setLinkedReferencesFor, updateLinkedReferencesFor, updateLinkedReferences } = referenceDrafts;
     const { isMobile } = preferences;
 
-    // Add message to queue instead of sending
     const handleQueueMessage = React.useCallback(async () => {
-        // The comment's exit paths are attach/cancel; queueing a real prompt
-        // underneath comment mode must never fire.
         if (isMobileCommentOpen()) return;
-        // Files still being attached: queue once they are in.
+        if (largeTextPasteOffer) return;
         if (await waitForPendingAttachments()) {
             void handleQueueMessageRef.current();
             return;
@@ -103,8 +104,6 @@ export function useComposerQueueActions({
         const inputSnapshot = getCurrentInputSnapshot();
         if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
 
-        // A local or extension command is run, not queued: the queue delivers
-        // text to the model, and `/compact`, `/btw`, or `/task` mean nothing there.
         if (planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts, true)
             || routeGuestSlashCommand(inputSnapshot.message, inputMode, guestCommands)) {
             void handleSubmitRef.current();
@@ -117,20 +116,11 @@ export function useComposerQueueActions({
         const settleModelPick = useSelectionStore.getState().captureSessionModelPickSettlement(
             queueSessionId, currentProviderId, currentModelId, queueRuntimeKey,
         );
-        // Queueing is the same user intent as sending, so an archived session
-        // comes back once the queue accepts the message, not at delivery.
         const resumeAfterQueue = prepareUserMessageResume(queueSessionId, queueRuntimeKey);
-        // A share link's key is never queued, even one the composer did not turn into a chip.
         const messageToQueue = withoutShareLinkKeys(inputSnapshot.message.replace(/^\n+|\n+$/g, ''));
         if (!(await readSessionMentionsBeforeSend(messageToQueue))) return;
-        // Only the files the text still cites go, and the screenshots of the
-        // annotations going with it: a deleted chip drops its file.
         const composerAttachments = sanitizeAttachmentsForSend(attachmentsToSend(messageToQueue));
 
-        // A queued message is resolved now, not at delivery: the server that
-        // sends it has no agent list, no confirmed mentions, and no way to read
-        // a file the user named — and the mention must match what was
-        // visible when the user typed it.
         const readOnSendMentions = await prepareReadOnSendMentions(
             [messageToQueue],
             new Set(composerAttachments.map((attachment) => attachment.filename)),
@@ -142,36 +132,38 @@ export function useComposerQueueActions({
             toast.error(t('chat.chatInput.toast.attachNamedFailed', { name: readOnSendMentions.filename }));
             return;
         }
-        // A shared page goes as its card and content; its keyless link leaves the delivered text.
         const { sanitizedText, mention } = parseAgentMentions(withoutSharedPageLinks(messageToQueue, linkedReferences), mentionableAgents());
         const { attachments: extractedMentionAttachments } = extractInlineFileMentions(sanitizedText, readOnSendMentions.prepared, composerAttachments);
-        // #3898: a queued message is delivered later without the composer, so
-        // a phantom mention (`@masha.conner`) must be dropped now or the
-        // delivery 400s.
+        // external: #3898 OpenCode rejects the entire prompt when an inline file mention does not exist.
         const { sendable: mentionAttachments } = await filterMissingInlineAttachments(
             extractedMentionAttachments,
             opencodeClient,
         );
+        let attachmentsToQueue = [...composerAttachments, ...mentionAttachments];
+        if (modelCannotReadImages(currentProviderId, currentModelId)) {
+            try {
+                attachmentsToQueue = await attachedImagesAsPathNotes(attachmentsToQueue, queueTarget.directory);
+            } catch (error) {
+                if (!(error instanceof ImageSaveForTextModelError)) throw error;
+                toast.error(t('chat.chatInput.toast.textModelImageSaveFailed', { files: error.filenames.join(', ') }));
+                return;
+            }
+            if (getRuntimeKey() !== queueRuntimeKey) return;
+        }
         const availableSkillNames = new Set(
             availableSkills.map((skill) => skill.name),
         );
         const skillInstruction = buildSkillMentionInstruction(collectInlineSkillMentions(sanitizedText, availableSkillNames));
-        // The server and the VS Code auto-send deliver `text` as is, so its
-        // snippets expand now; `content` keeps them for editing.
         const textToQueue = await useSnippetsStore.getState().expandText(sanitizedText).catch((error) => {
             console.warn('[queue] Failed to expand snippets, queueing original text:', error);
             return sanitizedText;
         });
 
-        // Everything attached to the composer leaves with the message: the
-        // chips are part of what was queued, and come back if it is edited.
         const syntheticParts = consumePendingSyntheticParts(mailboxTarget) ?? [];
         const draftTarget = inlineDraftTarget;
         const drafts = draftTarget ? consumeDrafts(draftTarget) : [];
-        // The items the text links: an item's chip is its link, so one deleted from the text stays behind.
         const linked = referencesLinkedIn(messageToQueue, linkedReferences);
         const linkedToQueue = await withRegisteredSharedPages(withReferencesFromText(linked, referenceLinksIn(messageToQueue)));
-        // Queued context is delivered as captured, so comment snippets expand now.
         const expandedDrafts = await expandCommentSnippets(drafts, useSnippetsStore.getState().expandText);
         const actionsNote = currentSessionId
             ? planRunningActionsNote(currentSessionId, collectRunningActions(projectActionsRef.current))
@@ -181,9 +173,6 @@ export function useComposerQueueActions({
             syntheticTexts: [...syntheticParts.map((part) => part.text), ...(actionsNote?.text ? [actionsNote.text] : [])],
             references: [...linkedToQueue.map(toContextReference), ...sessionMentionsIn(messageToQueue)],
         }, skillInstruction);
-        const attachmentsToQueue = [...composerAttachments, ...mentionAttachments];
-        // An armed goal belongs to this message: it leaves with it and starts
-        // when this message is delivered, whatever is sent in between.
         const goalArm = textToQueue.trim()
             ? useSessionGoalArmStore.getState().consume()
             : { armed: false, objectiveOverride: null };
@@ -193,14 +182,8 @@ export function useComposerQueueActions({
         } : undefined;
         if (goal && goalArm.objectiveOverride?.trim()) goal.objective = goalArm.objectiveOverride;
 
-        // Sending while the agent works must still take the reader to the
-        // live edge — a queued message produces no user row yet, so the
-        // anchor path has nothing to claim and would leave the viewport
-        // parked mid-history.
         scrollToLatest?.();
 
-        // Clear the composer. The mentions it had confirmed were resolved
-        // above, so nothing later needs them.
         setMessage('');
         confirmedMentionsRef.current.clear();
         if (composerAttachments.length > 0) {
@@ -230,8 +213,6 @@ export function useComposerQueueActions({
             console.warn('[queue] failed to queue message:', error);
             toast.error(t('chat.queuedMessage.toast.queueFailed'));
             if (goalArm.armed) useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride);
-            // The composer was cleared on queueing; give everything back. The
-            // text is appended if the user has already typed something new.
             const currentInput = composerRef.current?.getValue() ?? composerText.get();
             if (!currentInput) {
                 setMessage(messageToQueue);
@@ -247,12 +228,9 @@ export function useComposerQueueActions({
             if (syntheticParts.length > 0) {
                 useInputStore.getState().setPendingSyntheticParts(syntheticParts, mailboxTarget);
             }
-            // Anything attached while the queue write was out stays, after these.
             updateLinkedReferencesFor(chatDraftIdentity, (current) => withComposerReferences(linked, current));
             return;
         }
-        // The queued message carries the agent to the session now, whoever
-        // delivers it.
         if (queueSessionId && currentAgentName) {
             useSelectionStore.getState().settleSessionAgentPick(queueSessionId, currentAgentName);
         }
@@ -260,9 +238,8 @@ export function useComposerQueueActions({
         void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, linkedToQueue);
         if (currentSessionId) actionsNote?.commit(currentSessionId);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachmentsToSend, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, mentionableAgents, availableSkills, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, setLinkedReferencesFor, updateLinkedReferencesFor, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn, referenceLinksIn, composerText, setMessage, waitForPendingAttachments, projectActionsRef, handleSubmitRef, handleQueueMessageRef, confirmedMentionsRef, sendHeldByMissingFolderRef, composerRef]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachmentsToSend, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, mentionableAgents, availableSkills, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, setLinkedReferencesFor, updateLinkedReferencesFor, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn, referenceLinksIn, composerText, setMessage, waitForPendingAttachments, largeTextPasteOffer, projectActionsRef, handleSubmitRef, handleQueueMessageRef, confirmedMentionsRef, sendHeldByMissingFolderRef, composerRef]);
 
-    /** Put the context a queued message was captured with back on the composer chips. */
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
         const synthetic: SyntheticContextPart[] = [];
         const restored: Exclude<ComposerReference, { kind: 'shared-page' }>[] = [];
@@ -273,11 +250,9 @@ export function useComposerQueueActions({
                 synthetic.push({ text: part.text, synthetic: true });
                 continue;
             }
-            // An instruction is derived from the text, and derived again on send.
             if (part.kind !== 'context') continue;
             const payload = part.metadata[CONTEXT_METADATA_KEY];
             if (payload.kind === 'shared-page') {
-                // A page someone else shared goes back as its chip; its text never held the link.
                 sharedPages.push({
                     kind: 'shared-page',
                     shareKey: payload.receivedId ?? payload.host,
@@ -306,10 +281,6 @@ export function useComposerQueueActions({
                     contextText: part.text,
                 });
             } else if (payload.kind === 'change-request') {
-                // The captured context is final: whatever diff it includes is
-                // already in the text, and the branches were not captured.
-                // Messages written before providers other than GitHub existed
-                // carry no provider, so the reference reads as GitHub's.
                 restored.push({
                     kind: 'change-request',
                     provider: payload.provider ?? 'github',
@@ -324,7 +295,6 @@ export function useComposerQueueActions({
             } else if (payload.kind === 'tracker-item') {
                 restored.push({ kind: 'tracker-item', provider: payload.provider, identifier: payload.identifier, title: payload.title, url: payload.url, contextText: part.text });
             } else if (payload.kind === 'session') {
-                // The restored text still carries the link; it draws as a chip again.
                 mentions.push({ kind: 'session', sessionId: payload.sessionId, title: payload.title, contextText: part.text });
             } else if (payload.kind === 'session-message') {
                 mentions.push({
@@ -353,7 +323,6 @@ export function useComposerQueueActions({
                 }
             }
         }
-        // Every item goes back on the draft; one the text does not link yet gets its link written in.
         const chips: ComposerReference[] = [...restored, ...sharedPages];
         if (chips.length > 0) {
             updateLinkedReferences((current) => withComposerReferences(current, chips));
@@ -365,12 +334,8 @@ export function useComposerQueueActions({
         }
     }, [inlineDraftTarget, mailboxTarget, rememberSessionMentions, updateLinkedReferences]);
 
-    // Editing takes the message out of the queue, so sending it again queues
-    // one message, not a copy.
     const handleQueuedMessageEdit = React.useCallback((messageId: string) => {
         if (!messageQueueTarget) return;
-        // The full message (attachments included) comes back from the queue's
-        // owner; the queue row only knows the summary.
         void popQueuedToInput(messageQueueTarget, messageId).then((queued) => {
             if (!queued) return;
             if (queued.attachments && queued.attachments.length > 0) {
@@ -378,7 +343,6 @@ export function useComposerQueueActions({
                 useInputStore.getState().setAttachedFiles([...currentAttachments, ...queued.attachments]);
             }
             setMessage(withMissingCitations(queued.content, queued.attachments ?? []));
-            // Back in the composer, the message is armed again as it was queued.
             if (queued.goal) useSessionGoalArmStore.getState().setArmed(true, queued.goal.objective ?? null);
             restoreQueuedContext(queued.context ?? []);
             setTimeout(() => {
@@ -391,7 +355,6 @@ export function useComposerQueueActions({
     }, [messageQueueTarget, popQueuedToInput, restoreQueuedContext, t, setMessage, composerRef]);
 
     const handleQueuedMessageSend = React.useCallback((messageId: string) => {
-        // Force-sending from the queue during a busy session counts as steer
         void handleSubmitRef.current({ queuedOnly: true, queuedMessageId: messageId, delivery: 'steer' });
     }, [handleSubmitRef]);
 

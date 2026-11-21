@@ -7,15 +7,21 @@ const { readAsarFiles, findPackagedAppContentProblems } = require('./packaged-ap
 
 const web = 'node_modules/@openchamber/web';
 const helpers = [
-  `${web}/server/lib/git/credential-helper.js`,
-  `${web}/server/lib/git/ssh-wrapper.js`,
-  `${web}/server/lib/git/repository-credential-helper.js`,
+  `${web}/build/server/lib/git/credential-helper.js`,
+  `${web}/build/server/lib/git/credential-helper-runtime.js`,
+  `${web}/build/server/lib/git/ssh-wrapper.js`,
+  `${web}/build/server/lib/git/ssh-wrapper-runtime.js`,
+  `${web}/build/server/lib/git/repository-credential-helper.js`,
+  `${web}/build/server/lib/git/repository-credential-helper-runtime.js`,
+  `${web}/build/server/built-in-extensions/registry.json`,
 ];
 
 const completeApp = () => [
   ...['dist-bundle/entry.mjs', 'dist-bundle/main.mjs', 'dist-bundle/early-startup.mjs', 'preload.mjs', 'browser-panel-preload.cjs', 'package.json'],
   `${web}/package.json`,
-  `${web}/server/index.js`,
+  `${web}/build/server/index.js`,
+  `${web}/build/server/index.js.map`,
+  `${web}/build/bin/cli.js`,
 ].map((filePath) => ({ path: filePath, unpacked: false }))
   .concat(helpers.map((filePath) => ({ path: filePath, unpacked: true })))
   .concat(process.platform === 'win32' ? [{ path: `node_modules/7zip-bin/win/${process.arch}/7za.exe`, unpacked: true }] : []);
@@ -68,6 +74,17 @@ test('packaging keeps only the target Windows decoder and no decoders on macOS o
         }
       }
       assert.equal(filter(path.join(appDir, 'node_modules/7zip-bin/index.js'), { isDirectory: () => false }), true);
+      for (const [file, included] of [
+        [`${web}/build/server/index.js`, true],
+        [`${web}/build/server/index.js.map`, true],
+        [`${web}/build/server/index.d.ts`, false],
+        [`${web}/server/index.js`, false],
+        [`${web}/bin/cli.js`, false],
+        ['node_modules/luxon/build/node/luxon.js.map', false],
+        ['node_modules/@openchamber/sdk/dist/index.js.map', false],
+      ]) {
+        assert.equal(filter(path.join(appDir, file), { isDirectory: () => false }), included, file);
+      }
     }
   }
 });
@@ -86,16 +103,16 @@ test('ripgrep platform packages inside the archive are rejected', () => {
 });
 
 test('files copied from outside the allowlist are rejected', () => {
-  const files = [...completeApp(), ...['main.mjs', '.cache/opencode-cli/opencode'].map((filePath) => ({ path: filePath, unpacked: false }))];
-  assert.deepEqual(findPackagedAppContentProblems(files), ['2 unexpected files outside node_modules (main.mjs, .cache/opencode-cli/opencode)']);
+  const files = [...completeApp(), ...['main.mjs', '.cache/opencode-server/serve.mjs'].map((filePath) => ({ path: filePath, unpacked: false }))];
+  assert.deepEqual(findPackagedAppContentProblems(files), ['2 unexpected files outside node_modules (main.mjs, .cache/opencode-server/serve.mjs)']);
 });
 
 test('a missing server entry or a packed git helper is reported', () => {
   const files = completeApp()
-    .filter((file) => file.path !== `${web}/server/index.js`)
+    .filter((file) => file.path !== `${web}/build/server/index.js`)
     .map((file) => (file.path === helpers[0] ? { ...file, unpacked: false } : file));
   assert.deepEqual(findPackagedAppContentProblems(files), [
-    `${web}/server/index.js is missing`,
+    `${web}/build/server/index.js is missing`,
     `${helpers[0]} must be unpacked from the asar`,
   ]);
 });

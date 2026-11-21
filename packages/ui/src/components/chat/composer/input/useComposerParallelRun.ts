@@ -67,7 +67,6 @@ export function useComposerParallelRun({
     }, [largeTextPasteGesture, parallel.state?.active, parallel.isActive, newSessionDraftOpen, newSessionDraft?.target, mobileComposerExpanded, isExpandedInput]);
 
     const handleRunInParallel = React.useCallback(() => {
-        // The picker offers it everywhere; a run always starts from a new-session draft.
         if (newSessionDraftOpen && newSessionDraft?.target !== 'chat') enterParallel();
         else openParallelComposer(composerText.get());
     }, [composerText, enterParallel, newSessionDraft?.target, newSessionDraftOpen]);

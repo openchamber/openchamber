@@ -250,7 +250,7 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
         <div className="min-h-0 flex-1 overflow-hidden">
           <ErrorBoundary>
             <React.Suspense fallback={<MobileFilesState loading message={t('filesView.state.loading')} />}>
-              <LazyFilesEditor mode="editor-only" />
+              <LazyFilesEditor visible={visible} />
             </React.Suspense>
           </ErrorBoundary>
         </div>

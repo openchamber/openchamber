@@ -10,16 +10,14 @@ import { cn, isMacOS } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { BLANK_URL, browserUrlLabel, isLoopbackUrl, normalizeBrowserUrl } from '@/lib/browser/url';
-import { navStatusUrl, type BrowserNavStatus } from '@/lib/browser/contract';
 import {
   acceptsBrowserTabLoadRequest,
   forgetBrowserTabOpenedWithAddress,
-  planFailedLoadRetry,
   subscribeBrowserTabLoadRequests,
   wasBrowserTabOpenedWithAddress,
-  type DevServerWaitRun,
+  type BrowserTabReferrer,
 } from '@/lib/browser/devServerWait';
-import { probeLoopbackStatus } from '@/lib/browser/devServers';
+import { browserTabRequestSchema, openBrowserTabFromLink, useBrowserTabReferrer } from '@/hooks/useBrowserTabReferrer';
 import {
   cancelAnnotationSession,
   runAnnotationSession,
@@ -44,7 +42,7 @@ import { isPreviewFrameGuard, pushPreviewFrameGuard } from '@/lib/router/backGua
 import { useSpaceMarkLabel } from '@/lib/spaces/space-mark';
 import { Icon } from '@/components/icon/Icon';
 import { Spinner } from '@/components/ui/spinner';
-import { isProjectActionRunningAtOrigin, useTerminalStore } from '@/stores/useTerminalStore';
+import { useDevServerWait } from '@/hooks/useDevServerWait';
 import { buildQuietScript } from '@/lib/browser/pageActions';
 import { createPageDriver, pageActionParametersSchema, type DriveStep, type JsonObject } from '@/lib/browser/pageDriver';
 import type { JsonValue } from '@openchamber/sdk';
@@ -67,7 +65,8 @@ import { useAnnotationVoice } from './useAnnotationVoice';
 import type { AnnotationOverlayMessage } from '@/lib/browser/annotationOverlay';
 import { readEventPayload, useWebviewNavigation } from './useWebviewNavigation';
 import { useSteadyStage } from './useSteadyStage';
-import { deepActiveElement, isStageShown, useWebviewFocusGuard, type HoldPageFocus } from './useWebviewFocusGuard';
+import { isStageShown, useWebviewFocusGuard, type HoldPageFocus } from './useWebviewFocusGuard';
+import { usePageDrawn } from './usePageDrawn';
 
 export type BrowserPaneProps = {
   initialUrl: string;
@@ -79,12 +78,6 @@ export type BrowserPaneProps = {
   registerBackHandler?: (handler: (() => boolean) | null) => void;
   visible: boolean;
 };
-
-const subscribeDocumentVisibility = (onChange: () => void): (() => void) => {
-  document.addEventListener('visibilitychange', onChange);
-  return () => document.removeEventListener('visibilitychange', onChange);
-};
-const isDocumentVisible = (): boolean => document.visibilityState === 'visible';
 
 const isChromiumHost = (): boolean => (
   typeof window !== 'undefined' && Boolean(window.__OPENCHAMBER_ELECTRON__)
@@ -107,24 +100,17 @@ const browserPartitionOf = (directory: string, agentProfile = false): string => 
   return agentProfile ? AGENT_BROWSER_PARTITION : BROWSER_PARTITION;
 };
 const BROWSER_OPEN_TAB_EVENT = 'openchamber:browser-panel-open-tab';
-const browserTabRequestSchema = z.object({
-  webContentsId: z.number(),
-  url: z.string().min(1),
-  background: z.boolean(),
-});
 const CONSOLE_PROBLEM_LIMIT = 20;
-const GATEWAY_RETRY_DELAY_MS = 600;
-const GATEWAY_WAIT_MS = 20_000;
 const VIEW_READY_TIMEOUT_MS = 15_000;
 const PAGE_QUIET_MS = 500;
 const OPEN_QUIET_MAX_MS = 5_000;
 const OPEN_SETTLE_BUDGET_MS = 30_000;
 const CAPTURE_QUIET_MAX_MS = 3_000;
-const INPUT_TIMEOUT_MS = 12_000;
 const CAPTURE_FRAME_WAIT_MAX_MS = 1_000;
 const CAPTURE_FRAME_TIMER_LATE_MS = 250;
 const quietResultSchema = z.object({ quiet: z.boolean() });
 const answeredDialogsSchema = z.array(z.object({ answer: z.string() }).catchall(z.json()));
+let keyboardTurn: Promise<void> = Promise.resolve();
 const jsonObjectSchema = z.record(z.string(), z.json());
 const annotateReplySchema = z.object({ value: z.json().nullable() });
 const annotationMessageReplySchema = z.object({ ended: z.boolean().optional(), message: z.string().nullable().optional() });
@@ -190,13 +176,12 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
 
   const initialUrlRef = React.useRef(normalizeBrowserUrl(initialUrl));
   const startUrl = initialUrlRef.current !== BLANK_URL ? initialUrlRef.current : '';
-
   const [initialSrc, setInitialSrc] = React.useState<string | null>(startUrl ? null : BLANK_URL);
+  const [linkTarget, setLinkTarget] = React.useState(startUrl);
   const spaceMark = useSpaceMarkLabel(directory);
 
   const [address, setAddress] = React.useState(startUrl);
   const [isAnnotating, setIsAnnotating] = React.useState(false);
-  const [isWaitingForServer, setIsWaitingForServer] = React.useState(false);
   const [zoomLevel, setZoomLevel] = React.useState(0);
   const zoomLevelRef = React.useRef(0);
   const [showDeviceBar, setShowDeviceBar] = React.useState(false);
@@ -206,15 +191,11 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
   const consoleProblemsRef = React.useRef<Array<{ level: string; message: string; source: string }>>([]);
   const [colorScheme, setColorScheme] = React.useState<BrowserColorScheme>('system');
   const stageRef = React.useRef<HTMLDivElement | null>(null);
-  const retryRef = React.useRef<DevServerWaitRun | null>(null);
   const tabDirectory = normalizeContextPanelDirectoryKey(tabsDirectory);
   const restoredLoadRef = React.useRef(Boolean(startUrl) && !wasBrowserTabOpenedWithAddress(tabDirectory, tabID));
-  const restoredSettleRef = React.useRef<BrowserNavStatus | null>(null);
   React.useEffect(() => {
     forgetBrowserTabOpenedWithAddress(tabDirectory, tabID);
   }, [tabDirectory, tabID]);
-  const servedOkRef = React.useRef(false);
-  const openedAtRef = React.useRef(Date.now());
 
   const persistUrl = React.useCallback((url: string) => {
     if (!url || url === BLANK_URL || !tabsDirectory || !tabID) return;
@@ -262,7 +243,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     [history, address],
   );
 
-  const loadUrl = React.useCallback((value: string) => {
+  const loadUrl = React.useCallback((value: string, referrer?: BrowserTabReferrer) => {
     const next = normalizeBrowserUrl(value);
     if (next === BLANK_URL) return;
     restoredLoadRef.current = false;
@@ -275,7 +256,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
         return;
       }
       try {
-        webview.loadURL(target);
+        webview.loadURL(target, referrer ? { httpReferrer: referrer } : undefined);
       } catch {
         setInitialSrc(target);
       }
@@ -288,7 +269,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     if (!startUrl) return;
     let active = true;
     void resolveBrowsableUrl(startUrl, directory)
-      .then((target) => { if (active) setInitialSrc(target); })
+      .then((target) => { if (active) { setLinkTarget(target); setInitialSrc(target); } })
       .catch((error: unknown) => {
         if (!active) return;
         if (error instanceof DevTunnelUnavailableError) {
@@ -383,35 +364,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     }
   }, []);
 
-  const withPageDrawn = React.useCallback(async <T,>(run: () => Promise<T>): Promise<T> => {
-    const restoreStage = revealStage(stageRef.current, 'input');
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      if (!await waitForTwoFrames()) {
-        throw new Error('The OpenChamber window is not being drawn (minimized, on a workspace or tab that is not shown, or the screen is locked or off), so the page takes no input. browser.snapshot still reads the page.');
-      }
-      const late = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('The page did not take the input in time. Take a snapshot to see its state.')), INPUT_TIMEOUT_MS);
-      });
-      const userFocus = webviewRef.current && document.activeElement !== webviewRef.current ? deepActiveElement() : null;
-      let userActed = false;
-      const onUserInput = (event: Event) => { if (event.isTrusted) userActed = true; };
-      document.addEventListener('pointerdown', onUserInput, true);
-      document.addEventListener('keydown', onUserInput, true);
-      try {
-        return await Promise.race([run(), late]);
-      } finally {
-        document.removeEventListener('pointerdown', onUserInput, true);
-        document.removeEventListener('keydown', onUserInput, true);
-        if (!userActed && userFocus?.isConnected && userFocus !== document.body && deepActiveElement() !== userFocus && document.activeElement !== webviewRef.current) {
-          userFocus.focus({ preventScroll: true });
-        }
-      }
-    } finally {
-      clearTimeout(timer);
-      restoreStage();
-    }
-  }, []);
+  const withPageDrawn = usePageDrawn(stageRef, webviewRef, revealStage, waitForTwoFrames);
 
   const pageDriver = React.useMemo(() => createPageDriver({ drive: driveStep, withInput: withPageDrawn }), [driveStep, withPageDrawn]);
 
@@ -650,11 +603,33 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
       const emulated = await invokeDesktopCommand<{ focused: boolean }>('desktop_browser_keep_page_focused', {
         webContentsId: webview.getWebContentsId(),
       }).then((reply) => reply.focused === true).catch(() => false);
-      if (!emulated) {
+      if (!emulated && action !== 'browser.type' && action !== 'browser.press') {
         releasePageFocus = holdPageFocus();
         webview.focus({ preventScroll: true });
       }
     }
+    const keyboardAction = async (run: (expiresAt: number) => Promise<JsonObject>) => {
+      const previousTurn = keyboardTurn;
+      let endTurn = (): void => {};
+      keyboardTurn = new Promise<void>((resolve) => { endTurn = resolve; });
+      let release = (): void => {};
+      try {
+        return await withPageDrawn(async (expiresAt) => {
+          await previousTurn;
+          if (Date.now() >= expiresAt) throw new Error('The page did not take the input in time. Take a snapshot to see its state.');
+          release = holdPageFocus();
+          webview.focus({ preventScroll: true });
+          try {
+            return await run(expiresAt);
+          } finally {
+            release();
+          }
+        });
+      } finally {
+        release();
+        endTurn();
+      }
+    };
     let result: JsonObject;
     try {
       switch (action) {
@@ -668,8 +643,8 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
         case 'browser.click': result = await pageDriver.click(page); break;
         case 'browser.hover': result = await pageDriver.hover(page); break;
         case 'browser.drag': result = await pageDriver.drag(page); break;
-        case 'browser.type': result = await pageDriver.type(page); break;
-        case 'browser.press': result = await pageDriver.press(page); break;
+        case 'browser.type': result = await keyboardAction((expiresAt) => pageDriver.type(page, expiresAt)); break;
+        case 'browser.press': result = await keyboardAction((expiresAt) => pageDriver.press(page, expiresAt)); break;
         case 'browser.select': result = await pageDriver.select(page); break;
         case 'browser.scroll': return pageDriver.scroll(page);
         case 'browser.inspect': return pageDriver.inspect(page);
@@ -688,7 +663,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     await new Promise((resolve) => setTimeout(resolve, 150));
     await waitForIdle();
     return { url: toDisplayUrl(webview.getURL()), ...result };
-  }, [annotationHost, loadUrl, pageDriver, settlePage, stageUpload, waitForIdle, waitForQuiet, waitForView]);
+  }, [annotationHost, loadUrl, pageDriver, settlePage, stageUpload, waitForIdle, waitForQuiet, waitForView, withPageDrawn]);
 
   React.useEffect(() => {
     if (!webviewElement || ownerSessionId === null) return;
@@ -799,20 +774,37 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
   }, [webviewElement]);
 
   const retunneledUrlsRef = React.useRef(new Set<string>());
-  const loadUrlFromUser = React.useCallback((value: string) => {
+  const loadUrlFromUser = React.useCallback((value: string, referrer?: BrowserTabReferrer) => {
     retunneledUrlsRef.current.clear();
-    loadUrl(value);
+    loadUrl(value, referrer);
   }, [loadUrl]);
   const navStatusRef = React.useRef(navigation.status);
   navStatusRef.current = navigation.status;
+  const reloadView = React.useCallback(() => {
+    try {
+      webviewRef.current?.reload();
+    } catch {
+      // View went away; the next mount starts over.
+    }
+  }, []);
+  const { isWaitingForServer, rearm: rearmServerWait } = useDevServerWait({
+    status: navigation.status,
+    directory,
+    visible,
+    watchedOutOfSight: ownerSessionId !== null || agentDriven,
+    restoredLoadRef,
+    reload: reloadView,
+  });
+  const initialReferrer = useBrowserTabReferrer(webviewElement, tabDirectory, tabID, initialSrc, linkTarget, rearmServerWait);
   const hasShownPageRef = React.useRef(false);
   if (navigation.status.kind === 'ready' && navigation.status.url) hasShownPageRef.current = true;
   React.useEffect(
-    () => subscribeBrowserTabLoadRequests(tabDirectory, tabID, (url) => {
+    () => subscribeBrowserTabLoadRequests(tabDirectory, tabID, (url, referrer) => {
       if (!acceptsBrowserTabLoadRequest(navStatusRef.current, hasShownPageRef.current)) return;
-      loadUrlFromUser(url);
+      rearmServerWait();
+      loadUrlFromUser(url, referrer);
     }),
-    [loadUrlFromUser, tabDirectory, tabID],
+    [loadUrlFromUser, rearmServerWait, tabDirectory, tabID],
   );
   React.useEffect(() => {
     if (!webviewElement) return;
@@ -861,11 +853,9 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
         return;
       }
       if (request.data.webContentsId !== ownId) return;
-      if (ownerSessionId !== null) {
-        openBrowserTabForSession(request.data.url, { directory: tabDirectory, sessionId: ownerSessionId });
-        return;
-      }
-      useUIStore.getState().openContextBrowser(tabDirectory, request.data.url, { reveal: !request.data.background });
+      openBrowserTabFromLink(tabDirectory, request.data.referrer, () => (ownerSessionId !== null
+        ? openBrowserTabForSession(request.data.url, { directory: tabDirectory, sessionId: ownerSessionId })
+        : useUIStore.getState().openContextBrowser(tabDirectory, request.data.url, { reveal: !request.data.background })));
     };
     window.addEventListener(BROWSER_OPEN_TAB_EVENT, onOpenTab);
     return () => window.removeEventListener(BROWSER_OPEN_TAB_EVENT, onOpenTab);
@@ -937,83 +927,6 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     }
   }, [isLoading]);
 
-  const status = navigation.status;
-  const documentVisible = React.useSyncExternalStore(subscribeDocumentVisibility, isDocumentVisible);
-  const watched = (visible && documentVisible) || ownerSessionId !== null || agentDriven;
-  const statusUrl = toDisplayUrl(navStatusUrl(status));
-  const actionRunning = useTerminalStore((state) => isProjectActionRunningAtOrigin(state.sessions, statusUrl));
-  const actionWasRunningRef = React.useRef(false);
-  const actionStoppedAtRef = React.useRef<number | null>(null);
-  React.useEffect(() => {
-    const reloadSoon = (delayMs: number): (() => void) => {
-      setIsWaitingForServer(true);
-      const timer = setTimeout(() => {
-        try {
-          webviewRef.current?.reload();
-        } catch {
-          // View went away; the next mount starts over.
-        }
-      }, delayMs);
-      return () => clearTimeout(timer);
-    };
-
-    if (actionWasRunningRef.current && !actionRunning) actionStoppedAtRef.current = Date.now();
-    actionWasRunningRef.current = actionRunning;
-
-    if (status.kind === 'loading') return;
-
-    const restored = restoredLoadRef.current || restoredSettleRef.current === status;
-    if (restoredLoadRef.current && (status.kind === 'failed' || (status.kind === 'ready' && status.url))) {
-      restoredLoadRef.current = false;
-      restoredSettleRef.current = status;
-    }
-
-    if (status.kind === 'failed') {
-      const plan = planFailedLoadRetry(status, {
-        run: retryRef.current,
-        restored,
-        watched,
-        now: Date.now(),
-        actionRunning,
-        actionStoppedAt: actionStoppedAtRef.current,
-      });
-      retryRef.current = plan.run;
-      if (plan.next === 'retry') return reloadSoon(plan.delayMs);
-      setIsWaitingForServer(plan.next === 'pause');
-      return;
-    }
-
-    retryRef.current = null;
-
-    if (status.kind !== 'ready' || !status.url || !isLoopbackUrl(status.url)) {
-      servedOkRef.current = true;
-      setIsWaitingForServer(false);
-      return;
-    }
-    if (restored || servedOkRef.current || Date.now() - openedAtRef.current > GATEWAY_WAIT_MS) {
-      servedOkRef.current = true;
-      setIsWaitingForServer(false);
-      return;
-    }
-
-    let cancelled = false;
-    let cancelReload: (() => void) | null = null;
-    const probe = spaceIdOfDirectory(directory) ? Promise.resolve(null) : probeLoopbackStatus(toDisplayUrl(status.url));
-    void probe.then((httpStatus) => {
-      if (cancelled) return;
-      if (httpStatus === null || httpStatus < 500) {
-        servedOkRef.current = true;
-        setIsWaitingForServer(false);
-        return;
-      }
-      cancelReload = reloadSoon(GATEWAY_RETRY_DELAY_MS);
-    });
-    return () => {
-      cancelled = true;
-      cancelReload?.();
-    };
-  }, [actionRunning, directory, status, watched]);
-
   const failed = navigation.status.kind === 'failed' && !isWaitingForServer ? navigation.status : null;
   const stageSize = useSteadyStage(stageRef, webviewRef, viewportSize(viewport) !== null);
   const layout = fitViewport(viewport, stageSize);
@@ -1081,7 +994,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
         {initialSrc !== null && sessionReady ? (
           <webview
             ref={attachWebview}
-            src={initialSrc}
+            src={initialReferrer ? BLANK_URL : initialSrc}
             partition={partition}
             // @ts-expect-error @types/react's WebViewHTMLAttributes requires boolean, which React omits from the DOM.
             allowpopups="true"

@@ -26,8 +26,6 @@ export function useComposerLargePasteScope({
     React.useLayoutEffect(() => {
         largeTextPasteScopeRef.current = largeTextPasteScope;
         largeTextPasteGesture.invalidate();
-        // An unanswered choice belongs to the draft it was pasted into; it
-        // must not land in another one. The text is still on the clipboard.
         largeTextPasteOfferIdRef.current += 1;
         setLargeTextPasteOffer(null);
         return () => largeTextPasteGesture.invalidate();

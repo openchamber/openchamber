@@ -131,6 +131,17 @@ describe('connecting an account', () => {
     } finally { await h.cleanup(); }
   });
 
+  test('rejects a null verification login even though the account store permits it', async () => {
+    const h = await harness();
+    try {
+      h.answers['auth.verify'] = () => ({ ok: true, data: { account: { id: 'U1', login: null } } });
+
+      await expect(h.channels.connect({ providerId: 'ext-slack-bridge', token: 'token' }))
+        .rejects.toMatchObject({ status: 502, code: 'MALFORMED_PROVIDER_RESPONSE' });
+      expect(await h.accounts.read('ext-slack-bridge')).toBeNull();
+    } finally { await h.cleanup(); }
+  });
+
   test('refuses what cannot be connected before anything is sent', async () => {
     const h = await harness({ catalog: [channelGuest(), channelGuest({
       id: 'matrix', name: 'Matrix', packageRoot: '/pkg/matrix',

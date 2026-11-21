@@ -20,6 +20,7 @@ import { fenceUiBlocks } from '../../../uiBlocks/taggedBlocks';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { extractFirstChangedLineFromDiff, getDiffPatchEntries, getToolFallbackDiff, type DiffPatchEntry } from '../toolDiffUtils';
+import { getToolDiffPreviewText, isToolDiffPreviewOversized } from '../toolDiffPreview';
 import { useStreamingTextThrottle } from '../../../hooks/useStreamingTextThrottle';
 import { getToolOutput } from '../toolOutput';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
@@ -38,7 +39,7 @@ import { TOOL_COLLAPSED_CUSTOM_STYLE, CODE_TAG_PROPS, TOOL_ERROR_TITLE_STYLE } f
 import { getRelativePath } from './toolPaths';
 import { buildWritePreviewPatch } from './toolChangeSummary';
 import { getToolDiagnosticSection } from './toolDiagnostics';
-import { parseQuestionOutput } from './questionOutput';
+import { questionAnswersForCall } from './questionOutput';
 import { ToolScrollableSection } from './ToolScrollableSection';
 import { CommandOutput } from './CommandOutput';
 import { ToolScrollableTextOutput } from './ToolScrollableTextOutput';
@@ -58,6 +59,8 @@ interface ToolExpandedContentProps {
     presentation: GuestToolRule | null;
     headerActionsSlot: HTMLElement | null;
 }
+
+const OVERSIZED_PATCH_HUNK = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/m;
 
 export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     part,
@@ -267,7 +270,7 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
 
         if (isQuestionTool(part.tool)) {
             if (state.status === 'completed' && hasStringOutput) {
-                const parsedQA = parseQuestionOutput(outputString);
+                const parsedQA = questionAnswersForCall(metadata, input, outputString, t('chat.htmlRender.unanswered'));
                 if (parsedQA && parsedQA.length > 0) {
                     return renderScrollableBlock(
                         <div className="space-y-2">
@@ -505,6 +508,10 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
     const hasVisibleOutput = outputString.trim().length > 0;
     const shouldRenderResult = (state.status === 'completed' && 'output' in state)
         || (isShellTool(part.tool) && hasVisibleOutput);
+    const guestReplacesResult = Boolean(presentation?.output && presentation.output !== 'auto' && hasStringOutput && outputString.trim());
+    const resultDrawsReportedPatch = isFileChangeTool(part.tool)
+        && diffEntries.some((entry) => entry.renderMode === 'diff' || (isToolDiffPreviewOversized(entry.patch) && OVERSIZED_PATCH_HUNK.test(getToolDiffPreviewText(entry.patch))));
+    const hidesWriteInputPreview = isWriteLikeTool && shouldRenderResult && !guestReplacesResult && resultDrawsReportedPatch;
 
     return (
         <div className="relative space-y-2">
@@ -556,7 +563,7 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
                         </div>
                     ) : null}
 
-                    {hasInputText ? renderScrollableBlock(
+                    {hasInputText && !hidesWriteInputPreview ? renderScrollableBlock(
                         isWriteLikeTool && writeLikeInputPatch ? (
                             <DiffPreview
                                 diff={writeLikeInputPatch}

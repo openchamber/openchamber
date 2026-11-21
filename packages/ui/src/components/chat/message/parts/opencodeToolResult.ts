@@ -18,6 +18,11 @@ export const OPENCODE_TOOL_VERB_KEYS = {
   schedule_pause: 'chat.toolPart.opencode.action.schedulePause',
   schedule_resume: 'chat.toolPart.opencode.action.scheduleResume',
   schedule_delete: 'chat.toolPart.opencode.action.scheduleDelete',
+  automation_create: 'chat.toolPart.opencode.action.automationCreate',
+  automation_list: 'chat.toolPart.opencode.action.automationList',
+  automation_pause: 'chat.toolPart.opencode.action.automationPause',
+  automation_resume: 'chat.toolPart.opencode.action.automationResume',
+  automation_delete: 'chat.toolPart.opencode.action.automationDelete',
   artifact_create: 'chat.toolPart.opencode.action.artifactCreate',
   artifact_read: 'chat.toolPart.opencode.action.artifactRead',
   artifact_update: 'chat.toolPart.opencode.action.artifactUpdate',
@@ -110,6 +115,36 @@ const schedulesSchema = z.object({
 });
 const removedSchema = z.object({ id: z.string() });
 
+// OpenCode 2.3.1 replaced schedules with automations; the schedule readers above stay for older history.
+const automationTriggerSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('at'), at: z.string() }),
+  z.object({ type: z.literal('every'), every: z.string() }),
+  z.object({ type: z.literal('cron'), cron: z.string() }),
+  z.object({ type: z.literal('event'), server: z.string(), event: z.string() }),
+]);
+
+const automationActionSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('prompt'), prompt: z.string(), to: z.object({ session: text, subagent: text }).optional().catch(undefined) }),
+  z.object({ type: z.literal('code'), code: z.string() }),
+]);
+
+const automationViewSchema = z.object({
+  id: z.string(),
+  name: text,
+  trigger: automationTriggerSchema,
+  tz: text,
+  action: automationActionSchema,
+  status: z.enum(['active', 'paused', 'done']),
+  nextDueAt: text,
+  expires: text,
+});
+
+export type AutomationView = z.infer<typeof automationViewSchema>;
+
+const automationsSchema = z.object({
+  automations: z.array(automationViewSchema.nullable().catch(null)).transform((entries) => entries.filter((entry) => entry !== null)),
+});
+
 const artifactSchema = z.object({ id: z.string(), provider: text, title: z.string(), url: z.string().url() });
 const artifactContentSchema = z.object({ info: artifactSchema, files: z.record(z.string(), z.string()) });
 
@@ -132,6 +167,11 @@ const READERS = {
   schedule_pause: reader('schedule_pause', scheduleViewSchema),
   schedule_resume: reader('schedule_resume', scheduleViewSchema),
   schedule_delete: reader('schedule_delete', removedSchema),
+  automation_create: reader('automation_create', automationViewSchema),
+  automation_list: reader('automation_list', automationsSchema),
+  automation_pause: reader('automation_pause', automationViewSchema),
+  automation_resume: reader('automation_resume', automationViewSchema),
+  automation_delete: reader('automation_delete', removedSchema),
   artifact_create: reader('artifact_create', artifactSchema),
   artifact_read: reader('artifact_read', artifactContentSchema),
   artifact_update: reader('artifact_update', artifactSchema),

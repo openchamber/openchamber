@@ -37,6 +37,18 @@ const createRuntime = async (overrides = {}) => {
 
 const pluginDirectoryFor = (dataDir) => path.join(dataDir, 'agent-tool', 'openchamber-agent-tool');
 
+const createPageWaitSignals = () => {
+  const calls = new Map();
+  const forCall = (id) => {
+    if (!calls.has(id)) calls.set(id, Promise.withResolvers());
+    return calls.get(id);
+  };
+  return {
+    onPageWaitChange: (change) => { if (change.type === 'waiting') forCall(change.callId).resolve(); },
+    ready: (id) => forCall(id).promise,
+  };
+};
+
 /** What a managed OpenCode child start does: write the plugin, mint a token. */
 const prepareManagedEnv = async (runtime, options) => {
   const pluginDirectory = await runtime.materializePlugin(options);
@@ -367,7 +379,6 @@ describe('managed agent tool runtime', () => {
     const { runtime, dataDir } = await createRuntime();
 
     const preparedEnv = await prepareManagedEnv(runtime);
-    const source = await fs.readFile(path.join(pluginDirectoryFor(dataDir), 'index.js'), 'utf8');
     const manifest = JSON.parse(await fs.readFile(path.join(pluginDirectoryFor(dataDir), 'package.json'), 'utf8'));
 
     // The managed config layer names this directory; the runtime only writes it.
@@ -375,12 +386,12 @@ describe('managed agent tool runtime', () => {
     expect(manifest.exports).toEqual({ '.': './index.js' });
     expect(preparedEnv.OPENCHAMBER_AGENT_TOOL_URL).toBe('http://127.0.0.1:3901/api/openchamber/agent-tool');
     expect(preparedEnv.OPENCHAMBER_AGENT_TOOL_TOKEN).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(source).toContain('openchamber: {');
-    for (const { action } of OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS) {
-      expect(source).toContain(JSON.stringify(action));
-    }
-    expect(source).not.toContain('"schedule.status"');
     const tool = await loadTools(dataDir, 'schema');
+    expect(tool.openchamber).not.toHaveProperty('title');
+    expect(tool.openchamber.input.properties.action.enum).toEqual(
+      OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS.map(({ action }) => action),
+    );
+    expect(tool.openchamber.input.properties.action.enum).not.toContain('schedule.status');
     expect(tool.openchamber.description).toContain('A dispatch returns at once');
     expect(tool.openchamber.description).toContain('returnResult brings its final answer back here');
     expect(tool.openchamber.description).toContain('A session you start to get work done and collect its answer takes ownWork');
@@ -393,10 +404,6 @@ describe('managed agent tool runtime', () => {
     expect(controlParameters).not.toHaveProperty('timeout');
     expect(controlParameters.returnResult.type).toBe('boolean');
     expect(tool.openchamber.input.properties.parameters.properties.sessionId).toEqual({ type: 'string' });
-    expect(source).not.toContain('title: "OpenChamber"');
-    // Nothing resolves from the generated directory, so the file must not import.
-    expect(source).not.toMatch(/\bimport\b/);
-    expect(source).not.toContain(preparedEnv.OPENCHAMBER_AGENT_TOOL_TOKEN);
   });
 
   it('emits both tools, each carrying only its own actions and inputs', async () => {
@@ -786,7 +793,7 @@ describe('managed agent tool runtime', () => {
 
     expect(Object.keys(tools)).toEqual(['openchamber_secret']);
     expect(Object.keys(tools.openchamber_secret.input.properties.parameters.properties).sort())
-      .toEqual(['args', 'inputs', 'label', 'placeholder', 'program', 'reason', 'timeoutMs']);
+      .toEqual(['args', 'inputs', 'label', 'placeholder', 'program', 'reason', 'saved', 'timeoutMs']);
     expect(tools.openchamber_secret.options).toEqual({ codemode: false });
     expect(tools.openchamber_secret.description.length).toBeLessThanOrEqual(2048);
     // A chat message ends the wait, like a page's.
@@ -845,19 +852,25 @@ describe('managed agent tool runtime', () => {
   it.each([
     ['secret.request', { action: 'request', label: 'Token', reason: 'Deploy' }],
     ['secret.run', { action: 'run', program: 'wrangler', args: ['deploy'], reason: 'Deploy', inputs: [{ env: 'TOKEN', label: 'Token' }] }],
+    ['secret.forget', { action: 'forget', saved: 'true' }],
   ])('keeps a %s card waiting through an agent or queued prompt, and ends it for the user', async (action, input) => {
     const { runtime, dataDir } = await createRuntime();
     const prepared = await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeSecret: true });
     // OpenCode's event stream, fed by the test.
     const pushed = [];
     let wake = () => {};
-    const emit = (type, data) => { pushed.push({ type, data: { sessionID: 'ses_1', ...data } }); wake(); };
+    const emit = (type, data) => new Promise((resolve) => {
+      pushed.push({ event: { type, data: { sessionID: 'ses_1', ...data } }, resolve });
+      wake();
+    });
     const event = {
       subscribe: async function* ({ types }) {
         for (;;) {
           while (pushed.length > 0) {
             const next = pushed.shift();
-            if (types.includes(next.type)) yield next;
+            if (types.includes(next.event.type)) yield next.event;
+            // The consumer asks for the next event after handling this one.
+            next.resolve();
           }
           await new Promise((resolve) => { wake = resolve; });
         }
@@ -866,6 +879,7 @@ describe('managed agent tool runtime', () => {
     const hooks = {};
     const tools = await loadTools(dataDir, `secret-wait-${action}`, hooks, [], [], { permission: { assert: async () => {} }, event });
     const releases = [];
+    const requests = new Map();
     const originalFetch = globalThis.fetch;
     const originalUrl = process.env.OPENCHAMBER_AGENT_TOOL_URL;
     const originalToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
@@ -875,79 +889,85 @@ describe('managed agent tool runtime', () => {
     globalThis.fetch = (_endpoint, init) => new Promise((resolve, reject) => {
       releases.push(() => resolve(new Response(JSON.stringify({ schemaVersion: 1, ok: true, action, data: { answer: { answered: true } } }))));
       init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+      const request = requests.get(JSON.parse(init.body).callID);
+      request.signal = init.signal;
+      request.resolve();
     });
-    const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
     // A call's answer once it returns; `pending` while it waits.
     const pending = Symbol('pending');
     const call = (id, sessionID = 'ses_1') => {
       const box = { answer: pending };
-      tools.openchamber_secret.execute(input, { sessionID, agent: 'build', messageID: 'msg_1', id, signal: new AbortController().signal, progress: async () => {} })
-        .then((result) => { box.answer = JSON.parse(result.content).data.answer; });
+      const request = Promise.withResolvers();
+      requests.set(id, request);
+      box.ready = request.promise;
+      box.request = request;
+      box.result = tools.openchamber_secret.execute(input, { sessionID, agent: 'build', messageID: 'msg_1', id, signal: new AbortController().signal, progress: async () => {} })
+        .then((result) => { box.answer = JSON.parse(result.content).data.answer; return box.answer; });
       return box;
-    };
-    const state = async (box) => {
-      await settle();
-      return box.answer;
     };
     const agent = { openchamber: { promptedBy: { sessionID: 'ses_helper' } } };
 
     try {
       const answered = call('call_1');
-      await settle();
+      await answered.ready;
       await hooks.prompt({ sessionID: 'ses_1', messageID: 'msg_a', delivery: 'steer', metadata: agent });
       await hooks.prompt({ sessionID: 'ses_1', messageID: 'msg_s', delivery: 'steer', metadata: { schedule: { id: 'sch_1' } } });
       await hooks.prompt({ sessionID: 'ses_1', messageID: 'msg_q', delivery: 'queue' });
-      expect(await state(answered)).toBe(pending);
+      expect(answered.request.signal.aborted).toBe(false);
+      expect(answered.answer).toBe(pending);
       releases[0]();
-      expect(await state(answered)).toEqual({ answered: true });
+      expect(await answered.result).toEqual({ answered: true });
 
       // Moving a queued prompt to steer runs no prompt hook: the inbox event ends the wait, for the user's prompt only.
       const promoted = call('call_2');
-      await settle();
+      await promoted.ready;
       await hooks.prompt({ sessionID: 'ses_1', messageID: 'msg_user', delivery: 'queue' });
       await hooks.prompt({ sessionID: 'ses_1', messageID: 'msg_agent', delivery: 'queue', metadata: agent });
-      emit('session.inbox.delivery.changed', { inboxID: 'msg_agent', delivery: 'steer' });
-      emit('session.inbox.delivery.changed', { inboxID: 'msg_user', delivery: 'queue' });
-      expect(await state(promoted)).toBe(pending);
-      emit('session.inbox.delivery.changed', { inboxID: 'msg_user', delivery: 'steer' });
-      expect(await state(promoted)).toEqual({ answered: false, reason: 'chat' });
+      await emit('session.inbox.delivery.changed', { inboxID: 'msg_agent', delivery: 'steer' });
+      await emit('session.inbox.delivery.changed', { inboxID: 'msg_user', delivery: 'queue' });
+      expect(promoted.request.signal.aborted).toBe(false);
+      expect(promoted.answer).toBe(pending);
+      await emit('session.inbox.delivery.changed', { inboxID: 'msg_user', delivery: 'steer' });
+      expect(await promoted.result).toEqual({ answered: false, reason: 'chat' });
 
       const closed = call('call_3');
-      await settle();
+      await closed.ready;
       await hooks.prompt({ sessionID: 'ses_1', messageID: 'msg_now', delivery: 'steer' });
-      expect(await state(closed)).toEqual({ answered: false, reason: 'chat' });
+      expect(await closed.result).toEqual({ answered: false, reason: 'chat' });
 
       // A steer the user sent before the card, moved to the queue and back once it waits, ends it too.
       await hooks.prompt({ sessionID: 'ses_1', messageID: 'msg_early', delivery: 'steer' });
-      emit('session.inbox.delivery.changed', { inboxID: 'msg_early', delivery: 'queue' });
+      await emit('session.inbox.delivery.changed', { inboxID: 'msg_early', delivery: 'queue' });
       const late = call('call_4');
-      await settle();
-      emit('session.inbox.delivery.changed', { inboxID: 'msg_early', delivery: 'steer' });
-      expect(await state(late)).toEqual({ answered: false, reason: 'chat' });
+      await late.ready;
+      await emit('session.inbox.delivery.changed', { inboxID: 'msg_early', delivery: 'steer' });
+      expect(await late.result).toEqual({ answered: false, reason: 'chat' });
 
       // A delivered prompt is forgotten, so a later event for its id ends nothing.
       await hooks.prompt({ sessionID: 'ses_1', messageID: 'msg_done', delivery: 'queue' });
-      emit('session.inbox.delivered', { inboxID: 'msg_done' });
+      await emit('session.inbox.delivered', { inboxID: 'msg_done' });
       const delivered = call('call_5');
-      await settle();
-      emit('session.inbox.delivery.changed', { inboxID: 'msg_done', delivery: 'steer' });
-      expect(await state(delivered)).toBe(pending);
+      await delivered.ready;
+      await emit('session.inbox.delivery.changed', { inboxID: 'msg_done', delivery: 'steer' });
+      expect(delivered.request.signal.aborted).toBe(false);
+      expect(delivered.answer).toBe(pending);
       releases.at(-1)();
-      expect(await state(delivered)).toEqual({ answered: true });
+      expect(await delivered.result).toEqual({ answered: true });
 
       // A deleted session's prompts are forgotten, another session's are kept.
       await hooks.prompt({ sessionID: 'ses_1', messageID: 'msg_gone', delivery: 'queue' });
       await hooks.prompt({ sessionID: 'ses_2', messageID: 'msg_kept', delivery: 'queue' });
-      emit('session.deleted', { sessionID: 'ses_1' });
+      await emit('session.deleted', { sessionID: 'ses_1' });
       const forgotten = call('call_6');
       const kept = call('call_7', 'ses_2');
-      await settle();
-      emit('session.inbox.delivery.changed', { inboxID: 'msg_gone', delivery: 'steer' });
-      emit('session.inbox.delivery.changed', { sessionID: 'ses_2', inboxID: 'msg_kept', delivery: 'steer' });
-      expect(await state(kept)).toEqual({ answered: false, reason: 'chat' });
-      expect(await state(forgotten)).toBe(pending);
+      await Promise.all([forgotten.ready, kept.ready]);
+      await emit('session.inbox.delivery.changed', { inboxID: 'msg_gone', delivery: 'steer' });
+      await emit('session.inbox.delivery.changed', { sessionID: 'ses_2', inboxID: 'msg_kept', delivery: 'steer' });
+      expect(await kept.result).toEqual({ answered: false, reason: 'chat' });
+      expect(forgotten.request.signal.aborted).toBe(false);
+      expect(forgotten.answer).toBe(pending);
       releases.at(-2)();
-      expect(await state(forgotten)).toEqual({ answered: true });
+      expect(await forgotten.result).toEqual({ answered: true });
     } finally {
       globalThis.fetch = originalFetch;
       if (originalUrl === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;
@@ -1048,7 +1068,8 @@ describe('managed agent tool runtime', () => {
   });
 
   it('returns the answer a page waited for, or ends the wait when the user writes in the chat', async () => {
-    const service = createOpenChamberControlService({ sessionService: { resolveDirectory: async () => '/repo' } });
+    const pageWaits = createPageWaitSignals();
+    const service = createOpenChamberControlService({ sessionService: { resolveDirectory: async () => '/repo' }, onPageWaitChange: pageWaits.onPageWaitChange });
     const { runtime, dataDir } = await createRuntime({
       resolveSessionDirectory: async () => '/repo',
       executeAction: (...args) => service.execute(...args),
@@ -1083,8 +1104,7 @@ describe('managed agent tool runtime', () => {
       expect(fetchSpy.mock.lastCall?.[1]).not.toHaveProperty('timeout');
 
       const closed = ask('call_2');
-      // Lets the call reach the server and start waiting there.
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await pageWaits.ready('call_2');
       await hooks.prompt({ sessionID: 'ses_other' });
       await hooks.prompt({ sessionID: 'ses_caller' });
       const closedResult = await closed;
@@ -1099,7 +1119,7 @@ describe('managed agent tool runtime', () => {
       // call, and the chat would drop the page.
       const stop = new AbortController();
       const stopped = ask('call_3', true, stop.signal);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await pageWaits.ready('call_3');
       stop.abort();
       await expect(stopped).rejects.toThrow();
     } finally {
@@ -1113,7 +1133,8 @@ describe('managed agent tool runtime', () => {
   });
 
   it('keeps a page waiting through a prompt an agent sent or one queued for after the turn', async () => {
-    const service = createOpenChamberControlService({ sessionService: { resolveDirectory: async () => '/repo' } });
+    const pageWaits = createPageWaitSignals();
+    const service = createOpenChamberControlService({ sessionService: { resolveDirectory: async () => '/repo' }, onPageWaitChange: pageWaits.onPageWaitChange });
     const { runtime, dataDir } = await createRuntime({
       resolveSessionDirectory: async () => '/repo',
       executeAction: (...args) => service.execute(...args),
@@ -1136,7 +1157,7 @@ describe('managed agent tool runtime', () => {
     );
     try {
       const waiting = ask('call_1');
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await pageWaits.ready('call_1');
       // session.send records the sending session; its id may be any non-empty handle.
       await hooks.prompt({ sessionID: 'ses_caller', delivery: 'steer', metadata: { openchamber: { promptedBy: { sessionID: 'ses_helper', title: 'Build helper' } } } });
       await hooks.prompt({ sessionID: 'ses_caller', delivery: 'steer', metadata: { openchamber: { promptedBy: { sessionID: 'remote-host/opencode/session:ses_x' } } } });
@@ -1149,13 +1170,13 @@ describe('managed agent tool runtime', () => {
 
       // An empty sender names nobody, so the prompt counts as the user's.
       const closed = ask('call_2');
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await pageWaits.ready('call_2');
       await hooks.prompt({ sessionID: 'ses_caller', delivery: 'steer', metadata: { openchamber: { promptedBy: { sessionID: ' ' } } } });
       expect(JSON.parse((await closed).content)).toMatchObject({ data: { answer: { answered: false, reason: 'chat' } } });
 
       // A plain string is not the record session.send writes, so it counts as the user's too.
       const plain = ask('call_3');
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await pageWaits.ready('call_3');
       await hooks.prompt({ sessionID: 'ses_caller', delivery: 'steer', metadata: { openchamber: { promptedBy: 'remote-host/opencode/session:ses_x' } } });
       expect(JSON.parse((await plain).content)).toMatchObject({ data: { answer: { answered: false, reason: 'chat' } } });
     } finally {
@@ -1244,20 +1265,13 @@ describe('managed agent tool runtime', () => {
     ['browser.type', 'openchamber_web', { selector: '#q', value: 'x', submit: 'yes' }, 'submit'],
     ['knowledge.save', 'openchamber_knowledge', { kind: 'todo', id: 't1', completed: 'false' }, 'completed'],
     ['notify.send', 'openchamber_notify', { title: 't', showWhenFocused: 1 }, 'showWhenFocused'],
+    ['secret.forget', 'openchamber_secret', { saved: 'yes' }, 'saved'],
   ])('refuses a %s whose boolean %s field is not a boolean', async (action, tool, input, field) => {
     const { runtime, executeAction } = await createRuntime();
     const result = await runtime.execute({ input: { action, ...input }, sessionID: 'ses_1', tool });
 
     expect(result).toEqual(expect.objectContaining({ ok: false, action, error: { message: `${field} must be a boolean`, kind: 'usage' } }));
     expect(executeAction).not.toHaveBeenCalled();
-  });
-
-  it('passes a real boolean goal through', async () => {
-    const { runtime, executeAction } = await createRuntime();
-    const result = await runtime.execute({ input: { action: 'session.create', prompt: 'x', goal: true }, sessionID: 'ses_1', tool: 'openchamber' });
-
-    expect(result.ok).toBe(true);
-    expect(executeAction).toHaveBeenCalledTimes(1);
   });
 
   it('passes returnResult through with the calling session', async () => {

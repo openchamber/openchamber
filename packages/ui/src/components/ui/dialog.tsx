@@ -79,6 +79,7 @@ type DialogContentProps = Omit<React.ComponentProps<typeof BaseDialog.Popup>, "c
   showCloseButton?: boolean
   backdropProps?: React.ComponentProps<typeof DialogOverlay>
   layerClassName?: string
+  fullWindow?: boolean
   children?: React.ReactNode
 }
 
@@ -94,6 +95,7 @@ function DialogContent({
   showCloseButton = true,
   backdropProps,
   layerClassName,
+  fullWindow = false,
   ref,
   initialFocus,
   ...props
@@ -127,7 +129,8 @@ function DialogContent({
           data-slot="dialog-content"
           data-state-slot="dialog"
           className={cn(
-            "oc-window-corners relative pointer-events-auto outline-none bg-background flex flex-col w-full max-w-lg max-h-full gap-4 p-5 oc-modal-shadow overflow-y-auto overlay-scrollbar-target pwa-dialog-content origin-center",
+            "relative pointer-events-auto outline-none bg-background flex flex-col w-full max-w-lg max-h-full gap-4 p-5 oc-modal-shadow overflow-y-auto overlay-scrollbar-target origin-center",
+            !fullWindow && "oc-window-corners pwa-dialog-content",
             "transition-all duration-150 ease-out",
             "data-[starting-style]:opacity-0 data-[starting-style]:scale-[0.98]",
             "data-[ending-style]:opacity-0 data-[ending-style]:scale-[0.98]",

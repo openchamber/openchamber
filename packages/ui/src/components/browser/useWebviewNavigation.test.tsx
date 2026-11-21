@@ -40,9 +40,11 @@ describe('webview navigation failures', () => {
       getURL: () => currentUrl,
       getTitle: () => '',
       isLoading: () => true,
+      isCrashed: () => false,
       canGoBack: () => false,
       canGoForward: () => false,
-      loadURL: () => {},
+      loadURL: async () => {},
+      clearHistory: () => {},
       goBack: () => {},
       goForward: () => {},
       reload: () => {},
@@ -115,5 +117,24 @@ describe('webview navigation failures', () => {
     });
 
     expect(navigation.status).toMatchObject({ kind: 'ready', url: 'http://localhost:5199/' });
+  });
+
+  test('a ready page carries the status of its document, which in-page navigation keeps', async () => {
+    const load = (httpResponseCode: number) => {
+      webview.dispatchEvent(new Event('did-start-loading'));
+      currentUrl = 'http://myapp.localhost:1355/';
+      webview.dispatchEvent(Object.assign(new Event('did-navigate'), { url: currentUrl, httpResponseCode }));
+      webview.dispatchEvent(new Event('did-stop-loading'));
+    };
+
+    await act(async () => load(404));
+    expect(navigation.status).toMatchObject({ kind: 'ready', httpStatus: 404 });
+
+    await act(async () => {
+      load(200);
+      webview.dispatchEvent(Object.assign(new Event('did-navigate-in-page'), { url: 'http://myapp.localhost:1355/#a' }));
+      webview.dispatchEvent(new Event('did-stop-loading'));
+    });
+    expect(navigation.status).toMatchObject({ kind: 'ready', httpStatus: 200 });
   });
 });

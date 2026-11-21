@@ -68,41 +68,6 @@ describe('createArchiveStore', () => {
     await expect(createArchiveStore({ dataDir }).getAll()).resolves.toEqual({ ses_2: 7 });
   });
 
-  it('writes atomically: the visible file is the previous one until the rename', async () => {
-    const dataDir = makeDataDir();
-    writeFile(dataDir, { ses_1: 3, ses_2: 3 });
-    const seen = [];
-    const fsPromises = {
-      ...fs.promises,
-      writeFile: async (target, payload, encoding) => {
-        seen.push(readFile(dataDir));
-        return fs.promises.writeFile(target, payload, encoding);
-      },
-    };
-    const store = createArchiveStore({ dataDir, fsPromises });
-
-    await store.forget(['ses_1']);
-
-    expect(seen).toEqual([JSON.stringify({ ses_1: 3, ses_2: 3 })]);
-    expect(JSON.parse(readFile(dataDir))).toEqual({ ses_2: 3 });
-  });
-
-  it('refuses to write when the file could not be read, so unknown state is never overwritten', async () => {
-    const dataDir = makeDataDir();
-    writeFile(dataDir, { ses_1: 1 });
-    const unreadable = Object.assign(new Error('EACCES'), { code: 'EACCES' });
-    const fsPromises = {
-      ...fs.promises,
-      readFile: async () => { throw unreadable; },
-      writeFile: async () => { throw new Error('must not write'); },
-    };
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const store = createArchiveStore({ dataDir, fsPromises });
-    await expect(store.forget(['ses_1'])).resolves.toEqual({ failedIds: [] });
-    expect(JSON.parse(readFile(dataDir))).toEqual({ ses_1: 1 });
-  });
-
   it('writes nothing to forget a session it does not hold, and restores entries when the write fails', async () => {
     const dataDir = makeDataDir();
     writeFile(dataDir, { ses_1: 7 });

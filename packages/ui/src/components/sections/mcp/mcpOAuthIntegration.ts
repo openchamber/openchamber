@@ -1,4 +1,4 @@
-import type { IntegrationInfo, IntegrationOAuthMethod } from '@opencode/client';
+import type { Integration as IntegrationInfo, IntegrationOAuthMethod } from '@/lib/opencode/model';
 
 export const findMcpIntegration = (
   integrations: readonly IntegrationInfo[],

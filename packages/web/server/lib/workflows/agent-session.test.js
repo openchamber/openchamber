@@ -1,3 +1,4 @@
+import { OpenCode } from '@opencode/client';
 import { describe, expect, it } from 'vitest';
 
 import { WorkflowAgentStopped, createWorkflowAgentSessions } from './agent-session.js';
@@ -87,6 +88,53 @@ describe('workflow agent sessions', () => {
     const model = { providerID: 'openai', id: 'gpt-6-luna', variant: 'high' };
     const request = await createSessionRequest({ parent: { id: 'ses_parent', model }, allowTools: [] });
     expect(request.model).toEqual(model);
+  });
+
+  it('passes an explicitly undefined parent variant through to the client', async () => {
+    const model = { providerID: 'openai', id: 'test-model', variant: undefined };
+    const request = await createSessionRequest({ parent: { id: 'ses_parent', model }, allowTools: [] });
+    expect(request.model).toEqual(model);
+    expect(Object.hasOwn(request.model, 'variant')).toBe(true);
+  });
+
+  it('uses the real client for a parent model without a variant', async () => {
+    const requests = [];
+    const controller = new AbortController();
+    const sessions = createWorkflowAgentSessions({
+      buildOpenCodeUrl: (route) => `http://localhost:4096${route}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      globalEventHub: { subscribeEvent: () => () => {} },
+      fetchImpl: async (url, init) => {
+        requests.push({ url: String(url), init });
+        const data = init.method === 'GET'
+          ? { id: 'ses_parent', model: { providerID: 'test', id: 'model' } }
+          : { id: 'ses_agent' };
+        return Response.json({ data });
+      },
+    });
+    await expect(sessions.start({
+      directory: '/repo', parentSessionId: 'ses_parent', title: 'agent',
+      text: 'work', signal: controller.signal, onSession: () => controller.abort(),
+    })).rejects.toBeInstanceOf(WorkflowAgentStopped);
+    expect(requests.map(({ url }) => url)).toEqual([
+      'http://localhost:4096/api/session/ses_parent',
+      'http://localhost:4096/api/session',
+    ]);
+    expect(JSON.parse(requests[1].init.body).model).toEqual({ providerID: 'test', id: 'model' });
+    sessions.stop();
+  });
+
+  it('accepts an explicitly undefined variant at the real SDK serialization boundary', async () => {
+    const bodies = [];
+    const client = OpenCode.make({
+      baseUrl: 'http://localhost:4096',
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(init.body));
+        return Response.json({ data: { id: 'ses_agent' } });
+      },
+    });
+    await client.session.create({ model: { providerID: 'test', id: 'model', variant: undefined } });
+    expect(bodies).toEqual([{ model: { providerID: 'test', id: 'model' } }]);
   });
 
   it("allows the asked tools after the parent's own rules", async () => {

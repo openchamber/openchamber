@@ -1,6 +1,12 @@
 import { CODE_FONT_OPTION_MAP, UI_FONT_OPTION_MAP, type FontFaceSource, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
+import { isVSCodeRuntime } from './desktop';
+import { fetchBypassingRuntimeBridge } from './runtime-fetch';
+import { waitAtMost } from './timing/waitAtMost';
+import { withAbortDeadline } from './timing/withAbortDeadline';
 
-const loadedFaces = new Set<string>();
+const loadedFaces = new Map<string, { family: string; file: FaceFile }>();
+const embedCSSByFace = new Map<string, Promise<string>>();
+const PENDING_FACE_WAIT_MS = 2_000;
 const pendingFaces = new Map<string, Promise<void>>();
 
 interface FaceFile {
@@ -27,6 +33,40 @@ const faceFiles = (source: FontFaceSource): FaceFile[] => {
   }));
 };
 
+const readFontDataURL = (url: string): Promise<string> => withAbortDeadline(2_000, async (signal) => {
+  const response = await fetchBypassingRuntimeBridge(url, {
+    cache: 'force-cache',
+    credentials: 'omit',
+    signal,
+  });
+  if (!response.ok) throw new Error(`Font request failed: ${response.status}`);
+  const blob = await response.blob();
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const data = reader.result;
+      if (data === null || data instanceof ArrayBuffer) reject(new Error('Unable to encode font'));
+      else resolve(data);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+});
+
+const embedCSSFor = (key: string, family: string, file: FaceFile): Promise<string> => {
+  if (isVSCodeRuntime()) return Promise.resolve('');
+  const cached = embedCSSByFace.get(key);
+  if (cached) return cached;
+  const reading = readFontDataURL(file.url)
+    .then((data) => `@font-face{font-family:${JSON.stringify(family)};font-weight:${file.weight};src:url("${data}") format("woff2");}`)
+    .catch(() => {
+      embedCSSByFace.delete(key);
+      return '';
+    });
+  embedCSSByFace.set(key, reading);
+  return reading;
+};
+
 const loadFace = (family: string, file: FaceFile) => {
   const key = `${family}:${file.weight}`;
   if (loadedFaces.has(key)) {
@@ -51,7 +91,8 @@ const loadFace = (family: string, file: FaceFile) => {
   document.fonts.add(face);
   const promise = face.load()
     .then(() => {
-      loadedFaces.add(key);
+      loadedFaces.set(key, { family, file });
+      void embedCSSFor(key, family, file);
     })
     .catch((error) => {
       document.fonts.delete(face);
@@ -76,3 +117,16 @@ const loadSource = (source: FontFaceSource | undefined) => {
 export const loadUiFont = (font: UiFontOption) => loadSource(UI_FONT_OPTION_MAP[font]?.source);
 
 export const loadMonoFont = (font: MonoFontOption) => loadSource(CODE_FONT_OPTION_MAP[font]?.source);
+
+export const loadedAppFontCSS = async (stacks: readonly string[]): Promise<string> => {
+  const families = new Set(stacks.flatMap((stack) =>
+    stack.split(',').map((name) => name.trim().replace(/^(['"])(.*)\1$/, '$2').toLowerCase()),
+  ));
+  const loading = [...pendingFaces.values()];
+  if (loading.length > 0) {
+    await waitAtMost(PENDING_FACE_WAIT_MS, Promise.all(loading));
+  }
+  const matched = Array.from(loadedFaces.entries()).filter(([, { family }]) => families.has(family.toLowerCase()));
+  const css = await Promise.all(matched.map(([key, { family, file }]) => embedCSSFor(key, family, file)));
+  return css.filter(Boolean).join('\n');
+};
