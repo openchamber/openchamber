@@ -2879,7 +2879,7 @@ async function main(options: WebUiServerOptions = {}) {
     },
   });
   relayServiceInstance = relayService;
-  relayService.registerRoutes(app);
+  relayService.registerRoutes(app, server);
   registerSharePageRoutes(app, sharePagesRuntime);
   registerReceivedPageRoutes(app, receivedPagesRuntime);
 

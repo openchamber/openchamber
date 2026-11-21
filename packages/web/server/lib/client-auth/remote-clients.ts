@@ -1,4 +1,5 @@
 import type { BearerRequest, ClientInput, ClientStore, CreatedClient, RemoteClient, StoreDependencies, StoredClient, StoredInput } from './contracts.js';
+import { hasRelayProvenance } from '../relay/provenance.js';
 import { hasChmod, isInputArray, isMissingFile, isStoreInput, isStoredInput, isString } from './inputs.js';
 
 const STORE_VERSION = 1;
@@ -238,7 +239,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     if (!isString(token) || !token.startsWith(TOKEN_PREFIX)) {
       return null;
     }
-    const transport = req?.headers?.['x-openchamber-relay-connection'] ? 'relay' : 'direct';
+    const transport = hasRelayProvenance(req) ? 'relay' : 'direct';
     return withStoreMutation(async () => {
       const tokenHash = hashToken(token);
       const store = await readStore();
