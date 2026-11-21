@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { startExampleService } from './fixtures/example-service';
-import { FAKE_FORGE_FORK, FAKE_FORGE_STRANGER, startFakeForge, type FakeForge } from '../examples/source-control-provider/fake-forge';
+import { FAKE_FORGE_FORK, FAKE_FORGE_OWNER, FAKE_FORGE_REPO, FAKE_FORGE_STRANGER, startFakeForge, type FakeForge } from '../examples/source-control-provider/fake-forge';
 import { sourceControlProviderSchemasV1 as schemas } from '../src/service-provider-schemas';
 import {
   OPENCHAMBER_HOST_CALLBACK_URL,
@@ -346,5 +346,18 @@ describe('source-control provider example', () => {
       expect(answer).toMatchObject({ ok: false, error: { status: 409, code: 'SOURCE_CONTROL_MUTATION_REMOTE_MISMATCH' } });
     }
     expect(forge.writes.length).toBe(before + 1);
+  });
+
+  test('answers a failed route with a fixed message instead of the request text', async () => {
+    const answer = await fetch(`${forge.origin}/api/v1/repos/${FAKE_FORGE_OWNER}/${FAKE_FORGE_REPO}/issues/1/comments`, {
+      method: 'POST',
+      headers: { authorization: 'token good', 'content-type': 'application/json' },
+      body: '{"body": reflectedmarker}',
+    });
+    const text = await answer.text();
+    expect(answer.status).toBe(500);
+    expect(text).not.toContain('reflectedmarker');
+    expect(JSON.parse(text)).toEqual({ message: 'The fake forge could not handle this request.' });
+    expect(answer.headers.get('content-type')).toBe('application/json');
   });
 });
