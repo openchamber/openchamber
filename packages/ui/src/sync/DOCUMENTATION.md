@@ -65,6 +65,8 @@ Ordinary sessions archive together per directory with one request and one reconc
 
 Metadata updates send a recursive merge patch, including explicit nulls for deleted keys, so another feature's nested siblings survive. Link changes send the operation to the server's write queue, where a fresh read determines the list; a display-only record read happens before the write so its failure cannot report a link that already landed.
 
+Pin edits and fork pin repair are the only conditional metadata writes: they send the record the edit was computed from and retry against the current record after a conflict, because a pin list is replaced whole. Every other edit stays on the plain merge route, whose server side effects (such as starting a goal) the conditional route does not run. When an older server lacks the conditional route, a pin edit falls back to the plain merge; fork repair does not, because its replacement list could erase a concurrent pin. Pin edits carry the runtime they started on and stop, without retry or fallback, once the user switches servers. A UI fork is selected only after inheritance, including pin repair, has finished.
+
 ### Why workbook decompression uses a Bun-specific path and not Blob workers everywhere
 
 Bun's browser-style Blob workers do not reliably run fflate's asynchronous decoder. Browser production runtimes keep worker-backed extraction while Bun uses the alternate path.

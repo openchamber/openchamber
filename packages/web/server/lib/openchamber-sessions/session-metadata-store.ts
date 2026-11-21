@@ -1,6 +1,7 @@
 import { asNonEmptyString } from '../shared/guards.js';
 import fsDefault from 'node:fs';
 import pathDefault from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 
 import { createOpenCodeClient as createOpenCodeClientDefault } from './opencode-client.js';
@@ -83,6 +84,22 @@ interface SessionMetadataStoreOptions extends FileStoreOptions {
 }
 
 export type MetadataDecider = (current: SessionMetadata | undefined) => SessionMetadata | null;
+
+export async function compareAndSetMetadata(
+  expected: SessionMetadata,
+  patch: SessionMetadata,
+  update: (decide: MetadataDecider) => Promise<{ metadata: SessionMetadata | undefined }>,
+) {
+  let conflict = false;
+  const result = await update((current) => {
+    if (!isDeepStrictEqual(current, expected)) {
+      conflict = true;
+      return null;
+    }
+    return patch;
+  });
+  return { metadata: result.metadata, conflict };
+}
 
 export const createSessionMetadataStore = ({
   dataDir,

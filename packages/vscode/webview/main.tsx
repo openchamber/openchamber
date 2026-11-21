@@ -6,6 +6,7 @@ import { findMessagePageItem } from '@openchamber/ui/lib/opencode/messagePaging'
 import { BridgeRequestError, onCommand, onThemeChange, postBridgeNotification, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, sendBridgeMessageWithOptions, startSseProxy, stopSseProxy } from './api/bridge';
 import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
 import { quotaGiftResetBridgePayload } from './quotaGiftResetRequest';
+import { sessionMetadataRequest } from './sessionMetadataRequest';
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
@@ -429,13 +430,12 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
   if (normalizedPathname === '/api/openchamber/sessions/unarchive' && method === 'POST') {
     return bridgeJsonRoute('api:sessions/unarchive', await extractJsonBody(input, init, method));
   }
-  const sessionMetadataMatch = normalizedPathname.match(/^\/api\/openchamber\/sessions\/([^/]+)\/metadata$/);
+  const sessionMetadataMatch = normalizedPathname.match(/^\/api\/openchamber\/sessions\/([^/]+)\/metadata(\/compare-and-set)?$/);
   if (sessionMetadataMatch && (method === 'GET' || method === 'POST')) {
     const sessionId = decodeURIComponent(sessionMetadataMatch[1]);
     if (method === 'GET') return bridgeJsonRoute('api:sessions/metadata:get', { sessionId });
-    const body = await extractJsonBody(input, init, method);
-    const patch = body && typeof body === 'object' && !Array.isArray(body) ? (body as { patch?: unknown }).patch : undefined;
-    return bridgeJsonRoute('api:sessions/metadata:set', { sessionId, patch });
+    const request = sessionMetadataRequest(sessionId, await extractJsonBody(input, init, method), !!sessionMetadataMatch[2]);
+    return request ? bridgeJsonRoute(request.type, request.payload) : Response.json({ error: 'expected must be an object' }, { status: 400 });
   }
 
   if (/^\/api\/projects\/[^/]+\/scheduled-tasks(?:\/[^/]+)?$/.test(normalizedPathname)) {
