@@ -4,8 +4,9 @@ import { openRuntimeWebSocket } from './relay/runtime-socket';
 import type { RelayTunnelSocketMessageEvent, RelayTunnelWebSocket } from './relay/tunnel-client';
 import { runtimeFetch, type RuntimeFetchOptions } from './runtime-fetch';
 import { getRuntimeUrlResolver } from './runtime-url';
-import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from './runtime-auth';
+import { clearRuntimeUrlAuthToken, hasSameOriginTunnelSession, refreshRuntimeUrlAuthToken } from './runtime-auth';
 import { isTerminalShell } from './terminalShell';
+import { getClientPlatform } from './platform';
 import { spaceIdOfDirectory, spaceRootDirectory } from './spaces/space-route';
 import { z } from 'zod';
 
@@ -565,9 +566,34 @@ const terminalSocketPath = (spaceId: string | null): string => (
 );
 
 function hostTransportDependencies(spaceId: string | null): TerminalTransportDependencies {
+  const path = terminalSocketPath(spaceId);
+  let cookieSession: { url: string; statusUrl: string; resolver: ReturnType<typeof getRuntimeUrlResolver> } | null = null;
   return {
-    refreshAuth: refreshRuntimeUrlAuthToken,
-    openSocket: () => openRuntimeWebSocket(getRuntimeUrlResolver().websocket(terminalSocketPath(spaceId))),
+    refreshAuth: async () => {
+      cookieSession = null;
+      if (spaceId === null && getClientPlatform() === 'web') {
+        const resolver = getRuntimeUrlResolver();
+        const url = resolver.sameOriginCookieWebSocket?.(path);
+        const statusUrl = resolver.auth('/auth/session');
+        if (url && await hasSameOriginTunnelSession(statusUrl)) {
+          cookieSession = { url, statusUrl, resolver };
+          return;
+        }
+      }
+      await refreshRuntimeUrlAuthToken();
+    },
+    openSocket: () => {
+      const resolver = getRuntimeUrlResolver();
+      if (cookieSession) {
+        if (
+          resolver !== cookieSession.resolver
+          || resolver.auth('/auth/session') !== cookieSession.statusUrl
+          || resolver.sameOriginCookieWebSocket?.(path) !== cookieSession.url
+        ) throw new Error('Terminal runtime changed');
+        return openRuntimeWebSocket(cookieSession.url);
+      }
+      return openRuntimeWebSocket(resolver.websocket(path));
+    },
     clearUrlAuthToken: clearRuntimeUrlAuthToken,
   };
 }

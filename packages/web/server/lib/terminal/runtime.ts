@@ -2,11 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import {
   TERMINAL_WS_MAX_PAYLOAD_BYTES,
-  TERMINAL_WS_PATH,
   createTerminalWsControlFrame,
-  parseRequestPathname,
   readTerminalWsControlFrame,
 } from './terminal-ws-protocol.js';
+import { createTerminalSocketUpgradeHandler } from './socket-upgrade.js';
 import { sanitizeTerminalHistoryChunk } from './history.js';
 import { terminalPlainText } from './plain-text.js';
 import { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-response.js';
@@ -14,9 +13,8 @@ import { buildTerminalShellLaunch, createTerminalShellResolver, normalizeTermina
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, resolvePosixPtyLaunch } from '../inherited-env.js';
 import { shutdownTerminalProcesses } from './shutdown.js';
 import { bunVersionRunsBunPty } from './bun-pty-support.js';
-import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../security/request-security.js';
 import { isString as isText } from '../shared/object-guards.js';
-import type { IncomingMessage, Server } from 'node:http';
+import type { Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Stats } from 'node:fs';
 import type * as nodePath from 'node:path';
@@ -25,6 +23,7 @@ import type { Application } from '../shared/http-contracts.js';
 import type { WebSocket, WebSocketServer as TerminalWebSocketServer } from '../shared/websocket-contracts.js';
 import type { RequestOriginChecker } from '../security/request-security.js';
 import type { createUiAuth } from '../ui-auth/ui-auth.js';
+import type { createTunnelAuth } from '../tunnels/tunnel-auth.js';
 import type { createEnvironmentRuntime } from '../environment/runtime.js';
 import type { TerminalShellResolverOptions, TerminalShellPreference, TerminalLaunchMode, TerminalShellLaunchOptions } from './shells.js';
 import type { TerminalHistoryPending } from './history.js';
@@ -61,6 +60,7 @@ export interface TerminalRuntimeOptions extends Pick<TerminalShellResolverOption
   fs: { promises: TerminalShellResolverOptions['fs']['promises'] & { stat(cwd: string): Promise<Pick<Stats, 'isDirectory'>> } };
   path: Pick<typeof nodePath, 'join' | 'resolve'>;
   uiAuthController?: Pick<ReturnType<typeof createUiAuth>, 'enabled' | 'ensureSessionToken'> | null;
+  tunnelAuthController?: Pick<ReturnType<typeof createTunnelAuth>, 'classifyRequestScope' | 'getActiveTunnelOrigin' | 'getTunnelSessionFromRequest' | 'bindTunnelSession'>;
   buildAugmentedPath: () => string;
   isRequestOriginAllowed: RequestOriginChecker;
   rejectWebSocketUpgrade(socket: Duplex, code: number, reason: string): void;
@@ -387,7 +387,7 @@ export async function loadTerminalPtyProvider(
 }
 
 export function createTerminalRuntime({
-  app, server, fs, path, uiAuthController, buildAugmentedPath, searchPathFor, isExecutable,
+  app, server, fs, path, uiAuthController, tunnelAuthController, buildAugmentedPath, searchPathFor, isExecutable,
   isRequestOriginAllowed, rejectWebSocketUpgrade, TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
   loadPtyProvider, terminalTerminationGraceMs = TERMINATION_GRACE_MS, shutdownProcesses = shutdownTerminalProcesses,
   environmentRuntime = null,
@@ -705,6 +705,7 @@ export function createTerminalRuntime({
     send(socket, { t: 'hello', v: 3 });
     const heartbeat = setInterval(() => { try { socket.ping(); } catch { return; } }, TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS);
     socket.on('message', (raw, isBinary) => {
+      if (socket.readyState !== socket.OPEN) return;
       if (!isBinary) { send(socket, { t: 'error', v: 3, code: 'BAD_FRAME', message: 'Binary control frame required', fatal: false }); return; }
       const message = readTerminalWsControlFrame(raw);
       if (!hasFrameFields(message) || message.v !== 3 || !isText(message.t)) { send(socket, { t: 'error', v: 3, code: 'BAD_FRAME', message: 'Invalid terminal frame', fatal: false }); return; }
@@ -735,48 +736,14 @@ export function createTerminalRuntime({
     socket.on('close', cleanup); socket.on('error', () => {});
   });
 
-  const upgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    if (parseRequestPathname(req.url) !== TERMINAL_WS_PATH) return;
-    const logUpgradeFailure = ({ error }: { error: unknown }) => {
-      logger.warn?.(`[terminal] websocket upgrade failed: ${(hasErrorFields(error) && error.message) || error}`);
-    };
-    const accept = () => {
-      const acceptingServer = wsServer;
-      if (!acceptingServer) { rejectWebSocketUpgrade(socket, 500, 'Terminal WebSocket unavailable'); return; }
-      try {
-        acceptingServer.handleUpgrade(req, socket, head, (ws) => acceptingServer.emit('connection', ws, req));
-      } catch (error) {
-        logUpgradeFailure({ error });
-        socket.destroy();
-      }
-    };
-    const checkOrigin = () => {
-      void isRequestOriginAllowed(req).then((allowed) => {
-        if (allowed) accept();
-        else rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
-      }).catch((error) => { logUpgradeFailure({ error }); rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); });
-    };
-    if (isOpaqueOriginRequest(req)) { rejectWebSocketUpgrade(socket, 403, 'Invalid origin'); return; }
-    if (!uiAuthController?.enabled) {
-      void isPasswordlessSocketOriginAllowed(req, isRequestOriginAllowed).then((allowed) => {
-        if (allowed) accept();
-        else rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
-      }).catch((error) => { logUpgradeFailure({ error }); rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); });
-      return;
-    }
-    try {
-      const result = uiAuthController.ensureSessionToken(req, null);
-      if (!(result instanceof Promise)) {
-        if (result) checkOrigin();
-        else rejectWebSocketUpgrade(socket, 401, 'UI authentication required');
-        return;
-      }
-      void result.then((sessionToken) => {
-        if (sessionToken) checkOrigin();
-        else rejectWebSocketUpgrade(socket, 401, 'UI authentication required');
-      }).catch((error) => { logUpgradeFailure({ error }); rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); });
-    } catch (error) { logUpgradeFailure({ error }); rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); }
-  };
+  const upgradeHandler = createTerminalSocketUpgradeHandler({
+    getWebSocketServer: () => wsServer,
+    uiAuthController,
+    tunnelAuthController,
+    isRequestOriginAllowed,
+    rejectWebSocketUpgrade,
+    logger,
+  });
   server.on('upgrade', upgradeHandler);
 
   app.get('/api/terminal/shells', async (_req, res) => {

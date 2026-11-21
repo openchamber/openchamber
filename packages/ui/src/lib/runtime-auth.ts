@@ -330,6 +330,28 @@ export const refreshRuntimeUrlAuthToken = async (apiBaseUrl?: string | null): Pr
   return mintRuntimeUrlAuthToken(apiBaseUrl);
 };
 
+export const hasSameOriginTunnelSession = async (sessionUrl: string): Promise<boolean> => {
+  if (!globalThis.window || getActiveRelayTunnel() || Object.keys(getRuntimeExtraHeadersSync()).length > 0) return false;
+  const generation = runtimeAuthGeneration;
+  try {
+    if (await getRuntimeAuthCredential()) return false;
+    if (new URL(sessionUrl, window.location.href).origin !== window.location.origin) return false;
+    const response = await fetch(sessionUrl, {
+      credentials: 'same-origin',
+      mode: 'same-origin',
+      redirect: 'error',
+      signal: AbortSignal.timeout(1_500),
+    });
+    if (!response.ok) return false;
+    const session = tunnelSessionStatus.safeParse(await response.json());
+    return generation === runtimeAuthGeneration && session.success;
+  } catch {
+    return false;
+  }
+};
+
+const tunnelSessionStatus = z.object({ authenticated: z.literal(true), scope: z.literal('tunnel') });
+
 export const refreshLocalRuntimeUrlAuthToken = async (localOrigin: string): Promise<string> => {
   const origin = normalizeOrigin(localOrigin);
   if (!origin) throw new Error('Local runtime URL auth origin was invalid');
