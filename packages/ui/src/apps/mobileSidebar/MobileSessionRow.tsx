@@ -64,7 +64,7 @@ const HandToLeadItems: React.FC<{ session: Session; projectId: string | null }> 
   const leads = useProjectLeads(projectId, session.id);
   return leads.map((lead) => (
     <ContextMenuItem key={lead.id} onClick={() => { void handSessionToLead(session.id, lead.id).catch(() => toast.error(t('sessions.sidebar.session.handToLead.failed'))); }}>
-      <Icon name="lead-flag" className="me-1 size-4" />
+      <Icon name="lead" className="me-1 size-4" />
       <span className="min-w-0 max-w-[15rem] truncate">{t('sessions.sidebar.session.menu.handToNamedLead', { title: lead.title || t('sessions.sidebar.session.untitled') })}</span>
     </ContextMenuItem>
   ));
@@ -186,7 +186,7 @@ export const MobileSessionRow: React.FC<{
     : null;
   const isLead = isLeadSession(session);
   const leadMarker = isLead
-    ? <Icon name="lead-flag" className="size-3 shrink-0 text-muted-foreground" role="img" aria-hidden={false} aria-label={t('sessions.sidebar.session.leadMark')} />
+    ? <Icon name="lead" className="size-3 shrink-0 text-muted-foreground" role="img" aria-hidden={false} aria-label={t('sessions.sidebar.session.leadMark')} />
     : null;
   const doneHint = showDoneHint
     ? <Icon name="check" className="size-3.5 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.work.doneSuggested')} />
@@ -300,7 +300,7 @@ export const MobileSessionRow: React.FC<{
       ) : null}
       {topLevel && !isOperatorChildSession(session) ? (
         <ContextMenuItem onClick={() => { void setSessionLead(session.id, directory || null, !isLead).catch(() => toast.error(t('sessions.sidebar.session.lead.failed'))); }}>
-          <Icon name="lead-flag" className="me-1 size-4" />
+          <Icon name="lead" className="me-1 size-4" />
           {isLead ? t('sessions.sidebar.session.menu.stopLead') : t('sessions.sidebar.session.menu.makeLead')}
         </ContextMenuItem>
       ) : null}

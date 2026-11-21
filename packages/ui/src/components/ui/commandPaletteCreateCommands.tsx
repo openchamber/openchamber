@@ -52,7 +52,7 @@ export const createCommands = ({ t, run, startSession }: { t: ReturnType<typeof 
   ...(isVSCodeRuntime() ? [] : [{
     id: 'new-lead',
     title: t('commandPalette.item.newLead'),
-    icon: <Icon name="lead-flag" className="me-2 h-4 w-4" />,
+    icon: <Icon name="lead" className="me-2 h-4 w-4" />,
     shortcutId: 'new_lead' as const,
     searchText: t('commandPalette.item.newLead'),
     onSelect: run(() => openOrToggleLeadDraft()),

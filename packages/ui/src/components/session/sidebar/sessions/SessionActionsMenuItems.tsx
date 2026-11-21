@@ -516,7 +516,7 @@ export function SessionActionsMenuItems({
       {canLead ? (
         <SessionMenuItemHint hint={isLead ? t('sessions.sidebar.session.menuHint.stopLead') : t('sessions.sidebar.session.menuHint.makeLead')}>
           <Item onClick={toggleLead} className="[&>svg]:me-1">
-            <Icon name="lead-flag" className="me-1 h-4 w-4" />
+            <Icon name="lead" className="me-1 h-4 w-4" />
             {isLead ? t('sessions.sidebar.session.menu.stopLead') : t('sessions.sidebar.session.menu.makeLead')}
           </Item>
         </SessionMenuItemHint>

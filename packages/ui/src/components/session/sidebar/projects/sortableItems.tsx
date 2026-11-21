@@ -156,7 +156,7 @@ const NewSessionMenu: React.FC<{ onNewSession: () => void; onNewLead: (() => voi
           {t('sessions.sidebar.project.actions.newSession')}
         </ContextMenuItem>
         <ContextMenuItem onClick={onNewLead}>
-          <Icon name="lead-flag" className="me-1.5 h-4 w-4" />
+          <Icon name="lead" className="me-1.5 h-4 w-4" />
           {t('sessions.sidebar.project.actions.newLead')}
         </ContextMenuItem>
       </ContextMenuContent>
@@ -248,7 +248,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
       )}
       {showCreateButtons && !hideDirectoryControls && onNewLead && (
         <Item onClick={onNewLead}>
-          <Icon name="lead-flag" className="me-1.5 h-4 w-4" />
+          <Icon name="lead" className="me-1.5 h-4 w-4" />
           {t('sessions.sidebar.project.actions.newLead')}
         </Item>
       )}

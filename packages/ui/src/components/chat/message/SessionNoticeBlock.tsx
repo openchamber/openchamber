@@ -148,7 +148,7 @@ const PageAnswerNoticeRow: React.FC<{ notice: PageAnswerNotice; blockId: string 
 
 const LeadHandoverNoticeRow: React.FC<{ title: string }> = ({ title }) => {
     const { t } = useI18n();
-    return <PlainNoticeLine icon="lead-flag" title={t('chat.sessionNotice.leadHandover', { title })} />;
+    return <PlainNoticeLine icon="lead" title={t('chat.sessionNotice.leadHandover', { title })} />;
 };
 
 const LeadReplyNoticeRow: React.FC<{ notice: Extract<LeadNotice, { kind: 'lead-answer' }>; blockId: string }> = ({ notice, blockId }) => {
