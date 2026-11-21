@@ -454,12 +454,12 @@ one session the user may want to open.
 
 A lead (`metadata.openchamber.lead`, `lib/sessionLead.ts`, server side in
 `packages/web/server/lib/session-lead/`) is a session the user marked to run
-a direction through its own workers. Its one mark is an outlined flag
-(`lead-flag`) in the one-line row's chevron slot, the way the worktree icon
+a direction through its own workers. Its one mark is a peak with a
+pennant (`lead-flag`) in the one-line row's chevron slot, the way the worktree icon
 sits in a group header: the title starts where every row's title starts, and
-with workers under it the flag gives way to the chevron on hover or focus
-(`SessionLeadSlot`); on touch the flag stays and a tap on it still toggles.
-Two-line rows show the flag with the row's marks, the phone beside the title.
+with workers under it the mark gives way to the chevron on hover or focus
+(`SessionLeadSlot`); on touch the mark stays and a tap on it still toggles.
+Two-line rows show the mark with the row's marks, the phone beside the title.
 The row's states are any session's: no count of workers. A lead starts from
 New lead (a draft with its own welcome heading): in the project menu, and in
 the menu of the project's "+" (right click on desktop, long press on the
