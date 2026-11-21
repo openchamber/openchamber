@@ -196,13 +196,19 @@ OpenCode bepaalt welke modelproviders überhaupt gebruikt mogen worden, niet Ope
 }
 ```
 
-Een geweigerde provider verdwijnt ook als iemand er een sleutel voor toevoegt. Plaats het beleid in de algemene `~/.config/opencode/opencode.jsonc`, waar een project het niet kan opheffen, of lever het via een OpenCode Console-werkruimte, die het laatste woord heeft. De enterprise-modus beperkt daarnaast wat OpenChamber zelf verstuurt.
+Een geweigerde provider verdwijnt ook als iemand er een sleutel voor toevoegt. Plaats het beleid in de systeemconfiguratie van OpenCode (`/etc/opencode/opencode.jsonc` op Linux, `%ProgramData%\opencode\opencode.jsonc` op Windows, `/Library/Application Support/opencode/opencode.jsonc` op macOS) en laat alleen beheerders in de map ervan schrijven, zoals in het Windows-voorbeeld hierboven, of lever het via een OpenCode Console-werkruimte. Het pad van de systeemconfiguratie hoort bij de machine waarop OpenCode draait. In de Docker-opstelling hierboven draait OpenCode in de container, dus koppel het bestand daar alleen-lezen aan, onder `volumes` in `docker-compose.yml`: `- ./opencode-policy.jsonc:/etc/opencode/opencode.jsonc:ro`. Beide hebben voorrang op de algemene `~/.config/opencode/opencode.jsonc` van de gebruiker en op de bestanden van het project, en de systeemconfiguratie heeft ook voorrang op de Console. Console-beleid geldt alleen zolang de werkruimte verbonden is en wordt gewist zodra de verbinding verbreekt, dus beperkingen die daarna moeten blijven gelden horen in de systeemconfiguratie. Het algemene bestand zorgt ervoor dat een project het beleid niet kan opheffen, maar de gebruiker kan het bewerken. De enterprise-modus beperkt daarnaast wat OpenChamber zelf verstuurt.
 
-Zoekopdrachten op het web en het ophalen van pagina's door de agent lopen ook via OpenCode, naar de zoekdienst en de pagina's zelf. Als die uw netwerk niet mogen verlaten, weiger ze dan met hetzelfde soort beleid:
+Zoekopdrachten op het web en het ophalen van pagina's door de agent lopen ook via OpenCode, naar de zoekdienst en de pagina's zelf. Als die uw netwerk niet mogen verlaten, weiger ze dan met hetzelfde soort beleid. Heeft de configuratie al beleid, voeg de twee `tool.use`-regels dan toe aan het einde van die lijst en laat de provider-regels en ander beleid staan. Heeft het bestand zowel een array `policies` op het hoogste niveau als `experimental.policies`, voeg ze dan toe aan die op het hoogste niveau: OpenCode leest `experimental.policies` eerst, en de laatste passende regel wint. Voor een nieuwe configuratie werkt het voorbeeld op zichzelf:
 
 ```jsonc
-{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
-{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+{
+  "experimental": {
+    "policies": [
+      { "action": "tool.use", "resource": "websearch:*", "effect": "deny" },
+      { "action": "tool.use", "resource": "webfetch:*", "effect": "deny" }
+    ]
+  }
+}
 ```
 
 ## Zie ook
