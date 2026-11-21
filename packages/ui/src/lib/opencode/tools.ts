@@ -4,6 +4,7 @@ import { z } from "zod"
 import type { JsonValue, Metadata, ToolInput, ToolState } from "./model"
 import { opencodeNamespaceTool } from "./opencode-namespace-tools"
 import { normalizeToolName, type ToolName } from "./tool-name"
+import { booleanish, optionalCount, optionalText } from "./toolInputSchemas"
 
 export { normalizeToolName, opencodeNamespaceTool, type ToolName }
 
@@ -66,13 +67,6 @@ export const isWebTool = (toolName: ToolName): boolean => WEB_TOOLS.has(normaliz
 export const isWebSearchTool = (toolName: ToolName): boolean => normalizeToolName(toolName) === OPENCODE_TOOLS.websearch
 
 
-const optionalText = z.string().trim().min(1).optional().catch(undefined)
-const optionalCount = z.number().int().nonnegative().optional().catch(undefined)
-
-const booleanish = z
-  .union([z.boolean(), z.enum(["true", "false"]).transform((value) => value === "true")])
-  .optional()
-  .catch(undefined)
 
 const inputSchema = z
   .object({
@@ -515,6 +509,9 @@ export function requestedSecretRun(toolName: ToolName, state: ToolState): Reques
   }
 }
 
+export const requestedSecretForget = (toolName: ToolName, state: ToolState): boolean => toolName === OPENCHAMBER_SECRET_TOOL && state.status === "running"
+  && forgetsSavedSecrets(openChamberCallSchema.parse(state.input ?? {}))
+
 export function requestedSecret(toolName: ToolName, state: ToolState): RequestedSecret | null {
   if (toolName !== OPENCHAMBER_SECRET_TOOL || state.status !== "running") return null
   const action = secretRunInputSchema.parse(state.input ?? {}).action
@@ -602,15 +599,18 @@ export const isShownInPlace = (toolName: ToolName, state: ToolState): boolean =>
   || generatedImagePaths(toolName, state).length > 0
   || requestedSecret(toolName, state) !== null
   || requestedSecretRun(toolName, state) !== null
+  || requestedSecretForget(toolName, state)
 )
 
 const openChamberCallSchema = z
   .object({
     action: optionalText,
     awaitAnswer: booleanish,
-    parameters: z.object({ awaitAnswer: booleanish }).optional().catch(undefined),
+    saved: booleanish,
+    parameters: z.object({ awaitAnswer: booleanish, saved: booleanish }).optional().catch(undefined),
   })
   .catch({})
+const forgetsSavedSecrets = (call: z.infer<typeof openChamberCallSchema>) => isSecretForget(call.action) && (call.parameters?.saved ?? call.saved) === true
 
 export type OpenChamberToolCall = { tool: string; action?: string; awaitsAnswer: boolean }
 
@@ -631,7 +631,7 @@ export function openChamberToolCall(toolName: ToolName, input: JsonValue | undef
   const parsed = openChamberCallSchema.parse(input ?? {})
   const spilledWait = tool === OPENCHAMBER_RENDER_TOOL ? spilledCallFields(input).awaitAnswer : undefined
   const waits = parsed.parameters?.awaitAnswer ?? parsed.awaitAnswer ?? spilledWait
-  const awaitsAnswer = (tool === OPENCHAMBER_SECRET_TOOL && !isSecretForget(parsed.action)) || waits === true
+  const awaitsAnswer = (tool === OPENCHAMBER_SECRET_TOOL && (!isSecretForget(parsed.action) || forgetsSavedSecrets(parsed))) || waits === true
   return { tool, action: parsed.action, awaitsAnswer }
 }
 

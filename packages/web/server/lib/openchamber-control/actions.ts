@@ -127,7 +127,7 @@ export const OPENCHAMBER_IMAGE_ACTIONS = Object.freeze(
 export const OPENCHAMBER_SECRET_ACTION_DEFINITIONS = Object.freeze([
   { action: 'secret.run', title: 'Run with secrets', description: 'Requires program, reason and inputs; optional args and timeoutMs' },
   { action: 'secret.request', title: 'Ask for a secret', description: 'Requires label and reason' },
-  { action: 'secret.forget', title: 'Forget remembered secrets', description: 'No inputs' },
+  { action: 'secret.forget', title: 'Forget remembered secrets', description: 'Optional saved: true, only when the user asks, to forget the project\'s saved secrets too' },
 ]);
 
 export const OPENCHAMBER_SECRET_ACTIONS = Object.freeze(

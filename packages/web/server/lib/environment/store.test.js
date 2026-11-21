@@ -20,10 +20,10 @@ describe('environment store', () => {
 
   it('answers names only and keeps values in a 0600 file', async () => {
     const store = createEnvironmentStore({ filePath });
-    expect(await store.updateUser({ variables: { API_TOKEN: 'secret', DEBUG: '1' } })).toEqual({ names: ['API_TOKEN', 'DEBUG'] });
-    expect(store.describeUser()).toEqual({ names: ['API_TOKEN', 'DEBUG'] });
-    expect(JSON.stringify(store.describeUser())).not.toContain('secret');
-    expect(store.userVariables()).toEqual({ API_TOKEN: 'secret', DEBUG: '1' });
+    expect(await store.updateUser({ variables: { API_TOKEN: 'sk-hidden-1', DEBUG: '1' } })).toEqual({ names: ['API_TOKEN', 'DEBUG'], secrets: [] });
+    expect(store.describeUser()).toEqual({ names: ['API_TOKEN', 'DEBUG'], secrets: [] });
+    expect(JSON.stringify(store.describeUser())).not.toContain('sk-hidden-1');
+    expect(store.userVariables()).toEqual({ API_TOKEN: 'sk-hidden-1', DEBUG: '1' });
     if (process.platform !== 'win32') {
       expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
     }
@@ -41,12 +41,37 @@ describe('environment store', () => {
   it('stores a project command and variables and drops an emptied project', async () => {
     const store = createEnvironmentStore({ filePath });
     expect(await store.updateProject('path_abc', { variables: { GOFLAGS: '-mod=mod' }, command: '  direnv export json ' }))
-      .toEqual({ names: ['GOFLAGS'], command: 'direnv export json' });
+      .toEqual({ names: ['GOFLAGS'], command: 'direnv export json', secrets: [] });
     expect(store.projectEntry('path_abc')).toEqual({ variables: { GOFLAGS: '-mod=mod' }, command: 'direnv export json' });
     expect(store.hasProjectEntries()).toBe(true);
     await store.updateProject('path_abc', { variables: { GOFLAGS: null }, command: null });
     expect(store.hasProjectEntries()).toBe(false);
-    expect(store.describeProject('path_abc')).toEqual({ names: [], command: null });
+    expect(store.describeProject('path_abc')).toEqual({ names: [], command: null, secrets: [] });
+  });
+
+  it('keeps saved secrets apart from the variables a spawn gets', async () => {
+    const store = createEnvironmentStore({ filePath });
+    await store.updateProject('path_abc', { variables: { DEBUG: '1' }, secrets: { API_TOKEN: 'tok-1' } });
+    expect(store.projectEntry('path_abc')).toEqual({ variables: { DEBUG: '1' }, command: null });
+    expect(store.projectSecrets('path_abc')).toEqual({ API_TOKEN: 'tok-1' });
+    expect(store.describeProject('path_abc')).toEqual({ names: ['DEBUG'], command: null, secrets: ['API_TOKEN'] });
+    await store.updateProject('path_abc', { variables: { DEBUG: null } });
+    expect(store.projectSecrets('path_abc')).toEqual({ API_TOKEN: 'tok-1' });
+    expect(store.hasProjectEntries()).toBe(false);
+    await store.updateProject('path_abc', { secrets: { API_TOKEN: null } });
+    expect(store.hasProjectEntries()).toBe(false);
+  });
+
+  it('keeps secrets saved for all projects apart from the user variables', async () => {
+    const store = createEnvironmentStore({ filePath });
+    await store.updateUser({ variables: { DEBUG: '1' }, secrets: { API_TOKEN: 'tok-1' } });
+    expect(store.userVariables()).toEqual({ DEBUG: '1' });
+    expect(store.userSecrets()).toEqual({ API_TOKEN: 'tok-1' });
+    expect(store.describeUser()).toEqual({ names: ['DEBUG'], secrets: ['API_TOKEN'] });
+    await store.updateUser({ variables: { DEBUG: null } });
+    expect(store.userSecrets()).toEqual({ API_TOKEN: 'tok-1' });
+    await store.updateUser({ secrets: { API_TOKEN: null } });
+    expect(JSON.parse(fs.readFileSync(filePath, 'utf8'))).toEqual({ version: 1 });
   });
 
   it.each([
@@ -105,7 +130,8 @@ describe('environment store', () => {
     const store = createEnvironmentStore({ filePath });
     await store.updateProject('path_p', { variables: { A: '1' } });
     expect(store.projectEntry('constructor')).toEqual({ variables: {}, command: null });
-    expect(store.describeProject('toString')).toEqual({ names: [], command: null });
+    expect(store.describeProject('toString')).toEqual({ names: [], command: null, secrets: [] });
+    expect(store.projectSecrets('toString')).toEqual({});
     await store.updateProject('constructor', { variables: { OWN: 'yes' } });
     expect(store.projectEntry('constructor')).toEqual({ variables: { OWN: 'yes' }, command: null });
   });

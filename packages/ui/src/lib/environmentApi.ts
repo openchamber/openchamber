@@ -6,6 +6,7 @@ export const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const userEnvironmentSchema = z.object({
   names: z.array(z.string()),
+  secrets: z.array(z.string()).default([]),
 });
 
 const commandStatusSchema = z.discriminatedUnion('state', [
@@ -16,6 +17,7 @@ const commandStatusSchema = z.discriminatedUnion('state', [
 const projectEnvironmentSchema = z.object({
   names: z.array(z.string()),
   command: z.string().nullable(),
+  secrets: z.array(z.string()).default([]),
   status: commandStatusSchema.nullable(),
 });
 
@@ -34,7 +36,7 @@ const readJson = async <T>(response: Response, schema: z.ZodType<T>, failure: st
   return schema.parse(await response.json());
 };
 
-type EnvironmentUpdate = { variables?: EnvironmentVariablesPatch; command?: string | null };
+export type EnvironmentUpdate = { variables?: EnvironmentVariablesPatch; command?: string | null; secrets?: Record<string, null> };
 
 const jsonHeaders = { 'Content-Type': 'application/json', Accept: 'application/json' };
 
@@ -52,8 +54,8 @@ export const fetchUserEnvironment = async (): Promise<UserEnvironment> => readJs
   'Failed to read environment variables',
 );
 
-export const updateUserEnvironment = async (variables: EnvironmentVariablesPatch): Promise<UserEnvironment> => readJson(
-  await runtimeFetch('/api/environment', putRequest({ variables })),
+export const updateUserEnvironment = async (update: Pick<EnvironmentUpdate, 'variables' | 'secrets'>): Promise<UserEnvironment> => readJson(
+  await runtimeFetch('/api/environment', putRequest(update)),
   userEnvironmentSchema,
   'Failed to save environment variables',
 );

@@ -102,6 +102,11 @@ describe('secretRowView', () => {
     expect(run({ answer: { answered: false, reason: 'chat' } })?.key).toBe('chat.toolPart.openchamber.action.secretRunNotRun');
   });
 
+  test('names the values a finished run could not save', () => {
+    expect(secretRowView({ ok: true, action: 'secret.run', data: { answer: { status: 'ran', outcome: 'exited', exitCode: 0 }, notSaved: ['API_TOKEN'] } }))
+      .toEqual({ key: 'chat.toolPart.openchamber.action.secretRun', output: '', notSaved: ['API_TOKEN'] });
+  });
+
   test('leaves other answers alone', () => {
     expect(secretRowView({ ok: true, action: 'memory.save', data: { answer: { status: 'saved' } } })).toBeNull();
     expect(secretRowView({ ok: false, action: 'secret.run' })).toBeNull();

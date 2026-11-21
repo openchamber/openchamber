@@ -121,7 +121,9 @@ the user can want independently:
   Mode, like render: the chat draws the images in place of the call's row from
   its stored result, which an `execute` script would hide.
 - `openchamber_secret` — `secret.run`, `secret.request` and `secret.forget`.
-  `secret.run` asks OpenCode's shell permission for its command line in the
+  Its description and parameters live in `secret-tool.ts`, under names of
+  their own, since `label` means something else in the web tool. `secret.run`
+  asks OpenCode's shell permission for its command line in the
   plugin, before the call reaches the server: `ctx.permission.assert` with
   action `shell`, the line `secretRunCommandLine` draws as the resource and
   `<program> *` as the pattern to save, so the session's shell rules apply as
@@ -134,7 +136,8 @@ the user can want independently:
   reported, so no payload field can reach another session's remembered values.
   `secret.request` is a
   card where the user types one secret the agent asked for (`label`, `reason`,
-  optional `placeholder`). Both wait, with the same plugin machinery as a page
+  optional `placeholder`). Both wait, and so does a `secret.forget` with
+  `saved: true`, which the user confirms on a card, with the same plugin machinery as a page
   with `awaitAnswer` (call id, `timeout: false`, the `session.prompt` hook
   that ends the wait when the user writes in the chat and leaves it running
   for an agent's or a queued prompt, the inbox events for the user's prompt

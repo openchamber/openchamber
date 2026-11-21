@@ -267,6 +267,8 @@ export const createEnvironmentRuntime = ({
     return { ...serviceVariables, ...readUserVariables() };
   };
 
+  const projectIdFor = async (directory: string) => (await targetFor(path.resolve(directory)))?.projectId ?? null;
+
   const projectStatus = (projectId: string) => statuses.get(projectId) ?? null;
 
   const invalidateProject = (projectId: string) => {
@@ -290,5 +292,5 @@ export const createEnvironmentRuntime = ({
     return variables ? overlayEnvironment(env, variables) : env;
   };
 
-  return { forDirectory, applyToDirectory, forOpenCode, projectStatus, invalidateProject, reloadProject };
+  return { forDirectory, applyToDirectory, forOpenCode, projectIdFor, projectStatus, invalidateProject, reloadProject };
 };

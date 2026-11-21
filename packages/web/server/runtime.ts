@@ -224,7 +224,7 @@ import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
 import { linkedWorktreeOf } from './lib/openchamber-sessions/work-naming.js';
 import { createFileOpenRequester } from './lib/openchamber-control/file-open.js';
-import { createSecretFiles } from './lib/openchamber-control/secret-request.js';
+import { createSavedSecrets, createSecretFiles } from './lib/openchamber-control/secret-request.js';
 import { applyConnectAttemptTimeout } from './lib/network-defaults.js';
 import { applyOutboundProxyFromEnv } from './lib/outbound-proxy.js';
 import { applySystemCertificates } from './lib/system-ca.js';
@@ -1669,9 +1669,8 @@ const waitForOpenCodePort: typeof serverUtilsRuntime.waitForOpenCodePort = (...a
 const buildAugmentedPath: typeof serverUtilsRuntime.buildAugmentedPath = (...args) => serverUtilsRuntime.buildAugmentedPath(...args);
 const buildManagedOpenCodePath: typeof serverUtilsRuntime.buildManagedOpenCodePath = (...args) => serverUtilsRuntime.buildManagedOpenCodePath(...args);
 
-const environmentStore = createEnvironmentStore({
-  filePath: path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'environment.json'),
-});
+const savesSecrets = !process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE;
+const environmentStore = createEnvironmentStore({ filePath: path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'environment.json'), savesSecrets });
 const listConfiguredProjects = async () => {
   const settings = await readSettingsFromDiskMigrated();
   return sanitizeProjects(settings?.projects || []) ?? [];
@@ -2257,7 +2256,7 @@ const openChamberControlService = createOpenChamberControlService({
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     return settings?.agentSecretToolEnabled !== false;
   },
-  secretFiles,
+  secretFiles, savedSecrets: savesSecrets ? createSavedSecrets({ store: environmentStore, projectIdFor: environmentRuntime.projectIdFor }) : null,
   onPageWaitChange: (change) => {
     sessionRuntime.trackWaitingPage(change);
     if (change.type === 'waiting') {

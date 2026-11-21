@@ -8,7 +8,7 @@ import type { createOpenChamberControlService } from './service.js';
 import type { ControlErrorDetails } from './error.js';
 
 export interface ControlRoutesOptions {
-  controlService: Pick<ReturnType<typeof createOpenChamberControlService>, 'execute' | 'answerPage' | 'secretFields' | 'answerSecret'>;
+  controlService: Pick<ReturnType<typeof createOpenChamberControlService>, 'execute' | 'answerPage' | 'secretFields' | 'answerSecret' | 'forgetSavedSecret'>;
   laterPages?: Pick<ReturnType<typeof createLaterPages>, 'load' | 'snapshot'> | null;
 }
 
@@ -84,6 +84,15 @@ export const registerOpenChamberControlRoutes = (app: Application, { controlServ
       return res.json(controlService.secretFields(req.query ?? {}));
     } catch (error) {
       const controlError = asControlError(error, 'Could not read the card');
+      return res.status(controlError.statusCode).json({ error: controlError.message });
+    }
+  });
+
+  app.post('/api/openchamber/secret/forget-saved', express.json({ limit: '4kb' }), async (req, res) => {
+    try {
+      return res.json(await controlService.forgetSavedSecret(req.body ?? {}));
+    } catch (error) {
+      const controlError = asControlError(error, 'Could not forget the secret');
       return res.status(controlError.statusCode).json({ error: controlError.message });
     }
   });

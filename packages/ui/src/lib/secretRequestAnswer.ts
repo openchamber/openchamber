@@ -5,7 +5,7 @@ import { runtimeFetch } from './runtime-fetch';
 const errorSchema = z.object({ error: z.string().min(1) }).catch({ error: '' });
 
 export async function answerSecretRequest(
-    input: { sessionId: string; callId: string } & ({ value: string } | { values: Record<string, string>; remember: string[] } | { declined: true }),
+    input: { sessionId: string; callId: string } & ({ value: string } | { values: Record<string, string>; remember: string[]; save: string[]; saveGlobally: string[]; saved: string[] } | { declined: true }),
     directory: string | undefined,
 ): Promise<void> {
     const response = await runtimeFetch('/api/openchamber/secret/answer', {
@@ -19,15 +19,42 @@ export async function answerSecretRequest(
     throw new Error(payload.error || `The secret was not saved (${response.status})`);
 }
 
-const secretRunFieldsSchema = z.object({ fields: z.array(z.string()), reused: z.array(z.string()) });
+const secretRunFieldsSchema = z.object({
+    fields: z.array(z.string()),
+    reused: z.array(z.string()),
+    saved: z.array(z.string()).default([]),
+    savedGlobally: z.array(z.string()).default([]),
+    savedInBoth: z.array(z.string()).default([]),
+    canSave: z.boolean().default(false),
+    canSaveGlobally: z.boolean().default(false),
+});
+
+export type SecretRunFields = z.infer<typeof secretRunFieldsSchema>;
 
 export async function readSecretRunFields(
     input: { sessionId: string; callId: string },
     directory: string | undefined,
-): Promise<z.infer<typeof secretRunFieldsSchema> | null> {
+): Promise<SecretRunFields | null> {
     const query = new URLSearchParams({ sessionId: input.sessionId, callId: input.callId });
     const response = await runtimeFetch(`/api/openchamber/secret/fields?${query.toString()}`, { directory });
     if (!response.ok) return null;
     const parsed = secretRunFieldsSchema.safeParse(await response.json().catch(() => null));
     return parsed.success ? parsed.data : null;
+}
+
+export async function forgetSavedSecret(
+    input: { sessionId: string; callId: string; env: string },
+    directory: string | undefined,
+): Promise<SecretRunFields> {
+    const response = await runtimeFetch('/api/openchamber/secret/forget-saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+        directory,
+    });
+    if (!response.ok) {
+        const payload = errorSchema.parse(await response.json().catch(() => null));
+        throw new Error(payload.error || `The saved secret was not forgotten (${response.status})`);
+    }
+    return secretRunFieldsSchema.parse(await response.json());
 }

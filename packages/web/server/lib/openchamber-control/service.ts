@@ -93,6 +93,7 @@ export interface ControlDependencies {
   isSecretToolEnabled?: () => Promise<boolean>;
   getTerminalRuntime?: TerminalReadDependencies['getTerminalRuntime'];
   secretFiles?: Parameters<typeof createSecretRequests>[0]['files'];
+  savedSecrets?: Parameters<typeof createSecretRequests>[0]['saved'];
   onPageWaitChange?: NonNullable<Parameters<typeof createPageAnswers>[0]>['onWaitChange'];
   readPendingRequests?: () => { [sessionID: string]: { forms: object[]; pages: object[]; permissions: PendingPermission[] } };
   isPermissionAutoAnswered?: (sessionID: string | undefined, directory: PendingPermission['directory'], permissionID: PendingPermission['id']) => Promise<boolean>;
@@ -472,6 +473,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     isSecretToolEnabled = async () => true,
     getTerminalRuntime = null,
     secretFiles = null,
+    savedSecrets = null,
     onPageWaitChange = () => {},
     readPendingRequests = (): ReturnType<NonNullable<ControlDependencies['readPendingRequests']>> => ({}),
     isPermissionAutoAnswered = async () => false,
@@ -593,7 +595,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
   const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
   const readSession = async (sessionID: string) => (await getClient()).session.get({ sessionID });
   const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers, hasUnreadChat, readSession, laterPages, sharePages });
-  const secretRequests = createSecretRequests({ isEnabled: isSecretToolEnabled, files: secretFiles, onWaitChange: onPageWaitChange, hasUnreadChat });
+  const secretRequests = createSecretRequests({ isEnabled: isSecretToolEnabled, files: secretFiles, saved: savedSecrets, onWaitChange: onPageWaitChange, hasUnreadChat });
   const generateImage = createImageGenerationAction({
     getClient,
     readSettings: readSettingsFromDiskMigrated,
@@ -1343,25 +1345,14 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
       if (action.startsWith('terminal.')) {
         return await readTerminal(action, input, contextDirectory);
       }
-      if (action === 'secret.request') {
-        return await secretRequests.request(input, {
-          sessionId: asNonEmptyString(options.contextSessionId),
-          callId: asNonEmptyString(options.contextCallId),
-          directory: asNonEmptyString(contextDirectory),
-          signal: options.signal,
-        });
-      }
-      if (action === 'secret.run') {
-        return await secretRequests.run(input, {
+      if (action.startsWith('secret.')) {
+        return await secretRequests.execute(action, input, {
           sessionId: asNonEmptyString(options.contextSessionId),
           callId: asNonEmptyString(options.contextCallId),
           directory: asNonEmptyString(contextDirectory),
           signal: options.signal,
           authorized: options.secretRunAuthorized === true,
         });
-      }
-      if (action === 'secret.forget') {
-        return await secretRequests.forget(asNonEmptyString(options.contextSessionId));
       }
       if (action === 'file.open') {
         if (!fileOpen) {
@@ -1546,6 +1537,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     answerPage,
     answerSecret: secretRequests.answer,
     secretFields: secretRequests.fields,
+    forgetSavedSecret: secretRequests.forgetSaved,
     releaseAnswerWaits,
     stopSession,
     answerPermission,

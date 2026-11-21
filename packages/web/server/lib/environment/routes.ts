@@ -67,8 +67,9 @@ export const registerEnvironmentRoutes = (app: EnvironmentRouteApp, { store, run
     const projectId = requireProjectId(req, res);
     if (!projectId) return undefined;
     try {
-      await store.updateProject(projectId, parseProjectPatch(req.body));
-      runtime.invalidateProject(projectId);
+      const patch = parseProjectPatch(req.body);
+      await store.updateProject(projectId, patch);
+      if (patch.variables !== undefined || patch.command !== undefined) runtime.invalidateProject(projectId);
       return res.json(projectView(projectId));
     } catch (error) {
       return respondWithError(res, error, 'Failed to save project environment');
