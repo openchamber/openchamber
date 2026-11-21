@@ -3,8 +3,9 @@ import { asNonEmptyString, isString } from '../shared/guards.js';
 import { createMessageId, escapeAttribute } from '../dispatch-results/runtime.js';
 import { WORKFLOW_ANSWER_TOOL } from '../openchamber-control/actions.js';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
+import { callKey, publishCallName, readAgentOptions, resolveForkSource } from './agent-call.js';
 import { WorkflowAgentStopped } from './agent-session.js';
-import { hasErrorCode, hasErrorMessage, hasErrorStatus, isAgentOptions, isAnswerWrapper, isWorkflowSchema, isWorkflowText } from './contracts.js';
+import { hasErrorCode, hasErrorMessage, hasErrorStatus, isAnswerWrapper, isWorkflowText } from './contracts.js';
 import { findSchemaContradiction, parseJsonAnswer, validateJsonSchema } from './json-schema.js';
 import { createLimiter } from './limiter.js';
 import { readWorkflowProcessStart } from './process-owner.js';
@@ -13,7 +14,7 @@ import { WorkflowScriptError, parseWorkflowScript, plannedPhases } from './scrip
 import { isWorkflowRunId } from './store.js';
 import type { WorkflowRun, WorkflowAgent } from './store.js';
 import type { WorkflowAgentCall } from './sandbox.js';
-import type { AgentOptions, AnswerSlot, Ending, Execution, RunInput, WorkflowInput, WorkflowRuntimeOptions, WorkflowSchema, WorkflowScope, WorkflowText } from './contracts.js';
+import type { AnswerSlot, Ending, Execution, RunInput, WorkflowInput, WorkflowRuntimeOptions, WorkflowSchema, WorkflowScope, WorkflowText } from './contracts.js';
 export const MAX_CONCURRENT_AGENTS = 8;
 export const MAX_AGENTS_PER_RUN = 200;
 const SCHEMA_ATTEMPTS = 3;
@@ -31,21 +32,7 @@ const WORKFLOW_RESULT_SOURCE = 'openchamber-workflow';
 const truncate = <T extends WorkflowText>(text: T, limit: number) => (text.length > limit ? `${text.slice(0, limit)}…` : text);
 const asText = (value: WorkflowAgent['result']) => (isWorkflowText(value) ? value : JSON.stringify(value ?? null, null, 2));
 
-const callKey = (prompt: string, options: AgentOptions) => crypto.createHash('sha256').update(JSON.stringify([prompt, options])).digest('hex').slice(0, 24);
 const createRunId = () => `wf_${crypto.randomBytes(12).toString('base64url').replace(/[-_]/g, '').slice(0, 16).padEnd(16, '0')}`;
-
-const readAgentOptions = (raw: WorkflowAgentCall['options']) => {
-  const source = isAgentOptions(raw) ? raw : {};
-  const label = asNonEmptyString(source.label);
-  const agent = asNonEmptyString(source.agent);
-  const model = asNonEmptyString(source.model);
-  const options: AgentOptions = {};
-  if (label) options.label = label.trim().slice(0, 120);
-  if (agent) options.agent = agent.trim();
-  if (model) options.model = model.trim();
-  if (isWorkflowSchema(source.schema)) options.schema = source.schema;
-  return options;
-};
 
 const schemaInstruction = (schema: WorkflowSchema) => [
   '',
@@ -322,16 +309,24 @@ export const createWorkflowRuntime = ({
 
   const runAgent = async (run: WorkflowRun, execution: Execution, { prompt, options: rawOptions, phase }: WorkflowAgentCall): Promise<WorkflowAgent['result']> => {
     const options = readAgentOptions(rawOptions);
-    const base = callKey(prompt, options);
+    const forkFromSessionId = resolveForkSource(execution.named, options);
+    const base = callKey(prompt, forkFromSessionId ? { ...options, forkFromSessionId } : options);
     const occurrence = (execution.occurrences.get(base) ?? 0) + 1;
     execution.occurrences.set(base, occurrence);
     const key = `${base}-${occurrence}`;
     const label = options.label ?? truncate(prompt.replace(/\s+/g, ' ').trim(), 60);
 
-    const replay = execution.completed.get(key);
+    let replay = execution.completed.get(key);
+    if (replay && options.id && replay.sessionId
+      && await agentSessions.sessionGone({ directory: run.directory, sessionId: replay.sessionId, signal: execution.controller.signal })
+      && !execution.controller.signal.aborted) {
+      execution.completed.delete(key);
+      replay = undefined;
+    }
     if (replay) {
       execution.consumed.add(key);
       run.agents.push({ ...replay, phase: phase ?? replay.phase, replayed: true });
+      publishCallName(execution.named, options, replay);
       announce(run);
       return replay.result;
     }
@@ -380,6 +375,7 @@ export const createWorkflowRuntime = ({
       const { sessionId, outcome } = await agentSessions.start({
         directory: run.directory,
         parentSessionId: run.parentSessionId,
+        forkFromSessionId,
         title: label,
         agent: options.agent,
         model: options.model,
@@ -454,6 +450,7 @@ export const createWorkflowRuntime = ({
       await persist(run).catch((error) => {
         console.warn(`[workflows] agent ${record.key} of ${run.id} ended but could not be saved:`, error.message);
       });
+      publishCallName(execution.named, options, record);
     }
   };
 
@@ -536,6 +533,7 @@ export const createWorkflowRuntime = ({
       completed,
       consumed: new Set(),
       occurrences: new Map(),
+      named: new Map(),
       stopReason: null,
       sandbox: null,
     };

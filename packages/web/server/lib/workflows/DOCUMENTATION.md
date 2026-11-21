@@ -32,13 +32,15 @@ card and the Workflows panel open them.
   agent that wrote the script.
 - `sandbox.ts`: runs a body in a worker thread, inside a vm context that sees
   only `agent()`, `parallel()`, `pipeline()`, `phase()`, `log()` and `args`.
-- `agent-session.ts`: one workflow agent is one session linked to the
-  proposing session by metadata, prompted once and awaited until its turn
-  ends; a schema correction is a follow-up prompt in the same session. The
-  agent copies what a child would inherit from the proposing session: its
-  folder, its permission rules, and its model when the call names none. An
-  agent asked for a schema answer also gets an allow for
-  `openchamber_workflow_answer`. Also posts the report as a synthetic message.
+- `agent-session.ts`: one workflow agent is one session, either fresh or a
+  native fork of another agent's session when the call names `forkFrom`.
+  It is linked to the proposing session by metadata, prompted once and awaited
+  until its turn ends. A schema correction is a follow-up prompt in the same
+  session. A fresh agent copies what a child would inherit from the proposing
+  session: its folder, its permission rules, and its model when the call
+  names none; a fork takes them from its source instead. An agent asked for a
+  schema answer also gets an allow for `openchamber_workflow_answer`. Also
+  posts the report as a synthetic message.
 - `json-schema.ts`: the small part of JSON Schema `agent({ schema })` checks.
 - `store.ts`: run files under `<data-dir>/workflow-runs/`, one per run. A
   settled run (finished, report delivered) stays in memory only as
@@ -125,8 +127,32 @@ session proposed. `workflow.save` writes a script to
   resolve to null, show as failed and leave a log line. At most `MAX_CONCURRENT_AGENTS` work at once.
 - `agent()` resolves to the answer text, the parsed JSON when a schema was
   given, or null when the agent failed, was stopped, or gave no answer matching
-  the schema in three tries. The only rejection is a `TypeError` for a prompt
-  that is not a non-empty string, a bug in the script itself.
+  the schema in three tries. A prompt that is not a non-empty string rejects
+  in the script, a bug in the script itself; invalid `id`/`forkFrom`
+  references fail the run.
+- `id` uniquely names a call within its run; `forkFrom` names a successfully
+  completed call of the same run. Both are non-empty strings of at most 120
+  characters: a malformed name, a duplicate `id`, or a `forkFrom` that names
+  an unknown, unfinished or failed call rejects the host call and fails the
+  run before any prompt goes out, inside `parallel()` too. The sandbox checks
+  the name's type before the options cross to the host as JSON, where a
+  function would vanish and a BigInt would drop every option. The names live
+  only in the running script: an agent record stores neither, and a resume
+  learns them again as the script replays.
+- A fork goes through OpenCode's native `session.fork`, so the new session
+  starts from the source's history. The server then writes the same
+  `workflowAgentMetadata` link onto the fork as on a fresh agent — pointing at
+  the run's proposing session, not the source — sets the source's permission
+  rules with `openchamber_workflow_answer` re-scoped to this call (allowed
+  when it asks for a schema, denied otherwise, since a copied allow would let
+  a branch answer a schema it was never asked). The fork inherits the
+  source's agent and model; the server switches either only when the call
+  names a different one or the fork came back without it, since a switch to
+  the same value still writes a switch record. The source must read and
+  parse before the fork is made: an unreadable or unrecognized source fails
+  the call with no fork and no prompt, and a run stopped during the read
+  never forks. Everything after that — answers, schema follow-ups, stop,
+  resume — works as for a fresh agent.
 - `parallel(tasks)` starts every task at once (the agent slots do the
   queueing) and waits for all of them, takes at most 4096, and turns a task
   that throws into null with a log line. `pipeline(items, ...stages)` runs each
@@ -398,7 +424,12 @@ so they nest, archive and roll up cost as before. `hasWorkingChildren` in
 subagent of an idle one, for its parent, so a goal audit or a turn-end
 notification still waits for the run. A send that restores an archived
 session finds its archived agents by the same link
-(`../openchamber-sessions/routes.js`). Usage statistics are OpenCode's own
+(`../openchamber-sessions/routes.js`). A forked agent carries the same link,
+so it nests, cascades and notifies like a fresh agent, and a session the
+user forks by hand from a workflow agent copies its metadata and nests
+under the same proposer, as a hand fork of any workflow agent does; agents
+of a deleted or pruned run stay linked to their proposer like any other
+sessions. Usage statistics are OpenCode's own
 aggregate, which classifies sessions by `parentID` alone, so there an agent
 counts as a top-level session and its prompts as user prompts. An agent
 lives at the proposing session's directory: there is no isolated copy per
@@ -415,6 +446,12 @@ hand an answer to the wrong call. `Math.random()`, `Date.now()` and `new
 Date()` throw in the sandbox so a prompt cannot differ between attempts by
 accident.
 
+A fork call's key includes the source session id, so a source that ran again
+in a later attempt cannot hand its older branch's session to a new fork call.
+A named call whose saved session OpenCode reports as not found runs again
+instead of replaying, because every fork of it would fail on each resume; a
+read that fails any other way keeps the replay.
+
 ### Why a schema answer goes through a tool and not the final text
 
 Asking for "only JSON" and parsing the last reply depends on the model
@@ -424,7 +461,7 @@ returns the mismatch as an error, so the agent fixes it in the same turn.
 OpenCode 2 has no per-prompt structured output (1.x's `format: json_schema` is
 gone), and no per-prompt tool switch either, so the tool is denied in every
 session by the managed config and allowed in the agent's session through
-`session.create`'s `permissions`. Putting it behind Code Mode instead was
+its session `permissions`. Putting it behind Code Mode instead was
 weighed: every session would still list it in the catalog, and an agent would
 need an `execute` round trip to answer. The text path stays as the fallback
 for an OpenCode the managed config does not reach.
