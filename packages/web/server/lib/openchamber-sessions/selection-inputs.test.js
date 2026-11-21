@@ -1,41 +1,54 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fetchSelectionInputs, fetchWarmSelectionInputs } from './selection-inputs.js';
+import { describe, expect, it } from 'vitest';
+import { fetchSelectionInputs } from './selection-inputs.js';
 
-const ready = { agents: [{ id: 'build' }], config: {} };
-const cold = { agents: [], config: {} };
+const agents = [{ id: 'build', mode: 'primary' }];
 
-describe('fetchWarmSelectionInputs', () => {
-  it('reads again until the agents arrive', async () => {
-    const read = vi.fn().mockResolvedValueOnce(cold).mockResolvedValueOnce({ agents: null, config: null }).mockResolvedValue(ready);
-    const sleep = vi.fn(async () => {});
-    await expect(fetchWarmSelectionInputs(read, { sleep, pauseMs: 500 })).resolves.toBe(ready);
-    expect(read).toHaveBeenCalledTimes(3);
-    expect(sleep).toHaveBeenCalledWith(500);
-  });
+// OpenCode 2.3 on a location it has just built: agent.list answers at once from a registry
+// the plugins have not filled yet, model.list answers once they have activated.
+const coldLocation = ({ activation = Promise.resolve() } = {}) => {
+  let active = false;
+  return {
+    model: { list: async () => {
+      await activation;
+      active = true;
+      return { data: [] };
+    } },
+    agent: { list: async () => ({ data: active ? agents : [] }) },
+    config: { get: async () => [] },
+  };
+};
 
-  it('gives up at the deadline with the last read, which the caller refuses', async () => {
-    let clock = 0;
-    const read = vi.fn(async () => cold);
-    const sleep = vi.fn(async (ms) => { clock += ms; });
-    await expect(fetchWarmSelectionInputs(read, { deadlineMs: 2_000, pauseMs: 500, now: () => clock, sleep })).resolves.toBe(cold);
-    expect(read).toHaveBeenCalledTimes(5);
-  });
-
-  it('reads once when the first answer is complete', async () => {
-    const read = vi.fn(async () => ready);
-    await fetchWarmSelectionInputs(read);
-    expect(read).toHaveBeenCalledTimes(1);
-  });
-});
+const read = (client) => fetchSelectionInputs({ client, readSettingsFromDiskMigrated: async () => ({}) });
 
 describe('fetchSelectionInputs', () => {
+  it('reads the agents of a new location after its plugins have activated', async () => {
+    const inputs = await read(coldLocation());
+    expect(inputs.agents).toEqual(agents);
+    expect(inputs.notReadyReason).toBeNull();
+  });
+
+  it("passes on OpenCode's reason when the plugins do not activate in time", async () => {
+    const unavailable = { _tag: 'ServiceUnavailableError', service: 'plugin', message: 'Location plugins did not finish activating' };
+    const inputs = await read(coldLocation({ activation: Promise.reject(unavailable) }));
+    expect(inputs.agents).toEqual([]);
+    expect(inputs.notReadyReason).toBe('Location plugins did not finish activating');
+  });
+
+  it.each([
+    ['a socket error', new Error('socket hang up')],
+    ['another unavailable service', { _tag: 'ServiceUnavailableError', service: 'provider', message: 'Provider is starting' }],
+  ])('gives no reason for a model read that failed with %s', async (_, failure) => {
+    const inputs = await read(coldLocation({ activation: Promise.reject(failure) }));
+    expect(inputs.notReadyReason).toBeNull();
+  });
+
   it('skips config entries that are not objects and keeps the usable ones', async () => {
     const client = {
       model: { list: async () => ({ data: [] }) },
       agent: { list: async () => ({ data: [] }) },
       config: { get: async () => [42, 'text', null, { info: { default_agent: 'build' } }] },
     };
-    const inputs = await fetchSelectionInputs({ client, readSettingsFromDiskMigrated: async () => ({}) });
+    const inputs = await read(client);
     expect(inputs.config).toEqual({ defaultAgent: 'build', defaultModel: null });
   });
 });

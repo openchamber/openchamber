@@ -536,18 +536,21 @@ constructor retains its existing `Object.assign` behavior.
   and effort preferences survive missing catalog entries rather than silently
   dispatching with a different model.
 - A create with a prompt resolves its selection in the target directory before
-  creating an OpenCode session. It reads discovery with a 10-second request
-  deadline, once in an existing folder. In a worktree the same call just made,
-  it reads again every half second for up to 15 seconds while the agent list is
-  empty or the agent or config read fails, when the call has to pick an agent or
-  model (an explicit pair waits for nothing; its optional level is a single read)
-  (`../openchamber-sessions/selection-inputs.js`): that worktree's OpenCode
-  location answers its first agent read empty and fills the list about a second
-  later, so without the wait nearly every create in a new worktree came back
-  503 and the agent made a second, stray worktree before it retried in the
-  first. A list still missing after that, or after the one read elsewhere, an
-  empty agent list, or a configured agent absent from the list produce 503; no fallback model is dispatched from
-  those snapshots. A missing saved default agent is named in the error with a
+  creating an OpenCode session. Each discovery read takes two steps with a
+  10-second request deadline each: the model list first, then the agent list
+  and config in parallel (`../openchamber-sessions/selection-inputs.js`). The
+  agent list of a folder whose OpenCode location is not running yet (a new chat
+  or worktree, a project first used since start, one idle for an hour) is only
+  complete once that location's plugins have activated, and the model read is
+  what waits for them. When the plugins did not activate within OpenCode's
+  limit, a selection that still needs a default produces 503 with OpenCode's
+  reason, even if some agents and the config arrived: the list may be partial.
+  A failed agent or config read, an empty agent list, or a configured agent
+  absent from the list produce 503 too, and so does an explicitly requested
+  agent missing from a list read after activation failed. No fallback model is
+  dispatched from those snapshots. Validating an explicit model, agent or
+  level reads discovery too, so it also waits for the plugins of a cold
+  location, up to OpenCode's limit. A missing saved default agent is named in the error with a
   hint to update the default or pass an explicit agent; it never silently picks
   another agent. An explicit agent that needs only a model does not require the
   saved default agent to exist. Model precedence stays unchanged.
@@ -557,11 +560,10 @@ constructor retains its existing `Object.assign` behavior.
   setup, with the deadlines above, then check the final status once. Git-ready
   alone is insufficient. Creating in an existing checkout subdirectory checks
   bootstrap at the checkout root while retaining the session's requested folder.
-  If a create prerequisite fails after making a worktree (agents that never
-  warmed up, a missing default agent, setup still running), the error carries
+  If a create prerequisite fails after making a worktree (plugins that did not
+  activate, a missing default agent, setup still running), the error carries
   `partialAction: worktree-created` and `directory`, with no session ID. The
-  caller can retry that directory without a `worktree` parameter; after the
-  warm-up this is a real failure, no longer the normal first answer.
+  caller can retry that directory without a `worktree` parameter.
   The CLI prints the retained directory and a retry command preserving the
   prompt and selection options without creating another worktree.
   An empty-session create without a prompt keeps its existing selection behavior.
@@ -1045,6 +1047,21 @@ The target directory's agent snapshot determines its model bindings. Missing
 discovery cannot establish the default choice. Checking it once before creation
 lets the caller retry a known directory without polling, sending a prompt with
 an unintended model, or accumulating empty sessions.
+
+### Why selection reads the models before the agents, and does not poll
+
+OpenCode 2.3 builds the agent registry from plugins, the built-in agents
+included, and starts them when a location is first used. `agent.list` answers
+from the registry at once, so a parallel read on a new location got an empty
+list, while `model.list` waits up to 5 seconds for the plugins. Reading the
+models first makes that wait OpenCode's own activation barrier: one read gives
+the real agent list in every folder. It replaced a worktree-only loop that
+re-read every half second for up to 15 seconds, which guessed at readiness
+from an empty list, left new chats and evicted folders failing, and hid the
+real reason when activation failed. The order is a workaround for this server
+selection path only; it costs a second round trip before the agent read. When
+`agent.list` itself waits for activation upstream, read the three in parallel
+again.
 
 ### Why only ownWork nests a dispatched session, and by metadata
 

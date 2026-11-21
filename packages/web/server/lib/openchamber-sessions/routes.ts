@@ -32,7 +32,7 @@ import { applyForkInheritance } from './fork-inheritance.js';
 import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
 import { createSession } from './create-session.js';
-import { fetchSelectionInputs, fetchWarmSelectionInputs } from './selection-inputs.js';
+import { fetchSelectionInputs } from './selection-inputs.js';
 import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
 import { createSessionWorktreeMover } from './worktree-move.js';
 import { sessionParentId } from '../session-lineage.js';
@@ -42,7 +42,6 @@ import { hasMessage } from './contracts.js';
 import type { AgentInfo, ModelInfo, SessionPromptInput, SessionForkInput, SessionSwitchModelInput } from '@opencode/client';
 import type { SessionClient } from './opencode-client-contract.js';
 import type { SessionMetadata, MetadataDecider } from './session-metadata-store.js';
-import type { SelectionWarmUpOptions } from './selection-inputs.js';
 import type { SessionMoveWorktree } from './worktree-move.js';
 import type { StartDirectoryResult } from './worktree-start-directory.js';
 import type { Application, Request, Response } from '../shared/http-contracts.js';
@@ -117,7 +116,6 @@ export interface SessionServiceDependencies {
   worktreeBootstrapStore: BootstrapStore;
   hydrateWorktreeCheckout: FeatureRoutesRuntime['hydrateBoundCheckout'];
   createChangeRequestWorktree?: ((input: { directory: string; number: number; name?: string; branchName?: string; startCommand?: string; createCommand?: string }) => Promise<SessionMoveWorktree>) | null;
-  selectionWarmUp?: SelectionWarmUpOptions;
   dataDir?: string | null;
   archiveStore?: ReturnType<typeof createArchiveStore> | null;
   openCodeArchive?: Parameters<typeof createSessionArchive>[0]['openCode'] | null;
@@ -176,7 +174,6 @@ interface SessionSelectionInput extends SelectionRequest {
   directory: string;
   projectId: string | undefined;
   reuseSessionSelection?: boolean;
-  warmUp?: boolean;
 }
 type GoalInput = { ok: true; enabled: boolean; tokenBudget: number | null } | { ok: false; error: string };
 interface DispatchInput extends SessionSelectionInput {
@@ -686,7 +683,6 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     worktreeBootstrapStore,
     hydrateWorktreeCheckout,
     createChangeRequestWorktree = null,
-    selectionWarmUp = undefined,
     dataDir = null,
     archiveStore: injectedArchiveStore = null,
     openCodeArchive: injectedOpenCodeArchive = null,
@@ -854,13 +850,16 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
 
   const validateRequestedSelection = async ({ directory, requestedModel, requestedAgent, requestedVariant }: SelectionRequest & { directory: string }) => {
     if (!requestedModel && !requestedAgent && !requestedVariant) return;
-    const { models, agents } = await fetchSelectionInputs({
+    const { models, agents, notReadyReason } = await fetchSelectionInputs({
       client: clientFor(directory),
       readSettingsFromDiskMigrated,
     });
 
     if (requestedAgent && agents && agents.length > 0) {
       const agent = agents.find((entry) => entry?.id === requestedAgent) || null;
+      if (!agent && notReadyReason) {
+        throw new OpenChamberControlError(`Session selection is not ready: ${notReadyReason}`, 503);
+      }
       if (!agent) {
         throw new OpenChamberControlError(`Unknown agent '${requestedAgent}' for ${directory}`, 400);
       }
@@ -895,17 +894,13 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     requestedAgent,
     requestedVariant,
     reuseSessionSelection = false,
-    warmUp = false,
   }: SessionSelectionInput) => {
     let model = requestedModel;
     let agent = requestedAgent;
     let variant = requestedVariant;
     let selectionInputs: Awaited<ReturnType<typeof fetchSelectionInputs<SessionSettings | null>>> | null = null;
-    const readSelectionInputs = async ({ waitForAgents = false } = {}) => {
-      if (!selectionInputs) {
-        const read = () => fetchSelectionInputs({ client, readSettingsFromDiskMigrated });
-        selectionInputs = await (warmUp && waitForAgents ? fetchWarmSelectionInputs(read, selectionWarmUp) : read());
-      }
+    const readSelectionInputs = async () => {
+      selectionInputs ??= await fetchSelectionInputs({ client, readSettingsFromDiskMigrated });
       return selectionInputs;
     };
     if (reuseSessionSelection && (!model || !agent)) {
@@ -920,7 +915,10 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
       }
     }
     if (!model || !agent) {
-      const inputs = await readSelectionInputs({ waitForAgents: true });
+      const inputs = await readSelectionInputs();
+      if (inputs.notReadyReason) {
+        throw new OpenChamberControlError(`Session selection is not ready: ${inputs.notReadyReason}`, 503);
+      }
       if (!inputs.agents || !inputs.agents.length || inputs.config === null) {
         throw new OpenChamberControlError('Session selection is not ready: agent configuration is unavailable', 503);
       }
@@ -1286,7 +1284,6 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
           requestedModel: model,
           requestedAgent: agent,
           requestedVariant: variant,
-          warmUp: Boolean(worktree),
         });
       }
     } catch (error) {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createOpenChamberSessionService } from './routes.js';
 import { getWorktreeBootstrapStatus } from '../git/service.js';
+import { createOpenCodeClient } from './opencode-client.js';
 
 const directory = '/fixture/worktree';
 const bound = { providerID: 'example', id: 'build-model', variant: 'high' };
@@ -59,6 +60,19 @@ const fixture = (overrides = {}) => {
   return { service, sdk, records, delivered, createWorktree, createClient };
 };
 
+// OpenCode 2.3 on a location it has just built: agent.list answers from a registry the plugins
+// have not filled yet, model.list answers once they have activated.
+const coldLocation = (f) => {
+  let active = false;
+  const models = f.sdk.model.list.getMockImplementation();
+  f.sdk.model.list.mockImplementation(async (...args) => {
+    const response = await models(...args);
+    active = true;
+    return response;
+  });
+  f.sdk.agent.list.mockImplementation(async () => ({ data: active ? agents : [] }));
+};
+
 const request = { projectId: 'test', worktree: { name: 'task' }, prompt: 'Only the test double receives this' };
 
 describe('session creation preconditions', () => {
@@ -82,40 +96,86 @@ describe('session creation preconditions', () => {
     expect(f.delivered).toEqual([]);
   });
 
-  it.each(['empty agents', 'failed agents', 'failed config'])(
-    'waits in a new worktree while its agents warm up after %s, and creates the session in one call', async (failure) => {
-      const f = fixture({ selectionWarmUp: { deadlineMs: 5_000, pauseMs: 0 } });
-      if (failure === 'empty agents') f.sdk.agent.list.mockResolvedValueOnce({ data: [] });
-      else if (failure === 'failed agents') f.sdk.agent.list.mockRejectedValueOnce(new Error('starting'));
-      else f.sdk.config.get.mockRejectedValueOnce(new Error('starting'));
-
-      const result = await f.service.create(request);
+  it.each([['a new worktree', request], ['an existing folder', { directory, prompt: request.prompt }]])(
+    'creates the session in %s whose location has not activated its plugins yet, from one read', async (_, input) => {
+      const f = fixture();
+      coldLocation(f);
+      const result = await f.service.create(input);
       expect(result).toMatchObject({ agent: 'build', promptDispatched: true });
-      expect(f.sdk.agent.list).toHaveBeenCalledTimes(2);
-      expect(f.createWorktree).toHaveBeenCalledTimes(1);
+      expect(f.sdk.agent.list).toHaveBeenCalledTimes(1);
+      expect(f.sdk.model.list.mock.invocationCallOrder[0]).toBeLessThan(f.sdk.agent.list.mock.invocationCallOrder[0]);
       expect(f.delivered).toMatchObject([{ agent: 'build', model: bound }]);
     },
   );
 
-  it('reads once for an explicit model and agent in a new worktree, whose agents it need not wait for', async () => {
-    const f = fixture({ selectionWarmUp: { deadlineMs: 5_000, pauseMs: 0 } });
-    f.sdk.agent.list.mockResolvedValue({ data: [] });
-    const result = await f.service.create({ ...request, agent: 'plan', model: 'example/recent-model' });
-    expect(result).toMatchObject({ agent: 'plan', promptDispatched: true });
-    expect(f.sdk.agent.list).toHaveBeenCalledTimes(3);
+  it('refuses an unknown agent in a folder whose location has not activated its plugins yet', async () => {
+    const f = fixture();
+    coldLocation(f);
+    await expect(f.service.create({ directory, agent: 'deleted-agent', prompt: request.prompt })).rejects.toMatchObject({
+      statusCode: 400, message: expect.stringContaining("Unknown agent 'deleted-agent'"),
+    });
+    expect(f.records.size).toBe(0);
   });
 
-  it.each(['empty agents', 'failed agents', 'failed config', 'missing default agent'])(
-    'creates nothing after %s that outlasts the warm-up and lets the caller retry the checkout', async (failure) => {
-      const f = fixture({ selectionWarmUp: { deadlineMs: 0 } });
-      if (failure === 'empty agents') f.sdk.agent.list.mockResolvedValueOnce({ data: [] });
+  it('refuses a default selection when the plugins did not activate, even with some agents and a good config', async () => {
+    const f = fixture();
+    // The model read goes through the real SDK, so OpenCode's declared 503 is decoded as in production.
+    const opencode = createOpenCodeClient({ baseUrl: 'http://opencode.test', directory });
+    const fetch = vi.fn(async () => Response.json(
+      { _tag: 'ServiceUnavailableError', service: 'plugin', message: 'Location plugins did not finish activating' },
+      { status: 503 },
+    ));
+    vi.stubGlobal('fetch', fetch);
+    f.sdk.model.list.mockImplementationOnce((...args) => opencode.model.list(...args));
+    try {
+      const refused = f.service.create(request);
+      await expect(refused).rejects.toMatchObject({
+        statusCode: 503, partial: true, partialAction: 'worktree-created', directory,
+      });
+      await expect(refused).rejects.toThrow('Session selection is not ready: Location plugins did not finish activating');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(f.sdk.agent.list).toHaveBeenCalledTimes(1);
+    expect(f.records.size).toBe(0);
+    expect(f.delivered).toEqual([]);
+  });
+
+  it('dispatches an explicit model and agent while the plugins have not activated', async () => {
+    const f = fixture();
+    f.sdk.model.list.mockRejectedValue({ _tag: 'ServiceUnavailableError', service: 'plugin', message: 'Location plugins did not finish activating' });
+    await f.service.create({ directory, agent: 'build', model: 'example/build-model', variant: 'high', prompt: request.prompt });
+    expect(f.delivered).toMatchObject([{ agent: 'build', model: bound }]);
+  });
+
+  it('answers 503 for an explicit agent missing from the partial list the plugins left when they did not activate', async () => {
+    const f = fixture();
+    f.sdk.model.list.mockRejectedValue({ _tag: 'ServiceUnavailableError', service: 'plugin', message: 'Location plugins did not finish activating' });
+    await expect(f.service.create({ directory, agent: 'plugin-agent', prompt: request.prompt })).rejects.toMatchObject({
+      statusCode: 503, message: 'Session selection is not ready: Location plugins did not finish activating',
+    });
+    expect(f.records.size).toBe(0);
+  });
+
+  it.each(['plugins that did not activate', 'empty agents', 'failed agents', 'failed config', 'missing default agent'])(
+    'creates nothing after %s and lets the caller retry the checkout', async (failure) => {
+      const f = fixture();
+      if (failure === 'plugins that did not activate') {
+        f.sdk.model.list.mockRejectedValueOnce({ _tag: 'ServiceUnavailableError', service: 'plugin', message: 'Location plugins did not finish activating' });
+        f.sdk.agent.list.mockResolvedValueOnce({ data: [] });
+      } else if (failure === 'empty agents') f.sdk.agent.list.mockResolvedValueOnce({ data: [] });
       else if (failure === 'failed agents') f.sdk.agent.list.mockRejectedValueOnce(new Error('starting'));
       else if (failure === 'failed config') f.sdk.config.get.mockRejectedValueOnce(new Error('starting'));
       else f.sdk.agent.list.mockResolvedValueOnce({ data: [agents[1]] });
 
-      await expect(f.service.create(request)).rejects.toMatchObject({
+      const refused = f.service.create(request);
+      await expect(refused).rejects.toMatchObject({
         statusCode: 503, partial: true, partialAction: 'worktree-created', directory,
       });
+      if (failure === 'plugins that did not activate') {
+        await expect(refused).rejects.toThrow('Session selection is not ready: Location plugins did not finish activating');
+      }
       expect(f.sdk.agent.list).toHaveBeenCalledTimes(1);
       expect(f.sdk.config.get).toHaveBeenCalledTimes(1);
       expect(f.records.size).toBe(0);
