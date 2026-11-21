@@ -46,6 +46,8 @@ import { useFilePreviewRendering } from './files/view/useFilePreviewRendering';
 import { useFileToolbar } from './files/view/useFileToolbar';
 import { renderFileViewer } from './files/view/renderFileViewer';
 import { renderFileTreePanel } from './files/view/renderFileTreePanel';
+import { useFileImageFullscreen } from './files/view/useFileImageFullscreen';
+import { renderFileImageFullscreen } from './files/view/renderFileImageFullscreen';
 
 export const FilesView: React.FC<FilesViewProps> = ({ visible = true, onCloseFile }) => {
   const { t } = useI18n();
@@ -92,7 +94,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ visible = true, onCloseFil
     guestActions, isBrowserClient, isMobile, t,
   });
   const fileKinds = useFileKinds({ canvasState, draft, fileDocument, scope, tabs, viewModes, files });
-  const imageNavigation = useFileImageNavigation({ fileDirectory, fileKinds, scope, tabs, files, visible });
+  const imageFullscreen = useFileImageFullscreen({ fileKinds, tabs, isMobile, visible });
+  const imageNavigation = useFileImageNavigation({ fileDirectory, fileKinds, imageFullscreen, scope, tabs, files, visible });
   const navigationMask = useFileNavigationMask({ fileDocument, fileKinds, navigationRequests, tabs });
   useFileEditorPanels({ editor, fileKinds, isMobile });
   useFileMarkdownOutline({ fileKinds, markdownPreview, tabs, viewModes });
@@ -109,7 +112,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ visible = true, onCloseFil
   const fileEditorExtensions = useFileEditorExtensions({ editor, fileLanguage, mobileKeyboard, scope, tabs, themes, files, git, isMobile, t });
   const fileAssets = useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scope, tabs, viewModes, files, isMobile, runtime, t });
   const artifacts = useArtifactPreview({
-    draft, fileAssets, fileDocument, fileFreshness, fileKinds, imageNavigation, layout, tabs, viewModes, files, t,
+    draft, fileAssets, fileDocument, fileFreshness, fileKinds, imageFullscreen, imageNavigation, layout, tabs, viewModes,
+    files, t,
   });
   useFileImageLoading({ fileDocument, fileKinds, scope, tabs, files, t });
   const filePreviewRendering = useFilePreviewRendering({
@@ -147,6 +151,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ visible = true, onCloseFil
   const fileTreePanel = renderFileTreePanel({
     fileDirectory, fileOpening, fileTreeRendering, operations, scope, search, tabs, uploads, t,
   });
+  const imageFullscreenViewer = renderFileImageFullscreen({ artifacts, fileDocument, imageFullscreen, tabs, t });
   const { showMobilePageContent } = layout;
   const { dialogInputRef, activeDialog, dialogData, dialogInputValue, setDialogInputValue, isDialogSubmitting, handleDialogSubmit, handleCloseDialog } = operations;
   const { uploadElements } = uploads;
@@ -164,6 +169,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ visible = true, onCloseFil
         onClose={handleCloseDialog}
         inputRef={dialogInputRef}
       />
+      {imageFullscreenViewer}
       {uploadElements}
       {isMobile ? (
         showMobilePageContent ? (
