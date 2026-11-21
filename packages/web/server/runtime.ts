@@ -212,7 +212,7 @@ import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
 import { createUploadStore, registerUploadRoute } from './lib/browser-control/uploads.js';
 import { createManagedConfigRuntime, retireClaudePlugin } from './lib/opencode/managed-config-file.js';
-import { createSharedOpenCodeServiceConnector } from './lib/opencode/shared-service.js';
+import { createSharedOpenCodeServiceConnector, resolveServiceCliBinary } from './lib/opencode/shared-service.js';
 import { createAdaptivePluginSwitchStore, createGlobalConfigPluginSwitchStore } from './lib/opencode/global-plugin-switches.js';
 import { openCodePluginDelivery } from './lib/guests/opencode-plugin.js';
 import { createLimitFailoverRuntime } from './lib/limit-failover/runtime.js';
@@ -1885,7 +1885,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   },
   getManagedOpenCodeEnv: async () => (retireClaudePlugin({ buildOpenCodeUrl, getOpenCodeAuthHeaders, directory: openCodeLifecycleRuntime.getDefaultOpenCodeDirectory(), notify: (payload) => broadcastUiNotification(payload) }), managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
   getUserEnvironment: () => environmentRuntime.forOpenCode(),
-  sharedService: createSharedOpenCodeServiceConnector({ readSettings: () => readSettingsFromDiskMigrated(), resolveBinary: () => ensureOpencodeCliEnv(), buildEnv: () => ({ ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() }), setAuthPassword: (password, source) => openCodeAuthStateRuntime.setOpenCodeAuthState(password, source) }),
+  sharedService: createSharedOpenCodeServiceConnector({ readSettings: () => readSettingsFromDiskMigrated(), resolveBinary: () => ensureOpencodeCliEnv(), buildEnv: () => ({ ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() }), setAuthPassword: (password, source) => openCodeAuthStateRuntime.setOpenCodeAuthState(password, source), resolveLaunch: (binary) => resolveManagedOpenCodeLaunchSpec(binary) }),
 });
 
 configureOpenCodeCredentials(openCodeCredentialSource({
@@ -1909,12 +1909,14 @@ const getOpenCodeCompatibility = async () => {
   return describeOpenCodeCompatibility(version, installation, supportsOpenCodeV2Install() && !pinnedByPolicy, binary || null);
 };
 
+const getSharedServiceCliBinary = () => (openCodeLifecycleRuntime.isConnectedViaSharedService() && !isEnterpriseMode() ? resolveServiceCliBinary(ensureOpencodeCliEnv(), { ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() }) : null);
 const getOpenCodeUpgradeCapability = () => {
   const activeBinary = lastOpenCodeLaunchDiagnostics?.sourceBinary
     || lastOpenCodeLaunchDiagnostics?.binary
     || resolvedOpencodeBinary;
   return resolveOpenCodeUpgradeCapability({
     isExternal: isExternalOpenCode,
+    isSharedService: getSharedServiceCliBinary() !== null,
     hasManagedProcess: Boolean(openCodeProcess),
     activeBinary,
     isBundledBinary: isBundledOpenCodePath,
@@ -2692,7 +2694,7 @@ async function main(options: WebUiServerOptions = {}) {
     gracefulShutdown,
     readOpenCodeLoad: () => readOpenCodeLoad({ buildOpenCodeUrl, getOpenCodeAuthHeaders }),
     getHealthSnapshot: () => {
-      const launchSpec = resolvedOpencodeBinary && !useWslForOpencode
+      const launchSpec = resolvedOpencodeBinary && !useWslForOpencode && !isExternalOpenCode
         ? resolveManagedOpenCodeLaunchSpec(resolvedOpencodeBinary)
         : null;
       return {
@@ -2709,7 +2711,7 @@ async function main(options: WebUiServerOptions = {}) {
         lastManagedOpenCodeProcess,
         lastOpenCodeRestartDiagnostics,
         opencodeBinaryResolved: resolvedOpencodeBinary || null,
-        opencodeBinarySource: resolvedOpencodeBinarySource || null,
+        opencodeBinarySource: isExternalOpenCode ? (openCodeLifecycleRuntime.isConnectedViaSharedService() ? 'shared-service' : 'external') : resolvedOpencodeBinarySource || null,
         opencodeLaunchBinary: launchSpec?.binary || null,
         opencodeLaunchArgs: launchSpec?.args || [],
         opencodeLaunchWrapperType: launchSpec?.wrapperType || null,
@@ -2963,13 +2965,11 @@ async function main(options: WebUiServerOptions = {}) {
       await waitForOpenCodeReady();
     },
     upgradeOpenCodeCli: () => {
-      const launch = resolveManagedOpenCodeLaunchSpec(lastOpenCodeLaunchDiagnostics?.sourceBinary || resolvedOpencodeBinary);
-      const upgrade = () => runOpenCodeCliUpgrade(launch, {
-        env: { ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() },
-        cwd: os.homedir(),
-      });
+      const sharedServiceCli = getSharedServiceCliBinary();
+      const launch = resolveManagedOpenCodeLaunchSpec(sharedServiceCli || lastOpenCodeLaunchDiagnostics?.sourceBinary || resolvedOpencodeBinary);
+      const upgrade = () => runOpenCodeCliUpgrade(launch, { env: { ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() }, cwd: os.homedir() });
       // external: https://learn.microsoft.com/en-us/windows/win32/fileio/creating-and-opening-files Windows cannot replace the running executable; the managed process stops during installation.
-      if (process.platform !== 'win32') return upgrade();
+      if (sharedServiceCli || process.platform !== 'win32') return upgrade();
       return restartOpenCode('opencode-upgrade', { whileStopped: upgrade });
     },
     formatSettingsResponse,

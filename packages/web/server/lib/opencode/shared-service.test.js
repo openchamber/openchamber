@@ -53,6 +53,75 @@ describe('shared-service', () => {
     expect(ensureService).not.toHaveBeenCalled();
   });
 
+  it('replaces a running service older than the installed CLI and keeps one that is not older', async () => {
+    const ensureService = vi.fn(async ({ onStart }) => {
+      onStart('version-mismatch', '2.3.0');
+      return { url: 'http://127.0.0.1:49376', auth: undefined };
+    });
+    const discoverService = vi.fn();
+
+    const result = await connectSharedOpenCodeService({
+      binary: '/usr/local/bin/opencode',
+      platform: 'darwin',
+      enterpriseMode: false,
+      env: { PATH: '/usr/local/bin' },
+      discoverService,
+      ensureService,
+      readCliVersion: async () => '2.3.2',
+    });
+
+    expect(result).toEqual({ origin: 'http://127.0.0.1:49376', port: 49376, password: null, replaced: true });
+    expect(discoverService).not.toHaveBeenCalled();
+    const { version } = ensureService.mock.calls[0][0];
+    expect(version('2.3.0')).toBe(false);
+    expect(version('2.3.2')).toBe(true);
+    expect(version('2.4.0')).toBe(true);
+    expect(version('0.0.0-next-9')).toBe(true);
+  });
+
+  it('reuses whatever service runs when the CLI is a preview build or the caller only restores state', async () => {
+    const running = { url: 'http://127.0.0.1:49374', auth: undefined };
+    const ensureService = vi.fn();
+    const readCliVersion = vi.fn(async () => '0.0.0-next-10');
+    const options = { binary: '/usr/local/bin/opencode', enterpriseMode: false, discoverService: async () => running, ensureService, readCliVersion };
+
+    expect((await connectSharedOpenCodeService(options)).port).toBe(49374);
+    expect((await connectSharedOpenCodeService({ ...options, readCliVersion: async () => '2.3.2', replaceOutdated: false })).port).toBe(49374);
+    expect(ensureService).not.toHaveBeenCalled();
+  });
+
+  it('reads the version from and launches the service with the resolved executable, not a Windows shim', async () => {
+    const ensureService = vi.fn(async () => ({ url: 'http://127.0.0.1:49376', auth: undefined }));
+    const readCliVersion = vi.fn(async () => '2.3.2');
+    await connectSharedOpenCodeService({
+      binary: 'C:\\npm\\opencode.cmd',
+      platform: 'win32',
+      enterpriseMode: false,
+      env: { PATH: '' },
+      discoverService: vi.fn(),
+      ensureService,
+      resolveLaunch: () => ({ binary: 'C:\\npm\\opencode.exe', args: [] }),
+      readCliVersion,
+    });
+
+    expect(readCliVersion.mock.calls[0][0]).toEqual({ binary: 'C:\\npm\\opencode.exe', args: [] });
+    expect(ensureService.mock.calls[0][0].command).toEqual(['C:\\npm\\opencode.exe', 'serve', '--service']);
+  });
+
+  it('reuses whatever service runs when the installed CLI version cannot be read', async () => {
+    const ensureService = vi.fn();
+    const result = await connectSharedOpenCodeService({
+      binary: '/usr/local/bin/opencode',
+      enterpriseMode: false,
+      discoverService: async () => ({ url: 'http://127.0.0.1:49374', auth: undefined }),
+      ensureService,
+      readCliVersion: async () => { throw new Error('spawn failed'); },
+    });
+
+    expect(result.port).toBe(49374);
+    expect(ensureService).not.toHaveBeenCalled();
+  });
+
   it('unsets protected env vars via /usr/bin/env -u on POSIX when starting opencode serve --service', async () => {
     const discoverService = vi.fn(async () => undefined);
     const ensureService = vi.fn(async () => ({
@@ -73,14 +142,18 @@ describe('shared-service', () => {
       },
       discoverService,
       ensureService,
+      readCliVersion: async () => '2.3.2',
     });
 
     expect(result).toEqual({
       origin: 'http://127.0.0.1:49375',
       port: 49375,
       password: 'started-password',
+      replaced: false,
     });
     expect(ensureService).toHaveBeenCalledWith({
+      version: expect.any(Function),
+      onStart: expect.any(Function),
       command: [
         '/usr/bin/env',
         '-u', 'OPENCODE_PASSWORD',
@@ -165,6 +238,7 @@ describe('shared-service', () => {
       resolveBinary: () => '/usr/local/bin/opencode',
       buildEnv: () => ({}),
       setAuthPassword,
+      readCliVersion: async () => { throw new Error('not installed'); },
       discoverService: async () => ({
         url: 'http://127.0.0.1:49374',
         auth: { type: 'basic', username: 'opencode', password: 'pw' },

@@ -305,7 +305,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
 
   let managedPreflight: Promise<boolean> | null = null;
   let managedProcessEnv: ProcessEnvironment | null = null;
-  let connectedViaSharedService = false;
+  let connectedViaSharedService = false, sharedServiceReplaced = false;
 
   const killProcessOnPortWin32 = (port: number) => {
     try {
@@ -1040,7 +1040,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
 
       const canUseSharedService = !env.ENV_SKIP_OPENCODE_START && !env.ENV_CONFIGURED_OPENCODE_HOST && !env.ENV_EFFECTIVE_PORT;
       const wantSharedService = canUseSharedService && Boolean(await sharedService?.isEnabled());
-      if (wantSharedService && sharedService) { await attachSharedService(sharedService, sharedServiceTarget(), { stopManaged: !state.isExternalOpenCode }); connectedViaSharedService = true; return; }
+      if (wantSharedService && sharedService) { sharedServiceReplaced = await attachSharedService(sharedService, sharedServiceTarget(), { stopManaged: !state.isExternalOpenCode }); connectedViaSharedService = true; return; }
 
       const leavingShared = connectedViaSharedService && !wantSharedService;
       if (state.isExternalOpenCode && !leavingShared) {
@@ -1235,7 +1235,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
 
     await restartOpenCode(reason || 'config-change');
 
-    const external = state.isExternalOpenCode === true;
+    const external = state.isExternalOpenCode === true, replacedShared = connectedViaSharedService && sharedServiceReplaced;
 
     try {
       await waitForOpenCodeReady();
@@ -1255,8 +1255,8 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
       throw error;
     }
 
-    const switchedMode = wasExternal !== external;
-    return { reloaded: !external || switchedMode, external: external && !switchedMode };
+    const manualRestart = external && wasExternal && !replacedShared;
+    return { reloaded: !manualRestart, external: manualRestart };
   };
 
   const stopExternalReadinessRecheck = () => {
@@ -1364,8 +1364,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
         syncToHmrState();
         throw new UnsupportedOpenCodeVersionError(unsupportedExternalVersion);
       } else if (!env.ENV_EFFECTIVE_PORT && sharedService && await sharedService.isEnabled()) {
-        await attachSharedService(sharedService, sharedServiceTarget());
-        connectedViaSharedService = true;
+        sharedServiceReplaced = await attachSharedService(sharedService, sharedServiceTarget()); connectedViaSharedService = true;
       } else {
         if (env.ENV_EFFECTIVE_PORT) {
           console.log(`Using OpenCode port from environment: ${env.ENV_EFFECTIVE_PORT}`);
@@ -1676,6 +1675,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
   };
 
   return {
+    isConnectedViaSharedService: () => connectedViaSharedService,
     getManagedOpenCodeProcessEnv: () => (state.isExternalOpenCode ? null : managedProcessEnv),
     getDefaultOpenCodeDirectory: () => getValidatedDefaultDirectory(),
     noteCurrentDirectory: (directory: string | null) => {

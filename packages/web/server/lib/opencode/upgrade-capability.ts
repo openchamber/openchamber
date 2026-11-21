@@ -1,5 +1,6 @@
 export interface OpenCodeUpgradeInput {
   isExternal: boolean;
+  isSharedService?: boolean;
   hasManagedProcess: boolean;
   activeBinary: string | null | undefined;
   isBundledBinary: (binary: string) => boolean;
@@ -15,11 +16,16 @@ export type OpenCodeUpgradeCapability =
 
 export const resolveOpenCodeUpgradeCapability = ({
   isExternal,
+  isSharedService = false,
   hasManagedProcess,
   activeBinary,
   isBundledBinary,
   pinnedByPolicy = false,
 }: OpenCodeUpgradeInput): OpenCodeUpgradeCapability => {
+  if (isSharedService && !pinnedByPolicy) {
+    return { supported: true, manager: 'opencode', reason: null };
+  }
+
   if (isExternal) {
     return {
       supported: false,

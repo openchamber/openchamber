@@ -3,15 +3,23 @@ import path from 'node:path';
 import { discover, ensure } from '@opencode/client/service';
 import type { Endpoint } from '@opencode/client/service';
 import { isEnterpriseMode } from '../enterprise-mode.js';
+import { compareVersions } from '../version-order.js';
+import { readOpenCodeCliVersion } from './compatibility.js';
 
 export interface SharedOpenCodeServiceEndpoint {
   origin: string;
   port: number;
   password: string | null;
+  replaced?: boolean;
 }
 
 export interface SharedServiceSettings {
   useGlobalOpenCodeService?: boolean | undefined;
+}
+
+export interface ServiceCliLaunch {
+  binary: string;
+  args: string[];
 }
 
 export interface ConnectSharedServiceOptions {
@@ -21,11 +29,14 @@ export interface ConnectSharedServiceOptions {
   enterpriseMode?: boolean;
   discoverService?: typeof discover;
   ensureService?: typeof ensure;
+  resolveLaunch?: ((binary: string) => ServiceCliLaunch) | undefined;
+  readCliVersion?: ((launch: ServiceCliLaunch, env: NodeJS.ProcessEnv) => Promise<string>) | undefined;
+  replaceOutdated?: boolean;
 }
 
 export interface SharedOpenCodeServiceConnector {
   isEnabled: () => Promise<boolean>;
-  connect: () => Promise<SharedOpenCodeServiceEndpoint>;
+  connect: (options?: { replaceOutdated?: boolean }) => Promise<SharedOpenCodeServiceEndpoint>;
 }
 
 export interface SharedServiceConnectorDependencies {
@@ -35,6 +46,8 @@ export interface SharedServiceConnectorDependencies {
   setAuthPassword: (password: string, source: string) => string | null;
   discoverService?: typeof discover;
   ensureService?: typeof ensure;
+  resolveLaunch?: ConnectSharedServiceOptions['resolveLaunch'];
+  readCliVersion?: ConnectSharedServiceOptions['readCliVersion'];
 }
 
 const PROTECTED_SERVICE_ENV_KEYS = [
@@ -81,7 +94,8 @@ export const resolveServiceCliBinary = (
   return findCliOnPath(env, platform);
 };
 
-const buildServiceLaunchSpec = (cliBinary: string, env: NodeJS.ProcessEnv | undefined, platform: NodeJS.Platform) => {
+const buildServiceLaunchSpec = (launch: ServiceCliLaunch, env: NodeJS.ProcessEnv | undefined, platform: NodeJS.Platform) => {
+  const cli = [launch.binary, ...launch.args];
   const clean: Record<string, string> = {};
   if (env) {
     for (const [key, value] of Object.entries(env)) {
@@ -92,10 +106,10 @@ const buildServiceLaunchSpec = (cliBinary: string, env: NodeJS.ProcessEnv | unde
   }
   if (platform === 'win32') {
     for (const key of PROTECTED_SERVICE_ENV_KEYS) clean[key] = '';
-    return { command: [cliBinary, 'serve', '--service'], env: clean };
+    return { command: [...cli, 'serve', '--service'], env: clean };
   }
   return {
-    command: ['/usr/bin/env', ...PROTECTED_SERVICE_ENV_KEYS.flatMap((key) => ['-u', key]), cliBinary, 'serve', '--service'],
+    command: ['/usr/bin/env', ...PROTECTED_SERVICE_ENV_KEYS.flatMap((key) => ['-u', key]), ...cli, 'serve', '--service'],
     env: clean,
   };
 };
@@ -120,6 +134,11 @@ export const isSharedOpenCodeServiceEnabled = (settings: SharedServiceSettings |
   settings?.useGlobalOpenCodeService === true
 );
 
+const RELEASE_VERSION = /^\d+\.\d+\.\d+$/;
+
+const notOlderThan = (installed: string) => (running: string) => !RELEASE_VERSION.test(running)
+  || compareVersions(running, installed) >= 0;
+
 export const connectSharedOpenCodeService = async ({
   binary = null,
   env = process.env,
@@ -127,7 +146,26 @@ export const connectSharedOpenCodeService = async ({
   enterpriseMode = isEnterpriseMode(),
   discoverService = discover,
   ensureService = ensure,
+  resolveLaunch = (cliBinary) => ({ binary: cliBinary, args: [] }),
+  readCliVersion = (launch, cliEnv) => readOpenCodeCliVersion(launch, { env: cliEnv }),
+  replaceOutdated = true,
 }: ConnectSharedServiceOptions = {}): Promise<SharedOpenCodeServiceEndpoint> => {
+  const cliBinary = enterpriseMode ? null : resolveServiceCliBinary(binary, env, platform);
+  const launch = cliBinary ? resolveLaunch(cliBinary) : null;
+  const installedVersion = launch && replaceOutdated ? await readCliVersion(launch, env).catch(() => null) : null;
+  if (launch && installedVersion && RELEASE_VERSION.test(installedVersion)) {
+    let replaced = false;
+    const endpoint = await ensureService({
+      ...buildServiceLaunchSpec(launch, env, platform),
+      version: notOlderThan(installedVersion),
+      onStart: (reason, previousVersion) => {
+        if (reason !== 'version-mismatch') return;
+        replaced = true;
+        console.log(`Restarting shared OpenCode service ${previousVersion ?? 'unknown'} with installed ${installedVersion}`);
+      },
+    });
+    return { ...parseSharedServiceEndpoint(endpoint), replaced };
+  }
   const existing = await discoverService().catch(() => undefined);
   if (existing) {
     return parseSharedServiceEndpoint(existing);
@@ -135,11 +173,10 @@ export const connectSharedOpenCodeService = async ({
   if (enterpriseMode) {
     throw new Error('No running shared OpenCode service was found. Enterprise mode does not start a user-configured OpenCode daemon.');
   }
-  const cliBinary = resolveServiceCliBinary(binary, env, platform);
-  if (!cliBinary) {
+  if (!launch) {
     throw new Error('No running shared OpenCode service was found, and no OpenCode CLI binary is configured to start one. Install the OpenCode CLI or set the OpenCode binary path.');
   }
-  const started = await ensureService(buildServiceLaunchSpec(cliBinary, env, platform));
+  const started = await ensureService(buildServiceLaunchSpec(launch, env, platform));
   return parseSharedServiceEndpoint(started);
 };
 
@@ -150,14 +187,19 @@ export const createSharedOpenCodeServiceConnector = ({
   setAuthPassword,
   discoverService = discover,
   ensureService = ensure,
+  resolveLaunch,
+  readCliVersion,
 }: SharedServiceConnectorDependencies): SharedOpenCodeServiceConnector => ({
   isEnabled: async () => isSharedOpenCodeServiceEnabled(await Promise.resolve(readSettings()).catch(() => null)),
-  connect: async () => {
+  connect: async ({ replaceOutdated = true } = {}) => {
     const endpoint = await connectSharedOpenCodeService({
+      replaceOutdated,
       binary: await Promise.resolve(resolveBinary()).catch(() => null),
       env: buildEnv(),
       discoverService,
       ensureService,
+      resolveLaunch,
+      readCliVersion,
     });
     setAuthPassword(endpoint.password ?? '', 'shared-service');
     return endpoint;
@@ -212,9 +254,10 @@ export const attachSharedService = async (
     target.setupProxy();
     target.ensureOpenCodeApiPrefix();
   }
-  if (stopManaged) {
+  if (stopManaged || endpoint.replaced) {
     target.onOpenCodeRestarted?.();
   }
+  return endpoint.replaced === true;
 };
 
 export const restoreSharedServiceState = async (
@@ -222,10 +265,11 @@ export const restoreSharedServiceState = async (
   prev: { origin: string | null; port: number | null },
   target: Pick<SharedServiceLifecycleTarget, 'state' | 'setOpenCodePort' | 'syncToHmrState'>,
 ) => {
-  await connector?.connect().catch(() => {});
+  const endpoint = await connector?.connect({ replaceOutdated: false }).catch(() => null);
+  const port = endpoint?.port ?? prev.port;
   target.state.isExternalOpenCode = true;
-  target.state.openCodeBaseUrl = prev.origin;
-  if (prev.port) target.setOpenCodePort(prev.port);
+  target.state.openCodeBaseUrl = endpoint?.origin ?? prev.origin;
+  if (port) target.setOpenCodePort(port);
   target.state.isOpenCodeReady = true;
   target.syncToHmrState();
 };

@@ -1554,6 +1554,40 @@ under a running child.
   harmless. The card's delivery state (`guests/opencode-plugin.js`) tells the
   user, and the same button is the way in.
 
+### Why the shared service is replaced when it is older than the installed CLI
+
+With the shared service setting on, `shared-service.ts` reads the version of
+the OpenCode CLI on disk and passes `Service.ensure` a predicate that accepts
+a running service of that version or newer. `opencode update` swaps the binary
+but leaves the running `serve --service` on the old version, so reusing any
+service it finds kept OpenChamber on the old OpenCode until the user stopped
+the daemon by hand, while the About page and the update toast asked for a
+restart that did nothing. OpenCode's own TUI and desktop replace the service on
+a version mismatch the same way, and the replacement hands persistent terminals
+and open turns to the new process. A newer service is kept so OpenChamber never
+downgrades what other clients run. Only release versions are compared: preview
+builds such as `0.0.0-next-10` do not order as semver and a preview CLI keeps
+its own registration file, so a preview on either side is reused as is. The
+version probe and the service command both go through the managed launch
+resolver, so a Windows `opencode.cmd` shim becomes the native executable: the
+client spawns the service without a shell, and a service stopped for
+replacement could not be started again from a shim. When
+the CLI version cannot be read, in enterprise mode, or when a failed switch to
+the managed server rolls back to the shared one, OpenChamber reuses whatever
+service is registered and never restarts it.
+
+The same replacement makes the update toast work in shared mode. The upgrade
+capability reports `supported` while OpenChamber is connected through the
+shared service and outside enterprise mode, `/api/opencode/upgrade` runs
+`opencode upgrade` with the CLI that launches the service, and the toast's
+Reload goes through `restartOpenCode`, whose reconnect replaces the now older
+service. A config reload that replaced the service answers `requiresReload`, so
+the UI refreshes; one that reused it still asks the user to restart the
+connected server, because the running service has not reread its config. The
+CLI upgrade skips the Windows stop-and-start step: OpenChamber cannot stop a
+service it shares, and OpenCode's own upgrade keeps `serve --service` alive
+while it replaces the executable.
+
 ### External local OpenCode plugin bridge (`external-plugin-bridge.ts`)
 
 When OpenChamber connects to an externally started local OpenCode server (such
