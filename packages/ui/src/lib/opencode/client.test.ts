@@ -464,6 +464,24 @@ describe("sendMessage", () => {
     })
   })
 
+  test("passes a video data URL to the prompt without normalizing its MIME", async () => {
+    responses.push(json({ id: "msg_video" }))
+    await opencodeClient.sendMessage({
+      id: "ses_1",
+      providerID: "openai",
+      text: "watch",
+      messageId: "msg_video",
+      files: [{ type: "file", mime: "video/mp4", filename: "clip.mp4", url: "data:video/mp4;base64,AQID" }],
+    })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0].body).toEqual({
+      id: "msg_video",
+      text: "watch",
+      files: [{ uri: "data:video/mp4;base64,AQID", name: "clip.mp4" }],
+    })
+  })
+
   // OpenCode's `ModelRef.variant` is an optional string: a `null` is a 400
   // ("Expected string at [model][variant]") and the prompt never goes out.
   test("an explicit Default thinking level switches the model without a variant, never as null", async () => {
