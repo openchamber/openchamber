@@ -1681,8 +1681,15 @@ picker uses, and then draws as a chip where it stands: its number and title.
 - Only a paste that lands in the text reads a link, afresh each time, as the
   picker does; a large paste that goes as a file reads none. A link
   typed by hand stays text: typing passes through `/issues/1` on the way to
-  `/issues/12`, and a read per keystroke would attach the wrong item. A link
-  this composer has read before draws as its chip again wherever it reappears
+  `/issues/12`, and a read per keystroke would attach the wrong item. This
+  holds for an extension's review-portal address too (`urls.resolve`): only a
+  paste asks the extension to convert it, and only a change request comes
+  back as a chip, which opens that change request rather than the portal
+  address. A pasted link read again that now finds no item, or another one,
+  loses its earlier result, including the item a restored queued message
+  attached to it (unless another link in the text still names that item); a
+  failed read keeps it.
+  A link this composer has read before draws as its chip again wherever it reappears
   (typed or restored), with that read.
 - An item attached any other way (the issue, PR and tracker pickers, an
   extension's `attach`, a handed-over or restored item, a shared page) is its
@@ -1697,6 +1704,13 @@ picker uses, and then draws as a chip where it stands: its number and title.
   in Markdown mode through `MarkdownLink`, by the link's `href`). A link names
   an item whatever page of it opens (`isSameRepositoryItemLink`, the tracker's
   identifier), so a picker item whose link the user also typed draws there too.
+  A change request can also carry optional `sourceLinks` in its existing context
+  metadata. These original portal addresses take precedence over template
+  matching, so every address draws inline while the MR context stays deduplicated.
+  Sending and restoring a queued message preserve this association without
+  rewriting the user's text or adding source links to the model's context text.
+  History display makes no resolver request; older messages without the field
+  keep native-template matching.
   An item drawn inline leaves the message's preview strip; one the text does
   not link (messages sent before items were links in the text), or links only
   inside code, stays there. Both chips open the item in the Tracker
@@ -1706,6 +1720,12 @@ picker uses, and then draws as a chip where it stands: its number and title.
   network is read again as a linked item, as the Tracker does. Discussions stay
   text. A change request goes without its diff, the picker's default.
 - `/btw` and VS Code read no links, as they take no picker chips.
+
+### Why portal MR links stay with their context
+
+The canonical MR address cannot recover the portal addresses that named it.
+An optional source-link list on the existing MR context keeps that association
+through send and reload, without another resolver, cache or persisted store.
 
 ### Why every item is a chip in the text
 

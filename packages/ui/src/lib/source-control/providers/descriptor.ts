@@ -82,6 +82,7 @@ const descriptorSchema = z.object({
     })).max(16),
   }),
   urls: z.object({
+    resolve: z.string().max(256).optional(),
     changeRequest: urlPatternsSchema,
     issue: urlPatternsSchema,
     discussion: urlPatternsSchema.default([]).catch([]),

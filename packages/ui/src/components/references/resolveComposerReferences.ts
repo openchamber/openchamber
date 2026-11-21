@@ -12,6 +12,7 @@ import type {
     TrackerItem,
 } from '@/lib/api/types';
 import { buildTrackerItemContextText } from '@/lib/trackers/itemContext';
+import type { RepositoryUrlResolver } from '@/lib/source-control/repositoryUrlMatcher';
 
 import { referencePickerItemKey, type ReferencePickerSelection } from './referencePickerItems';
 
@@ -170,13 +171,19 @@ async function resolveOne(selection: ReferencePickerSelection, deps: ReferenceRe
 
 export type ReferenceLinkTarget =
     | { source: 'repository'; provider: string; instance: string; owner: string; repo: string; kind: 'issue' | 'pull'; number: number }
+    | ({ source: 'repository-url' } & RepositoryUrlResolver)
     | { source: 'tracker'; provider: string; identifier: string };
 
-export async function resolveReferenceLink(target: ReferenceLinkTarget, deps: ReferenceResolveDeps): Promise<ComposerReference> {
+export async function resolveReferenceLink(target: ReferenceLinkTarget, deps: ReferenceResolveDeps): Promise<ComposerReference | null> {
     if (target.source === 'tracker') return readTrackerItem(deps, target.provider, target.identifier);
     const { context } = deps;
     if (!context || context.provider !== target.provider || context.instance !== target.instance) {
         throw new Error('The repository is not available here');
+    }
+    if (target.source === 'repository-url') {
+        const item = await target.resolve();
+        if (!item || item.kind !== 'pull') return null;
+        return resolveReferenceLink({ source: 'repository', ...item, kind: item.kind }, deps);
     }
     const project = { owner: target.owner, name: target.repo };
     const read = (through: SourceControlReadContext) => (target.kind === 'issue'

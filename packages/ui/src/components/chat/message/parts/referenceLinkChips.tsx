@@ -46,7 +46,8 @@ export function referenceLinkChipsOf(
     for (const text of texts) {
         for (const { link } of findWebLinks(withoutCode(text))) {
             if (chips?.has(link)) continue;
-            const linked = items.find(({ item }) => namesItem(link, item, urls, trackerUrls));
+            const linked = items.find(({ item }) => item.kind === 'change-request' && item.sourceLinks?.includes(link))
+                ?? items.find(({ item }) => namesItem(link, item, urls, trackerUrls));
             if (!linked) continue;
             chips ??= new Map();
             chips.set(link, { chip: referenceLinkChip(linked.item, urls.descriptorOf), url: linked.item.url, part: linked.part });

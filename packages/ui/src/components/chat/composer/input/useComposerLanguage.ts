@@ -17,13 +17,13 @@ import { trackerItemLabel } from '@/components/sourceBoard/openTrackerItem';
 import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { useTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
 import { type ComposerReference } from '../../composer/composerReferences';
-import { findReferenceLinks, findWebLinks, referenceLinkChip, referenceLinksInText, referenceTextLink } from '../../composer/referenceLinks';
+import { findReferenceLinks, findWebLinks, referenceLinkChip, referenceLinksInText, referenceTextLinks, withoutReferenceSourceLinks } from '../../composer/referenceLinks';
 import { loadSessionLinkReference, sessionReferenceKey, sessionReferencesInText, type SessionReference } from '../../composer/sessionReferences';
 import { PastedSessionIds, sessionLinkOverPastedId, type PastedSessionIdRange } from '../../composer/pastedSessionIds';
 import { findSessionLinks, sessionLinkKey, type SessionLinkTarget } from '@/lib/sessionLinks';
 import { sessionMentionChip } from '@/lib/messages/sessionMentionChip';
 import { appOwnOrigins } from '@/lib/router/appOrigins';
-import { useDraftLinkedReferences } from '../../composer/linkedReferenceDrafts';
+import { readLinkedReferences, useDraftLinkedReferences, useLinkedReferenceDrafts } from '../../composer/linkedReferenceDrafts';
 import { useGuestCommands } from '@/hooks/useGuestSurfaces';
 import { reservedComposerCommandNames } from '../../composer/submit/guestCommands';
 import { selectAvailableSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
@@ -245,10 +245,13 @@ export function useComposerLanguage({
         referenceLinksRef.current = referenceLinks;
     }, [referenceLinks]);
 
-    const rememberReferenceLinks = React.useCallback((entries: ReadonlyArray<readonly [string, ComposerReference]>) => {
+    const rememberReferenceLinks = React.useCallback((entries: ReadonlyArray<readonly [string, ComposerReference | null]>) => {
         if (entries.length === 0) return;
         const next = new Map(referenceLinksRef.current);
-        for (const [link, reference] of entries) next.set(link, reference);
+        for (const [link, reference] of entries) {
+            if (reference) next.set(link, reference);
+            else next.delete(link);
+        }
         referenceLinksRef.current = next;
         setReferenceLinks(next);
     }, []);
@@ -256,14 +259,23 @@ export function useComposerLanguage({
     const readPastedReferenceLinks = useStableHandler(async (text: string) => {
         const pending = findReferenceLinks(text, repositoryUrls, trackerUrls);
         if (pending.length === 0) return;
+        const draft = chatDraftIdentity;
+        const draftKey = chatDraftIdentityKeyRef.current;
         const reads = referenceLinkReadsRef.current;
         const read = Promise.allSettled(pending.map(({ target }) => readReferenceLink(target)));
         for (const { link } of pending) reads.set(link, read);
         const results = await read;
         for (const { link } of pending) if (reads.get(link) === read) reads.delete(link);
-        rememberReferenceLinks(results.flatMap((result, index) => (
+        const answered = results.flatMap((result, index) => (
             result.status === 'fulfilled' ? [[pending[index].link, result.value] as const] : []
-        )));
+        ));
+        rememberReferenceLinks(answered);
+        if (draftKey === chatDraftIdentityKeyRef.current) {
+            const linked = readLinkedReferences(draft);
+            const text = composerRef.current?.getValue() ?? composerText.get();
+            const reconciled = withoutReferenceSourceLinks(linked, new Set(answered.map(([link]) => link)), text);
+            if (reconciled !== linked) useLinkedReferenceDrafts.getState().set(reconciled, draft);
+        }
         const failed = results.flatMap((result, index) => (result.status === 'rejected' ? [{ index, reason: result.reason }] : []));
         if (failed.length > 0) {
             toast.error(t('references.picker.error.attachFailed', {
@@ -283,7 +295,7 @@ export function useComposerLanguage({
 
     const referenceLinkChips = React.useMemo(() => new Map([
         ...[...referenceLinks].map(([link, reference]) => [link, referenceLinkChip(reference, repositoryUrls)] as const),
-        ...linkedReferences.map((reference) => [referenceTextLink(reference), referenceLinkChip(reference, repositoryUrls)] as const),
+        ...linkedReferences.flatMap((reference) => referenceTextLinks(reference).map((link) => [link, referenceLinkChip(reference, repositoryUrls)] as const)),
     ]), [linkedReferences, referenceLinks, repositoryUrls]);
 
     const [confirmedMentionsRevision, setConfirmedMentionsRevision] = React.useState(0);
