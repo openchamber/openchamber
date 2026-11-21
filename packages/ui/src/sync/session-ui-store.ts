@@ -19,7 +19,7 @@ import { attachmentWireName } from "@/lib/attachmentIdentity"
 import { filesForModel } from "./text-model-images"
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
 import { isDirectoryUnknown, useDirectoryStore } from "@/stores/useDirectoryStore"
-import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
+import { fileDraftSessionInFolder } from "./draft-folder-target"
 import { useSessionTabsStore } from "@/stores/useSessionTabsStore"
 import { selectCommandsForDirectory, useCommandsStore } from "@/stores/useCommandsStore"
 import { selectAvailableSkillsForDirectory, useSkillsStore } from "@/stores/useSkillsStore"
@@ -28,7 +28,7 @@ import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { prepareUserMessageResume } from "./user-message-resume"
 import { normalizePath } from "@/lib/pathNormalization"
 import { descendingId } from "@/lib/opencode/ids"
-import { CHAT_DRAFT_PROJECT_ID, captureChatDirectoryCleanup as captureChatCleanup, createChatDirectory, deleteChatDirectory, getChatsRoot, getChatsRootFromDirectory, isChatDirectoryPath, resolveChatsRootDirectory, warmChatsRootDirectory } from "@/lib/chatDirectories"
+import { CHAT_DRAFT_PROJECT_ID, captureChatDirectoryCleanup as captureChatCleanup, createChatDirectory, deleteChatDirectory, getChatsRoot, isChatDirectoryPath, resolveChatsRootDirectory, warmChatsRootDirectory } from "@/lib/chatDirectories"
 import { isSpaceArchiveDirectory } from "@/lib/spaces/space-archives"
 import { isSpaceDirectory } from "@/lib/spaces/space-route"
 import { isSpaceDirectoryClosedToNewSessions } from "@/lib/spaces/spaces-store"
@@ -888,7 +888,6 @@ const createSessionWithDraftLifecycle = async (
 ): Promise<Session | null> => {
   const store = useSessionUIStore.getState()
   const draft = store.newSessionDraft
-  const targetFolderId = draft.targetFolderId
 
   try {
     const resolved = await resolveCreatableDraftDirectory(draft, directoryOverride)
@@ -898,15 +897,7 @@ const createSessionWithDraftLifecycle = async (
     if (!session) return null
 
     useSessionUIStore.getState().closeNewSessionDraft()
-
-    if (targetFolderId) {
-      const currentStore = useSessionUIStore.getState()
-      const scopeDirectory = directory || currentStore.lastLoadedDirectory || session.directory
-      const scopeKey = getChatsRootFromDirectory(scopeDirectory) ?? scopeDirectory
-      if (scopeKey) {
-        useSessionFoldersStore.getState().addSessionToFolder(scopeKey, targetFolderId, session.id)
-      }
-    }
+    fileDraftSessionInFolder(draft, session.id, session.directory)
 
     return session
   } catch (error) {
@@ -1045,13 +1036,7 @@ const finishDraftSession = (
       })
   }
 
-  if (draft.targetFolderId) {
-    const scopeDirectory = requestedDirectory || useSessionUIStore.getState().lastLoadedDirectory || created.directory
-    const scopeKey = getChatsRootFromDirectory(scopeDirectory) ?? scopeDirectory
-    if (scopeKey) {
-      useSessionFoldersStore.getState().addSessionToFolder(scopeKey, draft.targetFolderId, created.id)
-    }
-  }
+  fileDraftSessionInFolder(draft, created.id)
 
   return createdDirectory
 }

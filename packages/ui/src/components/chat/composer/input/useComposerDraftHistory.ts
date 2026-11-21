@@ -171,6 +171,7 @@ export function useComposerDraftHistory({
         text: composerText,
         confirmedMentionsRef,
         projectId: newSessionDraftOpen ? newSessionDraft.selectedProjectId ?? null : null,
+        targetFolderId: newSessionDraftOpen ? newSessionDraft.targetFolderId : undefined,
         enabled: newSessionDraftOpen && !currentSessionId,
     });
 

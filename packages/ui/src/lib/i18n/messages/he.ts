@@ -885,6 +885,7 @@ export const dict = {
   'sessions.sidebar.folderItem.collapseAria': 'כווץ את התיקייה {folderName}',
   'sessions.sidebar.folderItem.namePlaceholder': 'שם התיקייה',
   'sessions.sidebar.folderItem.newSessionAria': 'הפעלה חדשה ב-{folderName}',
+  'sessions.sidebar.folderItem.draftDestination': 'בתיקייה {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': 'תיקיית משנה חדשה ב-{folderName}',
   'sessions.sidebar.folderItem.newSubfolder': 'תיקיית משנה חדשה',
   'sessions.sidebar.folderItem.renameAria': 'שנה את שם התיקייה {folderName}',

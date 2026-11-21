@@ -42,6 +42,18 @@ const setup = () => {
 const png = `data:image/png;base64,${Buffer.from('png-bytes').toString('base64')}`;
 
 describe('session drafts', () => {
+  it('round trips a folder target and accepts older drafts without one', async () => {
+    const { call } = setup();
+    const saved = await call('PUT', '/api/session-drafts/:id', {
+      params: { id: 'folder-draft' }, body: { directory: '/repo', text: 'hello', targetFolderId: 'folder-1' },
+    });
+    expect(saved.body.draft.targetFolderId).toBe('folder-1');
+    expect((await call('GET', '/api/session-drafts')).body.drafts[0].targetFolderId).toBe('folder-1');
+    const old = await call('PUT', '/api/session-drafts/:id', {
+      params: { id: 'old-draft' }, body: { directory: '/repo', text: 'old' },
+    });
+    expect(old.statusCode).toBe(200);
+  });
   it('stores a draft with its attachment bytes and serves them back', async () => {
     const { call, onChanged, dataDir } = setup();
     const saved = await call('PUT', '/api/session-drafts/:id', {

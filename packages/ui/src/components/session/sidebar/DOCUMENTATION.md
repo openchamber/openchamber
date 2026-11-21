@@ -885,6 +885,13 @@ project draft switched to a new Chat takes its text along, and its row goes.
 Opening a row (`works/openSessionDraft.ts`) opens the draft at once with its
 text and server files through `pendingComposerRestore`; attachments stored on
 the server follow once downloaded, if the user is still on the draft. A draft
+started from a sidebar folder shows that folder in the composer and retains its
+folder target when saved and reopened. The label and the send take the folder
+from one scope (`sync/draft-folder-target.ts`): the directory the sidebar opened the
+draft on, never the project's start folder inside a worktree, or the Chats
+root. When the folder is gone or the draft moves to another project or
+worktree, the label hides and the session lands unfiled. Its saved row stays
+in the project or worktree list until the session is sent. A draft
 this device failed to store (offline, or a 413 for attachments over the
 server's limit, which the user is told once) keeps this device's newer copy
 when reopened here. The first draft opened in a folder takes over the text

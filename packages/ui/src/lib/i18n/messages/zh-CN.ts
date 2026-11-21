@@ -967,6 +967,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.folderItem.collapseAria': '折叠文件夹 {folderName}',
   'sessions.sidebar.folderItem.namePlaceholder': '文件夹名称',
   'sessions.sidebar.folderItem.newSessionAria': '在 {folderName} 中新建会话',
+  'sessions.sidebar.folderItem.draftDestination': '位于文件夹 {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': '在 {folderName} 中新建子文件夹',
   'sessions.sidebar.folderItem.newSubfolder': '新建子文件夹',
   'sessions.sidebar.folderItem.renameAria': '重命名文件夹 {folderName}',

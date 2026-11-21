@@ -967,6 +967,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.folderItem.collapseAria': '접기 폴더 {folderName}',
   'sessions.sidebar.folderItem.namePlaceholder': '폴더 이름',
   'sessions.sidebar.folderItem.newSessionAria': '{folderName}에 새 세션 만들기',
+  'sessions.sidebar.folderItem.draftDestination': '폴더: {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': '{folderName}에 새 하위 폴더 만들기',
   'sessions.sidebar.folderItem.newSubfolder': '새 하위 폴더',
   'sessions.sidebar.folderItem.renameAria': '폴더 이름 변경: {folderName}',

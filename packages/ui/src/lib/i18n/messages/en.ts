@@ -966,6 +966,7 @@ export const dict = {
   'sessions.sidebar.folderItem.collapseAria': 'Collapse folder {folderName}',
   'sessions.sidebar.folderItem.namePlaceholder': 'Folder name',
   'sessions.sidebar.folderItem.newSessionAria': 'New session in {folderName}',
+  'sessions.sidebar.folderItem.draftDestination': 'In folder {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': 'New sub-folder in {folderName}',
   'sessions.sidebar.folderItem.newSubfolder': 'New sub-folder',
   'sessions.sidebar.folderItem.renameAria': 'Rename folder {folderName}',
