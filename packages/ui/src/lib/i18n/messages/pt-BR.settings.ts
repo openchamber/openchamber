@@ -2076,6 +2076,8 @@ export const settingsDict = {
   "settings.openchamber.defaults.field.defaultThinking": "Pensamiento por padrão",
   "settings.openchamber.defaults.field.thinkingPlaceholder": "Pensando",
   "settings.openchamber.defaults.field.defaultAgent": "Agente por padrão",
+  "settings.openchamber.defaults.field.chatsDefaultModel": "Modelo padrão para conversas",
+  "settings.openchamber.defaults.field.chatsDefaultAgent": "Agente padrão para conversas",
   "settings.openchamber.defaults.field.showDeletionDialogAria": "Mostrar diálogo de eliminación",
   "settings.openchamber.defaults.field.sessionWarming": "Manter sessões ociosas aquecidas",
   "settings.openchamber.defaults.field.sessionWarmingInfo": "Alguns provedores esquecem o contexto em cache após alguns minutos de silêncio, tornando a próxima mensagem mais lenta e cara. Com esta opção, o OpenCode envia uma instrução curta a cada 4 minutos enquanto a sessão está ociosa, por até 30 minutos após sua última mensagem. Cada requisição envia todo o contexto da sessão ao modelo e pode gerar custos ou consumir a cota da assinatura. Vale para todos os projetos.",

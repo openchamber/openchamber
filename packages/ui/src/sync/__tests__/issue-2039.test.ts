@@ -10,7 +10,7 @@ const applyDefaultModelAgentSelectionCalls: Array<{
   projectDefaultAgent?: string | null
   projectDefaultModel?: string | null
   projectDefaultVariant?: string | null
-}> = []
+} | undefined> = []
 const activateDirectoryCalls: Array<string | null | undefined> = []
 const activationOptions: Array<{ preserveManualModel?: boolean } | undefined> = []
 let configVariantOverride: string | null | undefined
@@ -149,7 +149,7 @@ mock.module("@/stores/useConfigStore", () => ({
         activationOptions.push(options)
         await activationPending
       }),
-      applyDefaultModelAgentSelection: mock((selection: {
+      applyDefaultModelAgentSelection: mock((selection?: {
         projectDefaultAgent?: string | null
         projectDefaultModel?: string | null
         projectDefaultVariant?: string | null
@@ -714,16 +714,13 @@ describe("issue 2039 draft auto-accept", () => {
     expect(applyDefaultModelAgentSelectionCalls).toHaveLength(appliedBeforeClose)
   })
 
-  test("reapplies global defaults when opening a fresh no-project draft", async () => {
+  test("reapplies the Chats scope defaults when opening a fresh no-project draft", async () => {
     useSessionUIStore.getState().openNewSessionDraft()
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(activateDirectoryCalls).toEqual(["/home/test/.config/openchamber/chats"])
-    expect(applyDefaultModelAgentSelectionCalls.at(-1)).toEqual({
-      projectDefaultAgent: undefined,
-      projectDefaultModel: undefined,
-      projectDefaultVariant: undefined,
-    })
+    expect(applyDefaultModelAgentSelectionCalls.length).toBeGreaterThan(0)
+    expect(applyDefaultModelAgentSelectionCalls.at(-1)).toBeUndefined()
   })
 
 

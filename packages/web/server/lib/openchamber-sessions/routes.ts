@@ -20,7 +20,7 @@ import {
 import { expandSnippets } from '../snippets/snippets.js';
 import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
 import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
-import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
+import { CHATS_SCOPE_PUBLIC_ID, readChatsDefaults } from '../scheduled-tasks/chats-scope.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { OpenChamberControlError, asControlError, controlErrorFields } from '../openchamber-control/error.js';
 import type { ControlErrorDetails } from '../openchamber-control/error.js';
@@ -91,6 +91,7 @@ interface SessionSettings {
   defaultAgent?: unknown;
   defaultModel?: unknown;
   defaultVariant?: unknown;
+  chatsDefaultAgent?: unknown; chatsDefaultModel?: unknown; chatsDefaultVariant?: unknown;
   lastUsedEfforts?: unknown;
   hiddenModels?: unknown;
   lastSelectedModel?: unknown;
@@ -364,14 +365,14 @@ const resolveSelectionVariant = ({
     : undefined;
   const projectDefaultModel = splitModel(projectDefaults?.defaultModel);
   const settingsDefaultModel = splitModel(asNonEmptyString(settings?.defaultModel));
-  const configuredVariant = projectDefaultModel?.providerID === providerID && projectDefaultModel.modelID === modelID
-    ? projectDefaults?.defaultVariant ?? undefined
-    : settingsDefaultModel?.providerID === providerID && settingsDefaultModel.modelID === modelID
-      ? settings?.defaultVariant ?? undefined
-      : undefined;
+  const isThisModel = (candidate: ModelSelection | null) => candidate?.providerID === providerID && candidate.modelID === modelID;
+  const settingsVariant = isThisModel(settingsDefaultModel) ? settings?.defaultVariant ?? undefined : undefined;
+  const scopeVariant = isThisModel(projectDefaultModel) ? projectDefaults?.defaultVariant ?? undefined : undefined;
   const remembered = hasEffortEntries(settings?.lastUsedEfforts) ? settings.lastUsedEfforts[`${providerID}/${modelID}`] : undefined;
+  const sources = !isThisModel(projectDefaultModel) ? [agentVariant, settingsVariant, remembered]
+    : scopeVariant === undefined ? [agentVariant, remembered, settingsVariant] : [agentVariant, scopeVariant, remembered];
 
-  for (const source of [agentVariant, configuredVariant, remembered]) {
+  for (const source of sources) {
     if (source === null) return null;
     const parsed = z.enum(offered).safeParse(source);
     if (parsed.success) return parsed.data;
@@ -397,10 +398,9 @@ const resolveFallbackModel = (models: readonly ModelInfo[], hiddenModels: readon
 };
 
 const resolveProjectDefaults = (settings: SessionSettings | null, directory: string, projectId: string | undefined) => {
+  if (projectId === CHATS_SCOPE_PUBLIC_ID) return readChatsDefaults(settings);
   const projects: readonly unknown[] = Array.isArray(settings?.projects) ? settings.projects : [];
-  const matchedProject = projectId
-    ? projects.find((entry) => hasProjectFields(entry) && entry.id === projectId) || null
-    : projects.find((entry) => hasProjectFields(entry) && entry.path === directory) || null;
+  const matchedProject = projects.find((entry) => hasProjectFields(entry) && (projectId ? entry.id === projectId : entry.path === directory)) || null;
   const project = hasProjectFields(matchedProject) ? matchedProject : undefined;
   return {
     defaultAgent: asNonEmptyString(project?.defaultAgent),
@@ -426,7 +426,7 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, co
   const opencodeDefaultModel = config.defaultModel;
   const configuredAgent = projectDefaultAgent || settingsDefaultAgent || opencodeDefaultAgent;
   if (requireDefaultAgent && configuredAgent && !findAgentBySetting(agents, configuredAgent)) {
-    throw new OpenChamberControlError(`Configured agent '${configuredAgent}' is not available in this directory. Update the default agent in project/global settings or OpenCode config, or pass an explicit agent.`, 503);
+    throw new OpenChamberControlError(`Configured agent '${configuredAgent}' is not available in this directory. Update the default agent in the project, Chats or global settings, or in OpenCode config, or pass an explicit agent.`, 503);
   }
   if (projectDefaultAgent) resolvedAgent = findAgentBySetting(agents, projectDefaultAgent);
   if (!resolvedAgent && settingsDefaultAgent) resolvedAgent = findAgentBySetting(agents, settingsDefaultAgent);
@@ -588,7 +588,7 @@ const parseArchiveRequest = (payload: SessionPayload): { ok: true; ids: string[]
 };
 
 type ResolvedDirectory =
-  | { ok: true; directory: string; projectId?: string; projectPath?: string }
+  | { ok: true; directory: string; projectId?: string; projectPath?: string; chats?: boolean }
   | { ok: false; status?: number; error: string };
 
 const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated, sanitizeProjects, validateDirectoryPath, chatsScope }: Pick<SessionServiceDependencies, 'readSettingsFromDiskMigrated' | 'sanitizeProjects' | 'validateDirectoryPath' | 'chatsScope'> & { payload: SessionPayload }): Promise<ResolvedDirectory> => {
@@ -614,7 +614,7 @@ const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated
     if (chatsRoot.ok) {
       const relative = path.relative(chatsRoot.directory, validated.directory);
       if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
-        return { ok: true, directory: validated.directory };
+        return { ok: true, directory: validated.directory, chats: true };
       }
     }
   }
@@ -898,7 +898,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
   }: SessionSelectionInput) => {
     let model = requestedModel;
     let agent = requestedAgent;
-    let variant = requestedVariant;
+    let variant = requestedVariant, reusedModel = false;
     let selectionInputs: Awaited<ReturnType<typeof fetchSelectionInputs<SessionSettings | null>>> | null = null;
     const readSelectionInputs = async () => {
       selectionInputs ??= await fetchSelectionInputs({ client, readSettingsFromDiskMigrated });
@@ -909,7 +909,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
       const previous = await fetchSessionSelection({ client, sessionID });
       if (previous) {
         if (!model && previous.model) {
-          model = previous.model;
+          [model, reusedModel] = [previous.model, true];
           if (variant == null) variant = previous.variant ?? undefined;
         }
         if (!agent && previous.agent) agent = previous.agent;
@@ -955,7 +955,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
       const error = Object.assign(new Error('No model is configured or available for the requested directory'), { statusCode: 400 });
       throw error;
     }
-    if (variant == null && !isAutoModel(model) && (!reuseSessionSelection || requestedModel)) {
+    if (variant == null && !isAutoModel(model) && !reusedModel) {
       try {
         const inputs = await readSelectionInputs();
         variant = resolveSelectionVariant({
@@ -1186,7 +1186,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     const variant = asNonEmptyString(payload.variant);
 
     const resolvedDirectory: ResolvedDirectory = payload.projectId === CHATS_SCOPE_PUBLIC_ID
-      ? await validateDirectoryPath(asNonEmptyString(payload.directory))
+      ? await validateDirectoryPath(asNonEmptyString(payload.directory)).then((result) => (result.ok ? { ...result, chats: true } : result))
       : await resolveRequestedDirectory({
         chatsScope,
         payload,
@@ -1275,7 +1275,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
         selection = await selectForSession({
           client,
           directory: sessionDirectory,
-          projectId: resolvedDirectory.projectId,
+          projectId: resolvedDirectory.chats ? CHATS_SCOPE_PUBLIC_ID : resolvedDirectory.projectId,
           requestedModel: model,
           requestedAgent: agent,
           requestedVariant: variant,
@@ -1312,7 +1312,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
         authHeaders,
         sessionID,
         directory: sessionDirectory,
-        projectId: resolvedDirectory.projectId,
+        projectId: resolvedDirectory.chats ? CHATS_SCOPE_PUBLIC_ID : resolvedDirectory.projectId,
         prompt,
         goalInput,
         requestedModel: selection.model,
@@ -1469,7 +1469,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
         authHeaders,
         sessionID: targetSessionID,
         directory,
-        projectId: resolvedDirectory.projectId,
+        projectId: resolvedDirectory.chats ? CHATS_SCOPE_PUBLIC_ID : resolvedDirectory.projectId,
         prompt,
         goalInput,
         requestedModel,

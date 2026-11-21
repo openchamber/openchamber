@@ -2097,6 +2097,8 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.defaultThinking': 'רמת חשיבה כברירת מחדל',
   'settings.openchamber.defaults.field.thinkingPlaceholder': 'חשיבה',
   'settings.openchamber.defaults.field.defaultAgent': 'סוכן ברירת מחדל',
+  'settings.openchamber.defaults.field.chatsDefaultModel': 'מודל ברירת מחדל לצ\'אטים',
+  'settings.openchamber.defaults.field.chatsDefaultAgent': 'סוכן ברירת מחדל לצ\'אטים',
   'settings.openchamber.defaults.field.showDeletionDialogAria': 'הצג תיבת דו-שיח למחיקה',
   'settings.openchamber.defaults.field.sessionWarming': 'שמור הפעלות לא פעילות חמות',
   'settings.openchamber.defaults.field.sessionWarmingInfo': "יש ספקים ששוכחים את ההקשר השמור של שיחה אחרי כמה דקות של שקט, ולכן ההודעה הבאה איטית ויקרה יותר. כשאפשרות זו פעילה, OpenCode שולח הנחיה קצרה כל 4 דקות כל עוד ההפעלה לא פעילה, עד 30 דקות אחרי ההודעה האחרונה. כל בקשה שולחת למודל את כל הקשר ההפעלה ועשויה לעלות כסף או להיחשב במכסת המנוי. חל על כל הפרויקטים.",

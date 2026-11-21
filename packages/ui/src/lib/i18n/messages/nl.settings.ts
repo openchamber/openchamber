@@ -2100,6 +2100,8 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.defaultThinking': 'Standaard denken',
   'settings.openchamber.defaults.field.thinkingPlaceholder': 'Denken',
   'settings.openchamber.defaults.field.defaultAgent': 'Standaardagent',
+  'settings.openchamber.defaults.field.chatsDefaultModel': 'Standaardmodel voor gesprekken',
+  'settings.openchamber.defaults.field.chatsDefaultAgent': 'Standaardagent voor gesprekken',
   'settings.openchamber.defaults.field.showDeletionDialogAria': 'Verwijderdialoog tonen',
   'settings.openchamber.defaults.field.sessionWarming': 'Inactieve sessies warm houden',
   'settings.openchamber.defaults.field.sessionWarmingInfo': 'Sommige providers vergeten na enkele minuten de gecachte gesprekscontext, waardoor het volgende bericht trager en duurder wordt. Met deze instelling stuurt OpenCode elke 4 minuten een korte prompt zolang een sessie inactief is, tot 30 minuten na uw laatste bericht. Elk verzoek stuurt de volledige sessiecontext naar het model en kan geld kosten of meetellen voor uw abonnementslimiet. Geldt voor alle projecten.',

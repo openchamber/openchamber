@@ -1100,6 +1100,27 @@ describe('openNewSessionDraft project binding', () => {
     }
   });
 
+  test('paints the Chats default on a chat draft before discovery, and the project default on a project draft', () => {
+    const original = useConfigStore.getState();
+    useConfigStore.setState({
+      activateDirectory: () => new Promise(() => {}),
+      providers: [], agents: [], settingsDefaultsLoaded: false, isConnected: false,
+      settingsDefaultModel: 'global/model', settingsDefaultAgent: 'build',
+      chatsDefaultModel: 'chat/model', chatsDefaultVariant: 'high', chatsDefaultAgent: 'plan',
+    });
+    useProjectsStore.setState({ projects: [{ ...projectA, defaultModel: 'project/model' }, projectB] });
+    try {
+      useSessionUIStore.getState().openNewSessionDraft({ target: 'chat' });
+      expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'chat', currentModelId: 'model', currentVariant: 'high', currentAgentName: 'plan' });
+      useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectA.id });
+      expect(useConfigStore.getState().currentProviderId).toBe('project');
+      useSessionUIStore.getState().openNewSessionDraft({ target: 'chat' });
+      expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'chat', currentModelId: 'model' });
+    } finally {
+      useConfigStore.setState(original);
+    }
+  });
+
   test('an old draft activation cannot replace a newer draft default', async () => {
     const original = useConfigStore.getState();
     let finishActivation;

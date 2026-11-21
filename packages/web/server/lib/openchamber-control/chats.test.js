@@ -186,6 +186,81 @@ describe('agent session destinations', () => {
     });
   });
 
+  const useChatsDefaults = ({ client, settings }) => {
+    client.model.list = async () => ({ data: [
+      { providerID: 'test', id: 'model', variants: [] },
+      { providerID: 'test', id: 'project-model', variants: [] },
+      { providerID: 'test', id: 'chat-model', variants: [{ id: 'high' }, { id: 'low' }] },
+    ] });
+    Object.assign(settings, {
+      defaultModel: 'test/model', defaultAgent: 'build',
+      chatsDefaultModel: 'test/chat-model', chatsDefaultVariant: 'high', chatsDefaultAgent: 'plan',
+    });
+    Object.assign(settings.projects[0], { defaultModel: 'test/project-model', defaultAgent: 'build' });
+  };
+
+  it.each([false, true])('starts a Chats create on the Chats defaults ahead of the global and the containing project with symlink root %s', async (symlinkRoot) => {
+    const context = await setup({ chatsInProject: true, symlinkRoot });
+    useChatsDefaults(context);
+    const { service, projectPath } = context;
+    const chat = await service.execute('session.create', { projectId: CHATS_SCOPE_PUBLIC_ID, prompt: 'Plan the week' }, projectPath);
+    expect(chat).toMatchObject({ model: { providerID: 'test', modelID: 'chat-model' }, variant: 'high', agent: 'plan', promptDispatched: true });
+    expect(chat.projectId).toBeUndefined();
+    const project = await service.execute('session.create', { projectId: 'project', prompt: 'Plan the week' }, projectPath);
+    expect(project).toMatchObject({ model: { providerID: 'test', modelID: 'project-model' }, agent: 'build' });
+  });
+
+  it.each([
+    ['send', false], ['fork', false], ['send', true], ['fork', true],
+  ])('uses the Chats defaults on the first %s to an empty Chat with symlink root %s', async (action, symlinkRoot) => {
+    const context = await setup({ chatsInProject: true, symlinkRoot });
+    useChatsDefaults(context);
+    const { service, projectPath } = context;
+    const created = await service.execute('session.create', { projectId: CHATS_SCOPE_PUBLIC_ID }, projectPath);
+    const result = await service.execute(`session.${action}`, {
+      sessionId: created.sessionId,
+      directory: created.directory,
+      prompt: 'Plan the week',
+    }, projectPath);
+    expect(result).toMatchObject({ model: { providerID: 'test', modelID: 'chat-model' }, agent: 'plan', promptDispatched: true });
+  });
+
+  it('inherits the global thinking level when the Chats model is the global one and its level is empty', async () => {
+    const context = await setup();
+    useChatsDefaults(context);
+    const { service, projectPath, settings } = context;
+    Object.assign(settings, { defaultModel: 'test/chat-model', defaultVariant: 'low', chatsDefaultVariant: '' });
+    const chat = await service.execute('session.create', { projectId: CHATS_SCOPE_PUBLIC_ID, prompt: 'Plan the week' }, projectPath);
+    expect(chat).toMatchObject({ model: { providerID: 'test', modelID: 'chat-model' }, variant: 'low' });
+    for (const action of ['send', 'fork']) {
+      const empty = await service.execute('session.create', { projectId: CHATS_SCOPE_PUBLIC_ID }, projectPath);
+      const result = await service.execute(`session.${action}`, { sessionId: empty.sessionId, directory: empty.directory, prompt: 'Plan the week' }, projectPath);
+      expect(result).toMatchObject({ model: { providerID: 'test', modelID: 'chat-model' }, variant: 'low' });
+    }
+  });
+
+  it('names a missing Chats default agent in a 503 and leaves no chat folder', async () => {
+    const context = await setup();
+    useChatsDefaults(context);
+    const { service, projectPath, settings, client, chatsScope } = context;
+    settings.chatsDefaultAgent = 'gone';
+    const creating = service.execute('session.create', { projectId: CHATS_SCOPE_PUBLIC_ID, prompt: 'Plan the week' }, projectPath);
+    await expect(creating).rejects.toMatchObject({ statusCode: 503 });
+    await expect(creating).rejects.toThrow(/'gone'.*Chats/);
+    expect(client.session.create).not.toHaveBeenCalled();
+    const dated = await fs.readdir(chatsScope.root).catch(() => []);
+    for (const day of dated) expect(await fs.readdir(path.join(chatsScope.root, day))).toEqual([]);
+  });
+
+  it('starts a session created with no scope from inside a chat on the Chats defaults', async () => {
+    const context = await setup();
+    useChatsDefaults(context);
+    const { service, projectPath } = context;
+    const chat = await service.execute('session.create', { projectId: CHATS_SCOPE_PUBLIC_ID }, projectPath);
+    const nested = await service.execute('session.create', { prompt: 'Go' }, chat.directory);
+    expect(nested).toMatchObject({ directory: chat.directory, model: { providerID: 'test', modelID: 'chat-model' }, agent: 'plan' });
+  });
+
   it('preserves explicit project, directory and omitted-scope creation', async () => {
     const { service, projectPath, chatsScope } = await setup();
     for (const input of [{ projectId: 'project' }, { directory: projectPath }, {}]) {

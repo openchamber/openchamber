@@ -2109,6 +2109,8 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.defaultThinking': 'デフォルト思考',
   'settings.openchamber.defaults.field.thinkingPlaceholder': '思考',
   'settings.openchamber.defaults.field.defaultAgent': 'デフォルト Agent',
+  'settings.openchamber.defaults.field.chatsDefaultModel': 'チャットのデフォルトモデル',
+  'settings.openchamber.defaults.field.chatsDefaultAgent': 'チャットのデフォルト Agent',
   'settings.openchamber.defaults.field.showDeletionDialogAria': '削除ダイアログを表示',
   'settings.openchamber.defaults.field.sessionWarming': 'アイドル中のセッションを温めておく',
   'settings.openchamber.defaults.field.sessionWarmingInfo': '一部のプロバイダーは数分間やり取りがないと会話のキャッシュを破棄するため、次のメッセージが遅く高くなります。オンにすると OpenCode はセッションのアイドル中に 4 分ごとに短いプロンプトを送り、最後のメッセージから最大 30 分間キャッシュを保ちます。各リクエストはセッションの全コンテキストをモデルに送り、料金が発生するかサブスクリプションの利用枠を消費する場合があります。すべてのプロジェクトに適用されます。',

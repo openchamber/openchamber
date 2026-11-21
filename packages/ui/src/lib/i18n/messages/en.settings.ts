@@ -2099,6 +2099,8 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.defaultThinking': 'Default thinking',
   'settings.openchamber.defaults.field.thinkingPlaceholder': 'Thinking',
   'settings.openchamber.defaults.field.defaultAgent': 'Default agent',
+  'settings.openchamber.defaults.field.chatsDefaultModel': 'Default model for chats',
+  'settings.openchamber.defaults.field.chatsDefaultAgent': 'Default agent for chats',
   'settings.openchamber.defaults.field.showDeletionDialogAria': 'Show deletion dialog',
   'settings.openchamber.defaults.field.sessionWarming': 'Keep idle sessions warm',
   'settings.openchamber.defaults.field.sessionWarmingInfo': 'Some providers forget a conversation\'s cached context after a few minutes of silence, so the next message is slower and costs more. With this on, OpenCode sends a short prompt every 4 minutes while a session sits idle, for up to 30 minutes after your last message. Each request sends the entire session context to the model and may cost money or count against your subscription quota. Applies to all projects.',

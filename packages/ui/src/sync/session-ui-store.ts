@@ -647,7 +647,7 @@ const applyDraftTargetSelectionDefaults = (
     const currentProject = selectedProject?.path
       ? useProjectsStore.getState().projects.find((project) => normalizePath(project.path) === normalizePath(selectedProject.path))
       : undefined
-    useConfigStore.getState().applyDefaultModelAgentSelection({
+    useConfigStore.getState().applyDefaultModelAgentSelection(draft.target === 'chat' ? undefined : {
       projectDefaultAgent: currentProject?.defaultAgent,
       projectDefaultModel: currentProject?.defaultModel,
       projectDefaultVariant: currentProject?.defaultVariant,

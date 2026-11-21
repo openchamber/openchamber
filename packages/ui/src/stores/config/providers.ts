@@ -15,7 +15,7 @@ import { getConfigLoadKey, _inFlightProviders } from './catalogRequests';
 import { useConfigStore } from '../useConfigStore';
 import { ensureModelsMetadataFetch } from './metadata';
 import { EMPTY_PROVIDERS } from './selectors';
-import { resolveProviderModelSelection, inheritedDefaultsFor, readFallbackModelPrefs, parseModelString, modelHasVariant, variantAfterResolve } from './selectionResolution';
+import { resolveProviderModelSelection, inheritedDefaultsFor, readFallbackModelPrefs, parseModelString, modelHasVariant, variantAfterResolve, scopeDefaultCandidates } from './selectionResolution';
 import { findCatalogModel } from '@/lib/opencode/model';
 
 const PROVIDERS_RETRY_SOURCE = "loadProviders:retryAfterFailure";
@@ -252,10 +252,11 @@ export const createProviderCatalog: ConfigSlice<'invalidateProviderCache' | 'loa
                         currentModelId,
                         currentVariant,
                         preserveCurrent: (isActive ? state.selectionSource : baseSnapshot.selectionSource) === 'manual',
-                        configuredDefaults: [
-                            { model: projectDefaults.projectDefaultModel, variant: projectDefaults.projectDefaultVariant },
-                            { model: state.settingsDefaultModel, variant: state.settingsDefaultVariant },
-                        ],
+                        configuredDefaults: scopeDefaultCandidates({
+                            ...projectDefaults,
+                            settingsDefaultModel: state.settingsDefaultModel,
+                            settingsDefaultVariant: state.settingsDefaultVariant,
+                        }),
                         inheritedDefaults: inheritedDefaultsFor(
                             isActive ? state.agents : baseSnapshot.agents,
                             isActive ? state.currentAgentName : baseSnapshot.currentAgentName,

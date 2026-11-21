@@ -3941,6 +3941,252 @@ describe('useConfigStore provider persistence', () => {
       expect(await resolving).toBeNull();
     });
   });
+
+  describe('Chats defaults', () => {
+    const CHAT_DIR = '/workspace/.config/openchamber/chats/2026-11-18/session-a';
+
+    beforeEach(async () => {
+      const { ensureChatsRootDirectory } = await import('@/lib/chatDirectories');
+      await ensureChatsRootDirectory();
+      useConfigStore.setState({ chatsDefaultModel: undefined, chatsDefaultVariant: undefined, chatsDefaultAgent: undefined });
+    });
+
+    test('a chat folder starts on the Chats defaults, and a project folder still on its own', () => {
+      projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'live/live-model', defaultAgent: 'build' };
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        providers: [provider('chat', 'chat-model', ['high', 'low']), provider('live')],
+        agents: [testAgent('build'), testAgent('plan')],
+        settingsDefaultModel: 'live/live-model',
+        settingsDefaultAgent: 'build',
+        chatsDefaultModel: 'chat/chat-model',
+        chatsDefaultVariant: 'high',
+        chatsDefaultAgent: 'plan',
+      });
+
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'chat', currentModelId: 'chat-model', currentVariant: 'high', currentAgentName: 'plan' });
+
+      useConfigStore.setState({ activeDirectoryKey: DIRECTORY });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'live', currentModelId: 'live-model', currentAgentName: 'build' });
+    });
+
+    test('a Chats root inside a registered checkout never takes that project\'s defaults', () => {
+      projectsState.projects.push({ id: 'home', path: '/workspace', label: 'Home', defaultModel: 'live/live-model', defaultAgent: 'plan' });
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        providers: [provider('chat', 'chat-model'), provider('live')],
+        agents: [testAgent('build'), testAgent('plan'), testAgent('review')],
+        chatsDefaultModel: 'chat/chat-model',
+        chatsDefaultAgent: 'review',
+      });
+
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentAgentName: 'review' });
+
+      useConfigStore.setState({ chatsDefaultModel: undefined, chatsDefaultAgent: undefined, settingsDefaultModel: 'chat/chat-model' });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentAgentName: 'build' });
+    });
+
+    test('a Chats agent with no model anywhere survives a settings load over a global agent', async () => {
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        agents: [testAgent('build'), testAgent('plan')],
+        settingsDefaultAgent: 'build',
+        chatsDefaultAgent: 'plan',
+      });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState().currentAgentName).toBe('plan');
+
+      persistedOpenChamberSettings = { defaultAgent: 'build', chatsDefaultAgent: 'plan' };
+      await useConfigStore.getState().loadSessionDefaults();
+
+      expect(useConfigStore.getState().currentAgentName).toBe('plan');
+    });
+
+    test('a chat folder that is not active reads the Chats thinking level and defaults', async () => {
+      persistedOpenChamberSettings = { defaultModel: 'chat/global-model', defaultVariant: 'low', defaultAgent: 'build', chatsDefaultModel: 'chat/chat-model', chatsDefaultVariant: 'high', chatsDefaultAgent: 'plan' };
+      await useConfigStore.getState().loadSessionDefaults();
+      getProvidersForConfigImpl = async () => ({
+        providers: [providerInfo('chat')],
+        models: [model('chat', 'chat-model', ['high', 'low']), model('chat', 'global-model')],
+        default: { providerID: 'chat', id: 'global-model' },
+      });
+      listAgentsImpl = async () => [testAgent('build'), testAgent('plan')];
+
+      expect(useConfigStore.getState().getDefaultVariantForModel('chat', 'chat-model', CHAT_DIR)).toBe('high');
+      expect(await useConfigStore.getState().resolveDirectoryDefaultSelection(CHAT_DIR))
+        .toEqual({ agentName: 'plan', providerId: 'chat', modelId: 'chat-model', variant: 'high' });
+    });
+
+    test('switching to an agent with no model of its own keeps the scope default model over the global one', () => {
+      projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'project/project-model' };
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        providers: [provider('chat', 'chat-model'), provider('live'), provider('project', 'project-model')],
+        agents: [testAgent('build'), testAgent('plan')],
+        settingsDefaultModel: 'live/live-model',
+        chatsDefaultModel: 'chat/chat-model',
+      });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      useConfigStore.getState().setAgent('plan');
+      expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentAgentName: 'plan' });
+
+      useConfigStore.setState({ activeDirectoryKey: DIRECTORY, currentAgentName: 'build', agentSelectionSource: 'auto' });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      useConfigStore.getState().setAgent('plan');
+      expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'project-model', currentAgentName: 'plan' });
+    });
+
+    test('switching agents in an existing session still falls back to the New sessions model', () => {
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        providers: [provider('chat', 'chat-model'), provider('live')],
+        agents: [testAgent('build'), testAgent('plan')],
+        settingsDefaultModel: 'live/live-model',
+        chatsDefaultModel: 'chat/chat-model',
+        currentAgentName: 'build',
+        agentSelectionSource: 'auto',
+        selectionSource: 'auto',
+      });
+      useSessionUIStore.setState({ currentSessionId: 'ses_existing_chat' });
+      try {
+        useConfigStore.getState().setAgent('plan');
+        expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'live-model', currentAgentName: 'plan' });
+      } finally {
+        useSessionUIStore.setState({ currentSessionId: null });
+      }
+    });
+
+    test('an empty Chats thinking level falls back to the New sessions one only for the same model', () => {
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        providers: [provider('chat', 'chat-model', ['high', 'low']), provider('live', 'live-model', ['high', 'low'])],
+        agents: [testAgent('build')],
+        settingsDefaultModel: 'chat/chat-model',
+        settingsDefaultVariant: 'low',
+        chatsDefaultModel: 'chat/chat-model',
+      });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentVariant: 'low' });
+
+      useConfigStore.setState({ settingsDefaultModel: 'live/live-model' });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentVariant: undefined });
+    });
+
+    test('switching agents keeps the New sessions thinking level an empty Chats level inherits', () => {
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        providers: [provider('chat', 'chat-model', ['high', 'low'])],
+        agents: [testAgent('build'), testAgent('plan')],
+        settingsDefaultModel: 'chat/chat-model',
+        settingsDefaultVariant: 'high',
+        chatsDefaultModel: 'chat/chat-model',
+      });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentVariant: 'high' });
+      useConfigStore.getState().setAgent('plan');
+      expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentAgentName: 'plan', currentVariant: 'high' });
+    });
+
+    test('a Chats thinking level change reaches a draft that picked the Chats model by hand', () => {
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        providers: [provider('chat', 'chat-model', ['high', 'low']), provider('live', 'live-model', ['high', 'low'])],
+        agents: [testAgent('build')],
+        chatsDefaultModel: 'chat/chat-model',
+        chatsDefaultVariant: 'high',
+      });
+      const draftBefore = useSessionUIStore.getState().newSessionDraft;
+      useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...draftBefore, open: true, target: 'chat' } });
+      try {
+        useConfigStore.getState().applyDefaultModelAgentSelection();
+        useConfigStore.getState().setProvider('live');
+        useConfigStore.getState().setProvider('chat');
+        useConfigStore.getState().setModel('chat-model');
+        useConfigStore.getState().setChatsDefaultVariant('low');
+        expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', selectionSource: 'manual', currentVariant: 'low' });
+
+        useConfigStore.getState().setCurrentVariantOverride('high', 'low');
+        useConfigStore.getState().setChatsDefaultVariant(undefined);
+        expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentVariant: 'high' });
+      } finally {
+        useSessionUIStore.setState({ newSessionDraft: draftBefore });
+      }
+    });
+
+    test('a Chats default change keeps the model, agent and thinking level picked in an open chat draft', () => {
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        providers: [provider('chat', 'chat-model', ['high', 'low']), provider('live', 'live-model', ['high', 'low'])],
+        agents: [testAgent('build'), testAgent('plan'), testAgent('review')],
+        chatsDefaultModel: 'chat/chat-model',
+        chatsDefaultAgent: 'build',
+      });
+      const draftBefore = useSessionUIStore.getState().newSessionDraft;
+      useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...draftBefore, open: true, target: 'chat' } });
+      try {
+        useConfigStore.getState().applyDefaultModelAgentSelection();
+        useConfigStore.getState().setAgent('plan', { keepModel: true });
+        useConfigStore.getState().setChatsDefaultAgent('review');
+        useConfigStore.getState().setChatsDefaultModel('live/live-model');
+        expect(useConfigStore.getState()).toMatchObject({ currentAgentName: 'plan', agentSelectionSource: 'manual', currentModelId: 'live-model', selectionSource: 'auto' });
+
+        useConfigStore.getState().setCurrentVariantOverride('high', undefined);
+        useConfigStore.getState().setChatsDefaultVariant('low');
+        expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'live-model', currentVariant: 'high', currentAgentName: 'plan' });
+
+        useConfigStore.getState().setProvider('chat');
+        useConfigStore.getState().setModel('chat-model');
+        useConfigStore.getState().setChatsDefaultModel('live/live-model');
+        useConfigStore.getState().setChatsDefaultAgent('build');
+        const state = useConfigStore.getState();
+        expect(state).toMatchObject({ currentProviderId: 'chat', currentModelId: 'chat-model', selectionSource: 'manual', currentAgentName: 'plan' });
+        expect(state.directoryScoped[CHAT_DIR]).toMatchObject({ currentModelId: 'chat-model', currentAgentName: 'plan' });
+      } finally {
+        useSessionUIStore.setState({ newSessionDraft: draftBefore });
+      }
+    });
+
+    test('an open chat draft takes the Chats defaults before its folder is active, and follows a Chats edit', async () => {
+      projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'live/live-model', defaultAgent: 'build' };
+      useConfigStore.setState({
+        activeDirectoryKey: DIRECTORY,
+        providers: [provider('chat', 'chat-model'), provider('live')],
+        agents: [testAgent('build'), testAgent('plan')],
+        chatsDefaultModel: 'chat/chat-model',
+        chatsDefaultAgent: 'plan',
+      });
+      const draftBefore = useSessionUIStore.getState().newSessionDraft;
+      useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...draftBefore, open: true, target: 'chat' } });
+      try {
+        useConfigStore.getState().applyDefaultModelAgentSelection();
+        expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentAgentName: 'plan' });
+
+        useConfigStore.getState().setChatsDefaultModel('live/live-model');
+        expect(useConfigStore.getState().currentModelId).toBe('live-model');
+
+        useConfigStore.setState({ activeDirectoryKey: '__global__', currentModelId: '', currentAgentName: 'build' });
+        persistedOpenChamberSettings = { chatsDefaultModel: 'chat/chat-model', chatsDefaultAgent: 'plan' };
+        useConfigStore.getState().setSettingsDefaultModel(undefined);
+        await useConfigStore.getState().loadSessionDefaults();
+        expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentAgentName: 'plan' });
+
+        useSessionUIStore.setState({ newSessionDraft: { ...draftBefore, open: true, target: 'project' } });
+        useConfigStore.setState({ activeDirectoryKey: DIRECTORY });
+        useConfigStore.getState().applyDefaultModelAgentSelection();
+        useConfigStore.getState().setChatsDefaultModel('live/live-model');
+        expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'live-model', currentAgentName: 'build', selectionSource: 'auto' });
+        useConfigStore.getState().setChatsDefaultModel('chat/chat-model');
+        expect(useConfigStore.getState().currentModelId).toBe('live-model');
+      } finally {
+        useSessionUIStore.setState({ newSessionDraft: draftBefore });
+      }
+    });
+  });
 });
 
 describe('ttsChunkedMode default', () => {

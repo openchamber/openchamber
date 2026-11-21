@@ -41,6 +41,7 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 
 - No cross-session message bus (#3757). Agents already send to and read other sessions through the `openchamber` tool.
 - Chats are isolated sessions.
+- Chats have their own defaults (Settings → Sessions → Chats: model, thinking level, agent) for every new chat, including chats an agent tool starts and chats from a scheduled task set to use session defaults. An empty field uses New sessions. VS Code reads the shared Chats values and has no Chats section of its own yet (a separate todo, #7226).
 - No built-in Recent section. Users build their own sidebar sections, a Recent one included.
 - In work rows show the project as an icon; the header and Work Status name it. Users give projects distinct icons.
 - Cmd+P shows no session status dot; a separate overview view is the plan. No manual unread mark.
