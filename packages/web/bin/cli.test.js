@@ -365,7 +365,7 @@ describe('cli args', () => {
 
   it('builds session create payloads from CLI options', () => {
     expect(buildSessionCreatePayload({
-      directory: '.',
+      directory: path.resolve('.'),
       name: 'Side task',
       prompt: 'Investigate cache invalidation',
       model: 'openai/gpt-5.5',
@@ -375,7 +375,7 @@ describe('cli args', () => {
       startRef: 'main',
       setUpstream: true,
     })).toEqual({
-      directory: '.',
+      directory: path.resolve('.'),
       title: 'Side task',
       worktree: {
         name: 'side-task',
@@ -390,11 +390,12 @@ describe('cli args', () => {
   });
 
   it('allows session create prompts without an explicit model', () => {
+    const directory = path.resolve('.');
     expect(buildSessionCreatePayload({
       directory: '.',
       prompt: 'Investigate cache invalidation',
     })).toEqual({
-      directory: '.',
+      directory,
       newWorktree: false,
       prompt: 'Investigate cache invalidation',
     });
@@ -403,6 +404,13 @@ describe('cli args', () => {
   it('keeps a session create with an explicit directory in that directory', () => {
     expect(buildSessionCreatePayload({ directory: '/prepared-worktree' })).toEqual({
       directory: '/prepared-worktree',
+      newWorktree: false,
+    });
+  });
+
+  it('resolves relative session create directories against the CLI working directory', () => {
+    expect(buildSessionCreatePayload({ directory: 'prepared-worktree' })).toEqual({
+      directory: path.resolve('prepared-worktree'),
       newWorktree: false,
     });
   });

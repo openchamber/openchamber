@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { resolveTargetPort } from './cli-api-target.js';
 import { parseGoalTokenBudget } from './cli-goal.js';
@@ -118,7 +119,7 @@ const buildSessionCreatePayload = (options = {}) => {
   const startRef = asNonEmptyString(options.startRef);
 
   const payload = {
-    ...(directory ? { directory } : {}),
+    ...(directory ? { directory: path.isAbsolute(directory) ? directory : path.resolve(directory) } : {}),
     ...(projectId ? { projectId } : {}),
     ...(title ? { title } : {}),
     ...(worktree ? { worktree: { name: worktree, ...(branch ? { branchName: branch } : {}), ...(startRef ? { startRef } : {}) } } : {}),
