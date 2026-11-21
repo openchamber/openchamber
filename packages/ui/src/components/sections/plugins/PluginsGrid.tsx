@@ -264,18 +264,22 @@ export const PluginsGrid: React.FC<{
     return actions;
   };
 
-  const seenPaths = new Set<string>();
+  const declaredResources = new Map<string, Set<string | undefined>>();
   for (const entry of entries) {
     const target = entry.resolvedPath ? pluginFileRuntimeTarget(entry.resolvedPath) : runtimeTargets.get(entry.id);
-    if (target?.kind === 'local') seenPaths.add(target.path);
+    if (target?.kind !== 'local') continue;
+    const resources = declaredResources.get(target.path) ?? new Set();
+    resources.add(entry.policyResource);
+    declaredResources.set(target.path, resources);
   }
   const visibleFiles = files.filter((file) => {
     if (file.kind !== 'package') return true;
     const target = pluginFileRuntimeTarget(file.resolvedPath ?? file.absolutePath);
     if (target?.kind !== 'local') return true;
-    if (seenPaths.has(target.path)) return false;
-    seenPaths.add(target.path);
-    return true;
+    const resources = declaredResources.get(target.path);
+    if (!resources) return true;
+    const sameSwitch = !file.policyResource || resources.has(undefined) || resources.has(file.policyResource);
+    return !sameSwitch;
   });
   const items: GridItem[] = [
     ...entries.map((entry): GridItem => ({ kind: 'entry', entry })),

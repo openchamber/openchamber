@@ -596,8 +596,14 @@ The page is hidden in VS Code (`metadata.ts`).
 ## Plugin duplicate sources
 
 `plugins/PluginsGrid.tsx` keeps every configuration entry and its editing target.
-A discovered package card is hidden when its normalized target is already
-represented by a declaration or another discovery record. Distinct declarations
+A discovered package card is hidden when a declaration reaches the same
+normalized target through the same switch resource (`policyResource`). A link
+to that directory under another discovery path keeps its card even when the
+real directory is declared, because its status and switch are its own. Two
+discovery records that resolve to the same
+directory (a link in `plugin/` to a package in `plugins/`) keep separate cards,
+because OpenCode reports status and applies switches by discovery path, so one
+card could not show or switch the other. Distinct declarations
 and their options remain separate, including declarations of the same target.
 Editable local files always keep their own cards and file edit/delete actions,
 including files declared in config.
