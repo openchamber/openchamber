@@ -4,6 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRemoteClientAuthRuntime } from './remote-clients.js';
+import { consumeRelayProof, relayProofHeaders } from '../relay/provenance.js';
+
+// What the server does with every request before any handler sees it.
+const received = (headers) => {
+  const req = { headers };
+  consumeRelayProof(req);
+  return req;
+};
 
 const createRuntime = async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-remote-clients-test-'));
@@ -120,8 +128,9 @@ describe('remote client auth runtime', () => {
       expect(created.client.usesRelay).toBe(false);
       expect(await runtime.hasActiveRelayClients()).toBe(false);
 
-      // A tunneled request is the authoritative proof the device uses the relay.
-      const relayReq = { headers: { 'x-openchamber-relay-connection': 'conn-1' } };
+      // A request the relay dispatcher stamped is the authoritative proof the
+      // device uses the relay.
+      const relayReq = received({ 'x-openchamber-relay-connection': 'conn-1', ...relayProofHeaders() });
       const authenticated = await runtime.authenticateBearerToken(created.token, relayReq);
       expect(authenticated?.ok).toBe(true);
       expect(authenticated?.client.usesRelay).toBe(true);
@@ -133,6 +142,37 @@ describe('remote client auth runtime', () => {
       expect(listed[0].usesRelay).toBe(true);
       expect(listed[0].lastTransport).toBe('direct');
       expect(await runtime.hasActiveRelayClients()).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps a direct-only device direct when it sends the relay headers itself', async () => {
+    const { dir, runtime } = await createRuntime();
+    try {
+      const created = await runtime.createClient({ label: 'Phone', localOnly: true });
+      // The LAN case and the same-host proxy case look the same to the server:
+      // client-chosen headers, whichever address the connection comes from.
+      const forgedRequests = [
+        { headers: { 'x-openchamber-relay-connection': 'forged' } },
+        { headers: { 'x-openchamber-relay-connection': 'forged', 'x-openchamber-relay-proof': 'guess' } },
+        { headers: { 'x-openchamber-relay-connection': 'forged', 'x-openchamber-relay-proof': '' } },
+      ];
+
+      for (const forged of forgedRequests) {
+        const authenticated = await runtime.authenticateBearerToken(created.token, received(forged.headers));
+        expect(authenticated?.ok).toBe(true);
+        expect(authenticated?.client.lastTransport).toBe('direct');
+        expect(authenticated?.client.usesRelay).toBe(false);
+      }
+      const listed = await runtime.listClients();
+      expect(listed[0].localOnly).toBe(true);
+      expect(await runtime.hasActiveRelayClients()).toBe(false);
+
+      const relayed = await runtime.authenticateBearerToken(created.token, received(relayProofHeaders()));
+      expect(relayed?.client.lastTransport).toBe('relay');
+      expect(relayed?.client.usesRelay).toBe(true);
+      expect((await runtime.listClients())[0].localOnly).toBe(false);
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }

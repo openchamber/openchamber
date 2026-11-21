@@ -1,8 +1,10 @@
 
 import express from 'express';
+import type { Server } from 'node:http';
 
 import { createRelayIdentityRuntime } from './identity.js';
 import { describeRelayError, startRelayHost } from './host-client.js';
+import { consumeRelayProof } from './provenance.js';
 import { isEnterpriseMode, readEnterprisePolicy } from '../enterprise-mode.js';
 import type { Application } from '../shared/http-contracts.js';
 import type { RelaySigningDependencies } from './signing-key.js';
@@ -320,7 +322,9 @@ export const createRelayService = ({
     if (wasHosting) await start((await readConfig()).relayUrl);
   };
 
-  const registerRoutes = (app: Application) => {
+  const registerRoutes = (app: Application, server: Server) => {
+    server.prependListener('request', consumeRelayProof);
+    server.prependListener('upgrade', consumeRelayProof);
     app.get('/api/openchamber/relay/status', async (_req, res) => {
       try {
         res.json(await getStatus());
