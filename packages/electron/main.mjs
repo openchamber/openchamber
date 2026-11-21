@@ -29,7 +29,7 @@ import { stopEmbeddedServer } from './server-shutdown.mjs';
 import { describeStartupEnvironmentOverrides, resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
 import { clearAppCache } from './app-cache.mjs';
 import { hideWindow, isWindowHidePending, showWindow } from './window-hide.mjs';
-import { parseExternalUrl } from './external-url-policy.mjs';
+import { isOpenableExternalUrl, parseExternalUrl } from './external-url-policy.mjs';
 import { createBrowserPanelDriver } from './browser-panel-driver.mjs';
 import {
   BACKGROUND_START_ARG,
@@ -2538,14 +2538,14 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
       if (route) emitToWindow(browserWindow, 'openchamber:open-session', route);
       return { action: 'deny' };
     }
-    void shell.openExternal(url).catch(() => {});
+    void (isOpenableExternalUrl(url) && shell.openExternal(url).catch(() => {}));
     return { action: 'deny' };
   });
 
   browserWindow.webContents.on('will-navigate', (event, url) => {
     if (isAllowedNavigationUrl(url)) return;
     event.preventDefault();
-    void shell.openExternal(url).catch(() => {});
+    void (isOpenableExternalUrl(url) && shell.openExternal(url).catch(() => {}));
   });
 
   browserWindow.webContents.on('did-navigate', (_event, url) => {
@@ -3012,7 +3012,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   }
 
   browserWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url).catch(() => {});
+    void (isOpenableExternalUrl(url) && shell.openExternal(url).catch(() => {}));
     return { action: 'deny' };
   });
   browserWindow.webContents.on('will-navigate', (event, url) => {
@@ -3023,7 +3023,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     } catch {
     }
     event.preventDefault();
-    void shell.openExternal(url).catch(() => {});
+    void (isOpenableExternalUrl(url) && shell.openExternal(url).catch(() => {}));
   });
   browserWindow.webContents.on('dom-ready', () => {
     const initScript = browserWindow.__ocInitScript;

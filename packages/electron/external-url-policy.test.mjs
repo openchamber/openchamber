@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseExternalUrl } from './external-url-policy.mjs';
+import { isOpenableExternalUrl, parseExternalUrl } from './external-url-policy.mjs';
 
 test('preserves editor file paths, lines and columns for the OS handler', () => {
   for (const url of [
@@ -14,6 +14,24 @@ test('preserves editor file paths, lines and columns for the OS handler', () => 
     assert.equal(parseExternalUrl(url).toString(), url);
   }
   assert.equal(parseExternalUrl('VSCODE://file/C:/Project/a.ts:1').protocol, 'vscode:');
+});
+
+test('answers whether a URL may be handed to the OS handler', () => {
+  for (const url of [
+    'vscode://file/Users/person/Project/package.json:7',
+    'https://example.test/path',
+    'http://localhost:3901/',
+  ]) {
+    assert.equal(isOpenableExternalUrl(url), true, url);
+  }
+  for (const url of [
+    'javascript:alert(1)', 'file:///etc/passwd', 'ms-msdt:/id%20PCWDiagnostic',
+    'search-ms:query=report', 'shell:AppsFolder', 'data:text/html,test',
+    '', 'not a url',
+  ]) {
+    assert.equal(isOpenableExternalUrl(url), false, url);
+  }
+  assert.equal(isOpenableExternalUrl(null), false);
 });
 
 test('rejects dangerous, internal and non-app protocols at the native boundary', () => {

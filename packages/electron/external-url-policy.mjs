@@ -15,3 +15,12 @@ export const parseExternalUrl = (target) => {
   }
   return parsed;
 };
+
+export const isOpenableExternalUrl = (target) => {
+  try {
+    parseExternalUrl(target);
+    return true;
+  } catch {
+    return false;
+  }
+};
