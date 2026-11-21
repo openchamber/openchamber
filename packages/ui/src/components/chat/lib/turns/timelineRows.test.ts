@@ -63,6 +63,13 @@ describe('answerChunkCuts', () => {
         expect(answerChunkCuts(`${longAnswer}[^1]: The note.\n`)).toEqual([]);
         expect(answerChunkCuts(`${longAnswer}[docs]: https://example.com\n`)).toEqual([]);
     });
+
+    test('never cuts inside a display equation that spans a blank line', () => {
+        const text = `${'Lorem ipsum dolor sit amet. '.repeat(75)}\n\n\\[\nx\n\ny\n\\]\n\n${'Tail words here. '.repeat(75)}`;
+        const cuts = answerChunkCuts(text);
+        expect(cuts.length).toBeGreaterThan(0);
+        for (const cut of cuts) expect(text.slice(cut).startsWith('Tail ')).toBe(true);
+    });
 });
 
 describe('buildTimelineRows', () => {

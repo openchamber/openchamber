@@ -1,4 +1,4 @@
-import { parseMarkdownIntoBlocks } from 'streamdown';
+import { parseMarkdownBlocksWithMath } from '../../markdown/mathBlocks';
 
 const ANSWER_CHUNK_MIN_LENGTH = 3000;
 
@@ -24,7 +24,7 @@ export const answerChunkCuts = (text: string): readonly number[] => {
     const cuts: number[] = [];
     let offset = 0;
     let chunkStart = 0;
-    for (const block of parseMarkdownIntoBlocks(text)) {
+    for (const block of parseMarkdownBlocksWithMath(text)) {
         if (offset - chunkStart >= ANSWER_CHUNK_TARGET_LENGTH
             && text.length - offset >= ANSWER_CHUNK_TARGET_LENGTH / 2
             && startsWithParagraphOrHeading(block)) {
