@@ -60,9 +60,12 @@ export const sleepSummaryText = ({ digest, children }: { digest: LeadDigest | un
       + ' (tools.openchamber inside execute) with all: true. Read it when something below is not enough to go on.',
   ];
   if (digest) {
-    if (digest.needsYou.length > 0) sections.push(`Waiting on the user, as the digest last said:\n${formatList(digest.needsYou)}`);
+    if (digest.needsYou.length > 0) {
+      sections.push(`Waiting on the user, as the digest last said:\n${formatList(digest.needsYou.map(({ question, recommended }) => (recommended ? `${question} (you recommended: ${recommended})` : question)))}`);
+    }
     if (digest.now.length > 0) sections.push(`Where each strand stood:\n${formatList(digest.now)}`);
     if (digest.news.length > 0) sections.push(`News you had for the user:\n${formatList(digest.news)}`);
+    if (digest.suggestions.length > 0) sections.push(`Work you offered the user next:\n${formatList(digest.suggestions)}`);
   } else {
     sections.push('The digest was never written.');
   }
@@ -200,5 +203,5 @@ export const createSessionLeadRuntime = ({
     for (const sessionId of [...timers.keys()]) cancel(sessionId);
   };
 
-  return { processPayload, sleepSummary, stop };
+  return { processPayload, sleepSummary, isBusy, stop };
 };

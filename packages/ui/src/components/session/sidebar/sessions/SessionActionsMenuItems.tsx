@@ -53,6 +53,7 @@ import { normalizePath } from '../utils';
 import { getWorkFolderScope } from './sessionFolderIdentity';
 import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled } from './sessionNodeItemUtils';
 import { collectSessionMoveDescendants } from './sessionSubtreeActions';
+import { HandToLeadMenu } from './HandToLeadMenu';
 
 type SessionMenuWork = {
   inWork: boolean;
@@ -520,6 +521,7 @@ export function SessionActionsMenuItems({
           </Item>
         </SessionMenuItemHint>
       ) : null}
+      {open && canLead && !isLead ? <HandToLeadMenu session={session} projectId={projectId} slots={slots} /> : null}
       <PinToMenu
         slots={slots}
         current={pinned ? getSessionPinList(session) ?? DEFAULT_PIN_LIST : null}

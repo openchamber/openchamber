@@ -6,12 +6,15 @@ A lead is a session the user marked to own a direction of work
 (`metadata.openchamber.lead = { at, digest? }`): it hands work to the
 sessions it creates with `ownWork`, checks what comes back against the
 outcome it agreed with the user, and keeps a brief and a digest. This module
-owns everything that only leads have on the server: the brief file, the
-`lead.brief` and `lead.digest` actions of the `openchamber` tool, the
-`openchamber.lead` and `openchamber.lead-brief` instruction texts, sleep
-compaction, the compaction callback route, and whether a lead's workflow runs
-start without approval. The UI owns the mark, the start points and the digest
-row (`packages/ui/src/lib/sessionLead.ts`). Session knowledge writes the
+owns everything that only leads have on the server: the brief file and the
+copy of it the lead's context holds, the `lead.brief` and `lead.digest`
+actions of the `openchamber` tool, handing a session to a lead
+(`lead.handover`), the `openchamber.lead` and `openchamber.lead-brief`
+instruction texts, sleep compaction, the compaction callback route, and
+whether a lead's workflow runs start without approval. The UI owns the mark,
+the start points, the digest row with its answers and dismissals, and the
+Hand to a lead menu (`packages/ui/src/lib/sessionLead.ts`,
+`packages/ui/src/sync/session-lead.ts`). Session knowledge writes the
 entries (`../session-knowledge/`), the control service routes the actions
 (`../openchamber-control/`), `work.name` names a lead
 (`../openchamber-sessions/work-naming.js`).
@@ -23,15 +26,36 @@ entries (`../session-knowledge/`), the control service routes the actions
   agent cannot turn itself or a child into a lead.
 - The brief is one markdown file per lead in `<data-dir>/leads/<id>.md`,
   outside the repository and outside Project knowledge. `lead.brief` replaces it
-  whole, at most 12,000 characters, and a longer one is refused with nothing
-  written. A missing file reads as "no brief yet"; a failed read is never an
-  empty brief: the knowledge sync then leaves the entry the session holds.
-  `session.deleted` removes the file; archiving keeps it, so a restored lead
-  has its brief.
-- `lead.digest` replaces the whole digest (`needsYou` at most 3, `now` at most
-  8, `news` at most 5, each item one line of at most 300 characters) and stamps
-  `updatedAt`. It is session metadata, so every client gets it through the
-  metadata broadcast. The server never asks the lead to update it.
+  whole or applies `edits` (`{ find, replace }`, each `find` exactly once, in
+  order), at most 12,000 characters; a failed edit or a longer brief is refused
+  with nothing written. A missing file reads as "no brief yet"; a failed read
+  is never an empty brief: the knowledge sync then leaves the entry the session
+  holds. `session.deleted` removes the file; archiving keeps it, so a restored
+  lead has its brief.
+- The `openchamber.lead-brief` entry holds the brief as it stood when the
+  lead's current stretch of conversation began, kept in `<id>.entry.md` (empty
+  when there was no brief yet). A `lead.brief` call does not touch it, and
+  `lead.brief` calls for one lead run one at a time; every compaction (the plugin hook calls
+  `/lead-compaction` on each one) brings it up to the current brief. A
+  compaction of a session that is no lead drops the copy, so marking it again
+  starts from the current brief.
+- `lead.digest` replaces the whole digest (`needsYou` at most 3 questions,
+  each `{ question, options, recommended }` with at most 4 options and the
+  recommendation one of them; `now` at most 8; `news` at most 5; `suggestions` at
+  most 3; each line at most 300 characters) and stamps `updatedAt`. It is
+  session metadata, so every client gets it through the metadata broadcast.
+  The server never asks the lead to update it. suggestions the user
+  dismissed (`lead.dismissed`, written by the UI) are left out, and the answer
+  tells the lead which.
+- `lead.handover` is the user's alone: it refuses any call that comes from a
+  session. It refuses a lead, a session another session runs, a subagent
+  session, the lead itself and a lead with a staged undo (OpenCode would take
+  the note without waking it). Hand-overs of one session run one at a time. It
+  denies the session the question and secret tools, links it as the lead's
+  `ownWork` child and wakes the lead with a note naming the session; when the
+  link or the wake fails, the session gets its permissions and its place back.
+  A session running at that moment returns its answer to the lead through
+  dispatch results, counted from its last idle record.
 - A lead whose agent has the `openchamber` tool gets two instruction entries:
   the fixed lead rules (`LEAD_GUIDANCE`) and its brief. A session that is no
   lead, or whose agent has no tool, has both removed. Unknown metadata leaves
@@ -71,6 +95,22 @@ needs after sleeping is already written down: the brief (an entry, kept
 through compaction), the digest, and its children's states. The note says
 where the full history is (`session.messages`); OpenCode keeps the recent
 tail verbatim beside it.
+
+### Why the brief entry changes only at compaction and not on every lead.brief
+
+OpenCode appends a changed entry to the conversation in full, so a lead that
+rewrites its brief each turn would carry a copy of up to 12,000 characters per
+turn until the next compaction. The lead's own `lead.brief` calls (the whole
+text or the edits) are already in its conversation, so the entry only has to
+be right where that history ends: at a compaction. The entry says it is the
+brief as the stretch began and that later calls changed it.
+
+### Why handing over goes through the control route and not its own route
+
+The agent-tool routes are registered before the UI's authentication, so a UI
+route there would skip it, and the server's wiring files may not grow. The
+control route is already authenticated for the UI and the CLI; the action
+refuses calls that come from an agent's session.
 
 ### Why a lead's name is its session title and not a separate field
 

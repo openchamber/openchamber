@@ -466,7 +466,7 @@ the menu of the project's "+" (right click on desktop, long press on the
 phone; a plain click or tap still opens an ordinary draft), and the `new_lead`
 shortcut (⇧⌥⌘L) and palette command, which on an open draft switch it between
 session and lead and keep what was typed. The session menu
-makes an existing session a lead and turns it back. VS Code
+makes an existing session a lead and turns it back. Hand to a lead in the session menu (a submenu of the project's leads on desktop, one item per lead on the phone) gives an ordinary top-level session to a lead as its own `ownWork` child; the server does the hand-over (`lead.handover`). VS Code
 has neither start, because its agent has no `openchamber` tool, but shows
 existing leads.
 

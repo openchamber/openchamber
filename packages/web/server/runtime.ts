@@ -1193,16 +1193,16 @@ const sessionLead = createSessionLeadServer({
   executeControl: (...args) => openChamberControlService.execute(...args),
   readWorkflowSettings: () => readWorkflowSettings(),
   createError: (message, status) => new OpenChamberControlError(message, status),
-  buildOpenCodeUrl: (route, directory) => buildOpenCodeUrl(route, directory),
-  getOpenCodeAuthHeaders: () => getOpenCodeAuthHeaders(),
+  buildOpenCodeUrl: (route, directory) => buildOpenCodeUrl(route, directory), getOpenCodeAuthHeaders: () => getOpenCodeAuthHeaders(),
   isSessionWarm: (sessionID, cacheLifetimeMs) => sessionWarmingRuntime.isSessionWarm(sessionID, cacheLifetimeMs),
+  registerResult: (entry) => dispatchResultsRuntime.register(entry),
 });
 
 const sessionKnowledgeRuntime = createManagedSessionKnowledgeRuntime({
   isToolHost: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
   readSettings: () => readSettingsFromDiskMigrated(),
   readExtensionInstructions: guestAgentContext.instructionText,
-  readLeadBrief: sessionLead.readBrief,
+  readLeadBrief: sessionLead.readBriefForEntry,
   projectContextRuntime,
   agentMemoryRuntime,
   resolveProjectId: (directory) => resolveMemoryProjectId(directory),

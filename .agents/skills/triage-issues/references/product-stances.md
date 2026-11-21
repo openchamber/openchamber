@@ -52,6 +52,7 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 - The Scheduled Tasks target picker lists root sessions at rest and finds subagents only by search, each named as its parent's subagent; `ownWork` workers never appear (OPE-374, #6315).
 - A subsession in a folder outside every project (a removed worktree, a folder outside the projects) shows under its parent and opens through the parent's folder; its own folder is never registered. A root session there stays hidden.
 - The agent's sidebar row shows no running/finished count of its `ownWork` sessions: they keep the row working and sit in its subtree.
+- A lead decides what its `ownWork` sessions ask; it is never a proxy for their questions. Its digest's Needs you holds only the lead's own questions, never a count of its children's pending permissions or questions. A lead stays one session with a brief and a digest: no per-lead task tracker, groups of leads or lead workspaces.
 - Between sessions, an idle session has answered: nothing an agent asked another session for waits on that session's subagents, workflow agents or `ownWork` sessions. Signals for the user and for review keep waiting on them, because the parent wakes again on each result: the "ready" notification, the extensions' `turn-finished` event and automatic review.
 
 ## Agent tools

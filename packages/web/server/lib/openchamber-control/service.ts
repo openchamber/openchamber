@@ -1429,7 +1429,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
       }
       if (action === 'session.list') return listSessions(input, contextDirectory, options.contextSessionId);
       if (action === 'session.archive') return archiveOwnSession(input, options.contextSessionId);
-      if (action === 'lead.brief' || action === 'lead.digest') {
+      if (action.startsWith('lead.')) {
         if (!leadActions) throw new OpenChamberControlError('Leads are not available on this server', 503);
         return leadActions.execute(action, input, asNonEmptyString(options.contextSessionId));
       }

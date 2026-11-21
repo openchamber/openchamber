@@ -11,22 +11,21 @@ const missingFileSchema = z.object({ code: z.literal('ENOENT') });
 export const createLeadBriefStore = ({ dataDir }: { dataDir: string }) => {
   const directory = path.join(dataDir, 'leads');
 
-  const fileOf = (sessionId: string) => {
+  const fileOf = (sessionId: string, suffix: string) => {
     if (!SESSION_ID_PATTERN.test(sessionId)) throw new Error(`Not a session id: ${sessionId}`);
-    return path.join(directory, `${sessionId}.md`);
+    return path.join(directory, `${sessionId}${suffix}`);
   };
 
-  const read = async (sessionId: string) => {
+  const readFile = async (file: string) => {
     try {
-      return await fs.readFile(fileOf(sessionId), 'utf8');
+      return await fs.readFile(file, 'utf8');
     } catch (error) {
       if (missingFileSchema.safeParse(error).success) return null;
       throw error;
     }
   };
 
-  const write = async (sessionId: string, body: string) => {
-    const file = fileOf(sessionId);
+  const writeFile = async (file: string, body: string) => {
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
     await fs.writeFile(temporary, body, { encoding: 'utf8', mode: 0o600 });
@@ -38,12 +37,22 @@ export const createLeadBriefStore = ({ dataDir }: { dataDir: string }) => {
     }
   };
 
-  const remove = async (sessionId: string) => {
+  const read = (sessionId: string) => readFile(fileOf(sessionId, '.md'));
+  const write = (sessionId: string, body: string) => writeFile(fileOf(sessionId, '.md'), body);
+
+  const readDelivered = (sessionId: string) => readFile(fileOf(sessionId, '.entry.md'));
+  const writeDelivered = (sessionId: string, body: string) => writeFile(fileOf(sessionId, '.entry.md'), body);
+  const forgetDelivered = async (sessionId: string) => {
     if (!SESSION_ID_PATTERN.test(sessionId)) return;
-    await fs.rm(fileOf(sessionId), { force: true });
+    await fs.rm(fileOf(sessionId, '.entry.md'), { force: true });
   };
 
-  return { read, write, remove };
+  const remove = async (sessionId: string) => {
+    if (!SESSION_ID_PATTERN.test(sessionId)) return;
+    await Promise.all([fs.rm(fileOf(sessionId, '.md'), { force: true }), forgetDelivered(sessionId)]);
+  };
+
+  return { read, write, readDelivered, writeDelivered, forgetDelivered, remove };
 };
 
 export type LeadBriefStore = ReturnType<typeof createLeadBriefStore>;

@@ -2,12 +2,16 @@ import { z } from 'zod';
 import { asNonEmptyString } from '../shared/guards.js';
 import { readSessionCacheLifetime } from '../session-warming/runtime.js';
 import { createLeadActions } from './actions.js';
+import { createLeadBriefEntry } from './brief-entry.js';
 import { createLeadBriefStore } from './brief-store.js';
+import { createLeadHandover } from './handover.js';
+import { createOpenCodeClient } from '../openchamber-sessions/opencode-client.js';
 import { readLead } from './metadata.js';
 import { createSessionLeadRuntime } from './runtime.js';
 import type { Application, ExpressFactory, Request } from '../shared/http-contracts.js';
 import type { SessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
 import type { LeadActionDependencies } from './actions.js';
+import type { createLeadHandover as LeadHandoverFactory } from './handover.js';
 import type { SessionLeadRuntimeOptions } from './runtime.js';
 import type { createOpenChamberControlService } from '../openchamber-control/service.js';
 
@@ -25,10 +29,11 @@ interface SessionLeadServerOptions extends Pick<SessionLeadRuntimeOptions, 'buil
   readSessionMetadata: (sessionId: string, options: { directory: string }) => Promise<SessionMetadata | null | undefined>;
   updateMetadata: LeadActionDependencies['updateMetadata'];
   resolveSessionDirectory: (sessionId: string) => Promise<string | null>;
-  syncBriefEntry: LeadActionDependencies['syncBriefEntry'];
+  syncBriefEntry: (sessionId: string, directory: string, brief: string) => Promise<boolean>;
   executeControl: ReturnType<typeof createOpenChamberControlService>['execute'];
   readWorkflowSettings: () => Promise<WorkflowApprovalSettings | null>;
   createError: LeadActionDependencies['createError'];
+  registerResult: Parameters<typeof LeadHandoverFactory>[0]['registerResult'];
 }
 
 export const createSessionLeadServer = ({
@@ -43,19 +48,12 @@ export const createSessionLeadServer = ({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   isSessionWarm,
+  registerResult,
 }: SessionLeadServerOptions) => {
   const briefs = createLeadBriefStore({ dataDir });
+  const briefEntry = createLeadBriefEntry({ briefs, putEntry: syncBriefEntry });
 
-  const actions = createLeadActions({
-    getSession: async (sessionId) => {
-      const directory = await resolveSessionDirectory(sessionId) ?? '';
-      return { id: sessionId, directory, metadata: await readSessionMetadata(sessionId, { directory }) };
-    },
-    updateMetadata,
-    briefs,
-    syncBriefEntry,
-    createError,
-  });
+  const openCode = (directory: string) => createOpenCodeClient({ baseUrl: String(buildOpenCodeUrl('/', '')).replace(/\/$/, ''), headers: getOpenCodeAuthHeaders(), directory });
 
   const runtime = createSessionLeadRuntime({
     briefs,
@@ -66,6 +64,33 @@ export const createSessionLeadServer = ({
     isSessionWarm,
     listChildren: async (sessionId) => childrenSchema.parse(await executeControl('session.list', { mine: true }, undefined, { contextSessionId: sessionId })).sessions,
   });
+
+  const handover = createLeadHandover({
+    resolveSessionDirectory,
+    readSessionMetadata,
+    updateMetadata,
+    openCode,
+    isBusy: runtime.isBusy,
+    registerResult,
+    createError,
+  });
+
+  const actions = createLeadActions({
+    getSession: async (sessionId) => {
+      const directory = await resolveSessionDirectory(sessionId) ?? '';
+      return { id: sessionId, directory, metadata: await readSessionMetadata(sessionId, { directory }) };
+    },
+    updateMetadata,
+    briefs,
+    handOver: handover.handOver,
+    createError,
+  });
+
+  const refreshBriefEntry = async (sessionId: string) => {
+    const directory = await resolveSessionDirectory(sessionId) ?? '';
+    const lead = readLead(await readSessionMetadata(sessionId, { directory }));
+    await briefEntry.refresh(sessionId, directory, lead !== null);
+  };
 
   const startsWorkflowWithoutApproval = async (sessionId: string) => {
     const settings = await readWorkflowSettings();
@@ -78,13 +103,15 @@ export const createSessionLeadServer = ({
     app.post<{ sessionID?: unknown }>('/api/openchamber/agent-tool/lead-compaction', express.json({ limit: '16kb' }), async (req, res) => {
       if (!authorize(req)) return res.status(401).json({ error: 'Unauthorized' });
       const sessionID = asNonEmptyString(req.body?.sessionID);
-      const summary = sessionID ? await runtime.sleepSummary(sessionID).catch(() => null) : null;
-      return res.json({ summary });
+      if (!sessionID) return res.json({ summary: null });
+      await refreshBriefEntry(sessionID)
+        .catch((error: Error) => console.warn('[session-lead] brief entry refresh failed:', error.message));
+      return res.json({ summary: await runtime.sleepSummary(sessionID).catch(() => null) });
     });
   };
 
   return {
-    readBrief: briefs.read,
+    readBriefForEntry: briefEntry.forEntry,
     actions,
     processPayload: runtime.processPayload,
     startsWorkflowWithoutApproval,

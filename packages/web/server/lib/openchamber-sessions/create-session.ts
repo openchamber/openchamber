@@ -5,7 +5,7 @@ import type { OpenCodeClient, SessionCreateInput } from '@opencode/client';
 
 export const OPERATOR_CHILD_NOTE_SOURCE = 'openchamber-operator-child';
 
-const OPERATOR_CHILD_DENIED_RULES = ['question', 'openchamber_secret'].map((action) => ({ action, resource: '*', effect: 'deny' as const }));
+export const OPERATOR_CHILD_DENIED_RULES = ['question', 'openchamber_secret'].map((action) => ({ action, resource: '*', effect: 'deny' as const }));
 
 const OPERATOR_CHILD_NOTE = [
   'The user does not interact with this session. Another agent started it as part of its own work, and your final answer goes to that agent, not to the user.',
@@ -19,7 +19,7 @@ export const withoutOperatorChildDenials = (permissions: SessionCreateInput['per
   )));
 };
 
-const operatorChildMetadata = (parentSessionId: string) => ({ kind: OPERATOR_CHILD_KIND, parentID: parentSessionId });
+export const operatorChildMetadata = (parentSessionId: string) => ({ kind: OPERATOR_CHILD_KIND, parentID: parentSessionId });
 
 interface CreateSessionOptions {
   client: OpenCodeClient;
@@ -50,7 +50,7 @@ export const createSession = async ({ client, directory, title, titleByUser = fa
   return sessionID;
 };
 
-const admitOperatorChildNote = async (client: OpenCodeClient, sessionID: string, parentSessionId: string) => {
+export const admitOperatorChildNote = async (client: OpenCodeClient, sessionID: string, parentSessionId: string) => {
   try {
     await client.session.synthetic({
       sessionID,

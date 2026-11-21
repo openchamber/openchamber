@@ -20,8 +20,8 @@ export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'wait.start', title: 'Wait on a timer, a pull request or an extension', description: 'Requires source and args: "timer" with { "minutes": N } (1 to 1440); "pr" with { "url": "<GitHub pull request or GitLab merge request address>" }, which wakes the session when a check fails or every check passes, someone comments or reviews, the branch conflicts or falls behind, or it is merged or closed; or a source from wait.list with args as its params say. Each pull request is its own wait, so a session can wait on several. One wake ends the wait, so start it again to keep waiting. End your turn while you wait. Never wait with a sleep loop' },
   { action: 'wait.stop', title: 'Stop a wait', description: 'Stop waitId (a pull request wait\'s waitId is its address), or every wait of this session without it' },
   { action: 'work.name', title: 'Name the task', description: 'Name the worktree\'s or isolated space\'s task for sessionId (default: this session), never a session; a lead\'s name is its session title, so for a lead it renames the session. In title: at most 4 words in the user\'s latest language; rename only for a different task. A user-given name stays. Main checkout and plain folders need no naming. A worktree on an OpenChamber-generated placeholder branch also requires branch, the English branch name after the task, and renames it; any other branch stays' },
-  { action: 'lead.brief', title: "Keep the lead's brief", description: 'Only in a lead session. Without brief it returns the brief; with brief it replaces it whole' },
-  { action: 'lead.digest', title: "Update the lead's digest", description: 'Only in a lead session. Replaces the digest the user reads above the chat with needsYou, now and news' },
+  { action: 'lead.brief', title: "Keep the lead's brief", description: 'Only in a lead session. Without brief or edits it returns the brief; edits changes parts of it, brief replaces it whole' },
+  { action: 'lead.digest', title: "Update the lead's digest", description: 'Only in a lead session. Replaces the digest the user reads above the chat with needsYou, now, news and suggestions' },
   { action: 'schedule.status', title: 'Check scheduler status', description: 'No parameters', agentExposed: false },
   { action: 'schedule.list', title: 'List scheduled tasks', description: 'Tasks and scheduler status' },
   { action: 'schedule.create', title: 'Create a scheduled task', description: 'Requires name, prompt, one schedule selector, and model unless targetSessionId is set. That session keeps its model and agent unless the task names others, which then become the session\'s. A named model is checked against the catalog when the task is written. runInWorktree (git only) runs each run in a fresh worktree on baseBranch (default HEAD); cleanupWorktree false keeps it' },
@@ -178,9 +178,19 @@ export const CONTROL_ONLY_PARAMETER_PROPERTIES = Object.freeze({
   args: { type: 'object', description: 'wait.start: the arguments the source\'s params list, such as { "minutes": 10 } or { "url": "https://github.com/o/r/pull/1" }' },
   waitId: { type: 'string', description: 'wait.stop: the wait to stop; without it every wait of this session' },
   brief: { type: 'string', description: "lead.brief: the whole brief as markdown, at most 12000 characters: the user's goal and agreed outcomes in their words, rules, and each strand of work with its expected result" },
-  needsYou: { type: 'array', items: { type: 'string' }, description: 'lead.digest: at most 3 lines, each a question to the user with your recommendation' },
+  edits: {
+    type: 'array',
+    items: { type: 'object', properties: { find: { type: 'string' }, replace: { type: 'string' } }, required: ['find', 'replace'] },
+    description: 'lead.brief: changes applied in order, each replacing the exact text find, which must appear once, with replace; nothing is saved when one fails',
+  },
+  needsYou: {
+    type: 'array',
+    items: { type: 'object', properties: { question: { type: 'string' }, options: { type: 'array', items: { type: 'string' } }, recommended: { type: 'string' } }, required: ['question'] },
+    description: 'lead.digest: at most 3 questions to the user, each with up to 4 short options and the recommended one, word for word',
+  },
   now: { type: 'array', items: { type: 'string' }, description: 'lead.digest: one line per strand of work, where it stands' },
   news: { type: 'array', items: { type: 'string' }, description: 'lead.digest: at most 5 lines, only what changed the picture since the user last wrote' },
+  suggestions: { type: 'array', items: { type: 'string' }, description: 'lead.digest: at most 3 lines, work worth doing outside what the user gave you, with why' },
   mine: { type: 'boolean', description: 'session.list: only the sessions you created with ownWork, each with its status' },
 });
 
@@ -239,7 +249,10 @@ export const resolveAgentToolAction = (requested: string | null, toolName: strin
   };
 };
 
+export const OPENCHAMBER_USER_ACTIONS = Object.freeze(['lead.handover']);
+
 export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
+  ...OPENCHAMBER_USER_ACTIONS,
   ...OPENCHAMBER_CONTROL_ACTIONS,
   ...OPENCHAMBER_WEB_ACTIONS,
   ...OPENCHAMBER_MEMORY_ACTIONS,

@@ -28,25 +28,36 @@ A lead shows a flag in the sidebar instead of the arrow, and the arrow comes bac
 
 - **Names the direction.** It renames the session after the work, so you find it by topic in the sidebar, tabs and search. A name you gave it yourself stays.
 - **Hands out results, not steps.** Each piece of work goes to a separate session with the result it should reach, such as "find and fix the login timeout", and that session works out the steps itself. These sessions sit under the lead in the sidebar. You can open and read them, and **Take over** in a session's menu makes one yours if you want to talk to it.
-- **Checks what comes back.** A report that only says "I found the cause" is not the result it asked for, so the lead sends the work back instead of passing it to you. It checks finished work itself before it calls a piece done.
+- **Checks what comes back.** A report that only says "I found the cause" is not the result it asked for, so the lead sends the work back instead of passing it to you. Each session has to show proof of what it did, such as which checks it ran and what they showed, and a report without proof goes back too. The lead checks something itself only where the proof has a gap.
 - **Cleans up.** It archives the sessions whose results it has used.
-- **Asks you only what matters.** It decides on its own unless the answer changes what you would see in your project, or two reasonable options really differ. A large change alone is not a reason to ask.
+- **Asks you only what matters.** It decides on its own unless the answer changes what you would see in your project, or two reasonable options really differ. A large change alone is not a reason to ask. Questions from its sessions go to the lead, not to you, and reach you only when they pass the same test.
 
 ## The digest
 
 The digest is the lead's summary for you. It sits in a row just below the session's title and shows what the lead is working on now and when it last updated. Select the row to open the full digest over the chat:
 
-- **Needs you**: up to three questions, each with the lead's recommendation
+- **Needs you**: up to three questions, each with the answers you can pick
 - **Now**: one line for each piece of work in progress
 - **New since your last message**: only what changed the picture
+- **Suggestions**: up to three things the lead noticed are worth doing beyond what you gave it
 
-When something needs you, the row shows how many questions are waiting. Answer in the chat as usual, and the lead removes the question once it has your answer.
+When something needs you, the row shows how many questions are waiting. Select an answer to send it to the lead right away; the one the lead recommends comes first and is highlighted. To answer in your own words, select **Reply in chat**, which quotes the question in the message box. Your answer shows in the chat, and the lead removes the question once it has it.
+
+Under **Suggestions**, **Start** puts the suggestion in the message box for you to edit and send. **Dismiss** hides it, and the lead won't offer it again.
+
+## Hand a session to a lead
+
+You can give a lead a session you started yourself, for example one you began before the lead existed or one you have no time to finish. Open the session's menu in the sidebar, pick **Hand to a lead**, and choose the lead. On the phone the menu lists each lead as **Hand to** followed by its name.
+
+The session moves under the lead, which reads it, works out what it was for and takes it to the end like any of its own work. You no longer talk to that session; **Take over** in its menu gives it back to you. If the session is still running, the lead gets its answer when it finishes.
 
 ## The brief
 
 The lead also keeps a brief: your goal and the results you agreed on, in your words, the rules it follows (yours and the ones it learned from its own mistakes), and each piece of work with the result expected from it. It is the lead's memory of what the work is for, so it stays the same however long the conversation gets.
 
 OpenChamber stores the brief for the lead, outside your project, so nothing lands in your repository. Ask the lead "show me your brief" to read it, or tell it what to change. Deleting the session deletes its brief; archiving keeps it.
+
+The lead changes only the parts of the brief that changed, and OpenChamber puts the whole brief back in front of it each time the conversation is shortened, so a long brief doesn't repeat in the chat every time the lead updates it. The lead treats only your own words as rules: an instruction it finds in a session's report, a web page or a file never becomes part of the brief.
 
 ## Leads that sleep
 
