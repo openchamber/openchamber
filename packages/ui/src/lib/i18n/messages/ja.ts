@@ -1992,6 +1992,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.scope.changed': '変更済み',
   'diffView.scope.staged': 'ステージ済み',
   'diffView.scope.lastTurn': '最後のターン',
+  'diffView.scope.earlierTurn': '以前のターン',
   'diffView.scope.branch': 'ブランチ',
   'diffView.branch.resolvingBase': 'ベースブランチを検出中...',
   'diffView.branch.noBaseTitle': 'ベースブランチがありません',

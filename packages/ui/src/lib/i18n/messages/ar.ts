@@ -1899,6 +1899,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.scope.changed': 'المتغيرة',
   'diffView.scope.staged': 'المُدرجة',
   'diffView.scope.lastTurn': 'الدور الأخير',
+  'diffView.scope.earlierTurn': 'دور سابق',
   'diffView.scope.branch': 'الفرع',
   'diffView.branch.resolvingBase': 'جارٍ اكتشاف الفرع الأساسي…',
   'diffView.branch.noBaseTitle': 'لا يوجد فرع أساسي',

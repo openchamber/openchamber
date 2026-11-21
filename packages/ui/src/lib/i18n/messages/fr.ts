@@ -1748,6 +1748,7 @@ export const dict = {
   "diffView.scope.changed": "Modifiés",
   "diffView.scope.staged": "Staged",
   "diffView.scope.lastTurn": "Dernier tour",
+  "diffView.scope.earlierTurn": "Tour précédent",
   "diffView.scope.branch": "Branche",
   "diffView.branch.resolvingBase": "Détection de la branche de base...",
   "diffView.branch.noBaseTitle": "Aucune branche de base",

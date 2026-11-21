@@ -1952,6 +1952,7 @@ export const dict: Record<I18nKey, string> = {
   "diffView.scope.changed": "Cambiados",
   "diffView.scope.staged": "Staged",
   "diffView.scope.lastTurn": "Último turno",
+  "diffView.scope.earlierTurn": "Turno anterior",
   "diffView.scope.branch": "Rama",
   "diffView.branch.resolvingBase": "Detectando rama base...",
   "diffView.branch.noBaseTitle": "Sin rama base",

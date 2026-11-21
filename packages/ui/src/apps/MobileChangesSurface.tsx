@@ -1144,7 +1144,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     return (
       <MobileDiffDetail
         path={route.path}
-        subtitle={navigation.turnId ? t('chat.changedFiles.title') : t('diffView.scope.lastTurn')}
+        subtitle={navigation.turnId ? t('diffView.scope.earlierTurn') : t('diffView.scope.lastTurn')}
         diff={turnDiffData.get(route.path) ?? null}
         fileExists={turnFiles.some((file) => file.path === route.path)}
         onBack={() => setRoute(LIST_ROUTE)}
@@ -1152,7 +1152,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     );
   }
 
-  const modeLabel = mode === 'pr' ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', prChangeRequestTerm)) : mode === 'branch' ? t('diffView.scope.branch') : mode === 'commit' ? t('commitComparison.mode') : mode === 'turn' ? (navigation.turnId ? t('chat.changedFiles.title') : t('diffView.scope.lastTurn')) : t('mobile.nav.changes');
+  const modeLabel = mode === 'pr' ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', prChangeRequestTerm)) : mode === 'branch' ? t('diffView.scope.branch') : mode === 'commit' ? t('commitComparison.mode') : mode === 'turn' ? (navigation.turnId ? t('diffView.scope.earlierTurn') : t('diffView.scope.lastTurn')) : t('mobile.nav.changes');
   const sourceLabel = mode === 'branch' && branchComparison.base
     ? branchRefLabel(branchComparison.base)
     : mode === 'commit' ? selectedCommitHash?.slice(0, 8) : mode === 'pr' && selectedPr ? `#${selectedPr.number}` : null;
@@ -1273,7 +1273,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
             }}>
               <DropdownMenuRadioItem value="working" className="min-h-8 items-center">{t('mobile.nav.changes')}</DropdownMenuRadioItem>
               {mode === 'turn' && navigation.turnId && (
-                <DropdownMenuRadioItem value="historical-turn" className="min-h-8 items-center">{t('chat.changedFiles.title')}</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="historical-turn" className="min-h-8 items-center">{t('diffView.scope.earlierTurn')}</DropdownMenuRadioItem>
               )}
               <DropdownMenuRadioItem value="turn" className="min-h-8 items-center">{t('diffView.scope.lastTurn')}</DropdownMenuRadioItem>
               {showBranchOption && <DropdownMenuRadioItem value="branch" className="min-h-8 items-center">{t('diffView.scope.branch')}</DropdownMenuRadioItem>}

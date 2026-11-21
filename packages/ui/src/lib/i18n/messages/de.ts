@@ -1733,6 +1733,7 @@ export const dict = {
   'diffView.scope.changed': 'Geändert',
   'diffView.scope.staged': 'Staged',
   'diffView.scope.lastTurn': 'Letzter Zug',
+  'diffView.scope.earlierTurn': 'Früherer Zug',
   'diffView.scope.branch': 'Branch',
   'diffView.branch.resolvingBase': 'Basis-Branch wird ermittelt...',
   'diffView.branch.noBaseTitle': 'Kein Basis-Branch',

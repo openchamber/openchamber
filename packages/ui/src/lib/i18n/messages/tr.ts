@@ -1872,6 +1872,7 @@ export const dict = {
   'diffView.scope.changed': 'Değişen',
   'diffView.scope.staged': 'Staged',
   'diffView.scope.lastTurn': 'Son tur',
+  'diffView.scope.earlierTurn': 'Önceki tur',
   'diffView.scope.selectorAria': 'Değişiklik modunu seç',
   'diffView.actions.retry': 'Yeniden dene',
   'diffView.actions.renderAnyway': 'Yine de render et',

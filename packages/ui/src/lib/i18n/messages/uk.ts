@@ -1952,6 +1952,7 @@ export const dict: Record<I18nKey, string> = {
   "diffView.scope.changed": "Змінені",
   "diffView.scope.staged": "Індексовані",
   "diffView.scope.lastTurn": "Останній хід",
+  "diffView.scope.earlierTurn": "Попередній хід",
   "diffView.scope.branch": "Гілка",
   "diffView.branch.resolvingBase": "Визначаємо базову гілку...",
   "diffView.branch.noBaseTitle": "Немає базової гілки",

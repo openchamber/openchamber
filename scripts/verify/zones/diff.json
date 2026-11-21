@@ -780,7 +780,7 @@
             {"do": "open", "session": "s"},
             {"do": "see", "on": "chat.changedFile", "path": "notes/verify-notes.md", "count": 2},
             {"do": "click", "on": "chat.changedFile", "path": "notes/verify-notes.md", "index": 0},
-            {"do": "see", "on": "diff.mode", "text": "Changed files: 1"},
+            {"do": "see", "on": "diff.mode", "text": "Earlier turn: 1"},
             {"do": "see", "on": "diff.added", "text": "second-note-line"},
             {"do": "click", "on": "chat.changedFile", "path": "notes/verify-notes.md", "index": 1},
             {"do": "see", "on": "diff.mode", "text": "Last turn: 1"},

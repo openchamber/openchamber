@@ -49,7 +49,7 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
     const currentLabel = scope === 'pr' ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestTerm)) : scope === 'staged'
         ? t('diffView.scope.staged')
         : scope === 'turn'
-            ? (showsHistoricalTurn ? t('chat.changedFiles.title') : t('diffView.scope.lastTurn'))
+            ? (showsHistoricalTurn ? t('diffView.scope.earlierTurn') : t('diffView.scope.lastTurn'))
             : scope === 'branch'
                 ? t('diffView.scope.branch')
                 : scope === 'commit' ? t('commitComparison.mode') : t('diffView.scope.changed');
@@ -83,7 +83,7 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
                     {showsHistoricalTurn && (
                         <DropdownMenuRadioItem value="historical-turn">
                             <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
-                                <span>{t('chat.changedFiles.title')}</span>
+                                <span>{t('diffView.scope.earlierTurn')}</span>
                                 <span className="typography-meta text-muted-foreground">{historicalTurn?.count ?? '…'}</span>
                             </span>
                         </DropdownMenuRadioItem>

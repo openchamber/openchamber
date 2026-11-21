@@ -1991,6 +1991,7 @@ export const dict = {
   'diffView.scope.changed': 'Gewijzigd',
   'diffView.scope.staged': 'Gestaged',
   'diffView.scope.lastTurn': 'Laatste beurt',
+  'diffView.scope.earlierTurn': 'Eerdere beurt',
   'diffView.scope.branch': 'Branch',
   'diffView.branch.resolvingBase': 'Basisbranch bepalen...',
   'diffView.branch.noBaseTitle': 'Geen basisbranch',

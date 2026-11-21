@@ -1996,6 +1996,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.scope.changed': '변경됨',
   'diffView.scope.staged': '스테이지됨',
   "diffView.scope.lastTurn": "마지막 턴",
+  "diffView.scope.earlierTurn": "이전 턴",
   "diffView.scope.branch": "브랜치",
   "diffView.branch.resolvingBase": "베이스 브랜치 감지 중...",
   "diffView.branch.noBaseTitle": "베이스 브랜치 없음",

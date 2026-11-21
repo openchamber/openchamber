@@ -1962,6 +1962,7 @@ export const dict: Record<I18nKey, string> = {
   "diffView.scope.changed": "已更改",
   "diffView.scope.staged": "已暂存",
   "diffView.scope.lastTurn": "上一轮",
+  "diffView.scope.earlierTurn": "更早的轮次",
   "diffView.scope.branch": "分支",
   "diffView.branch.resolvingBase": "正在检测基础分支...",
   "diffView.branch.noBaseTitle": "没有基础分支",

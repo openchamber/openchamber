@@ -2348,6 +2348,7 @@ export const dict: Record<I18nKey, string> = {
   "diffView.scope.changed": "Zmienione",
   "diffView.scope.staged": "Staged",
   "diffView.scope.lastTurn": "Ostatnia tura",
+  "diffView.scope.earlierTurn": "Wcześniejsza tura",
   "diffView.scope.branch": "Gałąź",
   "diffView.branch.resolvingBase": "Wykrywanie gałęzi bazowej...",
   "diffView.branch.noBaseTitle": "Brak gałęzi bazowej",

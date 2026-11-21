@@ -1898,6 +1898,7 @@ export const dict = {
   'diffView.scope.changed': 'שונו',
   'diffView.scope.staged': 'בהכנה (staged)',
   'diffView.scope.lastTurn': 'התור האחרון',
+  'diffView.scope.earlierTurn': 'תור קודם',
   'diffView.scope.branch': 'ענף',
   'diffView.branch.resolvingBase': 'מזהה את ענף הבסיס…',
   'diffView.branch.noBaseTitle': 'אין ענף בסיס',
