@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
 import { useSessionSearchEffects } from './sidebar/shell/useSessionSearchEffects';
+import { useNestedSessionDiscovery } from '@/hooks/useNestedSessionDiscovery';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useKeybinds } from '@/hooks/useKeybind';
@@ -40,7 +41,7 @@ import {
   worktreeMapsEqual,
   type ProjectRef,
 } from '@/lib/worktrees/worktreeManager';
-import { resolveProjectForCreatedSession, resolveProjectsForWorktreeChange } from '@/lib/worktrees/worktreeTopologyRefresh';
+import { getProjectWorktreeDiscovery, resolveProjectForCreatedSession, resolveProjectsForWorktreeChange } from '@/lib/worktrees/worktreeTopologyRefresh';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { resolveSidebarGrouping, useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -208,12 +209,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   })));
 
   const runtimeKey = getRuntimeKey();
-  const projectWorktreeDiscoveryKey = React.useMemo(
-    () => `${runtimeKey}|${projects
-      .map((project) => `${project.id}:${normalizePath(project.path) ?? ''}`)
-      .join('|')}`,
-    [projects, runtimeKey],
-  );
+  const projectWorktreeDiscoveryKey = React.useMemo(() => getProjectWorktreeDiscovery(projects, runtimeKey), [projects, runtimeKey]);
   const [resolvedWorktreeTopologyKey, setResolvedWorktreeTopologyKey] = React.useState<string | null>(
     isVSCode ? projectWorktreeDiscoveryKey : null,
   );
@@ -223,6 +219,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const unresolvedWorktreeProjectPathsRef = React.useRef(unresolvedWorktreeProjectPaths);
   unresolvedWorktreeProjectPathsRef.current = unresolvedWorktreeProjectPaths;
   const isConnected = useConfigStore((state) => state.isConnected);
+  const setNonGitProjectIds = useNestedSessionDiscovery(!isVSCode);
   const rawWorktreesByProjectRef = React.useRef<RawWorktreesByProjectScope>({
     runtimeKey: null,
     revision: 0,
@@ -233,7 +230,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     let cancelled = false;
 
     const discoverWorktrees = async () => {
-      const discoveryRuntimeKey = runtimeKey;
       const isCurrent = captureRuntimeInstance();
       const connectedAtStart = useConfigStore.getState().isConnected;
       const projectEntries = useProjectsStore.getState().projects;
@@ -255,11 +251,12 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       const seededRawScope = ensureRawWorktreesByProjectScope({
         rawWorktreesByProjectRef,
         publishedWorktreesByProject: knownPublishedWorktreesByProject,
-        runtimeKey: discoveryRuntimeKey,
+        runtimeKey,
       });
       const capturedRawRevision = seededRawScope.revision;
       const worktreesByProject = new Map(seededRawScope.worktreesByProject);
       const unresolvedProjectPaths = new Set<string>();
+      const nonGitProjects = new Set<string>();
 
       await runBackgroundNetworkTask(() => Promise.all(projectEntries.map(async (project) => {
         const projectPath = normalizePath(project.path);
@@ -269,6 +266,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
           const isGitRepo = cachedIsGitRepo ?? await checkIsGitRepository(projectPath);
           if (cancelled || !isCurrent()) return;
           if (!isGitRepo) {
+            nonGitProjects.add(project.id);
             worktreesByProject.delete(projectPath);
             return;
           }
@@ -284,7 +282,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         }
       })));
 
-      if (cancelled || !isCurrent() || getRuntimeKey() !== discoveryRuntimeKey) return;
+      if (cancelled || !isCurrent() || getRuntimeKey() !== runtimeKey) return;
 
       const activeProjectPaths = new Set(projectEntries.map((project) => normalizePath(project.path)).filter(Boolean));
       for (const projectPath of worktreesByProject.keys()) {
@@ -294,7 +292,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       }
       const committed = commitDiscoveredRawWorktreesByProject({
         rawWorktreesByProjectRef,
-        runtimeKey: discoveryRuntimeKey,
+        runtimeKey,
         capturedRevision: capturedRawRevision,
         nextRawWorktreesByProject: worktreesByProject,
         publishedWorktreesByProject: knownPublishedWorktreesByProject,
@@ -314,6 +312,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         return;
       }
       setUnresolvedWorktreeProjectPaths(unresolvedProjectPaths);
+      setNonGitProjectIds(nonGitProjects);
       useSessionUIStore.setState({ worktreeDiscoveryByProject: new Map(projectEntries.map((project) => {
         const path = normalizePath(project.path) ?? project.path;
         return [path, unresolvedProjectPaths.has(path) ? 'error' : 'ready'];
@@ -329,7 +328,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey, worktreeDiscoveryRevision]);
+  }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey, setNonGitProjectIds, worktreeDiscoveryRevision]);
 
   React.useEffect(() => {
     if (isConnected && unresolvedWorktreeProjectPathsRef.current.size > 0) {
