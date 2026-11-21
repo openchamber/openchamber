@@ -177,6 +177,95 @@ describe("input-store attachments", () => {
     }
   })
 
+  testWithMockFileReader("refuses a shared HEIC the decoder cannot read by name, without writing it anywhere", async () => {
+    const write = spyOn(opencodeClient, "writeOpenCodeTempFiles")
+    const share = { runtimeKey: "runtime", directory: "/repo", sessionId: "draft:share" }
+    try {
+      useInputStore.getState().selectAttachmentDraft(share)
+      await expect(
+        useInputStore.getState().addAttachedFile(new File(["heic-data"], "IMG_4015.heic", { type: "image/heic" }), share, undefined, { shared: true }),
+      ).rejects.toThrow("IMG_4015.heic")
+
+      expect(write).not.toHaveBeenCalled()
+      expect(useInputStore.getState().attachedFiles).toEqual([])
+    } finally {
+      write.mockRestore()
+    }
+  })
+
+  testWithMockFileReader("a shared file read across a draft switch lands in the share's draft, not the one on screen", async () => {
+    const share = { runtimeKey: "runtime", directory: "/repo", sessionId: "draft:share" }
+    const other = { runtimeKey: "runtime", directory: "/repo", sessionId: "other" }
+    const input = useInputStore.getState()
+    input.selectAttachmentDraft(share)
+    const adding = input.addAttachedFile(new File(["hello"], "notes.txt", { type: "text/plain" }), share, undefined, { shared: true })
+    await waitForReaderCount(1)
+
+    input.selectAttachmentDraft(other)
+    resolveReader(pendingReaders[0], "data:text/plain;base64,aGVsbG8=")
+
+    expect(await adding).toBe(true)
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+    expect(useInputStore.getState().getAttachedFiles(share).map((file) => file.filename)).toEqual(["notes.txt"])
+  })
+
+  testWithMockFileReader("an original kept for Send is written only when the send asks, then becomes a reference", async () => {
+    const write = spyOn(opencodeClient, "writeOpenCodeTempFiles").mockImplementation(async (_directory, files) => (
+      files.map(({ filename }) => ({ filename, path: `/tmp/opencode/openchamber/abc/${filename}` }))
+    ))
+    const share = { runtimeKey: "runtime", directory: "/repo", sessionId: "draft:share" }
+    try {
+      const input = useInputStore.getState()
+      input.selectAttachmentDraft(share)
+      const adding = input.addAttachmentSavedOnSend(new File(["docx-bytes"], "plan.docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }), share)
+      await waitForReaderCount(1)
+      resolveReader(pendingReaders[0], "data:application/octet-stream;base64,ZG9jeA==")
+      await adding
+
+      expect(write).not.toHaveBeenCalled()
+      const [held] = useInputStore.getState().attachedFiles
+      expect(held?.saveOnSend).toBe(true)
+      expect(held?.filename).toBe("plan.docx")
+
+      const saving = useInputStore.getState().saveAttachmentsHeldForSend(share, "/repo")
+      await waitForReaderCount(2)
+      resolveReader(pendingReaders[1], "data:text/plain;base64,bm90ZQ==")
+      expect(await saving).toEqual([])
+
+      expect(write).toHaveBeenCalledTimes(1)
+      expect(write.mock.calls[0][0]).toBe("/repo")
+      // The write is bound to the runtime the send started on.
+      expect(write.mock.calls[0][2]?.isCurrentRuntime?.()).toBe(true)
+      const [reference] = useInputStore.getState().attachedFiles
+      expect(reference?.id).toBe(held?.id)
+      expect(reference?.saveOnSend).toBeUndefined()
+      expect(reference?.mimeType).toBe("text/plain")
+      expect(reference?.agentPath).toBe("/tmp/opencode/openchamber/abc/plan.docx")
+    } finally {
+      write.mockRestore()
+    }
+  })
+
+  testWithMockFileReader("an original that cannot be written at Send stays held and is named", async () => {
+    const write = spyOn(opencodeClient, "writeOpenCodeTempFiles").mockImplementation(async () => {
+      throw new Error("OpenCode is not reachable")
+    })
+    const share = { runtimeKey: "runtime", directory: "/repo", sessionId: "draft:share" }
+    try {
+      const input = useInputStore.getState()
+      input.selectAttachmentDraft(share)
+      const adding = input.addAttachmentSavedOnSend(new File(["docx-bytes"], "plan.docx"), share)
+      await waitForReaderCount(1)
+      resolveReader(pendingReaders[0], "data:application/octet-stream;base64,ZG9jeA==")
+      await adding
+
+      expect(await useInputStore.getState().saveAttachmentsHeldForSend(share, "/repo")).toEqual(["plan.docx"])
+      expect(useInputStore.getState().attachedFiles[0]?.saveOnSend).toBe(true)
+    } finally {
+      write.mockRestore()
+    }
+  })
+
   test("refuses a VS Code file over 20 MB, which OpenCode would refuse on every send", () => {
     expect(() => useInputStore.getState().addVSCodeFileAttachment("/workspace/map.bin", "map.bin", 20 * 1024 * 1024 + 1)).toThrow("map.bin")
     expect(useInputStore.getState().attachedFiles).toEqual([])
@@ -757,5 +846,61 @@ describe("input-store draft submit", () => {
     useInputStore.getState().requestDraftSubmit(7, "Fix the build")
     expect(useInputStore.getState().consumePendingDraftSubmit(null)).toBeNull()
     expect(useInputStore.getState().pendingDraftSubmit).toBeNull()
+  })
+})
+
+describe("input-store draft content", () => {
+  const file = new File(["shared"], "notes.txt", { type: "text/plain" })
+
+  beforeEach(() => {
+    useInputStore.setState({ pendingDraftContent: null })
+  })
+
+  test("the requested draft takes the files and the text once", () => {
+    useInputStore.getState().requestDraftContent(7, { files: [file], text: "  https://example.com/x  " })
+
+    expect(useInputStore.getState().consumePendingDraftContent(7)).toEqual({
+      files: [file],
+      text: "https://example.com/x",
+      rejected: [],
+    })
+    expect(useInputStore.getState().consumePendingDraftContent(7)).toBeNull()
+  })
+
+  test("a text-only share carries no files", () => {
+    useInputStore.getState().requestDraftContent(7, { files: [], text: "Summarise this" })
+
+    expect(useInputStore.getState().consumePendingDraftContent(7)).toEqual({
+      files: [],
+      text: "Summarise this",
+      rejected: [],
+    })
+  })
+
+  test("blank text is stored as none", () => {
+    useInputStore.getState().requestDraftContent(7, { files: [file], text: "   " })
+
+    expect(useInputStore.getState().consumePendingDraftContent(7)).toEqual({ files: [file], text: null, rejected: [] })
+  })
+
+  test("a refusal the native side reported travels with the share", () => {
+    const rejected = [{ name: "huge.zip", reason: "too-large" }]
+    useInputStore.getState().requestDraftContent(7, { files: [file], rejected })
+
+    expect(useInputStore.getState().consumePendingDraftContent(7)?.rejected).toEqual(rejected)
+  })
+
+  test("another draft asking leaves the content for the draft it was requested for", () => {
+    useInputStore.getState().requestDraftContent(7, { files: [file], text: "hello" })
+    expect(useInputStore.getState().consumePendingDraftContent(8)).toBeNull()
+    expect(useInputStore.getState().pendingDraftContent).not.toBeNull()
+
+    expect(useInputStore.getState().consumePendingDraftContent(null)).toBeNull()
+    expect(useInputStore.getState().consumePendingDraftContent(7)).toEqual({
+      files: [file],
+      text: "hello",
+      rejected: [],
+    })
+    expect(useInputStore.getState().pendingDraftContent).toBeNull()
   })
 })
