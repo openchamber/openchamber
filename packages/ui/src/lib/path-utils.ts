@@ -111,7 +111,8 @@ export const isFilePathWithinDirectory = (filePath: string | null | undefined, d
 
   const comparablePath = toComparableFilePath(normalizedFilePath, options);
   const comparableDirectory = toComparableFilePath(normalizedDirectory);
-  return comparablePath === comparableDirectory || comparablePath.startsWith(`${comparableDirectory}/`);
+  const prefix = comparableDirectory.endsWith('/') ? comparableDirectory : `${comparableDirectory}/`;
+  return comparablePath === comparableDirectory || comparablePath.startsWith(prefix);
 };
 
 export const getRelativeFilePath = (filePath: string | null | undefined, directory: string | null | undefined, options?: FilePathOptions): string => {
@@ -133,7 +134,7 @@ export const getRelativeFilePath = (filePath: string | null | undefined, directo
     return normalizedFilePath;
   }
 
-  return normalizedFilePath.slice(normalizedDirectory.length + 1);
+  return normalizedFilePath.slice(normalizedDirectory.endsWith('/') ? normalizedDirectory.length : normalizedDirectory.length + 1);
 };
 
 const endsWithPath = (path: string, tail: string): boolean => path === tail || path.endsWith(`/${tail}`);
