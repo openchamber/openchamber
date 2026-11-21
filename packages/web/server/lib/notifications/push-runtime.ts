@@ -1,6 +1,7 @@
 import { sessionKeyFor, withHashedSessionKeys } from './session-key.js';
 import { hasStatusCode, isJsonObject, isMissingFile, isNumber, isSessionRecords, isString } from './inputs.js';
 import type { JsonValue, PushSettings, SessionRecords } from './contracts.js';
+import type { UpdateSettingsFromDisk } from '../settings/settings-write-queue.js';
 
 interface PushStore {
   version: number;
@@ -29,12 +30,19 @@ interface PushDependencies {
   }>;
   PUSH_SUBSCRIPTIONS_FILE_PATH: string;
   readSettingsFromDiskMigrated: () => Promise<PushSettings>;
-  writeSettingsToDisk: (settings: PushSettings) => Promise<void>;
+  updateSettingsFromDisk: UpdateSettingsFromDisk;
   getInvalidSessionKeys?: () => Promise<Set<string>>;
 }
 
 const PUSH_SUBSCRIPTIONS_VERSION = 1;
 const UI_VISIBILITY_TTL_MS = 30_000;
+
+const hasVapidKeys = (settings: PushSettings): settings is PushSettings & {
+  vapidKeys: { publicKey: string; privateKey: string };
+} => {
+  const keys = settings?.vapidKeys;
+  return isJsonObject(keys) && isString(keys.publicKey) && isString(keys.privateKey);
+};
 
 const isLoopbackHttpOrigin = (value: string) => {
   return value.startsWith('http://localhost')
@@ -49,7 +57,7 @@ export const createPushRuntime = (deps: PushDependencies) => {
     loadWebPush,
     PUSH_SUBSCRIPTIONS_FILE_PATH,
     readSettingsFromDiskMigrated,
-    writeSettingsToDisk,
+    updateSettingsFromDisk,
     getInvalidSessionKeys = async () => new Set(),
   } = deps;
 
@@ -121,23 +129,26 @@ export const createPushRuntime = (deps: PushDependencies) => {
 
   const getOrCreateVapidKeys = async () => {
     const settings = await readSettingsFromDiskMigrated();
-    const existing = settings?.vapidKeys;
-    if (isJsonObject(existing) && isString(existing.publicKey) && isString(existing.privateKey)) {
-      return { publicKey: existing.publicKey, privateKey: existing.privateKey };
+    if (hasVapidKeys(settings)) {
+      return { publicKey: settings.vapidKeys.publicKey, privateKey: settings.vapidKeys.privateKey };
     }
 
     const webPush = await loadWebPush();
     const generated = webPush.generateVAPIDKeys();
-    const next = {
-      ...settings,
-      vapidKeys: {
-        publicKey: generated.publicKey,
-        privateKey: generated.privateKey,
-      },
-    };
+    const next = await updateSettingsFromDisk((current) => {
+      if (hasVapidKeys(current)) {
+        return current;
+      }
+      return {
+        ...current,
+        vapidKeys: {
+          publicKey: generated.publicKey,
+          privateKey: generated.privateKey,
+        },
+      };
+    });
 
-    await writeSettingsToDisk(next);
-    return { publicKey: generated.publicKey, privateKey: generated.privateKey };
+    return { publicKey: next.vapidKeys.publicKey, privateKey: next.vapidKeys.privateKey };
   };
 
   const normalizePushSubscriptions = (record: JsonValue | undefined): PushSubscription[] => {

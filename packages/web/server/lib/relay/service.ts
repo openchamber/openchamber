@@ -10,10 +10,11 @@ import type { Application } from '../shared/http-contracts.js';
 import type { RelaySigningDependencies } from './signing-key.js';
 import type { RelayLegacySettings, RelayPublicJwk } from './key-store.js';
 import type { RelayHostLock } from './host-lock.js';
+import type { UpdateSettingsFromDisk } from '../settings/settings-write-queue.js';
 
 export interface RelayServiceDependencies extends RelaySigningDependencies {
   readSettingsFromDiskMigrated: () => Promise<RelayLegacySettings>;
-  writeSettingsToDisk: (settings: RelayLegacySettings) => Promise<void>;
+  updateSettingsFromDisk: UpdateSettingsFromDisk;
   getLocalPort: () => number;
   hasRelayDemand?: () => Promise<boolean>;
   hostLock?: RelayHostLock | null;
@@ -91,7 +92,7 @@ export const relayBlockedByEnterprise = () => isEnterpriseMode() && pinnedRelayU
 export const createRelayService = ({
   crypto,
   readSettingsFromDiskMigrated,
-  writeSettingsToDisk,
+  updateSettingsFromDisk,
   relayKeyStore,
   getLocalPort,
   hasRelayDemand = async () => false,
@@ -122,11 +123,10 @@ export const createRelayService = ({
   };
 
   const writeConfig = async (config: RelayConfig) => {
-    const settings = await readSettingsFromDiskMigrated();
-    await writeSettingsToDisk({
+    await updateSettingsFromDisk((settings) => ({
       ...settings,
       privateRelay: { enabled: config.enabled === true, relayUrl: normalizeRelayUrl(config.relayUrl) },
-    });
+    }));
   };
 
   const stopHostClient = () => {

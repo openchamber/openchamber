@@ -608,7 +608,7 @@ const pushRuntime = createPushRuntime({
   loadWebPush: () => import('web-push').then((module) => module.default),
   PUSH_SUBSCRIPTIONS_FILE_PATH,
   readSettingsFromDiskMigrated,
-  writeSettingsToDisk,
+  updateSettingsFromDisk: settingsRuntime.updateSettingsFromDisk,
   getInvalidSessionKeys: () => clientPushAccess.invalidSessionKeys(),
 });
 
@@ -2761,7 +2761,7 @@ async function main(options: WebUiServerOptions = {}) {
     ensureGlobalWatcherStarted,
     getOrCreateVapidKeys,
     getUiSessionTokenFromRequest,
-    writeSettingsToDisk,
+    updateSettingsFromDisk: settingsRuntime.updateSettingsFromDisk,
     addOrUpdatePushSubscription,
     removePushSubscription,
     addOrUpdateApnsToken,
@@ -2840,7 +2840,7 @@ async function main(options: WebUiServerOptions = {}) {
   const relayService = createRelayService({
     crypto,
     readSettingsFromDiskMigrated,
-    writeSettingsToDisk,
+    updateSettingsFromDisk: settingsRuntime.updateSettingsFromDisk,
     relayKeyStore,
     getLocalPort: () => tunnelRuntimeContext.getActivePort(),
     hostLock: createRelayHostLock({
