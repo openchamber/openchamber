@@ -66,7 +66,7 @@ integer, so omitting the null port preserves its source selection.
   - `POST /api/system/shutdown`
   - `GET /api/system/info`: open before login, because the CLI matches `pid` against its pid file to recognise its own server. `port` and `tunnelUrl` are included only for a caller `isRequestAuthorized` accepts.
 - `isRequestAuthorized(req, res, { tunnelAuthController, uiAuthController })`: whether a request carries credentials `/api` would accept, without refusing it. Routes open before login use it to leave private details out.
- - `registerAuthAndAccessRoutes(app, dependencies)`: registers browser auth/session exchange and API access middleware:
+ - `registerAuthAndAccessRoutes(app, dependencies)`: registers browser auth/session exchange and API access middleware, and returns `{ requireApiAuth }`, the gate it mounts on `/api`, so a route registered later can carry the same check instead of relying on mount order. The `/api` mount lets `POST /api/notifications/emit` through to its route, which carries this gate itself, so the request's credentials are read once:
    - `GET /auth/session`
    - `POST /auth/session`
    - `GET /auth/passkey/status`

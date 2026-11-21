@@ -201,7 +201,7 @@ The relay has no route for it, and sends only ever start from this server's list
 
 ### Plugin notification route (emit-route.js)
 - `createPluginNotificationEmitter(dependencies)` owns validation, the rate window and delivery; one instance is shared by the HTTP route and the `openchamber_notify` agent tool (`notify.send`).
-- `registerNotificationEmitRoutes(app, dependencies)` returns `registerPluginRoute()` and `registerApiRoute()`. Bootstrap calls the first before API auth and the second after it.
+- `registerNotificationEmitRoutes(app, dependencies)` returns `registerPluginRoute()` and `registerApiRoute(apiAuth)`. The plugin route is registered first and answers only a plugin-token request, otherwise it falls through. The API route carries the server's own `/api` gate (`requireApiAuth`, returned by `registerAuthAndAccessRoutes`) on the route, so its authorization does not depend on where the router was mounted. Registration without that gate throws.
 - Callers: a plugin in the managed OpenCode (agent-tool bearer token, the only reason for the pre-auth registration) or any client that passes regular API auth. No other auth path exists.
 - Body `{ title?, body?, tag?, sessionId?, directory?, showWhenFocused? }`, at least one of title/body; title ≤120, body ≤500 chars, 16kb JSON. `kind` is always `plugin` so callers cannot trigger kinds the UI treats specially.
 - One shared rate window: 10 notifications per 10s, then 429 with `Retry-After`.

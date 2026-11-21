@@ -165,7 +165,7 @@ export const createBootstrapRuntime = (dependencies: BootstrapDependencies) => {
     });
     notificationEmitRoutes.registerPluginRoute();
 
-    registerAuthAndAccessRoutes(app, {
+    const { requireApiAuth } = registerAuthAndAccessRoutes(app, {
       express,
       tunnelAuthController,
       uiAuthController,
@@ -182,7 +182,7 @@ export const createBootstrapRuntime = (dependencies: BootstrapDependencies) => {
       normalizeTunnelSessionTtlMs,
     });
 
-    notificationEmitRoutes.registerApiRoute();
+    notificationEmitRoutes.registerApiRoute(requireApiAuth);
 
     registerTtsRoutes(app, { sayTTSCapability });
 
