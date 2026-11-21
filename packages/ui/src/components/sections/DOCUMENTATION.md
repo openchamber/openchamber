@@ -880,6 +880,7 @@ the browser, and a second meaning there confuses both.
 - Message-search status reads continue beyond an initially settled answer after a switch because the debounced save can start indexing later.
 - Voice keys stay on the server. Dictation cleanup starts off because it sends text to the small-model provider, and without that model the server retains the transcription. Voice pickers share install state and list installed models plus the default; dictation displays the server's choice when no saved model is available.
 - Usage panels show only their provider's error, so Console budgets survive a failed Go usage read. Balance-only windows omit percentage bars and used captions because they report no usage share.
+- Settings names the Go credential next to its meters and the Console workspace next to its budgets. The two reads can use different accounts when the Go reader falls back to a key.
 - About separates app, connected-server and OpenCode updates. A latest-version toast waits for every relevant check; failed checks keep prior status, and authoritative running versions replace temporary installed-but-not-running state.
 - About offers upgrade commands only for package-manager installations. Update notes cover the offered release range; a stable release offered to Canary has only that release's notes.
 
