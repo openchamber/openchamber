@@ -123,7 +123,9 @@ Resetting the parser at the size limit would expose control payload as printable
 
 ## Security And Relay
 
-The WebSocket path must remain in both `isUrlAuthWebSocketPath` and relay `ALLOWED_WS_PATHS`. The client must use `getRuntimeUrlResolver().websocket()` and `openRuntimeWebSocket`; direct local URLs or raw browser WebSockets break relay and URL-token authentication.
+`socket-upgrade.ts` admits host-terminal sockets. A socket from the hosted tunnel UI uses the same live tunnel session as terminal HTTP. Its origin must also match the active tunnel's public origin, even if the server allows a second origin for other UI clients. Expiry, tunnel revocation and replacement disconnect that socket without stopping the PTY. Local UI and paired clients keep their existing credentials; space upgrades have a separate owner.
+
+The WebSocket path must remain in both `isUrlAuthWebSocketPath` and relay `ALLOWED_WS_PATHS`. The client uses the runtime resolver's `sameOriginCookieWebSocket()` for a confirmed hosted tunnel session and `websocket()` otherwise. Both paths use `openRuntimeWebSocket`; direct local URLs or raw browser WebSockets break relay and URL-token authentication.
 
 ## Verification
 

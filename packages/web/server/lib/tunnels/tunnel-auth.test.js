@@ -70,6 +70,29 @@ describe('tunnel authentication lifecycle', () => {
     expect(auth.listTunnelSessions()[0]).toMatchObject({ status: 'inactive', inactiveReason: 'expired' });
   });
 
+  it('keeps a bound socket alive for the full 30-day session, and forgets a disconnected one', () => {
+    vi.useFakeTimers();
+    try {
+      const auth = activeAuth();
+      const { token } = auth.issueBootstrapToken({ ttlMs: null });
+      const res = response();
+      const sessionTtlMs = 30 * 24 * 60 * 60 * 1000;
+      auth.exchangeBootstrapToken({ req: request(), res, token, sessionTtlMs });
+      const session = request(res.setHeader.mock.calls[0][1].split(';')[0]);
+      const disconnected = vi.fn(), connected = vi.fn();
+      auth.bindTunnelSession(session, disconnected)();
+      const unbind = auth.bindTunnelSession(session, connected);
+      vi.advanceTimersByTime(sessionTtlMs - 1);
+      expect(connected).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(connected).toHaveBeenCalledOnce();
+      expect(disconnected).not.toHaveBeenCalled();
+      unbind();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('rejects expired and non-text tokens without issuing cookies', () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
     const auth = activeAuth();

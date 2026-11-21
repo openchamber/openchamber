@@ -19,6 +19,7 @@ export interface RuntimeUrlResolver {
   rawFile(path: string, options?: { download?: boolean; allowOutsideWorkspace?: boolean; outsideFileGrant?: string }): string;
   sse(path: string, query?: RuntimeUrlQuery): string;
   websocket(path: string, query?: RuntimeUrlQuery): string;
+  sameOriginCookieWebSocket?(path: string, query?: RuntimeUrlQuery): string | null;
 }
 
 const ABSOLUTE_URL_PATTERN = /^[a-z][a-z\d+.-]*:\/\//i;
@@ -120,6 +121,20 @@ const toWebSocketUrl = (candidate: string, config: RuntimeUrlConfig): string => 
   return url.toString();
 };
 
+const sameOriginWebSocket = (candidate: string, config: RuntimeUrlConfig): string | null => {
+  if (hasRuntimeExtraHeaders()) return null;
+  try {
+    const page = new URL(currentHref(config));
+    const socket = new URL(toWebSocketUrl(candidate, config));
+    const expectedProtocol = page.protocol === 'https:' ? 'wss:' : page.protocol === 'http:' ? 'ws:' : '';
+    if (!expectedProtocol || socket.protocol !== expectedProtocol) return null;
+    if (socket.host !== page.host) return null;
+    return socket.toString();
+  } catch {
+    return null;
+  }
+};
+
 const toRealtimeProxyUrl = (kind: 'sse' | 'ws', targetUrl: string, config: RuntimeUrlConfig): string | null => {
   if (!hasRuntimeExtraHeaders()) return null;
   const localOrigin = readInjectedLocalOrigin();
@@ -139,7 +154,7 @@ const toRealtimeProxyUrl = (kind: 'sse' | 'ws', targetUrl: string, config: Runti
   }
 };
 
-export const createRuntimeUrlResolver = (config: RuntimeUrlConfig = {}): RuntimeUrlResolver => {
+export const createRuntimeUrlResolver = (config: RuntimeUrlConfig = {}): RuntimeUrlResolver & Required<Pick<RuntimeUrlResolver, 'sameOriginCookieWebSocket'>> => {
   const configuredApiBaseUrl = normalizeBaseUrl(config.apiBaseUrl);
   const configuredRealtimeBaseUrl = normalizeBaseUrl(config.realtimeBaseUrl);
 
@@ -169,10 +184,11 @@ export const createRuntimeUrlResolver = (config: RuntimeUrlConfig = {}): Runtime
       const target = toWebSocketUrl(withUrlAuth(realtime(path, query)), config);
       return toRealtimeProxyUrl('ws', target, config) || target;
     },
+    sameOriginCookieWebSocket: (path, query) => sameOriginWebSocket(realtime(path, query), config),
   };
 };
 
-let activeRuntimeUrlResolver = createRuntimeUrlResolver();
+let activeRuntimeUrlResolver: RuntimeUrlResolver = createRuntimeUrlResolver();
 
 export const getRuntimeUrlResolver = (): RuntimeUrlResolver => activeRuntimeUrlResolver;
 

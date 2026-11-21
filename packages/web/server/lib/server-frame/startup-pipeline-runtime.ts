@@ -13,6 +13,7 @@ type TerminalOptions =
   & Pick<ReturnType<typeof createOpenCodeEnvRuntime>, 'searchPathFor' | 'isExecutable'>
   & {
     server: ServerStartupDependencies['server'];
+    tunnelAuthController: ServerStartupDependencies['tunnelAuthController'];
     fs: typeof import('node:fs');
     path: typeof import('node:path');
     buildAugmentedPath: () => string;
@@ -125,6 +126,7 @@ export const createStartupPipelineRuntime = (dependencies: StartupPipelineDepend
       fs,
       path,
       uiAuthController,
+      tunnelAuthController,
       buildAugmentedPath,
       searchPathFor,
       isExecutable,
