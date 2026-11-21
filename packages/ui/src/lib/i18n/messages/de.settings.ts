@@ -1429,6 +1429,7 @@ export const settingsDict = {
   'settings.common.sidebar.clearSearch': 'Suche löschen',
   'settings.openchamber.keyboardShortcuts.findByKey.recording': 'Tasten werden aufgezeichnet',
   'settings.openchamber.keyboardShortcuts.action.open_archive.label': 'Archivierte Sitzungen öffnen',
+  'settings.openchamber.keyboardShortcuts.action.toggle_reasoning_traces.label': 'Denkspuren ein- oder ausblenden',
   'settings.openchamber.keyboardShortcuts.action.open_notes.label': 'Notizbereich öffnen',
   'settings.openchamber.keyboardShortcuts.action.open_todos.label': 'To-do-Bereich öffnen',
   'settings.openchamber.keyboardShortcuts.action.show_context_usage.label': 'Kontextnutzung anzeigen',

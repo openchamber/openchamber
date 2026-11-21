@@ -2984,6 +2984,7 @@ export const dict = {
   'commandPalette.item.copySessionId': 'Sessie-ID kopiëren',
   'commandPalette.item.openMultiRun': 'Multi-run-starter openen',
   'commandPalette.item.openArchive': 'Gearchiveerde sessies openen',
+  'commandPalette.item.toggleReasoningTraces': 'Redeneringstraces tonen of verbergen',
   'commandPalette.item.openNotes': 'Notities openen',
   'commandPalette.item.openTodos': 'Taken openen',
   'commandPalette.item.openSettings': 'Instellingen openen...',

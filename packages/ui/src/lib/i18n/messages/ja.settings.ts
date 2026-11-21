@@ -1479,6 +1479,7 @@ export const settingsDict = {
   'settings.common.sidebar.clearSearch': '検索をクリア',
   'settings.openchamber.keyboardShortcuts.findByKey.recording': 'キー記録中',
   'settings.openchamber.keyboardShortcuts.action.open_archive.label': 'アーカイブ済みセッションを開く',
+  'settings.openchamber.keyboardShortcuts.action.toggle_reasoning_traces.label': '推論トレースの表示切替',
   'settings.openchamber.keyboardShortcuts.action.open_notes.label': 'ノートパネルを開く',
   'settings.openchamber.keyboardShortcuts.action.open_todos.label': 'ToDoパネルを開く',
   'settings.openchamber.keyboardShortcuts.action.show_context_usage.label': 'コンテキスト使用量を表示',

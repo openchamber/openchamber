@@ -1479,6 +1479,7 @@ export const settingsDict = {
   'settings.common.sidebar.clearSearch': 'Zoekopdracht wissen',
   'settings.openchamber.keyboardShortcuts.findByKey.recording': 'Toetsen opnemen',
   'settings.openchamber.keyboardShortcuts.action.open_archive.label': 'Gearchiveerde sessies openen',
+  'settings.openchamber.keyboardShortcuts.action.toggle_reasoning_traces.label': 'Redeneringstraces tonen of verbergen',
   'settings.openchamber.keyboardShortcuts.action.open_notes.label': 'Notities openen',
   'settings.openchamber.keyboardShortcuts.action.open_todos.label': 'Taken openen',
   'settings.openchamber.keyboardShortcuts.action.show_context_usage.label': 'Contextgebruik tonen',

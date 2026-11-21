@@ -3658,6 +3658,7 @@ export const dict = {
   'commandPalette.item.copySessionId': 'Session ID\'yi kopyala',
   'commandPalette.item.openMultiRun': 'Paralel çalıştır',
   'commandPalette.item.openArchive': 'Arşivlenmiş session\'ları aç',
+  'commandPalette.item.toggleReasoningTraces': 'Akıl yürütme izlerini göster/gizle',
   'commandPalette.item.openNotes': 'Notlar yüzeyini aç',
   'commandPalette.item.openTodos': 'Yapılacaklar yüzeyini aç',
   'sessionAuth.expired.banner': 'Session\'ınızın süresi doldu — devam etmek için oturum açın.',

@@ -1478,6 +1478,7 @@ export const settingsDict = {
   'settings.common.sidebar.clearSearch': 'נקה חיפוש',
   'settings.openchamber.keyboardShortcuts.findByKey.recording': 'מקליט מקשים',
   'settings.openchamber.keyboardShortcuts.action.open_archive.label': 'פתח הפעלות בארכיון',
+  'settings.openchamber.keyboardShortcuts.action.toggle_reasoning_traces.label': 'הצג/הסתר עקבות חשיבה',
   'settings.openchamber.keyboardShortcuts.action.open_notes.label': 'פתח את ההערות',
   'settings.openchamber.keyboardShortcuts.action.open_todos.label': 'פתח את המשימות',
   'settings.openchamber.keyboardShortcuts.action.show_context_usage.label': 'הצג שימוש בהקשר',

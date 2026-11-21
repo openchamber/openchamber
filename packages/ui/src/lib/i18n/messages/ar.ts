@@ -2885,6 +2885,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.copySessionId': 'نسخ معرّف الجلسة',
   'commandPalette.item.openMultiRun': 'تشغيل بالتوازي',
   'commandPalette.item.openArchive': 'فتح الجلسات المؤرشفة',
+  'commandPalette.item.toggleReasoningTraces': 'إظهار مسارات التفكير أو إخفاؤها',
   'commandPalette.item.openNotes': 'فتح الملاحظات',
   'commandPalette.item.openTodos': 'فتح المهام',
   'commandPalette.item.openSettings': 'فتح الإعدادات…',

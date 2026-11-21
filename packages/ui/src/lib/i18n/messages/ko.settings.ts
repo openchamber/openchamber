@@ -1446,6 +1446,7 @@ export const settingsDict = {
   'settings.common.sidebar.clearSearch': '검색 지우기',
   'settings.openchamber.keyboardShortcuts.findByKey.recording': '키 기록 중',
   'settings.openchamber.keyboardShortcuts.action.open_archive.label': '보관된 세션 열기',
+  'settings.openchamber.keyboardShortcuts.action.toggle_reasoning_traces.label': 'Reasoning Trace 표시/숨기기',
   'settings.openchamber.keyboardShortcuts.action.open_notes.label': '노트 패널 열기',
   'settings.openchamber.keyboardShortcuts.action.open_todos.label': '할 일 패널 열기',
   'settings.openchamber.keyboardShortcuts.action.show_context_usage.label': '컨텍스트 사용량 표시',

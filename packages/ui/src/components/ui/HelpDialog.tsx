@@ -288,6 +288,11 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
+          id: 'toggle_reasoning_traces',
+          icon: 'brain-ai-3',
+          keys: '',
+        },
+        {
           id: 'toggle_services_menu',
           descriptionKey: 'helpDialog.item.toggleServicesMenu',
           icon: "stack",

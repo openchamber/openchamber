@@ -2694,6 +2694,7 @@ export const dict = {
   'commandPalette.item.copySessionId': 'Sitzungs-ID kopieren',
   'commandPalette.item.openMultiRun': 'Parallel ausführen',
   'commandPalette.item.openArchive': 'Archivierte Sitzungen öffnen',
+  'commandPalette.item.toggleReasoningTraces': 'Denkspuren ein- oder ausblenden',
   'commandPalette.item.openNotes': 'Notizbereich öffnen',
   'commandPalette.item.openTodos': 'To-do-Bereich öffnen',
   'commandPalette.item.openSettings': 'Einstellungen öffnen...',

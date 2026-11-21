@@ -1478,6 +1478,7 @@ export const settingsDict = {
   'settings.common.sidebar.clearSearch': 'مسح البحث',
   'settings.openchamber.keyboardShortcuts.findByKey.recording': 'تسجيل المفاتيح',
   'settings.openchamber.keyboardShortcuts.action.open_archive.label': 'فتح الجلسات المؤرشفة',
+  'settings.openchamber.keyboardShortcuts.action.toggle_reasoning_traces.label': 'إظهار مسارات التفكير أو إخفاؤها',
   'settings.openchamber.keyboardShortcuts.action.open_notes.label': 'فتح الملاحظات',
   'settings.openchamber.keyboardShortcuts.action.open_todos.label': 'فتح المهام',
   'settings.openchamber.keyboardShortcuts.action.show_context_usage.label': 'إظهار استخدام السياق',

@@ -2984,6 +2984,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.copySessionId': '세션 ID 복사',
   'commandPalette.item.openMultiRun': '병렬 실행',
   'commandPalette.item.openArchive': '보관된 세션 열기',
+  'commandPalette.item.toggleReasoningTraces': 'Reasoning Trace 표시/숨기기',
   'commandPalette.item.openNotes': '노트 패널 열기',
   'commandPalette.item.openTodos': '할 일 패널 열기',
   'commandPalette.item.openSettings': '설정... 열기',

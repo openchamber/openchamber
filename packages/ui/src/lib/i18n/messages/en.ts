@@ -2984,6 +2984,7 @@ export const dict = {
   'commandPalette.item.copySessionId': 'Copy session ID',
   'commandPalette.item.openMultiRun': 'Run in parallel',
   'commandPalette.item.openArchive': 'Open archived sessions',
+  'commandPalette.item.toggleReasoningTraces': 'Show or hide reasoning traces',
   'commandPalette.item.openNotes': 'Open notes surface',
   'commandPalette.item.openTodos': 'Open todos surface',
   'commandPalette.item.openSettings': 'Open Settings...',
