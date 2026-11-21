@@ -60,6 +60,18 @@ describe('path-utils', () => {
     expect(normalizeFilePath('\\\\server\\share\\project')).toBe('//server/share/project');
   });
 
+  test('a root directory contains the files under it', () => {
+    expect(isFilePathWithinDirectory('/etc/hosts', '/')).toBe(true);
+    expect(getRelativeFilePath('/etc/hosts', '/')).toBe('etc/hosts');
+    expect(isFilePathWithinDirectory('C:/src/a.ts', 'C:/')).toBe(true);
+    expect(getRelativeFilePath('C:/src/a.ts', 'C:/')).toBe('src/a.ts');
+    expect(getRelativeFilePath('/', '/')).toBe('.');
+    // Other directories and other drives are still outside.
+    expect(isFilePathWithinDirectory('/etcetera/a', '/etc')).toBe(false);
+    expect(isFilePathWithinDirectory('D:/src/a.ts', 'C:/')).toBe(false);
+    expect(getRelativeFilePath('D:/src/a.ts', 'C:/')).toBe('D:/src/a.ts');
+  });
+
   test('recognizes Windows absolute paths', () => {
     expect(isAbsoluteFilePath('C:/Users/file.ts')).toBe(true);
     expect(isAbsoluteFilePath('C:\\Users\\file.ts')).toBe(true);
