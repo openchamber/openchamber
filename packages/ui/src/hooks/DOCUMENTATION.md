@@ -47,6 +47,15 @@ A hook here owns the lifetime of what it subscribes to. Mechanics that another m
 - A remembered reading position is captured before the list is hidden, because ref cleanup can run after the hide when nothing measurable is left. An unknown at-end measurement never clears the record, and a hidden container never overwrites it.
 - A message link is an explicit request: it loads history until the message is found or the history ends. A remembered position is a convenience and gives up after a few batches.
 
+### List scroll memory
+
+- `useListScrollMemory` covers a list that leaves the screen together with its scroller: a file preview, a diff tab. It records the offset per key from the scroller's own scroll events and restores it in a layout effect, so a short replacement cannot clamp the browser's restore to its own height. Lists opt in through `ScrollableOverlay`'s `memoryKey` and `memoryReady` props or `ChangesPanel`'s for its own scroller; only a raw scroller outside those primitives (`ReceivedPagesTab`) binds the hook itself.
+- Content that is not the key's own (a list still loading, a loading placeholder, a failed read or search, rows a previous query left on screen) neither restores nor records (`ready`), or an offset the browser clamped to the placeholder would be saved as the list's. A binding restores once: a later `ready` flip must not move a list already on screen, which would yank it under the user. A null key is a view without a list and starts at its top; an undefined key keeps no memory and attaches no scroll listener. Each folder, search, mode and repository is its own key. A key carries what makes a list its own (runtime, directory, session, query, filter) and nothing it shares with another list; a list that refreshes keeps its rows on screen rather than a placeholder.
+- A list that aligns a row of its own, the directory picker's highlighted row, does that only when the selection moves. Alignment on every content change lands after the restore and takes the position back.
+- The offset map is module-level, so an offset outlives the panel that held the list. `memory` exists for a caller that needs its own map, such as a test, and must be stable: a map created per render rebinds the scroller's listener on every render.
+- A virtualizer computes its first offset while rendering, before the scroller mounts, and writes it on attach; it takes the saved offset as `initialOffset` (`savedListScrollOffset`).
+- The other shape, one scroller that stays mounted while a preview swaps its content, is `usePreviewReturnScroll` in `components/references`; it restores on the same node only.
+
 ### Read-aloud, TTS and dictation
 
 - Mobile Safari only unlocks audio inside a user gesture. Playback uses one shared `AudioContext`, resumes it when suspended, and plays a silent buffer to unlock; preparation must happen before the first asynchronous step.

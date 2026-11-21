@@ -67,3 +67,23 @@ export const projectBrowsePlaces = (
   places.delete('~/');
   return [...places].slice(0, PROJECT_PLACES);
 };
+
+type BrowseListMemory = { key: string | null; ready: boolean };
+
+export const browseListMemory = ({ runtimeKey, openCodeView, browseDirectory, filter = '', showHidden = false, listedDirectory, loading, failed }: {
+  runtimeKey: string;
+  openCodeView: boolean;
+  browseDirectory: string;
+  filter?: string;
+  showHidden?: boolean;
+  listedDirectory: string;
+  loading: boolean;
+  failed: boolean;
+}): BrowseListMemory => {
+  if (openCodeView) return { key: `explorer:${runtimeKey}:opencode`, ready: true };
+  const folder = trimTrailingSeparators(browseDirectory.trim().replace(/\\/g, '/'));
+  if (!folder) return { key: null, ready: false };
+  const listed = trimTrailingSeparators(listedDirectory.trim().replace(/\\/g, '/'));
+  const rows = `${showHidden ? ':hidden' : ''}${filter ? `:filter:${filter}` : ''}`;
+  return { key: `explorer:${runtimeKey}:${folder}${rows}`, ready: !loading && !failed && listed === folder };
+};

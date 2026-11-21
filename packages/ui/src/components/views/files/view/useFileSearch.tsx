@@ -16,10 +16,12 @@ export function useFileSearch({ scope }: {
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 200);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const [searchResults, setSearchResults] = React.useState<FileNode[]>([]);
+  const [resultsFor, setResultsFor] = React.useState<{ directory: string; query: string } | null>(null);
   const [searching, setSearching] = React.useState(false);
   React.useEffect(() => {
     if (!currentDirectory) {
       setSearchResults([]);
+      setResultsFor(null);
       setSearching(false);
       return;
     }
@@ -27,6 +29,7 @@ export function useFileSearch({ scope }: {
     const trimmedQuery = debouncedSearchQuery.trim();
     if (!trimmedQuery) {
       setSearchResults([]);
+      setResultsFor(null);
       setSearching(false);
       return;
     }
@@ -55,10 +58,12 @@ export function useFileSearch({ scope }: {
         }));
 
         setSearchResults(mapped);
+        setResultsFor({ directory: currentDirectory, query: trimmedQuery });
       })
       .catch(() => {
         if (!cancelled) {
           setSearchResults([]);
+          setResultsFor(null);
         }
       })
       .finally(() => {
@@ -72,5 +77,5 @@ export function useFileSearch({ scope }: {
     };
   }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored]);
 
-  return { searchQuery, setSearchQuery, debouncedSearchQuery, searchInputRef, searchResults, searching };
+  return { searchQuery, setSearchQuery, debouncedSearchQuery, searchInputRef, searchResults, resultsFor, searching };
 }

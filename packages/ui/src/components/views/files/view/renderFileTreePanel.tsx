@@ -19,7 +19,7 @@ import { type useFileTabs } from './useFileTabs';
 import { type useFileUploads } from './useFileUploads';
 import { useI18n } from '@/lib/i18n';
 
-export function renderFileTreePanel({ fileDirectory, fileOpening, fileTreeRendering, operations, scope, search, tabs, uploads, t }: {
+export function renderFileTreePanel({ fileDirectory, fileOpening, fileTreeRendering, operations, scope, search, tabs, uploads, memoryKey, memoryReady, t }: {
   fileDirectory: Pick<ReturnType<typeof useFileDirectory>, 'childrenByDir' | 'loadErrorsByDir' | 'refreshRoot'>;
   fileOpening: Pick<ReturnType<typeof useFileOpening>, 'handleSelectFile'>;
   fileTreeRendering: Pick<ReturnType<typeof useFileTreeRendering>, 'renderTree' | 'treeListRef'>;
@@ -28,6 +28,8 @@ export function renderFileTreePanel({ fileDirectory, fileOpening, fileTreeRender
   search: Pick<ReturnType<typeof useFileSearch>, 'debouncedSearchQuery' | 'searchInputRef' | 'searchQuery' | 'searchResults' | 'searching' | 'setSearchQuery'>;
   tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile'>;
   uploads: Pick<ReturnType<typeof useFileUploads>, 'canUpload' | 'isUploading' | 'pickFiles'>;
+  memoryKey?: string | null;
+  memoryReady?: boolean;
   t: ReturnType<typeof useI18n>['t'];
 }) {
   const { childrenByDir, loadErrorsByDir, refreshRoot } = fileDirectory;
@@ -111,7 +113,7 @@ export function renderFileTreePanel({ fileDirectory, fileOpening, fileTreeRender
         </div>
       </div>
 
-      <ScrollableOverlay outerClassName="flex-1 min-h-0" className="@container px-3 py-2">
+      <ScrollableOverlay memoryKey={memoryKey} memoryReady={memoryReady} outerClassName="flex-1 min-h-0" className="@container px-3 py-2">
         <ul ref={treeListRef} className={cn('relative flex flex-col', showsTree && 'w-max min-w-full')}>
           {searching ? (
             <li className="flex items-center gap-1.5 px-2 py-1 typography-meta text-muted-foreground">
