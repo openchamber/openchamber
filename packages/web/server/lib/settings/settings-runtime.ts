@@ -1,5 +1,6 @@
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
-import { isMessageSearchEnabled } from './settings-helpers.js';
+import { createSettingsFileState } from './settings-file-state.js';
+import { createExternalSettingsReconciler, createRuntimeSettingsApplier } from './settings-reconciliation.js';
 import type { SettingsDocument, createSettingsHelpers } from './settings-helpers.js';
 import type { SettingsProject, createSettingsNormalizationRuntime } from './settings-normalization-runtime.js';
 import type { createManagedTunnelConfigRuntime } from '../tunnels/managed-config.js';
@@ -18,7 +19,6 @@ import {
   isDeviceSettingsKey,
   isProfileSettingsKey,
   normalizeSettingsSurface,
-  parsePreferencesDocument,
   preferencesFilePathFor,
   seedPreferencesFrom,
   serializePreferencesDocument,
@@ -58,7 +58,10 @@ export interface SettingsWriteOptions extends SettingsReadOptions {
 type NotificationTemplate = { title: string; message: string };
 type NotificationTemplates = Record<string, NotificationTemplate>;
 type OrphanProject = { orphanId: string; filePath: string; content: SettingsDocument };
-type PreferenceReadResult = { status: 'missing' } | { status: 'failed' } | { status: 'ok'; fields: PreferenceFields };
+type PreferenceReadResult =
+  | { status: 'missing'; revision?: number }
+  | { status: 'failed'; fields?: PreferenceFields | undefined; revision?: number }
+  | { status: 'ok'; fields: PreferenceFields; revision: number };
 const hasFields = (value: unknown): value is SettingsDocument => Boolean(value && typeof value === 'object');
 const hasErrorCode = (value: unknown): value is { code?: unknown } => Boolean(value && typeof value === 'object');
 const hasOptionalCode = (value: unknown): value is { code?: unknown } => value != null;
@@ -111,23 +114,6 @@ const normalizeNotificationTemplates = (templates: SettingsDocument[string]) => 
   return { templates: next, changed };
 };
 
-const MANAGED_PLUGIN_SETTINGS_KEYS = new Set([
-  'agentControlToolEnabled',
-  'agentScheduleToolEnabled',
-  'agentWebToolEnabled',
-  'agentMemoryToolEnabled',
-  'agentKnowledgeToolEnabled',
-  'agentNotifyToolEnabled',
-  'agentRenderToolEnabled',
-  'agentImageToolEnabled',
-  'agentSecretToolEnabled',
-  'agentUsageToolEnabled',
-  'agentTerminalToolEnabled',
-  'agentWorkflowToolEnabled',
-  'fallbackModel',
-  'accountSwitchProviders',
-]);
-
 export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
   const {
     fsPromises,
@@ -156,7 +142,10 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
 
   const PREFERENCES_FILE_PATH = preferencesFilePathFor(SETTINGS_FILE_PATH, path);
   let preferencesUnavailable = false;
-  let preferencesFailureLogged = false;
+  const settingsFileState = createSettingsFileState({
+    fsPromises, path, settingsFilePath: SETTINGS_FILE_PATH, preferencesFilePath: PREFERENCES_FILE_PATH,
+    sanitizeSettingsUpdate,
+  });
 
   let orphanRecoveryDone = false;
 
@@ -577,50 +566,15 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
   };
 
   const readInstanceSettingsFromDisk = async () => {
-    try {
-      const raw = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
-      const parsed: unknown = JSON.parse(raw);
-      if (hasFields(parsed)) {
-        return parsed;
-      }
-      return {};
-    } catch (error) {
-      if (hasErrorCode(error) && error.code === 'ENOENT') {
-        return {};
-      }
-      console.warn('Failed to read settings file:', error);
-      return {};
-    }
+    const result = await settingsFileState.read('settings');
+    return result.document ?? {};
   };
 
   const readPreferenceFields = async (): Promise<PreferenceReadResult> => {
-    let raw;
-    try {
-      raw = await fsPromises.readFile(PREFERENCES_FILE_PATH, 'utf8');
-    } catch (error) {
-      if (hasErrorCode(error) && error.code === 'ENOENT') {
-        return { status: 'missing' };
-      }
-      if (!preferencesFailureLogged) {
-        preferencesFailureLogged = true;
-        console.warn('Failed to read preferences file:', error);
-      }
-      return { status: 'failed' };
-    }
-    const parsed = parsePreferencesDocument(raw);
-    if (!parsed.ok) {
-      if (!preferencesFailureLogged) {
-        preferencesFailureLogged = true;
-        console.warn(`Preferences file is unreadable (${parsed.reason}); profile writes are paused until it is fixed or removed.`);
-      }
-      return { status: 'failed' };
-    }
-    preferencesFailureLogged = false;
-    return { status: 'ok', fields: parsed.fields };
-  };
-
-  const writePreferencesToDisk = async (fields: PreferenceFields) => {
-    await writeJsonFileAtomic(PREFERENCES_FILE_PATH, serializePreferencesDocument(fields));
+    const result = await settingsFileState.read('preferences');
+    if (result.status === 'missing') return { status: 'missing' };
+    if (result.status === 'failed') return { status: 'failed', fields: result.document };
+    return { status: 'ok', fields: result.document, revision: result.revision };
   };
 
   const readSettingsFromDisk = async ({ surface = null }: SettingsReadOptions = {}) => {
@@ -628,19 +582,19 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     const preferences = await readPreferenceFields();
     if (preferences.status === 'failed') {
       preferencesUnavailable = true;
-      return instance;
+      return { ...(preferences.fields ? instancePartOf(instance) : instance), ...flattenPreferences(preferences.fields ?? {}, normalizeSettingsSurface(surface)) };
     }
     preferencesUnavailable = false;
     if (preferences.status === 'missing') {
       const seeded = seedPreferencesFrom(instance, Date.now());
       try {
-        await writePreferencesToDisk(seeded);
+        await writeJsonFileAtomic(PREFERENCES_FILE_PATH, serializePreferencesDocument(seeded), { expectedRevision: preferences.revision ?? 0 });
       } catch (error) {
         console.warn('Failed to seed preferences file:', error);
       }
       return instance;
     }
-    return { ...instance, ...flattenPreferences(preferences.fields, normalizeSettingsSurface(surface)) };
+    return { ...instancePartOf(instance), ...flattenPreferences(preferences.fields, normalizeSettingsSurface(surface)) };
   };
 
   const readSettingsFromDiskStrict = async () => {
@@ -654,7 +608,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
       throw error;
     }
     const parsed: unknown = JSON.parse(raw);
-    if (!hasFields(parsed)) {
+    if (!hasFields(parsed) || Array.isArray(parsed)) {
       throw new Error('Settings file is malformed (non-object payload)');
     }
     return parsed;
@@ -709,7 +663,21 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     }
   };
 
-  const writeJsonFileAtomic = async (filePath: string, text: string) => {
+  const writeJsonFileAtomic = async (filePath: string, text: string, { acknowledge = true, expectedRevision = null }: {
+    acknowledge?: boolean;
+    expectedRevision?: number | null;
+  } = {}) => {
+    const source = filePath === SETTINGS_FILE_PATH ? 'settings' : filePath === PREFERENCES_FILE_PATH ? 'preferences' : null;
+    if (source && (await settingsFileState.read(source)).status === 'failed') {
+      throw new Error(`Cannot replace unreadable ${path.basename(filePath)}`);
+    }
+    if (source && acknowledge && settingsFileState.hasUnreportedChanges(source)) {
+      throw new Error(`Cannot replace an external ${path.basename(filePath)} update before reconciliation`);
+    }
+    const publicationRevision = source ? expectedRevision ?? settingsFileState.getRevision(source) : null;
+    if (source && settingsFileState.getRevision(source) !== publicationRevision) {
+      throw new Error(`${path.basename(filePath)} changed before publication`);
+    }
     const directory = path.dirname(filePath);
     const created = await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
     if (created && process.platform !== 'win32') await fsPromises.chmod(directory, 0o700);
@@ -717,7 +685,14 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     try {
       await fsPromises.writeFile(tmp, text, { encoding: 'utf8', mode: 0o600 });
       if (process.platform !== 'win32') await fsPromises.chmod(tmp, 0o600);
+      if (source) {
+        const latest = await settingsFileState.read(source);
+        if (latest.status === 'failed' || settingsFileState.getRevision(source) !== publicationRevision) {
+          throw new Error(`${path.basename(filePath)} changed during publication`);
+        }
+      }
       await replaceFile(tmp, filePath);
+      if (acknowledge) settingsFileState.acknowledge(filePath, text, { expectedRevision: publicationRevision });
       if (process.platform !== 'win32') await fsPromises.chmod(filePath, 0o600);
     } catch (error) {
       await fsPromises.rm(tmp, { force: true }).catch(() => {});
@@ -727,7 +702,11 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
   };
 
   const writeSettingsToDisk = async (settings: SettingsDocument, { surface = null, changedKeys = null }: SettingsWriteOptions = {}) => {
+    const instanceSnapshot = await settingsFileState.read('settings');
     const current: PreferenceReadResult = preferencesUnavailable ? { status: 'failed' } : await readPreferenceFields();
+    if (settingsFileState.hasUnreportedChanges('settings') || (current.status === 'ok' && settingsFileState.hasUnreportedChanges('preferences'))) {
+      throw new Error('Cannot replace external settings updates before reconciliation');
+    }
     if (current.status === 'failed') {
       preferencesUnavailable = true;
       const onDisk = await readInstanceSettingsFromDisk();
@@ -742,8 +721,8 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
       surface: normalizeSettingsSurface(surface),
       changedKeys,
     });
-    await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify(legacySettingsDocumentOf(settings, nextFields), null, 2));
-    await writePreferencesToDisk(nextFields);
+    await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify(legacySettingsDocumentOf(settings, nextFields), null, 2), { expectedRevision: instanceSnapshot.revision ?? 0 });
+    await writeJsonFileAtomic(PREFERENCES_FILE_PATH, serializePreferencesDocument(nextFields), { expectedRevision: current.revision ?? 0 });
   };
 
   const validateProjectEntries = async (projects: unknown[]) => {
@@ -1167,28 +1146,22 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
 
       const changedKeys = Object.keys(sanitized);
       await writeSettingsToDisk(next, { surface, changedKeys });
-      if (changedKeys.some((key) => MANAGED_PLUGIN_SETTINGS_KEYS.has(key))) {
-        await Promise.resolve(onManagedPluginSettingsChanged(next)).catch((error) => {
-          console.warn('Failed to refresh the managed OpenCode config:', error?.message ?? error);
-        });
-      }
-      if (changedKeys.includes('messageSearchEnabled')) {
-        onMessageSearchEnabledChanged(isMessageSearchEnabled(next));
-      }
-      if (changedKeys.includes('messageSearchReasoningEnabled')) {
-        onMessageSearchReasoningChanged(next.messageSearchReasoningEnabled === true);
-      }
-      if (changedKeys.includes('permissionDefaultMode') && next.permissionDefaultMode !== current.permissionDefaultMode) {
-        onPermissionDefaultModeChanged(next.permissionDefaultMode);
-      }
-      if (changedKeys.includes('lastDirectory') && next.lastDirectory !== current.lastDirectory) {
-        onLastDirectoryChanged(next.lastDirectory);
-      }
+      await applyRuntimeSettings(current, next, changedKeys);
       return formatSettingsResponse(next);
     });
   };
 
   const persistSettings = (changes: SettingsDocument, options?: SettingsReadOptions) => persistResolvedSettings(() => changes, options);
+
+  const applyRuntimeSettings = createRuntimeSettingsApplier({
+    onManagedPluginSettingsChanged, onMessageSearchEnabledChanged,
+    onMessageSearchReasoningChanged, onPermissionDefaultModeChanged, onLastDirectoryChanged,
+  });
+
+  const reconcileExternalSettings = createExternalSettingsReconciler({
+    enqueue, settingsFileState, sanitizeSettingsUpdate, writeJsonFileAtomic, applyRuntimeSettings,
+    settingsFilePath: SETTINGS_FILE_PATH, preferencesFilePath: PREFERENCES_FILE_PATH,
+  });
 
   const registerSessionProject = (resolveProject: (projects: SettingsProject[]) => SettingsProject | Promise<SettingsProject>) => {
     return enqueue(async () => {
@@ -1214,5 +1187,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     persistResolvedSettings,
     updateSettingsFromDisk,
     registerSessionProject,
+    watchSettingsFiles: settingsFileState.watch,
+    reconcileExternalSettings,
   };
 };
