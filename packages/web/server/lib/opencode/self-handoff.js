@@ -180,7 +180,10 @@ export const createSelfHandoffRuntime = ({
     let child;
     try {
       const spawned = spawnSuccessor(server, address);
-      if (spawned?.failure) return { ok: false, reason: spawned.failure };
+      if (spawned?.failure) {
+        log.warn(`[handoff] could not resolve the successor: ${spawned.failure}; still serving`);
+        return { ok: false, reason: spawned.failure };
+      }
       child = spawned;
     } catch (error) {
       log.warn(`[handoff] could not start the successor: ${error?.message ?? error}; still serving`);
