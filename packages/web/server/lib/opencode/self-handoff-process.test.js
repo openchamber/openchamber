@@ -246,7 +246,7 @@ const runCli = (sandbox, args, env = {}) => new Promise((resolve) => {
   let stderr = '';
   child.stdout.on('data', (chunk) => { stdout += chunk; });
   child.stderr.on('data', (chunk) => { stderr += chunk; });
-  child.once('exit', (code) => resolve({ code, stdout, stderr }));
+  child.once('close', (code) => resolve({ code, stdout, stderr }));
 });
 
 // Keeps one keep-alive client polling /health every ~10 ms. A refused connection is the listener being
