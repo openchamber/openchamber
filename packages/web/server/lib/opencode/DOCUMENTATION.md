@@ -783,7 +783,13 @@ directory up to the worktree root, so a definition in a parent directory of a
 monorepo package counts; a nested id (`team/reviewer`) maps onto the path.
 Only files in the v2 `plugins/` directory are editable through the plugins
 page; a package directory or a v1 `plugin/` file is listed as a package that
-OpenCode loads and OpenChamber does not touch.
+OpenCode loads and OpenChamber does not touch. A symlink is listed as the file
+or package it points at, the way OpenCode loads it. Broken links are skipped.
+A file already in a plugin directory is listed, read, saved, deleted and
+switched under its exact on-disk name, mixed case included
+(`isExistingPluginFileName` in `plugin-paths.ts`), because OpenCode loads any
+`.js` or `.ts` name there. Only a new file has to match the lowercase naming
+rule.
 
 The plugins page lists entries from every config file OpenCode takes plugins
 from: both global files (`opencode.json` and `opencode.jsonc`),

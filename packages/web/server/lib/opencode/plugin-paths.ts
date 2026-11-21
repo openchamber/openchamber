@@ -2,6 +2,26 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+export function isExistingPluginFileName(name: unknown): name is string {
+  return typeof name === 'string'
+    && !name.startsWith('.')
+    && !name.includes('..')
+    && /^[^/\\\0]+\.(js|ts|mjs|cjs)$/.test(name);
+}
+
+export function pluginDirEntryKind(entry: fs.Dirent, absolutePath: string): 'file' | 'directory' | null {
+  if (entry.isFile()) return 'file';
+  if (entry.isDirectory()) return 'directory';
+  if (!entry.isSymbolicLink()) return null;
+  try {
+    const stat = fs.statSync(absolutePath);
+    if (stat.isFile()) return 'file';
+    return stat.isDirectory() ? 'directory' : null;
+  } catch {
+    return null;
+  }
+}
+
 export function canonicalPluginPath(filePath: string) {
   try {
     return fs.realpathSync(filePath);
