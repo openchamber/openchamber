@@ -2046,6 +2046,7 @@ export const settingsDict = {
   'settings.notifications.page.delivery.enableAria': 'Activer les notifications',
   'settings.notifications.page.delivery.enableLabel': 'Activer les notifications',
   'settings.notifications.page.delivery.localOnlyDevice': 'Cet appareil est associé uniquement à votre réseau domestique, il ne reçoit donc aucune notification, car elles passent par internet pour atteindre le téléphone. Pour les recevoir, ajoutez à nouveau l\'appareil et choisissez « Partout ».',
+  'settings.notifications.page.delivery.localOnlyServer': 'Ce serveur est associé uniquement à votre réseau domestique, il n\'envoie donc pas de notifications. Vos autres serveurs enregistrés continuent de les envoyer.',
   'settings.notifications.page.delivery.focusedAria': 'Notifier lorsque l\'application est ciblée',
   'settings.notifications.page.delivery.focusedLabel': 'Notifier lorsque l\'application est ciblée',
   'settings.notifications.page.delivery.testAction': 'Envoyer une notification de test',

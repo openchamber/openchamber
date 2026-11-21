@@ -2164,6 +2164,7 @@ export const settingsDict = {
   'settings.notifications.page.delivery.enableAria': 'تفعيل الإشعارات',
   'settings.notifications.page.delivery.enableLabel': 'تفعيل الإشعارات',
   'settings.notifications.page.delivery.localOnlyDevice': 'هذا الجهاز مقترن بشبكتك المنزلية فقط، لذا لا تصله الإشعارات لأنها تصل إلى الهاتف عبر الإنترنت. لتلقيها، أضف الجهاز مرة أخرى واختر "في أي مكان".',
+  'settings.notifications.page.delivery.localOnlyServer': 'هذا الخادم مقترن بشبكتك المنزلية فقط، لذا لا يرسل إشعارات. أما خوادمك المحفوظة الأخرى فما زالت ترسلها.',
   'settings.notifications.page.delivery.focusedAria': 'الإشعار أثناء التركيز على التطبيق',
   'settings.notifications.page.delivery.focusedLabel': 'الإشعار أثناء التركيز على التطبيق',
   'settings.notifications.page.delivery.testAction': 'إرسال إشعار تجريبي',

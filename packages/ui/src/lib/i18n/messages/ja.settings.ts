@@ -2176,6 +2176,7 @@ export const settingsDict = {
   'settings.notifications.page.delivery.enableAria': '通知を有効化',
   'settings.notifications.page.delivery.enableLabel': '通知を有効化',
   'settings.notifications.page.delivery.localOnlyDevice': 'このデバイスは自宅ネットワーク専用でペアリングされているため、通知は届きません。通知はインターネット経由でスマートフォンに届くためです。通知を受け取るには、デバイスを追加し直して「どこでも」を選んでください。',
+  'settings.notifications.page.delivery.localOnlyServer': 'このサーバーは自宅ネットワーク専用でペアリングされているため、通知を送りません。保存済みのほかのサーバーからは引き続き届きます。',
   'settings.notifications.page.delivery.focusedAria': 'アプリ起動中も通知',
   'settings.notifications.page.delivery.focusedLabel': 'アプリ起動中も通知',
   'settings.notifications.page.delivery.testAction': 'テスト通知を送信',
