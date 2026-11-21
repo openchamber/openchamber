@@ -3167,6 +3167,8 @@ export const dict: Record<I18nKey, string> = {
   'desktopHostSwitcher.error.pairingInvalidResponse': 'أعاد الخادم ردّ إقران غير صالح.',
   'desktopHostSwitcher.error.failedToOpenNewWindow': 'تعذّر فتح نافذة جديدة',
   'desktopHostSwitcher.instance.local': 'محلي',
+  'tray.instance.local': 'OpenChamber المحلي',
+  'tray.instance.fallback': 'مثيل',
   'desktopHostSwitcher.instance.fallback': 'نسخة',
   'desktopHostSwitcher.startup.title': 'نسخة SSH الافتراضية غير متاحة',
   'desktopHostSwitcher.startup.connectingTo': 'جارٍ الاتصال بـ {host}…',

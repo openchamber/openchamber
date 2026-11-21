@@ -3265,6 +3265,8 @@ export const dict: Record<I18nKey, string> = {
   'desktopHostSwitcher.error.pairingInvalidResponse': 'サーバーが無効なペアリング応答を返しました。',
   'desktopHostSwitcher.error.failedToOpenNewWindow': '新しいウィンドウを開けませんでした',
   'desktopHostSwitcher.instance.local': 'ローカル',
+  'tray.instance.local': 'ローカルの OpenChamber',
+  'tray.instance.fallback': 'インスタンス',
   'desktopHostSwitcher.instance.fallback': 'インスタンス',
   'desktopHostSwitcher.startup.title': 'デフォルトSSHインスタンスは利用できません',
   'desktopHostSwitcher.startup.connectingTo': '{host}に接続中...',

@@ -3266,6 +3266,8 @@ export const dict = {
   'desktopHostSwitcher.error.pairingInvalidResponse': 'De server gaf een ongeldig antwoord op de koppeling.',
   'desktopHostSwitcher.error.failedToOpenNewWindow': 'Kan het nieuwe venster niet openen',
   'desktopHostSwitcher.instance.local': 'Lokaal',
+  'tray.instance.local': 'Lokale OpenChamber',
+  'tray.instance.fallback': 'Instantie',
   'desktopHostSwitcher.instance.fallback': 'Instantie',
   'desktopHostSwitcher.startup.title': 'Standaard SSH-instantie niet beschikbaar',
   'desktopHostSwitcher.startup.connectingTo': 'Verbinden met {host}...',

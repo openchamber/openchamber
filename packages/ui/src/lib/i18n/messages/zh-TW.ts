@@ -3240,6 +3240,8 @@ export const dict: Record<I18nKey, string> = {
   'desktopHostSwitcher.error.pairingInvalidResponse': '伺服器回傳了無效的配對回應。',
   'desktopHostSwitcher.error.failedToOpenNewWindow': '在新視窗開啟失敗',
   'desktopHostSwitcher.instance.local': 'Local',
+  'tray.instance.local': '本機 OpenChamber',
+  'tray.instance.fallback': '執行個體',
   'desktopHostSwitcher.instance.fallback': '實例',
   'desktopHostSwitcher.startup.title': '預設 SSH 實例無法使用',
   'desktopHostSwitcher.startup.connectingTo': '正在連線到 {host}...',
