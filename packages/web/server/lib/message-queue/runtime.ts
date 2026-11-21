@@ -14,6 +14,7 @@ import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { attachmentHint } from '../routing/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
+import { parseAttachment, toPublicAttachment, type PublicQueuedAttachment, type QueuedAttachment } from './attachments.js';
 
 const QUEUE_FILE_NAME = 'message-queue.json';
 const QUEUE_FILE_VERSION = 1;
@@ -29,7 +30,6 @@ const RETRY_MAX_DELAY_MS = 60_000;
 const FETCH_TIMEOUT_MS = 15_000;
 const MESSAGE_TAIL_LIMIT = 2;
 
-const ATTACHMENT_SOURCES = new Set(['local', 'server', 'vscode']);
 const CONTEXT_PART_KINDS = new Set(['context', 'instruction', 'synthetic']);
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
 const MESSAGE_ID_PATTERN = /^msg_[A-Za-z0-9]{8,64}$/;
@@ -44,17 +44,6 @@ export interface QueueSendConfig {
 export interface QueuedGoal {
   tokenBudget: number | null;
   objective?: string;
-}
-
-export interface QueuedAttachment {
-  id: string;
-  filename: string;
-  mimeType: string;
-  size: number;
-  source: 'local' | 'server' | 'vscode';
-  serverPath?: string;
-  agentPath?: string;
-  dataUrl: string;
 }
 
 export type QueuedContextPart =
@@ -80,7 +69,7 @@ export interface QueuedItem extends QueuedItemInput {
 }
 
 export interface PublicQueuedItem extends Omit<QueuedItem, 'context' | 'syntheticIds' | 'attachments'> {
-  attachments: Omit<QueuedAttachment, 'dataUrl'>[];
+  attachments: PublicQueuedAttachment[];
 }
 
 export interface SessionQueue {
@@ -194,30 +183,7 @@ const goalSchema = z.unknown().transform((value): QueuedGoal | null => {
 });
 const parseGoal = goalSchema.parse;
 
-const isAttachmentSource = (value: unknown): value is QueuedAttachment['source'] => isString(value) && ATTACHMENT_SOURCES.has(value);
 const isContextKind = (value: unknown): value is QueuedContextPart['kind'] => isString(value) && CONTEXT_PART_KINDS.has(value);
-
-const attachmentSchema = z.unknown().transform((value): QueuedAttachment | null => {
-  const raw = asRecord(value);
-  if (!raw) return null;
-  const filename = asNonEmptyString(raw.filename);
-  const mimeType = asNonEmptyString(raw.mimeType);
-  const dataUrl = asText(raw.dataUrl);
-  if (!filename || !mimeType || !dataUrl) return null;
-  const attachment: Omit<QueuedAttachment, 'dataUrl'> = {
-    id: asNonEmptyString(raw.id) || `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-    filename,
-    mimeType,
-    size: asCount(raw.size) ?? 0,
-    source: isAttachmentSource(raw.source) ? raw.source : 'local',
-  };
-  const serverPath = asNonEmptyString(raw.serverPath);
-  if (serverPath) attachment.serverPath = serverPath;
-  const agentPath = asNonEmptyString(raw.agentPath);
-  if (agentPath) attachment.agentPath = agentPath;
-  return Object.assign(attachment, { dataUrl });
-});
-const parseAttachment = attachmentSchema.parse;
 
 const contextPartSchema = z.unknown().transform((value): QueuedContextPart | null => {
   const raw = asRecord(value);
@@ -286,8 +252,6 @@ const storedItemSchema = z.unknown().transform((value): QueuedItem | null => {
   }
 });
 const parseStoredItem = storedItemSchema.parse;
-
-const toPublicAttachment = ({ dataUrl: _dataUrl, ...attachment }: QueuedAttachment) => attachment;
 
 const toPublicItem = (item: QueuedItem) => {
   const publicItem: Omit<PublicQueuedItem, 'attachments' | 'sendConfig'> & Partial<Pick<PublicQueuedItem, 'attachments' | 'sendConfig'>> = { id: item.id, createdAt: item.createdAt, content: item.content, text: item.text };

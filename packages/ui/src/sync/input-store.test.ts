@@ -3,6 +3,10 @@ import { strToU8, zipSync } from "fflate"
 import { useInputStore } from "./input-store"
 import { getChatDraftIdentityKey } from "@/lib/chatDraftPersistence"
 import { opencodeClient } from "@/lib/opencode/client"
+import { attachmentWireName } from "@/lib/attachmentIdentity"
+import { useConfigStore } from "@/stores/useConfigStore"
+import { serverAttachmentSchema, toAttachedFile, toServerAttachment, withOriginalAttachment } from "@/stores/messageQueueAttachments"
+import { attachedFilesForModel, filesForModel } from "./model-attachment-paths"
 
 // A HEIC conversion that fails the way the vendored decoder does for Apple's
 // HDR gain-map photos.
@@ -241,6 +245,31 @@ describe("input-store attachments", () => {
       expect(reference?.saveOnSend).toBeUndefined()
       expect(reference?.mimeType).toBe("text/plain")
       expect(reference?.agentPath).toBe("/tmp/opencode/openchamber/abc/plan.docx")
+
+      // Send and Queue hand the reference to a model that lists no text input: it is already a path.
+      const getModelMetadata = useConfigStore.getState().getModelMetadata
+      useConfigStore.setState({ getModelMetadata: () => ({ id: "m", providerId: "p", modalities: { input: [] } }) })
+      try {
+        const model = { providerID: "p", modelID: "m" }
+        const part = { mime: reference!.mimeType, url: reference!.dataUrl, filename: attachmentWireName(reference!) }
+        expect(await filesForModel(model, [part], "/repo", () => true)).toEqual([part])
+        expect(await attachedFilesForModel(model, [reference!], "/repo", () => true)).toEqual([reference!])
+      } finally {
+        useConfigStore.setState({ getModelMetadata })
+      }
+      expect(write).toHaveBeenCalledTimes(1)
+
+      // The queue delivers the reference and keeps the document; Edit puts it back held for Send.
+      const queued = toAttachedFile(serverAttachmentSchema.parse(JSON.parse(JSON.stringify(toServerAttachment(reference!)))))
+      expect(queued.dataUrl).toBe(reference?.dataUrl)
+      const edited = withOriginalAttachment(queued)
+      expect(edited.saveOnSend).toBe(true)
+      expect(edited.mimeType).toBe(held?.mimeType)
+      expect(edited.dataUrl).toBe(held?.dataUrl)
+      expect(edited.agentPath).toBeUndefined()
+      expect(edited.serverPath).toBeUndefined()
+      expect(edited.original).toBeUndefined()
+      expect(await edited.file.text()).toBe("docx")
     } finally {
       write.mockRestore()
     }
@@ -504,23 +533,38 @@ describe("input-store attachments", () => {
     expect(useInputStore.getState().attachedFiles[0]?.dataUrl).toBe("data:text/plain;base64,e30=")
   })
 
-  test("rejects an unknown binary file after inspecting its contents", async () => {
-    const attached = await useInputStore.getState().addAttachedFile(
-      new File([new Uint8Array([0, 1, 2, 3])], "archive.bin", { type: "application/octet-stream" })
-    )
-
-    expect(attached).toBe(false)
-    expect(pendingReaders).toHaveLength(0)
-    expect(useInputStore.getState().attachedFiles).toEqual([])
+  testWithMockFileReader("keeps an unknown binary file in the draft without saving it anywhere", async () => {
+    const write = spyOn(opencodeClient, "writeOpenCodeTempFiles")
+    try {
+      const adding = useInputStore.getState().addAttachedFile(
+        new File([new Uint8Array([0, 1, 2, 3])], "archive.zip", { type: "application/zip" }),
+      )
+      await waitForReaderCount(1)
+      resolveReader(pendingReaders[0], "data:application/zip;base64,AAECAw==")
+      expect(await adding).toBe(true)
+      expect(write).not.toHaveBeenCalled()
+      const [attached] = useInputStore.getState().attachedFiles
+      expect(attached.filename).toBe("archive.zip")
+      expect(attached.mimeType).toBe("application/zip")
+      expect(attached.dataUrl).toBe("data:application/zip;base64,AAECAw==")
+      expect(attached.agentPath).toBeUndefined()
+    } finally {
+      write.mockRestore()
+    }
   })
 
-  test("rejects unknown content with too many control bytes", async () => {
-    const attached = await useInputStore.getState().addAttachedFile(
-      new File([new Uint8Array([1, 2, 3, 65])], "encoded.custom", { type: "application/octet-stream" })
-    )
-
-    expect(attached).toBe(false)
-    expect(pendingReaders).toHaveLength(0)
+  test("a malformed HAR is still rejected instead of sharing unsanitized content", async () => {
+    const write = spyOn(opencodeClient, "writeOpenCodeTempFiles")
+    try {
+      const attached = await useInputStore.getState().addAttachedFile(
+        new File([new Uint8Array([1, 2, 3, 65])], "secret.har", { type: "application/octet-stream" }),
+      )
+      expect(attached).toBe(false)
+      expect(write).not.toHaveBeenCalled()
+      expect(pendingReaders).toHaveLength(0)
+    } finally {
+      write.mockRestore()
+    }
   })
 
   testWithMockFileReader("accepts an unknown MIME type when its contents are text", async () => {

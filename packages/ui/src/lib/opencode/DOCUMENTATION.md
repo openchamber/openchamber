@@ -246,7 +246,8 @@ buckets, and a project filter names an OpenCode project ID.
 
 OpenCode's temp directory is on the machine its agents can read, including when
 the UI and OpenChamber server run elsewhere. Each upload uses a fresh folder to
-prevent repeated filenames from overwriting earlier attachments.
+prevent repeated filenames from overwriting earlier attachments. File names are
+restricted to their basename so they cannot escape that folder.
 `temp-files.ts` writes a batch one file at a time. A file's bytes may be a
 reader called right before its own write, so a batch of large documents holds
 one in memory at a time. A caller that passes `runtimeKey` gets a batch that

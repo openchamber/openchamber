@@ -659,7 +659,8 @@ local until Send:
   "Attach as is" (and the Save setting) keeps the original in the draft with
   `saveOnSend` (`addAttachmentSavedOnSend`); `saveAttachmentsHeldForSend` writes
   it where OpenCode runs when Send or Queue is pressed and swaps it for the same
-  path reference a dropped document gets. A write that fails keeps the message
+  path reference a dropped document gets; a message queued that way returns the
+  document still held for Send when its row is edited. A write that fails keeps the message
   unsent with a toast naming the file. Each write is bound to the runtime the
   send started on, and when the user left that draft or instance during the
   writes the send stops instead of running in the composer now on screen. A
@@ -884,10 +885,11 @@ the row's head states the file and line it anchors to.
 | `largeTextPasteOffer.ts` | Offer id begin/resolve for the choice above the composer, large paste or office documents (supersede + double-apply guards) |
 
 `ChatInput.handlePaste` owns paste orchestration: URL-over-selection markdown
-links, clipboard files, and large plain-text pastes. Pasted and dropped files
+links, clipboard files, and large plain-text pastes. Pasted, dropped and picked files
 share `attachFilesWithCitation`: every file attaches and is cited in the draft
 as `[name]`; images get a generated unique name first, other files keep their
-own name and are cited only after they attached. A copied file's filename text
+own name and are cited only after they attached. Pickers allow all file types;
+binary formats no model reads stay local chips and become path notes at Send. A copied file's filename text
 is suppressed so only the citation lands in the draft.
 
 ### Attachments are chips in the text
@@ -971,12 +973,13 @@ A model whose metadata lists no `image` input never receives an image part,
 whatever the setting says: an image part to such a model fails the turn. Every
 image a send or a launch still carries (a pasted image attached with the
 setting off or under a model picked earlier, the annotation screenshot, a
-comment-field paste) goes through `sync/text-model-images.ts` and arrives as a
+comment-field paste) goes through `sync/model-attachment-paths.ts` and arrives as a
 text note naming the file under the same filename (`sync/DOCUMENTATION.md`).
-The composer says so once per model in a toast when such an image lands or the
-model changes to a text-only one. Converting at send, and not at attach, keeps
-the image a real attachment while the model can still change: picking a model
-that reads images sends the picture itself.
+The same send-time conversion saves PDFs and other attachments when the model
+lacks their input type. The composer tells the user where the files will go
+when the file lands or the model changes. Converting at send keeps the original
+attachment in the draft and lets a later model choice accept the bytes directly.
+Saving failure stops the send and restores the draft.
 Large pastes (about 2,000 characters or 25 lines) follow the composer setting
 `largeTextPasteBehavior` (`ask` / `attach` / `inline` / `inline-double-paste`). Attaching creates an
 in-memory `text/plain` file named `pasted-context-N.txt`, inserts a bracket

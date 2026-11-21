@@ -20,8 +20,10 @@ export async function writeTempFiles(
       continue
     }
     assertCurrent()
+    const basename = filename.replace(/\\/g, "/").split("/").pop() || "attachment"
+    const safeName = basename === "." || basename === ".." ? "attachment" : basename
     try {
-      results.push({ filename, path: await write(`${folder}/${filename}`, payload) })
+      results.push({ filename, path: await write(`${folder}/${safeName}`, payload) })
     } catch (error) {
       results.push({ filename, error: error instanceof Error ? error : new Error(String(error)) })
     }

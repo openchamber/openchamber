@@ -2,7 +2,6 @@ import type { useI18n } from '@/lib/i18n';
 import type { useComposerRuntime } from './useComposerRuntime';
 import type { useComposerFileIntake } from './useComposerFileIntake';
 import React from 'react';
-import { ACCEPTED_ATTACHMENT_EXTENSIONS } from '@/sync/attachment-files';
 import { toast } from '@/components/ui';
 import { isVSCodeRuntime } from '@/lib/desktop';
 
@@ -27,7 +26,7 @@ export function useComposerFilePicker({
 
     const handleVSCodePickFiles = React.useCallback(async () => {
         try {
-            const data = (await vscodeApi?.pickFiles?.({ extensions: ACCEPTED_ATTACHMENT_EXTENSIONS })) as {
+            const data = (await vscodeApi?.pickFiles?.({})) as {
                 files?: Array<{ name: string; mimeType?: string; dataUrl?: string }>;
                 skipped?: Array<{ name?: string; reason?: string }>;
             } | undefined;

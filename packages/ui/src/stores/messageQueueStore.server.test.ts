@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test"
 import { directoryEnvironment } from './test-support/directoryEnvironment'
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch'
 import type { AttachedFile } from "./types/sessionTypes"
+import { withOriginalAttachment } from "./messageQueueAttachments"
 import type { MessageQueueUpdatedEvent } from "./messageQueueStore"
 
 const environment = directoryEnvironment({ home: '/home/test' })
@@ -438,6 +439,46 @@ describe("server-owned message queue", () => {
     expect(taken?.attachments?.[0]?.agentPath).toBe('/Users/me/Documents/note.txt')
     expect(taken?.attachments?.[0]?.file.size).toBe(2)
     expect(useMessageQueueStore.getState().queuedMessages[key]).toBe(undefined)
+  })
+
+  test("a path note keeps the picked file across the server for Edit", async () => {
+    const original = { mimeType: "application/pdf", dataUrl: "data:application/pdf;base64,JVBERg==" }
+    respond = () => json({ revision: 2, session: session([]) })
+    await useMessageQueueStore.getState().addToQueue(target, {
+      content: "pdf", attachments: [{ ...attachment, filename: "manual.pdf", original }], sendConfig: { providerID: "p", modelID: "m" },
+    })
+    const sent = calls[0]?.body.item.attachments[0]
+    expect(sent.dataUrl).toBe(attachment.dataUrl)
+    expect(sent.original).toEqual(original)
+
+    respond = () => json({ revision: 3, session: session([]), item: serverItem("q1", "pdf", { attachments: [sent] }) })
+    const [taken] = await useMessageQueueStore.getState().takeForSend(target, "q1")
+    expect(taken?.attachments?.[0]?.original).toEqual(original)
+  })
+
+  test("originals that would overrun the queue request are left out, and a small one still comes back for Edit", async () => {
+    const large = (name: string) => ({
+      ...attachment, id: name, filename: name,
+      original: { mimeType: "application/msword", dataUrl: `data:application/msword;base64,${"A".repeat(28 * 1024 * 1024)}` },
+    })
+    const small = { mimeType: "application/pdf", dataUrl: "data:application/pdf;base64,JVBERg==" }
+    respond = () => json({ revision: 2, session: session([]) })
+    await useMessageQueueStore.getState().addToQueue(target, {
+      content: "docs",
+      attachments: [large("a.doc"), large("b.doc"), { ...attachment, id: "c", filename: "c.pdf", original: small }],
+      sendConfig: { providerID: "p", modelID: "m" },
+    })
+    expect(calls).toHaveLength(1)
+    expect(new TextEncoder().encode(JSON.stringify(calls[0]?.body)).byteLength).toBeLessThan(50 * 1024 * 1024)
+    const sent = calls[0]?.body.item.attachments
+    expect(sent.map((file: { dataUrl: string }) => file.dataUrl)).toEqual([attachment.dataUrl, attachment.dataUrl, attachment.dataUrl])
+    expect(sent.filter((file: { original?: unknown }) => file.original)).toHaveLength(2)
+    expect(sent[1].original).toBeUndefined()
+    expect(sent[2].original).toEqual(small)
+
+    respond = () => json({ revision: 3, session: session([]), item: serverItem("q1", "docs", { attachments: [sent[2]] }) })
+    const [taken] = await useMessageQueueStore.getState().takeForSend(target, "q1")
+    expect(withOriginalAttachment(taken!.attachments![0]!).mimeType).toBe("application/pdf")
   })
 
   test("takeForSend without an id takes everything the server is not already sending", async () => {

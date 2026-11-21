@@ -17,7 +17,7 @@ import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
 import { syncSessionKnowledge } from "@/lib/sessionKnowledgeApi"
 import { fetchResponseStyleInstruction } from "@/lib/responseStyle"
 import { attachmentWireName } from "@/lib/attachmentIdentity"
-import { filesForModel } from "./text-model-images"
+import { filesForModel } from "./model-attachment-paths"
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
 import { isDirectoryUnknown, useDirectoryStore } from "@/stores/useDirectoryStore"
 import { fileDraftSessionInFolder } from "./draft-folder-target"
@@ -145,7 +145,7 @@ export function resolveGoalObjective(content: string, directory: string | null |
 }
 
 
-export async function routeMessage(params: {
+export async function routeMessage(params: Pick<SendMessageOptions, "isCurrentRuntime"> & {
   runtimeKey?: string
   sessionId: string
   directory?: string | null
@@ -168,7 +168,7 @@ export async function routeMessage(params: {
   markBusy?: boolean
 }): Promise<'command' | 'prompt' | 'shell'> {
   const assertRuntimeCurrent = () => {
-    if (params.runtimeKey !== undefined && params.runtimeKey !== getRuntimeKey()) {
+    if (params.isCurrentRuntime?.() === false || (params.runtimeKey !== undefined && params.runtimeKey !== getRuntimeKey())) {
       throw new Error("Message was not sent because the runtime changed.")
     }
   }
@@ -202,7 +202,7 @@ export async function routeMessage(params: {
     return 'shell'
   }
 
-  const sendFiles = await filesForModel(params, [...(params.files ?? []), ...(params.additionalParts ?? []).flatMap((part) => part.files ?? [])], requestDirectory)
+  const sendFiles = await filesForModel(params, [...(params.files ?? []), ...(params.additionalParts ?? []).flatMap((part) => part.files ?? [])], requestDirectory, params.isCurrentRuntime ?? captureRuntimeInstance())
 
   let skills = params.skills
   if (params.content.startsWith("/")) {
@@ -1789,15 +1789,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   ) => {
     const capturedTarget = options?.target
     const effortRevision = options?.effortRevision ?? readEffortRevision(providerID, modelID)
-    const isCurrentRuntimeInstance = captureRuntimeInstance()
+    const isCurrentRuntimeInstance = options?.isCurrentRuntime ?? captureRuntimeInstance()
     const capturedRuntimeKey = capturedTarget?.runtimeKey ?? getRuntimeKey()
-    if (capturedTarget && capturedTarget.runtimeKey !== getRuntimeKey()) {
+    if (!isCurrentRuntimeInstance() || (capturedTarget && capturedTarget.runtimeKey !== getRuntimeKey())) {
       throw new Error("Message was not sent because the runtime changed.")
     }
     return runAfterOpenCodeStartup(async () => {
       const draft = options?.draftSnapshot ?? get().newSessionDraft
       const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
-      if (capturedRuntimeKey !== getRuntimeKey()) {
+      if (capturedRuntimeKey !== getRuntimeKey() || !isCurrentRuntimeInstance()) {
         throw new Error("Message was not sent because the runtime changed.")
       }
       const responseStyleInstruction = inputMode === "shell"
@@ -1920,7 +1920,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
         try {
           const draftRoute = await routeMessage({
-            runtimeKey: capturedRuntimeKey,
+            runtimeKey: capturedRuntimeKey, isCurrentRuntime: isCurrentRuntimeInstance,
             sessionId,
             directory: sessionDirectory,
             content,
@@ -2058,7 +2058,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         ? useSelectionStore.getState().captureSessionSelectionSentSettlement(targetSessionId, providerID, modelID, effectiveAgent, variant)
         : undefined
       const routed = await routeMessage({
-        runtimeKey: capturedRuntimeKey,
+        runtimeKey: capturedRuntimeKey, isCurrentRuntime: isCurrentRuntimeInstance,
         sessionId: targetSessionId || "",
         directory: currentSessionDirectory,
         content,
