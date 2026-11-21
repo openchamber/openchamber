@@ -50,6 +50,9 @@ describe('useUpdateStore restartToUpdate', () => {
       downloading: false,
       downloaded: true,
       installing: false,
+      idlePhase: 'idle',
+      idleReason: null,
+      idleRemainingMs: 0,
       info: null,
       progress: null,
       error: null,
@@ -101,6 +104,48 @@ describe('useUpdateStore restartToUpdate', () => {
 
     expect(useUpdateStore.getState().installing).toBe(false)
     expect(useUpdateStore.getState().downloaded).toBe(false)
+  })
+})
+
+describe('useUpdateStore idle install', () => {
+  test('native waiting state remains cancellable after renderer reload and a failed feed check', async () => {
+    useUpdateStore.setState({
+      runtimeType: null,
+      available: false,
+      downloaded: false,
+      info: null,
+      idlePhase: 'idle',
+      idleReason: null,
+    })
+    useUpdateStore.getState().applyIdleUpdate({
+      phase: 'waiting',
+      reason: 'session',
+      remainingMs: 0,
+      version: '2.0.0',
+      channel: 'stable',
+    })
+    expect(useUpdateStore.getState()).toMatchObject({ runtimeType: 'desktop', idlePhase: 'waiting', downloaded: false })
+
+    desktopCheckError = new Error('Update feed unavailable')
+    await useUpdateStore.getState().checkForUpdates()
+    expect(useUpdateStore.getState()).toMatchObject({ runtimeType: 'desktop', idlePhase: 'waiting', available: false })
+    desktopCheckError = null
+  })
+
+  test('a failed install leaves the download available', () => {
+    useUpdateStore.setState({ downloaded: true, installing: true, runtimeType: 'desktop' })
+    useUpdateStore.getState().applyIdleUpdate({
+      phase: 'idle',
+      reason: 'install-failed',
+      remainingMs: 0,
+      version: null,
+      channel: null,
+    })
+
+    expect(useUpdateStore.getState().installing).toBe(false)
+    expect(useUpdateStore.getState().idlePhase).toBe('idle')
+    expect(useUpdateStore.getState().idleReason).toBe('install-failed')
+    expect(useUpdateStore.getState().downloaded).toBe(true)
   })
 })
 
@@ -159,6 +204,13 @@ describe('useUpdateStore checkForUpdates', () => {
   test('the same offered version keeps the downloaded payload', async () => {
     await useUpdateStore.getState().checkForUpdates()
 
+    expect(useUpdateStore.getState().downloaded).toBe(true)
+  })
+
+  test('a fresh renderer picks up an already downloaded update', async () => {
+    useUpdateStore.setState({ downloaded: false, info: null })
+    desktopCheckResult = { available: true, downloaded: true, currentVersion: '1.0.0', version: '2.0.0' }
+    await useUpdateStore.getState().checkForUpdates()
     expect(useUpdateStore.getState().downloaded).toBe(true)
   })
 

@@ -107,6 +107,20 @@ it imports.
 - Session lineage is learned from translated creation events, metadata changes
   and records already read. User takeover can change a child's parent status;
   bounded eviction returns it to unknown, so stale ancestry is not permanent.
+- `getUpdateIdleStatus` answers whether a desktop update may restart this
+  process. It reads in-memory session state (busy, retry, and pending blocking
+  requests), live terminals, scheduled tasks that are running or already
+  queued, and live workflow, goal, session-assist, message-queue, wait,
+  pull-request watch, and review work. It loads the work catalogs before
+  sampling live state. A failed or unfinished read, including a disconnected
+  session stream or a connection not yet reconciled against `/api/session/active`,
+  is `unknown` rather than idle. A failed reconciliation remains unknown until
+  a successful read for the current connection. It does not scan session
+  history or start an OpenCode location. A future scheduled task that is not
+  yet due does not count. A running interactive terminal counts, because
+  nothing shows that it is at a prompt. An open tunnel changes the reason
+  only when a read did not finish: clients on that tunnel use this server,
+  and a finished read already includes them.
 
 ## Enterprise policy invariants
 
@@ -454,6 +468,14 @@ literals because `cmd.exe` parses the joined command string. Bun and every POSIX
 probe keep argument-array spawning without a shell. The install command itself
 is a shell string on every platform and still names the manager by its bare
 name.
+
+### Why an unfinished idle read stays unknown
+
+The message queue, extension waits, and pull-request watches keep an empty catalog until `load()` finishes. Reading that catalog early would look idle while work is still on disk. A thrown read is the same answer: unknown, so the desktop update keeps waiting. An open tunnel changes the reason only when that read did not finish, because a finished read already includes the clients using the tunnel.
+
+### Why a running interactive terminal blocks a desktop update
+
+A restart would close the shell. Nothing on the terminal says it is sitting at a prompt, so a running interactive terminal stays busy and the dialog says why. A scheduled task that is only due later does not.
 
 ### Why update channels belong to the installed runtime and not every client
 

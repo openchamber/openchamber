@@ -87,7 +87,7 @@ type SessionMetadataInput = SessionMetadata | null | undefined;
 export interface SessionGoalRuntime {
   processPayload: (payload: JsonValue | undefined, directoryHint?: string) => void;
   notifyGoalChanged: (sessionId: string, directory: string, metadata: SessionMetadataInput) => Promise<void>;
-  recoverActiveGoals: () => Promise<void>;
+  recoverActiveGoals: () => Promise<void>; hasLiveWork: () => boolean;
   stop: () => void;
 }
 
@@ -1072,5 +1072,5 @@ export const createSessionGoalRuntime = ({
     interruptions.stop();
   };
 
-  return { processPayload, notifyGoalChanged, recoverActiveGoals, stop };
+  return { processPayload, notifyGoalChanged, recoverActiveGoals, hasLiveWork: () => inflight.size > 0 || timers.size > 0, stop };
 };

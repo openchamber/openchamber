@@ -191,6 +191,7 @@ export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueR
 
   return {
     validateTarget, listEligibleTargets, run, beforeSend,
+    pendingAdmissions: () => admissions.size,
     result: ({ projectId, taskId }: ScheduledTaskProvenance, status: ScheduledTaskStatus, cause?: unknown) => record(projectId, taskId, status, cause),
     cancel: (projectId: string, taskId: ScheduledTaskInput['id']) => messageQueueRuntime.cancelScheduledTask(projectId, taskId),
   };

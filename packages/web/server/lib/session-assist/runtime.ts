@@ -414,5 +414,5 @@ export const createSessionAssistRuntime = ({
     ready.clear();
     for (const { controller } of inflight.values()) controller.abort();
   };
-  return { processPayload, stop };
+  return { processPayload, stop, hasLiveWork: () => announced.size > 0 };
 };
