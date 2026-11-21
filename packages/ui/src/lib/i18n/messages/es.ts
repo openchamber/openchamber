@@ -2372,6 +2372,7 @@ export const dict: Record<I18nKey, string> = {
   "session.newWorktree.noMatchingBranches": "No hay ramas coincidentes",
   "session.newWorktree.localBranches": "Ramas locales",
   "session.newWorktree.remoteBranches": "Ramas remotas",
+  "session.newWorktree.defaultBranches": "Ramas predeterminadas",
   "session.newWorktree.branchName": "Nombre de la rama",
   "session.newWorktree.branchNamePlaceholder": "feature/my-awesome-feature",
   'session.newWorktree.actions.startFromRepository.pullRequest': 'Iniciar desde Issue/PR de {provider}',

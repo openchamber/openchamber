@@ -46,6 +46,10 @@ own their contracts in `project-context/DOCUMENTATION.md` and
 - New-worktree source selection waits for fetched branches. Persisted branch
   seeds contain only local branches and can incorrectly select local `main` when
   the bound remote's default branch should win.
+- The "Based on" picker lists each remote's detected default branch first while
+  nothing is typed, the bound remote's first, and only when that branch is in the
+  fetched list. A typed query ranks them with every other branch. The
+  existing-branch picker lists no defaults: it checks out a branch, not a base.
 - A stacked branch starts from its named parent, fetching the remote copy when
   needed. Failure to find it never substitutes the project root's current branch.
 - Worktree folder names remain ASCII and keep their initial random name when a
@@ -97,6 +101,12 @@ own their contracts in `project-context/DOCUMENTATION.md` and
 The picker requests autofocus because Chromium's focus scan can skip candidates
 under its `display: contents` portal. Keyboard events reach cmdk before propagation
 stops, so the enclosing menu's typeahead cannot consume branch navigation.
+
+### Why the base picker lifts every remote's default
+
+The comparison picker lifts only the bound remote's default because it rejects a
+base on another remote. A new worktree can start from any remote branch, and work
+in a fork often starts from upstream's default, so every remote's default is lifted.
 
 ### Why repository identity is one choice
 

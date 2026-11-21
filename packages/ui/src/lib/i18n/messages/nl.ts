@@ -2404,6 +2404,7 @@ export const dict = {
   'session.newWorktree.noMatchingBranches': 'Geen overeenkomende branches',
   'session.newWorktree.localBranches': 'Lokale branches',
   'session.newWorktree.remoteBranches': 'Remote branches',
+  'session.newWorktree.defaultBranches': 'Standaardbranches',
   'session.newWorktree.branchName': 'Branchnaam',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.startFromRepository.pullRequest': 'Starten vanuit {provider}-issue/PR',

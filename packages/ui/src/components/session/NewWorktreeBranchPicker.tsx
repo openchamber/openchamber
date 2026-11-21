@@ -46,6 +46,7 @@ export function NewWorktreeBranchPicker({
   title,
   localBranches,
   remoteBranches,
+  remoteDefaults,
   isLoading,
   isMobile,
   disabled = false,
@@ -56,6 +57,7 @@ export function NewWorktreeBranchPicker({
   title: string;
   localBranches: string[];
   remoteBranches: string[];
+  remoteDefaults?: readonly string[];
   isLoading: boolean;
   isMobile: boolean;
   disabled?: boolean;
@@ -70,17 +72,19 @@ export function NewWorktreeBranchPicker({
 
   const searching = query.trim().length > 0;
   const sections = React.useMemo((): BranchSection[] => {
-    const ranked = rankBranchesForQuery({ localBranches, remoteBranches, query });
+    const ranked = rankBranchesForQuery({ localBranches, remoteBranches, remoteDefaults, query });
     if (searching) {
       return ranked.matching.length > 0
         ? [{ heading: t('session.newWorktree.matchingBranches'), branches: ranked.matching.map(({ value: branch, label }) => ({ value: branch, label })) }]
         : [];
     }
+    const remote = (branch: string): PickedBranch => ({ value: `remotes/${branch}`, label: branch });
     return [
+      { heading: t('session.newWorktree.defaultBranches'), branches: ranked.remoteDefaults.map(remote) },
       { heading: t('session.newWorktree.localBranches'), branches: ranked.otherLocal.map((branch) => ({ value: branch, label: branch })) },
-      { heading: t('session.newWorktree.remoteBranches'), branches: ranked.otherRemote.map((branch) => ({ value: `remotes/${branch}`, label: branch })) },
+      { heading: t('session.newWorktree.remoteBranches'), branches: ranked.otherRemote.map(remote) },
     ].filter((section) => section.branches.length > 0);
-  }, [localBranches, remoteBranches, query, searching, t]);
+  }, [localBranches, remoteBranches, remoteDefaults, query, searching, t]);
 
   const total = sections.reduce((count, section) => count + section.branches.length, 0);
   let offset = 0;

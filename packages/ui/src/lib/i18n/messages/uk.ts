@@ -2372,6 +2372,7 @@ export const dict: Record<I18nKey, string> = {
   "session.newWorktree.noMatchingBranches": "Немає відповідних гілок",
   "session.newWorktree.localBranches": "Локальні гілки",
   "session.newWorktree.remoteBranches": "Віддалені гілки",
+  "session.newWorktree.defaultBranches": "Гілки за замовчуванням",
   "session.newWorktree.branchName": "Назва гілки",
   "session.newWorktree.branchNamePlaceholder": "feature/my-awesome-feature",
   'session.newWorktree.actions.startFromRepository.pullRequest': 'Почати з {provider} issue/PR',
