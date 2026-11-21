@@ -20,6 +20,13 @@ own their contracts in `project-context/DOCUMENTATION.md` and
 - Folder listings publish resolved identities with their rows, so a symlink never
   briefly appears addable. Previous rows remain until the next listing arrives
   to avoid a loading flash, and actions check which folder those rows belong to.
+- Each browsed folder keeps its scroll offset per runtime (`browseListMemory`).
+  The key and the check that the rows are the folder's own use one identity
+  with case kept, so `/work/Foo` and `/work/foo` stay separate lists on a
+  case-sensitive filesystem. A read in flight, its loading message included,
+  or a failed read neither takes the saved offset nor records its own.
+  A name filter or the hidden-folders toggle makes its own list, so clearing
+  the filter returns to the full folder's offset.
 - Batch selections survive folder navigation and take precedence over creating
   the directory typed in the filter. Space toggles selection only while browsing;
   during path entry it remains a literal space.

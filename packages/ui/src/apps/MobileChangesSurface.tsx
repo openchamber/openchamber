@@ -10,10 +10,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenu
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ChangesPanel, type ChangesGroupConfig } from '@/components/views/git/ChangesPanel';
 import { BranchSelector } from '@/components/views/git/BranchSelector';
-import { ChangeStats } from '@/components/views/git/ChangeRow';
-import { ChangedPathLabel } from '@/components/views/git/ChangedPathLabel';
 import type { WalkthroughTarget } from '@/lib/walkthrough/types';
 import { MobileWalkthroughScreen } from './MobileWalkthroughScreen';
+import { MobileComparisonFileList } from './MobileComparisonFileList';
 import { BranchComparisonSelector } from '@/components/views/git/BranchComparisonSelector';
 import { CommitComparisonSelector } from '@/components/views/git/CommitComparisonSelector';
 import { branchRefLabel } from '@/components/views/git/baseBranch';
@@ -64,7 +63,6 @@ import { useLastTurnDiff } from '@/components/views/useLastTurnDiff';
 import { ReviewFlowDialog } from '@/components/session/ReviewFlowDialog';
 import { useReviewFlowStart } from '@/components/session/useReviewFlowStart';
 import { cn } from '@/lib/utils';
-import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { fileDiffFromPatch, isBinaryPatch } from '@/lib/diff/patchFileDiff';
 import { parseDiffFromFile, type FileDiffMetadata } from '@pierre/diffs';
 import type { GitStatus, GitSubmoduleState } from '@/lib/api/types';
@@ -504,6 +502,16 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
       .sort((a, b) => a.path.localeCompare(b.path)),
     [lastTurnDiffs],
   );
+
+  const listKey = route.type !== 'list'
+    ? null
+    : mode === 'working'
+      ? `${ownerKey}|working`
+      : mode === 'turn'
+        ? `${ownerKey}|turn|${currentSessionId ?? ''}`
+        : comparison.key ? `${ownerKey}|${comparison.key}` : null;
+  const listReady = route.type === 'list'
+    && (mode === 'working' || (mode === 'turn' ? turnDiffSettled : comparisonFiles !== null));
 
   const turnDiffData = React.useMemo(() => {
     const map = new Map<string, MobileDiffData>();
@@ -1274,7 +1282,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         ? t('commitComparison.emptyDiff')
         : t('diffView.branch.empty', { base: sourceLabel ?? '' })} />;
     }
-    return <MobileComparisonFileList files={comparisonFiles} onSelect={(path) => {
+    return <MobileComparisonFileList files={comparisonFiles} memoryKey={listKey} memoryReady={listReady} onSelect={(path) => {
       if (comparison.key) setRoute({ type: 'comparison', path, sourceKey: comparison.key });
     }} />;
   };
@@ -1289,7 +1297,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     }
     if ((!hasTurnData || turnFileRequest) && currentSessionId) return <MobileChangesState loading message={t('diffView.state.loadingChanges')} />;
     if (turnFiles.length === 0) return <MobileChangesState message={t('diffView.state.noLastTurnChanges')} />;
-    return <MobileComparisonFileList files={turnFiles} onSelect={(path) => setRoute({ type: 'turn', path })} />;
+    return <MobileComparisonFileList files={turnFiles} memoryKey={listKey} memoryReady={listReady} onSelect={(path) => setRoute({ type: 'turn', path })} />;
   };
 
   return (
@@ -1465,6 +1473,8 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
               isRevertingAll={isRevertingAll}
               headerBackgroundClassName="bg-transparent"
               onVisiblePathsChange={setVisibleChangePaths}
+              memoryKey={listKey}
+              memoryReady={listReady}
             />
           </div>
           <div data-keyboard-rider="" className="oc-mobile-commit-bar shrink-0 border-t border-edge-muted bg-background px-4 py-3">
@@ -1695,37 +1705,5 @@ const MobileDiffDetail: React.FC<{
         )}
       </div>
     </div>
-  );
-};
-
-type ComparisonFileListItem = { path: string; status: string; insertions: number; deletions: number; previousPath?: string };
-
-const MobileComparisonFileList: React.FC<{ files: ComparisonFileListItem[]; onSelect: (path: string) => void }> = ({ files, onSelect }) => {
-  const { t } = useI18n();
-  return (
-    <ScrollableOverlay outerClassName="h-full" className="px-2 py-1" useScrollShadow disableHorizontal>
-      <ul aria-label={t('gitView.changes.changedFilesAria')} className="flex flex-col">
-        {files.map((file) => {
-          const statusLabel = file.status === 'A' ? t('diffView.change.new')
-            : file.status === 'D' ? t('diffView.change.deleted')
-            : file.status === 'R' ? t('diffView.change.renamed')
-            : file.status === 'C' ? t('diffView.change.copied') : t('diffView.change.modified');
-          const statusColor = file.status === 'A' ? 'var(--status-success)' : file.status === 'D' ? 'var(--status-error)'
-            : file.status === 'R' || file.status === 'C' ? 'var(--status-info)' : 'var(--status-warning)';
-          return <li key={file.path}>
-            <button
-              type="button"
-              className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-start touch-manipulation focus:outline-none active:bg-interactive-hover"
-              onClick={() => onSelect(file.path)}
-            >
-              <span className="w-4 shrink-0 text-center typography-micro font-semibold uppercase" style={{ color: statusColor }} aria-label={statusLabel}>{file.status}</span>
-              <FileTypeIcon filePath={file.path} className="size-3.5 shrink-0" />
-              <ChangedPathLabel path={file.path} from={file.previousPath} nameFirst className="flex-1 typography-ui-label" />
-              {(file.insertions > 0 || file.deletions > 0) && <ChangeStats insertions={file.insertions} deletions={file.deletions} hideZero />}
-            </button>
-          </li>;
-        })}
-      </ul>
-    </ScrollableOverlay>
   );
 };

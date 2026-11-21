@@ -112,6 +112,13 @@
 - Identity selection uses the repository's bound primary remote and the same configuration answers as add and clone. Trusting system Git is confirmed in repository configuration because selecting a menu item alone cannot authorize that trust.
 - Worktree deletion handles sessions in every subfolder while their directory still exists. Archiving rolls back if removal fails; keeping sessions moves them to the project first. Teardown retries reread options at execution time, and failed remote-branch deletion preserves the worktree with its reason.
 - Files navigation remains rooted for parent traversal, while an explicit chat tool target can open outside the workspace through the editor's existing outside-workspace read path. Image-preview navigation retains the browsed folder as Back's destination. Upload completion reloads only the folder still on screen.
+- A phone file or change list keeps the offset it left when a preview or diff
+  replaces it, and a file's search results, a folder's listing and each change
+  mode are their own list. A folder child starts at its top rather than
+  inheriting the parent's offset (the list's `memoryKey`). Search results of
+  the same folder and query stay on screen while a return re-runs the search
+  (`mobileFilesList`): a loading placeholder there would clamp the restored
+  offset and be saved as the list's. A failed folder read or search is not the list.
 
 ### Native chrome, notifications and snapshots
 
