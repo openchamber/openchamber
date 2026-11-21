@@ -15,13 +15,13 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.1.0",
+    "@effect/platform-node": "4.1.5",
     "@electron/rebuild": "^4.2.0",
     "@opencode/plugin": "2.3.2",
     "@opencode/schema": "2.3.2",
     "@opencode/server": "2.3.2",
     "@opencode/util": "2.3.2",
-    "effect": "4.1.0",
+    "effect": "4.1.5",
     "electron": "^45.0.0",
     "electron-builder": "^26.0.0",
     "node-abi": "^4.40.0"
