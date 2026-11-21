@@ -1206,7 +1206,7 @@ describe('OpenChamber control service', () => {
     expect(client.session.list).not.toHaveBeenCalled();
   });
 
-  it('projects only ordered text content from session messages', async () => {
+  it('projects ordered text content, with what the user attached as context, from session messages', async () => {
     const { service, client } = createService();
     client.message.list.mockResolvedValue({ data: [
       {
@@ -1215,6 +1215,9 @@ describe('OpenChamber control service', () => {
       },
       { id: 'msg_user', type: 'user', time: { created: 10 }, text: 'Question' },
       { id: 'msg_tool', type: 'assistant', time: { created: 15 }, content: [{ type: 'tool' }] },
+      { id: 'msg_quote', type: 'synthetic', time: { created: 9 }, text: 'The user selected this fragment:\n> old answer\n\nThe user wrote: why?', metadata: { openchamberContext: { kind: 'chat-quote' } } },
+      { id: 'msg_notice', type: 'synthetic', time: { created: 12 }, text: 'A plugin notice', metadata: { source: 'some-plugin' } },
+      { id: 'msg_choice', type: 'synthetic', time: { created: 25 }, text: 'The user picked MIT', metadata: { openchamberUiBlockAnswer: { block: 'b1' } } },
     ] });
 
     await expect(service.execute('session.messages', {
@@ -1228,10 +1231,22 @@ describe('OpenChamber control service', () => {
       role: 'all',
       sessionStatus: { type: 'idle' },
       messages: [
+        { id: 'msg_quote', role: 'user', createdAt: 9, completedAt: null, model: null, text: 'The user selected this fragment:\n> old answer\n\nThe user wrote: why?', attached: true },
         { id: 'msg_user', role: 'user', createdAt: 10, completedAt: null, model: null, text: 'Question' },
         { id: 'msg_assistant', role: 'assistant', createdAt: 20, completedAt: 30, model: 'openai/gpt-5.4-mini', text: 'First answer' },
+        { id: 'msg_choice', role: 'user', createdAt: 25, completedAt: null, model: null, text: 'The user picked MIT', attached: true },
       ],
     });
+  });
+
+  it('keeps an attachment before the prompt it came with, also when both share a millisecond', async () => {
+    const { service, client } = createService();
+    client.message.list.mockResolvedValue({ data: [
+      { id: 'msg_2_prompt', type: 'user', time: { created: 10 }, text: 'Why is that?' },
+      { id: 'msg_1_quote', type: 'synthetic', time: { created: 10 }, text: 'The user selected this fragment', metadata: { openchamberContext: { kind: 'chat-quote' } } },
+    ] });
+    const { messages } = await service.execute('session.messages', { sessionId: 'ses_1', directory: '/repo', last: true });
+    expect(messages.map((message) => message.id)).toEqual(['msg_2_prompt']);
   });
 
   it('follows the message cursor so all: true returns the whole history', async () => {

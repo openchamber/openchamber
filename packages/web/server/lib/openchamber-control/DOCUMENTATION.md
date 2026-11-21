@@ -382,7 +382,16 @@ constructor retains its existing `Object.assign` behavior.
   Failed creation removes only an empty directory. Once OpenCode creates the
   session, a failed prompt keeps its directory. Chats cannot request a worktree.
 - Session status and messages come from official directory-scoped OpenCode
-  APIs. Message output includes only ordered `text` parts.
+  APIs. Message output includes only ordered `text` parts. What the user
+  attached to a message travels as a synthetic message before it (a quote, a
+  code comment, a lead digest reply, an answer to a reply block or a page:
+  `openchamberContext`, `openchamberLeadAnswer`, `openchamberUiBlockAnswer`
+  metadata or the `openchamber-page-answer` source), and the user's own words
+  to a quote live only there, so those come back as `user` messages marked
+  `attached: true`. A caller that wants what the user typed (an extension's
+  Retry) skips the marked ones. Messages of one millisecond keep OpenCode's id
+  order, so an attachment stays before its prompt. Other synthetic messages
+  (notices, subagent reports) stay out.
 - `session.status` and `session.messages` ask OpenCode's `session.get` first,
   because the active-session map names only running sessions: a session it
   does not name is idle or does not exist. An unknown id is a 404. A lookup

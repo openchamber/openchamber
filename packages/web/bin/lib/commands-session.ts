@@ -5,7 +5,7 @@ import { requestControlAction } from './cli-control.js';
 import { asNonEmptyString } from '../../server/lib/shared/object-guards.js';
 import type { CliOptions } from './cli-args.js';
 import type { ControlInput } from '../../server/lib/openchamber-control/contracts.js';
-import type { TextMessage } from '../../server/lib/openchamber-control/service.js';
+import type { TextMessage } from '../../server/lib/openchamber-control/session-text-messages.js';
 import {
   intro as clackIntro,
   outro as clackOutro,

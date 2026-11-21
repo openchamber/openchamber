@@ -1,4 +1,5 @@
 import { asNonEmptyString, isBoolean, isRecord } from '../shared/guards.js';
+import { extractTextMessages, type MessageRecord, type TextMessage } from './session-text-messages.js';
 import path from 'node:path';
 import nodeFsPromises from 'node:fs/promises';
 import { OpenCode } from '@opencode/client';
@@ -118,27 +119,10 @@ export interface ControlDependencies {
 
 const hasText = (value: unknown): value is string => Boolean(asNonEmptyString(value));
 const isSafeInteger = (value: unknown): value is number => Number.isSafeInteger(value);
-const isFiniteNumber = (value: unknown): value is number => Number.isFinite(value);
 const isIntegerNumber = (value: unknown): value is number => Number.isInteger(value);
 const isText = (value: unknown): value is string => typeof value === 'string';
 type Mutable<Value> = { -readonly [Key in keyof Value]: Value[Key] };
 type ControlSession = SessionInfo & { directory?: string; time: SessionInfo['time'] & { archived?: number } };
-interface MessageRecord {
-  id: string;
-  type: string;
-  text?: unknown;
-  content?: { type: string; text?: unknown }[];
-  model?: { providerID?: unknown; id?: unknown };
-  time: { created: number; completed?: number };
-}
-export interface TextMessage {
-  id: string;
-  role: string;
-  createdAt: number | null;
-  completedAt: number | null;
-  model: string | null;
-  text: string;
-}
 interface TaskExecution {
   prompt: string;
   providerID?: string;
@@ -221,36 +205,6 @@ const normalizeWaitTimeoutMs = (value: ControlInput['timeout']) => {
     throw new OpenChamberControlError(`timeout must be from 1 to ${MAX_WAIT_TIMEOUT_SECONDS} seconds`, 400);
   }
   return seconds * 1000;
-};
-
-const messageText = (record: MessageRecord) => {
-  if (record.type === 'user') return isText(record.text) ? record.text.trim() : '';
-  return (Array.isArray(record.content) ? record.content : [])
-    .filter((item) => item?.type === 'text' && isText(item.text))
-    .map((item) => item.text)
-    .join('')
-    .trim();
-};
-
-const extractTextMessages = (messages: MessageRecord[], role = 'all') => {
-  const result: TextMessage[] = [];
-  for (const record of Array.isArray(messages) ? messages : []) {
-    const messageRole = record?.type;
-    if ((messageRole !== 'user' && messageRole !== 'assistant') || (role !== 'all' && role !== messageRole)) continue;
-    const text = messageText(record);
-    if (!text) continue;
-    const providerID = asNonEmptyString(record.model?.providerID);
-    const modelID = asNonEmptyString(record.model?.id);
-    result.push({
-      id: asNonEmptyString(record.id) || '',
-      role: messageRole,
-      createdAt: isFiniteNumber(record?.time?.created) ? record.time.created : null,
-      completedAt: isFiniteNumber(record?.time?.completed) ? record.time.completed : null,
-      model: providerID && modelID ? `${providerID}/${modelID}` : null,
-      text,
-    });
-  }
-  return result.sort((left, right) => (left.createdAt || 0) - (right.createdAt || 0));
 };
 
 const parseModel = (value: ControlInput['model']) => {

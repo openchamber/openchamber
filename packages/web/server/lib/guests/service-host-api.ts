@@ -53,9 +53,11 @@ const readSession = async <Action extends SessionReadAction>(control: ServiceHos
   return control.execute(action, input, directory);
 };
 
+const LAST_PROMPT_WINDOW = 20;
+
 const lastUserPrompt = async (control: ServiceHostControl, sessionId: string) => {
-  const { messages } = await readSession(control, 'session.messages', { sessionId, role: 'user', limit: 1 });
-  return messages?.[0]?.text ?? null;
+  const { messages } = await readSession(control, 'session.messages', { sessionId, role: 'user', limit: LAST_PROMPT_WINDOW });
+  return messages?.findLast((message) => !message.attached)?.text ?? null;
 };
 
 const SERVICE_EVENT_CHARS_PER_SECOND = 256_000;
