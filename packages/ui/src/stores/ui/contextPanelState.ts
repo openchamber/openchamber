@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { rebaseMovedPath } from '@/lib/filePathMoves';
 import {
   getZoneView,
+  resolveZoneActiveTab,
   resolveZoneActiveTabId,
   keepZoneViewsOnTabs,
   zoneViewsSchema,
@@ -12,7 +13,15 @@ import {
   CONTEXT_ZONES,
 } from '@/lib/workspace/zones';
 import type { ContextZone, ContextZonePlacement, ContextZoneView } from '@/lib/workspace/zones';
-import type { ContextPanelTab, ContextPanelTabDescriptor, ContextPanelDirectoryState, LegacyZoneSizes } from './types';
+import type { ContextPanelMode } from '@/lib/surfaces/modes';
+import type {
+  ContextPanelTab,
+  ContextPanelTabDescriptor,
+  ContextPanelDirectoryState,
+  ContextZoneReturnEntry,
+  ContextZoneReturnStacks,
+  LegacyZoneSizes,
+} from './types';
 import {
   CONTEXT_PANEL_MAX_TABS,
   normalizeDirectoryPath,
@@ -337,4 +346,118 @@ export const clampContextPanelRoots = (
     next[directory] = state;
   }
   return next;
+};
+
+const MAX_CONTEXT_ZONE_RETURN_STACK = 10;
+
+export const setContextZoneReturnStack = (
+  stacks: ContextZoneReturnStacks,
+  directory: string,
+  zone: ContextZone,
+  entries: readonly ContextZoneReturnEntry[],
+): ContextZoneReturnStacks => {
+  const currentDir = stacks[directory];
+  if (entries.length === 0) {
+    if (!currentDir || !(zone in currentDir)) {
+      return stacks;
+    }
+    const nextDir = { ...currentDir };
+    delete nextDir[zone];
+    if (Object.keys(nextDir).length === 0) {
+      const nextStacks = { ...stacks };
+      delete nextStacks[directory];
+      return nextStacks;
+    }
+    return { ...stacks, [directory]: nextDir };
+  }
+
+  return {
+    ...stacks,
+    [directory]: {
+      ...currentDir,
+      [zone]: entries.slice(-MAX_CONTEXT_ZONE_RETURN_STACK),
+    },
+  };
+};
+
+export const clearContextZoneReturnStack = (
+  stacks: ContextZoneReturnStacks,
+  directory: string,
+  zone: ContextZone,
+): ContextZoneReturnStacks => setContextZoneReturnStack(stacks, directory, zone, []);
+
+export const pruneContextZoneReturnStacks = (
+  stacks: ContextZoneReturnStacks,
+  keptByDirectory: Record<string, ContextPanelDirectoryState>,
+): ContextZoneReturnStacks => {
+  const dirs = Object.keys(stacks);
+  if (dirs.every((dir) => dir in keptByDirectory)) {
+    return stacks;
+  }
+  const next: ContextZoneReturnStacks = {};
+  for (const dir of dirs) {
+    if (dir in keptByDirectory) {
+      next[dir] = stacks[dir];
+    }
+  }
+  return next;
+};
+
+export const pushContextZoneReturnEntry = (
+  stacks: ContextZoneReturnStacks,
+  directory: string,
+  zone: ContextZone,
+  previousTab: Pick<ContextPanelTab, 'id' | 'mode'> | null,
+  nextMode: ContextPanelMode,
+): ContextZoneReturnStacks => {
+  if (!previousTab || previousTab.mode === nextMode) {
+    return stacks;
+  }
+
+  const existing = stacks[directory]?.[zone] ?? [];
+  const filtered = existing.filter((entry) => entry.mode !== nextMode && entry.mode !== previousTab.mode);
+  return setContextZoneReturnStack(stacks, directory, zone, [
+    ...filtered,
+    { tabId: previousTab.id, mode: previousTab.mode },
+  ]);
+};
+
+export const resolveContextZoneReturnTarget = (
+  panel: ContextPanelDirectoryState | undefined,
+  placement: ContextZonePlacement,
+  zone: ContextZone,
+  stack: readonly ContextZoneReturnEntry[] | undefined,
+  eligibleTabIds?: ReadonlySet<string>,
+): { tab: ContextPanelTab; remainingStack: ContextZoneReturnEntry[] } | null => {
+  if (!panel || !stack || stack.length === 0) {
+    return null;
+  }
+
+  const isEligible = (tab: ContextPanelTab): boolean => (
+    zoneOfMode(placement, tab.mode) === zone
+    && (!eligibleTabIds || eligibleTabIds.has(tab.id))
+  );
+
+  const view = getZoneView(panel, zone);
+  const activeTab = view.isOpen ? resolveZoneActiveTab(panel, placement, zone) : null;
+
+  for (let index = stack.length - 1; index >= 0; index -= 1) {
+    const entry = stack[index];
+    if (!entry) continue;
+    if (activeTab && entry.mode === activeTab.mode) continue;
+    if (zoneOfMode(placement, entry.mode) !== zone) continue;
+
+    const exact = panel.tabs.find((tab) => tab.id === entry.tabId && isEligible(tab));
+    if (exact) {
+      return { tab: exact, remainingStack: stack.slice(0, index) };
+    }
+
+    const modeTabs = panel.tabs.filter((tab) => tab.mode === entry.mode && isEligible(tab));
+    if (modeTabs.length > 0) {
+      const mostRecent = modeTabs.reduce((best, tab) => (tab.touchedAt >= best.touchedAt ? tab : best));
+      return { tab: mostRecent, remainingStack: stack.slice(0, index) };
+    }
+  }
+
+  return null;
 };

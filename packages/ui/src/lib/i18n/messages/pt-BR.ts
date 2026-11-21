@@ -1683,6 +1683,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.actions.collapsePanel": "Recolher painel",
   "contextPanel.actions.expandPanel": "Expandir painel",
   "contextPanel.actions.closePanel": "Fechar painel",
+  "contextPanel.actions.backToPanel": "Voltar para {panel}",
   "contextPanel.actions.resizePanelAria": "Ajustar tamanho do painel de contexto",
   "contextPanel.iframe.sessionChatTitle": "Chat de sessão {sessionID}",
   "contextPanel.preview.actions.reload": "Recarregar prévia",

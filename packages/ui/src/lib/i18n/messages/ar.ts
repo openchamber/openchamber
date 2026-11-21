@@ -1604,6 +1604,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.actions.collapsePanel': 'طي اللوحة',
   'contextPanel.actions.expandPanel': 'توسيع اللوحة',
   'contextPanel.actions.closePanel': 'إغلاق اللوحة',
+  'contextPanel.actions.backToPanel': 'العودة إلى {panel}',
   'contextPanel.actions.resizePanelAria': 'تغيير حجم لوحة السياق',
   'contextPanel.iframe.sessionChatTitle': 'محادثة الجلسة {sessionID}',
   'contextPanel.preview.actions.reload': 'إعادة تحميل المعاينة',

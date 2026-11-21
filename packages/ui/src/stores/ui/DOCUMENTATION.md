@@ -32,3 +32,13 @@ Neighbouring stores still own terminal state and the files view's open paths.
 Each group needs current values from other groups, and callers subscribe to
 the existing combined state. Separate Zustand stores would change subscription
 and persistence behavior, so these modules only compose the original store.
+
+### Why the zone return stack is transient and opt-in on close
+
+`contextZoneReturnStack` records per-zone navigation history only in memory,
+never in `ui-store` persistence, so a restart never reopens an old panel when
+dismissing a current one. Programmatic jumps (`openContextPanelTab`,
+`openTrackerItem`) push the zone's active surface while explicit rail switches
+(`openContextSurface`) and plain `closeContextZone` calls clear the stack; only
+the panel header close action passes `returnToPrevious: true`, so layout
+displacement and shortcuts always close the zone immediately.

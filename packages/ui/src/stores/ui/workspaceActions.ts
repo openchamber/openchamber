@@ -5,7 +5,14 @@ import { sanitizeWorkStatusSectionOrder } from '@/components/chat/work-status/se
 import { clampContextEditorTreeWidth } from './preferences';
 import type { ContextPanelDirectoryState, UIStoreSlice } from './types';
 import { normalizeDirectoryPath, clampContextZoneSize } from './contextTabs';
-import { touchContextPanelState, clampContextPanelRoots } from './contextPanelState';
+import {
+  touchContextPanelState,
+  clampContextPanelRoots,
+  clearContextZoneReturnStack,
+  pruneContextZoneReturnStacks,
+  setContextZoneReturnStack,
+  resolveContextZoneReturnTarget,
+} from './contextPanelState';
 
 export const createWorkspaceActions: UIStoreSlice<
   | 'toggleSidebar'
@@ -85,7 +92,7 @@ export const createWorkspaceActions: UIStoreSlice<
     get().closeContextZone(directory, 'right');
   },
 
-  closeContextZone: (directory, zone) => {
+  closeContextZone: (directory, zone, options) => {
     const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
     if (!normalizedDirectory) {
       return;
@@ -97,12 +104,57 @@ export const createWorkspaceActions: UIStoreSlice<
         return state;
       }
 
+      const current = touchContextPanelState(prev, state.contextSurfaceZones);
+      if (options?.returnToPrevious) {
+        const target = resolveContextZoneReturnTarget(
+          current,
+          state.contextSurfaceZones,
+          zone,
+          state.contextZoneReturnStack[normalizedDirectory]?.[zone],
+          options.eligibleTabIds,
+        );
+        if (target) {
+          const now = Date.now();
+          const showsFile = target.tab.mode === 'file' && Boolean(target.tab.targetPath);
+          const next = withZoneView({
+            ...current,
+            touchedAt: now,
+            tabs: current.tabs.map((tab) => (tab.id === target.tab.id ? { ...tab, touchedAt: now } : tab)),
+          }, zone, { isOpen: true, activeTabId: target.tab.id });
+          const byDirectory = {
+            ...state.contextPanelByDirectory,
+            [normalizedDirectory]: next,
+          };
+          const clamped = clampContextPanelRoots(byDirectory, 20);
+          return {
+            contextPanelByDirectory: clamped,
+            contextZoneReturnStack: pruneContextZoneReturnStacks(
+              setContextZoneReturnStack(
+                state.contextZoneReturnStack,
+                normalizedDirectory,
+                zone,
+                target.remainingStack,
+              ),
+              clamped,
+            ),
+            contextEditorVisible: showsFile || state.contextEditorVisible,
+          };
+        }
+      }
+
       const byDirectory = {
         ...state.contextPanelByDirectory,
-        [normalizedDirectory]: withZoneView(touchContextPanelState(prev, state.contextSurfaceZones), zone, { isOpen: false }),
+        [normalizedDirectory]: withZoneView(current, zone, { isOpen: false }),
       };
 
-      return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+      const clamped = clampContextPanelRoots(byDirectory, 20);
+      return {
+        contextPanelByDirectory: clamped,
+        contextZoneReturnStack: pruneContextZoneReturnStacks(
+          clearContextZoneReturnStack(state.contextZoneReturnStack, normalizedDirectory, zone),
+          clamped,
+        ),
+      };
     });
   },
 
@@ -153,11 +205,30 @@ export const createWorkspaceActions: UIStoreSlice<
       }
 
       const byDirectory: Record<string, ContextPanelDirectoryState> = {};
+      let contextZoneReturnStack = state.contextZoneReturnStack;
       for (const [directory, panel] of Object.entries(state.contextPanelByDirectory)) {
-        byDirectory[directory] = carrySurfaceToZone(panel, mode, from, zone, placement);
+        const prevDest = getZoneView(panel, zone);
+        const nextPanel = carrySurfaceToZone(panel, mode, from, zone, placement);
+        const nextDest = getZoneView(nextPanel, zone);
+        byDirectory[directory] = nextPanel;
+        if (!getZoneView(nextPanel, from).isOpen) {
+          contextZoneReturnStack = clearContextZoneReturnStack(contextZoneReturnStack, directory, from);
+        }
+        if (nextDest.isOpen && (nextDest.activeTabId !== prevDest.activeTabId || !prevDest.isOpen)) {
+          contextZoneReturnStack = clearContextZoneReturnStack(contextZoneReturnStack, directory, zone);
+        }
+        const fromStack = contextZoneReturnStack[directory]?.[from];
+        if (fromStack && fromStack.some((entry) => entry.mode === mode)) {
+          contextZoneReturnStack = setContextZoneReturnStack(
+            contextZoneReturnStack,
+            directory,
+            from,
+            fromStack.filter((entry) => entry.mode !== mode),
+          );
+        }
       }
 
-      return { contextSurfaceZones: placement, contextPanelByDirectory: byDirectory };
+      return { contextSurfaceZones: placement, contextPanelByDirectory: byDirectory, contextZoneReturnStack };
     });
   },
 

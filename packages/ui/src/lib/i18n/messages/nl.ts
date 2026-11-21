@@ -1687,6 +1687,7 @@ export const dict = {
   'contextPanel.actions.collapsePanel': 'Paneel inklappen',
   'contextPanel.actions.expandPanel': 'Paneel uitklappen',
   'contextPanel.actions.closePanel': 'Paneel sluiten',
+  'contextPanel.actions.backToPanel': 'Terug naar {panel}',
   'contextPanel.actions.resizePanelAria': 'Grootte van het contextpaneel aanpassen',
   'contextPanel.iframe.sessionChatTitle': 'Sessiechat {sessionID}',
   'contextPanel.preview.actions.reload': 'Preview herladen',

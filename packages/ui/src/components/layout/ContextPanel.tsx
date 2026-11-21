@@ -41,6 +41,7 @@ import { useTrackedItems } from '@/lib/trackedItems/interest';
 import type { TrackedItem, TrackedItemState } from '@/lib/trackedItems/model';
 import { trackerStateGlyph } from '@/lib/trackers/stateLook';
 import { clampContextEditorTreeWidth, isTrackerBranchTab, useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
+import { useContextZoneCloseAction } from './useContextZoneCloseAction';
 import { useGitStatus } from '@/stores/useGitStore';
 import { useChildStoreManager } from '@/sync/sync-context';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
@@ -391,7 +392,6 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   const panelState = useGuestTabsInScope(useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined)));
   const placement = useUIStore((state) => state.contextSurfaceZones);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  const closeContextZone = useUIStore((state) => state.closeContextZone);
   const closeContextPanelTab = useUIStore((state) => state.closeContextPanelTab);
   const pinContextPanelTab = useUIStore((state) => state.pinContextPanelTab);
   const toggleContextPanelExpanded = useUIStore((state) => state.toggleContextPanelExpanded);
@@ -699,12 +699,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     }
   }, [isResizing]);
 
-  const handleClose = React.useCallback(() => {
-    if (!directoryKey) {
-      return;
-    }
-    closeContextZone(directoryKey, zone);
-  }, [closeContextZone, directoryKey, zone]);
+  const { label: closeButtonLabel, onClose: handleClose } = useContextZoneCloseAction(directoryKey, zone, panelState, placement, getModeLabel, tabT);
 
   const handleToggleExpanded = React.useCallback(() => {
     if (!directoryKey) {
@@ -1033,12 +1028,12 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
           size="sm"
           onClick={handleClose}
           className="h-7 w-7 p-0"
-          aria-label={t('contextPanel.actions.closePanel')}
+          aria-label={closeButtonLabel}
         >
           <Icon name="close" className="h-3.5 w-3.5" />
         </Button>
         </TooltipTrigger>
-        <TooltipContent side="bottom" sideOffset={6}>{t('contextPanel.actions.closePanel')}</TooltipContent>
+        <TooltipContent side="bottom" sideOffset={6}>{closeButtonLabel}</TooltipContent>
         </Tooltip>
       </div>
     </header>

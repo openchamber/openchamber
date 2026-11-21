@@ -1689,6 +1689,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.actions.collapsePanel': 'パネルを折りたたむ',
   'contextPanel.actions.expandPanel': 'パネルを展開',
   'contextPanel.actions.closePanel': 'パネルを閉じる',
+  'contextPanel.actions.backToPanel': '{panel}に戻る',
   'contextPanel.actions.resizePanelAria': 'コンテキストパネルのサイズを変更',
   'contextPanel.iframe.sessionChatTitle': 'セッションチャット {sessionID}',
   'contextPanel.preview.actions.reload': 'プレビューを再読み込み',

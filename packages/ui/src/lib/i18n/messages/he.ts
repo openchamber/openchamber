@@ -1603,6 +1603,7 @@ export const dict = {
   'contextPanel.actions.collapsePanel': 'כווץ חלונית',
   'contextPanel.actions.expandPanel': 'הרחב חלונית',
   'contextPanel.actions.closePanel': 'סגור חלונית',
+  'contextPanel.actions.backToPanel': 'חזרה אל {panel}',
   'contextPanel.actions.resizePanelAria': 'שנה את גודל חלונית ההקשר',
   'contextPanel.iframe.sessionChatTitle': 'צ\'אט ההפעלה {sessionID}',
   'contextPanel.preview.actions.reload': 'טען מחדש את התצוגה המקדימה',

@@ -1693,6 +1693,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.actions.collapsePanel': '折叠面板',
   'contextPanel.actions.expandPanel': '展开面板',
   'contextPanel.actions.closePanel': '关闭面板',
+  'contextPanel.actions.backToPanel': '返回 {panel}',
   'contextPanel.actions.resizePanelAria': '调整上下文面板大小',
   'contextPanel.iframe.sessionChatTitle': '会话聊天 {sessionID}',
   'contextPanel.preview.actions.reload': '刷新预览',

@@ -1453,6 +1453,7 @@ export const dict = {
   'contextPanel.actions.collapsePanel': 'Réduire le panneau',
   'contextPanel.actions.expandPanel': 'Agrandir le panneau',
   'contextPanel.actions.closePanel': 'Fermer le panneau',
+  'contextPanel.actions.backToPanel': 'Retour à {panel}',
   'contextPanel.actions.resizePanelAria': 'Redimensionner le panneau contextuel',
   'contextPanel.iframe.sessionChatTitle': 'Session de discussion {sessionID}',
   'contextPanel.preview.actions.reload': 'Recharger l\'aperçu',

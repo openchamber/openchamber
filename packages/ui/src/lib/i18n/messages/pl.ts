@@ -1810,6 +1810,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.footer.close': 'zamknij',
   'commandPalette.title': 'Paleta poleceń',
   'contextPanel.actions.closePanel': 'Zamknij panel',
+  'contextPanel.actions.backToPanel': 'Wróć do {panel}',
   'contextPanel.actions.collapsePanel': 'Zwiń panel',
   'contextPanel.actions.expandPanel': 'Rozwiń panel',
   'contextPanel.actions.resizePanelAria': 'Zmień rozmiar panelu kontekstu',

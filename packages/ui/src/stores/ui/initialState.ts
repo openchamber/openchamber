@@ -17,6 +17,7 @@ export const createInitialUIState = (): Pick<UIStore,
   | 'sidebarFoldedForExpandedZone'
   | 'sidebarWidth'
   | 'contextPanelByDirectory'
+  | 'contextZoneReturnStack'
   | 'contextRailOrder'
   | 'contextRailHiddenSurfaces'
   | 'mobileWorkspaceTabOrder'
@@ -244,6 +245,7 @@ export const createInitialUIState = (): Pick<UIStore,
   sidebarFoldedForExpandedZone: false,
   sidebarWidth: LEFT_SIDEBAR_DEFAULT_WIDTH,
   contextPanelByDirectory: {},
+  contextZoneReturnStack: {},
   contextRailOrder: [],
   contextRailHiddenSurfaces: [],
   mobileWorkspaceTabOrder: [],
