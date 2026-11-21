@@ -17,6 +17,7 @@ const createPersistedScheduleService = async (schedule) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-schedule-'));
   let failRename = false;
   let syncsUntilFailure = 0;
+  let syncWritesState = false;
   const config = createProjectConfigRuntime({
     fsPromises: {
       ...fs,
@@ -50,6 +51,9 @@ const createPersistedScheduleService = async (schedule) => {
     scheduledTasksRuntime: {
       syncProject: async (id) => {
         if (syncsUntilFailure > 0 && --syncsUntilFailure === 0) throw new Error('fixture scheduler sync failed');
+        if (syncWritesState) {
+          for (const { id: taskId } of await config.listScheduledTasks(id)) await config.updateScheduledTaskState(id, taskId, { updatedAt: Date.now() });
+        }
         return config.listScheduledTasks(id);
       },
     },
@@ -59,10 +63,12 @@ const createPersistedScheduleService = async (schedule) => {
   return {
     upsert, task, history, unrelated,
     update: (input) => service.execute('schedule.update', { projectId: 'project-1', taskId: task.id, ...input }),
+    create: (input) => service.execute('schedule.create', { projectId: 'project-1', daily: '09:00', model: 'provider/model', ...input }),
     bytes: () => fs.readFile(file, 'utf8'),
     read: async () => JSON.parse(await fs.readFile(file, 'utf8')),
     failWrite: (value) => { failRename = value; },
     failPostSaveSync: () => { syncsUntilFailure = 2; },
+    syncWritesState: () => { syncWritesState = true; },
     cleanup: () => fs.rm(root, { recursive: true, force: true }),
   };
 };
@@ -133,6 +139,72 @@ describe('persisted schedule.update patches', () => {
       expect(await fixture.bytes()).toBe(before);
       await fixture.update({ name: 'Recovered' });
       expect((await fixture.read()).scheduledTasks[0].name).toBe('Recovered');
+    } finally { await fixture.cleanup(); }
+  });
+
+  it.each([
+    ['prompt', 20_000, 'execution.prompt is invalid: at most 20000 characters'],
+    ['name', 80, 'task.name is invalid: at most 80 characters'],
+  ])('refuses a %s over the limit on update and create, and saves one at the limit whole', async (field, limit, message) => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      fixture.syncWritesState();
+      const withoutState = ({ scheduledTasks, ...rest }) => ({ ...rest, scheduledTasks: scheduledTasks.map(({ state: _state, ...task }) => task) });
+      const before = await fixture.read();
+      await expect(fixture.update({ [field]: 'x'.repeat(limit + 1) })).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+      await expect(fixture.create({ name: 'New', prompt: 'Run', [field]: 'x'.repeat(limit + 1) })).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+      const after = await fixture.read();
+      expect(withoutState(after)).toEqual(withoutState(before));
+      expect(after.scheduledTasks[0].state.updatedAt).not.toBe(before.scheduledTasks[0].state.updatedAt);
+
+      await fixture.update({ [field]: 'x'.repeat(limit) });
+      const saved = (await fixture.read()).scheduledTasks[0];
+      expect(field === 'name' ? saved.name : saved.execution.prompt).toBe('x'.repeat(limit));
+      await fixture.create({ name: 'New', prompt: 'Run', [field]: 'y'.repeat(limit) });
+      expect((await fixture.read()).scheduledTasks).toHaveLength(3);
+    } finally { await fixture.cleanup(); }
+  });
+
+  it('refuses a source branch over 200 characters as a client error, not a server error', async () => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      const before = await fixture.bytes();
+      await expect(fixture.update({ runInWorktree: true, baseBranch: 'b'.repeat(201) }))
+        .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('baseBranch is invalid: at most 200 characters, got 201') });
+      expect(await fixture.bytes()).toBe(before);
+      await fixture.update({ runInWorktree: true, baseBranch: 'b'.repeat(200) });
+      expect((await fixture.read()).scheduledTasks[0].baseBranch).toBe('b'.repeat(200));
+    } finally { await fixture.cleanup(); }
+  });
+
+  it('refuses a source branch with a space or control character as a client error', async () => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      const before = await fixture.bytes();
+      for (const baseBranch of ['feature/with space', 'feature/tab\there']) {
+        await expect(fixture.update({ runInWorktree: true, baseBranch }))
+          .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('baseBranch is invalid: a branch name cannot contain spaces or control characters') });
+      }
+      expect(await fixture.bytes()).toBe(before);
+    } finally { await fixture.cleanup(); }
+  });
+
+  it.each([
+    ['kind', { kind: 'hourly' }, 'schedule.kind is invalid'],
+    ['timezone', { kind: 'daily', times: ['09:00'], timezone: 'Mars/Base' }, 'schedule.timezone is invalid'],
+    ['times entry', { kind: 'daily', times: ['9am'] }, 'schedule.times is invalid'],
+    ['daily without times', { kind: 'daily', times: [] }, 'schedule.times is invalid'],
+    ['weekly without times', { kind: 'weekly', weekdays: [1] }, 'schedule.times is invalid'],
+    ['weekdays', { kind: 'weekly', times: ['09:00'], weekdays: [7] }, 'schedule.weekdays is invalid'],
+    ['once date', { kind: 'once', date: '2099-13-40', time: '09:00' }, 'schedule.date is invalid'],
+    ['once time', { kind: 'once', date: '2099-05-06', time: '25:00' }, 'schedule.time is invalid'],
+  ])('refuses a bad schedule %s as a client error, not a server error', async (_name, schedule, message) => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      const before = await fixture.bytes();
+      await expect(fixture.upsert('project-1', { ...fixture.task, schedule }))
+        .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+      expect(await fixture.bytes()).toBe(before);
     } finally { await fixture.cleanup(); }
   });
 

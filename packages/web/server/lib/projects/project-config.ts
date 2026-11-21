@@ -12,6 +12,7 @@ import type { DiscoveredLoop, LoopDefinition } from '../scheduled-tasks/loops.js
 import type { ScheduledTask, ScheduledTaskExecution, ScheduledTaskInput, ScheduledTaskSchedule, ScheduledTaskState, ScheduledTaskStatePatch, ScheduledTaskStatus, ScheduledWorktreeCleanup, SharedProjectDocument, SharedProjectRead } from './contracts.js';
 
 import { projectConfigFileStemOf, projectPathFromId } from './project-id.js';
+import { MAX_TASK_NAME_LENGTH, MAX_TASK_PROMPT_LENGTH, assertTaskTextWithinLimits } from './task-text-limits.js';
 import {
   DEFAULT_PLANS_DIR,
   EMPTY_SHARED_PROJECT_CONFIG,
@@ -30,8 +31,6 @@ import {
 } from './project-setup.js';
 
 const PROJECT_CONFIG_VERSION = 1;
-export const MAX_TASK_NAME_LENGTH = 80;
-const MAX_TASK_PROMPT_LENGTH = 20_000;
 const MAX_CRON_LENGTH = 200;
 const MAX_BRANCH_LENGTH = 200;
 const MAX_LAST_ERROR_LENGTH = 2_000;
@@ -158,7 +157,7 @@ const resolveScheduleTimes = (value: TaskScheduleSource, existingSchedule: TaskS
     for (const item of value.times) {
       const normalized = normalizeTimeValue(asNonEmptyString(item));
       if (!normalized) {
-        throw new Error('schedule.times must contain HH:mm values');
+        throw new Error('schedule.times is invalid: every entry must be HH:mm');
       }
       times.push(normalized);
     }
@@ -220,19 +219,19 @@ const normalizeSchedule = (value: ScheduledTaskInput['schedule'], existingSchedu
 
   const kind = asNonEmptyString(value.kind);
   if (kind !== 'daily' && kind !== 'weekly' && kind !== 'once' && kind !== 'cron') {
-    throw new Error('schedule.kind must be daily, weekly, once, or cron');
+    throw new Error('schedule.kind is invalid: use daily, weekly, once, or cron');
   }
 
   const fallbackTimezone = existingSchedule?.timezone || resolveDefaultTimezone();
   const timezone = normalizeTimezone(asNonEmptyString(value.timezone), fallbackTimezone);
   if (!timezone) {
-    throw new Error('schedule.timezone must be a valid IANA timezone');
+    throw new Error('schedule.timezone is invalid: use an IANA timezone name');
   }
 
   if (kind === 'daily') {
     const times = resolveScheduleTimes(value, existingSchedule);
     if (!times) {
-      throw new Error('schedule.times must include at least one HH:mm value for daily schedule');
+      throw new Error('schedule.times is invalid: a daily schedule needs at least one HH:mm value');
     }
     return { kind, times, timezone };
   }
@@ -240,11 +239,11 @@ const normalizeSchedule = (value: ScheduledTaskInput['schedule'], existingSchedu
   if (kind === 'weekly') {
     const times = resolveScheduleTimes(value, existingSchedule);
     if (!times) {
-      throw new Error('schedule.times must include at least one HH:mm value for weekly schedule');
+      throw new Error('schedule.times is invalid: a weekly schedule needs at least one HH:mm value');
     }
     const weekdays = isInputArray(value.weekdays) ? normalizeWeekdays(value.weekdays) : null;
     if (!weekdays) {
-      throw new Error('schedule.weekdays must include values from 0 to 6 for weekly schedule');
+      throw new Error('schedule.weekdays is invalid: a weekly schedule needs values from 0 to 6');
     }
     return { kind, times, weekdays, timezone };
   }
@@ -252,12 +251,12 @@ const normalizeSchedule = (value: ScheduledTaskInput['schedule'], existingSchedu
   if (kind === 'once') {
     const date = normalizeDateValue(asNonEmptyString(value.date));
     if (!date) {
-      throw new Error('schedule.date must be YYYY-MM-DD for once schedule');
+      throw new Error('schedule.date is invalid: a once schedule needs YYYY-MM-DD');
     }
 
     const time = normalizeTimeValue(asNonEmptyString(value.time));
     if (!time) {
-      throw new Error('schedule.time must be HH:mm for once schedule');
+      throw new Error('schedule.time is invalid: a once schedule needs HH:mm');
     }
 
     return { kind, date, time, timezone };
@@ -411,10 +410,10 @@ const normalizeTaskForStorage = (value: JsonValue | ScheduledTaskInput, options:
     : (asNonEmptyString(branchValue) ?? asNonEmptyString(existingTask?.baseBranch));
   const baseBranchRaw = branchSource || '';
   if (baseBranchRaw.length > MAX_BRANCH_LENGTH) {
-    throw new Error(`baseBranch must be at most ${MAX_BRANCH_LENGTH} characters`);
+    throw new Error(`baseBranch is invalid: at most ${MAX_BRANCH_LENGTH} characters, got ${baseBranchRaw.length}`);
   }
   if (baseBranchRaw && (/\s/.test(baseBranchRaw) || Array.from(baseBranchRaw).some((char) => char.charCodeAt(0) < 32))) {
-    throw new Error('baseBranch must be a branch name without spaces');
+    throw new Error('baseBranch is invalid: a branch name cannot contain spaces or control characters');
   }
   const cleanupWorktree = value.cleanupWorktree === true || value.cleanupWorktree === false
     ? value.cleanupWorktree
@@ -726,7 +725,7 @@ export const createProjectConfigRuntime = (deps: ProjectConfigDependencies) => {
         : -1;
       const existingTask = existingIndex >= 0 ? current.scheduledTasks[existingIndex] : null;
 
-      const normalizedTask = normalizeTaskForStorage(taskInput, {
+      const normalizedTask = normalizeTaskForStorage(assertTaskTextWithinLimits(taskInput), {
         now,
         createId: taskIDFactory,
         existingTask,

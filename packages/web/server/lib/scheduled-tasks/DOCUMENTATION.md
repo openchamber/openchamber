@@ -12,6 +12,11 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 
 ## Invariants
 
+- `upsertScheduledTask` refuses a task with a name over 80 characters or a
+  prompt over 20,000 characters, both counted after trimming. The error names
+  the limit and the submitted fields are not stored. A refused update can still
+  write task state or reconcile loop files through the scheduler's separate
+  sync. A stored task over either limit still lists with its text cut to fit.
 - Failed chat creation removes only an empty directory. Non-recursive removal
   preserves any files that appear before cleanup.
 - A default variant belongs to the model selected from the same settings scope.
@@ -39,6 +44,10 @@ the same server-owned membership rule.
 
 Storage clamps task names to 80 characters. Rejecting longer loop names keeps
 discovery identity keys equal to the stored task names.
+
+Loop sync still cuts a markdown body over 20,000 characters to the limit.
+Rejecting the file would make its loop unpausable and give no feedback to the
+person saving the file.
 
 ### Why loop approval excludes the enabled flag
 

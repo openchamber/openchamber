@@ -6,6 +6,7 @@ import { discoverLoopFiles, loopFingerprint, parseLoopDefinition, setLoopFileEna
 import type { resolvePrimaryWorktreeRoot as resolveGitWorktreeRoot } from '../git/service.js';
 import type { ScheduledTask, ScheduledTaskInput, ScheduledTaskStore, SessionProject } from '../projects/contracts.js';
 import type { createProjectConfigRuntime } from '../projects/project-config.js';
+import { assertTaskTextWithinLimits } from '../projects/task-text-limits.js';
 import type { createChatsScope } from './chats-scope.js';
 import type { createScheduledTasksRuntime, ScheduledTaskRunResult } from './runtime.js';
 
@@ -207,6 +208,11 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
     const { id } = await findProjectByID(projectID);
     if (!isTaskInput(taskInput)) {
       throw new OpenChamberControlError('task payload is required', 400);
+    }
+    try {
+      assertTaskTextWithinLimits(taskInput);
+    } catch (error) {
+      throw new OpenChamberControlError(error instanceof Error ? error.message : 'Task text is too long', 400);
     }
     let upserted;
     const previous = taskInput.id ? (await projectConfigRuntime.listScheduledTasks(id)).find((task) => task.id === taskInput.id) : null;
