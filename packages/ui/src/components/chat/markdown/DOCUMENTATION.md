@@ -146,6 +146,14 @@ A link target can contain repeated spaces, angle brackets, or encoded `://` in i
 
 Text references are trimmed as prose, but an href's encoded edge spaces identify a different file. Href resolution opts out of trimming, and stat checks and absolute file-tab targets retain those spaces.
 
+### Why a flow construct plus a block merge and not a text construct
+
+Multiline bracket math uses a concrete micromark flow construct because text constructs end at paragraph breaks; concrete flow keeps blank lines and Markdown-looking formula content inside the equation, while rejecting lazy container continuation. The equation ends at the first line that is a standalone `\]` or ends in `\]`, the same close the text construct accepts, so prose after `x\]` never joins a formula that a later `\]` would otherwise close.
+
+`parseMarkdownBlocksWithMath` (`mathBlocks.ts`, free of the renderer's plugins so the chat timeline can import it eagerly) rejoins Streamdown chunks split inside a closed equation for streaming and windowed rendering and for the settled answer's row cuts; its opener, close and fence rules must agree with the tokenizer so splitting cannot change the rendered formula. It only needs to handle top-level equations: Streamdown keeps a whole list or blockquote, nested ones included, in one block, so an equation inside a container is never split. That is why a chunk that starts a fence, list, blockquote or indented code never opens a join, and the opener rule is document-level (a standalone `\[` indented at most three spaces).
+
+The flow construct interrupts a paragraph only when the equation crosses a blank line. One that closes inside the paragraph is left to the text construct, which keeps the inline precedence of code spans around delimiter lines.
+
 # Commands run from a reply
 
 ## Ownership
