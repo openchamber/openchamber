@@ -1,5 +1,6 @@
 import { asNonEmptyString, isRecord } from '../shared/guards.js';
 import { parseModelSelection } from '../opencode/config-v2.js';
+import { controlErrorFields } from '../openchamber-control/error.js';
 import type { OpenCodeClient } from '@opencode/client';
 
 const asList = <T>(value: T[] | null | undefined): T[] => (Array.isArray(value) ? value : []);
@@ -14,15 +15,25 @@ interface SelectionConfig {
   defaultModel: ReturnType<typeof parseModelSelection>;
 }
 
+const pluginActivationFailure = (cause: unknown) => {
+  const fields = controlErrorFields(cause);
+  return fields?._tag === 'ServiceUnavailableError' && Object(cause).service === 'plugin' ? asNonEmptyString(fields.message) : null;
+};
+
 export const fetchSelectionInputs = async <Settings>({ client, readSettingsFromDiskMigrated }: SelectionInputDependencies<Settings>) => {
   const settings = await readSettingsFromDiskMigrated();
-  const options = { signal: AbortSignal.timeout(10_000) };
-  const [models, agents, configEntries] = await Promise.all([
-    client.model.list(undefined, options).then((response) => asList(response?.data)).catch(() => []),
+  const requestDeadline = () => ({ signal: AbortSignal.timeout(10_000) });
+  let notReadyReason: string | null = null;
+  const modelsAfterPluginActivation = await client.model.list(undefined, requestDeadline()).then((response) => asList(response?.data)).catch((cause: unknown) => {
+    notReadyReason = pluginActivationFailure(cause);
+    return [];
+  });
+  const options = requestDeadline();
+  const [agents, configEntries] = await Promise.all([
     client.agent.list(undefined, options).then((response) => asList(response?.data)).catch(() => null),
     client.config.get(undefined, options).then((response) => asList(response)).catch(() => null),
   ]);
-  if (configEntries === null) return { settings, models, agents, config: null };
+  if (configEntries === null) return { settings, models: modelsAfterPluginActivation, agents, config: null, notReadyReason };
 
   const config: SelectionConfig = { defaultAgent: null, defaultModel: null };
   for (const entry of configEntries) {
@@ -34,24 +45,5 @@ export const fetchSelectionInputs = async <Settings>({ client, readSettingsFromD
     if (model) config.defaultModel = model;
   }
 
-  return { settings, models, agents, config };
-};
-
-const isReady = (inputs: { agents: unknown[] | null; config: object | null }) => (inputs.agents?.length ?? 0) > 0 && inputs.config !== null;
-
-export interface SelectionWarmUpOptions {
-  deadlineMs?: number;
-  pauseMs?: number;
-  now?: () => number;
-  sleep?: (ms: number) => Promise<void>;
-}
-
-export const fetchWarmSelectionInputs = async <T extends { agents: unknown[] | null; config: object | null }>(read: () => Promise<T>, { deadlineMs = 15_000, pauseMs = 500, now = Date.now, sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)) }: SelectionWarmUpOptions = {}) => {
-  const deadline = now() + deadlineMs;
-  let inputs = await read();
-  while (!isReady(inputs) && now() < deadline) {
-    await sleep(pauseMs);
-    inputs = await read();
-  }
-  return inputs;
+  return { settings, models: modelsAfterPluginActivation, agents, config, notReadyReason };
 };
