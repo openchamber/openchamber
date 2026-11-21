@@ -961,7 +961,7 @@ export function createGitHubResources({
         context,
         sourceProject: { id: `${headOwner}/${headName}`, owner: headOwner, name: headName },
         targetProject: { id: project.id, owner: target.owner, name: target.repo },
-        classification: headOwner === target.owner && headName === target.repo ? 'same-repository' : 'contributor-fork',
+        classification: `${headOwner}/${headName}`.toLowerCase() === `${target.owner}/${target.repo}`.toLowerCase() ? 'same-repository' : 'contributor-fork',
         headSha,
         headRef: `refs/heads/${headRef}`,
         endpoint,

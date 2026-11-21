@@ -1672,7 +1672,7 @@ process.exit(safe ? 0 : 1);
     await system.service.execute(systemPlan.operationId);
     expect(systemPlan.transport).toEqual({ mode: 'system', verification: { status: 'unverified', reason: 'system-credentials' } });
     expect(system.calls[0].options.env).toEqual(inherited);
-    expect(system.calls[0].args).toEqual(['fetch', '--no-tags', '--', ENDPOINT, 'refs/heads/feature:refs/heads/published']);
+    expect(system.calls[0].args).toEqual(['fetch', '--no-tags', '--no-recurse-submodules', '--', ENDPOINT, 'refs/heads/feature:refs/heads/published']);
     expect(system.credentialBroker.start).not.toHaveBeenCalled();
   });
 
