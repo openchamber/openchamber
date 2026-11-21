@@ -163,13 +163,16 @@ mutation reached the forge exactly once.
 `packages/sdk/scripts/source-control-example.test.ts` runs the built service
 against it through a stand-in for OpenChamber's outbound proxy.
 
-The service is two bundles: `service/main.ts` serves the calls and loads
+The service is a set of bundles: `service/main.ts` serves the calls and loads
 `service/mutations.ts` at runtime, which keeps both under the repository's
-source size limit.
+source size limit. It also loads the reviewer state, reference, and diff
+mappings from their own bundles.
 
 Rebuild after editing the service or the SDK:
 
 ```bash
-bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/source-control-provider/service/mutations.ts packages/sdk/examples/source-control-provider/service/mutations.js
-bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/source-control-provider/service/main.ts packages/sdk/examples/source-control-provider/service/main.js
+for entry in main mutations reviewer-states references diff; do
+  bun packages/sdk/scripts/bundle-guest.ts --node "packages/sdk/examples/source-control-provider/service/$entry.ts" "packages/sdk/examples/source-control-provider/service/$entry.js"
+done
+```
 ```

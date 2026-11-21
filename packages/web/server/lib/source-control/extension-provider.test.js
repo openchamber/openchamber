@@ -228,6 +228,19 @@ describe('an extension provider', () => {
     expect(calls.at(-1).input).not.toHaveProperty('session');
   });
 
+  it('keeps an issue and a change request when one of their cross-references is malformed', async () => {
+    const session = await connect();
+    const link = { kind: 'issue', number: 5, url: 'https://forge.example/mona/teapot/issues/5', createdAt: '2026-11-12T16:47:27Z' };
+    const references = [{ ...link, kind: 'discussion' }, { ...link, url: 'javascript:alert(1)' }, link];
+    service = async () => ok({ number: 1, title: 'Teapot', references });
+    await expect(provider.resources.getIssue({ session, ...readInput({ number: 1, includeReferences: true }) }))
+      .resolves.toEqual({ number: 1, title: 'Teapot', references: [link] });
+    expect(calls.at(-1).input).toMatchObject({ includeReferences: true });
+    service = async () => ok({ changeRequest: { number: 2 }, references: references.slice(0, 2) });
+    await expect(provider.resources.changeRequestContext({ session, ...readInput({ number: 2, includeReferences: true }) }))
+      .resolves.toEqual({ changeRequest: { number: 2 } });
+  });
+
   it.each([
     ['a body that is not JSON', { raw: 'nope' }],
     ['a non-200 answer', { status: 500, raw: '{}' }],

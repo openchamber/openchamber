@@ -3,6 +3,9 @@ import { createHash } from 'node:crypto';
 import type { SourceControlJson } from '@openchamber/sdk';
 import { checkContextSchema, isGraphqlRateLimitError, parseSummaryRefs, summarizeCheckContexts, toDiscussionState } from './pr-summaries.js';
 import { DETAIL_COMMENT_LIMIT, DETAIL_QUERY, DETAIL_THREAD_COMMENT_LIMIT } from './detail-query.js';
+import { toReviewerStates, toReviewers } from './reviewer-states.js';
+import { referencesField } from './references.js';
+import { fetchPullStack } from './pull-stack.js';
 import { graphqlAliasesSchema, hasProperty, retainedEntry, referenceDirectory, livePage, referenceNodeAt } from './contracts.js';
 import { parseReferenceLookup, repoKey } from './reference-links.js';
 import type { Octokit, PullRequestQuery, GitHubEnvelope, SummaryRef, AcrossContext, ReferenceRepo, Reference, DetailLineComment, DetailEntry, StatusDictionary, SearchInput, AcrossGroup, AcrossPosition, CommentPermissions, EditableText, ReferenceAssignee, ReferenceDetail, LookupVariables, AcrossPage, AcrossSearchInput } from './contracts.js';
@@ -365,70 +368,6 @@ export const reviewCommentExcerpt = (comment: Pick<DetailLineComment, 'line' | '
   return { startLine: start, lines: newSide.slice(-count) };
 };
 
-const STACK_LAYER_LIMIT = 50;
-
-const STACK_QUERY = `
-query PullStack($owner: String!, $repo: String!, $number: Int!) {
-  repository(owner: $owner, name: $repo) {
-    issueOrPullRequest(number: $number) {
-      __typename
-      ... on PullRequest {
-        stack {
-          number
-          baseRefName
-          entries(first: ${STACK_LAYER_LIMIT}) {
-            nodes { position pullRequest { number title url state isDraft headRefName } }
-          }
-        }
-      }
-    }
-  }
-}
-`;
-
-const stackSchema = z.object({
-  repository: z.object({
-    issueOrPullRequest: z.object({
-      __typename: z.string(),
-      stack: z.object({
-        number: z.number().int(),
-        baseRefName: z.string(),
-        entries: z.object({
-          nodes: z.array(z.object({
-            position: z.number().int(),
-            pullRequest: z.object({
-              number: z.number().int(),
-              title: z.string(),
-              url: z.string(),
-              state: z.enum(['OPEN', 'CLOSED', 'MERGED']),
-              isDraft: z.boolean(),
-              headRefName: z.string(),
-            }).nullable(),
-          })),
-        }),
-      }).nullable().optional(),
-    }).nullable(),
-  }).nullable(),
-});
-
-export async function fetchPullStack({ octokit, owner, repo, number }: PullRequestQuery) {
-  const parsed = stackSchema.parse(await octokit.graphql(STACK_QUERY, { owner, repo, number }));
-  const stack = parsed.repository?.issueOrPullRequest?.stack;
-  if (!stack) return null;
-  const layers = stack.entries.nodes
-    .filter((entry): entry is typeof entry & { pullRequest: NonNullable<typeof entry.pullRequest> } => entry.pullRequest !== null)
-    .sort((left, right) => left.position - right.position)
-    .map(({ pullRequest }) => ({
-      number: pullRequest.number,
-      title: pullRequest.title,
-      url: pullRequest.url,
-      state: PULL_STATES[pullRequest.state],
-      draft: pullRequest.isDraft,
-      head: pullRequest.headRefName,
-    }));
-  return { number: stack.number, base: stack.baseRefName, layers };
-}
-
 const referenceNodeSchema = z.discriminatedUnion('__typename', [issueNodeSchema, pullNodeSchema, discussionNodeSchema]);
 
 const REVIEW_DECISIONS = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes_requested', REVIEW_REQUIRED: 'review_required' };
@@ -539,10 +478,11 @@ const conversationFlags = (item: {
   return flags;
 };
 
-export async function fetchReferenceDetail({ octokit, owner, repo, number }: PullRequestQuery) {
-  const [response, stack] = await Promise.all([
+export async function fetchReferenceDetail({ octokit, owner, repo, number, includeReferences = false }: PullRequestQuery & { includeReferences?: boolean }) {
+  const [response, stack, references] = await Promise.all([
     octokit.graphql(DETAIL_QUERY, { owner, repo, number }),
     fetchPullStack({ octokit, owner, repo, number }).catch(() => undefined),
+    includeReferences ? referencesField(octokit, owner, repo, number) : {},
   ]);
   const parsed = detailSchema.parse(response);
   const item = parsed.repository?.issueOrPullRequest;
@@ -562,7 +502,7 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }: Pul
     return entry;
   });
   if (item.__typename === 'Issue') {
-    const detail: ReferenceDetail = { number: item.number, ...editableText(item), ...conversationFlags(item), comments, commentTotal: item.comments.totalCount, pull: null };
+    const detail: ReferenceDetail = { number: item.number, ...editableText(item), ...conversationFlags(item), comments, commentTotal: item.comments.totalCount, pull: null, ...references };
     const writeAccess = writeAccessOf(parsed.repository?.viewerPermission);
     if (writeAccess !== undefined) detail.writeAccess = writeAccess;
     if (item.assignees !== undefined) {
@@ -617,11 +557,8 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }: Pul
     commentTotal: item.comments.totalCount,
     pull: {
       reviewDecision: item.reviewDecision ? REVIEW_DECISIONS[item.reviewDecision] : null,
-      reviewers: item.reviewRequests.nodes.flatMap(({ requestedReviewer: reviewer }) => (
-        reviewer?.__typename === 'User' && reviewer.login
-          ? [{ id: reviewer.login, ...toAuthor({ login: reviewer.login, avatarUrl: reviewer.avatarUrl }) }]
-          : []
-      )),
+      reviewers: toReviewers(item.reviewRequests.nodes),
+      reviewerStates: toReviewerStates(item.reviews.nodes, item.reviewRequests.nodes),
       checks: item.state === 'OPEN'
         ? summarizeCheckContexts(item.headCommit.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [])
         : null,
@@ -642,7 +579,7 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }: Pul
   if (stack !== undefined && detail.pull) detail.pull.stack = stack;
   const writeAccess = writeAccessOf(parsed.repository?.viewerPermission);
   if (writeAccess !== undefined) detail.writeAccess = writeAccess;
-  return detail;
+  return { ...detail, ...references };
 }
 
 export async function fetchDiscussionDetail({ octokit, owner, repo, number }: PullRequestQuery) {

@@ -123,6 +123,8 @@ export const useTurnMessageRenderer = ({
         };
     }, [turn.activityParts, turn.changedFiles, turn.hasReasoning, turn.hasTools, turn.headerMessageId, turn.summaryText, turn.turnId, turn.assistantMessages, turn.userMessage.info]);
 
+    const snapshotTurnId = turn.userMessage.info.role === 'user' ? turn.turnId : undefined;
+
     return React.useCallback(
         (message: ChatMessageEntry) => {
             const assistantIndex = assistantIndexById.get(message.info.id) ?? -1;
@@ -138,6 +140,7 @@ export const useTurnMessageRenderer = ({
             const turnGroupingContext = isAssistantMessage
                 ? {
                     turnId: turn.turnId,
+                    snapshotTurnId,
                     isFirstAssistantInTurn: isFirstAssistant,
                     isLastAssistantInTurn: isLastAssistant,
                     opensAnswerText: message.info.id === answerTextOpenerId,
@@ -183,6 +186,7 @@ export const useTurnMessageRenderer = ({
             turn.hasReasoning,
             turn.hasTools,
             turn.turnId,
+            snapshotTurnId,
             turnGroupingContextBase,
             streamingAssistantMessageId,
             activeStreamingPhase,

@@ -2143,6 +2143,7 @@ export const settingsDict = {
   'settings.notifications.page.delivery.enableAria': '启用通知',
   'settings.notifications.page.delivery.enableLabel': '启用通知',
   'settings.notifications.page.delivery.localOnlyDevice': '此设备仅通过家庭网络配对，因此不会收到通知，因为通知需要经由互联网送达手机。如需接收通知，请重新添加此设备并选择“任何地方”。',
+  'settings.notifications.page.delivery.localOnlyServer': '此服务器仅通过家庭网络配对，因此不会发送通知。你保存的其他服务器仍会发送通知。',
   'settings.notifications.page.delivery.focusedAria': '应用聚焦时通知',
   'settings.notifications.page.delivery.focusedLabel': '应用聚焦时通知',
   'settings.notifications.page.delivery.testAction': '发送测试通知',

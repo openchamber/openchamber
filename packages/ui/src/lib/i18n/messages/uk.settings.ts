@@ -2143,6 +2143,7 @@ export const settingsDict = {
   "settings.notifications.page.delivery.enableAria": "Увімкнути сповіщення",
   "settings.notifications.page.delivery.enableLabel": "Увімкнути сповіщення",
   "settings.notifications.page.delivery.localOnlyDevice": "Цей пристрій підключено лише через домашню мережу, тому сповіщення на нього не надходять: вони йдуть на телефон через інтернет. Щоб їх отримувати, додайте пристрій ще раз і виберіть \"Будь-де\".",
+  "settings.notifications.page.delivery.localOnlyServer": "Цей сервер підключено лише для домашньої мережі, тому він не надсилає сповіщень. Інші збережені сервери надсилають їх і далі.",
   "settings.notifications.page.delivery.focusedAria": "Сповіщати, коли застосунок у фокусі",
   "settings.notifications.page.delivery.focusedLabel": "Сповіщати, поки програма сфокусована",
   "settings.notifications.page.delivery.testAction": "Надіслати тестове сповіщення",

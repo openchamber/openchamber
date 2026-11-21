@@ -1,15 +1,13 @@
 import type {
+  ChangeRequestContext,
   ChangeRequestRevision,
   ChangeRequestSubmitRequirement,
   ChangeRequestVoteLabel,
   CISummary,
   PullRequestStack,
 } from '../source-control/types';
-import type {
-  RepositoryReferenceComment,
-  RepositoryReferenceCommit,
-  RepositoryReferenceReviewer,
-} from './types';
+import type { RepositoryReferenceCommit, RepositoryReferenceReviewer, RepositoryReferenceReviewerState } from './repositoryReferenceTypes';
+import type { RepositoryReferenceComment } from './types';
 
 export type RepositoryReferenceDetail = {
   number: number;
@@ -23,6 +21,7 @@ export type RepositoryReferenceDetail = {
   pull: {
     reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
     reviewers: RepositoryReferenceReviewer[];
+    reviewerStates?: RepositoryReferenceReviewerState[];
     additions: number;
     deletions: number;
     changedFiles: number;
@@ -34,6 +33,7 @@ export type RepositoryReferenceDetail = {
     submitRequirements?: ChangeRequestSubmitRequirement[];
     revisions?: ChangeRequestRevision[];
   } | null;
+  references?: ChangeRequestContext['references'];
   discussion?: { canComment: boolean; canClose: boolean; canReopen: boolean };
   writeAccess?: boolean;
 };

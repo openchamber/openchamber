@@ -250,11 +250,53 @@ describe('source-control provider contract', () => {
     }).success).toBe(true);
   });
 
+  test('invalid reviewer states do not discard comments or references', () => {
+    const context = {
+      issueComments: [{ id: '1', body: 'Still here' }],
+      references: [{ kind: 'issue', number: 2, url: 'https://tea.example.com/mona/tea/issues/2', createdAt: null }],
+    };
+    const approved = { user: { id: '9', username: 'ann' }, state: 'approved' };
+    const invalid = [{ user: { id: '9' }, state: 'approved' }, { user: { id: '10', username: 'bo' }, state: 'unknown' }];
+    const { changeRequestContext } = schemas.data;
+    expect(changeRequestContext.parse({ ...context, reviewerStates: [...invalid, approved] })).toEqual({
+      ...context, reviewerStates: [approved],
+    });
+    expect(changeRequestContext.parse({ ...context, reviewerStates: invalid })).toEqual(context);
+    expect(changeRequestContext.parse({ ...context, reviewerStates: 'not a list' })).toEqual(context);
+  });
+
   test('reads the UI parses itself pass as any JSON object or array', () => {
     expect(schemas.data.listIssues.safeParse({ items: [], page: 1, hasMore: false }).success).toBe(true);
     expect(schemas.data.projectBranches.safeParse(['main']).success).toBe(true);
     expect(schemas.data.listIssues.safeParse('items').success).toBe(false);
     expect(schemas.data.listIssues.safeParse(null).success).toBe(false);
+  });
+
+  test('a timeline reference is checked entry by entry and stays absent when the host did not answer', () => {
+    const reference = { kind: 'pull', number: 2, url: 'https://tea.example.com/mona/tea/pulls/2', createdAt: '2026-10-03T10:00:00Z' };
+    const detail = schemas.data.getIssue.parse({ number: 1, references: [reference] });
+    expect(detail.references).toEqual([reference]);
+    expect(Object.hasOwn(schemas.data.getIssue.parse({ number: 1 }), 'references')).toBe(false);
+    expect(Object.hasOwn(schemas.data.changeRequestContext.parse({ changeRequest: {} }), 'references')).toBe(false);
+    expect(schemas.data.changeRequestContext.parse({ references: [reference] }).references).toEqual([reference]);
+  });
+
+  test('a malformed timeline reference is dropped without failing the item it rides on', () => {
+    const reference = { kind: 'pull', number: 2, url: 'https://tea.example.com/mona/tea/pulls/2', createdAt: '2026-10-03T10:00:00Z' };
+    const malformed = [
+      { ...reference, kind: 'discussion' },
+      { ...reference, number: '2' },
+      { ...reference, url: 'not a url' },
+      { kind: 'issue', number: 1, url: 'https://tea.example.com/mona/tea/issues/1' },
+    ];
+    for (const method of ['getIssue', 'changeRequestContext'] as const) {
+      const mixed = schemas.data[method].parse({ number: 1, references: [...malformed, reference] });
+      expect(mixed).toEqual({ number: 1, references: [reference] });
+      const none = schemas.data[method].parse({ number: 1, references: malformed });
+      expect(none).toEqual({ number: 1 });
+      expect(Object.hasOwn(none, 'references')).toBe(false);
+      expect(schemas.data[method].parse({ number: 1, references: 'not a list' })).toEqual({ number: 1 });
+    }
   });
 
   test('the outbound proxy takes only a path on the instance and the allowed headers', () => {

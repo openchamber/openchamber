@@ -5,12 +5,12 @@ import { joinProjectPath } from '../source-control/project-path.js';
 import { readLocalRevision as readLocalRevisionDefault, readUpstreamBranch as readUpstreamBranchDefault } from './local-revision.js';
 import {
   changePath, changeState, diffOfPatch, gerritTimestamp, liveChangeSummary, mapGerritChange, mapGerritFiles, mapGerritInlineComment,
-  mapGerritMessage, mapGerritProject, mapGerritRelatedStack, mapGerritRevisions, mapGerritSubmitRequirements, mapGerritUser,
+  mapGerritMessage, mapGerritProject, mapGerritRelatedStack, mapGerritRevisions, mapGerritReviewerStates, mapGerritSubmitRequirements, mapGerritUser,
   mapGerritVoteLabels, splitUnifiedDiff,
 } from './mappers.js';
 import { resolveGerritProjectsFromDirectory } from './repo.js';
 import type { BindingMutationTarget } from '../source-control/binding-service-contracts.js';
-import type { GerritChange, GerritComment, GerritFile, GerritIdentity, GerritJson, GerritProject, GerritQuery, GerritRevision, GerritSubmitRequirement, GerritVoteLabel } from './contracts.js';
+import type { GerritChange, GerritComment, GerritFile, GerritIdentity, GerritJson, GerritProject, GerritQuery, GerritRevision, GerritReviewerState, GerritSubmitRequirement, GerritVoteLabel } from './contracts.js';
 import type { ProviderReadContext } from '../source-control/provider-contract.js';
 import type { SourceControlMutationTarget } from '@openchamber/sdk';
 import type { reviewCommentPosition } from '../source-control/review-position.js';
@@ -56,6 +56,7 @@ export interface GerritChangeContext {
   voteLabels: GerritVoteLabel[];
   submitRequirements: GerritSubmitRequirement[];
   revisions: GerritRevision[];
+  reviewerStates?: GerritReviewerState[];
   stack?: Stack;
 }
 type FileComment = JsonObject & { file: string };
@@ -333,6 +334,8 @@ export function createGerritResourceService({
         submitRequirements: mapGerritSubmitRequirements(raw),
         revisions: mapGerritRevisions(raw, identity),
       };
+      const reviewerStates = mapGerritReviewerStates(raw, identity);
+      if (reviewerStates !== undefined) context.reviewerStates = reviewerStates;
       if (stack !== undefined) context.stack = stack;
       if (!options.includeTimeline) return context;
       const commit = field(field(raw.revisions, String(raw.current_revision)), 'commit');

@@ -14,7 +14,7 @@ const openPull = {
   draft: false,
   base: { ref: 'main' },
   head: { ref: 'feature', label: 'acme:feature' },
-  user: { login: 'contributor' },
+  user: { id: 2, login: 'contributor' },
   created_at: '2026-10-01T00:00:00Z',
   updated_at: '2026-10-02T00:00:00Z',
 };
@@ -42,7 +42,7 @@ describe('resource error boundaries', () => {
   });
 });
 
-const makeResources = (permission) => createGitHubResources({
+const makeResources = (permission, octokit = {}) => createGitHubResources({
   load: async () => ({
     rateLimit: {
       isGitHubRateLimited: () => false,
@@ -53,6 +53,7 @@ const makeResources = (permission) => createGitHubResources({
   accountOf: () => ({
     user: { login: 'octocat' },
     octokit: {
+      graphql: octokit.graphql,
       rest: {
         pulls: { get: async () => ({ data: openPull }) },
         checks: {
@@ -62,6 +63,7 @@ const makeResources = (permission) => createGitHubResources({
           getCombinedStatusForRef: async () => { throw httpError(500, 'statuses unavailable'); },
           getCollaboratorPermissionLevel: permission,
         },
+        ...(octokit.rest ?? {}),
       },
     },
   }),
@@ -327,6 +329,100 @@ describe('listChangeRequests filters', () => {
       per_page: 50,
       page: 1,
     }));
+  });
+});
+
+
+const timelineIssue = {
+  number: 1,
+  title: 'First issue',
+  html_url: 'https://github.com/acme/app/issues/1',
+  state: 'open',
+  user: { id: 1, login: 'octocat' },
+  labels: [],
+};
+
+const crossReference = {
+  createdAt: '2026-11-12T16:47:27Z',
+  willCloseTarget: false,
+  actor: { login: 'gaojunran' },
+  source: {
+    __typename: 'Issue',
+    number: 5,
+    title: 'Mentioning issue',
+    url: 'https://github.com/acme/app/issues/5',
+    repository: { nameWithOwner: 'acme/app' },
+  },
+};
+
+const timelineGraphql = (nodes = [crossReference]) => vi.fn(async () => ({
+  repository: { issueOrPullRequest: { timelineItems: { nodes } } },
+}));
+
+const timelineRest = () => ({
+  issues: {
+    get: async () => ({ data: timelineIssue }),
+    listComments: async () => ({ data: [] }),
+  },
+  pulls: {
+    get: async () => ({ data: openPull }),
+    listReviewComments: async () => ({ data: [] }),
+    listFiles: async () => ({ data: [] }),
+  },
+});
+
+const expectedReference = {
+  kind: 'issue',
+  number: 5,
+  title: 'Mentioning issue',
+  url: 'https://github.com/acme/app/issues/5',
+  repo: 'acme/app',
+  createdAt: '2026-11-12T16:47:27Z',
+  willCloseTarget: false,
+};
+
+describe('GitHub timeline references', () => {
+  test('an issue read carries references only when they are asked for', async () => {
+    const graphql = timelineGraphql();
+    const asked = makeResources(undefined, { graphql, rest: timelineRest() });
+    const issue = await asked.getIssue({ session, directory: '/repo', number: 1, remote: 'origin', context: { repositoryId: 'repo-1', bindingRevision: 1 }, includeReferences: true });
+    expect(issue.references).toHaveLength(1);
+    expect(issue.references[0]).toMatchObject(expectedReference);
+    expect(graphql).toHaveBeenCalledTimes(1);
+
+    const quietGraphql = timelineGraphql();
+    const quiet = makeResources(undefined, { graphql: quietGraphql, rest: timelineRest() });
+    const plain = await quiet.getIssue({ session, directory: '/repo', number: 1, remote: 'origin', context: { repositoryId: 'repo-1', bindingRevision: 1 } });
+    expect(plain).not.toHaveProperty('references');
+    expect(quietGraphql).not.toHaveBeenCalled();
+  });
+
+  test('a change request context carries references only when they are asked for, never for the timeline alone', async () => {
+    const graphql = timelineGraphql();
+    const asked = makeResources(undefined, { graphql, rest: timelineRest() });
+    const context = await asked.changeRequestContext({ session, directory: '/repo', number: 42, remote: 'origin', context: { repositoryId: 'repo-1', bindingRevision: 1 }, includeTimeline: true, includeReferences: true });
+    expect(context.references).toHaveLength(1);
+    expect(context.references[0]).toMatchObject(expectedReference);
+    expect(graphql).toHaveBeenCalledTimes(1);
+
+    const quietGraphql = timelineGraphql();
+    const quiet = makeResources(undefined, { graphql: quietGraphql, rest: timelineRest() });
+    const plain = await quiet.changeRequestContext({ session, directory: '/repo', number: 42, remote: 'origin', context: { repositoryId: 'repo-1', bindingRevision: 1 }, includeTimeline: true });
+    expect(plain).not.toHaveProperty('references');
+    expect(quietGraphql).not.toHaveBeenCalled();
+  });
+
+  test('a failed timeline read leaves the item readable without references', async () => {
+    const graphql = vi.fn(async () => { throw httpError(502, 'timeline unavailable'); });
+    const resources = makeResources(undefined, { graphql, rest: timelineRest() });
+
+    const issue = await resources.getIssue({ session, directory: '/repo', number: 1, remote: 'origin', context: { repositoryId: 'repo-1', bindingRevision: 1 }, includeReferences: true });
+    expect(issue).toMatchObject({ number: 1, title: 'First issue' });
+    expect(issue).not.toHaveProperty('references');
+
+    const context = await resources.changeRequestContext({ session, directory: '/repo', number: 42, remote: 'origin', context: { repositoryId: 'repo-1', bindingRevision: 1 }, includeTimeline: true, includeReferences: true });
+    expect(context.changeRequest).toMatchObject({ number: 42 });
+    expect(context).not.toHaveProperty('references');
   });
 });
 

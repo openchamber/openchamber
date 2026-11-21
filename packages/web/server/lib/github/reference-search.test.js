@@ -523,6 +523,10 @@ describe('fetchReferenceDetail', () => {
     expect(detail?.pull).toEqual({
       reviewDecision: 'changes_requested',
       reviewers: [{ id: 'hubot', login: 'hubot', avatarUrl: undefined }],
+      reviewerStates: [
+        { id: 'octo', login: 'octo', avatarUrl: 'https://avatars/octo', state: 'approved' },
+        { id: 'hubot', login: 'hubot', avatarUrl: undefined, state: 'pending' },
+      ],
       checks: expect.objectContaining({ state: 'failure', total: 2, success: 1, failure: 1 }),
       additions: 12,
       deletions: 3,
@@ -538,6 +542,131 @@ describe('fetchReferenceDetail', () => {
       commitTotal: 1,
       stack: null,
     });
+  });
+
+  it('reads one state per reviewer, the latest review deciding and outstanding requests pending', async () => {
+    const ann = { login: 'ann', avatarUrl: 'https://avatars/ann' };
+    const bo = { login: 'bo', avatarUrl: null };
+    const di = { login: 'di', avatarUrl: null };
+    const detail = await fetchReferenceDetail({ octokit: graphqlReturning(pull([
+      { author: ann, body: '', state: 'CHANGES_REQUESTED', createdAt: '2026-10-01T09:00:00Z', url: 'r1' },
+      { author: bo, body: 'nit', state: 'COMMENTED', createdAt: '2026-10-01T09:30:00Z', url: 'r2' },
+      { author: di, body: '', state: 'APPROVED', createdAt: '2026-10-01T10:30:00Z', url: 'r3' },
+      { author: di, body: '', state: 'DISMISSED', createdAt: '2026-10-01T10:45:00Z', url: 'r4' },
+      { author: ann, body: '', state: 'APPROVED', createdAt: '2026-10-01T11:00:00Z', url: 'r5' },
+    ])), owner: 'acme', repo: 'app', number: 9 });
+    // A team request names no person, so it has no state.
+    expect(detail?.pull?.reviewerStates).toEqual([
+      { id: 'ann', login: 'ann', avatarUrl: 'https://avatars/ann', state: 'approved' },
+      { id: 'bo', login: 'bo', avatarUrl: undefined, state: 'commented' },
+      { id: 'di', login: 'di', avatarUrl: undefined, state: 'pending' },
+      { id: 'hubot', login: 'hubot', avatarUrl: undefined, state: 'pending' },
+    ]);
+  });
+
+  // The cross-references come from their own query, so the detail query never carries them.
+  const withTimeline = (item, timeline) => {
+    const queries = [];
+    return {
+      queries,
+      graphql: async (query) => {
+        queries.push(query.includes('query ReferenceLinks') ? 'links' : 'other');
+        if (!query.includes('query ReferenceLinks')) return { repository: { issueOrPullRequest: item } };
+        if (timeline instanceof Error) throw timeline;
+        return { repository: { issueOrPullRequest: timeline === undefined ? {} : { timelineItems: timeline } } };
+      },
+    };
+  };
+  const issueItem = { __typename: 'Issue', number: 3, comments: { totalCount: 0, nodes: [] } };
+
+  it('selects no conflicting state fields from GitHub cross-reference sources', async () => {
+    const octokit = withTimeline(issueItem, { nodes: [] });
+    const graphql = octokit.graphql;
+    let linksQuery;
+    octokit.graphql = async (query) => {
+      if (query.includes('query ReferenceLinks')) linksQuery = query;
+      return graphql(query);
+    };
+    await fetchReferenceDetail({ octokit, owner: 'acme', repo: 'app', number: 3, includeReferences: true });
+    // GitHub returns IssueState and PullRequestState for the same response name.
+    // GraphQL requires matching leaf types even in disjoint fragments.
+    const issue = linksQuery?.match(/\.\.\. on Issue\s*\{\s*number[^{}]*/)?.[0];
+    const pull = linksQuery?.match(/\.\.\. on PullRequest\s*\{\s*number[^{}]*/)?.[0];
+    expect(issue).toContain('url');
+    expect(pull).toContain('url');
+    expect(issue).not.toMatch(/\bstate\b/);
+    expect(pull).not.toMatch(/\bstate\b/);
+  });
+
+  it('reads the items that mention an issue, each with the repository it lives in', async () => {
+    const detail = await fetchReferenceDetail({ octokit: withTimeline(issueItem, { nodes: [
+      { createdAt: '2026-10-02T09:00:00Z', willCloseTarget: false, actor: author,
+        source: { __typename: 'Issue', number: 21, title: 'Wire the thing', url: 'https://github.com/acme/app/issues/21', repository: { nameWithOwner: 'acme/app' } } },
+      { createdAt: '2026-10-03T09:00:00Z', willCloseTarget: null, actor: null,
+        source: { __typename: 'Issue', number: 2, title: 'From the library', url: 'https://github.com/upstream/lib/issues/2', repository: { nameWithOwner: 'upstream/lib' } } },
+    ] }), owner: 'acme', repo: 'app', number: 3, includeReferences: true });
+    expect(detail?.references).toEqual([
+      { kind: 'issue', number: 21, title: 'Wire the thing', url: 'https://github.com/acme/app/issues/21', repo: 'acme/app', createdAt: '2026-10-02T09:00:00Z', author, willCloseTarget: false },
+      // A reference may point into another repository than the item's own.
+      { kind: 'issue', number: 2, title: 'From the library', url: 'https://github.com/upstream/lib/issues/2', repo: 'upstream/lib', createdAt: '2026-10-03T09:00:00Z', author: null },
+    ]);
+    // The reference is the detail's own, not the issue's pull half, which stays null.
+    expect(detail?.pull).toBeNull();
+  });
+
+  it('reads a pull request cross-reference as a pull, keeping only the link fields', async () => {
+    const detail = await fetchReferenceDetail({ octokit: withTimeline(pull(), { nodes: [{ createdAt: '2026-10-04T09:00:00Z', willCloseTarget: true, actor: author,
+      source: { __typename: 'PullRequest', number: 12, title: 'Layer 12', state: 'MERGED', isDraft: false, url: 'https://github.com/acme/app/pull/12', repository: { nameWithOwner: 'acme/app' } } }] }),
+    owner: 'acme', repo: 'app', number: 9, includeReferences: true });
+    expect(detail?.references).toEqual([
+      { kind: 'pull', number: 12, title: 'Layer 12', url: 'https://github.com/acme/app/pull/12', repo: 'acme/app', createdAt: '2026-10-04T09:00:00Z', author, willCloseTarget: true },
+    ]);
+  });
+
+  it('reads no cross-references unless asked', async () => {
+    const octokit = withTimeline(issueItem, { nodes: [{ createdAt: null, actor: null, source: { __typename: 'Issue', number: 21, url: 'https://github.com/acme/app/issues/21' } }] });
+    const detail = await fetchReferenceDetail({ octokit, owner: 'acme', repo: 'app', number: 3 });
+    expect(detail).not.toHaveProperty('references');
+    expect(octokit.queries).not.toContain('links');
+  });
+
+  it('leaves references off when the timeline answers nothing, on an issue or a pull request', async () => {
+    const emptyIssue = await fetchReferenceDetail({ octokit: withTimeline(issueItem, { nodes: [] }), owner: 'acme', repo: 'app', number: 3, includeReferences: true });
+    expect(emptyIssue).not.toHaveProperty('references');
+
+    const emptyPull = await fetchReferenceDetail({ octokit: withTimeline(pull(), { nodes: null }), owner: 'acme', repo: 'app', number: 9, includeReferences: true });
+    expect(emptyPull).not.toHaveProperty('references');
+
+    // A host that does not answer the timeline at all reads the same way.
+    const silent = await fetchReferenceDetail({ octokit: withTimeline(issueItem), owner: 'acme', repo: 'app', number: 3, includeReferences: true });
+    expect(silent).not.toHaveProperty('references');
+  });
+
+  it('keeps the detail when the timeline request fails', async () => {
+    const detail = await fetchReferenceDetail({
+      octokit: withTimeline({ ...issueItem, comments: { totalCount: 1, nodes: [{ author, body: 'kept', createdAt: '2026-10-01T10:00:00Z', url: 'u1' }] } },
+        Object.assign(new Error('Field timelineItems is unavailable'), { errors: [{ type: 'FORBIDDEN' }] })),
+      owner: 'acme', repo: 'app', number: 3, includeReferences: true,
+    });
+    expect(detail).toMatchObject({ number: 3, commentTotal: 1, comments: [{ body: 'kept' }], pull: null });
+    expect(detail).not.toHaveProperty('references');
+  });
+
+  it('drops a cross-reference node it cannot link or read, and keeps the usable ones', async () => {
+    const detail = await fetchReferenceDetail({ octokit: withTimeline(issueItem, { nodes: [
+      null,
+      { createdAt: '2026-10-02T09:00:00Z', willCloseTarget: false, actor: null, source: null },
+      // A source the query read no fields for carries no link.
+      { createdAt: '2026-10-02T09:00:00Z', willCloseTarget: false, actor: null, source: { __typename: 'Discussion', number: 5 } },
+      // No URL: nothing the preview could open.
+      { createdAt: '2026-10-02T09:00:00Z', willCloseTarget: false, actor: null, source: { __typename: 'Issue', number: 22, title: 'No link' } },
+      // Malformed: costs only its own row.
+      { createdAt: 7, willCloseTarget: 'yes', actor: { login: 3 }, source: { __typename: 'Issue', number: 'x', url: 9 } },
+      { createdAt: '2026-10-02T09:00:00Z', actor: null, source: { __typename: 'Issue', number: 21, url: 'https://github.com/acme/app/issues/21' } },
+    ] }), owner: 'acme', repo: 'app', number: 3, includeReferences: true });
+    expect(detail?.references).toEqual([
+      { kind: 'issue', number: 21, url: 'https://github.com/acme/app/issues/21', createdAt: '2026-10-02T09:00:00Z', author: null },
+    ]);
   });
 
   it('reads the stack a PR is a layer of, bottom first, and leaves it unknown where the host has none', async () => {

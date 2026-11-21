@@ -26,6 +26,7 @@ import { useUIStore } from '@/stores/useUIStore';
 
 import { MobileChangesSurface } from './MobileChangesSurface';
 import type { MobileChangesCommitRequest } from './mobileChangesCommitRequest';
+import type { MobileChangesInitialDiff } from '@/hooks/useMobileChangesNavigation';
 import { MobileFilesSurface } from './MobileFilesSurface';
 import { MobileStatusPane } from './MobileStatusPane';
 import { useEdgeSwipe } from './useEdgeSwipe';
@@ -46,7 +47,7 @@ export const MobileWorkspaceDrawer: React.FC<{
   tab: MobileWorkspaceTab;
   onTabChange: (tab: MobileWorkspaceTab) => void;
   registerPreviewBackHandler: (handler: (() => boolean) | null) => void;
-  pendingChangesDiff: { path: string; staged: boolean; scope?: 'turn' } | null;
+  pendingChangesDiff: MobileChangesInitialDiff | null;
   pendingChangesCommit: MobileChangesCommitRequest | null;
   onOpenPlan: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
   onOpenReceivedPage: (page: { receivedId: string; title: string }) => void;

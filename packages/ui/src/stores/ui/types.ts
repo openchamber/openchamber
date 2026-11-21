@@ -136,7 +136,7 @@ export interface UIStore {
   pendingDiffFile: string | null;
   pendingDiffStaged: boolean;
   pendingDiffScope: PendingDiffScope | null;
-  pendingTurnDiffFile: { file: string; sessionId: string | null } | null;
+  pendingTurnDiffFile: { file: string; sessionId: string | null; turnId?: string; panelSessionId: string | null } | null;
   pendingFileNavigation: PendingFileNavigation | null;
   pendingFileFocusPath: string | null;
   isMobile: boolean;
@@ -393,7 +393,7 @@ export interface UIStore {
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
   setPendingDiffFile: (filePath: string | null, staged?: boolean, scope?: PendingDiffScope | null) => void;
-  setPendingTurnDiffFile: (request: { file: string; sessionId: string | null } | null) => void;
+  setPendingTurnDiffFile: (request: { file: string; sessionId: string | null; turnId?: string; panelSessionId: string | null } | null) => void;
   setPendingFileNavigation: (navigation: PendingFileNavigation | null) => void;
   setPendingFileFocusPath: (path: string | null) => void;
   navigateToDiff: (filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;

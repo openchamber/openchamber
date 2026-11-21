@@ -2114,6 +2114,7 @@ export const settingsDict = {
   'settings.notifications.page.delivery.enableAria': 'Benachrichtigungen aktivieren',
   'settings.notifications.page.delivery.enableLabel': 'Benachrichtigungen aktivieren',
   'settings.notifications.page.delivery.localOnlyDevice': 'Dieses Gerät ist nur für dein Heimnetzwerk gekoppelt und bekommt daher keine Benachrichtigungen, weil sie das Telefon über das Internet erreichen. Um sie zu bekommen, füge das Gerät erneut hinzu und wähle "Überall".',
+  'settings.notifications.page.delivery.localOnlyServer': 'Dieser Server ist nur für dein Heimnetzwerk gekoppelt und sendet daher keine Benachrichtigungen. Deine anderen gespeicherten Server senden sie weiterhin.',
   'settings.notifications.page.delivery.focusedAria': 'Benachrichtigen, wenn App im Vordergrund ist',
   'settings.notifications.page.delivery.focusedLabel': 'Benachrichtigen, wenn App im Vordergrund ist',
   'settings.notifications.page.delivery.testAction': 'Testbenachrichtigung senden',

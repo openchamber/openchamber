@@ -606,6 +606,12 @@ anywhere under `packages/ui/src`).
   preview offers a picker when there is more than one, and the detail of an
   older one is read with `revision` (`useRepositoryReferenceDetail`), cached
   apart from the latest.
+- `reviewerStates` on the context names everyone asked to review and everyone
+  who answered, one entry per person; a host that does not say leaves it out, so
+  the preview falls back to the requested `reviewers`. A requested reviewer
+  missing from `reviewerStates` still shows, without a state. The client skips
+  an entry it cannot read (a state a newer server added, a malformed user)
+  instead of failing the read, so that person falls back to the roster too.
 - `features.submitRequirements`: submit (`MergeMethod` `submit`, alone) waits
   for the context's requirements and stays disabled while one is unmet
   (`sourceBoard/mergeChoice.ts`). Methods this version has no words for are

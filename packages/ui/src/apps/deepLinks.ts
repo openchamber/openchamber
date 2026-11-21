@@ -7,7 +7,7 @@ export type SessionsFilter = 'all' | 'attention' | 'recent';
 export type ViewTarget = 'files' | 'mcp' | 'instances' | 'update';
 
 export type DeepLinkIntent =
-  | { type: 'session'; sessionId: string; directory?: string; messageId?: string }
+  | { type: 'session'; sessionId: string; directory?: string; messageId?: string; serverId?: string }
   | { type: 'new-session'; directory?: string; projectId?: string; agent?: string; model?: string }
   | { type: 'sessions'; filter?: SessionsFilter }
   | { type: 'status' }

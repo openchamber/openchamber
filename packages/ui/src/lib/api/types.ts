@@ -5,6 +5,8 @@ import type { DesktopSettings } from '@/lib/settings/registry';
 import type { GitIdentityProfile, GitIdentitySummary } from './git-identity';
 import type { GitPathUnavailableReason } from './git-path-diff';
 import type { PushAPI } from './push';
+import type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
+export type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
 import type {
   ChangeRequest,
   ChangeRequestContext,
@@ -1398,7 +1400,7 @@ export interface EditorAPI {
     original: string,
     modified: string,
     label?: string,
-    options?: { line?: number; patch?: string },
+    options?: { line?: number; patch?: string; snapshot?: boolean },
   ): Promise<void>;
 }
 
@@ -1569,22 +1571,7 @@ export type RepositoryReferenceThread = {
   replies: RepositoryReferenceComment[];
 };
 
-export type RepositoryReferenceReviewer = {
-  id: string;
-  login: string;
-  avatarUrl?: string;
-};
-
 export type { RepositoryReferenceDetail } from './repository-reference-detail';
-
-export type RepositoryReferenceCommit = {
-  sha: string;
-  headline: string;
-  author: { login: string; avatarUrl?: string } | null;
-  authorName: string | null;
-  committedAt: string | null;
-  url: string | null;
-};
 
 export type RepositoryReferenceDetailResult =
   | { connected: false }
@@ -1718,6 +1705,7 @@ export interface SourceControlAPI extends SourceControlWrites {
       includeDiff?: boolean;
       includeCIDetails?: boolean;
       includeTimeline?: boolean;
+      includeReferences?: boolean;
       project?: { owner: string; name: string };
       revision?: string;
     },
@@ -1731,6 +1719,7 @@ export interface SourceControlAPI extends SourceControlWrites {
     context: SourceControlReadContext,
     number: number,
     project?: { owner: string; name: string },
+    options?: { includeReferences?: boolean },
   ): Promise<Issue | null>;
   issueComments(
     context: SourceControlReadContext,
@@ -1742,7 +1731,7 @@ export interface SourceControlAPI extends SourceControlWrites {
 
   references(context: SourceControlReadContext, query: RepositoryReferenceQuery): Promise<RepositoryReferencePage>;
   referencesAcross?(contexts: SourceControlReadContext[], query: RepositoryReferenceQuery): Promise<RepositoryReferencesAcrossResult>;
-  referenceDetail(context: SourceControlReadContext, ref: RepositoryItemRef & { kind?: 'discussion' }): Promise<RepositoryReferenceDetailResult>;
+  referenceDetail(context: SourceControlReadContext, ref: RepositoryItemRef & { kind?: 'discussion' }, options?: { includeReferences?: boolean }): Promise<RepositoryReferenceDetailResult>;
   changeRequestListStatuses(context: SourceControlReadContext, refs: RepositoryItemRef[]): Promise<ChangeRequestListStatusesResult>;
 }
 

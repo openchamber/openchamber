@@ -2164,6 +2164,7 @@ export const settingsDict = {
   'settings.notifications.page.delivery.enableAria': 'הפעל התראות',
   'settings.notifications.page.delivery.enableLabel': 'הפעל התראות',
   'settings.notifications.page.delivery.localOnlyDevice': 'המכשיר הזה מחובר לרשת הבית בלבד, ולכן לא מקבל התראות, כי הן מגיעות לטלפון דרך האינטרנט. כדי לקבל אותן, הוסיפו את המכשיר שוב ובחרו "מכל מקום".',
+  'settings.notifications.page.delivery.localOnlyServer': 'השרת הזה מחובר לרשת הבית בלבד, ולכן הוא לא שולח התראות. השרתים השמורים האחרים שלך עדיין שולחים אותן.',
   'settings.notifications.page.delivery.focusedAria': 'התרע גם כשהאפליקציה בפוקוס',
   'settings.notifications.page.delivery.focusedLabel': 'התרע גם כשהאפליקציה בפוקוס',
   'settings.notifications.page.delivery.testAction': 'שלח התראת בדיקה',

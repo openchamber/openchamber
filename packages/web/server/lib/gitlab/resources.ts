@@ -3,7 +3,10 @@ import { createHash } from 'node:crypto';
 import { pairedDiffLine } from '../source-control/review-position.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 import { mapGitLabCI, mapGitLabCommit, mapGitLabDiff, mapGitLabIssue, mapGitLabMergeRequest, mapGitLabNote, mapGitLabProject, mapGitLabUser, mapGitLabVerdictNote } from './mappers.js';
+import { readDiffStats, readReviewerStates } from './context-extras.js';
 import { resolveGitLabProjectsFromDirectory } from './repo.js';
+import { gitPatchForDiff } from './diff-patch.js';
+import { systemReferences, withIssueReferences, withReferences } from './references.js';
 import { isPlainObject as isPlain, isPresent, isString } from './validation.js';
 import { gitlabItemFlags, gitlabItemWrites, gitlabPeople } from './item-writes.js';
 import type { SourceControlMutationTarget, SourceControlProjectRef } from '@openchamber/sdk';
@@ -21,7 +24,7 @@ type Selector = Pick<SourceControlProjectRef, 'owner' | 'name'> | null | undefin
 type Remote = string | undefined;
 type Project = { raw: JsonObject & { id: number }; project: GitLabMappedProject };
 type Projects = [Project, ...Project[]];
-type ReadOptions = { remote?: Remote; linked?: boolean | undefined; requireComplete?: boolean | undefined;
+type ReadOptions = { remote?: Remote; linked?: boolean | undefined; includeReferences?: boolean | undefined; requireComplete?: boolean | undefined;
   constrainToPrimary?: boolean | undefined; requireNetwork?: boolean | undefined; project?: Selector };
 type ListOptions = { labels?: string[] | undefined; state?: string | undefined; people?: string | undefined; remote?: Remote;
   page?: number | undefined; query?: string | undefined };
@@ -131,23 +134,6 @@ function projectPath(owner: string, name: string) {
   return `${owner}/${name}`;
 }
 
-function gitPatchForDiff(file: JsonObject) {
-  const oldPath = text(file.old_path) || file.new_path;
-  const newPath = text(file.new_path) || file.old_path;
-  const lines = [`diff --git a/${oldPath} b/${newPath}`];
-  if (file.new_file === true) lines.push(`new file mode ${text(file.b_mode) || '100644'}`);
-  else if (file.deleted_file === true) lines.push(`deleted file mode ${text(file.a_mode) || '100644'}`);
-  else if (text(file.a_mode) && text(file.b_mode) && file.a_mode !== file.b_mode) lines.push(`old mode ${file.a_mode}`, `new mode ${file.b_mode}`);
-  if (file.renamed_file === true) lines.push(`rename from ${oldPath}`, `rename to ${newPath}`);
-  const body = isString(file.diff) ? file.diff : '';
-  if (body.startsWith('@@')) {
-    lines.push(`--- ${file.new_file === true ? '/dev/null' : `a/${oldPath}`}`);
-    lines.push(`+++ ${file.deleted_file === true ? '/dev/null' : `b/${newPath}`}`);
-  }
-  const header = `${lines.join('\n')}\n`;
-  if (!body) return header;
-  return `${header}${body.endsWith('\n') ? body : `${body}\n`}`;
-}
 
 const LIVE_SUMMARY_CONCURRENCY = 4;
 const PIPELINE_PENDING = new Set(['created', 'waiting_for_resource', 'preparing', 'pending', 'running', 'manual', 'scheduled']);
@@ -740,29 +726,6 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     return resolvable.length > 0 && resolvable.every((note) => note.resolved === true);
   };
 
-  const DIFF_STATS_QUERY = `query($path: ID!, $iid: String!) {
-  project(fullPath: $path) {
-    mergeRequest(iid: $iid) { diffStats { path additions deletions } }
-  }
-}`;
-  const readDiffStats = async (project: SourceControlProjectRef, number: number) => {
-    try {
-      const response = await client.MergeRequests.requester.post('../graphql', {
-        body: { query: DIFF_STATS_QUERY, variables: { path: `${project.owner}/${project.name}`, iid: String(number) } },
-      });
-      const stats = obj(obj(obj(obj(response?.body)?.data)?.project)?.mergeRequest)?.diffStats;
-      if (!array(stats)) return null;
-      const byPath = new Map<string, { additions: number; deletions: number }>();
-      for (const entry of stats) {
-        if (!isPlainObject(entry) || !isString(entry.path) || !integer(entry.additions) || !integer(entry.deletions)) return null;
-        byPath.set(entry.path, { additions: entry.additions, deletions: entry.deletions });
-      }
-      return byPath;
-    } catch {
-      return null;
-    }
-  };
-
   const resolveMutationActionTarget = async (payload: ActionPayload) => {
     if (payload.providerTarget) {
       return {
@@ -1329,7 +1292,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         linked: options.linked,
       });
       const raw = obj(reply);
-      const [noteSource, diffs, ci, headProject, commitPage, diffStats, threadPermissions, chain] = await Promise.all([
+      const [noteSource, diffs, ci, headProject, commitPage, diffStats, threadPermissions, reviewerStates, chain] = await Promise.all([
         options.includeTimeline
           ? readCollection((page) => client.MergeRequestDiscussions.all(target.project.id, number, page), 'GitLab merge request has more threads than OpenChamber reads')
           : readCollection((page) => client.MergeRequestNotes.all(target.project.id, number, page), 'GitLab merge request has more notes than OpenChamber reads'),
@@ -1343,8 +1306,9 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         options.includeTimeline
           ? client.MergeRequests.allCommits(target.project.id, number, { maxPages: 1, perPage: TIMELINE_COMMIT_LIMIT, showExpanded: true }).then(readPage)
           : Promise.resolve(null),
-        options.includeDiff ? readDiffStats(target.project, number) : Promise.resolve(null),
+        options.includeDiff ? readDiffStats(client, target.project, number) : Promise.resolve(null),
         options.includeTimeline ? readThreadPermissions(target.project, number) : Promise.resolve(null),
+        options.includeTimeline ? readReviewerStates(client, target.project.id, number, raw, identity) : Promise.resolve(undefined),
         readChain(reply, isString(target.raw?.default_branch) ? target.raw.default_branch : null).catch(() => undefined),
       ]);
       const notes = options.includeTimeline ? notesOfDiscussions(noteSource, threadPermissions) : noteSource;
@@ -1395,9 +1359,12 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       };
       const withStack = chain === undefined ? context : { ...context, stack: chain };
       if (!options.includeTimeline) return withStack;
+      const withRefs = options.includeReferences
+        ? withReferences(withStack, systemReferences(notes, String(obj(raw)?.web_url ?? ''), projectPath(target.project.owner, target.project.name)))
+        : withStack;
       if (canonicalReads && !Array.isArray(commitPage?.items)) throw new Error('GitLab returned an invalid merge request commit list');
-      return {
-        ...withStack,
+      const timeline = {
+        ...withRefs,
         commits: asArray(commitPage?.items).flatMap((commit) => {
           const mapped = mapGitLabCommit(obj(commit));
           return mapped ? [mapped] : [];
@@ -1409,6 +1376,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
           return mapped ? [mapped] : [];
         }),
       };
+      return reviewerStates === undefined ? timeline : { ...timeline, reviewerStates };
     },
 
     async listIssues(directory: string, options: ListOptions = {}) {
@@ -1431,11 +1399,14 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       return { items, page: options.page ?? 1, hasMore: page.hasMore };
     },
 
-    async getIssue(directory: string, number: number, selector?: Selector, remote?: Remote, { linked }: ReadOptions = {}) {
+    async getIssue(directory: string, number: number, selector?: Selector, remote?: Remote, { linked, includeReferences }: ReadOptions = {}) {
       const target = await constrainedProject(directory, selector, remote, { linked });
       const raw = await client.Issues.show(number, { projectId: target.project.id });
-      const issue = canonicalReads ? requireIssue(raw, target.project) : requireMapped(mapGitLabIssue(obj(raw), identity, target.project), 'GitLab returned an invalid issue');
-      return gitlabItemFlags(issue, target.raw, raw);
+      const issue = canonicalReads
+        ? requireIssue(raw, target.project)
+        : requireMapped(mapGitLabIssue(obj(raw), identity, target.project), 'GitLab returned an invalid issue');
+      const flagged = gitlabItemFlags(issue, target.raw, raw);
+      return includeReferences ? withIssueReferences(client, target.project, flagged, number, String(obj(raw)?.web_url ?? '')) : flagged;
     },
 
     async changeRequestPatch(directory: string, number: number, options: ReadOptions = {}) {

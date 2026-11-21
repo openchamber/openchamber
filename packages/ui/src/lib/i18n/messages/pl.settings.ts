@@ -709,6 +709,7 @@ export const settingsDict = {
   'settings.notifications.page.delivery.enableAria': 'Włącz powiadomienia',
   'settings.notifications.page.delivery.enableLabel': 'Włącz powiadomienia',
   'settings.notifications.page.delivery.localOnlyDevice': 'To urządzenie jest sparowane tylko z siecią domową, więc nie dostaje powiadomień, bo docierają one do telefonu przez internet. Aby je otrzymywać, dodaj urządzenie ponownie i wybierz „Wszędzie”.',
+  'settings.notifications.page.delivery.localOnlyServer': 'Ten serwer jest sparowany tylko z siecią domową, więc nie wysyła powiadomień. Pozostałe zapisane serwery nadal je wysyłają.',
   'settings.notifications.page.delivery.focusedAria': 'Powiadamiaj, gdy aplikacja jest w centrum uwagi',
   'settings.notifications.page.delivery.focusedLabel': 'Powiadamiaj, gdy aplikacja jest w centrum uwagi',
   'settings.notifications.page.delivery.permissionDenied': 'Odmówiono uprawnień do powiadomień. Włącz je w ustawieniach przeglądarki.',

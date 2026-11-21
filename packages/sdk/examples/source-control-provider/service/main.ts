@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import http from 'node:http';
-
+import type { GiteaReview, ReviewerStatesApi } from './reviewer-states.ts';
+import type { DiffApi } from './diff.ts';
+import type { ReferenceEvent, ReferencesApi } from './references.ts';
 import {
   SOURCE_CONTROL_PROVIDER_ERROR_MESSAGE_MAX,
   SOURCE_CONTROL_PROVIDER_PATH,
@@ -25,6 +27,13 @@ import type {
   Call, GiteaBranch, GiteaBranchRef, GiteaChangedFile, GiteaComment, GiteaIssue, GiteaPull, GiteaRepo, GiteaSubscriptionCheck, GiteaUser, GiteaVersion, ProviderTarget,
 } from './types.ts';
 import type { MutationDeps, Mutations } from './mutations.ts';
+
+const reviewerStatesPath = `./reviewer-states${'.js'}`;
+const { readReviews, withReviewerStates }: ReviewerStatesApi = await import(reviewerStatesPath);
+const referencesPath = `./references${'.js'}`;
+const { readReferences, withReferences }: ReferencesApi = await import(referencesPath);
+const diffPath = `./diff${'.js'}`;
+const { mapChangedFile, splitUnifiedDiff }: DiffApi = await import(diffPath);
 
 const port = Number(process.env.OPENCHAMBER_SERVICE_PORT);
 const serviceToken = process.env.OPENCHAMBER_SERVICE_TOKEN ?? '';
@@ -140,10 +149,6 @@ type Comment = Identity & Dated & {
   id: string; url: string; body: string; author: User | null;
   canUpdate?: boolean; canDelete?: boolean;
 };
-type ChangedFile = {
-  path: string; status: 'added' | 'removed' | 'renamed' | 'modified';
-  additions?: number; deletions?: number; changes?: number; patch?: string;
-};
 type ChangeRequestStatus = {
   identity: Identity; project: Project; branch: string; changeRequest: ChangeRequest | null; ci: null;
   canMerge?: boolean; resolvedRemoteName: string | null; defaultBranch: string | null;
@@ -245,34 +250,6 @@ const mapComment = (call: Call, raw: GiteaComment, fallbackUrl: string): Comment
   return comment;
 };
 
-const FILE_STATUSES = new Map<string, ChangedFile['status']>([['added', 'added'], ['deleted', 'removed'], ['removed', 'removed'], ['renamed', 'renamed']]);
-
-const mapChangedFile = (raw: GiteaChangedFile): ChangedFile => {
-  const file: ChangedFile = { path: raw.filename, status: FILE_STATUSES.get(raw.status ?? '') ?? 'modified' };
-  if (raw.additions !== undefined) file.additions = raw.additions;
-  if (raw.deletions !== undefined) file.deletions = raw.deletions;
-  if (raw.changes !== undefined) file.changes = raw.changes;
-  return file;
-};
-
-const splitUnifiedDiff = (diff: string): Map<string, string> => {
-  const parts = new Map<string, string>();
-  const chunks = diff.split(/^(?=diff --git )/m).filter((chunk) => chunk.startsWith('diff --git '));
-  for (const chunk of chunks) {
-    const lines = chunk.split('\n');
-    const plus = lines.find((line) => line.startsWith('+++ '));
-    const minus = lines.find((line) => line.startsWith('--- '));
-    const renamed = lines.find((line) => line.startsWith('rename to '));
-    let path = '';
-    if (plus && plus !== '+++ /dev/null') path = plus.slice(4).replace(/^b\//, '');
-    else if (renamed) path = renamed.slice('rename to '.length);
-    else if (minus && minus !== '--- /dev/null') path = minus.slice(4).replace(/^a\//, '');
-    else path = lines[0].match(/^diff --git a\/.+? b\/(.+)$/)?.[1] ?? '';
-    if (path) parts.set(path.replace(/\t.*$/, ''), chunk.endsWith('\n') ? chunk : `${chunk}\n`);
-  }
-  return parts;
-};
-
 const listState = (state: string): string => {
   if (state === 'closed' || state === 'merged') return 'closed';
   return state === 'all' ? 'all' : 'open';
@@ -359,6 +336,12 @@ const findBranchPull = async (call: Call, repo: GiteaRepo, branch: string): Prom
   throw new CallError(`The repository has more open pull requests than this Git host scans (${STATUS_SCAN_PAGES * SCAN_SIZE})`, 502, 'SCAN_LIMIT');
 };
 
+const readItemReferences = (call: Call, input: Input, repo: string, number: number) => readReferences(
+  input.includeReferences === true ? (page, limit) => api<ReferenceEvent[]>(call, 'GET', `${repo}/issues/${number}/timeline`, {
+    query: { page: String(page), limit: String(limit) },
+  }) : null,
+);
+
 type Handler = (call: Call, input: Input, request: SourceControlProviderRequest) => Promise<SourceControlJson>;
 
 const unsupported: Handler = async (_call, _input, request) => {
@@ -414,25 +397,25 @@ const handlers = {
 
   changeRequestContext: async (call, input) => {
     const { project } = await resolveRepo(call, text(input, 'directory'), text(input, 'remote'), selectorOf(input, 'project'));
-    const number = integer(input, 'number');
-    const repo = repoPath(project);
-    const includeDiff = input.includeDiff === true;
-    const [raw, { data: comments }, diff, changed, check] = await Promise.all([
+    const number = integer(input, 'number'), repo = repoPath(project), includeDiff = input.includeDiff === true;
+    const [raw, { data: comments }, diff, changed, reviews, references, check] = await Promise.all([
       readPull(call, project, number),
       api<GiteaComment[]>(call, 'GET', `${repo}/issues/${number}/comments`),
       includeDiff ? apiText(call, `${repo}/pulls/${number}.diff`) : Promise.resolve(''),
       includeDiff ? readChangedFiles(call, repo, number) : Promise.resolve([]),
+      input.includeTimeline === true ? readReviews(SCAN_SIZE, (page, limit) =>
+        api<GiteaReview[]>(call, 'GET', `${repo}/pulls/${number}/reviews`, { query: { page: String(page), limit: String(limit) } })) : Promise.resolve(null),
+      readItemReferences(call, input, repo, number),
       api<GiteaSubscriptionCheck>(call, 'GET', `${repo}/issues/${number}/subscriptions/check`).catch(() => null),
     ]);
-    const pull = mapPull(call, raw, project);
-    const patches = splitUnifiedDiff(diff);
+    const pull = mapPull(call, raw, project), patches = splitUnifiedDiff(diff);
     const files = changed.map((file) => {
-      const mapped = mapChangedFile(file);
-      const patch = patches.get(mapped.path);
+      const mapped = mapChangedFile(file), patch = patches.get(mapped.path);
       if (patch) mapped.patch = patch;
       return mapped;
     });
-    const subscribed = check?.data.subscribed; return {
+    const subscribed = check?.data.subscribed;
+    const context = withReviewerStates({
       identity: call.identity,
       project,
       changeRequest: pull,
@@ -442,7 +425,8 @@ const handlers = {
       diff,
       ci: null,
       ...(subscribed === true || subscribed === false ? { subscribed } : undefined),
-    };
+    }, reviews, raw.requested_reviewers ?? []);
+    return withReferences(context, references);
   },
 
   listIssues: async (call, input) => {
@@ -458,13 +442,16 @@ const handlers = {
   getIssue: async (call, input) => {
     const { project } = await resolveRepo(call, text(input, 'directory'), text(input, 'remote'), selectorOf(input, 'project'));
     const number = integer(input, 'number');
-    const { data } = await api<GiteaIssue>(call, 'GET', `${repoPath(project)}/issues/${number}`);
+    const [{ data }, references, check] = await Promise.all([
+      api<GiteaIssue>(call, 'GET', `${repoPath(project)}/issues/${number}`),
+      readItemReferences(call, input, repoPath(project), number),
+      api<GiteaSubscriptionCheck>(call, 'GET', `${repoPath(project)}/issues/${number}/subscriptions/check`).catch(() => null),
+    ]);
     if (data.pull_request) throw new CallError(`#${data.number} is a pull request`, 404);
     const issue = mapIssue(call, data, project);
-    const check = await api<GiteaSubscriptionCheck>(call, 'GET', `${repoPath(project)}/issues/${number}/subscriptions/check`).catch(() => null);
     const subscribed = check?.data.subscribed;
     if (subscribed === true || subscribed === false) issue.subscribed = subscribed;
-    return issue;
+    return withReferences(issue, references);
   },
 
   issueComments: async (call, input) => {

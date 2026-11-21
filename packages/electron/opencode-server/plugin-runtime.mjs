@@ -1,5 +1,8 @@
 // external: https://github.com/anomalyco/opencode/blob/v2.3.2/packages/cli/vite.node.config.ts
-import { registerHooks } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { registerHooks, stripTypeScriptTypes } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as PromiseSdk from '@opencode/plugin';
 import * as EffectSdk from '@opencode/plugin/effect';
 import { Tool } from '@opencode/schema/tool';
@@ -42,6 +45,15 @@ const specifiers = {
   '@opencode/plugin/effect/tool': 'opencode:plugin-v2-effect-tool',
 };
 
+const TYPESCRIPT_EXTENSIONS = new Set(['.ts', '.mts']);
+
+const installedTypeScript = (url) => {
+  if (!url.startsWith('file:')) return null;
+  const filename = fileURLToPath(url);
+  if (!TYPESCRIPT_EXTENSIONS.has(path.extname(filename))) return null;
+  return filename.split(path.sep).includes('node_modules') ? filename : null;
+};
+
 registerHooks({
   resolve(specifier, context, nextResolve) {
     const url = specifiers[specifier];
@@ -49,6 +61,15 @@ registerHooks({
   },
   load(url, context, nextLoad) {
     const source = sources[url];
-    return source ? { format: 'module', source, shortCircuit: true } : nextLoad(url, context);
+    if (source) return { format: 'module', source, shortCircuit: true };
+    const installed = installedTypeScript(url);
+    if (installed) {
+      return {
+        format: 'module',
+        source: stripTypeScriptTypes(readFileSync(installed, 'utf8'), { mode: 'strip' }),
+        shortCircuit: true,
+      };
+    }
+    return nextLoad(url, context);
   },
 });

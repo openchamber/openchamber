@@ -2,6 +2,7 @@ import React from "react";
 import { cn } from "@/lib/utils";
 import { OverlayScrollbar } from "./OverlayScrollbar";
 import { ScrollShadow, ScrollShadowBands } from "./ScrollShadow";
+import { useListScrollMemory } from "@/hooks/useListScrollMemory";
 
 type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   minThumbSize?: number;
@@ -22,6 +23,8 @@ type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   userIntentOnly?: boolean;
   verticalTrackStart?: number;
   disabled?: boolean;
+  memoryKey?: string | null;
+  memoryReady?: boolean;
 };
 
 export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlayProps>(
@@ -46,9 +49,16 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
     hideBottomScrollShadow = false,
     userIntentOnly = false,
     verticalTrackStart,
+    memoryKey,
+    memoryReady = true,
     ...rest
   }, ref) => {
     const containerRef = React.useRef<HTMLElement | null>(null);
+    const memoryBind = useListScrollMemory(memoryKey, { ready: memoryReady });
+    const attach = React.useCallback((node: HTMLElement | null) => {
+      containerRef.current = node;
+      memoryBind(node);
+    }, [memoryBind]);
 
     React.useImperativeHandle(ref, () => containerRef.current as HTMLElement, []);
 
@@ -64,7 +74,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
         {useScrollShadow ? (
           <ScrollShadow
             as={Component}
-            ref={containerRef as React.Ref<HTMLElement>}
+            ref={attach}
             size={scrollShadowSize}
             surface={scrollShadowSurface}
             hideTopShadow={hideTopScrollShadow}
@@ -84,7 +94,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
           </ScrollShadow>
         ) : (
           <Component
-            ref={containerRef as React.Ref<HTMLElement>}
+            ref={attach}
             className={cn(
               "overlay-scrollbar-target overlay-scrollbar-container",
               preventOverscroll && "overscroll-none",

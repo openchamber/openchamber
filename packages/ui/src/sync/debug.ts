@@ -28,6 +28,9 @@ export const syncDebug = {
 
     flush: (count: number) =>
       log("pipeline", "flush", `${count} events`),
+
+    staleTurnBoundary: (eventType: string, seq: number) =>
+      log("pipeline", "stale turn boundary dropped", eventType, seq),
   },
 
   reducer: {

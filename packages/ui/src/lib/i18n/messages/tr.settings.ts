@@ -2027,6 +2027,7 @@ export const settingsDict = {
   'settings.notifications.page.delivery.enableAria': 'Bildirimleri etkinleştir',
   'settings.notifications.page.delivery.enableLabel': 'Bildirimleri Etkinleştir',
   'settings.notifications.page.delivery.localOnlyDevice': 'Bu cihaz yalnızca ev ağınız için eşleştirildi, bu yüzden bildirim almaz; bildirimler telefona internet üzerinden ulaşır. Bildirim almak için cihazı yeniden ekleyin ve "Her yerden" seçeneğini seçin.',
+  'settings.notifications.page.delivery.localOnlyServer': 'Bu sunucu yalnızca ev ağınız için eşleştirildi, bu yüzden bildirim göndermez. Kayıtlı diğer sunucularınız göndermeye devam eder.',
   'settings.notifications.page.delivery.focusedAria': 'Uygulama odaktayken bildir',
   'settings.notifications.page.delivery.focusedLabel': 'Uygulama Odaktayken Bildir',
   'settings.notifications.page.delivery.testAction': 'Test bildirimi gönder',

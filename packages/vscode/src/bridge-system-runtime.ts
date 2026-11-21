@@ -16,7 +16,7 @@ import { sessionNotificationSchema } from './sessionNotifications';
 import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode } from './opencode-upgrade-runtime';
 import { normalizeWindowsDriveLetter, pathsEqualWithNormalizedDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
-import { isFileDeletionPatch, reconstructOriginalContentFromPatch } from './patchReconstruction';
+import { fileSidesFromFullPatch, isFileDeletionPatch, reconstructOriginalContentFromPatch } from './patchReconstruction';
 import type { BridgeContext, BridgeResponse } from './bridge';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode, publicEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
 import { discoverProviderModels } from './model-discovery';
@@ -137,8 +137,7 @@ const ensureVirtualDiffProviderRegistered = (ctx?: BridgeContext): void => {
     VIRTUAL_DIFF_SCHEME,
     {
       provideTextDocumentContent: (uri: vscode.Uri) => {
-        const key = new URLSearchParams(uri.query).get('key') || '';
-        return virtualDiffContents.get(key) ?? '';
+        return virtualDiffContents.get(uri.query) ?? '';
       },
     },
   );
@@ -148,9 +147,10 @@ const ensureVirtualDiffProviderRegistered = (ctx?: BridgeContext): void => {
   }
 };
 
-const createVirtualOriginalDiffUri = (modifiedPath: string, content: string): vscode.Uri => {
+const createVirtualOriginalDiffUri = (modifiedPath: string, content: string, commentPath?: string): vscode.Uri => {
   const key = `${Date.now()}-${++virtualDiffCounter}`;
-  virtualDiffContents.set(key, content);
+  const query = JSON.stringify(commentPath ? { key, path: commentPath } : { key });
+  virtualDiffContents.set(query, content);
 
   if (virtualDiffContents.size > 100) {
     const firstKey = virtualDiffContents.keys().next().value;
@@ -162,7 +162,7 @@ const createVirtualOriginalDiffUri = (modifiedPath: string, content: string): vs
   return vscode.Uri.from({
     scheme: VIRTUAL_DIFF_SCHEME,
     path: `/${path.basename(modifiedPath) || 'original'}`,
-    query: `key=${encodeURIComponent(key)}`,
+    query,
   });
 };
 
@@ -339,27 +339,35 @@ export async function handleSystemBridgeMessage(
     }
 
     case 'editor:openDiff': {
-      const { original, modified, label, line, patch } = payload as {
+      const { original, modified, label, line, patch, snapshot } = payload as {
         original: string;
         modified: string;
         label?: string;
         line?: number;
         patch?: string;
+        snapshot?: boolean;
       };
       try {
         let modifiedUri = vscode.Uri.file(modified);
         const patchText = typeof patch === 'string' && patch.trim().length > 0 ? patch : undefined;
-        const deleted = patchText !== undefined && isFileDeletionPatch(patchText)
-          && !(await vscode.workspace.fs.stat(modifiedUri).then(() => true, () => false));
-        const modifiedText = deleted ? '' : (await vscode.workspace.openTextDocument(modifiedUri)).getText();
+        const sides = snapshot === true && patchText !== undefined ? fileSidesFromFullPatch(patchText) : null;
         let originalUri = original ? vscode.Uri.file(original) : modifiedUri;
 
-        if (patchText !== undefined) {
-          const originalContent = reconstructOriginalContentFromPatch(modifiedText, patchText);
-          if (typeof originalContent === 'string') {
-            ensureVirtualDiffProviderRegistered(ctx);
-            originalUri = createVirtualOriginalDiffUri(modified, originalContent);
-            if (deleted) modifiedUri = createVirtualOriginalDiffUri(modified, '');
+        if (sides) {
+          ensureVirtualDiffProviderRegistered(ctx);
+          originalUri = createVirtualOriginalDiffUri(modified, sides.original, modified);
+          modifiedUri = createVirtualOriginalDiffUri(modified, sides.modified, modified);
+        } else {
+          const deleted = patchText !== undefined && isFileDeletionPatch(patchText)
+            && !(await vscode.workspace.fs.stat(modifiedUri).then(() => true, () => false));
+          const modifiedText = deleted ? '' : (await vscode.workspace.openTextDocument(modifiedUri)).getText();
+          if (patchText !== undefined) {
+            const originalContent = reconstructOriginalContentFromPatch(modifiedText, patchText);
+            if (typeof originalContent === 'string') {
+              ensureVirtualDiffProviderRegistered(ctx);
+              originalUri = createVirtualOriginalDiffUri(modified, originalContent);
+              if (deleted) modifiedUri = createVirtualOriginalDiffUri(modified, '');
+            }
           }
         }
 

@@ -358,7 +358,13 @@ export function useTrackerReferenceList(options: {
     return { ...list, items: live.items, followed: live.followed };
 }
 
-export function useRepositoryReferenceDetail(directory: string | null, reference: RepositoryReference | null, settled: boolean, revision: string | null = null) {
+export function useRepositoryReferenceDetail(
+    directory: string | null,
+    reference: RepositoryReference | null,
+    settled: boolean,
+    revision: string | null = null,
+    crossReferences = false,
+) {
     const { sourceControl } = useRuntimeAPIs();
     const context = useRepositoryReadContext(reference ? directory : null);
     const readable = useReferenceReadContext(context, reference?.linked === true);
@@ -369,23 +375,29 @@ export function useRepositoryReferenceDetail(directory: string | null, reference
     const number = reference?.number ?? 0;
     const kind = reference?.kind ?? 'issue';
     const key = directory && reference && readable
-        ? JSON.stringify([getRuntimeKey(), readContextCacheKey(readable), directory, kind, owner, repo, number])
+        ? JSON.stringify([getRuntimeKey(), readContextCacheKey(readable), directory, kind, owner, repo, number, crossReferences])
         : null;
     const fetch = React.useCallback(async (): Promise<RepositoryReferenceDetail> => {
         if (!readable || !reference) throw new Error('The repository is not available here');
-        if (!detailed) return fetchListBackedReferenceDetail(sourceControl, readable, reference);
-        const result = await sourceControl.referenceDetail(readable, kind === 'discussion' ? { owner, repo, number, kind } : { owner, repo, number });
+        if (!detailed) return fetchListBackedReferenceDetail(sourceControl, readable, reference, { crossReferences });
+        const result = await sourceControl.referenceDetail(
+            readable,
+            kind === 'discussion' ? { owner, repo, number, kind } : { owner, repo, number },
+            { includeReferences: crossReferences && kind !== 'discussion' },
+        );
         if (!result.connected) throw new Error(`${readable.provider} is not connected`);
         if (!result.detail) throw new Error('Not found');
-        return result.detail;
-    }, [detailed, kind, number, owner, readable, reference, repo, sourceControl]);
+        if (crossReferences || !result.detail.references) return result.detail;
+        const { references: _unasked, ...detail } = result.detail;
+        return detail;
+    }, [crossReferences, detailed, kind, number, owner, readable, reference, repo, sourceControl]);
     const latest = useCachedValue(repositoryDetails, key, fetch, settled);
     const pickedRevision = features.revisions && kind === 'pull' && !detailed ? revision : null;
     const revisionKey = key && pickedRevision ? JSON.stringify([key, pickedRevision]) : null;
     const fetchRevision = React.useCallback(async (): Promise<RepositoryReferenceDetail> => {
         if (!readable || !reference || !pickedRevision) throw new Error('The repository is not available here');
-        return fetchListBackedReferenceDetail(sourceControl, readable, reference, pickedRevision);
-    }, [pickedRevision, readable, reference, sourceControl]);
+        return fetchListBackedReferenceDetail(sourceControl, readable, reference, { revision: pickedRevision, crossReferences });
+    }, [crossReferences, pickedRevision, readable, reference, sourceControl]);
     const revisionDetail = useCachedValue(repositoryDetails, revisionKey, fetchRevision, settled);
     const refresh = React.useCallback(
         () => (key ? Promise.all([

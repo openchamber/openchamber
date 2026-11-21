@@ -214,7 +214,7 @@ export function NewWorktreeDialog({
     touched: false,
   });
   const [isCreating, setIsCreating] = React.useState(false);
-  const [validationAbortController, setValidationAbortController] = React.useState<AbortController | null>(null);
+  const validationAbortController = React.useRef<AbortController | null>(null);
   const [fallbackFolderName, setFallbackFolderName] = React.useState('');
   const folderNameForBranch = React.useCallback(
     (branch: string) => slugifyWorktreeName(branch) || fallbackFolderName,
@@ -299,11 +299,9 @@ export function NewWorktreeDialog({
   const validateInputs = React.useCallback(async () => {
     if (!projectRef || !validation.touched || isCreating) return;
 
-    if (validationAbortController) {
-      validationAbortController.abort();
-    }
+    validationAbortController.current?.abort();
     const abortController = new AbortController();
-    setValidationAbortController(abortController);
+    validationAbortController.current = abortController;
     setValidation(prev => ({ ...prev, isValidating: true }));
 
     try {
@@ -356,7 +354,6 @@ export function NewWorktreeDialog({
     linkedPrContext,
     branches?.branches,
     validation.touched,
-    validationAbortController,
     isCreating,
     t,
   ]);
@@ -413,10 +410,8 @@ export function NewWorktreeDialog({
       return;
     }
 
-    if (validationAbortController) {
-      validationAbortController.abort();
-      setValidationAbortController(null);
-    }
+    validationAbortController.current?.abort();
+    validationAbortController.current = null;
     setValidation((prev) => ({ ...prev, isValidating: false, branchError: null, worktreeError: null }));
     setIsCreating(true);
 

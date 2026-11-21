@@ -1,4 +1,5 @@
 import type { SourceControlProviderSession } from '@openchamber/sdk';
+import type { GiteaPerson } from './reviewer-states.ts';
 
 export type GiteaUser = { id: number; login: string; full_name?: string; email?: string; avatar_url?: string };
 export type GiteaRepo = {
@@ -15,6 +16,7 @@ export type GiteaSubscriptionCheck = { subscribed?: boolean };
 export type GiteaPull = GiteaIssue & {
   draft?: boolean; merged?: boolean; mergeable?: boolean; head: GiteaBranchRef; base: GiteaBranchRef;
   merge_base?: string;
+  requested_reviewers?: GiteaPerson[];
 };
 export type GiteaChangedFile = { filename: string; status?: string; additions?: number; deletions?: number; changes?: number };
 export type GiteaComment = {

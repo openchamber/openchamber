@@ -68,8 +68,15 @@ panel's tab strip owns the open files: closing
 a file from the editor (Cmd/Ctrl+W in the desktop app, which the window menu
 turns into `openchamber:close-tab` through `lib/closeTabTarget.ts`, or the
 unsaved-changes prompt that may come first) goes through `onCloseFile` to
-`closeContextFile`, which closes that tab exactly as its close button does. Mobile retains its tree. The context panel passes actual visibility,
-including the panel's open state, its active tab, and the editor toggle, to each file surface.
+`closeContextFile`, which closes that tab exactly as its close button does. Mobile
+retains its tree. Opening a file replaces the tree in the same scroll area on a
+phone, so the tree keeps its offset per workspace root and returns to it before
+repainting; a search's results and a folder child's listing are their own lists
+(`memoryKey` on the tree's scroller). A root read still loading or failed,
+search results of another folder or query, a failed search, and a cleared
+search's rows still on screen are not the list. The context panel passes actual
+visibility, including the panel's open state, its active tab, and the editor
+toggle, to each file surface.
 Hidden surfaces retain drafts, loaded content and scroll state. They stop
 directory and file metadata polling; reopening checks freshness once before
 normal polling resumes. The visible open file is watched by OpenCode

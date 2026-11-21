@@ -1,5 +1,4 @@
 
-import { SecureStorage } from '@aparajita/capacitor-secure-storage';
 import { Capacitor } from '@capacitor/core';
 import React from 'react';
 import { z } from 'zod';
@@ -14,13 +13,18 @@ import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 import { recordMobileConnectDebug } from './mobileConnectionDebug';
+import { KEYCHAIN_ACCESS_WHEN_UNLOCKED, MOBILE_SECURE_STORAGE_PREFIX, deleteSecureHeaders, deleteSecureToken, logDetail, logStorage, nativeSecure, readSecureToken, withTimeout, writeSecureToken } from './mobileSecureStorage';
 import { fetchThroughRelayOnce, fetchThroughRelayWithRetry } from './mobileRelayFetch';
 import { mobileHeadersForUrl, mobileRequestHeadersSchema, type MobileRequestHeaders } from './mobileRequestHeaders';
 
 const MOBILE_CONNECTIONS_STORAGE_KEY = 'openchamber.mobile.connections.v1';
-const MOBILE_SECURE_STORAGE_PREFIX = 'openchamber.mobile.';
+export const MOBILE_CONNECTIONS_CHANGED_EVENT = 'openchamber:mobile-connections-changed';
+
+const notifyConnectionsChanged = (): void => void window.dispatchEvent(new Event(MOBILE_CONNECTIONS_CHANGED_EVENT));
 const MOBILE_DEVICE_ID_STORAGE_KEY = 'openchamber.mobile.deviceId';
 const mobileHeadersKeySchema = z.string().startsWith(`${MOBILE_SECURE_STORAGE_PREFIX}headers.`);
+
+const pushServerIdSchema = z.string().trim().min(1);
 
 const getMobileDeviceId = (): string => {
   try {
@@ -47,7 +51,6 @@ const mobileDevicePlatform = (): string | undefined => {
 const MOBILE_CONNECTIONS_LIMIT = 12;
 const MOBILE_CONNECT_TIMEOUT_MS = 8000;
 const MOBILE_NATIVE_HTTP_TIMEOUT_MS = 2500;
-const MOBILE_SECURE_TIMEOUT_MS = 3000;
 const MOBILE_FAST_PROBE_TIMEOUT_MS = 2500;
 
 export const createMobilePasswordOperationTracker = () => {
@@ -79,6 +82,7 @@ export type MobileSavedConnection = {
   label: string;
   candidates: MobileTransportCandidate[];
   serverId?: string;
+  pushServerId?: string;
   lastUsedAt: number;
   hasToken?: boolean;
   clientToken?: string;
@@ -128,7 +132,7 @@ type PairingRedeemResponse = {
 };
 
 
-const normalizeConnectionUrl = (value: string): string => {
+export const normalizeConnectionUrl = (value: string): string => {
   const trimmed = value.trim();
   if (!trimmed) return '';
   const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
@@ -164,10 +168,10 @@ const relayConnectionRuntimeKey = (relay: MobileRelayConfig): string =>
 
 const canonicalRelayUrl = (relay: MobileRelayConfig): string => `relay://${relay.serverId}`;
 
-const directCandidates = (connection: { candidates: MobileTransportCandidate[] }): Array<{ kind: 'direct'; url: string }> =>
+export const directCandidates = (connection: { candidates: MobileTransportCandidate[] }): Array<{ kind: 'direct'; url: string }> =>
   connection.candidates.filter((c): c is { kind: 'direct'; url: string } => c.kind === 'direct');
 
-const relayCandidateOf = (connection: { candidates: MobileTransportCandidate[] }): MobileRelayConfig | null => {
+export const relayCandidateOf = (connection: { candidates: MobileTransportCandidate[] }): MobileRelayConfig | null => {
   const found = connection.candidates.find((c) => c.kind === 'relay');
   return found && found.kind === 'relay' ? found.relay : null;
 };
@@ -179,12 +183,15 @@ export const connectionDisplayUrl = (connection: { candidates: MobileTransportCa
   return relay ? canonicalRelayUrl(relay) : '';
 };
 
-type MobileConnectionIdentity = { candidates: MobileTransportCandidate[]; serverId?: string };
+type MobileConnectionIdentity = { candidates: MobileTransportCandidate[]; serverId?: string; pushServerId?: string };
 
-const serverIdOf = (connection: MobileConnectionIdentity): string | null =>
+const authServerIdOf = (connection: MobileConnectionIdentity): string | null =>
   connection.serverId || relayCandidateOf(connection)?.serverId || null;
 
-const secureTokenKeyOf = (connection: MobileConnectionIdentity): string => {
+export const pushServerIdOf = (connection: MobileConnectionIdentity): string | null =>
+  authServerIdOf(connection) || connection.pushServerId || null;
+
+export const secureTokenKeyOf = (connection: MobileConnectionIdentity): string => {
   const relay = relayCandidateOf(connection);
   if (relay) return relayConnectionRuntimeKey(relay);
   if (connection.serverId) return `server:${connection.serverId}`;
@@ -193,8 +200,8 @@ const secureTokenKeyOf = (connection: MobileConnectionIdentity): string => {
 };
 
 const isSameDevice = (a: MobileConnectionIdentity, b: MobileConnectionIdentity): boolean => {
-  const aServerId = serverIdOf(a);
-  const bServerId = serverIdOf(b);
+  const aServerId = authServerIdOf(a);
+  const bServerId = authServerIdOf(b);
   if (aServerId && bServerId) return aServerId === bServerId;
   return candidateSetsMatch(a.candidates, b.candidates);
 };
@@ -248,14 +255,6 @@ const parseRelayConfig = (value: unknown): MobileRelayConfig | null => {
 };
 
 
-const logDetail = (detail: Record<string, unknown>): string => {
-  try {
-    return JSON.stringify(detail);
-  } catch {
-    return String(detail);
-  }
-};
-
 const logConnect = (step: string, detail: Record<string, unknown> = {}): void => {
   const serialized = logDetail(detail);
   console.info('[mobile-connect]', step, serialized);
@@ -264,12 +263,6 @@ const logConnect = (step: string, detail: Record<string, unknown> = {}): void =>
 
 export const logMobileConnectEvent = (step: string, detail: Record<string, unknown> = {}): void => {
   logConnect(step, detail);
-};
-
-const logStorage = (step: string, detail: Record<string, unknown> = {}): void => {
-  const serialized = logDetail(detail);
-  console.info('[mobile-storage]', step, serialized);
-  recordMobileConnectDebug(step, serialized);
 };
 
 const parseMaybeJson = (value: unknown): unknown => {
@@ -340,7 +333,7 @@ const raceWithTimeout = async <T,>(timeoutMs: number, operation: Promise<T | nul
   }
 };
 
-const requestWithTimeout = async (
+export const requestWithTimeout = async (
   url: string,
   init?: RequestInit,
   options?: { totalTimeoutMs?: number },
@@ -374,14 +367,14 @@ const readSessionStatus = async (response: { json: () => Promise<unknown> } | nu
   };
 };
 
-const readHealthServerId = async (response: MobileFetchResponse): Promise<string | undefined> => {
+export const readHealthServerId = async (response: MobileFetchResponse): Promise<string | undefined> => {
   const payload = await response.json().catch(() => null);
   const reported = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).serverId : null;
   return typeof reported === 'string' && reported ? reported : undefined;
 };
 
 
-const RELAY_CONNECT_TIMEOUT_MS = 15_000;
+export const RELAY_CONNECT_TIMEOUT_MS = 15_000;
 
 type RelayProbeOutcome = 'ok' | 'needs-login' | 'auth-failed' | 'unreachable' | 'relay-limit';
 
@@ -491,7 +484,7 @@ const migrateLegacyCandidates = (c: Record<string, unknown>): MobileTransportCan
   return typeof c.url === 'string' ? directCandidatesFromUrl(c.url) : [];
 };
 
-const readConnections = (): MobileSavedConnection[] => {
+export const readConnections = (): MobileSavedConnection[] => {
   if (typeof window === 'undefined') return [];
   let parsed: unknown;
   try {
@@ -517,6 +510,7 @@ const readConnections = (): MobileSavedConnection[] => {
         label,
         candidates,
         serverId: typeof c.serverId === 'string' && c.serverId.trim() ? c.serverId : undefined,
+        pushServerId: pushServerIdSchema.safeParse(c.pushServerId).data,
         lastUsedAt: typeof c.lastUsedAt === 'number' ? c.lastUsedAt : 0,
         requestHeadersKey: native ? mobileHeadersKeySchema.safeParse(c.requestHeadersKey).data : undefined,
         requestHeaders: native ? undefined : mobileRequestHeadersSchema.safeParse(c.requestHeaders).data,
@@ -541,6 +535,7 @@ const writeConnections = (connections: MobileSavedConnection[]): boolean => {
       label: c.label,
       candidates: c.candidates.map(serializeCandidate),
       serverId: c.serverId,
+      pushServerId: c.pushServerId,
       lastUsedAt: c.lastUsedAt,
     };
     return native
@@ -549,6 +544,7 @@ const writeConnections = (connections: MobileSavedConnection[]): boolean => {
   });
   try {
     window.localStorage.setItem(MOBILE_CONNECTIONS_STORAGE_KEY, JSON.stringify(serialized));
+    notifyConnectionsChanged();
     return true;
   } catch (error) {
     console.warn('[mobile-storage] failed to persist connection metadata', error);
@@ -558,7 +554,7 @@ const writeConnections = (connections: MobileSavedConnection[]): boolean => {
 
 const upsertConnectionInList = (
   connections: MobileSavedConnection[],
-  draft: { id?: string; label: string; candidates: MobileTransportCandidate[]; serverId?: string; clientToken?: string; hasToken?: boolean },
+  draft: { id?: string; label: string; candidates: MobileTransportCandidate[]; serverId?: string; pushServerId?: string; clientToken?: string; hasToken?: boolean },
 ): MobileSavedConnection[] => {
   const existing = (draft.id ? connections.find((item) => item.id === draft.id) : undefined)
     ?? connections.find((item) => isSameDevice(item, draft));
@@ -568,6 +564,7 @@ const upsertConnectionInList = (
     label: draft.label,
     candidates: draft.candidates,
     serverId: draft.serverId ?? existing?.serverId,
+    pushServerId: draft.pushServerId ?? existing?.pushServerId,
     requestHeadersKey: existing?.requestHeadersKey,
     requestHeaders: existing?.requestHeaders,
     lastUsedAt: Date.now(),
@@ -582,80 +579,11 @@ const upsertConnectionInList = (
 };
 
 
-type NativeSecureStorage = {
-  internalSetItem: (options: { prefixedKey: string; data: string; sync: boolean; access: number }) => Promise<void>;
-  internalGetItem: (options: { prefixedKey: string; sync: boolean }) => Promise<{ data: string | null }>;
-  internalRemoveItem: (options: { prefixedKey: string; sync: boolean }) => Promise<{ success: boolean }>;
-};
-
-const nativeSecure = SecureStorage as unknown as NativeSecureStorage;
-const KEYCHAIN_ACCESS_WHEN_UNLOCKED = 0;
-
-const prefixedTokenKey = (key: string): string =>
-  `${MOBILE_SECURE_STORAGE_PREFIX}token.${encodeURIComponent(key)}`;
-
-const withTimeout = async <T,>(operation: Promise<T>, fallback: T): Promise<T> => {
-  let timeoutId: number | undefined;
-  const timeout = new Promise<T>((resolve) => {
-    timeoutId = window.setTimeout(() => resolve(fallback), MOBILE_SECURE_TIMEOUT_MS);
-  });
-  try {
-    return await Promise.race([operation.catch(() => fallback), timeout]);
-  } finally {
-    if (timeoutId !== undefined) window.clearTimeout(timeoutId);
-  }
-};
-
-const boundedSecure = async <T,>(label: string, run: () => Promise<T>, fallback: T): Promise<T> => {
-  if (!isCapacitorApp()) return fallback;
-  return withTimeout(
-    run().catch((error) => {
-      console.warn(`[mobile-storage] ${label} failed`, error);
-      return fallback;
-    }),
-    fallback,
-  );
-};
-
-const readSecureToken = async (key: string): Promise<string | undefined> => {
-  logStorage('secure:read-start', { key });
-  const value = await boundedSecure(
-    'secure:read',
-    async () => (await nativeSecure.internalGetItem({ prefixedKey: prefixedTokenKey(key), sync: false })).data,
-    null,
-  );
-  const token = typeof value === 'string' && value.trim() ? value : undefined;
-  logStorage('secure:read', { key, hasToken: Boolean(token) });
-  return token;
-};
-
-const writeSecureToken = async (key: string, token: string): Promise<boolean> => {
-  logStorage('secure:write-start', { key });
-  const ok = await boundedSecure('secure:write', async () => {
-    await nativeSecure.internalSetItem({
-      prefixedKey: prefixedTokenKey(key),
-      data: token,
-      sync: false,
-      access: KEYCHAIN_ACCESS_WHEN_UNLOCKED,
-    });
-    return true;
-  }, false);
-  logStorage('secure:write', { key, ok });
-  return ok;
-};
-
-const deleteSecureToken = async (key: string): Promise<void> => {
-  await boundedSecure('secure:delete', async () => {
-    await nativeSecure.internalRemoveItem({ prefixedKey: prefixedTokenKey(key), sync: false });
-    return true;
-  }, false);
-};
-
 class MobileHeaderStorageError extends Error {
   constructor() { super('Mobile header storage unavailable'); }
 }
 
-const readConnectionHeaders = async (connection?: MobileSavedConnection): Promise<MobileRequestHeaders | undefined> => {
+export const readConnectionHeaders = async (connection?: MobileSavedConnection): Promise<MobileRequestHeaders | undefined> => {
   if (!connection) return undefined;
   if (!isCapacitorApp()) return connection.requestHeaders;
   const prefixedKey = connection.requestHeadersKey;
@@ -674,10 +602,6 @@ const readConnectionHeaders = async (connection?: MobileSavedConnection): Promis
 
 export const loadMobileConnectionHeaders = async (id: string): Promise<MobileRequestHeaders | undefined> =>
   readConnectionHeaders(readConnections().find((connection) => connection.id === id));
-
-const deleteSecureHeaders = async (prefixedKey: string): Promise<void> => {
-  await withTimeout(nativeSecure.internalRemoveItem({ prefixedKey, sync: false }), null);
-};
 
 const resolveConnectionHeaders = async (
   input: MobileConnectInput,
@@ -753,7 +677,7 @@ export const loadMobileConnections = async (): Promise<MobileSavedConnection[]> 
 };
 
 const persistMobileConnection = async (
-  connection: { id?: string; label: string; candidates: MobileTransportCandidate[]; serverId?: string; clientToken?: string; requestHeaders?: MobileRequestHeaders | null },
+  connection: { id?: string; label: string; candidates: MobileTransportCandidate[]; serverId?: string; pushServerId?: string; clientToken?: string; requestHeaders?: MobileRequestHeaders | null },
 ): Promise<MobileSavedConnection[]> => {
   let newHeadersKey: string | undefined;
   if (isCapacitorApp() && connection.requestHeaders) {
@@ -786,6 +710,7 @@ export const upsertMobileConnection = async (
   const next = await persistMobileConnection(connection);
   if (isCapacitorApp() && connection.clientToken) {
     await writeSecureToken(secureTokenKeyOf(next[0]), connection.clientToken);
+    notifyConnectionsChanged();
   }
   return next;
 };
@@ -802,8 +727,10 @@ const deleteMobileConnection = async (id: string): Promise<MobileSavedConnection
 };
 
 type ChosenTransport =
-  | { kind: 'direct'; url: string }
+  | { kind: 'direct'; url: string; serverId?: string }
   | { kind: 'relay'; relay: MobileRelayConfig; tunnel?: HeldRelayTunnel };
+
+const directServerIdOf = (transport: ChosenTransport): string | undefined => (transport.kind === 'direct' ? transport.serverId : undefined);
 
 type ProbeResult =
   | { status: 'ok'; transport: ChosenTransport }
@@ -847,10 +774,10 @@ const writeLastTransport = (runtimeKey: string, kind: ChosenTransport['kind'] | 
 const probeConnectionCandidates = async (
   candidates: MobileTransportCandidate[],
   token: string | undefined,
-  options?: { fast?: boolean; requestHeaders?: MobileRequestHeaders; relayFirst?: boolean },
+  options?: { fast?: boolean; requestHeaders?: MobileRequestHeaders; relayFirst?: boolean; expectedServerId?: string },
 ): Promise<ProbeResult> => {
   const requestOptions = options?.fast ? { totalTimeoutMs: MOBILE_FAST_PROBE_TIMEOUT_MS } : undefined;
-  const expectedServerId = relayCandidateOf({ candidates })?.serverId ?? null;
+  const expectedServerId = options?.expectedServerId ?? relayCandidateOf({ candidates })?.serverId ?? null;
   const relayCandidate = candidates.find((c): c is Extract<MobileTransportCandidate, { kind: 'relay' }> => c.kind === 'relay') ?? null;
   const directList = candidates.filter((c): c is Extract<MobileTransportCandidate, { kind: 'direct' }> => c.kind === 'direct');
 
@@ -868,12 +795,10 @@ const probeConnectionCandidates = async (
       const health = await probe.health;
       logConnect('probe:direct:health', { url, ok: health?.ok === true, status: health?.status ?? null, source: health?.source ?? null });
       if (!health?.ok) continue;
-      if (expectedServerId) {
-        const reported = await readHealthServerId(health);
-        if (reported && reported !== expectedServerId) {
-          logConnect('probe:server-id-mismatch', { url });
-          continue;
-        }
+      const reportedServerId = await readHealthServerId(health);
+      if (expectedServerId && reportedServerId && reportedServerId !== expectedServerId) {
+        logConnect('probe:server-id-mismatch', { url });
+        continue;
       }
       const session = await requestWithTimeout(`${url}/auth/session`, { method: 'GET', credentials: token ? 'omit' : 'include', headers, redirect }, requestOptions);
       logConnect('probe:direct:session', { url, ok: session?.ok === true, status: session?.status ?? null, source: session?.source ?? null, hasToken: Boolean(token) });
@@ -883,7 +808,7 @@ const probeConnectionCandidates = async (
       if (status && status.disabled !== true && status.authenticated === false) return { status: 'needs-login' };
       const authDisabled = status?.disabled === true;
       if (!token && isCapacitorApp() && !authDisabled && status?.scope !== 'client') return { status: 'needs-login' };
-      return { status: 'ok', transport: { kind: 'direct', url } };
+      return { status: 'ok', transport: { kind: 'direct', url, serverId: reportedServerId } };
     }
     return { status: 'unreachable' };
   };
@@ -997,17 +922,13 @@ export const suppressAutoConnectUntilManualConnect = (): void => {
   autoConnectSuppressed = true;
 };
 
-export const autoConnectLastInstance = async (options?: { fast?: boolean; skipIfConnected?: boolean }): Promise<AutoConnectOutcome> => {
-  if (autoConnectSuppressed) {
-    logConnect('auto-connect:suppressed', {});
-    return { status: 'no-candidate' };
-  }
-  const fast = options?.fast !== false;
-  await migrateLegacyInlineTokens();
-  const candidate = readConnections()[0];
-  logConnect('auto-connect:start', { hasCandidate: Boolean(candidate), fast });
-  if (!candidate) return { status: 'no-candidate' };
+let connectionSelectionGeneration = 0;
+let notificationSwitchCount = 0;
 
+const connectSavedConnection = async (
+  candidate: MobileSavedConnection,
+  options: { fast: boolean; skipIfConnected?: boolean; selectionGeneration?: number; allowDuringNotificationSwitch?: boolean; expectedServerId?: string },
+): Promise<AutoConnectOutcome> => {
   let token: string | undefined;
   if (isCapacitorApp()) {
     if (candidate.hasToken) {
@@ -1026,24 +947,92 @@ export const autoConnectLastInstance = async (options?: { fast?: boolean; skipIf
     return { status: 'unreachable', label: candidate.label };
   }
   const relayFirst = readLastTransports().get(secureTokenKeyOf(candidate)) === 'relay';
-  const result = await probeConnectionCandidates(candidate.candidates, token, { fast, requestHeaders, relayFirst });
+  const result = await probeConnectionCandidates(candidate.candidates, token, { fast: options.fast, requestHeaders, relayFirst, expectedServerId: options.expectedServerId });
   logConnect('auto-connect:probe', { status: result.status, candidates: candidate.candidates.map((c) => c.kind), relayFirst });
   if (result.status === 'needs-login') return { status: 'needs-login', label: candidate.label };
   if (result.status === 'relay-limit') return { status: 'relay-limit', label: candidate.label };
   if (result.status !== 'ok') return { status: 'unreachable', label: candidate.label };
-  if (options?.skipIfConnected && getRuntimeApiBaseUrl()) {
+  const isSuperseded = (options.selectionGeneration !== undefined
+    && options.selectionGeneration !== connectionSelectionGeneration)
+    || (!options.allowDuringNotificationSwitch && notificationSwitchCount > 0);
+  if (isSuperseded || (options.skipIfConnected && getRuntimeApiBaseUrl())) {
     if (result.transport.kind === 'relay') releaseHeldRelayTunnel(result.transport.tunnel);
     logConnect('auto-connect:superseded', {});
     return { status: 'no-candidate' };
   }
   try {
-    await upsertMobileConnection({ id: candidate.id, label: candidate.label, candidates: candidate.candidates });
+    await upsertMobileConnection({ id: candidate.id, label: candidate.label, candidates: candidate.candidates, pushServerId: directServerIdOf(result.transport) });
   } catch {
     if (result.transport.kind === 'relay') releaseHeldRelayTunnel(result.transport.tunnel);
     return { status: 'unreachable', label: candidate.label };
   }
   switchToTransport(result.transport, token ?? null, { runtimeKey: secureTokenKeyOf(candidate), requestHeaders });
   return { status: 'connected' };
+};
+
+export const autoConnectLastInstance = async (options?: { fast?: boolean; skipIfConnected?: boolean }): Promise<AutoConnectOutcome> => {
+  const selectionGeneration = connectionSelectionGeneration;
+  if (autoConnectSuppressed || notificationSwitchCount > 0) {
+    logConnect('auto-connect:suppressed', {});
+    return { status: 'no-candidate' };
+  }
+  const fast = options?.fast !== false;
+  await migrateLegacyInlineTokens();
+  const candidate = readConnections()[0];
+  logConnect('auto-connect:start', { hasCandidate: Boolean(candidate), fast });
+  if (!candidate) return { status: 'no-candidate' };
+  return connectSavedConnection(candidate, {
+    fast,
+    skipIfConnected: options?.skipIfConnected,
+    selectionGeneration,
+  });
+};
+
+export type SavedInstanceSwitchOutcome = 'active' | 'switched' | 'unavailable';
+
+const savedConnectionsAnsweringAs = async (serverId: string): Promise<MobileSavedConnection[]> => {
+  const answers = await Promise.all(readConnections().filter((entry) => !pushServerIdOf(entry)).map(async (entry) => {
+    const requestHeaders = await readConnectionHeaders(entry).catch(() => undefined);
+    for (const candidate of directCandidates(entry)) {
+      const url = normalizeConnectionUrl(candidate.url) || candidate.url;
+      const headers = mobileHeadersForUrl(url, requestHeaders);
+      const health = await requestWithTimeout(`${url}/health`, { method: 'GET', headers, redirect: Object.keys(headers).length ? 'error' : undefined });
+      if (health?.ok && await readHealthServerId(health) === serverId) return [entry];
+    }
+    return [];
+  }));
+  return answers.flat();
+};
+
+export const switchToSavedInstance = async (serverId: string): Promise<SavedInstanceSwitchOutcome> => {
+  if (!serverId) return 'unavailable';
+  await migrateLegacyInlineTokens();
+  const identified = readConnections().filter((entry) => pushServerIdOf(entry) === serverId);
+  const connections = identified.length > 0 ? identified : await savedConnectionsAnsweringAs(serverId);
+  if (connections.length === 0) {
+    logConnect('notification:switch-missing', { serverId });
+    return 'unavailable';
+  }
+  connectionSelectionGeneration += 1;
+  if (connections.some((connection) => secureTokenKeyOf(connection) === getRuntimeKey())) return 'active';
+  const selectionGeneration = connectionSelectionGeneration;
+  notificationSwitchCount += 1;
+  try {
+    for (const connection of connections) {
+      if (selectionGeneration !== connectionSelectionGeneration) return 'unavailable';
+      const outcome = await connectSavedConnection(connection, {
+        fast: false,
+        selectionGeneration,
+        allowDuringNotificationSwitch: true,
+        expectedServerId: serverId,
+      });
+      logConnect('notification:switch', { serverId, status: outcome.status });
+      if (outcome.status === 'connected') return 'switched';
+    }
+    return 'unavailable';
+  } finally {
+    notificationSwitchCount = Math.max(0, notificationSwitchCount - 1);
+  }
 };
 
 export const validateMobileConnectionSession = async (input: {
@@ -1086,7 +1075,7 @@ const releaseLiveTransport = (transport: LiveTransport | null, adopted: boolean)
 const sameHostKey = (left: JsonWebKey, right: JsonWebKey): boolean =>
   left.kty === right.kty && left.crv === right.crv && left.x === right.x && left.y === right.y;
 
-const connectedRuntimeTunnelFor = (relay: MobileRelayConfig): ReturnType<typeof createRelayTunnelClient> | null => {
+export const connectedRuntimeTunnelFor = (relay: MobileRelayConfig): ReturnType<typeof createRelayTunnelClient> | null => {
   const tunnel = getActiveRelayTunnel();
   const active = getActiveRelayDescriptor();
   if (!tunnel || !active || tunnel.getStatus().state !== 'connected') return null;
@@ -1187,12 +1176,14 @@ export const isActiveRuntimeConnection = (connection: MobileSavedConnection): bo
 type ReprobeOutcome = 'switched' | 'unchanged' | 'unreachable' | 'relay-limit' | 'needs-login' | 'no-connection';
 
 export const reprobeActiveConnection = async (options?: { fast?: boolean }): Promise<ReprobeOutcome> => {
+  if (notificationSwitchCount > 0) return 'unchanged';
   const fast = options?.fast !== false;
   const active = findActiveConnection();
   if (!active) {
     logConnect('reprobe:no-connection', { runtimeKey: Boolean(getRuntimeKey()) });
     return 'no-connection';
   }
+  const selectionGeneration = connectionSelectionGeneration;
 
   let token: string | undefined;
   if (isCapacitorApp()) {
@@ -1220,8 +1211,12 @@ export const reprobeActiveConnection = async (options?: { fast?: boolean }): Pro
   const better = await probeConnectionCandidates(higher, token, { fast, requestHeaders });
   logConnect('reprobe:better', { status: better.status, probed: higher.length });
   if (better.status === 'ok') {
+    if (selectionGeneration !== connectionSelectionGeneration || notificationSwitchCount > 0) {
+      if (better.transport.kind === 'relay') releaseHeldRelayTunnel(better.transport.tunnel);
+      return 'unchanged';
+    }
     try {
-      await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates });
+      await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates, pushServerId: directServerIdOf(better.transport) });
     } catch {
       if (better.transport.kind === 'relay') releaseHeldRelayTunnel(better.transport.tunnel);
       return 'unreachable';
@@ -1245,8 +1240,12 @@ export const reprobeActiveConnection = async (options?: { fast?: boolean }): Pro
   const fallback = await probeConnectionCandidates(lower, token, { fast, requestHeaders });
   logConnect('reprobe:fallback', { status: fallback.status, probed: lower.length });
   if (fallback.status === 'ok') {
+    if (selectionGeneration !== connectionSelectionGeneration || notificationSwitchCount > 0) {
+      if (fallback.transport.kind === 'relay') releaseHeldRelayTunnel(fallback.transport.tunnel);
+      return 'unchanged';
+    }
     try {
-      await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates });
+      await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates, pushServerId: directServerIdOf(fallback.transport) });
     } catch {
       if (fallback.transport.kind === 'relay') releaseHeldRelayTunnel(fallback.transport.tunnel);
       return 'unreachable';
@@ -1454,7 +1453,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       if (token && tokenIsNew && isCapacitorApp()) {
         await writeSecureToken(tokenKey, token);
       }
-      await persistMetadata({ id: saved?.id, label, candidates, clientToken: token, requestHeaders: headerUpdate });
+      await persistMetadata({ id: saved?.id, label, candidates, clientToken: token, pushServerId: directServerIdOf(result.transport), requestHeaders: headerUpdate });
       switchToTransport(result.transport, token ?? null, { runtimeKey: tokenKey, grant, requestHeaders });
       heldTunnel = undefined;
       onConnected();
@@ -1588,7 +1587,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
 
       if (!issuedToken) {
         if (chosen.kind === 'direct' && !isCapacitorApp()) {
-          await persistMetadata({ id, label, candidates });
+          await persistMetadata({ id, label, candidates, pushServerId: chosen.serverId });
           if (!isCurrentOperation()) return;
           setPendingConnection(null);
           switchToTransport({ kind: 'direct', url: chosen.url }, null, { runtimeKey: tokenKey, requestHeaders });
@@ -1605,7 +1604,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         if (!isCurrentOperation()) return;
       }
       if (!isCurrentOperation()) return;
-      await persistMetadata({ id, label, candidates, clientToken: issuedToken });
+      await persistMetadata({ id, label, candidates, clientToken: issuedToken, pushServerId: chosen.kind === 'direct' ? chosen.serverId : undefined });
       if (!isCurrentOperation()) return;
       setPendingConnection(null);
       switchToTransport(

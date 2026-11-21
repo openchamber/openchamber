@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { OPENCODE_CONFIG_DIR, OPENCODE_DATA_DIR } from './opencodeConfigPaths';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fetchOpenCodeGoUsage, OPENCODE_GO_KEY_EXPIRED, type OpenCodeGoApiKeyCredential, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
+import { fetchOpenCodeGoUsage, isOpenCodeGoKeyRefusal, OPENCODE_GO_KEY_EXPIRED, type OpenCodeGoApiKeyCredential, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
 import { fetchOpenCodeZenUsage, type OpenCodeZenCredential } from '../../web/server/lib/quota/providers/opencode-zen.js';
 import { fetchMistralUsage } from '../../web/server/lib/quota/providers/mistral-billing.js';
 import { deleteLegacyOllamaCloudCredential, deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
@@ -436,14 +436,11 @@ const openCodeGoConsoleCredential = (auth: AuthFile): OpenCodeGoConsoleCredentia
   return { accessToken, orgID, expires, label: asNonEmptyString(entry.label) };
 };
 
-const openCodeGoApiKey = (auth: AuthFile): OpenCodeGoApiKeyCredential | null => {
-  const own = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
-  const ownKey = asNonEmptyString(own?.key) ?? asNonEmptyString(own?.token);
-  if (ownKey) return { apiKey: ownKey, consoleKey: false, label: asNonEmptyString(own?.label) };
-  const consoleEntry = normalizeAuthEntry(getAuthEntry(auth, ['opencode']));
-  if (!consoleEntry || consoleEntry.type === 'oauth') return null;
-  const consoleKey = asNonEmptyString(consoleEntry.key) ?? asNonEmptyString(consoleEntry.token);
-  return consoleKey ? { apiKey: consoleKey, consoleKey: true, label: asNonEmptyString(consoleEntry.label) } : null;
+const openCodeGoKey = (auth: AuthFile, integrationID: 'opencode' | 'opencode-go'): OpenCodeGoApiKeyCredential | null => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, [integrationID]));
+  if (!entry || entry.type === 'oauth') return null;
+  const apiKey = asNonEmptyString(entry.key) ?? asNonEmptyString(entry.token);
+  return apiKey ? { apiKey, consoleKey: integrationID === 'opencode', label: asNonEmptyString(entry.label) } : null;
 };
 
 const openCodeZenCredential = (auth: AuthFile): OpenCodeZenCredential | null => {
@@ -817,7 +814,7 @@ const collectKimiApiKeys = (auth: AuthFile): { apiKey: string; endpoint: string 
 export const listConfiguredQuotaProviders = async () => {
   const auth = await readOpenCodeCredentials();
   const configured = new Set<string>();
-  if (openCodeGoApiKey(auth) || openCodeGoConsoleCredential(auth)) configured.add('opencode-go');
+  if (openCodeGoKey(auth, 'opencode-go') || openCodeGoKey(auth, 'opencode') || openCodeGoConsoleCredential(auth)) configured.add('opencode-go');
   if (openCodeZenCredential(auth)) configured.add('opencode');
   if (readCredential('cursor')) configured.add('cursor');
   if (readCredential('exe-dev')) configured.add('exe-dev');
@@ -4147,15 +4144,16 @@ const fetchOpenCodeGoQuota = async (): Promise<ProviderResult> => {
   try {
     deleteLegacyOpenCodeGoCredential();
     const auth = await readOpenCodeCredentials();
-    const consoleCredential = openCodeGoConsoleCredential(auth);
-    const apiKey = openCodeGoApiKey(auth);
+    const consoleCredential = openCodeGoConsoleCredential(auth) ?? openCodeGoKey(auth, 'opencode');
+    const apiKey = openCodeGoKey(auth, 'opencode-go');
     let consoleFailure: Error | null = null;
     if (consoleCredential) {
       try {
         return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(consoleCredential) }, accountLabel: consoleCredential.label });
       } catch (consoleError) {
-        if (!apiKey) throw consoleError;
-        consoleFailure = consoleError instanceof Error ? consoleError : new Error('Request failed');
+        const consoleKey = 'apiKey' in consoleCredential;
+        if (!apiKey || (consoleKey && !isOpenCodeGoKeyRefusal(consoleError))) throw consoleError;
+        if (!consoleKey) consoleFailure = consoleError instanceof Error ? consoleError : new Error('Request failed');
       }
     }
     if (!apiKey) return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: false, error: 'Not configured' });

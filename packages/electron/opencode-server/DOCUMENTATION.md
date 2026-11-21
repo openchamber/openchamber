@@ -9,7 +9,7 @@ The web server owns starting and stopping it. `lib/opencode/env-runtime.js` reso
 - `serve.mjs`: the entry. Answers `--version` without loading OpenCode, refuses every command but `serve`, sets the native paths, then loads the server. It runs as a bundle; the bundler defines `__OPENCODE_SERVER_VERSION__` from the pinned `@opencode/server` version.
 - `args.mjs`: the command line, `serve [--stdio] [--hostname] [--port] [--cors]...` and `--version`.
 - `assets.mjs`: points OpenCode at the staged natives (`OPENCODE_NODE_PTY_PATH`, `OPENCODE_PARCEL_WATCHER_PATH`, `OPENCODE_PHOTON_WASM_PATH`, `FFF_BINARY_PATH`, `OPENCODE_FFF_FFI_PATH`, `OPENCODE_PTY_BIN`) from `assets/manifest.json`.
-- `plugin-runtime.mjs`: publishes OpenCode's plugin SDK so plugins that import `@opencode/plugin` get the host's copy.
+- `plugin-runtime.mjs`: publishes OpenCode's plugin SDK so plugins that import `@opencode/plugin` get the host's copy, and strips `.ts` and `.mts` plugin entrypoints that Node refuses to load from `node_modules`.
 - `server.mjs`: `opencode serve` in `default` and `stdio` modes. Service mode, the upstream web UI and the remote tunnel remain outside the desktop's server contract.
 
 ## Invariants
@@ -56,6 +56,16 @@ FFF reports itself unavailable without its native binding, and OpenCode falls ba
 ### Why plugins resolve the host's SDK
 
 User-installed plugins can import `@opencode/plugin` without a copy installed beside them. Following OpenCode's Node build, the server publishes its Promise and Effect SDKs on `globalThis` and resolves plugin SDK specifiers to modules that re-export those copies.
+
+### Why the loader strips TypeScript plugin entrypoints
+
+OpenCode imports a plugin from its installed package, and npm plugins commonly publish a `.ts` entrypoint under `~/.cache/opencode/npm/.../node_modules/`, where Node refuses to strip types (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`). In 2.7.2 the same import went through Bun, which transpiles TypeScript anywhere, so this regressed when the desktop switched to OpenCode's server on Electron's Node. For a `file:` URL whose path has a `node_modules` segment and ends in `.ts` or `.mts`, the loader reads the file, strips its types with `stripTypeScriptTypes` and returns it as a module, which bypasses the restriction without moving the plugin out of the folder OpenCode resolves it from. Every other URL, including a local TypeScript plugin outside `node_modules`, goes to Node's default loader and keeps its package format.
+
+Installed packages still hit three limits, all gaps against Bun rather than regressions against 2.7.3:
+
+- A `.ts` entry under `node_modules` always loads as a module, so a CommonJS-syntax `.ts` plugin fails.
+- A `.cts` entry fails: Node's CommonJS loader strips types again by file extension and refuses the path, whatever source a hook returns.
+- The strip mode does not transform, so a plugin using an enum, a runtime namespace or a constructor parameter property fails to load.
 
 ### Why both Claude Code flags gate the same roots
 

@@ -240,6 +240,43 @@ describe('OpenCode Go quota provider (VS Code parity)', () => {
     });
   });
 
+  // #6679: OpenCode sends Go requests with the Console card's key whenever its workspace has Go.
+  test('prefers a key on the Console integration over the OpenCode Go key, which stays the fallback', async () => {
+    configureOpenCodeCredentials({ list: async () => [key('opencode', 'console'), key('opencode-go', 'go')] });
+    try {
+      stubFetchReturning(async () => mockResponse({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } }));
+      assert.equal((await fetchQuotaForProvider('opencode-go')).accountLabel, 'console');
+
+      let reads = 0;
+      stubFetchReturning(async (url) => {
+        if (url.includes('/console/')) return mockResponse({}, { ok: false, status: 403 });
+        reads += 1;
+        return reads === 1
+          ? mockResponse({}, { ok: false, status: 403 })
+          : mockResponse({ usage: { rolling: { percent: 10, resetsAt: '2026-08-12T12:00:00.000Z' } } });
+      });
+      const fallback = await fetchQuotaForProvider('opencode-go');
+      assert.equal(fallback.ok, true);
+      assert.equal(fallback.accountLabel, 'go');
+      assert.equal(fallback.usage!.windows['5h']!.usedPercent, 10);
+
+      reads = 0;
+      stubFetchReturning(async (url) => {
+        if (url.includes('/console/')) return mockResponse({}, { ok: false, status: 403 });
+        reads += 1;
+        return reads === 1
+          ? mockResponse({}, { ok: false, status: 403 })
+          : mockResponse({ error: { type: 'authentication_error', code: 'api_key_expired' } }, { ok: false, status: 401 });
+      });
+      assert.equal((await fetchQuotaForProvider('opencode-go')).error, 'OpenCode Go key expired. Connect an OpenCode Console account on the OpenCode card in Providers.');
+
+      stubFetchReturning(async () => mockResponse({}, { ok: false, status: 503 }));
+      assert.equal((await fetchQuotaForProvider('opencode-go')).error, 'OpenCode Go usage API returned HTTP 503');
+    } finally {
+      configureOpenCodeCredentials({ list: async () => baseCredentialList() });
+    }
+  });
+
   // #5278: the usage API floors its percent, so 17.657% came back as 17 while
   // the Console page showed 18.
   test('reads the exact Console meters with an API key, without an organization', async () => {

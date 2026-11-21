@@ -45,11 +45,12 @@ interface DiffViewComparisonsOptions {
     visible: boolean;
     onDiffScopeChange: DiffViewProps['onDiffScopeChange'];
     diffScope: DiffScope | null;
+    turnId?: string;
 }
 
 export function useDiffViewComparisons({
     currentSessionId, rootDirectory, visible, activeDiffScope, status, effectiveDirectory, binding, setActiveDiffScope,
-    onDiffScopeChange, fetchBranches, git, isGitRepo, diffScope, expandedFiles, t,
+    onDiffScopeChange, fetchBranches, git, isGitRepo, diffScope, turnId, expandedFiles, t,
 }: DiffViewComparisonsOptions) {
     const {
         diffs: lastTurnDiffs,
@@ -58,7 +59,7 @@ export function useDiffViewComparisons({
         settled: turnDiffSettled,
         error: turnDiffError,
         retry: retryTurnDiff,
-    } = useLastTurnDiff(currentSessionId, rootDirectory ?? undefined, { enabled: visible, live: activeDiffScope === 'turn' });
+    } = useLastTurnDiff(currentSessionId, rootDirectory ?? undefined, { enabled: visible, live: activeDiffScope === 'turn', from: activeDiffScope === 'turn' ? turnId : undefined });
 
     const lastTurnDiffData = React.useMemo(() => {
         const map = new Map<string, DiffData>();
