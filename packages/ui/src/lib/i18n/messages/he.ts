@@ -3491,6 +3491,8 @@ export const dict = {
   'markdownRenderer.code.actions.disableWrapTitle': 'השבת גלישת שורות',
   'markdownRenderer.table.actions.enableWrapTitle': 'הפעל גלישה בתאים',
   'markdownRenderer.table.actions.disableWrapTitle': 'השבת גלישה בתאים',
+  'markdownRenderer.table.actions.expandTitle': 'הרחב את הטבלה לרוחב הצ׳אט',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': 'התאם את הטבלה לרוחב ההודעה',
   'markdownRenderer.table.actions.downloadTitle': 'הורד טבלה',
   'markdownRenderer.table.toast.downloadedAsFormat': 'הטבלה הורדה כ-{format}',
   'markdownRenderer.mermaid.actions.copyTitle': 'העתק',

@@ -3588,6 +3588,8 @@ export const dict = {
   'markdownRenderer.code.actions.disableWrapTitle': 'Disable line wrap',
   'markdownRenderer.table.actions.enableWrapTitle': 'Enable cell wrap',
   'markdownRenderer.table.actions.disableWrapTitle': 'Disable cell wrap',
+  'markdownRenderer.table.actions.expandTitle': 'Expand table to chat width',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': 'Fit table to message width',
   'markdownRenderer.table.actions.downloadTitle': 'Download table',
   'markdownRenderer.table.toast.downloadedAsFormat': 'Table downloaded as {format}',
   'markdownRenderer.mermaid.actions.copyTitle': 'Copy',

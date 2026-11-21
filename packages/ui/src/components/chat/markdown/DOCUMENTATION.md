@@ -49,6 +49,7 @@ This module owns shared Markdown parsing, sanitization, presentation, code highl
 - Whole-document readers such as find and heading navigation hold all blocks mounted. Selections retain their ends and mount every block when they cross placeholders, otherwise copying would read empty boxes. Detaching releases selection holds because the collapse event will no longer be observed; synchronous holds run only from event handlers and are effective only after the window attaches.
 - User-toggled disclosures and playing media stay mounted to preserve state and playback position. Summary clicks identify user changes because `toggle` also fires when an open disclosure is inserted.
 - Tables measure only after streaming settles to avoid a forced layout on every update. Capped-column flags and their shared map change only with content or cap status, since rebuilding the map during resize rerenders every cell. Table copies preserve already escaped links without escaping them again.
+- Only settled, top-level assistant tables in the main transcript can expand. Each table keeps its own toggle and measures the nearest chat scroller that contains it, so retained timelines cannot read another session's scroller. Expansion widens only the table's scroll area inside the message gutters, anchored to the chat panel whatever the table's own text direction; tables inside quotes, list items or disclosures, prose, sibling tables, toolbar placement, exports, and other Markdown surfaces keep their existing measure. Settled chat tables show inline-edge fades while that side has hidden columns, even when collapsed. An expanded table records its message-width column widths, so the message image export, which clones the live DOM, draws it collapsed and without fades.
 - Header measurement preserves rendered cell styles and the longest unbroken word. Short columns keep natural width; once horizontal scrolling is required, squeezing long text to the minimum only makes cells taller.
 - Diff parsing loads only for settled, bounded patches. Headerless model snippets receive parser-only coordinates; copy retains the original source. Suggestion fences use review context and its excerpt, show additions when no excerpt exists, and stay ordinary code outside a review comment; an empty hunk side names the preceding line.
 
@@ -94,6 +95,14 @@ Highlights runs on the main thread so synchronous consumers can paint highlighte
 ### Why heading-based table identity and not an order number
 
 Persisted table widths use headings for identity because inserting a preceding table changes ordinal positions.
+
+### Why table expansion widens the scroller and not the Markdown root
+
+The expanded scroller can use the transcript's spare width without changing the message column's measure. Its toolbar stays anchored to that column, and the prose and other tables keep their existing layout. A right-to-left table's frame grows leftward from its own start edge, so its offset is measured from that edge; a direction change remeasures, because no size an observer sees changes with it.
+
+### Why nested tables keep the message-width layout
+
+A table inside a Markdown quote, list item or disclosure stays within that container's indentation. Only a top-level assistant table can reach into spare transcript width; chat tables in either state still show fades for hidden columns.
 
 ### Why document windowing and not mounting the whole document
 

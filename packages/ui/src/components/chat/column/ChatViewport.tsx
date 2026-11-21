@@ -2,6 +2,7 @@ import React from 'react';
 import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
 import type { Message, Part } from '@/lib/opencode/model';
 import { ChatColumnSessionContext, type ChatColumnSession } from '../chatColumnSession';
+import { ChatTranscriptContext } from './ChatTranscriptContext';
 import { Button } from '@/components/ui/button';
 import { KeepAlive } from '@/components/ui/KeepAlive';
 import MessageList, { type MessageListHandle } from '../MessageList';
@@ -37,6 +38,7 @@ type ChatViewportProps = {
     isDesktopExpandedInput: boolean;
     isMobile: boolean;
     formsInChat: boolean;
+    tableExpansion: boolean;
     floatingComposer: boolean;
     statusRowClearance: number;
     directory?: string;
@@ -78,6 +80,7 @@ export const ChatViewport = React.memo(({
     isDesktopExpandedInput,
     isMobile,
     formsInChat,
+    tableExpansion,
     floatingComposer,
     statusRowClearance,
     directory,
@@ -217,30 +220,32 @@ export const ChatViewport = React.memo(({
                         capacity={retainedTimelines()}
                         onBeforeHide={captureOutgoingPosition}
                     >
-                        <ChatColumnSessionContext.Provider value={session}>
-                            <MessageList
-                                key={currentSessionKey}
-                                ref={messageListRef}
-                                sessionKey={currentSessionId}
-                                messages={renderedMessages}
-                                sessionIsWorking={sessionIsWorking}
-                                activeStreamingMessageId={streamingMessageId}
-                                activeStreamingPhase={activeStreamingPhase}
-                                retryOverlay={retryOverlay}
-                                isLoadingOlder={isLoadingOlder}
-                                scrollToBottom={scrollToBottom}
-                                endPinningReleased={endPinningReleased}
-                                directory={directory}
-                                registerList={registerSessionList}
-                                composerOverlayHeight={0}
-                                onIsAtEndChange={onIsAtEndChange}
-                                onListMetricsChange={onListMetricsChange}
-                                onTimelineDataChange={onTimelineDataChange}
-                                listHeader={listHeader}
-                                listFooter={listFooter}
-                                scrollContainerProps={scrollContainerProps}
-                            />
-                        </ChatColumnSessionContext.Provider>
+                        <ChatTranscriptContext.Provider value={tableExpansion}>
+                            <ChatColumnSessionContext.Provider value={session}>
+                                <MessageList
+                                    key={currentSessionKey}
+                                    ref={messageListRef}
+                                    sessionKey={currentSessionId}
+                                    messages={renderedMessages}
+                                    sessionIsWorking={sessionIsWorking}
+                                    activeStreamingMessageId={streamingMessageId}
+                                    activeStreamingPhase={activeStreamingPhase}
+                                    retryOverlay={retryOverlay}
+                                    isLoadingOlder={isLoadingOlder}
+                                    scrollToBottom={scrollToBottom}
+                                    endPinningReleased={endPinningReleased}
+                                    directory={directory}
+                                    registerList={registerSessionList}
+                                    composerOverlayHeight={0}
+                                    onIsAtEndChange={onIsAtEndChange}
+                                    onListMetricsChange={onListMetricsChange}
+                                    onTimelineDataChange={onTimelineDataChange}
+                                    listHeader={listHeader}
+                                    listFooter={listFooter}
+                                    scrollContainerProps={scrollContainerProps}
+                                />
+                            </ChatColumnSessionContext.Provider>
+                        </ChatTranscriptContext.Provider>
                     </KeepAlive>
                     <div aria-hidden="true" className="chat-scroll-fade chat-scroll-fade--top" />
                     <div
@@ -281,6 +286,7 @@ export const ChatViewport = React.memo(({
         && prev.isDesktopExpandedInput === next.isDesktopExpandedInput
         && prev.isMobile === next.isMobile
         && prev.formsInChat === next.formsInChat
+        && prev.tableExpansion === next.tableExpansion
         && prev.floatingComposer === next.floatingComposer
         && prev.statusRowClearance === next.statusRowClearance
         && prev.directory === next.directory

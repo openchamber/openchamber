@@ -3041,6 +3041,8 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.disableWrapTitle': 'Wyłącz zawijanie wierszy',
   'markdownRenderer.table.actions.enableWrapTitle': 'Włącz zawijanie komórek',
   'markdownRenderer.table.actions.disableWrapTitle': 'Wyłącz zawijanie komórek',
+  'markdownRenderer.table.actions.expandTitle': 'Rozszerz tabelę do szerokości czatu',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': 'Dopasuj tabelę do szerokości wiadomości',
   'markdownRenderer.table.actions.downloadTitle': 'Pobierz tabelę',
   'markdownRenderer.table.toast.downloadedAsFormat': 'Tabela została pobrana jako {format}',
   'memoryDebugPanel.actions.copyJson': 'Kopiuj JSON',

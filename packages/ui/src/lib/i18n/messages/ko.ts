@@ -3588,6 +3588,8 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.disableWrapTitle': '줄 바꿈 끄기',
   'markdownRenderer.table.actions.enableWrapTitle': '셀 줄 바꿈 켜기',
   'markdownRenderer.table.actions.disableWrapTitle': '셀 줄 바꿈 끄기',
+  'markdownRenderer.table.actions.expandTitle': '표를 채팅 너비로 확장',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': '표를 메시지 너비에 맞추기',
   'markdownRenderer.table.actions.downloadTitle': '표 다운로드',
   'markdownRenderer.table.toast.downloadedAsFormat': '{format} 형식으로 다운로드됨',
   'markdownRenderer.mermaid.actions.copyTitle': '복사',

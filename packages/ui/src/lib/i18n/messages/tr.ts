@@ -3392,6 +3392,8 @@ export const dict = {
   'markdownRenderer.code.actions.disableWrapTitle': 'Satır kaydırmayı devre dışı bırak',
   'markdownRenderer.table.actions.enableWrapTitle': 'Hücre kaydırmayı etkinleştir',
   'markdownRenderer.table.actions.disableWrapTitle': 'Hücre kaydırmayı devre dışı bırak',
+  'markdownRenderer.table.actions.expandTitle': 'Tabloyu sohbet genişliğine genişlet',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': 'Tabloyu mesaj genişliğine sığdır',
   'markdownRenderer.table.actions.downloadTitle': 'Tabloyu indir',
   'markdownRenderer.table.toast.downloadedAsFormat': 'Tablo {format} olarak indirildi',
   'markdownRenderer.mermaid.actions.copyTitle': 'Kopyala',

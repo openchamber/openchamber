@@ -272,6 +272,7 @@ export interface MarkdownContentProps {
   onShowPopup?: (content: ToolPopupContent) => void;
   mermaidControls?: MermaidControls;
   purpose?: 'copy' | 'image';
+  chatTableExpansion?: boolean;
   theme?: Theme;
   preparedHighlights?: ReadonlyMap<string, ReadonlyMap<string, HighlightResult>>;
   onExportCode?: (source: string, language: string) => void;
@@ -305,6 +306,7 @@ export function MarkdownContent({
   onShowPopup,
   mermaidControls = defaultMermaidControls,
   purpose,
+  chatTableExpansion = false,
   theme: exportTheme,
   preparedHighlights,
   onExportCode,
@@ -435,6 +437,7 @@ export function MarkdownContent({
     disableLinkSafety,
     guestLinks: activeGuestLinks,
     tableWidthScope,
+    chatTableExpansion: chatTableExpansion && variant === 'assistant' && !purpose,
     theme,
     mermaidControls,
     onShowPopup,
@@ -443,7 +446,7 @@ export function MarkdownContent({
     confirmFile,
     code,
   }), [
-    directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, uiBlocks, svgFences, sessionId, messageId, disableLinkSafety, activeGuestLinks, tableWidthScope, theme,
+    directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, uiBlocks, svgFences, sessionId, messageId, disableLinkSafety, activeGuestLinks, tableWidthScope, chatTableExpansion, variant, theme,
     mermaidControls, onShowPopup, onExportCode, preparedHighlights, confirmFile, code,
   ]);
 
@@ -560,6 +563,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
       isStreaming={isStreaming}
       variant={variant}
       className={className}
+      chatTableExpansion={variant === 'assistant'}
       directory={directory}
       settled={!isStreaming}
       sessionId={settledPart?.sessionID}

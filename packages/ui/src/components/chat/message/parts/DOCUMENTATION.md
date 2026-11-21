@@ -372,6 +372,13 @@ or font changes require fresh measurement. Inline code wraps only in capped
 columns. This preserves the previous sizing policy without a document-wide
 decorator or imperative colgroup replacement.
 
+Settled assistant tables at the top level of the main transcript can widen
+their scroller into spare chat width; pinned columns keep the message width.
+A table reads the nearest scroller that contains it, so retained timelines
+cannot borrow another session's viewport. Tables in quotes, list items and
+disclosures keep their message-width layout. Chat tables show edge fades for
+hidden columns while collapsed; non-chat Markdown previews do not.
+
 Code copy/wrap buttons remain visible without hover. File navigation is enabled
 only for settled content with file references enabled; mobile keeps navigation
 while skipping filesystem probes. Selection-ending clicks are consumed without

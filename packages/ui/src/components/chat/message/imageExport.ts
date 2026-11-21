@@ -86,6 +86,34 @@ export const cloneMessageImageExportSource = (source: HTMLElement): HTMLElement 
     return clone;
 };
 
+export const collapseMessageImageExportTables = (clone: HTMLElement): void => {
+    clone.querySelectorAll<HTMLElement>('[data-streamdown="table-wrapper"]').forEach((wrapper) => {
+        delete wrapper.dataset.chatTable;
+        delete wrapper.dataset.tableOverflowStart;
+        delete wrapper.dataset.tableOverflowEnd;
+        if (wrapper.dataset.tableExpanded !== 'true') return;
+        delete wrapper.dataset.tableExpanded;
+        const table = wrapper.querySelector<HTMLTableElement>('[data-streamdown="table"]');
+        const frame = table?.closest<HTMLElement>('.overlay-scrollbar-wrapper');
+        if (frame && wrapper.contains(frame)) {
+            frame.style.removeProperty('transform');
+            frame.style.removeProperty('width');
+        }
+        const widths = table?.dataset.collapsedWidths?.split(',').map(Number);
+        if (!table || !widths?.length || widths.some((width) => !Number.isFinite(width))) return;
+        const capped = table.dataset.collapsedCapped ?? '';
+        table.style.width = `${widths.reduce((sum, width) => sum + width, 0)}px`;
+        table.querySelectorAll<HTMLElement>(':scope > colgroup > col').forEach((col, index) => {
+            if (widths[index] !== undefined) col.style.width = `${widths[index]}px`;
+        });
+        table.querySelectorAll<HTMLTableRowElement>('tr').forEach((row) => {
+            Array.from(row.cells).forEach((cell, index) => {
+                cell.style.setProperty('--oc-table-code-wrap', capped[index] === '1' ? 'normal' : 'nowrap');
+            });
+        });
+    });
+};
+
 export type MessageImageSaveResult = 'saved' | 'canceled';
 
 type VSCodeImageSavePayload = { saved?: boolean; canceled?: boolean; error?: string };
@@ -133,6 +161,7 @@ const prepareMessageImageClone = (source: HTMLElement): HTMLElement => {
         transform: none;
         contain: none;
     `;
+    collapseMessageImageExportTables(clone);
     clone.querySelectorAll<HTMLElement>('[data-code-wrap]').forEach((root) => {
         root.setAttribute('data-code-wrap', 'true');
     });
