@@ -83,3 +83,22 @@ describe('tray approval submenu', () => {
     expect(trayMenuKey(snapshotWith(permission('p1', false)))).toBe(oneOff);
   });
 });
+
+describe('tray usage submenu', () => {
+  const usageSnapshot = (account) => ({
+    instanceName: 'OpenChamber', sessions: [], approvals: [],
+    usage: { mode: 'usage', groups: [{ provider: 'OpenCode Go', account, status: null, rows: [{ label: '5h', value: '25%' }] }] },
+  });
+  const usageLabels = (snapshot) => buildTrayMenuTemplate(snapshot, { onAction: () => {}, statusIcons: {} })
+    .filter((row) => Array.isArray(row.submenu))
+    .flatMap((row) => row.submenu.map((item) => item.label));
+
+  test('names the account next to the provider', () => {
+    expect(usageLabels(usageSnapshot('outlook'))).toContain('OpenCode Go · outlook');
+    expect(usageLabels(usageSnapshot(null))).toContain('OpenCode Go');
+  });
+
+  test('the menu key changes when only the account changes, so a switch between accounts with equal meters shows', () => {
+    expect(trayMenuKey(usageSnapshot('outlook'))).not.toBe(trayMenuKey(usageSnapshot('solar tool')));
+  });
+});
