@@ -15,6 +15,7 @@ import { readConsoleBudgets, withConsoleBudgets, type ConsoleBudgets } from '../
 import { antigravityHeaders, warnIfGeminiGroupMissing } from '../../web/server/lib/quota/providers/antigravity/client.js';
 import { miniMaxStatusError } from '../../web/server/lib/quota/providers/minimax-status.js';
 import { readCodexCliLogin, signInEmailOf } from '../../web/server/lib/quota/providers/codex-cli.js';
+import { isUsageTimeout, requestCodexUsage, requestUsageWithDeadline, type UsageResponse } from './usageRequest';
 import { formatCredits } from '../../web/server/lib/quota/utils/formatters.js';
 import { fetchCursorSummaryWindow } from '../../web/server/lib/quota/providers/cursor-summary.js';
 
@@ -432,17 +433,17 @@ const openCodeGoConsoleCredential = (auth: AuthFile): OpenCodeGoConsoleCredentia
   const orgID = asNonEmptyString(entry.orgID);
   if (!accessToken || entry.server !== CONSOLE_SERVER || !orgID || !CONSOLE_ORGANIZATION_ID_PATTERN.test(orgID)) return null;
   const expires = toNumber(entry.expires);
-  return { accessToken, orgID, expires };
+  return { accessToken, orgID, expires, label: asNonEmptyString(entry.label) };
 };
 
 const openCodeGoApiKey = (auth: AuthFile): OpenCodeGoApiKeyCredential | null => {
   const own = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
   const ownKey = asNonEmptyString(own?.key) ?? asNonEmptyString(own?.token);
-  if (ownKey) return { apiKey: ownKey, consoleKey: false };
+  if (ownKey) return { apiKey: ownKey, consoleKey: false, label: asNonEmptyString(own?.label) };
   const consoleEntry = normalizeAuthEntry(getAuthEntry(auth, ['opencode']));
   if (!consoleEntry || consoleEntry.type === 'oauth') return null;
   const consoleKey = asNonEmptyString(consoleEntry.key) ?? asNonEmptyString(consoleEntry.token);
-  return consoleKey ? { apiKey: consoleKey, consoleKey: true } : null;
+  return consoleKey ? { apiKey: consoleKey, consoleKey: true, label: asNonEmptyString(consoleEntry.label) } : null;
 };
 
 const openCodeZenCredential = (auth: AuthFile): OpenCodeZenCredential | null => {
@@ -932,21 +933,10 @@ export const listConfiguredQuotaProviders = async () => {
   return Array.from(configured);
 };
 
-const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
 const codexErrorBodySchema = z.object({ error: z.object({ type: z.string() }) });
 
-const requestCodexUsage = (accessToken: string, accountId: string | null | undefined): Promise<Response> => fetch(CODEX_USAGE_URL, {
-  method: 'GET',
-  redirect: 'error',
-  headers: {
-    Authorization: `Bearer ${accessToken}`,
-    'Content-Type': 'application/json',
-    ...(accountId ? { 'ChatGPT-Account-Id': accountId } : {}),
-  },
-});
-
 // SAFETY: every field of the payload is read through toNumber/toTimestamp/asNonEmptyString, so a shape other than the one asserted yields no window rather than a wrong one.
-const codexUsagePayloadOf = (response: Response) => response.json() as Promise<OpenAiUsagePayload>;
+const codexUsagePayloadOf = (response: UsageResponse) => response.json() as Promise<OpenAiUsagePayload>;
 
 const codexUsageResult = (payload: OpenAiUsagePayload, accountLabel: string | null = null): ProviderResult => buildResult({
   providerId: 'codex',
@@ -965,10 +955,15 @@ const codexFailure = (error: string, configured = true): ProviderResult => build
   error,
 });
 
+const unlessTimedOut = (error: Error): null => {
+  if (isUsageTimeout(error)) throw error;
+  return null;
+};
+
 const codexUsageFromCli = async (): Promise<ProviderResult | null> => {
   const login = readCodexCliLogin();
   if (!login) return null;
-  const response = await requestCodexUsage(login.accessToken, login.accountId).catch(() => null);
+  const response = await requestCodexUsage(login.accessToken, login.accountId).catch(unlessTimedOut);
   if (!response?.ok) return null;
   const payload = await codexUsagePayloadOf(response);
   return codexUsageResult(payload, asNonEmptyString(payload?.email) ?? signInEmailOf(login.accessToken));
@@ -987,13 +982,14 @@ const fetchCodexQuota = async (): Promise<ProviderResult> => {
     if (response.ok) return codexUsageResult(await codexUsagePayloadOf(response));
     if (response.status !== 401) return codexFailure(`API error: ${response.status}`);
 
-    const body = codexErrorBodySchema.safeParse(await response.json().catch(() => null));
+    const body = codexErrorBodySchema.safeParse(await response.json().catch(unlessTimedOut));
     if (!body.success || body.data.error.type !== 'rejected_by_access_enforcement') {
       return codexFailure('Session expired \u2014 please re-authenticate with OpenAI');
     }
     return await codexUsageFromCli()
       ?? codexFailure('OpenAI shows usage for Sign in with ChatGPT only at chatgpt.com/settings/usage. The legacy Codex sign-ins show it here.');
   } catch (error) {
+    if (isUsageTimeout(error)) return codexFailure('Request timed out');
     return codexFailure(error instanceof Error ? error.message : 'Request failed');
   }
 };
@@ -1548,7 +1544,7 @@ let claudeCredentialFingerprint: string | null = null;
 let claudeCachedUsage: ProviderUsage | null = null;
 let claudeCooldownUntil = 0;
 
-const claudeCooldownFromResponse = (response: Response): number => {
+const claudeCooldownFromResponse = (response: UsageResponse): number => {
   const raw = response.headers.get('retry-after');
   const seconds = raw ? Number(raw) : Number.NaN;
   if (Number.isFinite(seconds) && seconds >= 0) {
@@ -1683,7 +1679,7 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
   if (Date.now() < claudeCooldownUntil) return buildClaudeRateLimitResult();
 
   try {
-    const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
+    const response = await requestUsageWithDeadline('https://api.anthropic.com/api/oauth/usage', {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -1737,12 +1733,13 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
       usage,
     });
   } catch (error) {
+    const timedOut = isUsageTimeout(error);
     return buildResult({
       providerId: 'claude',
       providerName: 'Claude',
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed',
+      error: timedOut ? 'Request timed out' : (error instanceof Error ? error.message : 'Request failed'),
     });
   }
 };
@@ -4155,7 +4152,7 @@ const fetchOpenCodeGoQuota = async (): Promise<ProviderResult> => {
     let consoleFailure: Error | null = null;
     if (consoleCredential) {
       try {
-        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(consoleCredential) } });
+        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(consoleCredential) }, accountLabel: consoleCredential.label });
       } catch (consoleError) {
         if (!apiKey) throw consoleError;
         consoleFailure = consoleError instanceof Error ? consoleError : new Error('Request failed');
@@ -4163,7 +4160,7 @@ const fetchOpenCodeGoQuota = async (): Promise<ProviderResult> => {
     }
     if (!apiKey) return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: false, error: 'Not configured' });
     try {
-      return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(apiKey) } });
+      return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(apiKey) }, accountLabel: apiKey.label });
     } catch (keyError) {
       throw consoleFailure && keyError instanceof Error && keyError.message === OPENCODE_GO_KEY_EXPIRED ? consoleFailure : keyError;
     }

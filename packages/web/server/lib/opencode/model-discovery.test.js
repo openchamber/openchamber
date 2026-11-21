@@ -195,18 +195,48 @@ describe('provider model discovery', () => {
           supports_tool_call: true,
         },
         { id: 'big-pickle', input_modalities: ['text'], supports_tool_call: false },
+        { id: 'tools-only', supports_tool_call: false },
       ] }), { status: 200 }),
     });
     expect(result.models).toEqual([
       expect.objectContaining({
         id: 'big-pickle',
-        capabilities: { input: ['text'], output: ['text'], tools: false },
+        capabilities: { input: ['text'], tools: false },
       }),
       expect.objectContaining({
         id: 'deepseek-v4.1-flash',
         limit: { context: 1_000_000, output: 128_000 },
-        capabilities: { input: ['text', 'image'], output: ['text'], tools: true },
+        capabilities: { input: ['text', 'image'], tools: true },
       }),
+      // Fields the provider leaves out stay unset, so the saved model inherits them.
+      expect.objectContaining({ id: 'tools-only', capabilities: { tools: false } }),
+    ]);
+  });
+
+  // The OpenCode inference API lists image input as MIME types; the custom
+  // provider form only saves the five modality categories.
+  test('reads MIME-typed modalities as their categories', async () => {
+    const result = await discoverProviderModels({ baseURL: 'https://provider.test', enrich: false }, {
+      fetch: async () => new Response(JSON.stringify({ data: [
+        {
+          id: 'deepseek-v4.1-flash',
+          modalities: { input: ['text', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'], output: ['text'] },
+        },
+      ] }), { status: 200 }),
+    });
+    expect(result.models[0].capabilities).toEqual({ input: ['text', 'image'], output: ['text'] });
+  });
+
+  test('keeps reported modalities that name no category as reported', async () => {
+    const result = await discoverProviderModels({ baseURL: 'https://provider.test', enrich: false }, {
+      fetch: async () => new Response(JSON.stringify({ data: [
+        { id: 'embedder', modalities: { input: ['  embedding  '], output: ['embedding'] } },
+        { id: 'empty', modalities: { input: [], output: [] } },
+      ] }), { status: 200 }),
+    });
+    expect(result.models).toEqual([
+      expect.objectContaining({ id: 'embedder', capabilities: { input: ['  embedding  '], output: ['embedding'] } }),
+      expect.objectContaining({ id: 'empty', capabilities: { input: [], output: [] } }),
     ]);
   });
 });

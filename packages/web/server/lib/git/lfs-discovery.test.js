@@ -115,6 +115,7 @@ describe('LFS publication discovery', () => {
     for (const records of [
       [['lfs.pushurl', 'ssh://git@example.com/storage']], [['lfs.pushurl', 'https://user:secret@example.com/storage']],
       [['lfs.customtransfer.bad.path', '/private/command']], [['lfs.standalonetransferagent', 'custom']],
+      [['lfs.pushurl', 'https://push.example/storage/']],
     ]) expect(() => resolveLfsPushConfig({ ...config, effectiveConfigOutput: configOutput(records) })).toThrow();
   });
 });

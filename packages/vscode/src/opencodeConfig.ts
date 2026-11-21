@@ -22,7 +22,7 @@ import { writeFileAtomic } from '../../web/server/lib/opencode/atomic-write.js';
 import { toLoadablePluginSpec } from '../../web/server/lib/opencode/loadable-plugin-spec.js';
 import { isGitSpec, isPluginControlSpec } from '../../web/server/lib/opencode/plugin-spec.js';
 import { mergeCustomProviderConfig, validateCustomProviderConfig } from '../../web/server/lib/opencode/providers.js';
-import { canonicalPluginPath, resolveLocalPluginPath } from '../../web/server/lib/opencode/plugin-paths.js';
+import { canonicalPluginPath, isExistingPluginFileName, pluginDirEntryKind, resolveLocalPluginPath } from '../../web/server/lib/opencode/plugin-paths.js';
 import {
   isPluginDenialOverridden,
   pluginPolicyResource,
@@ -719,7 +719,7 @@ const readConfigLayer = (filePath?: string | null): {
   }
 };
 
-const readConfigLayers = (workingDirectory?: string) => {
+export const readConfigLayers = (workingDirectory?: string) => {
   const { userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
   const userPath = getPrimaryUserConfigPath(userPaths);
   const userOverridePath = userPaths.find((candidate) => candidate !== userPath && fs.existsSync(candidate)) ?? null;
@@ -1547,8 +1547,8 @@ const getPluginFileTarget = (id: string, workingDirectory?: string): { scope: Pl
     throw codedError('Plugin file id must use file prefix', 'INVALID_FILENAME');
   }
   const { scope, rest } = parsePluginIdValue(decoded.value);
-  const fileName = validatePluginFileName(rest);
-  return { scope, fileName, filePath: path.join(getPluginDir(scope, workingDirectory), fileName) };
+  if (!isExistingPluginFileName(rest)) throw codedError('Plugin file name is invalid', 'INVALID_FILENAME');
+  return { scope, fileName: rest, filePath: path.join(getPluginDir(scope, workingDirectory), rest) };
 };
 
 export const listPluginDirFiles = (workingDirectory?: string, switchDirectory?: string): PluginFile[] => {
@@ -1563,10 +1563,10 @@ export const listPluginDirFiles = (workingDirectory?: string, switchDirectory?: 
     }
     if (!fs.existsSync(dir)) continue;
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (!entry.isFile()) continue;
+      const absolutePath = path.join(dir, entry.name);
+      if (pluginDirEntryKind(entry, absolutePath) !== 'file' || !isExistingPluginFileName(entry.name)) continue;
       try {
-        const fileName = validatePluginFileName(entry.name);
-        const absolutePath = path.join(dir, fileName);
+        const fileName = entry.name;
         const policyResource = `plugin:${absolutePath}`;
         const file: PluginFile = {
           id: encodePluginId('file', `${scope}:${fileName}`),
@@ -1603,7 +1603,7 @@ export const writePluginDirFile = (
   opts: { overwrite?: boolean } = {},
 ): void => {
   const scope = validatePluginScope(file.scope || 'user');
-  const fileName = validatePluginFileName(file.fileName);
+  const fileName = opts.overwrite && isExistingPluginFileName(file.fileName) ? file.fileName : validatePluginFileName(file.fileName);
   const filePath = path.join(getPluginDir(scope, workingDirectory), fileName);
   if (!opts.overwrite && fs.existsSync(filePath)) {
     throw codedError(`Plugin file "${fileName}" already exists`, 'FILE_EXISTS');
@@ -2682,14 +2682,14 @@ export const upsertProviderConfig = (
   scope: 'user' | 'project' | 'custom' = 'user',
   options: { hasStoredAuth?: boolean } = {},
 ) => {
-  const validated = validateCustomProviderConfig(providerId, config, options);
+  const layers = readConfigLayers(workingDirectory);
+  const validated = validateCustomProviderConfig(providerId, config, { ...options, layers });
   if (!validated.ok) {
     const error = new Error(validated.error) as Error & { statusCode?: number };
     error.statusCode = 400;
     throw error;
   }
 
-  const layers = readConfigLayers(workingDirectory);
   let targetPath: string | null | undefined = getUserProviderPath(layers, validated.value.providerId);
 
   if (scope === 'project') {

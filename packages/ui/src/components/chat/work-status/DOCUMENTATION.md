@@ -904,13 +904,21 @@ Selection rules live in `usageHeadline.ts` and are pinned by
 - provider ids are matched directly, with a small alias table for the ones that
   diverge from OpenCode's (`openai`/`chatgpt` → `codex`, `anthropic` → `claude`,
   `gemini` → `google`);
+- an extension's group is keyed `ext-<guestId>`, so a direct id can never be
+  one: when the direct match finds nothing, an extension whose
+  `contributes.quota.providers` is exactly the composer's provider id (no alias)
+  is taken instead. That list is a credential grant and a reply does not say
+  whose windows it reports, so an extension declaring several credentials stays
+  in the expanded list only. A declaring extension with no row that has a value
+  to show (a failed first read, a reset time without an amount) is skipped for the next one; a direct id match wins when both could
+  claim the provider, so a built-in keeps the headline it always had;
 - model-scoped rows are skipped while any provider-level row exists — a
   per-model quota is not the provider's;
 - rows without a window duration (credit balances, tool counters) are a last
   resort, never preferred over a real window;
-- **no match means no headline.** The section falls back to the display-mode
-  label, because showing an unmatched provider's quota would read as the active
-  one.
+- **no match in either place means no headline.** The section falls back to the
+  display-mode label, because showing an unmatched provider's quota would read
+  as the active one.
 
 ## Provider status line
 

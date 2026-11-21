@@ -1,6 +1,7 @@
 import React from 'react';
-import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
+import { useOnDemandComponent, useOnDemandValue } from '@/hooks/useOnDemandComponent';
 import { importWithChunkRecovery } from '@/lib/chunkLoadRecovery';
+import { loadProgramCheck, needsProgramCheck } from './taggedBlocks';
 
 export function onDemand<Props extends object>(load: () => Promise<React.ComponentType<Props>>) {
   let loaded: React.ComponentType<Props> | null = null;
@@ -19,3 +20,9 @@ export function onDemand<Props extends object>(load: () => Promise<React.Compone
 export const useUiBlockComponent = onDemand(() => import('./UiBlock').then((module) => module.UiBlock));
 
 export const useReplyUiBlockComponent = onDemand(() => import('./ReplyUiBlock').then((module) => module.ReplyUiBlock));
+
+const keepCode = () => undefined;
+
+export function useProgramCheck(text: string): void {
+  useOnDemandValue(needsProgramCheck(text), loadProgramCheck, keepCode);
+}

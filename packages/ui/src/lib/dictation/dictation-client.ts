@@ -14,6 +14,7 @@ export interface DictationStartOptions {
         model?: string;
         apiKey?: string;
         endpointPath?: string;
+        prompt?: string;
     };
 }
 

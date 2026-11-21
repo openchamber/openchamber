@@ -33,9 +33,10 @@ export const createWebSettingsAPI = (): SettingsAPI => ({
     };
   },
 
-  async save(changes: Partial<SettingsPayload>): Promise<SettingsPayload> {
+  async save(changes: Partial<SettingsPayload>, options?: { keepalive?: boolean }): Promise<SettingsPayload> {
     const response = await runtimeFetch(settingsEndpoint(), {
       method: 'PUT',
+      keepalive: options?.keepalive === true,
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',

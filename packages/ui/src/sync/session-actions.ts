@@ -2275,7 +2275,7 @@ export async function cancelForm(sessionId: string, formId: string, message?: st
       throw new Error("Form cancellation failed")
     }
     removeFormRequestFromChildStores(sessionId, formId)
-    if (message === undefined) noteLocalFormCancelled(sessionId, formId)
+    noteLocalFormCancelled(sessionId, formId, message)
   } catch (error) {
     if (isFormRequestNotFoundError(error)) {
       removeFormRequestFromChildStores(sessionId, formId)
@@ -2327,7 +2327,7 @@ export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text:
   const runtimeKey = getRuntimeKey()
   const isCurrentRuntime = captureRuntimeInstance()
   const deferred = question.evidence === "deferred-on-send"
-  await submitRecoveredAnswer(question.form.id, async () => {
+  await submitRecoveredAnswer(question.sessionID, question.form.id, async () => {
     const selection = recoveredAnswerSelection(question)
     await useSessionUIStore.getState().sendMessage(
       deferred ? `${DEFERRED_ANSWER_LEAD_IN}\n\n${text}` : text,

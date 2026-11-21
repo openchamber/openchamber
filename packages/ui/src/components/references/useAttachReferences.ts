@@ -43,7 +43,7 @@ export function useAttachReferences(
     }, [deps, onAttach, t]);
 }
 
-export function useReadReferenceLink(directory: string | null): (target: ReferenceLinkTarget) => Promise<ComposerReference> {
+export function useReadReferenceLink(directory: string | null): (target: ReferenceLinkTarget) => Promise<ComposerReference | null> {
     const deps = useReferenceResolveDeps(directory);
     return React.useCallback((target) => resolveReferenceLink(target, deps), [deps]);
 }

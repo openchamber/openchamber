@@ -19,6 +19,7 @@ import {
   parseSettingsDocument,
   readAutoSaveSnapshot,
 } from './registry';
+import { STT_PROMPT_MAX_LENGTH, readTranscriptionPrompt, setTranscriptionPrompt } from '@/stores/useTranscriptionPromptStore';
 import { renderSettingsRegistrySnapshot, SETTINGS_REGISTRY_SNAPSHOT_PATHS } from './registry-snapshot';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..');
@@ -423,4 +424,22 @@ test('the server\'s message search value replaces whatever the client remembered
   } finally {
     useUIStore.setState({ messageSearchEnabled: before });
   }
+});
+
+describe('transcription prompt setting', () => {
+  test('is a profile setting that keeps multiline Unicode text as typed and treats a missing key as unset', () => {
+    expect(SETTINGS_REGISTRY.sttPrompt.scope).toBe('profile');
+    const typed = 'Español e inglés.\nTérminos: 東京, OpenChamber\n';
+    expect(parseSettingsDocument({ sttPrompt: typed })).toEqual({ sttPrompt: typed });
+    expect(parseSettingsDocument({ sttPrompt: 'x'.repeat(STT_PROMPT_MAX_LENGTH + 1) })).toEqual({});
+    expect(parseSettingsDocument({ sttLanguage: 'es' })).toEqual({ sttLanguage: 'es' });
+  });
+
+  test('applies a synced prompt to the store the dictation reads', () => {
+    applySettingsToStores({ sttPrompt: 'Español e inglés.\n' });
+    expect(readTranscriptionPrompt()).toBe('Español e inglés.\n');
+    applySettingsToStores({});
+    expect(readTranscriptionPrompt()).toBe('Español e inglés.\n');
+    setTranscriptionPrompt('');
+  });
 });

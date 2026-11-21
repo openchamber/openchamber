@@ -301,6 +301,9 @@
     "sttLanguage": {
       "scope": "profile"
     },
+    "sttPrompt": {
+      "scope": "profile"
+    },
     "sttCorrectTranscript": {
       "scope": "profile"
     },

@@ -1,3 +1,4 @@
+import { normalizeGitRemoteEndpoint } from './credential-resolver.js';
 import { forkRemoteName } from './contributor-remote.js';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { asNonEmptyString } from '../shared/guards.js';
@@ -81,6 +82,27 @@ const worktreeInputForSource = (input: WorktreeCreationInput, source: ResolvedCh
   return result;
 };
 
+const withoutSystemHttpsUsername = (remoteUrl: string | undefined, transportMode: string | undefined) => {
+  if (transportMode !== 'system' || !remoteUrl) return remoteUrl;
+  let parsed;
+  try { parsed = new URL(remoteUrl); } catch { return remoteUrl; }
+  if (parsed.protocol !== 'https:' || !parsed.username || parsed.password) return remoteUrl;
+  parsed.username = '';
+  return parsed.href;
+};
+
+const matchesGitHubHeadRemote = (source: ResolvedChangeRequestSource, transportMode: string | undefined) => {
+  try {
+    const remote = normalizeGitRemoteEndpoint(withoutSystemHttpsUsername(source.remoteUrl, transportMode));
+    const head = normalizeGitRemoteEndpoint(source.endpoint);
+    return remote.host === source.context.instance && remote.host === head.host
+      && (remote.protocol === 'ssh' || (remote.protocol === 'https' && remote.port === head.port))
+      && remote.path.replace(/\.git$/, '').toLowerCase() === head.path.replace(/\.git$/, '').toLowerCase();
+  } catch {
+    return false;
+  }
+};
+
 const isSafeInteger = (value: unknown): value is number => Number.isSafeInteger(value);
 const hasErrorFields = (value: unknown): value is { code?: unknown; remoteName?: unknown } =>
   value !== null && value !== undefined;
@@ -144,15 +166,24 @@ export const createWorktreeCreation = ({
         'INVALID_REQUEST',
       );
     }
-    const authMethods = sourceControlProviderDescriptors.get(source.context.provider)?.authMethods;
+    const descriptor = sourceControlProviderDescriptors.get(source.context.provider);
+    const authMethods = descriptor?.authMethods;
     const cli = authMethods?.cli;
-    if (cli && cli.kind === 'service' && !authMethods.pat) {
+    const enterprisePrimary = source.context.provider === 'github'
+      && source.classification === 'same-repository'
+      && descriptor?.transport.managedHttpsInstances === 'default-only'
+      && !descriptor.instance.defaultInstances.includes(source.context.instance);
+    if (enterprisePrimary || (cli && cli.kind === 'service' && !authMethods.pat)) {
       if (source.classification !== 'same-repository') {
         throw new WorktreeCreationError('Service-login worktrees require a head in the primary remote repository', 501, 'RUNTIME_UNSUPPORTED');
       }
       if (!getSourceControlBinding) throw new TypeError('getSourceControlBinding is not a function');
       const { repository, binding } = await getSourceControlBinding(directory);
       const remote = source.context.primaryRemote;
+      const transportMode = binding ? binding.remotes.find((entry) => entry.name === remote)?.mode : 'system';
+      if (enterprisePrimary && !matchesGitHubHeadRemote(source, transportMode)) {
+        throw new WorktreeCreationError('The primary remote must point to the GitHub Enterprise pull request head repository', 409, 'RUNTIME_UNSUPPORTED');
+      }
       const planned = await networkOperations.plan({
         operation: 'fetch', directory,
         repositoryId: source.context.repositoryId,
@@ -162,7 +193,7 @@ export const createWorktreeCreation = ({
           displayUrl: redactRemoteUrl(source.remoteUrl),
           fingerprint: fingerprintRemoteUrl(source.remoteUrl),
         } },
-        transportMode: binding ? binding.remotes.find((entry) => entry.name === remote)?.mode : 'system',
+        transportMode,
         sourceRef: source.headRef, destinationRef,
       });
       const transfer = await networkOperations.execute(planned.operationId);

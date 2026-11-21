@@ -49,6 +49,13 @@ export function dropFormDraft(scope: FormDraftScope): void {
   formDrafts.delete(scopeKey(scope));
 }
 
+export function dropFormDraftsForRequest(runtimeKey: string, sessionID: string, formID: string): void {
+  for (const key of [...formDrafts.keys()]) {
+    const [draftRuntimeKey, , draftSessionID, draftFormID] = key.split('\u0000');
+    if (draftRuntimeKey === runtimeKey && draftSessionID === sessionID && draftFormID === formID) formDrafts.delete(key);
+  }
+}
+
 export function resetFormDrafts(): void {
   formDrafts.clear();
 }

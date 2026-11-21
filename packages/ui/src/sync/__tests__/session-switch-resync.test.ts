@@ -7,6 +7,7 @@ import type { FormRequest, PermissionRequest, ToolInput } from "@/lib/opencode/m
 const listPendingFormsCalls: Array<{ directories?: Array<string | null | undefined> }> = []
 const listPendingPermissionsCalls: Array<{ directories?: Array<string | null | undefined> }> = []
 let pendingFormsResponse: FormRequest[] = []
+let pendingFormsInFlight: Promise<FormRequest[]> | undefined
 let pendingPermissionsResponse: PermissionRequest[] = []
 let pendingFormsShouldThrow = false
 let pendingPermissionsShouldThrow = false
@@ -16,7 +17,7 @@ mock.module("@/lib/opencode/client", () => ({
     listPendingForms: mock(async (opts?: { directories?: Array<string | null | undefined> }) => {
       listPendingFormsCalls.push(opts ?? {})
       if (pendingFormsShouldThrow) throw new Error("form.list failed: simulated")
-      return pendingFormsResponse
+      return pendingFormsInFlight ?? pendingFormsResponse
     }),
     listPendingPermissions: mock(async (opts?: { directories?: Array<string | null | undefined> }) => {
       listPendingPermissionsCalls.push(opts ?? {})
@@ -24,6 +25,8 @@ mock.module("@/lib/opencode/client", () => ({
       return pendingPermissionsResponse
     }),
     getDirectory: () => "/repo",
+    getSession: async (id: string) => ({ id, directory: "/repo", title: id, time: { created: 1, updated: 1 } }),
+    cancelForm: async () => true,
     getScopedSdkClient: () => ({}),
     setDirectory: () => undefined,
   },
@@ -104,6 +107,17 @@ mock.module("@/components/ui", () => ({
 
 import { INITIAL_STATE, type State } from "../types"
 import { ChildStoreManager, type DirectoryStore } from "../child-store"
+import {
+  applyRecoverableQuestionEvents,
+  DEFERRED_QUESTION_NOTE,
+  deriveRecoveredQuestions,
+  noteLocalFormCancelled,
+  noteQuestionFormSnapshot,
+  resetRecoverableQuestions,
+  submitRecoveredAnswer,
+  useRecoverableQuestionsStore,
+} from "../recoverable-questions"
+import { cancelForm, deferQuestionsAfterSend, setActionRefs } from "../session-actions"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { sessionEvents } from "@/lib/sessionEvents"
 import { subscribeFileTreeChanges, type FileTreeChange } from "@/lib/fileTreeChanges"
@@ -151,9 +165,11 @@ describe("resyncBlockingRequestsForDirectory", () => {
     listPendingFormsCalls.length = 0
     listPendingPermissionsCalls.length = 0
     pendingFormsResponse = []
+    pendingFormsInFlight = undefined
     pendingPermissionsResponse = []
     pendingFormsShouldThrow = false
     pendingPermissionsShouldThrow = false
+    resetRecoverableQuestions()
     setActiveSession("", "")
   })
 
@@ -237,6 +253,106 @@ describe("resyncBlockingRequestsForDirectory", () => {
     await resyncBlockingRequestsForDirectory("/repo", store)
 
     expect(store.getState().form["ses_a"]).toEqual(undefined)
+  })
+
+  test("does not put back a form cancelled after the list resolved but before recovery applied it", async () => {
+    const form = buildForm({ id: "frm_cancelled" })
+    // Deliver the cancel at every microtask depth after the stale list resolves,
+    // so it lands in each gap between the read and the store update.
+    for (let depth = 0; depth < 12; depth += 1) {
+      const store = createDirectoryStore({ form: { ses_a: [form] } })
+      let releaseStaleList: (forms: FormRequest[]) => void = () => { throw new Error("Promise not initialized") }
+      pendingFormsInFlight = new Promise((resolve) => { releaseStaleList = resolve })
+      const recovery = resyncBlockingRequestsForDirectory("/repo", store)
+      releaseStaleList([form])
+      const cancel = (async () => {
+        for (let tick = 0; tick < depth; tick += 1) await Promise.resolve()
+        store.setState({ form: {} })
+        noteLocalFormCancelled(form.sessionID, form.id)
+      })()
+      await Promise.all([recovery, cancel])
+
+      expect({ depth, forms: store.getState().form.ses_a }).toEqual({ depth, forms: undefined })
+    }
+  })
+
+  test("keeps a pending form whose ID matches a question dismissed in another session", async () => {
+    const dismissed = buildForm({ metadata: { kind: "question", tool: { messageID: "msg_1", id: "tool_1" } } })
+    const pending = buildForm({ sessionID: "ses_b" })
+    noteQuestionFormSnapshot("/elsewhere", [dismissed])
+    noteLocalFormCancelled(dismissed.sessionID, dismissed.id)
+    const store = createDirectoryStore({ form: { ses_b: [pending] } })
+    pendingFormsResponse = [pending]
+
+    await resyncBlockingRequestsForDirectory("/repo", store)
+
+    expect(store.getState().form.ses_b).toEqual([pending])
+  })
+
+  test("keeps a question answerable after a stale form list arrives following deferral", async () => {
+    const question = buildForm({ metadata: { kind: "question", tool: { messageID: "msg_1", id: "tool_1" } } })
+    const childStores = new ChildStoreManager()
+    const store = childStores.ensureChild("/repo", { bootstrap: false })
+    store.setState({
+      session: createDirectoryStore({}).getState().session,
+      form: { ses_a: [question] },
+    })
+    setActionRefs(childStores, () => "/repo")
+    noteQuestionFormSnapshot("/repo", [question])
+
+    let releaseStaleList: (forms: FormRequest[]) => void = () => { throw new Error("Promise not initialized") }
+    pendingFormsInFlight = new Promise((resolve) => { releaseStaleList = resolve })
+    const recovery = resyncBlockingRequestsForDirectory("/repo", store)
+    expect(listPendingFormsCalls).toHaveLength(1)
+
+    await deferQuestionsAfterSend([question], { route: "prompt", sessionId: "ses_a" })
+    expect(store.getState().form.ses_a).toBeUndefined()
+    applyRecoverableQuestionEvents("/repo", [{
+      type: "message.tool.transition",
+      properties: {
+        sessionID: "ses_a", messageID: "msg_1", partID: "tool_1",
+        transition: { kind: "failed", error: DEFERRED_QUESTION_NOTE, executed: false, end: 2 },
+      },
+    }])
+    releaseStaleList([question])
+    expect(await recovery).toBe(true)
+
+    expect(store.getState().form.ses_a).toBeUndefined()
+    const [recovered] = deriveRecoveredQuestions(store.getState(), useRecoverableQuestionsStore.getState(), new Set(["ses_a"]))
+    expect(recovered).toMatchObject({ form: question, evidence: "deferred-on-send" })
+    const sendAnswer = mock(async () => {})
+    await submitRecoveredAnswer(recovered.form.sessionID, recovered.form.id, sendAnswer)
+    expect(sendAnswer).toHaveBeenCalledTimes(1)
+  })
+
+  test("does not put back a dismissed form that newer questions pushed out of the recovery history", async () => {
+    const question = buildForm({ id: "frm_old", metadata: { kind: "question", tool: { messageID: "msg_1", id: "tool_1" } } })
+    const childStores = new ChildStoreManager()
+    const store = childStores.ensureChild("/repo", { bootstrap: false })
+    store.setState({
+      session: createDirectoryStore({}).getState().session,
+      form: { ses_a: [question] },
+    })
+    setActionRefs(childStores, () => "/repo")
+    noteQuestionFormSnapshot("/repo", [question])
+    noteQuestionFormSnapshot("/repo", Array.from({ length: 100 }, (_, index) => buildForm({
+      id: `frm_newer_${index}`,
+      sessionID: "ses_elsewhere",
+      metadata: { kind: "question", tool: { messageID: `msg_newer_${index}`, id: `tool_newer_${index}` } },
+    })))
+    expect(useRecoverableQuestionsStore.getState().seen.has(question.id)).toBe(false)
+
+    let releaseStaleList: (forms: FormRequest[]) => void = () => { throw new Error("Promise not initialized") }
+    pendingFormsInFlight = new Promise((resolve) => { releaseStaleList = resolve })
+    const recovery = resyncBlockingRequestsForDirectory("/repo", store)
+    expect(listPendingFormsCalls).toHaveLength(1)
+
+    await cancelForm("ses_a", question.id)
+    expect(store.getState().form.ses_a).toBeUndefined()
+    releaseStaleList([question])
+    expect(await recovery).toBe(true)
+
+    expect(store.getState().form.ses_a).toBeUndefined()
   })
 
   test("ignores forms for sessions the directory does not know about", async () => {

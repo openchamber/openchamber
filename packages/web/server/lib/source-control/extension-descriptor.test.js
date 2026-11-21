@@ -49,6 +49,15 @@ const isDeeplyFrozen = (value) => {
 afterEach(() => detachExtensionDescriptors());
 
 describe('extension source-control descriptors', () => {
+  it('publishes the optional service URL path without adding a capability', () => {
+    const presentation = contribution().presentation;
+    const descriptor = build({ presentation: { ...presentation, urls: { ...presentation.urls, resolve: '/handle-url' } } });
+    const published = publicProviderDescriptor(descriptor, 5, { guestId: 'forge', name: guest.name, version: guest.version });
+    expect(sourceControlProviderListSchema.parse([published])[0].urls.resolve).toBe('/handle-url');
+    expect(descriptor.capabilities).toEqual(build().capabilities);
+    expect(publicProviderDescriptor(build(), 5).urls).not.toHaveProperty('resolve');
+  });
+
   it('publishes a service-owned login and omits token settings only when no token is declared', () => {
     const login = { kind: 'service', hint: 'Run forge auth login on the server' };
     const descriptor = build({ login, token: undefined });

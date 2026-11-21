@@ -17,6 +17,7 @@ import { useDefaultDiffViewMode } from '../../useDefaultDiffViewMode';
 import { type GuestToolRule } from '@/lib/guests/tool-presentation';
 import { prepareTaskToolOutput } from '../taskToolModel';
 import { fenceUiBlocks } from '../../../uiBlocks/taggedBlocks';
+import { useProgramCheck } from '../../../uiBlocks/useUiBlockComponent';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { extractFirstChangedLineFromDiff, getDiffPatchEntries, getToolFallbackDiff, type DiffPatchEntry } from '../toolDiffUtils';
@@ -90,6 +91,7 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
         allowTextReplacement: isStreamingBash,
     });
     const outputString = isStreamingBash ? throttledOutputString : rawOutputString;
+    useProgramCheck(isSubagentTool(part.tool) ? rawOutputString : '');
     const isMobile = useUIStore((store) => store.isMobile);
     const openChamberEnvelope = React.useMemo(
         () => (state.status === 'completed' && openChamberCallSummary(part.tool, input) ? parseOpenChamberEnvelope(rawOutputString) : null),

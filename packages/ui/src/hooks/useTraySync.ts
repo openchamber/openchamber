@@ -76,7 +76,7 @@ type TrayApproval = {
 };
 
 type TrayUsageRow = { label: string; value: string };
-type TrayUsageGroup = { provider: string; rows: TrayUsageRow[]; status: string | null };
+type TrayUsageGroup = { provider: string; account: string | null; rows: TrayUsageRow[]; status: string | null };
 type TrayUsage = { mode: 'usage' | 'remaining'; groups: TrayUsageGroup[] };
 
 type TraySnapshot = {
@@ -188,7 +188,8 @@ const buildUsage = (): TrayUsage => {
       : rows.length === 0
         ? t('header.services.noRateLimitsReported')
         : null;
-    groups.push({ provider: meta.name, rows, status });
+    const account = meta.id === 'opencode-go' ? result.accountLabel?.trim() || null : null;
+    groups.push({ provider: meta.name, account, rows, status });
   }
   return { mode, groups };
 };

@@ -276,6 +276,7 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string | null) => {
 };
 
 export const fetchQuotaForProvider = (providerId: string | null) => {
+  if (providerId === claude.providerId) return fetchQuotaForProviderUncoalesced(providerId);
   const existing = pendingFetches.get(providerId);
   if (existing) return existing;
 

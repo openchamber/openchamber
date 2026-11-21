@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { readConsoleBudgets } from '../console-budgets.js';
 
 const previousDataDirectory = process.env.OPENCHAMBER_DATA_DIR;
 const temporaryDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-opencode-go-'));
@@ -140,6 +141,28 @@ describe('OpenCode Go quota provider — legacy API key', () => {
     expect(result.usage.windows.monthly.usedPercent).toBeCloseTo(26.896);
   });
 
+  it('names the account the active key belongs to, and no label for an unnamed key', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(consolePayload())));
+
+    const named = await fetchQuota({ readAuth: async () => ({ 'opencode-go': { key: 'test-key', label: 'outlook' } }), fetchImpl });
+    expect(named.ok).toBe(true);
+    expect(named.accountLabel).toBe('outlook');
+
+    const unnamed = await fetchQuota({ readAuth: async () => ({ 'opencode-go': { key: 'test-key' } }), fetchImpl });
+    expect(unnamed.ok).toBe(true);
+    expect(unnamed.accountLabel).toBeUndefined();
+  });
+
+  it('names a key of the Console integration with its own label', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(consolePayload())));
+    const result = await fetchQuota({
+      readAuth: async () => ({ opencode: { type: 'api', key: 'console-key', label: 'solar tool' } }),
+      fetchImpl,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.accountLabel).toBe('solar tool');
+  });
+
   it('falls back to the usage API when the Console status gives the key no Go meters', async () => {
     const usage = { usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } };
     const consoleAnswers = [
@@ -234,6 +257,46 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
     });
     expect(result.ok).toBe(true);
     expect(result.usage.windows['5h'].usedPercent).toBe(25);
+  });
+
+  it('names the account the active sign-in belongs to, and no label for an unnamed sign-in', async () => {
+    const fetchImpl = async () => new Response(JSON.stringify(consolePayload()));
+
+    const named = await fetchQuota({ readAuth: async () => consoleAuth({ label: 'outlook' }), fetchImpl });
+    expect(named.ok).toBe(true);
+    expect(named.accountLabel).toBe('outlook');
+
+    const unnamed = await fetchQuota({ readAuth: async () => consoleAuth(), fetchImpl });
+    expect(unnamed.ok).toBe(true);
+    expect(unnamed.accountLabel).toBeUndefined();
+  });
+
+  it('keeps the fallback Go key label separate from the Console sign-in budget workspace', async () => {
+    const fetchImpl = async (url, options) =>
+      url === CONSOLE_STATUS_URL && new Headers(options.headers).has('x-org-id')
+        ? Response.json(consolePayload({ product: 'zen' }))
+        : Response.json(consolePayload());
+    const result = await fetchQuota({
+      readAuth: async () => ({
+        ...consoleAuth({ label: 'Work Console sign-in' }),
+        'opencode-go': { key: 'test-key', label: 'Personal Go key' },
+      }),
+      fetchImpl,
+      readBudgets: () => readConsoleBudgets(async () => ({
+        workspace: { name: 'Acme Console' },
+        budgets: [{
+          id: 'bud_1', limit: 50, spent: 10, scope: 'each', per: 'set', coverage: 'all',
+          models: [], vendors: [], picked: false, shared: false, resetsAt: 1_800_000_000_000,
+        }],
+      })),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.accountLabel).toBe('Personal Go key');
+    expect(result.usage.windows['5h'].usedPercent).toBe(25);
+    expect(result.usage.consoleBudgets).toMatchObject({
+      workspace: 'Acme Console',
+      budgets: [{ id: 'bud_1', usedPercent: 20 }],
+    });
   });
 
   it('skips only the unusable meters and keeps the rest', () => {

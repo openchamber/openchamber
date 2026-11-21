@@ -21,11 +21,11 @@ const createApp = ({ settings = { nativeNotificationsEnabled: true, notification
     emitter,
   });
   routes.registerPluginRoute();
-  // Stands in for the server's API auth gate between the two registrations.
-  app.use('/api', (req, res, next) => (
+  // The route carries the server's API gate itself; nothing is mounted in front
+  // of it here, so a missing gate would show up as an open endpoint.
+  routes.registerApiRoute((req, res, next) => (
     req.headers.authorization === UI_TOKEN ? next() : res.status(401).json({ error: 'UI session missing' })
   ));
-  routes.registerApiRoute();
   return { app, delivered };
 };
 
@@ -60,6 +60,17 @@ describe('POST /api/notifications/emit', () => {
     await request(app).post('/api/notifications/emit').send({ body: 'Hi' }).expect(401);
     await request(app).post('/api/notifications/emit').set('Authorization', 'Bearer wrong').send({ body: 'Hi' }).expect(401);
     expect(delivered.map(({ payload }) => payload.title)).toEqual(['OpenChamber']);
+  });
+
+  it('refuses to register the API route without a gate', () => {
+    const app = express();
+    const routes = registerNotificationEmitRoutes(app, {
+      express,
+      isAgentToolRequestAuthorized: () => false,
+      emitter: { emit: async () => ({ status: 200, body: {} }) },
+    });
+
+    expect(() => routes.registerApiRoute()).toThrow(TypeError);
   });
 
   it('never lets a caller choose the notification kind', async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { delimiterForPath, parseDelimitedText, setDelimitedField, shiftDelimitedColumn, shiftDelimitedRow } from './delimitedText';
+import { parseDelimitedText, setDelimitedField, shiftDelimitedColumn, shiftDelimitedRow } from './delimitedText';
+import { resolveDelimiter } from './tableDelimiter';
 
 describe('parseDelimitedText', () => {
   test('splits a plain CSV into a header and rows, ignoring the trailing newline', () => {
@@ -18,8 +19,8 @@ describe('parseDelimitedText', () => {
   });
 
   test('reads TSV by path and a UTF-8 BOM does not leak into the first header', () => {
-    expect(delimiterForPath('/x/data.tsv')).toBe('\t');
-    expect(delimiterForPath('/x/data.CSV')).toBe(',');
+    expect(resolveDelimiter('/x/data.tsv', 'a\tb\n1\t2\n')).toBe('\t');
+    expect(resolveDelimiter('/x/data.CSV', 'a,b\n1,2\n')).toBe(',');
     const table = parseDelimitedText('﻿a\tb\n1\t2\n', '\t');
     expect(table.header).toEqual(['a', 'b']);
     expect(table.rows).toEqual([['1', '2']]);
@@ -41,6 +42,62 @@ describe('parseDelimitedText', () => {
     const wideTail = `a,b\n1,2\n${Array.from({ length: 10_000 }, () => 'x').join(',')}`;
     expect(parseDelimitedText(wideTail, ',', 1)).toMatchObject({ columnCount: 2, dataColumnCount: 10_000, rows: [['1', '2']] });
     expect(parseDelimitedText('', ',')).toEqual({ header: [], rows: [], totalRows: 0, columnCount: 0, dataColumnCount: 0, truncated: false });
+  });
+});
+
+describe('resolveDelimiter', () => {
+  const semicolonExport = 'company;email;note\nExample Ltd;info@example.com;Accounting\nAnother Ltd;office@example.org;Payroll\n';
+
+  test('reads a semicolon export as semicolon, so its columns survive', () => {
+    const delimiter = resolveDelimiter('/x/export.csv', semicolonExport);
+    expect(delimiter).toBe(';');
+    expect(parseDelimitedText(semicolonExport, delimiter).columnCount).toBe(3);
+    expect(parseDelimitedText(semicolonExport, delimiter).header).toEqual(['company', 'email', 'note']);
+  });
+
+  test('a comma file whose text holds semicolons stays comma-delimited', () => {
+    expect(resolveDelimiter('/x/data.csv', 'company,note\nExample Ltd,Accounting;Payroll\n')).toBe(',');
+  });
+
+  test('a semicolon file whose text holds commas keeps its columns', () => {
+    const file = 'company;note\nExample Ltd, Inc;Accounting\n';
+    expect(resolveDelimiter('/x/data.csv', file)).toBe(';');
+  });
+
+  test('semicolons inside quoted fields do not make a comma file semicolon-delimited', () => {
+    expect(resolveDelimiter('/x/data.csv', 'id,note\n1,"a; b"\n2,"c; d"\n')).toBe(',');
+  });
+
+  test('a .tsv path stays tab-delimited whatever its text holds', () => {
+    expect(resolveDelimiter('/x/data.tsv', 'a\tb\n1,2\t3,4\n')).toBe('\t');
+  });
+
+  test('a single-column file keeps the comma default', () => {
+    expect(resolveDelimiter('/x/data.csv', 'name\nAda\nLinus\n')).toBe(',');
+  });
+
+  test('a tab-separated file saved under .csv is read by its content', () => {
+    expect(resolveDelimiter('/x/data.csv', 'a\tb\n1\t2\n')).toBe('\t');
+  });
+
+  test('a comma file with a missing trailing field stays comma-delimited', () => {
+    const file = 'id,note\n1,hello\n2\n';
+    expect(resolveDelimiter('/x/data.csv', file)).toBe(',');
+    expect(parseDelimitedText(file, ',').rows).toEqual([['1', 'hello'], ['2']]);
+  });
+
+  test('records a stray semicolon leaves whole do not outvote a ragged comma file', () => {
+    expect(resolveDelimiter('/x/data.csv', 'id,note\n1,hello\n2\n3,good;bye\n4\n')).toBe(',');
+  });
+
+  test('a separator whose split puts a quote inside a field loses to one that reads the quotes', () => {
+    const file = 'id,"note",tag;group;level;rank\n1,"memo",a;b;c;d\n';
+    expect(resolveDelimiter('/x/data.csv', file)).toBe(',');
+    expect(parseDelimitedText(file, ',').header).toEqual(['id', 'note', 'tag;group;level;rank']);
+  });
+
+  test('a semicolon file with a quoted comma header is read as semicolon', () => {
+    expect(resolveDelimiter('/x/data.csv', 'id;"label, title"\n1;alpha,one\n2;beta,two\n')).toBe(';');
   });
 });
 

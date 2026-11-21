@@ -281,7 +281,7 @@ export function useComposerQueueActions({
                     contextText: part.text,
                 });
             } else if (payload.kind === 'change-request') {
-                restored.push({
+                const reference: Extract<ComposerReference, { kind: 'change-request' }> = {
                     kind: 'change-request',
                     provider: payload.provider ?? 'github',
                     number: payload.number,
@@ -291,7 +291,9 @@ export function useComposerQueueActions({
                     base: '',
                     includeDiff: false,
                     contextText: part.text,
-                });
+                };
+                if (payload.sourceLinks) reference.sourceLinks = payload.sourceLinks;
+                restored.push(reference);
             } else if (payload.kind === 'tracker-item') {
                 restored.push({ kind: 'tracker-item', provider: payload.provider, identifier: payload.identifier, title: payload.title, url: payload.url, contextText: part.text });
             } else if (payload.kind === 'session') {

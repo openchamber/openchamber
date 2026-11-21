@@ -327,6 +327,26 @@ OpenChamber names the host `ext-<panel.id>` (provider ids are at most 32 charact
 
 ### `contributes.sourceControl`
 
+An optional `presentation.urls.resolve` names a service path, for example
+`"/handle-url"`. An explicit paste on an existing `instanceAlias` uses this
+converter before native templates, since an alias may use a different path
+layout. Native templates retain priority on the canonical instance; a template
+miss there can also call the converter. The host calls the path through the
+ordinary service proxy with `POST` and JSON `{ "url": "…", "instance": "…" }`.
+Return HTTP 200 with `{ "url": "<canonical change request URL>" }`, or JSON
+`null`. The answer must be a change request on the same provider instance,
+matched by this provider's own `changeRequest` templates; an issue or any other
+URL draws no chip. The host then uses its existing change request reader,
+account and chip. This is URL conversion only; no source-control RPC method or
+new permission is involved. Only a paste into the composer calls the converter:
+a link typed by hand, a send, a queued message and agent tools never do.
+
+**Performance warning.** The same URL may be resolved again on every paste.
+OpenChamber does not cache conversion results.
+If resolution performs expensive I/O, the extension should manage its own
+caching and concurrent-request deduplication, with freshness appropriate to
+the service.
+
 Declared in the manifest, not answered by the service: OpenChamber reads it to draw the card, route Git transport and recognise remotes without starting a process, and the approval dialog shows it. Every object is strict; an unknown key fails.
 
 | Field | Contents |

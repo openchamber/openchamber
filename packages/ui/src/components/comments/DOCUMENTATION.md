@@ -48,6 +48,22 @@ to [review](../review/DOCUMENTATION.md).
 - The click dispatched in the mouseup task after a drag counts as its release,
   even over the code or outside the gutter. Hosts must not clear selection as
   though that click starts an unrelated outside interaction.
+- A code editor's selection is offered for a comment only while it is one
+  non-empty range in an editor the user works in; several ranges keep plain
+  editing. The quote is the selected text of the editor's current document,
+  unsaved edits and whitespace included, and a range that stops at the start
+  of a line ends on the line before. The quote is captured when the field
+  opens, and a new file or host scope closes the menu. While the field is
+  open, edits to the document move only where the quote is drawn, and a
+  refresh that replaces the whole document finds the quoted text again, the
+  copy nearest its old place; once the quoted text is gone, the field keeps
+  its last place and no highlight.
+- Pressing the open field's suggestion list or its editor's scrollbar keeps the
+  field open; any other press outside the field closes it.
+- A selection whose ends are both off screen still offers Comment, anchored
+  at the top of the screen.
+- The open comment field is placed by its own measured size inside the
+  window, so an anchor near an edge keeps the textarea and Attach on screen.
 
 ## Decisions
 
@@ -63,6 +79,33 @@ DOM uses the composer editor so comments render prompt syntax consistently.
 Markdown markers interrupt rendered-text matches, so preview mapping tries
 shorter anchors. A multiline fragment needs both ends located; a partial match
 omits the range because a single-line range would misidentify the quoted code.
+
+### Why code selections read the editor state and not the browser selection
+
+The editor state holds exact positions, so a repeated fragment gets the lines
+it was selected on, with no text matching. The browser selection misses lines
+outside the rendered viewport and is empty where the editor draws its own
+selection.
+
+### Why the code selection menu reads a store and not the editor host's state
+
+The editor reports every selection change, many per drag. Its extension writes
+to a store that only the menu subscribes to, so a drag re-renders the menu
+alone; state in the host would re-render the whole files view each time. The
+menu is keyed by the host's scope, and its unsubscribe closes the store, so a
+hidden editor or an unmounted host leaves no menu or
+document listener behind.
+
+### Why only touch editors get a highlight overlay
+
+The desktop editor draws its own selection and keeps it visible after focus
+moves into the comment field. A touch editor uses the native selection, which
+the field's focus clears, so the menu marks the quoted text itself.
+
+### Why several selections get no Comment and not a joined quote
+
+Joining ranges would quote the code between them or drop some of the selected
+fragments, and the quote must be exactly what was selected.
 
 ### Why mobile highlights share the popup layer and not a body-level overlay
 

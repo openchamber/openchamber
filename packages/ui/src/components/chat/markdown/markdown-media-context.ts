@@ -17,7 +17,7 @@ export type MarkdownDocumentAssets = {
   colorScheme: 'light' | 'dark';
 };
 
-const PROJECT_UPLOAD_ROUTE_RE = /^\/api\/source-control\/[^/?#]+\/uploads\/[0-9a-f]{32}\/[^/?#]+\?/;
+const PROJECT_UPLOAD_ROUTE_RE = /^\/api\/source-control\/[^/?#]+\/uploads\/[A-Za-z0-9_-]{16,}\/[^/?#]+\?/;
 
 type GalleryImage = { source: string; filename: string; element: HTMLElement; resolve: () => Promise<string>; load: () => Promise<Blob> };
 const galleries = new Map<string, Set<GalleryImage>>();

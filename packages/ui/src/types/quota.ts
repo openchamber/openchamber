@@ -94,6 +94,7 @@ export interface ProviderResult {
   error?: string;
   planLabel?: string | null;
   accountLabel?: string | null;
+  selection?: string;
   usage: ProviderUsage | null;
   fetchedAt: number;
 }

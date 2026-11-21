@@ -50,6 +50,7 @@ import {
   WalkthroughGenerateButton,
   WalkthroughLanguagePicker,
   WalkthroughModelPicker,
+  WalkthroughExportMenu,
   WalkthroughOptions,
   WalkthroughStepMenu,
 } from './WalkthroughControls';
@@ -492,6 +493,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
             </TooltipContent>
           </Tooltip>
 
+          <WalkthroughExportMenu review={review} className="walkthrough-header__option" />
           {headerOffersGeneration && (
             <>
               <WalkthroughLanguagePicker review={review} className="walkthrough-header__option max-w-40" />

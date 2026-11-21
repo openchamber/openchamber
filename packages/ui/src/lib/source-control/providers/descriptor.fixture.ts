@@ -28,7 +28,7 @@ export const acmeDescriptor = (overrides: Partial<SourceControlProviderDescripto
   },
   features: {
     referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
-    startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, issueCloseReason: true,
+    startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, absoluteProjectUploads: false, issueCloseReason: true,
     issueEdit: true, baseChange: true, updateBranch: true, rebase: false, changeRequestEdit: true,
     changeRequestTemplates: [], changeRequestPatch: true, reviewModel: 'verdict', revisions: false,
     submitRequirements: false, createByPush: false, branchHeads: true, discussions: false, advancedSearch: true, commentEdit: true, lock: true, subscription: true,
@@ -49,7 +49,7 @@ export const githubLikeDescriptor = (): SourceControlProviderDescriptor => acmeD
     changeRequest: ['/{owner}/{repo}/pull/{number}'], issue: ['/{owner}/{repo}/issues/{number}'],
     discussion: ['/{owner}/{repo}/discussions/{number}'], commit: ['/{owner}/{repo}/commit/{sha}'], user: ['/{user}'],
   },
-  features: { ...acmeDescriptor().features, discussions: true, rebase: true },
+  features: { ...acmeDescriptor().features, discussions: true, absoluteProjectUploads: true, rebase: true },
 });
 
 export const gitlabLikeDescriptor = (): SourceControlProviderDescriptor => acmeDescriptor({

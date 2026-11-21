@@ -1,7 +1,7 @@
 import React from 'react';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { textLineSource } from '@/lib/commentAnchor';
-import { isWholeFileComment, normalizeLineRange, useInlineCommentController, useLineNumberDragSelection, useWholeFileComment } from '@/components/comments';
+import { isWholeFileComment, normalizeLineRange, useCodeSelectionComment, useInlineCommentController, useLineNumberDragSelection, useWholeFileComment } from '@/components/comments';
 import { type SelectedLineRange } from './fileViewTypes';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { type useFileDraft } from './useFileSaving';
@@ -19,15 +19,17 @@ type FileComments = Pick<CommentController, 'commentText' | 'setCommentText' | '
     markdownPreviewRef: React.RefObject<HTMLDivElement | null>;
     filesLineDrafts: CommentController['drafts'];
     wholeFileComment: ReturnType<typeof useWholeFileComment>;
+    codeSelectionComment: ReturnType<typeof useCodeSelectionComment>;
     handleSaveComment: CommentController['saveComment'];
   };
 
-export function useFileComments({ draft, editor, fileDocument, tabs, isMobile }: {
+export function useFileComments({ draft, editor, fileDocument, tabs, isMobile, visible }: {
   draft: Pick<ReturnType<typeof useFileDraft>, 'setDraftContent' | 'setIsSaving'>;
   editor: Pick<ReturnType<typeof useFileEditor>, 'editorViewRef'>;
   fileDocument: Pick<ReturnType<typeof useFileDocument>, 'fileContent' | 'fileLoading' | 'loadedFilePath' | 'pendingPathMoveRef'>;
   tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile'>;
   isMobile: boolean;
+  visible: boolean;
 }): FileComments {
   const { setDraftContent, setIsSaving } = draft;
   const { editorViewRef } = editor;
@@ -153,9 +155,10 @@ export function useFileComments({ draft, editor, fileDocument, tabs, isMobile }:
       {wholeFileComment.cards}
     </ScrollableOverlay>
   ) : null;
+  const codeSelectionComment = useCodeSelectionComment({ filePath: selectedFile?.path ?? null, scope: String(visible) });
   return {
   lineSelection, setLineSelection, wholeFileCommentPanel,
   markdownPreviewRef, commentText, setCommentText, editingDraftId, cancel, startEdit, deleteDraft, filesLineDrafts,
-  wholeFileComment, isDragging, lineNumbersConfig, handleSaveComment,
+  wholeFileComment, codeSelectionComment, isDragging, lineNumbersConfig, handleSaveComment,
   };
 }

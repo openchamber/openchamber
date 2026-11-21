@@ -419,6 +419,60 @@ describe('custom provider config persistence', () => {
       .toThrow('A client certificate needs both the certificate and the key');
   });
 
+  test('the canonical provider is written, kept when the payload has none, cleared by null, and refused when malformed', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    const save = (fields) => upsertProviderConfig('cc', {
+      name: 'Command Code',
+      env: ['CC_KEY'],
+      settings: { baseURL: 'https://cc.example.com/v1' },
+      models: { 'anthropic/claude-sonnet-4.5': { name: 'Sonnet' } },
+      ...fields,
+    }, projectDir, 'project');
+
+    save({ canonical: ' openrouter ' });
+    expect(readJson(configPath).providers.cc.canonical).toBe('openrouter');
+
+    // A form that never read the stored entry sends no canonical provider.
+    save({});
+    expect(readJson(configPath).providers.cc.canonical).toBe('openrouter');
+
+    save({ canonical: 'wafer.ai' });
+    expect(readJson(configPath).providers.cc.canonical).toBe('wafer.ai');
+
+    save({ canonical: null });
+    expect(readJson(configPath).providers.cc).not.toHaveProperty('canonical');
+
+    for (const canonical of [42, '', '  ', 'open router']) {
+      expect(() => save({ canonical })).toThrow('Canonical provider must be a provider ID');
+    }
+    expect(readJson(configPath).providers.cc).not.toHaveProperty('canonical');
+  });
+
+  test('a provider with its own connection settings is refused as a canonical source', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    const gateway = {
+      name: 'Gateway',
+      env: ['MTLS_KEY'],
+      settings: { baseURL: 'https://mtls.example.com/v1', tls: { cert: '{file:/etc/client.pem}', key: '{file:/etc/client.key}' } },
+      models: { fast: { name: 'Fast' } },
+    };
+    upsertProviderConfig('mtls', gateway, projectDir, 'project');
+    const save = (canonical) => upsertProviderConfig('other', {
+      name: 'Other',
+      env: ['OTHER_KEY'],
+      settings: { baseURL: 'https://other.example.com/v1' },
+      models: { fast: { name: 'Fast' } },
+      canonical,
+    }, projectDir, 'project');
+
+    // OpenCode would copy the certificate of `mtls` into `other` and present it to other.example.com.
+    expect(() => save('mtls')).toThrow('Provider "mtls" sets its own connection settings');
+    expect(readJson(configPath).providers).not.toHaveProperty('other');
+
+    save('openrouter');
+    expect(readJson(configPath).providers.other.canonical).toBe('openrouter');
+  });
+
   test('a form save keeps the type of a hand-marked image model', () => {
     const configPath = path.join(projectDir, '.opencode', 'opencode.json');
     writeJson(configPath, {
@@ -685,6 +739,119 @@ describe('custom provider config persistence', () => {
       limit: { context: 128_000, output: 16_000 },
       capabilities: { tools: true, input: ['text', 'image'], output: ['text'] },
     });
+  });
+
+  test('a saved empty capability list reloads empty', () => {
+    const providerId = 'empty-llm';
+    upsertProviderConfig(providerId, {
+      name: 'Empty LLM',
+      package: 'aisdk:@ai-sdk/openai-compatible',
+      settings: { baseURL: 'https://empty.example.com/v1' },
+      models: { m: { modelID: 'm', name: 'M', capabilities: { tools: true, input: [], output: [] } } },
+    }, projectDir, 'project', { hasStoredAuth: true });
+
+    expect(getProviderSources(providerId, projectDir).config.models.m.capabilities)
+      .toEqual({ tools: true, input: [], output: [] });
+  });
+
+  test('a save maps MIME modalities and keeps stored entries the form cannot edit', () => {
+    const providerId = 'mime-llm';
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    writeJson(configPath, {
+      providers: {
+        [providerId]: {
+          name: 'Mime',
+          package: 'aisdk:@ai-sdk/openai-compatible',
+          settings: { baseURL: 'https://mime.example.com/v1' },
+          models: {
+            m: { modelID: 'm', name: 'M', capabilities: { tools: true, input: ['text', 'image/png', 'application/json'], output: ['text'] } },
+            j: { modelID: 'j', name: 'J', capabilities: { tools: true, input: ['  application/json  '], output: ['text'] } },
+          },
+        },
+      },
+    });
+
+    const { config } = getProviderSources(providerId, projectDir);
+    expect(config.models.m.capabilities.input).toEqual(['text', 'image', 'application/json']);
+    expect(config.models.j.capabilities.input).toEqual(['  application/json  ']);
+
+    upsertProviderConfig(providerId, { ...config, name: 'Mime renamed' }, projectDir, 'project', { hasStoredAuth: true });
+    const saved = readJson(configPath).providers[providerId];
+    expect(saved.name).toBe('Mime renamed');
+    expect(saved.models.m.capabilities.input).toEqual(['text', 'image', 'application/json']);
+    expect(saved.models.j.capabilities.input).toEqual(['  application/json  ']);
+
+    expect(() => upsertProviderConfig(providerId, {
+      ...config,
+      models: { m: { ...config.models.m, capabilities: { tools: true, input: ['text', 'font/woff'], output: ['text'] } } },
+    }, projectDir, 'project', { hasStoredAuth: true })).toThrow('Model "m" input capabilities are invalid');
+    for (const entry of ['image/not a MIME', '   ']) {
+      expect(() => upsertProviderConfig(providerId, {
+        ...config,
+        models: { n: { modelID: 'n', name: 'N', capabilities: { tools: true, input: [entry], output: ['text'] } } },
+      }, projectDir, 'project', { hasStoredAuth: true })).toThrow('Model "n" input capabilities are invalid');
+    }
+    expect(readJson(configPath).providers[providerId]).toEqual(saved);
+  });
+
+  test('a model that sets only some capabilities keeps the rest unset, on disk and when read back', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    upsertProviderConfig('partial-llm', {
+      name: 'Partial LLM',
+      canonical: 'openrouter',
+      settings: { baseURL: 'https://partial.example.com/v1' },
+      models: { sonnet: { name: 'Sonnet', capabilities: { tools: false } } },
+    }, projectDir, 'project', { hasStoredAuth: true });
+
+    expect(readJson(configPath).providers['partial-llm'].models.sonnet.capabilities).toEqual({ tools: false });
+    expect(getProviderSources('partial-llm', projectDir).config.models.sonnet.capabilities).toEqual({ tools: false });
+  });
+
+  test('a partial capability update keeps stored fields and validates unknowns against the same field', () => {
+    const providerId = 'partial-mime-llm';
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    const settings = { baseURL: 'https://mime.example.com/v1' };
+    const input = ['  application/json  '];
+    writeJson(configPath, { providers: { [providerId]: {
+      name: 'Mime', settings,
+      models: { m: { name: 'M', capabilities: { input, output: [] } } },
+    } } });
+
+    const save = (capabilities) => upsertProviderConfig(providerId, {
+      name: 'Mime', settings, models: { m: { name: 'M', capabilities } },
+    }, projectDir, 'project', { hasStoredAuth: true });
+
+    save({ tools: false });
+    expect(readJson(configPath).providers[providerId].models.m.capabilities).toEqual({ input, output: [], tools: false });
+    expect(() => save({ output: input })).toThrow('Model "m" output capabilities are invalid');
+    save({ input: [] });
+    expect(getProviderSources(providerId, projectDir).config.models.m.capabilities).toEqual({ input: [], output: [], tools: false });
+  });
+
+  test('a canonical provider a lower layer sets is reported as inherited by the entry above it', () => {
+    const providerId = `inherited-${Date.now()}`;
+    const customPath = path.join(projectDir, 'custom-opencode.json');
+    const projectPath = path.join(projectDir, '.opencode', 'opencode.json');
+    const previousEnv = process.env.OPENCODE_CONFIG;
+    process.env.OPENCODE_CONFIG = customPath;
+    const entry = { name: 'Gateway', settings: { baseURL: 'https://gw.example.com/v1' }, models: { m: { name: 'M' } } };
+
+    try {
+      writeJson(projectPath, { providers: { [providerId]: { ...entry, canonical: 'openrouter' } } });
+      expect(getProviderSources(providerId, projectDir).inheritedCanonical).toBeNull();
+
+      writeJson(customPath, { providers: { [providerId]: entry } });
+      expect(getProviderSources(providerId, projectDir).inheritedCanonical).toEqual({ provider: 'openrouter', path: projectPath });
+
+      writeJson(customPath, { providers: { [providerId]: { ...entry, canonical: 'anthropic' } } });
+      expect(getProviderSources(providerId, projectDir).inheritedCanonical).toEqual({ provider: 'openrouter', path: projectPath });
+    } finally {
+      if (previousEnv === undefined) {
+        delete process.env.OPENCODE_CONFIG;
+      } else {
+        process.env.OPENCODE_CONFIG = previousEnv;
+      }
+    }
   });
 
   test('custom-scope edit updates custom layer without creating a user entry', () => {

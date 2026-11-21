@@ -395,6 +395,7 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
         providerId,
         sources: sources.sources,
         config: sources.config,
+        inheritedCanonical: sources.inheritedCanonical,
       });
     } catch (error) {
       console.error('Failed to get provider sources:', error);

@@ -494,6 +494,15 @@ Invariants:
   callers. Non-React code that reads links (`lib/linkedIssues.ts`,
   `components/references/listBackedReferences.ts`) takes it as a parameter. The
   matcher reads `www.` in front of a default instance's host as that instance.
+  An extension may also name `urls.resolve`, a service path. Canonical instances
+  keep native template priority; an existing alias uses the converter even when
+  its path also matches a native template. A canonical template miss can use it
+  too. `resolverFor` supplies deferred conversion through the ordinary guest
+  service proxy. Only a composer paste invokes it; `match` and rendering
+  remain synchronous. The converted URL is matched against the converting
+  descriptor and its instance alone (a built-in provider with the same path on
+  the same origin cannot claim it), must be a change request, and goes through
+  the native reader.
 - `useSourceControlDescriptorOf()` is the lookup for surfaces that name several
   providers in one render, and `useSourceControlProviderServing(id)` gates
   what only a served provider has (change-request diffs, walkthroughs): it is

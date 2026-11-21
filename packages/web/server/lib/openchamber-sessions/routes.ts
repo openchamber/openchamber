@@ -34,6 +34,7 @@ import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './ses
 import { compareAndSetSessionMetadata, registerConditionalMetadataRoute, setSessionMetadata } from './session-metadata-route.js';
 import { createSession } from './create-session.js';
 import { fetchSelectionInputs } from './selection-inputs.js';
+import { EMPTY_SESSION_AUTO_ERROR, assertEmptySessionModel, resolveRequestedModel, splitModel } from './requested-model.js';
 import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
 import { createSessionWorktreeMover } from './worktree-move.js';
 import { sessionParentId } from '../session-lineage.js';
@@ -253,26 +254,6 @@ const requiredDataDir = (value: string | null) => {
   return value;
 };
 
-const splitModel = (value: string | null | undefined) => {
-  const model = asNonEmptyString(value);
-  if (!model) return null;
-  const slashIndex = model.indexOf('/');
-  if (slashIndex <= 0 || slashIndex === model.length - 1) return null;
-  return {
-    providerID: model.slice(0, slashIndex),
-    modelID: model.slice(slashIndex + 1),
-  };
-};
-
-const resolveRequestedModel = (payload: SessionPayload) => {
-  const model = splitModel(asNonEmptyString(payload?.model));
-  if (model) return model;
-
-  const providerID = asNonEmptyString(payload?.providerID);
-  const modelID = asNonEmptyString(payload?.modelID);
-  return providerID && modelID ? { providerID, modelID } : null;
-};
-
 const FALLBACK_PROVIDER_ID = 'opencode';
 const FALLBACK_MODEL_ID = 'big-pickle';
 const MIN_GOAL_TOKEN_BUDGET = 1_000;
@@ -307,8 +288,6 @@ const findCatalogModel = (models: readonly ModelInfo[], providerID: string, ref:
     || ofProvider.find((model) => model?.modelID === ref)
     || null;
 };
-
-const hasCatalogModel = (models: readonly ModelInfo[], providerID: string, ref: string) => findCatalogModel(models, providerID, ref) !== null;
 
 const isMissingFromCatalog = (models: readonly ModelInfo[], model: ModelSelection) => {
   if (models.length === 0 || isAutoModel(model)) return false;
@@ -849,8 +828,8 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     }
   };
 
-  const validateRequestedSelection = async ({ directory, requestedModel, requestedAgent, requestedVariant }: SelectionRequest & { directory: string }) => {
-    if (!requestedModel && !requestedAgent && !requestedVariant) return;
+  const validateRequestedSelection = async ({ directory, requestedModel, requestedAgent, requestedVariant, requireModelMatch = false }: SelectionRequest & { directory: string; requireModelMatch?: boolean }) => {
+    if (!requestedModel && !requestedAgent && !requestedVariant) return requestedModel;
     const { models, agents, notReadyReason } = await fetchSelectionInputs({
       client: clientFor(directory),
       readSettingsFromDiskMigrated,
@@ -869,8 +848,10 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
       }
     }
 
+    if (requestedModel && requireModelMatch && models.length === 0) throw new OpenChamberControlError(`Session selection is not ready: ${notReadyReason ?? 'the model catalog is unavailable'}`, 503);
     if (requestedModel && models.length > 0) {
-      if (!hasCatalogModel(models, requestedModel.providerID, requestedModel.modelID)) {
+      const entry = findCatalogModel(models, requestedModel.providerID, requestedModel.modelID);
+      if (!entry) {
         throw new OpenChamberControlError(
           `Unknown model '${requestedModel.providerID}/${requestedModel.modelID}' for ${directory}`,
           400,
@@ -883,7 +864,9 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
           400,
         );
       }
+      return { providerID: entry.providerID, modelID: entry.id };
     }
+    return requestedModel;
   };
 
   const selectForSession = async ({
@@ -1184,6 +1167,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     const model = resolveRequestedModel(payload);
     const agent = asNonEmptyString(payload.agent);
     const variant = asNonEmptyString(payload.variant);
+    if (!prompt) assertEmptySessionModel(payload, model);
 
     const resolvedDirectory: ResolvedDirectory = payload.projectId === CHATS_SCOPE_PUBLIC_ID
       ? await validateDirectoryPath(asNonEmptyString(payload.directory)).then((result) => (result.ok ? { ...result, chats: true } : result))
@@ -1209,14 +1193,14 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     if (waitForOpenCodeReady) await waitForOpenCodeReady(10_000, 250);
 
     const projectPath = resolvedDirectory.projectPath ?? resolvedDirectory.directory;
-    if (prompt) {
-      await validateRequestedSelection({
+    const validatedModel = prompt || model
+      ? await validateRequestedSelection({
         directory: resolvedDirectory.directory,
         requestedModel: model,
-        requestedAgent: agent,
-        requestedVariant: variant,
-      });
-    }
+        requestedAgent: prompt ? agent : null,
+        requestedVariant: variant, requireModelMatch: !prompt,
+      })
+      : null;
 
     const setup = pullRequestInput || worktreeInput
       ? await worktreeSetupForDirectory(resolvedDirectory.directory)
@@ -1257,7 +1241,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
 
     let startDirectoryFallback: StartDirectoryResult['fallback'] = null;
     let client;
-    let selection: Selection = { model, agent, variant };
+    let selection: Selection = { model: prompt ? model : validatedModel, agent, variant };
     try {
       const checkoutRoot = worktree?.path || (await resolveWorktreeTopLevel(sessionDirectory))?.root || sessionDirectory;
       const { setupStillRunning } = await waitForWorktreeBootstrapReady({ directory: checkoutRoot, bootstrapStore: worktreeBootstrapStore });
@@ -1271,7 +1255,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
         throw new OpenChamberControlError(`The project's setup commands are still running in ${checkoutRoot}, so no session started there. Retry in that folder once they finish`, 503);
       }
       client = clientFor(sessionDirectory);
-      if (prompt) {
+      if (prompt || (variant && !model)) {
         selection = await selectForSession({
           client,
           directory: sessionDirectory,
@@ -1279,6 +1263,16 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
           requestedModel: model,
           requestedAgent: agent,
           requestedVariant: variant,
+        });
+      }
+      if (!prompt && isAutoModel(selection.model)) {
+        throw new OpenChamberControlError(EMPTY_SESSION_AUTO_ERROR, 400);
+      }
+      if (!prompt && selection.model && (worktree || !model)) {
+        selection.model = await validateRequestedSelection({
+          directory: sessionDirectory,
+          requestedModel: model ?? selection.model,
+          requestedAgent: null, requestedVariant: variant, requireModelMatch: true,
         });
       }
     } catch (error) {
@@ -1300,11 +1294,15 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
       startedByExtension,
       operatorParentId,
     };
+    if (!prompt) {
+      createInput.model = selection.model;
+      createInput.variant = selection.variant ?? null;
+    }
     if (title) createInput.title = title;
     const sessionID = await createSession(createInput);
     onCreated();
 
-    let dispatch: Selection & Omit<DispatchResult, 'model'> = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
+    let dispatch: Selection & Omit<DispatchResult, 'model'> = { ...selection, promptDispatched: false, dispatchedAsCommand: false };
     if (prompt) {
       dispatch = await dispatchPrompt({
         client,
@@ -1331,9 +1329,9 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     if (resolvedDirectory.projectId) result.projectId = resolvedDirectory.projectId;
     if (title) result.title = title;
     if (worktree) result.worktree = worktree;
-    if (prompt && dispatch.model) result.model = dispatch.model;
+    if (dispatch.model) result.model = dispatch.model;
     if (prompt && dispatch.agent) result.agent = dispatch.agent;
-    if (prompt && dispatch.variant) result.variant = dispatch.variant;
+    if (dispatch.variant) result.variant = dispatch.variant;
     if (dispatch.promptError) result.promptError = dispatch.promptError;
     if (goalInput.enabled) result.goalEnabled = true;
     if (goalInput.tokenBudget) result.goalTokenBudget = goalInput.tokenBudget;

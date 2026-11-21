@@ -22,7 +22,8 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { opencodeClient } from '@/lib/opencode/client';
 import { getIntegrationClient, loadIntegrationCatalog, peekIntegrationCatalog, subscribeCredentialChanges, type IntegrationCatalog } from '@/lib/opencode/integration-catalog';
 import { fetchDisabledProviders, setProviderDisabled as setProviderDisabledRequest } from '@/lib/disabledProviders';
-import { listConnectableProviders } from './connectableProviders';
+import { listCanonicalProviders, listConnectableProviders } from './connectableProviders';
+import { fetchProviderSource, type ProviderSources } from './providerSource';
 import { ProviderConnectPicker } from './ProviderConnectPicker';
 import {
   providerHasCredentials,
@@ -47,7 +48,7 @@ import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
 import { ProviderAccounts } from './ProviderAccounts';
 import { ProviderAccountSwitchToggle } from './ProviderAccountSwitchToggle';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { CustomProviderForm } from './CustomProviderForm';
+import { CustomProviderForm, type CatalogProviders } from './CustomProviderForm';
 import { ProviderLogoImageControl } from './ProviderLogoImageControl';
 import { providerLogoUploadSupported, removeProviderLogo, uploadProviderLogo } from '@/lib/customProviderLogos';
 
@@ -61,12 +62,11 @@ import {
   isConfigDefinedCustomProvider,
   providerToEditFormState,
   resolveProviderConfigScope,
-  storedProviderEntrySchema,
   type CustomProviderFormState,
   type CustomProviderLogoPlan,
   type CustomProviderPersistPlan,
   type ProviderConfigScope,
-  type StoredProviderEntry,
+  type StoredProviderSource,
 } from './custom-provider-form';
 
 const formatTokens = (value?: number | null) => {
@@ -86,17 +86,6 @@ const connectIntegrationKey = async (request: IntegrationKeyRequest): Promise<vo
 
 const ADD_PROVIDER_ID = '__add_provider__';
 const CLASSIFICATION_PAGE_ID = '__classification__';
-
-interface ProviderSourceInfo {
-  exists: boolean;
-  path?: string | null;
-}
-
-interface ProviderSources {
-  user: ProviderSourceInfo;
-  project: ProviderSourceInfo;
-  custom?: ProviderSourceInfo;
-}
 
 export const ProvidersPage: React.FC = () => {
   const { t } = useI18n();
@@ -184,7 +173,7 @@ export const ProvidersPage: React.FC = () => {
   const [modelQuery, setModelQuery] = React.useState('');
   const [candidateProviderId, setCandidateProviderId] = React.useState('');
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
-  const [storedProviderConfigs, setStoredProviderConfigs] = React.useState<Record<string, StoredProviderEntry | null>>({});
+  const [storedProviderConfigs, setStoredProviderConfigs] = React.useState<Record<string, StoredProviderSource | null>>({});
   const [providerSourcesRevision, setProviderSourcesRevision] = React.useState(0);
   const [integrationsRevision, setIntegrationsRevision] = React.useState(0);
   const backgroundIntegrationsReadRef = React.useRef(false);
@@ -243,6 +232,11 @@ export const ProvidersPage: React.FC = () => {
     [providers]
   );
 
+  const catalogProviders = React.useMemo<CatalogProviders>(
+    () => (catalog ? listCanonicalProviders(catalog) : integrationsLoadFailed ? 'failed' : 'loading'),
+    [catalog, integrationsLoadFailed],
+  );
+
   const unconnectedProviders = React.useMemo(
     () => (catalog ? listConnectableProviders(catalog, connectedProviderIds) : null),
     [catalog, connectedProviderIds]
@@ -288,26 +282,15 @@ export const ProvidersPage: React.FC = () => {
 
     const loadSources = async () => {
       try {
-        const query = settingsDirectory ? `?directory=${encodeURIComponent(settingsDirectory)}` : '';
-        const response = await runtimeFetch(`/api/provider/${encodeURIComponent(selectedProviderId)}/source${query}`, {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        });
-
-        const payload = await response.json().catch(() => null);
-        if (!response.ok) {
-          throw new Error(payload?.error || t('settings.providers.page.toast.providerSourcesLoadFailed'));
-        }
-
-        const sources = (payload?.sources ?? payload?.data?.sources) as ProviderSources | undefined;
-        if (!cancelled && sources) {
+        const source = await fetchProviderSource(selectedProviderId, settingsDirectory, t('settings.providers.page.toast.providerSourcesLoadFailed'));
+        if (!cancelled && source) {
           setProviderSources((prev) => ({
             ...prev,
-            [selectedProviderId]: sources,
+            [selectedProviderId]: source.sources,
           }));
           setStoredProviderConfigs((prev) => ({
             ...prev,
-            [selectedProviderId]: storedProviderEntrySchema.safeParse(payload?.config ?? payload?.data?.config).data ?? null,
+            [selectedProviderId]: source.stored,
           }));
         }
       } catch (error) {
@@ -580,6 +563,7 @@ export const ProvidersPage: React.FC = () => {
             <CustomProviderForm
               mode="create"
               existingProviderIDs={connectedProviderIds}
+              catalogProviders={catalogProviders}
               busy={authBusyKey?.startsWith('custom:') ?? false}
               authFailureHint={customAuthFailureHint}
               onCancel={() => {
@@ -733,6 +717,7 @@ export const ProvidersPage: React.FC = () => {
         <CustomProviderForm
           mode="edit"
           existingProviderIDs={connectedProviderIds}
+          catalogProviders={catalogProviders}
           initialValues={editingCustomFormInitial}
           allowExistingAuth={hasCredentials || !sourcesLoaded}
           busy={authBusyKey?.startsWith('custom:') ?? false}

@@ -4,8 +4,8 @@ import type { CredentialCreateInput, CredentialEntry, CredentialOAuth, Credentia
 import { z } from 'zod';
 
 export type LegacyAuthEntry =
-  | { type: 'api'; key: string; metadata?: { [key: string]: JsonValue } }
-  | { type: 'oauth'; access: string | undefined; refresh: string | undefined; expires: number | undefined; methodID?: string; accountId?: string; enterpriseUrl?: string; server?: string; orgID?: string };
+  | { type: 'api'; key: string; label?: string; metadata?: { [key: string]: JsonValue } }
+  | { type: 'oauth'; access: string | undefined; refresh: string | undefined; expires: number | undefined; label?: string; methodID?: string; accountId?: string; enterpriseUrl?: string; server?: string; orgID?: string };
 export type LegacyAuthFile = Record<string, LegacyAuthEntry>;
 
 type Metadata = NonNullable<CredentialOAuth['metadata']>;
@@ -84,6 +84,7 @@ export const openCodeCredentialSource = ({
 };
 
 const metadataString = z.string();
+const credentialLabel = z.string().trim().min(1);
 
 type ProjectableCredential = CredentialValue & Pick<Partial<CredentialOAuth>, 'access' | 'refresh' | 'expires'>;
 const projectCredentialValue = (value: ProjectableCredential): LegacyAuthEntry => {
@@ -106,7 +107,12 @@ const projectCredentialValue = (value: ProjectableCredential): LegacyAuthEntry =
 export const projectCredentialEntries = (entries: CredentialEntry[]) => {
   const result: LegacyAuthFile = {};
   for (const entry of entries) {
-    if (entry.active) result[entry.integrationID] = projectCredentialValue(entry.value);
+    if (entry.active) {
+      const label = credentialLabel.safeParse(entry.label).data;
+      const projected = projectCredentialValue(entry.value);
+      if (label !== undefined) projected.label = label;
+      result[entry.integrationID] = projected;
+    }
   }
   return result;
 };

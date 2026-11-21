@@ -44,6 +44,7 @@ export type ComposerReference =
         number: number;
         title: string;
         url: string;
+        sourceLinks?: string[];
         head: string;
         base: string;
         includeDiff: boolean;
@@ -88,6 +89,12 @@ export const composerReferenceKey = (reference: ComposerReference): string => {
     }
 };
 
+export const withReferenceSourceLinks = (reference: ComposerReference, links: readonly string[]): ComposerReference => {
+    if (reference.kind !== 'change-request') return reference;
+    const sourceLinks = [...new Set([...(reference.sourceLinks ?? []), ...links])].filter((link) => link !== reference.url);
+    return sourceLinks.length > 0 ? { ...reference, sourceLinks } : reference;
+};
+
 export const withComposerReferences = (
     current: readonly ComposerReference[],
     added: readonly ComposerReference[],
@@ -99,7 +106,8 @@ export const withComposerReferences = (
         if (index === -1) {
             next.push(reference);
         } else {
-            next[index] = reference;
+            const previous = next[index];
+            next[index] = withReferenceSourceLinks(reference, previous.kind === 'change-request' ? previous.sourceLinks ?? [] : []);
         }
     }
     return next;
@@ -178,8 +186,8 @@ export const toContextReference = (reference: ComposerReference): ComposerContex
                 url: reference.url,
                 contextText: reference.contextText,
             };
-        case 'change-request':
-            return {
+        case 'change-request': {
+            const entry: Extract<ComposerContextReference, { kind: 'change-request' }> = {
                 kind: 'change-request',
                 provider: reference.provider,
                 number: reference.number,
@@ -187,6 +195,9 @@ export const toContextReference = (reference: ComposerReference): ComposerContex
                 url: reference.url,
                 context: reference.contextText,
             };
+            if (reference.sourceLinks?.length) entry.sourceLinks = reference.sourceLinks;
+            return entry;
+        }
         case 'tracker-item':
             return {
                 kind: 'tracker-item',

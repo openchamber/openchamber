@@ -125,7 +125,7 @@ const deferred = <T>() => {
 };
 
 const registerSettingsApi = (
-  save: (changes: Partial<SettingsPayload>) => Promise<SettingsPayload>,
+  save: (changes: Partial<SettingsPayload>, options?: { keepalive?: boolean }) => Promise<SettingsPayload>,
   load: () => Promise<{ settings: SettingsPayload; source: 'web' | 'vscode' }> = async () => ({ settings: {}, source: 'web' }),
 ): void => {
   registerRuntimeAPIs({
@@ -137,7 +137,7 @@ const registerSettingsApi = (
   } as unknown as RuntimeAPIs);
 };
 
-const registerSettingsSave = (save: (changes: Partial<SettingsPayload>) => Promise<SettingsPayload>): void => {
+const registerSettingsSave = (save: (changes: Partial<SettingsPayload>, options?: { keepalive?: boolean }) => Promise<SettingsPayload>): void => {
   registerSettingsApi(save);
 };
 
@@ -1576,6 +1576,22 @@ describe('unload lifecycle flush (#2197)', () => {
     } finally {
       globalThis.fetch = previousFetch;
     }
+  });
+
+  test('asks the runtime settings API for keepalive on the unload flush only', async () => {
+    const saveOptions: Array<{ keepalive?: boolean } | undefined> = [];
+    registerSettingsSave(async (_changes, options) => {
+      saveOptions.push(options);
+      return {};
+    });
+
+    const update = updateDesktopSettings({ gitChangesViewMode: 'flat' });
+    getWindow().dispatchEvent(new Event('pagehide'));
+    await update;
+    await updateDesktopSettings({ gitChangesViewMode: 'tree' });
+    await delay(300);
+
+    expect(saveOptions).toEqual([{ keepalive: true }, { keepalive: false }]);
   });
 
   test('ignores lifecycle events when no settings write is pending', async () => {

@@ -77,6 +77,8 @@ and retains the own-property check, so inherited names remain unsupported.
 
 Configuration failures skip only the failing provider. Pending requests remain
 keyed by the original ID and are removed only when that same promise settles.
+Claude owns its pending requests so the registry cannot join requests for
+different homes; its reads still pass the registry's error normalization.
 
 `getAuthEntry` and `normalizeAuthEntry` do not validate credential fields.
 Credential readers narrow the fields they use.

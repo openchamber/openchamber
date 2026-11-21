@@ -207,7 +207,7 @@ function referenceChips(text: string, context: ComposerLanguageContext, typingEn
     if (context.referenceLinkChips?.size) {
         for (const range of findWebLinks(text)) {
             const chip = context.referenceLinkChips.get(range.link);
-            if (chip) chips.push({ start: range.start, end: range.end, widget: new ReferenceChipWidget(chip.label, chip.title, chip.iconHref, { openTarget: `link:${range.link}` }) });
+            if (chip) chips.push({ start: range.start, end: range.end, widget: new ReferenceChipWidget(chip.label, chip.title, chip.iconHref, { openTarget: `link:${chip.openUrl ?? range.link}` }) });
         }
     }
 

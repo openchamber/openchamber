@@ -16,7 +16,7 @@ import { isPluginControlSpec, parsedKindForSpec } from './plugin-spec.js';
 import { isPluginDenialOverridden, pluginPolicyResource, pluginSwitchState } from './plugin-switches.js';
 import { PLUGIN_SECTION, toPluginEntity, fromPluginEntity, readPluginList } from './config-v2.js';
 import { toLoadablePluginSpec } from './loadable-plugin-spec.js';
-import { canonicalPluginPath, resolveLocalPluginPath } from './plugin-paths.js';
+import { canonicalPluginPath, isExistingPluginFileName, pluginDirEntryKind, resolveLocalPluginPath } from './plugin-paths.js';
 import { isString } from '../shared/object-guards.js';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
 import type { OpenCodeConfigLayer, OpenCodeConfigLayers } from './config-files.js';
@@ -123,6 +123,13 @@ function validateFileName(fileName: JsonValue | undefined) {
   return fileName;
 }
 
+function validateExistingFileName(fileName: JsonValue | undefined) {
+  if (!isExistingPluginFileName(fileName)) {
+    throw codedError('Plugin file name is invalid', 'INVALID_FILENAME');
+  }
+  return fileName;
+}
+
 function ensureProjectConfigPath(workingDirectory?: string | null) {
   if (!workingDirectory) {
     throw codedError('Project scope requires working directory', 'INVALID_SCOPE');
@@ -219,7 +226,7 @@ function fileTargetFromId(id: string, workingDirectory?: string | null) {
   }
   const { scope, value: fileName } = splitScopedValue(decoded.value);
   validateScope(scope);
-  validateFileName(fileName);
+  validateExistingFileName(fileName);
   return {
     fileName,
     scope,
@@ -433,7 +440,7 @@ function pluginPathTargetFromId(id: string, workingDirectory?: string | null) {
   const { scope, value: name } = splitScopedValue(decoded.value);
   validateScope(scope);
   if (isFile) {
-    validateFileName(name);
+    validateExistingFileName(name);
   } else if (!name || name.includes('..') || /[\\/]/.test(name)) {
     throw codedError('Plugin package name is invalid', 'INVALID_FILENAME');
   }
@@ -467,12 +474,13 @@ function listPluginDirFiles(workingDirectory?: string | null, switchStore?: Plug
       .filter((entry) => !entry.name.includes('..') && !entry.name.startsWith('.'))
       .flatMap((entry): PluginFile[] => {
         const absolutePath = path.join(dir, entry.name);
-        if (entry.isFile() && PLUGIN_FILE_NAME_PATTERN.test(entry.name)) {
+        const entryKind = pluginDirEntryKind(entry, absolutePath);
+        if (entryKind === 'file' && isExistingPluginFileName(entry.name)) {
           return editable
             ? [{ id: encodePluginId('file', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'file', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }]
             : [{ id: encodePluginId('legacy', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }];
         }
-        if (entry.isDirectory()) {
+        if (entryKind === 'directory') {
           return [{ id: encodePluginId(editable ? 'package' : 'legacyPackage', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }];
         }
         return [];
@@ -498,7 +506,7 @@ function readPluginDirFile(id: string, workingDirectory?: string | null) {
 }
 
 function writePluginDirFile(file: PluginFileInput | null | undefined, workingDirectory?: string | null, opts: { overwrite?: boolean } = {}) {
-  const fileName = validateFileName(file?.fileName);
+  const fileName = opts.overwrite ? validateExistingFileName(file?.fileName) : validateFileName(file?.fileName);
   const scope = file?.scope || AGENT_SCOPE.USER;
   validateScope(scope);
   const dir = pluginDirForScope(scope, workingDirectory);

@@ -20,6 +20,7 @@ import { indentGuides } from '@/lib/codemirror/indentGuides';
 import { isLintedJsonPath, jsonSyntaxLint } from '@/lib/codemirror/jsonSyntaxLint';
 import { stickyScope } from '@/lib/codemirror/stickyScope';
 import { gitBaselineTarget } from '../gitBaselineTarget';
+import { type useFileComments } from './useFileComments';
 import { type useFileLanguage } from './useFileLanguage';
 import { type useFileMobileKeyboard } from './useFileMobileKeyboard';
 import { type useFileScope } from './useFileScope';
@@ -53,8 +54,9 @@ export function useFileEditor() {
   return { wrapLines, setWrapLines, isSearchOpen, setIsSearchOpen, handleToolbarDropdownOpenChange, editorViewRef, editorWrapperRef, editorViewReadyNonce, setEditorViewReadyNonce, isGoToLineOpen, setIsGoToLineOpen, isSymbolsOpen, setIsSymbolsOpen, fileEditorKeymap };
 }
 
-export function useFileEditorExtensions({ editor, fileLanguage, mobileKeyboard, scope, tabs, themes, files, git, isMobile, t }: {
+export function useFileEditorExtensions({ editor, fileComments, fileLanguage, mobileKeyboard, scope, tabs, themes, files, git, isMobile, t }: {
   editor: Pick<ReturnType<typeof useFileEditor>, 'editorViewRef' | 'fileEditorKeymap' | 'wrapLines'>;
+  fileComments: Pick<ReturnType<typeof useFileComments>, 'codeSelectionComment'>;
   fileLanguage: Pick<ReturnType<typeof useFileLanguage>, 'dynamicLanguageExtension' | 'staticLanguageExtension'>;
   mobileKeyboard: Pick<ReturnType<typeof useFileMobileKeyboard>, 'nudgeEditorSelectionAboveKeyboard'>;
   scope: Pick<ReturnType<typeof useFileScope>, 'currentDirectory' | 'panelRoot' | 'root'>;
@@ -66,6 +68,7 @@ export function useFileEditorExtensions({ editor, fileLanguage, mobileKeyboard, 
   t: ReturnType<typeof useI18n>['t'];
 }) {
   const { editorViewRef, fileEditorKeymap, wrapLines } = editor;
+  const { codeSelectionComment } = fileComments;
   const { dynamicLanguageExtension, staticLanguageExtension } = fileLanguage;
   const { nudgeEditorSelectionAboveKeyboard } = mobileKeyboard;
   const { currentDirectory, panelRoot, root } = scope;
@@ -208,6 +211,7 @@ export function useFileEditorExtensions({ editor, fileLanguage, mobileKeyboard, 
       bracketAids(),
       indentGuides(),
       importLinksExtension,
+      codeSelectionComment.extension,
     );
     if (isLintedJsonPath(selectedFile.path)) {
       extensions.push(jsonSyntaxLint(t('filesView.editor.jsonSyntaxError'), {
@@ -219,8 +223,7 @@ export function useFileEditorExtensions({ editor, fileLanguage, mobileKeyboard, 
     }
     if (!isMobile) {
       extensions.push(codeFolding(), multipleCursors({ vimMode: fileEditorKeymap === 'vim' }), stickyScope());
-    }
-    if (isMobile) {
+    } else {
       extensions.push(EditorView.updateListener.of((update) => {
         if (!update.view.hasFocus) {
           return;
@@ -235,7 +238,7 @@ export function useFileEditorExtensions({ editor, fileLanguage, mobileKeyboard, 
       }));
     }
     return extensions;
-  }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension, fileEditorKeymap, t, importLinksExtension]);
+  }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension, fileEditorKeymap, t, importLinksExtension, codeSelectionComment.extension]);
 
   const pierreTheme = React.useMemo(
     () => ({ light: ensurePierreThemeRegistered(lightTheme), dark: ensurePierreThemeRegistered(darkTheme) }),

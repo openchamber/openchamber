@@ -54,6 +54,7 @@ describe('environment runtime', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     fs.rmSync(root, { recursive: true, force: true });
   });
 
@@ -204,6 +205,28 @@ describe('environment runtime', () => {
     expect(await runtime.forDirectory(projectPath, USER_ACTION)).toBeNull();
     expect(runtime.forOpenCode()).toEqual({});
     expect(logger.warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('resolves the Claude usage home live from user, service, then inherited environment', async () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '/inherited');
+    const runtime = createRuntime({ readOpenCodeServiceEnv: () => ({ CLAUDE_CONFIG_DIR: '/service', OTHER_SECRET: 'hidden' }) });
+    expect(runtime.forClaudeQuota()).toEqual({ CLAUDE_CONFIG_DIR: '/service' });
+    await store.updateProject('path_project', { variables: { CLAUDE_CONFIG_DIR: '/project' } });
+    await store.updateUser({ variables: { CLAUDE_CONFIG_DIR: '/selected' } });
+    expect(runtime.forClaudeQuota()).toEqual({ CLAUDE_CONFIG_DIR: '/selected' });
+    await store.updateUser({ variables: { CLAUDE_CONFIG_DIR: null } });
+    expect(runtime.forClaudeQuota()).toEqual({ CLAUDE_CONFIG_DIR: '/service' });
+    expect(createRuntime().forClaudeQuota()).toEqual({ CLAUDE_CONFIG_DIR: '/inherited' });
+  });
+
+  it('fails Claude selection on a broken Settings store, except when enterprise suppresses the overlay', () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '/inherited');
+    fs.writeFileSync(path.join(root, 'environment.json'), 'broken');
+    expect(() => createRuntime().forClaudeQuota()).toThrow();
+    const readOpenCodeServiceEnv = vi.fn();
+    expect(createRuntime({ isEnterpriseMode: () => true, readOpenCodeServiceEnv }).forClaudeQuota())
+      .toEqual({ CLAUDE_CONFIG_DIR: '/inherited' });
+    expect(readOpenCodeServiceEnv).not.toHaveBeenCalled();
   });
 
   it('lays the variables over an environment', async () => {

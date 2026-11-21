@@ -21,6 +21,7 @@ let inFlightExtensionLoad: Promise<void> | null = null;
 let extensionLoadAgain = false;
 const quotaRequests = new Map<QuotaProviderId, { controller: AbortController; promise: Promise<boolean> }>();
 let configuredProvidersRequest: Promise<ReadonlySet<string> | null> | null = null;
+let claudeSelectionRevision = 0;
 const quotaAutoRefreshConsumers = new Map<symbol, boolean>();
 let quotaAutoRefreshInterval: number | null = null;
 let lastVisibleRefreshAt: number | null = null;
@@ -61,6 +62,7 @@ interface QuotaStore extends QuotaSettingsState {
   ensureLoadedForRuntime: (options?: { refresh?: boolean; allProviders?: boolean; visibleOnly?: boolean }) => Promise<void>;
   resetForRuntimeSwitch: () => void;
   refreshAfterCredentialChange: () => Promise<void>;
+  reconcileClaudeSelection: (options: { changed: boolean }) => Promise<void>;
 }
 
 const resolveDropdownProviderIds = (saved: readonly string[] | null, known: readonly QuotaProviderId[]): QuotaProviderId[] => (
@@ -100,20 +102,25 @@ const applyExtensionProviders = (next: ExtensionQuotaProvider[]): void => {
   if (sameExtensionQuotaProviders(state.extensionProviders, next)) return;
   const gone = state.extensionProviders.map((previous) => previous.id).filter((id) => !next.some((entry) => entry.id === id));
   const isGone = (id: string): boolean => gone.some((goneId) => goneId === id);
-  for (const id of gone) {
+  const replaced = state.extensionProviders
+    .filter((previous) => next.some((entry) => entry.id === previous.id && !sameExtensionQuotaProviders([previous], [entry])))
+    .map((previous) => previous.id);
+  const stale = [...gone, ...replaced];
+  const isStale = (id: string): boolean => stale.some((staleId) => staleId === id);
+  for (const id of stale) {
     quotaRequests.get(id)?.controller.abort();
     quotaRequests.delete(id);
   }
   useQuotaStore.setState((current) => {
     const refreshErrors = { ...current.refreshErrors };
-    for (const id of gone) delete refreshErrors[id];
+    for (const id of stale) delete refreshErrors[id];
     return {
       extensionProviders: next,
       dropdownProviderIds: resolveDropdownProviderIds(current.savedDropdownProviderIds, quotaProviderIds(next)),
-      results: gone.length > 0 ? current.results.filter((result) => !isGone(result.providerId)) : current.results,
+      results: stale.length > 0 ? current.results.filter((result) => !isStale(result.providerId)) : current.results,
       refreshErrors,
       selectedProviderId: current.selectedProviderId !== null && isGone(current.selectedProviderId) ? null : current.selectedProviderId,
-      isFetchingProvider: Object.fromEntries(Object.entries(current.isFetchingProvider).filter(([id]) => !isGone(id))),
+      isFetchingProvider: Object.fromEntries(Object.entries(current.isFetchingProvider).filter(([id]) => !isStale(id))),
       isLoading: quotaRequests.size > 0,
     };
   });
@@ -203,12 +210,14 @@ export const useQuotaStore = create<QuotaStore>()(
 
       fetchQuotas: async (providerIds, { invalidate = false } = {}) => {
         const generation = quotaGeneration;
+        const claudeRevision = claudeSelectionRevision;
         try {
           if (!invalidate) set({ isLoading: true });
           const configured = invalidate ? null : await readConfiguredProviders();
           if (generation !== quotaGeneration) return false;
-          const absent = configured ? providerIds.filter((providerId) => !configured.has(providerId)) : [];
-          const targets = providerIds.filter((providerId) => !absent.includes(providerId));
+          const current = providerIds.filter((providerId) => providerId !== 'claude' || claudeRevision === claudeSelectionRevision);
+          const absent = configured ? current.filter((providerId) => !configured.has(providerId)) : [];
+          const targets = current.filter((providerId) => !absent.includes(providerId));
           if (absent.length > 0) recordNotConfigured(set, absent);
           if (targets.length === 0) set({ isLoading: quotaRequests.size > 0 });
           const answered = await Promise.all(targets.map((providerId) => get().fetchProviderQuota(providerId, invalidate)));
@@ -243,7 +252,7 @@ export const useQuotaStore = create<QuotaStore>()(
               const message = result.error || 'Failed to fetch quota';
               set(state => {
                 const previous = state.results.find(entry => entry.providerId === providerId);
-                const keepPrevious = previous?.configured && !invalidate;
+                const keepPrevious = previous?.configured && !invalidate && previous.selection === result.selection;
                 const results = keepPrevious
                   ? state.results
                   : [...state.results.filter(entry => entry.providerId !== providerId), result];
@@ -354,6 +363,35 @@ export const useQuotaStore = create<QuotaStore>()(
         set({ results: [], loadedRuntimeKey: null, isLoading: false, isFetchingProvider: {}, lastUpdated: null, refreshErrors: {}, error: null });
         if (!hasVisibleQuotaReadout()) return;
         await get().ensureLoadedForRuntime({ refresh: true, allProviders: [...quotaAutoRefreshConsumers.values()].some(Boolean), visibleOnly: true });
+      },
+
+      reconcileClaudeSelection: async ({ changed }) => {
+        lastVisibleRefreshAt = null;
+        lastVisibleRefreshIncludedAll = false;
+        if (changed) {
+          claudeSelectionRevision += 1;
+          configuredProvidersRequest = null;
+          quotaRequests.get('claude')?.controller.abort();
+          quotaRequests.delete('claude');
+          set((state) => {
+            const refreshErrors = { ...state.refreshErrors };
+            delete refreshErrors.claude;
+            return {
+              results: state.results.filter((entry) => entry.providerId !== 'claude'),
+              refreshErrors,
+              error: Object.values(refreshErrors)[0] ?? null,
+              isFetchingProvider: { ...state.isFetchingProvider, claude: false },
+              isLoading: quotaRequests.size > 0,
+            };
+          });
+        } else if (!get().results.some((entry) => entry.providerId === 'claude')) {
+          return;
+        }
+        if (!hasVisibleQuotaReadout() || !useConfigStore.getState().isInitialized) {
+          if (changed) set({ loadedRuntimeKey: null });
+          return;
+        }
+        await get().fetchProviderQuota('claude', changed);
       },
 
       setSelectedProvider: (providerId) => set({ selectedProviderId: providerId }),

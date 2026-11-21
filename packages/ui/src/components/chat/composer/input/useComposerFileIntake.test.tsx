@@ -31,6 +31,8 @@ describe('useComposerFileIntake with office documents', () => {
     let writeResult: (files: ReadonlyArray<{ filename: string }>) => Array<{ filename: string; path: string } | { filename: string; error: Error }>;
     const spies: Array<{ mockRestore: () => void }> = [];
     let errorToasts: unknown[][];
+    let infoToasts: unknown[];
+    let pathReferences: Map<string, string>;
 
     const editor = {
         getValue: () => draft,
@@ -56,9 +58,9 @@ describe('useComposerFileIntake with office documents', () => {
                 currentDirectory: '/repo',
                 chatDraftIdentity: null,
                 attachedFiles: [],
-                addAttachedFile: async (file: File, _target?: null, onAttached?: (files: Array<{ filename: string }>) => void) => {
+                addAttachedFile: async (file: File, _target?: null, onAttached?: (files: Array<{ filename: string; agentPath?: string }>) => void) => {
                     attached.push(file.name);
-                    onAttached?.([{ filename: file.name }]);
+                    onAttached?.([{ filename: file.name, agentPath: pathReferences.get(file.name) }]);
                     return true;
                 },
             } as never,
@@ -85,13 +87,15 @@ describe('useComposerFileIntake with office documents', () => {
         pendingWork = new Set();
         attached = [];
         errorToasts = [];
+        infoToasts = [];
+        pathReferences = new Map();
         writes = [];
         writeResult = (files) => files.map(({ filename }) => ({ filename, path: `/oc-tmp/openchamber/abc/${filename}` }));
         useInputStore.setState({ attachmentDraftKey: 'draft-a', attachedFiles: [] });
         spies.push(
             spyOn(toast, 'loading').mockImplementation(() => 'saving'),
             spyOn(toast, 'dismiss').mockImplementation(() => 'saving'),
-            spyOn(toast, 'info').mockImplementation(() => 'info'),
+            spyOn(toast, 'info').mockImplementation((message) => { infoToasts.push(message); return 'info'; }),
             spyOn(toast, 'error').mockImplementation((message) => { errorToasts.push([message]); return 'error'; }),
             spyOn(opencodeClient, 'writeOpenCodeTempFiles').mockImplementation(async (directory, files, options) => {
                 const read = [];
@@ -224,5 +228,15 @@ describe('useComposerFileIntake with office documents', () => {
         expect(offer).toBeNull();
         expect(writes).toEqual([]);
         expect(attached).toEqual(['a.docx']);
+        expect(infoToasts).toEqual([]);
+    });
+
+    test('Convert says so when a document reaches the agent as its path instead of text', async () => {
+        useUIStore.getState().setDocumentAttachBehavior('convert');
+        pathReferences.set('huge.docx', '/Users/me/huge.docx');
+        pathReferences.set('notes.txt', '/Users/me/notes.txt');
+        await act(async () => { await intake?.attachFilesWithCitation([docx('huge.docx'), text('notes.txt')]); });
+        expect(attached).toEqual(['huge.docx', 'notes.txt']);
+        expect(infoToasts).toEqual(['chat.fileAttachment.toast.documentAttachedAsPath{"name":"huge.docx"}']);
     });
 });

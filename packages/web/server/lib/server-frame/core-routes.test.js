@@ -3,6 +3,7 @@ import express from 'express';
 import request from 'supertest';
 import { createTunnelAuth } from '../tunnels/tunnel-auth.js';
 import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerHttpResponseDiagnostics, registerServerStatusRoutes, registerSettingsUtilityRoutes } from './core-routes.js';
+import { createPluginNotificationEmitter, registerNotificationEmitRoutes } from '../notifications/emit-route.js';
 import { createServerDiagnosticJournal } from '../diagnostics/server-journal.js';
 import { createUiAuth } from '../ui-auth/ui-auth.js';
 
@@ -165,6 +166,63 @@ describe('core-routes', () => {
 
     await request(app).post('/api/git/identities').send({}).expect(401);
     expect(requireAuth).toHaveBeenCalledTimes(1);
+  });
+
+  it('authenticates a notification emit once when both the /api gate and the route gate run', async () => {
+    const app = express();
+    // A paired client's bearer token: each check reads the credential store again,
+    // and here the second read fails.
+    let reads = 0;
+    const requireAuth = vi.fn((req, res, next) => {
+      reads += 1;
+      if (reads === 1 && req.headers.authorization === 'Bearer client-token') return next();
+      return res.status(401).json({ error: 'Unauthorized' });
+    });
+    const delivered = [];
+    const emitRoutes = registerNotificationEmitRoutes(app, {
+      express,
+      isAgentToolRequestAuthorized: () => false,
+      emitter: createPluginNotificationEmitter({
+        readSettingsFromDiskMigrated: async () => ({ nativeNotificationsEnabled: true }),
+        emitDesktopNotification: () => false,
+        broadcastUiNotification: (payload) => delivered.push(payload),
+        now: () => 0,
+      }),
+    });
+    // Production order, as bootstrap-runtime registers them.
+    emitRoutes.registerPluginRoute();
+    const { requireApiAuth } = registerAuthAndAccessRoutes(app, {
+      express,
+      tunnelAuthController: {
+        classifyRequestScope: () => 'local',
+        requireTunnelSession: vi.fn(),
+        getTunnelSessionFromRequest: vi.fn(),
+        clearTunnelSessionCookie: vi.fn(),
+        exchangeBootstrapToken: vi.fn(),
+      },
+      uiAuthController: {
+        requireAuth,
+        handleSessionStatus: vi.fn(), handleSessionCreate: vi.fn(), handlePasskeyStatus: vi.fn(),
+        handlePasskeyAuthenticationOptions: vi.fn(), handlePasskeyAuthenticationVerify: vi.fn(),
+        handlePasskeyRegistrationOptions: vi.fn(), handlePasskeyRegistrationVerify: vi.fn(),
+        handlePasskeyList: vi.fn(), handlePasskeyRevoke: vi.fn(), handleResetAuth: vi.fn(),
+      },
+      readSettingsFromDiskMigrated: vi.fn(async () => ({})),
+      normalizeTunnelSessionTtlMs: vi.fn(),
+    });
+    emitRoutes.registerApiRoute(requireApiAuth);
+
+    await request(app)
+      .post('/api/notifications/emit')
+      .set('Authorization', 'Bearer client-token')
+      .send({ title: 'Build done' })
+      .expect(200, { delivered: true });
+    expect(requireAuth).toHaveBeenCalledTimes(1);
+    expect(delivered.map((payload) => payload.title)).toEqual(['Build done']);
+
+    // The /api mount defers this POST to the route, and the route's gate still refuses.
+    await request(app).post('/api/notifications/emit').send({ title: 'Anonymous' }).expect(401);
+    expect(delivered.map((payload) => payload.title)).toEqual(['Build done']);
   });
 
   it('should require UI auth before /api/system/shutdown when auth is configured', async () => {
