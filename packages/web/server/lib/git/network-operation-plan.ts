@@ -8,6 +8,8 @@ import { normalizeSourceControlProviderInstance } from '../source-control/provid
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { createHttpsCredentialReference, endpointIsInstanceOrigin, normalizeGitRemoteEndpoint } from './credential-resolver.js';
 import { loopbackHttpPermitted } from './loopback-http.js';
+import { inspectForHydrationPlan } from './hydration-results.js';
+import type { CheckoutHydrationFailure } from './network-execution-contracts.js';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
 import type {
   AuxiliaryGrant, CloneInternal, ContributorSelection, ExistingInternal,
@@ -910,11 +912,7 @@ export function createNetworkOperationPlanner({
       throw planError('Git checkout hydration source changed', 409, 'GIT_NETWORK_OPERATION_AUTHORITY_CHANGED');
     }
     const expectedHeadSha = parseSha(await resolveRef(directory, 'HEAD'), 'checkout HEAD');
-    const inspection = await inspectCheckoutHydration({
-      directory,
-      parentEndpoint: authority.endpoint,
-      parentRemoteName: remote.name,
-    });
+    const { inspection, preparedHydrationFailure } = await inspectForHydrationPlan(inspectCheckoutHydration, { directory, parentEndpoint: authority.endpoint, parentRemoteName: remote.name }, expectedHeadSha);
     if (inspection.headSha !== expectedHeadSha) {
       throw planError('Git checkout changed during hydration planning', 409, 'GIT_NETWORK_OPERATION_AUTHORITY_CHANGED');
     }
@@ -943,6 +941,7 @@ export function createNetworkOperationPlanner({
       parentEndpoint: string;
       parentRemoteName: string;
       repositoryAuthority: { directory: string; repositoryId: string; bindingRevision: number; configRevision: string };
+      preparedHydrationFailure?: CheckoutHydrationFailure;
     } = {
       directory,
       endpointKind: 'fetch',
@@ -962,6 +961,7 @@ export function createNetworkOperationPlanner({
       },
     };
     if (authority.credentialId) internal.credentialId = authority.credentialId;
+    if (preparedHydrationFailure) internal.preparedHydrationFailure = preparedHydrationFailure;
     return bundlePlans({
       operationId,
       endpoint: authority.endpoint,
