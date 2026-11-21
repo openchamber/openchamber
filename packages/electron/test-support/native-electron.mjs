@@ -77,6 +77,7 @@ export function installNativeElectron({ directory, app: appOverrides = {}, fetch
     },
     session: { defaultSession: nativeSession, fromPartition: () => nativeSession },
     shell: {}, webContents: {},
+    systemPreferences: { getUserDefault: () => '', setUserDefault() {} },
   };
   const log = {
     initialize() {},
