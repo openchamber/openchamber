@@ -642,6 +642,15 @@ card read the page and element text out of the prompt
 (`lib/browser/annotationPrompt.ts`); an annotation saved before keeps its
 comment in the prompt and shows it all the same, and editing it moves it out.
 
+### Why a composing draft is typed in its row, not a floating field
+
+The float above the composer — a glass pill with the attach button, Enter to
+save — was the chips design's field for a draft, and it left with the chips. A
+glass surface inside the composer's own glass box stacks two blurs, and a field
+that floats over the box needs the portal and the height cap the rows removed.
+A composing draft opens where every other draft is read and edited, its row, and
+the row's head states the file and line it anchors to.
+
 ## Invariants
 
 - Drag payload reads are guarded individually because a host can reject
@@ -717,6 +726,28 @@ comment in the prompt and shows it all the same, and editing it moves it out.
 - Context-row editing saves once after focus leaves the entire row. Its own
   controls retain focus, and a remount that returns focus inside the row cannot
   save it prematurely. Completion guards reject a later unmount blur.
+- A composing draft's row is the open one while `composing` is set, and only an
+  active surface opens it: a chat that is not on screen cannot take the keyboard.
+  The row's head names the file and line a field with no text cannot.
+- A composing draft owns its text: every keystroke reaches the store, so a
+  reload, session switch or surface swap loses nothing. When the store refuses a
+  write at its size bound, the field keeps the typed text, the storage-limit
+  toast says why, and finishing waits until that text is saved.
+- Finishing a composing draft clears `composing` and closes the row; Escape
+  removes the draft, and one finished with no text goes with its field. Every
+  other draft survives an empty edit.
+- A composing row is never folded behind "+N more" (`foldContextRows`); it takes
+  the last visible slot so its field stays mounted. When its row opens, the
+  field is scrolled into view once: the field focuses with `preventScroll`, and
+  a long quote can push it below the capped context list. Later scrolling is
+  the user's.
+- Arriving with a composing draft switches the layout to the chat, including out
+  of a run overview. The reveal belongs to the arrival, so the user can reopen a
+  run overview while the field is open, and a reload that restores an unfinished
+  composing draft leaves the view where it was. Arrival is counted per draft id
+  (`takeArrivedComposingDraft`), not by whether any draft is composing: a
+  restored unfinished composition stays composing, and the next comment filed
+  must still bring the chat forward.
 - Collapsed context text before a chip keeps its width until its cap; fractional
   shrinking would ellipsize a word that fits. Space runs at chip boundaries remain
   explicit so truncation cannot collapse them.

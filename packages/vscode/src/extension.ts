@@ -9,6 +9,7 @@ import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } 
 import { pathsEqualWithNormalizedDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { InlineCommentThreads, SIDEBAR_SURFACE_ID } from './InlineCommentThreads';
+import { registerAddLineCommentCommand } from './lineCommentCommand';
 import { applyConnectAttemptTimeout } from './networkDefaults';
 import { disposeOutputChannel, getOutputChannel } from './outputChannel';
 import { stopGitProcesses } from './bridge-git-process-runtime';
@@ -580,20 +581,7 @@ export async function activate(context: vscode.ExtensionContext) {
   });
   context.subscriptions.push(inlineCommentThreads);
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.addLineComment', () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) {
-        vscode.window.showWarningMessage(t('OpenChamber [Add Comment]: No active editor'));
-        return;
-      }
-      if (!inlineCommentThreads.canCommentOn(editor.document.uri)) {
-        vscode.window.showWarningMessage(t('OpenChamber [Add Comment]: File is outside the workspace'));
-        return;
-      }
-      inlineCommentThreads.openThread(editor.document.uri, editor.selection);
-    })
-  );
+  context.subscriptions.push(registerAddLineCommentCommand(inlineCommentThreads));
 
   context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.submitLineComment', async (reply: vscode.CommentReply) => {

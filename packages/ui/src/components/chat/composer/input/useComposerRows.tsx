@@ -14,6 +14,7 @@ import type { useComposerEditorState } from './useComposerEditorState';
 import type { useComposerEditorActions } from './useComposerEditorActions';
 import type { useComposerDraftText } from './useComposerDraftText';
 import type { useComposerDraftTarget } from './useComposerDraftTarget';
+import type { ChatInputProps } from './chatInputProps';
 import React from 'react';
 import { QueuedMessagesStrip } from '../../QueuedMessagesStrip';
 import { AutoReviewStrip } from '../../AutoReviewStrip';
@@ -37,6 +38,7 @@ import { MemoMobileModelButton, MemoMobileEffortButton, MemoMobileAgentButton } 
 const CREATING_SESSION_LINE_DELAY_MS = 300;
 
 type Dependencies = {
+    props: Pick<ChatInputProps, 'active'>;
     draftText: Pick<ReturnType<typeof useComposerDraftText>, 'setMessage'>;
     editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
     i18n: Pick<ReturnType<typeof useI18n>, 't'>;
@@ -56,7 +58,7 @@ type Dependencies = {
 };
 
 export function useComposerRows({
-    draftText, editorState, i18n, preferences, mobileShell: mobile, inlineContext, referenceActions,
+    props, draftText, editorState, i18n, preferences, mobileShell: mobile, inlineContext, referenceActions,
     sendAvailability, sessionScope, queueState, draftTarget, selection, queueActions, sessionLifecycle,
     editorActions, referencePicker,
 }: Dependencies) {
@@ -91,7 +93,7 @@ export function useComposerRows({
     }, [isMobile, mobileComposerExpanded, mobileShell, setMessage, composerRef]);
 
     const contextRows = hasDrafts ? (
-        <ComposerContextRows draftTarget={inlineDraftTarget} isMobile={isMobile} onOpenAttachment={openAttachmentByName} />
+        <ComposerContextRows draftTarget={inlineDraftTarget} isMobile={isMobile} onOpenAttachment={openAttachmentByName} surfaceActive={props.active ?? true} />
     ) : null;
 
     const suggestionHidden = hasContent || newSessionDraftOpen || isBtwActive || isBtwPanelVisible || queuedMessages.length > 0 || hasPendingForm;

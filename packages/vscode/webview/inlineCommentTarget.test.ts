@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveCommentTarget } from './inlineCommentTarget';
+import { needsComposerDraft, resolveCommentTarget } from './inlineCommentTarget';
 
 const snapshot = (overrides = {}) => ({
     currentSessionId: null,
@@ -47,6 +47,19 @@ describe('resolveCommentTarget', () => {
             resolveCommentTarget(snapshot({ draftOpen: true })),
             { directory: '/repo', sessionKey: 'draft' },
         );
+    });
+
+    test('a composer comment on the sidebar session list opens a draft to file into', () => {
+        // Without it nothing could be filed: the sidebar shows the field only
+        // after a draft is stored, and the draft waited for a session.
+        assert.equal(needsComposerDraft(snapshot(), true), true);
+        assert.equal(needsComposerDraft(snapshot(), false), false);
+        assert.equal(needsComposerDraft(snapshot({ draftOpen: true }), true), false);
+        assert.equal(needsComposerDraft(snapshot({ currentSessionId: 'ses_1' }), true), false);
+    });
+
+    test('a session panel comment never opens a draft in place of its session', () => {
+        assert.equal(needsComposerDraft(snapshot(), true, 'ses_1'), false);
     });
 
     test('nothing is filed without any directory', () => {

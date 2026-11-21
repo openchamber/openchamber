@@ -21,6 +21,30 @@ export function nextDraftId(now: number, randomFraction: number): string {
     return `icd-${now}-${randomFraction.toString(36).substring(2, 9)}`;
 }
 
+export interface LineEdit {
+    startLine: number;
+    endLine: number;
+    insertedLines: number;
+    endsAtLineStart?: boolean;
+}
+
+export function shiftLineRangeOnEdits(range: LineRange, edits: readonly LineEdit[]): LineRange {
+    let { startLine, endLine } = range;
+    for (const edit of [...edits].sort((left, right) => right.startLine - left.startLine)) {
+        const removedLines = edit.endLine - edit.startLine + 1;
+        const delta = edit.insertedLines - removedLines;
+        const endsBeforeAnchor = edit.endLine < startLine || (edit.endLine === startLine && edit.endsAtLineStart === true);
+        if (endsBeforeAnchor) {
+            startLine += delta;
+            endLine += delta;
+        } else if (edit.startLine <= endLine) {
+            startLine = edit.startLine;
+            endLine = edit.startLine;
+        }
+    }
+    return { startLine: Math.max(startLine, 1), endLine: Math.max(endLine, startLine, 1) };
+}
+
 export function shouldDisposeOnEmptyBody(body: string): boolean {
     return body.trim().length === 0;
 }
@@ -95,4 +119,11 @@ export function reconcileThreadFate(text: string | undefined, confirmed: boolean
     if (text === undefined) return confirmed ? 'dispose' : 'wait';
     if (shouldDisposeOnEmptyBody(text)) return 'dispose';
     return 'show';
+}
+
+export type ComposingThreadFate = 'wait' | 'create' | 'drop';
+
+export function composingThreadFate(text: string | undefined, confirmed: boolean): ComposingThreadFate {
+    if (text === undefined) return confirmed ? 'drop' : 'wait';
+    return shouldDisposeOnEmptyBody(text) ? 'wait' : 'create';
 }
