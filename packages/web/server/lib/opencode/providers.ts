@@ -16,12 +16,14 @@ import {
 } from './config-v2.js';
 import { isBoolean, isRecord, isString } from '../shared/object-guards.js';
 import type { OpenCodeConfigLayers } from './config-files.js';
+import { canonicalSourceConnectionError, readInheritedProviderCanonical, type ProviderConfigLayers } from './inherited-canonical.js';
 import type { ProviderEntity, ProviderModelEntity } from './config-v2.js';
 import { isModelModality, toModelModalities } from './model-modalities.js';
 
 export interface CustomProviderConfig {
   package: string;
   name: string;
+  canonical?: string | null;
   settings: { baseURL: string; tls?: ClientCertificate | null };
   headers?: Record<string, string>;
   models: Record<string, CustomProviderModel>;
@@ -41,6 +43,7 @@ interface ClientCertificate {
 
 interface ProviderValidationOptions {
   hasStoredAuth?: boolean;
+  layers?: ProviderConfigLayers<object>;
 }
 
 const MODEL_TYPE_SCHEMA = z.string().trim().min(1);
@@ -60,6 +63,7 @@ const CUSTOM_PROVIDER_PACKAGES = new Set([
   '@opencode/ai/providers/anthropic',
   '@opencode/ai/providers/anthropic-compatible',
 ]);
+const CANONICAL_PROVIDER_SCHEMA = z.string().trim().regex(/^\S+$/);
 
 const isPositiveSafeInteger = (value: unknown): value is number =>
   Number.isSafeInteger(value) && Number(value) > 0;
@@ -89,6 +93,7 @@ function getProviderSources(providerId: string, workingDirectory: string | null)
       custom: { exists: providerExistsIn(customConfig, providerId), path: paths.customPath },
     },
     config: readStoredProviderEntry([customConfig, projectConfig, userOverrideConfig, userConfig], providerId),
+    inheritedCanonical: readInheritedProviderCanonical(layers, providerId),
   };
 }
 
@@ -175,11 +180,11 @@ function validateCustomProviderConfig<Config>(providerId: string, config: Config
       if (tools !== undefined && !isBoolean(tools)) {
         return { ok: false, error: `Model "${trimmedId}" tools capability must be a boolean` };
       }
-      normalizedModel.capabilities = {
-        tools: isBoolean(tools) ? tools : true,
-        input: input ? toModelModalities(input) : ['text'],
-        output: output ? toModelModalities(output) : ['text'],
-      };
+      const capabilities: NonNullable<CustomProviderModel['capabilities']> = {};
+      if (isBoolean(tools)) capabilities.tools = tools;
+      if (input !== undefined) capabilities.input = toModelModalities(input);
+      if (output !== undefined) capabilities.output = toModelModalities(output);
+      if (Object.keys(capabilities).length > 0) normalizedModel.capabilities = capabilities;
     }
     if (Array.isArray(modelValue.variants)) {
       normalizedModel.variants = toModelVariants(modelValue.variants);
@@ -189,6 +194,16 @@ function validateCustomProviderConfig<Config>(providerId: string, config: Config
   const tls = validateClientCertificate(settingsBlock.tls);
   if (!tls.ok) return tls;
 
+  let canonical: string | null | undefined;
+  if (config.canonical === undefined || config.canonical === null) {
+    canonical = config.canonical;
+  } else {
+    canonical = CANONICAL_PROVIDER_SCHEMA.safeParse(config.canonical).data;
+    if (!canonical) return { ok: false, error: 'Canonical provider must be a provider ID' };
+    const connectionError = options.layers && canonicalSourceConnectionError(options.layers, providerId, canonical);
+    if (connectionError) return { ok: false, error: connectionError };
+  }
+
   const normalized: CustomProviderConfig = {
     package: packageName,
     name,
@@ -196,6 +211,7 @@ function validateCustomProviderConfig<Config>(providerId: string, config: Config
     models: normalizedModels,
   };
   if (tls.value !== undefined) normalized.settings.tls = tls.value;
+  if (canonical !== undefined) normalized.canonical = canonical;
 
   let env: string[] = [];
   if (Array.isArray(config.env)) {
@@ -252,13 +268,13 @@ function validateClientCertificate(value: Parameters<typeof CLIENT_CERTIFICATE_S
 
 function assertStoredOrKnownModalities(
   modelId: string,
-  capabilities: { input: string[]; output: string[] } | undefined,
-  stored: { input?: string[]; output?: string[] } | undefined,
+  capabilities: ProviderModelEntity['capabilities'],
+  stored: ProviderModelEntity['capabilities'],
 ) {
   if (!capabilities) return;
   for (const target of ['input', 'output'] as const) {
     const storedList = stored?.[target] ?? [];
-    if (capabilities[target].some((entry) => !isModelModality(entry) && !storedList.includes(entry))) {
+    if (capabilities[target]?.some((entry) => !isModelModality(entry) && !storedList.includes(entry))) {
       throw Object.assign(new Error(`Model "${modelId}" ${target} capabilities are invalid`), { statusCode: 400 });
     }
   }
@@ -273,9 +289,12 @@ function mergeCustomProviderConfig(existingValue: Parameters<typeof toProviderEn
   const normalizedModels = isRecord(normalizedConfig.models) ? normalizedConfig.models : {};
   const mergedModels = Object.fromEntries(
     Object.entries(normalizedModels).map(([modelId, normalizedModel]) => {
-      const existingModel = isRecord(existingModels[modelId]) ? existingModels[modelId] : {};
+      const existingModel = existingModels[modelId];
       const mergedModel = { ...existingModel, ...normalizedModel };
-      assertStoredOrKnownModalities(modelId, normalizedModel.capabilities, existingModels[modelId]?.capabilities);
+      assertStoredOrKnownModalities(modelId, normalizedModel.capabilities, existingModel?.capabilities);
+      if (normalizedModel.capabilities) {
+        mergedModel.capabilities = { ...existingModel?.capabilities, ...normalizedModel.capabilities };
+      }
       if (Array.isArray(mergedModel.variants) && mergedModel.variants.length === 0) {
         delete mergedModel.variants;
       }
@@ -289,6 +308,7 @@ function mergeCustomProviderConfig(existingValue: Parameters<typeof toProviderEn
     settings: mergedSettings,
     models: mergedModels,
   };
+  if (merged.canonical === null) delete merged.canonical;
   if (!Object.prototype.hasOwnProperty.call(normalizedConfig, 'headers')) {
     delete merged.headers;
   }
@@ -299,13 +319,13 @@ function mergeCustomProviderConfig(existingValue: Parameters<typeof toProviderEn
 }
 
 function upsertProviderConfig<Config>(providerId: string, config: Config, workingDirectory: string | null, scope: string = 'user', options: ProviderValidationOptions = {}) {
-  const validated = validateCustomProviderConfig(providerId, config, options);
+  const layers = readConfigLayers(workingDirectory);
+  const validated = validateCustomProviderConfig(providerId, config, { ...options, layers });
   if (!validated.ok) {
     const error = Object.assign(new Error(validated.error), { statusCode: 400 });
     throw error;
   }
 
-  const layers = readConfigLayers(workingDirectory);
   let targetPath = getUserProviderPath(layers, validated.value.providerId);
 
   if (scope === 'project') {

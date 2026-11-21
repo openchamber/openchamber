@@ -385,7 +385,7 @@ describe('provider entity', () => {
     }).models.m.capabilities).toEqual({ tools: true, input: ['text', 'image'], output: ['text'] });
     expect(toProviderEntity({
       models: { m: { capabilities: { input: ['embedding'], output: [] } } },
-    }).models.m.capabilities).toEqual({ tools: true, input: ['embedding'], output: [] });
+    }).models.m.capabilities).toEqual({ input: ['embedding'], output: [] });
   });
 });
 

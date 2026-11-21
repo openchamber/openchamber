@@ -72,7 +72,7 @@ export interface ModelVariant {
   headers?: Record<string, string>;
   body?: Record<string, ConfigField>;
 }
-export interface ModelCapabilities { tools: boolean; input: string[]; output: string[] }
+export interface ModelCapabilities { tools?: boolean; input?: string[]; output?: string[] }
 interface ModelCost {
   tier?: Record<string, ConfigField>;
   input?: number;

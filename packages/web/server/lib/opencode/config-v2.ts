@@ -487,11 +487,12 @@ export function toModelVariants<Value>(value: Value): ModelVariant[] | undefined
 function toModelCapabilities(source: { modalities?: unknown; capabilities?: unknown; tool_call?: unknown }): ModelCapabilities | undefined {
   const modalities = isRecord(source.modalities) ? source.modalities : {};
   if (isRecord(source.capabilities)) {
-    return pickDefined({
-      tools: isBoolean(source.capabilities.tools) ? source.capabilities.tools : true,
-      input: isList(source.capabilities.input) ? toModelModalities(source.capabilities.input) : ['text', 'image'],
-      output: isList(source.capabilities.output) ? toModelModalities(source.capabilities.output) : ['text'],
+    const capabilities = pickDefined({
+      tools: isBoolean(source.capabilities.tools) ? source.capabilities.tools : undefined,
+      input: isList(source.capabilities.input) ? toModelModalities(source.capabilities.input) : undefined,
+      output: isList(source.capabilities.output) ? toModelModalities(source.capabilities.output) : undefined,
     });
+    return Object.keys(capabilities).length ? capabilities : undefined;
   }
   if (!isBoolean(source.tool_call) && !Array.isArray(modalities.input) && !Array.isArray(modalities.output)) {
     return undefined;
