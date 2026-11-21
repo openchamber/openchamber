@@ -20,7 +20,7 @@ import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
 import { createCloudflareTunnelProvider } from './lib/tunnels/providers/cloudflare.js';
 import { createNgrokTunnelProvider } from './lib/tunnels/providers/ngrok.js';
 import { createTailscaleTunnelProvider } from './lib/tunnels/providers/tailscale.js';
-import { allowsLocalDevOrigins, buildFrameAncestorsPolicy, createRequestSecurityRuntime, isLocalDevClientOrigin } from './lib/security/request-security.js';
+import { allowsLocalDevOrigins, buildFrameAncestorsPolicy, createRequestSecurityRuntime, resolveClientCorsHeaders } from './lib/security/request-security.js';
 import {
   getUnauthenticatedLanErrorMessage,
   isLoopbackBindHost,
@@ -2624,12 +2624,6 @@ async function main(options: WebUiServerOptions = {}) {
 
   const app = express();
   const serverStartedAt = new Date().toISOString();
-  const packagedClientOrigins = new Set([
-    'openchamber-ui://app',
-    'capacitor://localhost',
-    'http://localhost',
-    'https://localhost',
-  ]);
   const allowLocalDevOrigins = allowsLocalDevOrigins(process.env);
   const frameAncestorsPolicy = buildFrameAncestorsPolicy({
     allowLocalDevOrigins,
@@ -2649,16 +2643,9 @@ async function main(options: WebUiServerOptions = {}) {
     res.type('text/plain').send('User-agent: *\nDisallow: /\n');
   });
   app.use((req, res, next) => {
-    const origin = isString(req.headers.origin) ? req.headers.origin : '';
-    if (packagedClientOrigins.has(origin) || (allowLocalDevOrigins && isLocalDevClientOrigin(origin))) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding,Ngrok-Skip-Browser-Warning,CF-Access-Client-Id,CF-Access-Client-Secret,X-OpenChamber-Surface,X-OpenChamber-Provider,X-OpenChamber-Model,X-OpenChamber-Part-Shells');
-      res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
-      // external: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Max-Age Chromium caps the preflight cache lifetime at 2 hours.
-      res.setHeader('Access-Control-Max-Age', '7200');
-      res.setHeader('Vary', 'Origin');
+    const corsHeaders = resolveClientCorsHeaders(req, { allowLocalDevOrigins });
+    if (corsHeaders) {
+      for (const [name, value] of Object.entries(corsHeaders)) res.setHeader(name, value);
       if (req.method === 'OPTIONS') {
         res.status(204).end();
         return;

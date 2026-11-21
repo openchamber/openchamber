@@ -20,6 +20,13 @@ HTTP and WebSocket consumers. `../ui-auth` owns credentials and session cookies;
   its SSE traffic can continue.
 - Session identity uses the same host-port cookie resolver as issuance and
   validation. Extracted notification identity is not a CSRF token.
+- Preflights from the three packaged origins (desktop, iOS and Android
+  Capacitor) get the requested header names reflected, because the desktop
+  sends the remote host's saved request headers. `http://localhost` and
+  development origins keep the fixed list: reflecting there would let any
+  local page send headers the server trusts, such as
+  `x-openchamber-relay-connection`. Requested names that are not a plain
+  comma-separated token list fall back to the fixed list.
 - Frame ancestors contain the app and packaged shells plus development origins
   only in development. Configured additions must be plain origins or the
   explicit wildcard; untrusted documents supply their own response policy.

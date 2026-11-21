@@ -52,6 +52,31 @@ export const buildFrameAncestorsPolicy = ({ allowLocalDevOrigins = false, extra 
   return `frame-ancestors ${sources.join(' ')}`;
 };
 
+const CLIENT_CORS_ORIGINS = ['openchamber-ui://app', 'capacitor://localhost', 'http://localhost', 'https://localhost'];
+const PACKAGED_CLIENT_ORIGINS = new Set(PACKAGED_FRAME_ANCESTORS);
+const CLIENT_CORS_ALLOW_HEADERS = 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding,Ngrok-Skip-Browser-Warning,CF-Access-Client-Id,CF-Access-Client-Secret,X-OpenChamber-Surface,X-OpenChamber-Provider,X-OpenChamber-Model,X-OpenChamber-Part-Shells';
+const HEADER_NAME_LIST = /^[!#$%&'+.^_`|~0-9A-Za-z-]+(?:\s*,\s*[!#$%&'+.^_`|~0-9A-Za-z-]+)*$/;
+
+export const resolveClientCorsHeaders = (
+  req: Pick<SecurityRequest, 'headers'>,
+  { allowLocalDevOrigins = false }: { allowLocalDevOrigins?: boolean } = {},
+): Record<string, string> | null => {
+  const origin = isString(req.headers.origin) ? req.headers.origin : '';
+  if (!CLIENT_CORS_ORIGINS.includes(origin) && !(allowLocalDevOrigins && isLocalDevClientOrigin(origin))) return null;
+  const requested = req.headers['access-control-request-headers'];
+  const reflect = PACKAGED_CLIENT_ORIGINS.has(origin) && isString(requested) && HEADER_NAME_LIST.test(requested.trim());
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+    'Access-Control-Allow-Headers': reflect ? requested.trim() : CLIENT_CORS_ALLOW_HEADERS,
+    'Access-Control-Expose-Headers': 'x-next-cursor',
+    // external: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Max-Age Chromium caps the preflight cache lifetime at 2 hours.
+    'Access-Control-Max-Age': '7200',
+    Vary: 'Origin, Access-Control-Request-Headers',
+  };
+};
+
 export const isPasswordlessSocketOriginAllowed = async (req: SecurityRequest, isRequestOriginAllowed: RequestOriginChecker) => {
   const header = req?.headers?.origin;
   const origin = String((Array.isArray(header) ? header[0] : header) ?? '').trim();
