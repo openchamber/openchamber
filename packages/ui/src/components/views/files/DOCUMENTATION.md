@@ -323,6 +323,62 @@ alone missed both. A viewer that is laid out nowhere, behind another tab of
 the panel, ignores the keys, and the first viewer to handle a key marks it
 handled, so a second viewer on the page cannot step on the same key.
 
+An image's meta bar has a fullscreen toggle everywhere but the phone layout
+(`useFileImageFullscreen`; the tablet layout keeps it). It opens
+`renderFileImageFullscreen`, a full-size shared `Dialog` over the whole window
+that renders the same `ImageArtifact` through `renderImageArtifact`: the same
+`src`, neighbours and gestures, starting at fit. The arrow-key scope is the
+context panel or the overlay (`data-image-fullscreen`), whichever holds the
+viewer, and the overlay's viewer listens on the overlay itself: Base UI's
+popup stops arrow keys from bubbling on to the document. Other dialogs, such
+as the phone's workspace drawer, keep the document listener. A step from the
+overlay opens the neighbour in the panel as the docked arrows do, and the
+overlay follows the selection. While the next image loads, or when its read
+fails, the overlay keeps a bar with the name and the exit button, so it can be
+left without a keyboard. It closes when the panel is hidden (on a tablet, when
+the workspace drawer closes or switches to another tab: `MobileFilesSurface`
+passes the drawer's visibility down, because the drawer keeps Files mounted
+behind other tabs) or the selection
+is a file other than an image; an SVG shown as source stays (shown as an image,
+with its folder's arrows, since the image navigation keeps listing neighbors
+while the overlay is open), and a step that briefly leaves no file selected does
+not close it. Escape and the exit button
+close it everywhere. In the desktop app Ctrl/⌘+W closes the overlay first and
+leaves the file tab open, as it does the Settings window; Electron's menu sends
+that chord as the close-tab event, while in a browser the chord belongs to the
+browser. Its bar is the header's height and padded by
+`--oc-titlebar-start-inset` and `--oc-titlebar-end-inset` (published by
+`Header`), so the window controls the OS draws over the page (macOS traffic
+lights, an installed web app's window controls overlay) never cover its
+buttons. The desktop app's Windows controls are different: the page draws them
+in the header, and the overlay covers them like any modal, as the Settings
+window does; the exit button stays reachable and the controls work again once
+the overlay closes. It carries the
+header's `header-safe-area` class too, so on an iPad its buttons sit below the
+status bar as the header's do. The dialog portals out of the mobile shell, so
+it carries `oc-side-safe-area` itself: the background stays full bleed and the
+bar and arrows keep clear of a side cutout. Its `DialogContent` is `fullWindow`,
+so in an installed app window 768 px wide or narrower it still fills the window
+with square corners. On close the
+focus goes to the docked toggle, which a step may have remounted, so the docked
+arrows keep working.
+
+### Why a dialog over the window and not the panel's fullscreen
+
+The panel `<aside>` clips and isolates its content, so nothing inside it can
+cover the window. The shared dialog brings the focus trap, Escape, focus return
+and `oc-dialog-open`, which turns off the title bar's drag regions under it;
+the composer's key and paste redirect and the chat arrow navigation already
+skip `[role="dialog"]`. The overlay therefore sets no global flag such as
+`isImagePreviewOpen`: a flag every automatic close must clear can stick, and a
+stuck one silently stops typing from reaching the composer.
+
+### Why the overlay shares the docked `src` and does not fetch again
+
+Both viewers render inside `FilesView`, which owns the object URL and revokes
+it when the selection changes, so the overlay lives no longer than its URL. A
+second fetch would double the bytes and need its own revoke.
+
 Non-text artifacts the browser must own (PDF, audio, video, fonts) are loaded
 through `getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', …)` with
 the scoped URL token; the server streams byte ranges so playback can seek.
