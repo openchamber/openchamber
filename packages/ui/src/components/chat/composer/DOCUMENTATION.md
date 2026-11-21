@@ -622,12 +622,24 @@ render.
 ### Why a share waits for the draft to be the one on screen
 
 A share (the Android share intent) always opens a new-session draft of its own
-(`openSharedFilesSession` in `apps/deepLinkNavigation.ts`). Its work draft id is
-marked with `keepWorkDraftOwnSlot` (`lib/chatDraftPersistence.ts`), so even a chat
-draft gets its own work-draft composer key instead of the one slot every chat
-draft shares, and it never claims the folder's draft text. A draft the user was
-writing keeps its text and attachments and receives nothing. The mark lives in
-memory: after a reload the share's draft is an ordinary draft again.
+(`openSharedFilesSession` in `apps/deepLinkNavigation.ts`) in the last-used
+project: the projects store's active project, which opening a session keeps
+current, or the first project when none is active. A project draft is listed in
+the sidebar under its project and can be reopened after the user leaves it; the
+Chat target has no such list, so a share opens in Chat only when the app has no
+project. An empty project cache before the server's project list arrives is not
+"no project": `openSharedFilesSession` then returns false, the share queue keeps
+the share, and a change of the project list, `hasServerSnapshot` or
+`serverSnapshotFailed` flushes it on the next microtask, because
+`synchronizeFromSettings` marks the snapshot before it writes the projects. The
+wait has no deadline: until the page takes the share the native side keeps it,
+so a relaunch hands it over again, and choosing Chat early would put it where it
+cannot be reopened. Its work draft id is marked with `keepWorkDraftOwnSlot`
+(`lib/chatDraftPersistence.ts`), so it never claims the folder's draft text, and
+in the Chat case it gets its own work-draft composer key instead of the one slot
+every chat draft shares. A draft the user was writing keeps its text and
+attachments and receives nothing. The mark lives in memory: after a reload the
+share's draft is an ordinary draft again.
 
 The share leaves its files, text and the names the native side refused in
 `input-store.pendingDraftContent`, addressed by the draft's id. Taking it there
@@ -639,8 +651,8 @@ switch commit"), so for one commit after `openNewSessionDraft()` it still names
 the session the user left; taking the share there would file its attachments
 under that session's draft and the draft would look empty.
 
-Files go through `attachSharedFiles`, not `attachFilesWithCitation`, and stay
-local until Send:
+Files go through `attachSharedFiles`, not `attachFilesWithCitation`, and reach
+OpenCode only at Send:
 
 - Every file names the share's draft identity and attaches with
   `addAttachedFile(..., { shared: true })`. It lands in that draft even when the

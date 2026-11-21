@@ -61,17 +61,23 @@ const openShortcutSession = (intent: ShortcutNewSessionIntent): void => {
   useInputStore.getState().requestDraftSubmit(useSessionUIStore.getState().newSessionDraft.draftId, text);
 };
 
-export const openSharedFilesSession = (intent: SharedFilesIntent): void => {
+export const openSharedFilesSession = (intent: SharedFilesIntent): boolean => {
   if (intent.files.length === 0 && !intent.text) {
     reportSkippedSharedFiles(intent.rejected);
     intent.accept?.();
-    return;
+    return true;
   }
+  const projects = useProjectsStore.getState();
+  const project = projects.getActiveProject() ?? projects.projects[0] ?? null;
+  if (!project && !projects.hasServerSnapshot && !projects.serverSnapshotFailed) return false;
   const workDraftId = createSessionDraftId();
   keepWorkDraftOwnSlot(workDraftId);
-  useSessionUIStore.getState().openNewSessionDraft({ workDraftId });
+  useSessionUIStore.getState().openNewSessionDraft(project
+    ? { workDraftId, selectedProjectId: project.id }
+    : { workDraftId, target: 'chat' });
   const draftId = useSessionUIStore.getState().newSessionDraft.draftId;
   useInputStore.getState().requestDraftContent(draftId, intent);
+  return true;
 };
 
 const execute = (intent: NavigationIntent): boolean => {
@@ -186,9 +192,14 @@ export const createDeepLinkQueue = <Intent extends { type: string; serverId?: st
 };
 
 const queue = createDeepLinkQueue<NavigationIntent>(execute);
-const shareQueue = createDeepLinkQueue<SharedFilesIntent>((intent) => {
-  openSharedFilesSession(intent);
-  return true;
+const shareQueue = createDeepLinkQueue<SharedFilesIntent>(openSharedFilesSession);
+useProjectsStore.subscribe((state, previous) => {
+  if (
+    state.projects === previous.projects
+    && state.hasServerSnapshot === previous.hasServerSnapshot
+    && state.serverSnapshotFailed === previous.serverSnapshotFailed
+  ) return;
+  queueMicrotask(() => void shareQueue.flush());
 });
 
 const applyDeepLinkIntent = (intent: NavigationIntent): void => {
