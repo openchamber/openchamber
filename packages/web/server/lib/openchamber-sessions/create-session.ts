@@ -28,13 +28,19 @@ interface CreateSessionOptions {
   titleByUser?: boolean;
   startedByExtension?: string | null;
   operatorParentId?: string | null;
+  model?: { providerID: string; modelID: string } | null;
+  variant?: string | null;
 }
 
 type MutableCreateInput = { -readonly [Key in keyof SessionCreateInput]: SessionCreateInput[Key] };
 type SessionMetadata = NonNullable<SessionCreateInput['metadata']>;
 
-export const createSession = async ({ client, directory, title, titleByUser = false, startedByExtension = null, operatorParentId = null }: CreateSessionOptions) => {
+export const createSession = async ({ client, directory, title, titleByUser = false, startedByExtension = null, operatorParentId = null, model, variant }: CreateSessionOptions) => {
   const input: MutableCreateInput = { location: { directory } };
+  if (model) {
+    const selectedModel = { providerID: model.providerID, id: model.modelID };
+    input.model = variant ? { ...selectedModel, variant } : selectedModel;
+  }
   const openchamberMetadata: { -readonly [Key in keyof SessionMetadata]: SessionMetadata[Key] } = operatorParentId ? operatorChildMetadata(operatorParentId) : {};
   if (title) {
     input.title = title;
