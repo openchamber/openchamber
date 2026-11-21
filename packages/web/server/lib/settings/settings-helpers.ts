@@ -13,6 +13,7 @@ import { idleStopSchema } from '../spaces/idle-stop.js';
 import { sshHostSchema } from '../spaces/places/ssh-host.js';
 import { PROVIDER_LOGO_MIMES } from '../appearance/provider-logo-routes.js';
 import { sanitizeDictationSettings } from './settings-dictation.js';
+import { sanitizeSidebarRowDisplaySettings } from './sidebar-display-settings.js';
 
 const settingsDocumentSchema = z.looseObject({});
 export type SettingsDocument = z.infer<typeof settingsDocumentSchema>;
@@ -300,6 +301,7 @@ export type SanitizedSettings = Partial<Record<BooleanSettingsKey, boolean>>
     permissionDefaultMode?: PermissionMode;
     projects?: NonNullable<ReturnType<Normalization['sanitizeProjects']>>;
     sidebarSections?: SidebarSection[];
+    sidebarRowDisplayMode?: ReturnType<typeof sanitizeSidebarRowDisplaySettings>['sidebarRowDisplayMode'];
     sidebarPinLists?: { id: string; name: string }[];
     draftStarters?: { type: 'command' | 'skill'; name: string }[];
     fileTreeSide?: 'left' | 'right';
@@ -675,12 +677,7 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (candidate.sidebarShowPinnedSection === true || candidate.sidebarShowPinnedSection === false) {
       result.sidebarShowPinnedSection = candidate.sidebarShowPinnedSection;
     }
-    if (candidate.sidebarDetailedZoneRows === true || candidate.sidebarDetailedZoneRows === false) {
-      result.sidebarDetailedZoneRows = candidate.sidebarDetailedZoneRows;
-    }
-    if (candidate.sidebarWorktreeNameByBranch === true || candidate.sidebarWorktreeNameByBranch === false) {
-      result.sidebarWorktreeNameByBranch = candidate.sidebarWorktreeNameByBranch;
-    }
+    Object.assign(result, sanitizeSidebarRowDisplaySettings(candidate));
     if (Array.isArray(candidate.sidebarSections)) {
       result.sidebarSections = sanitizeSidebarSections(candidate.sidebarSections);
     }

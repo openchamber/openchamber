@@ -7,7 +7,7 @@ import { useWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDraftsStore } from '@/stores/useSessionDraftsStore';
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { resolveSidebarRowDisplayMode, useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useFirstSessionWithOpenTurn } from '@/sync/global-session-status';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -92,7 +92,7 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
   const title = space ? space.taskTitle?.title?.trim() || null : worktree?.title?.trim() || null;
   const branch = group.branch?.trim() || worktree?.branch?.trim() || null;
   const spaceName = space ? group.label : null;
-  const nameByBranch = useSessionDisplayStore((state) => state.worktreeNameByBranch);
+  const nameByBranch = useSessionDisplayStore(resolveSidebarRowDisplayMode) === 'branches';
   const ownName = space ? spaceName : branch;
   const label = (nameByBranch ? ownName ?? title : title ?? ownName) ?? group.label;
   const secondName = [title, ownName].find((name) => name && name !== label) ?? null;

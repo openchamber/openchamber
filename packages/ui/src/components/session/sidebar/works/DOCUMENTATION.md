@@ -51,6 +51,13 @@ Invariants:
 - Done leaves a work before optional worktree archival, because archival cannot
   remove the checkout still on screen. Busy or unreadable activity keeps the
   worktree after its sessions leave In work.
+- Display as Sessions projects each root conversation into its own work ref,
+  retaining its origin group for inherited folder and pin-list membership.
+  Worktrees and Branches retain grouped work refs and their group actions.
+  Empty groups remain available for drafts and workspace actions in every mode.
+  `list/sessionRowProjection.ts` owns their pin, folder and draft projections;
+  `sessionRowFolders.ts` owns timeline folder projection and whole-work selection.
+
 - Display lineage belongs to `lib/sessionWorkLineage.ts`. Archive, delete and
   restore follow OpenCode's `parentID` plus linked reviews. Forks and promoted
   `/btw` conversations remain independent; move also carries the rendered tree.
