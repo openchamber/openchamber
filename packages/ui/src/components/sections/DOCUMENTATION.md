@@ -163,12 +163,41 @@ while discovery runs elsewhere, so the same path would read two different
 files. The server keeps a certificate the form never read
 (`packages/web/server/lib/opencode/DOCUMENTATION.md`, `providers.js`).
 
+"Model defaults from" sets the provider's `canonical`: OpenCode then gives each
+model whose ID that catalog provider also lists its limits, capabilities, costs
+and reasoning levels, under whatever the model row sets itself. The choices are
+every provider in the running OpenCode's integration list, connected or not,
+without MCP sign-ins, web search and well-known logins, which are keyed by their
+origin URL rather than a provider ID (`listCanonicalProviders`), passed in by the
+Providers page, which has already read that list. OpenCode copies the source
+provider's settings, headers and body into this one, so the server refuses a
+source whose config entry sets any of them: a gateway's TLS certificate or
+headers would otherwise go to this provider's endpoint. OpenCode copies from its own
+provider registry, and the models.dev feed OpenChamber fetches is older and
+misses providers OpenCode has, so that feed is not the source. The list has
+a few hundred entries, so `CanonicalProviderPicker` is searchable and mounts rows
+in steps as its end scrolls into view, with a sheet on the phone; None leads the
+unfiltered list. A saved value the list lacks stays as an option, and a list that
+fails to load shows a note and keeps the saved value. None sends null to clear
+it; a stored entry the page could not read sends nothing, so the server keeps it.
+OpenCode cannot unset `canonical` from a higher config layer, so None only removes
+the edited layer's value: when a lower layer sets one (`inheritedCanonical` from
+the source route, carried on the edit form's initial state), the field says which
+provider still applies and in which file, ahead of the note about a list that failed.
+
 Model rows render collapsed (name, id, limits, non-text inputs) so a provider
 with dozens of models stays scannable; a row added by hand opens, and a row
 with a validation error opens on submit. Capabilities are written to the
-OpenCode config only when they are known (saved config, discovery, or the
-user's edit, `capabilitiesKnown`); otherwise the key is left out so a save
-never replaces what OpenCode knows about a model with a text-only default.
+OpenCode config field by field, only those that are known (saved config,
+discovery, or the user's edit, `capabilitiesKnown`); the rest are left out so a
+save never replaces what OpenCode knows or inherits from the canonical provider
+with a text-only default. Turning tools off writes `tools` alone. Discovery
+fills each field from the provider first, then the matched catalog model. A field
+neither reports stays unset. When editing a stored model, the form shows the
+editable categories OpenCode resolved for each missing list. Unchecking one
+inherited category keeps the other editable categories, and the list stays out
+of the config until changed. Unknown entries survive in lists the model already
+stores.
 
 Custom-provider icons are OpenChamber profile preferences, keyed by provider
 ID. They are not written into OpenCode config because OpenCode has no provider

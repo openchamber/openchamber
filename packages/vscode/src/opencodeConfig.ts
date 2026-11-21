@@ -719,7 +719,7 @@ const readConfigLayer = (filePath?: string | null): {
   }
 };
 
-const readConfigLayers = (workingDirectory?: string) => {
+export const readConfigLayers = (workingDirectory?: string) => {
   const { userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
   const userPath = getPrimaryUserConfigPath(userPaths);
   const userOverridePath = userPaths.find((candidate) => candidate !== userPath && fs.existsSync(candidate)) ?? null;
@@ -2682,14 +2682,14 @@ export const upsertProviderConfig = (
   scope: 'user' | 'project' | 'custom' = 'user',
   options: { hasStoredAuth?: boolean } = {},
 ) => {
-  const validated = validateCustomProviderConfig(providerId, config, options);
+  const layers = readConfigLayers(workingDirectory);
+  const validated = validateCustomProviderConfig(providerId, config, { ...options, layers });
   if (!validated.ok) {
     const error = new Error(validated.error) as Error & { statusCode?: number };
     error.statusCode = 400;
     throw error;
   }
 
-  const layers = readConfigLayers(workingDirectory);
   let targetPath: string | null | undefined = getUserProviderPath(layers, validated.value.providerId);
 
   if (scope === 'project') {
