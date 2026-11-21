@@ -233,7 +233,7 @@ const ALL_PARAMETER_PROPERTIES = {
   goal: { type: 'boolean', description: 'Goal Mode; only when the user asks' },
   goalTokenBudget: { type: 'integer', minimum: 1000, maximum: 100_000_000, description: 'Requires goal' },
   returnResult: { type: 'boolean', description: 'create, send or fork with a prompt: the final answer arrives here as a message when the session finishes. Only when the user wants the outcome or your next step needs it' },
-  ownWork: { type: 'boolean', description: 'session.create: the session is part of your own task, not one the user asked for. It nests under this session in the sidebar, the user does not talk to it, it cannot ask questions with tools, and with a prompt its final answer comes back here unless returnResult is false. Leave it out when the user wants the session for themselves, to follow and talk to' },
+  ownWork: { type: 'boolean', description: 'session.create: the session is part of your own task, not one the user asked for. It nests under this session in the sidebar, the user does not talk to it, it cannot ask questions with tools, and with a prompt every answer it ends a turn with comes back here, whatever started that turn (your prompt, its own subagents finishing, a wait firing), until it is archived, unless returnResult is false. Leave it out when the user wants the session for themselves, to follow and talk to' },
   lastAssistant: { type: 'boolean', description: 'Only the last assistant message' },
   limit: { type: 'integer', minimum: 1, description: 'Default 10' },
   all: { type: 'boolean', description: 'Include archived sessions, all messages, or older model versions' },

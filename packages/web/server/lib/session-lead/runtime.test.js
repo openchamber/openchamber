@@ -358,6 +358,12 @@ describe('handing a session to a lead', () => {
     expect(wake[3]).toContain('Its answer comes to you');
   });
 
+  it('starts following an idle session too, so every later answer of it reaches the lead', async () => {
+    const { handover, calls } = setup({ busy: false });
+    await handover.handOver('ses_old', 'ses_lead');
+    expect(calls).toContainEqual(['register', 'ses_lead', 'ses_old', 'msg_idle']);
+  });
+
   it('refuses a lead, a session another one runs and the lead itself, and undoes the permissions when the link fails', async () => {
     const refused = setup({ sessions: { ses_other_lead: LEAD, ses_theirs: { openchamber: { kind: 'operator-child', parentID: 'ses_x' } } } });
     for (const sessionId of ['ses_other_lead', 'ses_theirs', 'ses_lead']) {

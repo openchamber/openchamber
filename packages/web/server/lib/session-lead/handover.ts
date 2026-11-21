@@ -16,7 +16,7 @@ interface LeadHandoverOptions {
   updateMetadata: (sessionId: string, decide: MetadataDecider, directory: string) => Promise<{ changed: boolean }>;
   openCode: (directory: string) => SessionClient;
   isBusy: (sessionId: string) => Promise<boolean>;
-  registerResult: (entry: { parentSessionId: string; sessionId: string; dispatchedAt: number; afterIdleId: string | null }) => Promise<{ id: string }>;
+  registerResult: (entry: { parentSessionId: string; sessionId: string; dispatchedAt: number; afterIdleId?: string | null }) => Promise<{ id: string }>;
   createError: (message: string, status: number) => Error;
   warn?: (...args: unknown[]) => void;
   now?: () => number;
@@ -27,8 +27,8 @@ export const handoverText = ({ title, sessionId, running }: { title: string; ses
   'Read it with session.messages, work out the result it was going for, and take that result to the end the way you run any strand: continue it with session.send and returnResult, or hand the rest to a new child.'
     + ' Ask the user only what its conversation leaves open by your usual rule. Add the strand to the brief and the digest.',
   running
-    ? "It is running right now. Its answer comes to you when this turn of it ends; if it doesn't, read it with session.messages once it is idle."
-    : 'It is not running right now.',
+    ? 'It is running right now. Its answer comes to you when this turn of it ends, and every later answer of it the same way.'
+    : 'It is not running right now. Every answer it gives from now on comes to you.',
 ].join('\n\n');
 
 export const createLeadHandover = ({
@@ -96,6 +96,7 @@ export const createLeadHandover = ({
     if (linkSchema.safeParse(session.metadata).success) throw createError('Another session runs this one. Take it over first.', 409);
 
     const client = openCode(session.directory);
+    const handedAt = now();
     const lastIdleId = await latestIdleId(client, sessionId).catch(() => undefined);
     const running = await isBusy(sessionId).catch(() => false);
     const { title, undo } = await adopt(client, sessionId, leadId, session.directory);
@@ -112,10 +113,10 @@ export const createLeadHandover = ({
       throw error;
     }
     await admitOperatorChildNote(client, sessionId, leadId);
-    if (running && lastIdleId !== undefined) {
-      await registerResult({ parentSessionId: leadId, sessionId, dispatchedAt: now(), afterIdleId: lastIdleId })
-        .catch((error: Error) => warn('[session-lead] the handed-over session\'s answer will not reach its lead:', error.message));
-    }
+    const registration: Parameters<typeof registerResult>[0] = { parentSessionId: leadId, sessionId, dispatchedAt: handedAt };
+    if (lastIdleId !== undefined) registration.afterIdleId = lastIdleId;
+    await registerResult(registration)
+      .catch((error: Error) => warn('[session-lead] the handed-over session\'s answer will not reach its lead:', error.message));
     return { sessionId, leadId };
   });
 

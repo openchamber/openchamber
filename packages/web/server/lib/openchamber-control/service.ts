@@ -869,7 +869,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     return { dispatchResults, parentSessionID };
   };
 
-  const RESULT_PENDING_NOTE = 'The session runs in the background. Its final answer will be delivered to you automatically as a message when it finishes, and you will continue from there. Do not poll, sleep, or call session.messages to wait for it; carry on with other work or end your turn.';
+  const RESULT_PENDING_NOTE = 'The session runs in the background. Its answer will be delivered to you automatically as a message when its turn ends, and you will continue from there; a session you run with ownWork keeps sending each later answer the same way until it is archived. Do not poll, sleep, or call session.messages to wait for it; carry on with other work or end your turn.';
 
   const scheduleResultDelivery = async (result: SessionActionResult, delivery: ReturnType<typeof assertReturnResult>, dispatchedAt: number) => {
     const { dispatchResults, parentSessionID } = delivery;
