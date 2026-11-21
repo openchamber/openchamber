@@ -22,6 +22,7 @@ import { type useFileTabs } from './useFileTabs';
 import { type useFileViewModes } from './useFilePreviewModes';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
+import { useTableDelimiter } from './useTableDelimiter';
 
 export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scope, tabs, viewModes, files, isMobile, runtime, t }: {
   draft: Pick<ReturnType<typeof useFileDraft>, 'draftContent'>;
@@ -43,6 +44,7 @@ export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scop
   const { root, runtimeKey } = scope;
   const { resolveFileReadOptions, selectedFile, selectedFilePathRef, selectedFileReadOptions } = tabs;
   const { htmlViewMode } = viewModes;
+  const tableDelimiter = useTableDelimiter(isTable && selectedFile ? selectedFile.path : null, fileContent, fileContentRevision);
 
   const usesRawAssetUrl = isSelectedPdf || isSelectedMedia || isSelectedFont;
   const rawAssetRequest = React.useMemo(
@@ -170,7 +172,7 @@ export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scop
       return;
     }
     const delimited = isTable ? await import('../previews/delimitedText') : null;
-    const table = delimited ? delimited.parseDelimitedText(draftContent, delimited.delimiterForPath(selectedFile.path), Number.MAX_SAFE_INTEGER) : null;
+    const table = delimited ? delimited.parseDelimitedText(draftContent, tableDelimiter, Number.MAX_SAFE_INTEGER) : null;
     const bytes = table ? await rowsToXlsx(selectedFile.name, [table.header, ...table.rows]) : await markdownToDocx(draftContent);
     const stem = selectedFile.path.replace(/\.[^./\\]+$/, '');
     let target = `${stem}.${format}`;
@@ -230,6 +232,6 @@ export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scop
   return {
   htmlPreviewUnreachable, assetAuthErrorFallback, htmlPreview, htmlPreviewFrameRef, htmlPreviewAnnotation,
   canAnnotateHtmlPreview, annotateWhenLoadedRef, rawAsset, isPdfAssetAuthLoading, imageSrc, pdfSrc, downloadButton,
-  loadCanvasBytes, maxDataBytes, loadOfficeBytes, loadDataBytes, exportDocument, saveOfficeBytes, binaryFileActions,
+  loadCanvasBytes, maxDataBytes, loadOfficeBytes, loadDataBytes, exportDocument, saveOfficeBytes, binaryFileActions, tableDelimiter,
   };
 }
