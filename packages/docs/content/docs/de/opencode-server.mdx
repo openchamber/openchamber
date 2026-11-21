@@ -22,18 +22,20 @@ Standardmäßig verwaltet OpenChamber einen eigenen Server auf einem zugewiesene
 
 Wenn du auch die OpenCode-CLI oder -TUI nutzt, kannst du OpenChamber auf denselben lokalen Hintergrunddienst `opencode serve --service` zeigen lassen, ohne Umgebungsvariablen zu setzen.
 
-1. Öffne **Einstellungen → Allgemein → OpenCode CLI**.
+1. Öffne **Einstellungen → Allgemein → OpenCode-Server**.
 2. Schalte **Gemeinsamen OpenCode-Dienst verwenden** ein.
 
 OpenChamber liest Adresse und Passwort des laufenden Dienstes aus der `service.json` von OpenCode und wechselt zu ihm. Läuft kein Dienst und ist eine OpenCode-CLI-Binärdatei installiert, startet OpenChamber `opencode serve --service` für dich. Im Enterprise-Modus verbindet sich OpenChamber nur mit einem bereits laufenden lokalen Dienst und startet keinen selbst.
 
 Schaltest du die Option aus, wechselt OpenChamber zurück zu seinem eigenen privaten OpenCode-Server, ohne den gemeinsamen Dienst zu stoppen.
 
+Nach `opencode update` läuft der Dienst bis zu seinem Neustart mit der alten Version weiter. Findet OpenChamber beim Verbinden ein installiertes OpenCode-Release, das neuer ist als der laufende Dienst, startet es den Dienst neu, außer im Unternehmensmodus. Wähle in der OpenCode-Update-Benachrichtigung **Aktualisieren**, um `opencode upgrade` auszuführen, und danach **OpenCode neu laden**, um den Dienst mit der neuen Version neu zu starten.
+
 ## OpenChamber-Werkzeuge auf einem externen lokalen Server aktivieren
 
 Wenn sich OpenChamber mit einem lokalen externen Server verbindet (über **Gemeinsamen OpenCode-Dienst verwenden** oder über `OPENCODE_HOST` und `OPENCODE_SKIP_START`), kann OpenChamber seine verwalteten Plugins beim Serverstart nicht einbinden. Stattdessen stellt es einen einzelnen Plugin-Ordner bereit, den du in deiner globalen OpenCode-Konfiguration registrierst:
 
-1. Öffne **Einstellungen → Allgemein → OpenCode CLI** (oder **Einstellungen → Allgemein → OpenChamber-Werkzeuge**).
+1. Öffne **Einstellungen → Allgemein → OpenCode-Server**.
 2. Wähle im Infobanner **Zur OpenCode-Konfiguration hinzufügen**.
 
 Ist deine globale `opencode.json` schreibgeschützt oder wird von deiner Organisation verwaltet, wähle im selben Banner **Pfad kopieren** und füge diesen Ordnerpfad der Liste `plugins` in deiner verwalteten OpenCode-Konfiguration hinzu.

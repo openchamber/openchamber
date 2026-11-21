@@ -1200,7 +1200,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.error.miniChatGlobalShortcutUnsupported': '此组合无法用作全局快捷键。请包含 Ctrl、Alt 或 Cmd。',
   'settings.openchamber.desktopNetwork.error.quakeModeSaveFailed': '更新 Quake 模式失败',
   'settings.openchamber.desktopNetwork.error.quakeModeShortcutUnsupported': '此组合无法用作全局快捷键。请包含 Ctrl、Alt 或 Cmd。',
-  'settings.openchamber.opencodeCli.title': 'OpenCode CLI',
+  'settings.openchamber.opencodeCli.title': 'OpenCode 服务器',
   'settings.openchamber.spaces.title': '隔离空间',
   'settings.openchamber.spaces.field.enabled': '允许智能体在隔离空间中工作',
   'settings.openchamber.spaces.field.enabledAria': '允许智能体在隔离空间中工作',

@@ -22,18 +22,20 @@ OpenChamber の起動時、次の順序でサーバーを探します。
 
 OpenCode CLI や TUI も使っている場合は、環境変数を設定せずに、同じローカルの `opencode serve --service` バックグラウンドサービスへ OpenChamber を接続できます。
 
-1. **設定 → 一般 → OpenCode CLI** を開きます。
+1. **設定 → 一般 → OpenCode サーバー** を開きます。
 2. **共有 OpenCode サービスを使用する** をオンにします。
 
 OpenChamber は OpenCode の `service.json` から実行中サービスのアドレスとパスワードを読み取り、そのサービスに切り替えます。サービスが起動しておらず OpenCode CLI のバイナリがインストールされている場合は、OpenChamber が自動で `opencode serve --service` を起動します。エンタープライズモードでは、すでに実行中のローカルサービスにのみ接続し、OpenChamber 自身で起動することはありません。
 
 このオプションをオフにすると、共有サービスを停止せずに OpenChamber 独自のプライベートな OpenCode サーバーへ戻ります。
 
+`opencode update` の後も、実行中のサービスは再起動するまで古いバージョンのままです。OpenChamber は接続時に、実行中のサービスより新しい OpenCode のリリースがインストールされていればサービスを再起動します（エンタープライズモードを除く）。OpenCode 更新通知で **更新** を選ぶと `opencode upgrade` が実行され、続けて **OpenCodeを再読み込み** を選ぶと新しいバージョンでサービスが再起動します。
+
 ## 外部のローカルサーバーで OpenChamber ツールを有効にする
 
 OpenChamber が外部のローカルサーバー（**共有 OpenCode サービスを使用する**、または `OPENCODE_HOST` と `OPENCODE_SKIP_START` 経由）に接続している場合、サーバー起動時に管理対象プラグインを自動で組み込めません。代わりに、グローバルの OpenCode 設定に登録するための単一のプラグインフォルダーが用意されています。
 
-1. **設定 → 一般 → OpenCode CLI**（または **設定 → 一般 → OpenChamber ツール**）を開きます。
+1. **設定 → 一般 → OpenCode サーバー**を開きます。
 2. 情報バナーで **OpenCode 設定に追加** を選択します。
 
 グローバルの `opencode.json` が読み取り専用、または組織によって管理されている場合は、同じバナーで **パスをコピー** を選択し、管理されている OpenCode 設定の `plugins` リストにそのフォルダーパスを追加してください。

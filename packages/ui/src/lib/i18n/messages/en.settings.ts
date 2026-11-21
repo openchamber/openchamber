@@ -1232,7 +1232,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.error.miniChatGlobalShortcutUnsupported': 'This combination can\'t be used as a global shortcut. Include Ctrl, Alt or Cmd.',
   'settings.openchamber.desktopNetwork.error.quakeModeSaveFailed': 'Failed to update Quake mode',
   'settings.openchamber.desktopNetwork.error.quakeModeShortcutUnsupported': 'This combination can\'t be used as a global shortcut. Include Ctrl, Alt or Cmd.',
-  'settings.openchamber.opencodeCli.title': 'OpenCode CLI',
+  'settings.openchamber.opencodeCli.title': 'OpenCode Server',
   'settings.openchamber.spaces.title': 'Isolated spaces',
   'settings.openchamber.spaces.field.enabled': 'Let agents work in isolated spaces',
   'settings.openchamber.spaces.field.enabledAria': 'Let agents work in isolated spaces',

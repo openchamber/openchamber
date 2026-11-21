@@ -1200,7 +1200,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.error.miniChatGlobalShortcutUnsupported': '이 조합은 전역 단축키로 사용할 수 없습니다. Ctrl, Alt 또는 Cmd를 포함하세요.',
   'settings.openchamber.desktopNetwork.error.quakeModeSaveFailed': 'Quake 모드를 업데이트하지 못했습니다',
   'settings.openchamber.desktopNetwork.error.quakeModeShortcutUnsupported': '이 조합은 전역 단축키로 사용할 수 없습니다. Ctrl, Alt 또는 Cmd를 포함하세요.',
-  'settings.openchamber.opencodeCli.title': 'OpenCode CLI',
+  'settings.openchamber.opencodeCli.title': 'OpenCode 서버',
   'settings.openchamber.spaces.title': '격리 공간',
   'settings.openchamber.spaces.field.enabled': '에이전트가 격리 공간에서 작업하도록 허용',
   'settings.openchamber.spaces.field.enabledAria': '에이전트가 격리 공간에서 작업하도록 허용',

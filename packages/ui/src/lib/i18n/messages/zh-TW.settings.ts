@@ -1158,7 +1158,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.error.loadFailed': '載入桌面設定失敗',
   'settings.openchamber.desktopNetwork.error.saveFailed': '儲存桌面設定失敗',
   'settings.openchamber.desktopNetwork.error.savedRestartFailed': '已儲存，但重新啟動應用程式失敗',
-  'settings.openchamber.opencodeCli.title': 'OpenCode CLI',
+  'settings.openchamber.opencodeCli.title': 'OpenCode 伺服器',
   'settings.openchamber.spaces.title': '隔離空間',
   'settings.openchamber.spaces.field.enabled': '允許代理在隔離空間中工作',
   'settings.openchamber.spaces.field.enabledAria': '允許代理在隔離空間中工作',

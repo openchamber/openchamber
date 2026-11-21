@@ -1205,7 +1205,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.error.miniChatGlobalShortcutUnsupported': 'Bu kombinasyon genel kısayol olarak kullanılamaz. Ctrl, Alt veya Cmd ekleyin.',
   'settings.openchamber.desktopNetwork.error.quakeModeSaveFailed': 'Quake Modu güncellenemedi',
   'settings.openchamber.desktopNetwork.error.quakeModeShortcutUnsupported': 'Bu kombinasyon genel kısayol olarak kullanılamaz. Ctrl, Alt veya Cmd ekleyin.',
-  'settings.openchamber.opencodeCli.title': 'OpenCode CLI',
+  'settings.openchamber.opencodeCli.title': 'OpenCode Sunucusu',
   'settings.openchamber.spaces.title': 'Yalıtılmış alanlar',
   'settings.openchamber.spaces.field.enabled': 'Ajanların yalıtılmış alanlarda çalışmasına izin ver',
   'settings.openchamber.spaces.field.enabledAria': 'Ajanların yalıtılmış alanlarda çalışmasına izin ver',

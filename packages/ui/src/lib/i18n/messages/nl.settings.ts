@@ -1233,7 +1233,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.error.miniChatGlobalShortcutUnsupported': 'Deze combinatie kan niet als globale sneltoets worden gebruikt. Gebruik Ctrl, Alt of Cmd.',
   'settings.openchamber.desktopNetwork.error.quakeModeSaveFailed': 'Quake-modus kon niet worden bijgewerkt',
   'settings.openchamber.desktopNetwork.error.quakeModeShortcutUnsupported': 'Deze combinatie kan niet als globale sneltoets worden gebruikt. Gebruik Ctrl, Alt of Cmd.',
-  'settings.openchamber.opencodeCli.title': 'OpenCode CLI',
+  'settings.openchamber.opencodeCli.title': 'OpenCode-server',
   'settings.openchamber.spaces.title': 'Geïsoleerde ruimtes',
   'settings.openchamber.spaces.idleStop.enabled': 'Inactieve ruimtes stoppen',
   'settings.openchamber.spaces.idleStop.enabledAria': 'Ruimtes stoppen die inactief blijven',

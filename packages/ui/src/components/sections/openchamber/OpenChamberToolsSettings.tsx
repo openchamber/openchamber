@@ -24,7 +24,6 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { listModelVariantIds } from '@/lib/modelVariants';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { ModelVariantSelect } from './ModelVariantSelect';
-import { ExternalOpenCodePluginBanner } from './ExternalOpenCodePluginBanner';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { isDesktopShell } from '@/lib/desktop';
@@ -245,7 +244,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
 
   return (
     <SettingsSection title={t('settings.openchamber.tools.title')} contentClassName="space-y-6">
-      <ExternalOpenCodePluginBanner />
       <SettingsControlGroup title={t('settings.openchamber.tools.group.work')} contentClassName={TOOL_LIST_CLASS}>
         <ToolRow
           icon="node-tree"

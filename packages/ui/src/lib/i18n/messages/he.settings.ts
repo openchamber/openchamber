@@ -1232,7 +1232,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.error.miniChatGlobalShortcutUnsupported': 'אי אפשר להשתמש בצירוף הזה כקיצור מקשים גלובלי. יש לכלול Ctrl, Alt או Cmd.',
   'settings.openchamber.desktopNetwork.error.quakeModeSaveFailed': 'לא ניתן היה לעדכן את מצב Quake',
   'settings.openchamber.desktopNetwork.error.quakeModeShortcutUnsupported': 'אי אפשר להשתמש בצירוף הזה כקיצור מקשים גלובלי. יש לכלול Ctrl, Alt או Cmd.',
-  'settings.openchamber.opencodeCli.title': 'OpenCode CLI',
+  'settings.openchamber.opencodeCli.title': 'שרת OpenCode',
   'settings.openchamber.spaces.title': 'מרחבים מבודדים',
   'settings.openchamber.spaces.field.enabled': 'אפשר לסוכנים לעבוד במרחבים מבודדים',
   'settings.openchamber.spaces.field.enabledAria': 'אפשר לסוכנים לעבוד במרחבים מבודדים',

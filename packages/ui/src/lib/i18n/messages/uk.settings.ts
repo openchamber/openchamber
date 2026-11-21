@@ -1200,7 +1200,7 @@ export const settingsDict = {
   "settings.openchamber.desktopNetwork.error.miniChatGlobalShortcutUnsupported": "Цю комбінацію не можна використати як глобальне скорочення. Додайте Ctrl, Alt або Cmd.",
   "settings.openchamber.desktopNetwork.error.quakeModeSaveFailed": "Не вдалося оновити режим Quake",
   "settings.openchamber.desktopNetwork.error.quakeModeShortcutUnsupported": "Цю комбінацію не можна використати як глобальне скорочення. Додайте Ctrl, Alt або Cmd.",
-  "settings.openchamber.opencodeCli.title": "OpenCode CLI",
+  "settings.openchamber.opencodeCli.title": "Сервер OpenCode",
   "settings.openchamber.spaces.title": "Ізольовані простори",
   "settings.openchamber.spaces.field.enabled": "Дозволити агентам працювати в ізольованих просторах",
   "settings.openchamber.spaces.field.enabledAria": "Дозволити агентам працювати в ізольованих просторах",

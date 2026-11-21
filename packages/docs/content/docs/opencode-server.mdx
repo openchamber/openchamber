@@ -22,18 +22,20 @@ By default, OpenChamber manages its own server on an allocated port. The port ca
 
 If you also use the OpenCode CLI or TUI, you can point OpenChamber at the same local `opencode serve --service` background service without setting environment variables.
 
-1. Open **Settings → General → OpenCode CLI**.
+1. Open **Settings → General → OpenCode Server**.
 2. Turn on **Use shared OpenCode service**.
 
 OpenChamber reads the running service address and password from OpenCode's `service.json` and switches to it. If no service is running and an OpenCode CLI binary is installed, OpenChamber starts `opencode serve --service` for you. In enterprise mode, OpenChamber connects only to an already-running local service and does not start one itself.
 
 Turning the option off switches OpenChamber back to its own private OpenCode server without stopping the shared service.
 
+After `opencode update`, the running service keeps the old version until it restarts. When OpenChamber connects and finds an installed release of OpenCode newer than the running service, it restarts the service, except in enterprise mode. From the OpenCode update notification, select **Update** to run `opencode upgrade`, then **Reload OpenCode** to restart the service on the new version.
+
 ## Enable OpenChamber tools on an external local server
 
 When OpenChamber connects to a local external server (through **Use shared OpenCode service** or through `OPENCODE_HOST` and `OPENCODE_SKIP_START`), OpenChamber cannot inject its managed plugins at server startup. Instead, it provides a single plugin folder that you register in your global OpenCode config:
 
-1. Open **Settings → General → OpenCode CLI** (or **Settings → General → OpenChamber Tools**).
+1. Open **Settings → General → OpenCode Server**.
 2. In the info banner, select **Add to OpenCode config**.
 
 If your global `opencode.json` is read-only or managed by your organization, select **Copy path** in the same banner and add that folder path to the `plugins` list in your managed OpenCode config.

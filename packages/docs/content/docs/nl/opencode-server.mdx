@@ -22,18 +22,20 @@ Standaard beheert OpenChamber zijn eigen server op een toegewezen poort. Na een 
 
 Als u ook de OpenCode CLI of TUI gebruikt, kunt u OpenChamber laten verbinden met dezelfde lokale achtergrondservice `opencode serve --service` zonder omgevingsvariabelen in te stellen.
 
-1. Open **Instellingen → Algemeen → OpenCode CLI**.
+1. Open **Instellingen → Algemeen → OpenCode-server**.
 2. Zet **Gedeelde OpenCode-service gebruiken** aan.
 
 OpenChamber leest het adres en wachtwoord van de draaiende service uit het bestand `service.json` van OpenCode en schakelt ernaar over. Draait er geen service en is er een OpenCode CLI-binary geïnstalleerd, dan start OpenChamber `opencode serve --service` voor u. In enterprise-modus verbindt OpenChamber alleen met een al draaiende lokale service en start het er zelf geen.
 
 Zet u de optie weer uit, dan schakelt OpenChamber terug naar zijn eigen privé-OpenCode-server zonder de gedeelde service te stoppen.
 
+Na `opencode update` blijft de draaiende service op de oude versie tot hij opnieuw start. Als OpenChamber bij het verbinden een geïnstalleerde OpenCode-release vindt die nieuwer is dan de draaiende service, herstart het de service, behalve in de bedrijfsmodus. Kies in de OpenCode-updatemelding **Bijwerken** om `opencode upgrade` uit te voeren en daarna **OpenCode herladen** om de service met de nieuwe versie te herstarten.
+
 ## OpenChamber-tools inschakelen op een externe lokale server
 
 Wanneer OpenChamber verbindt met een lokale externe server (via **Gedeelde OpenCode-service gebruiken** of via `OPENCODE_HOST` en `OPENCODE_SKIP_START`), kan OpenChamber zijn beheerde plugins niet bij het starten van de server injecteren. In plaats daarvan biedt het één pluginmap die u in uw globale OpenCode-configuratie registreert:
 
-1. Open **Instellingen → Algemeen → OpenCode CLI** (of **Instellingen → Algemeen → OpenChamber-tools**).
+1. Open **Instellingen → Algemeen → OpenCode-server**.
 2. Kies in de infobanner **Toevoegen aan OpenCode-config**.
 
 Is uw globale `opencode.json` alleen-lezen of wordt dit bestand door uw organisatie beheerd? Kies dan in dezelfde banner **Pad kopiëren** en voeg dat mappad toe aan de lijst `plugins` in uw beheerde OpenCode-configuratie.

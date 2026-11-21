@@ -22,18 +22,20 @@ Domyślnie OpenChamber zarządza własnym serwerem na przydzielonym porcie. Port
 
 Jeśli korzystasz również z CLI lub TUI OpenCode, możesz wskazać OpenChamber tę samą lokalną usługę działającą w tle `opencode serve --service` bez ustawiania zmiennych środowiskowych.
 
-1. Otwórz **Ustawienia → Ogólne → OpenCode CLI**.
+1. Otwórz **Ustawienia → Ogólne → Serwer OpenCode**.
 2. Włącz **Używaj współdzielonej usługi OpenCode**.
 
 OpenChamber odczytuje adres i hasło działającej usługi z pliku `service.json` OpenCode i przełącza się na nią. Jeśli żadna usługa nie działa, a plik binarny OpenCode CLI jest zainstalowany, OpenChamber uruchamia `opencode serve --service` za Ciebie. W trybie enterprise OpenChamber łączy się wyłącznie z już działającą usługą lokalną i sam jej nie uruchamia.
 
 Wyłączenie tej opcji przełącza OpenChamber z powrotem na własny, prywatny serwer OpenCode bez zatrzymywania współdzielonej usługi.
 
+Po `opencode update` działająca usługa zostaje przy starej wersji aż do ponownego uruchomienia. Jeśli przy połączeniu OpenChamber znajdzie zainstalowane wydanie OpenCode nowsze niż działająca usługa, uruchamia ją ponownie, z wyjątkiem trybu firmowego. W powiadomieniu o aktualizacji OpenCode wybierz **Aktualizuj**, aby uruchomić `opencode upgrade`, a potem **Przeładuj OpenCode**, aby uruchomić usługę w nowej wersji.
+
 ## Włączanie narzędzi OpenChamber na zewnętrznym serwerze lokalnym
 
 Gdy OpenChamber łączy się z lokalnym serwerem zewnętrznym (przez **Używaj współdzielonej usługi OpenCode** lub przez `OPENCODE_HOST` i `OPENCODE_SKIP_START`), nie może wstrzyknąć swoich zarządzanych wtyczek podczas startu serwera. Zamiast tego udostępnia jeden folder wtyczki, który rejestrujesz w globalnej konfiguracji OpenCode:
 
-1. Otwórz **Ustawienia → Ogólne → OpenCode CLI** (lub **Ustawienia → Ogólne → Narzędzia OpenChamber**).
+1. Otwórz **Ustawienia → Ogólne → Serwer OpenCode**.
 2. W banerze informacyjnym wybierz **Dodaj do konfiguracji OpenCode**.
 
 Jeśli Twój globalny plik `opencode.json` jest tylko do odczytu lub zarządzany przez organizację, wybierz **Kopiuj ścieżkę** w tym samym banerze i dodaj ścieżkę tego folderu do listy `plugins` w zarządzanej konfiguracji OpenCode.

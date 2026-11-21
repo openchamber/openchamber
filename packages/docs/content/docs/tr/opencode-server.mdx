@@ -22,18 +22,20 @@ Varsayılan olarak OpenChamber, kendisine ayrılan bir bağlantı noktasında ke
 
 OpenCode CLI veya TUI da kullanıyorsanız ortam değişkeni ayarlamadan OpenChamber'ı aynı yerel `opencode serve --service` arka plan hizmetine yönlendirebilirsiniz.
 
-1. **Ayarlar → Genel → OpenCode CLI** bölümünü açın.
+1. **Ayarlar → Genel → OpenCode Sunucusu** bölümünü açın.
 2. **Paylaşılan OpenCode hizmetini kullan** seçeneğini açın.
 
 OpenChamber çalışan hizmetin adresini ve parolasını OpenCode'un `service.json` dosyasından okur ve ona geçer. Çalışan bir hizmet yoksa ve bir OpenCode CLI ikili dosyası kuruluysa, OpenChamber sizin için `opencode serve --service` hizmetini başlatır. Kurumsal modda OpenChamber yalnızca zaten çalışan bir yerel hizmete bağlanır ve kendisi başlatmaz.
 
 Bu seçeneği kapatmak, paylaşılan hizmeti durdurmadan OpenChamber'ı yeniden kendi özel OpenCode sunucusuna geçirir.
 
+`opencode update` sonrasında çalışan hizmet yeniden başlayana kadar eski sürümde kalır. OpenChamber bağlanırken çalışan hizmetten daha yeni bir OpenCode sürümü kurulu bulursa, kurumsal mod dışında hizmeti yeniden başlatır. OpenCode güncelleme bildiriminde `opencode upgrade` komutunu çalıştırmak için **Güncelle**'yi, ardından hizmeti yeni sürümle yeniden başlatmak için **OpenCode'u Yeniden Yükle**'yi seçin.
+
 ## Harici yerel bir sunucuda OpenChamber araçlarını etkinleştirin
 
 OpenChamber yerel bir harici sunucuya bağlandığında (**Paylaşılan OpenCode hizmetini kullan** üzerinden veya `OPENCODE_HOST` ve `OPENCODE_SKIP_START` ile), yönettiği eklentileri sunucu başlangıcında enjekte edemez. Bunun yerine, genel OpenCode yapılandırmanıza kaydedebileceğiniz tek bir eklenti klasörü sağlar:
 
-1. **Ayarlar → Genel → OpenCode CLI** (veya **Ayarlar → Genel → OpenChamber Araçları**) bölümünü açın.
+1. **Ayarlar → Genel → OpenCode Sunucusu** bölümünü açın.
 2. Bilgi şeridinde **OpenCode yapılandırmasına ekle** seçeneğini seçin.
 
 Genel `opencode.json` dosyanız salt okunursa veya kuruluşunuz tarafından yönetiliyorsa aynı şeritte **Yolu kopyala** seçeneğini seçin ve o klasör yolunu yönetilen OpenCode yapılandırmanızdaki `plugins` listesine ekleyin.

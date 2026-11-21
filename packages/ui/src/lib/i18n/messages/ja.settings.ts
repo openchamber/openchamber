@@ -1233,7 +1233,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.error.miniChatGlobalShortcutUnsupported': 'この組み合わせはグローバルショートカットに使えません。Ctrl、Alt、Cmd のいずれかを含めてください。',
   'settings.openchamber.desktopNetwork.error.quakeModeSaveFailed': 'Quake モードを更新できませんでした',
   'settings.openchamber.desktopNetwork.error.quakeModeShortcutUnsupported': 'この組み合わせはグローバルショートカットに使えません。Ctrl、Alt、Cmd のいずれかを含めてください。',
-  'settings.openchamber.opencodeCli.title': 'OpenCode CLI',
+  'settings.openchamber.opencodeCli.title': 'OpenCode サーバー',
   'settings.openchamber.spaces.title': '隔離スペース',
   'settings.openchamber.spaces.field.enabled': 'エージェントに隔離スペースで作業させる',
   'settings.openchamber.spaces.field.enabledAria': 'エージェントに隔離スペースで作業させる',

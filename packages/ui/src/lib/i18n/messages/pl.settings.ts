@@ -1054,7 +1054,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.field.showUpdateNotificationsAria': 'Pokazuj powiadomienia o aktualizacjach OpenCode',
   'settings.openchamber.opencodeCli.tipMiddle': 'zmienna środowiskowa, ale to ustawienie jest zapisywane w',
   'settings.openchamber.opencodeCli.tipPrefix': 'Wskazówka: możesz również użyć',
-  'settings.openchamber.opencodeCli.title': 'OpenCode CLI',
+  'settings.openchamber.opencodeCli.title': 'Serwer OpenCode',
   'settings.openchamber.spaces.title': 'Izolowane przestrzenie',
   'settings.openchamber.spaces.field.enabled': 'Pozwól agentom pracować w izolowanych przestrzeniach',
   'settings.openchamber.spaces.field.enabledAria': 'Pozwól agentom pracować w izolowanych przestrzeniach',
