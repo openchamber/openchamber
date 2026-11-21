@@ -1116,15 +1116,16 @@ export async function patchSessionMetadata(
   condition?: MetadataWriteCondition,
 ): Promise<Session> {
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+  const isCurrentRuntime = captureRuntimeInstance()
   const targetDirectory = directory ?? getSessionDirectory(sessionId)
   const current = await opencodeClient.getSession(sessionId, targetDirectory)
-  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+  if (!isCurrentRuntime()) throw new Error("runtime changed")
   let currentMetadata = getSessionMetadata(current)
   let result: Awaited<ReturnType<typeof requestSessionMetadataUpdate>>
   for (let attempt = 1; ; attempt += 1) {
     const patch = buildMetadataMergePatch(currentMetadata, updater(currentMetadata))
     result = await requestSessionMetadataUpdate(sessionId, patch, targetDirectory, condition ? currentMetadata : undefined)
-    if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+    if (!isCurrentRuntime()) throw new Error("runtime changed")
     if (result.outcome === "unavailable" && result.status === 404 && condition === "preferred") {
       result = await requestSessionMetadataUpdate(sessionId, patch, targetDirectory)
     }
@@ -1132,9 +1133,9 @@ export async function patchSessionMetadata(
     if (attempt >= 5) throw new Error("session metadata changed repeatedly")
     currentMetadata = result.metadata
   }
+  if (!isCurrentRuntime()) throw new Error("runtime changed")
   if (result.outcome !== "updated") throw new Error(`session metadata update failed: ${result.reason}`)
   const updated = withSessionMetadata(current, result.metadata)
-  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   useGlobalSessionsStore.getState().upsertSession(updated)
   const sessionDirectory = updated.directory || targetDirectory
   if (sessionDirectory) registerSessionDirectory(updated.id, sessionDirectory)
@@ -1761,21 +1762,20 @@ export async function updateSessionTitle(
   options?: { directory?: string | null; expectedRuntimeKey?: string; signal?: AbortSignal; byUser?: boolean },
 ): Promise<void> {
   if (isStaleRuntime(options?.expectedRuntimeKey)) throw new Error("runtime changed")
+  const isCurrentRuntime = captureRuntimeInstance()
   if (options?.signal) options.signal.throwIfAborted()
   else cancelSessionTitleGeneration(sessionId)
   const sessionDirectory = options?.directory ?? getSessionDirectory(sessionId)
   await opencodeClient.renameSession(sessionId, title, sessionDirectory)
+  if (!isCurrentRuntime()) throw new Error("runtime changed")
   const session = await opencodeClient.getSession(sessionId, sessionDirectory)
-  if (isStaleRuntime(options?.expectedRuntimeKey)) throw new Error("runtime changed")
+  if (!isCurrentRuntime()) throw new Error("runtime changed")
   options?.signal?.throwIfAborted()
   useGlobalSessionsStore.getState().upsertSession(session)
   mirrorSessionIntoLiveStores(session, sessionDirectory)
-  if (options?.byUser) {
-    await patchSessionMetadata(sessionId, sessionDirectory, (metadata) => withUserWorkTitle(metadata, title), options.expectedRuntimeKey)
-      .catch(() => undefined)
-  }
+  if (options?.byUser) await patchSessionMetadata(sessionId, sessionDirectory, (metadata) => withUserWorkTitle(metadata, title), options.expectedRuntimeKey)
+    .catch(() => undefined)
 }
-
 
 export function markSessionStatus(sessionId: string, directory: string | null | undefined, type: "busy" | "idle"): void {
   const store = directory ? dirStoreForDirectory(directory) : dirStore()

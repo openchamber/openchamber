@@ -49,6 +49,7 @@ const selectedSessions: Array<{ sessionId: string | null; directoryHint?: string
 let beforeSessionDeleteResolve: ((sessionId: string) => void) | null = null
 // Lets a test switch runtime while a session read is in flight.
 let beforeSessionGetResolve: (() => void) | null = null
+let beforeSessionRenameResolve: (() => void) | null = null
 const sessionMoveErrorsById = new Map<string, Error>()
 let globalHasLoaded = true
 const deletedChatDirectories: string[] = []
@@ -153,6 +154,7 @@ mock.module("@/lib/opencode/client", () => ({
       replyCalls.push({ method: "session.rename", params: { sessionID: sessionId, title, directory } })
       const record = sessionRecords.get(sessionId)
       if (record) sessionRecords.set(sessionId, { ...record, title })
+      beforeSessionRenameResolve?.()
     }),
     moveSession: mock(async (sessionId: string, directory: string) => {
       replyCalls.push({ method: "session.move", params: { sessionID: sessionId, directory } })
@@ -1821,9 +1823,13 @@ describe("session restore (unarchive)", () => {
 
 describe("updateSessionTitle live state", () => {
   beforeEach(() => {
+    runtimeKey = "title-runtime"
+    runtimeGeneration += 1
     replyCalls.length = 0
     globalUpsertedSessions.length = 0
     sessionRecords.clear()
+    beforeSessionGetResolve = null
+    beforeSessionRenameResolve = null
   })
 
   test("updates the live directory store after renaming", async () => {
@@ -1864,6 +1870,66 @@ describe("updateSessionTitle live state", () => {
     const renameCall = replyCalls.find((call) => call.method === "session.rename")
     expect(renameCall?.params.directory).toBe("/test/project/.worktrees/feature")
     globalActiveSessions = []
+  })
+
+  test("does not read or publish a rename after the runtime changes before rename completes", async () => {
+    const oldSession = { ...sessionFixture("session-a"), title: "Old Title" }
+    const sessionStore = createStore({}, { session: [oldSession] })
+    const childStores = createChildStores([["/test/project", sessionStore]])
+    sessionRecords.set("session-a", oldSession)
+    beforeSessionRenameResolve = () => {
+      beforeSessionRenameResolve = null
+      runtimeKey = "next-title-runtime"
+      runtimeGeneration += 1
+    }
+
+    const { setActionRefs, updateSessionTitle } = await import("./session-actions")
+    setActionRefs(childStores, () => "/current/project")
+
+    await expect(updateSessionTitle("session-a", "New Title")).rejects.toThrow("runtime changed")
+    expect(replyCalls.map((call) => call.method)).toEqual(["session.rename"])
+    expect(globalUpsertedSessions).toHaveLength(0)
+    expect(sessionStore.getState().session[0].title).toBe("Old Title")
+  })
+
+  test("does not publish a same-ID response read from the previous runtime", async () => {
+    const oldSession = { ...sessionFixture("session-a"), title: "Old Title" }
+    const sessionStore = createStore({}, { session: [oldSession] })
+    const childStores = createChildStores([["/test/project", sessionStore]])
+    sessionRecords.set("session-a", oldSession)
+    beforeSessionGetResolve = () => {
+      beforeSessionGetResolve = null
+      runtimeKey = "next-title-runtime"
+      runtimeGeneration += 1
+    }
+
+    const { setActionRefs, updateSessionTitle } = await import("./session-actions")
+    setActionRefs(childStores, () => "/current/project")
+
+    await expect(updateSessionTitle("session-a", "New Title")).rejects.toThrow("runtime changed")
+    expect(replyCalls.map((call) => call.method)).toEqual(["session.rename", "session.get"])
+    expect(globalUpsertedSessions).toHaveLength(0)
+    expect(sessionStore.getState().session[0].title).toBe("Old Title")
+  })
+
+  test("drops user-title metadata if the runtime switches away and back during its read", async () => {
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+    let reads = 0
+    beforeSessionGetResolve = () => {
+      if (++reads !== 2) return
+      beforeSessionGetResolve = null
+      switchRuntimeEndpoint({ apiBaseUrl: "http://other.test", runtimeKey: "other-title-runtime" })
+      switchRuntimeEndpoint({ apiBaseUrl: "http://initial.test", runtimeKey: "title-runtime" })
+    }
+    openchamberRouteRequests.length = 0
+
+    const { setActionRefs, updateSessionTitle } = await import("./session-actions")
+    setActionRefs(createChildStores([]), () => "/test/project")
+    await updateSessionTitle("session-a", "New Title", { byUser: true })
+
+    expect(reads).toBe(2)
+    expect(globalUpsertedSessions).toHaveLength(1)
+    expect(openchamberRouteRequests).toEqual([])
   })
 })
 
