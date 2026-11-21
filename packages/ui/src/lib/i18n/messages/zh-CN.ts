@@ -3542,6 +3542,7 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.copyTitle': '复制代码',
   'markdownRenderer.code.actions.copiedTitle': '已复制',
   'markdownRenderer.code.actions.runTitle': '运行命令。智能体会根据其输出继续',
+  'markdownRenderer.code.actions.runInTerminalTitle': '在终端中运行',
   'markdownRenderer.code.actions.stopTitle': '停止命令',
   'markdownRenderer.code.run.startFailed': '无法启动命令',
   'markdownRenderer.code.run.running': '运行中',

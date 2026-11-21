@@ -3576,6 +3576,7 @@ export const dict = {
   'markdownRenderer.code.actions.copyTitle': 'Code kopiëren',
   'markdownRenderer.code.actions.copiedTitle': 'Gekopieerd',
   'markdownRenderer.code.actions.runTitle': 'Opdracht uitvoeren. De agent gaat verder met de uitvoer',
+  'markdownRenderer.code.actions.runInTerminalTitle': 'Uitvoeren in terminal',
   'markdownRenderer.code.actions.stopTitle': 'Opdracht stoppen',
   'markdownRenderer.code.run.startFailed': 'De opdracht kon niet worden gestart',
   'markdownRenderer.code.run.running': 'Bezig',

@@ -3281,6 +3281,7 @@ export const dict = {
   'markdownRenderer.code.actions.copyTitle': 'Code kopieren',
   'markdownRenderer.code.actions.copiedTitle': 'Kopiert',
   'markdownRenderer.code.actions.runTitle': 'Befehl ausführen. Der Agent arbeitet mit der Ausgabe weiter',
+  'markdownRenderer.code.actions.runInTerminalTitle': 'Im Terminal ausführen',
   'markdownRenderer.code.actions.stopTitle': 'Befehl stoppen',
   'markdownRenderer.code.run.startFailed': 'Der Befehl konnte nicht gestartet werden',
   'markdownRenderer.code.run.running': 'Läuft',

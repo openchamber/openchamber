@@ -3240,6 +3240,7 @@ export const dict = {
   'markdownRenderer.code.actions.copyTitle': 'Copier le code',
   'markdownRenderer.code.actions.copiedTitle': 'Copié',
   'markdownRenderer.code.actions.runTitle': "Exécuter la commande. L'agent continue à partir de sa sortie",
+  'markdownRenderer.code.actions.runInTerminalTitle': 'Exécuter dans le terminal',
   'markdownRenderer.code.actions.stopTitle': 'Arrêter la commande',
   'markdownRenderer.code.run.startFailed': 'Impossible de lancer la commande',
   'markdownRenderer.code.run.running': 'En cours',

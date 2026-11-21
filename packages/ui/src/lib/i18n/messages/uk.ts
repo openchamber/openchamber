@@ -3532,6 +3532,7 @@ export const dict: Record<I18nKey, string> = {
   "markdownRenderer.code.actions.copyTitle": "Скопіювати код",
   "markdownRenderer.code.actions.copiedTitle": "Скопійовано",
   "markdownRenderer.code.actions.runTitle": "Запустити команду. Агент продовжить із її виводу",
+  "markdownRenderer.code.actions.runInTerminalTitle": "Запустити в терміналі",
   "markdownRenderer.code.actions.stopTitle": "Зупинити команду",
   "markdownRenderer.code.run.startFailed": "Не вдалося запустити команду",
   "markdownRenderer.code.run.running": "Виконується",
