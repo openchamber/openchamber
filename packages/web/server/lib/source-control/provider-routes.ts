@@ -163,7 +163,7 @@ function readListFilter(query: Query) {
   return filter;
 }
 
-const UPLOAD_SECRET_RE = /^[0-9a-f]{32}$/;
+const UPLOAD_SECRET_RE = /^[A-Za-z0-9_-]{16,8192}$/;
 const UPLOAD_MEDIA_TYPE_RE = /^(?:image\/(?:png|jpeg|gif|webp|avif)|video\/(?:mp4|webm|quicktime))$/;
 const UPLOAD_EXTENSION_TYPES = new Map([
   ['png', 'image/png'], ['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg'], ['gif', 'image/gif'], ['webp', 'image/webp'], ['avif', 'image/avif'],

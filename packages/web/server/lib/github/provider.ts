@@ -14,8 +14,11 @@ import { listTrustedGitHubHosts } from './host-trust.js';
 import { createGitHubAccounts } from './accounts.js';
 import { createGitHubMutations } from './mutations.js';
 import { createGitHubResources } from './resources.js';
+import { readGitHubMedia } from './media.js';
+import { requireGitHubRepoNetwork } from './mappers.js';
+import { isRecord, isString } from '../shared/guards.js';
 import type { GitHubResourceOptions } from './resources.js';
-import type { AccountEvents, ConnectedAccount, ProviderDescriptor, ProviderSession } from '../source-control/provider-contract.js';
+import type { AccountEvents, ConnectedAccount, ProviderDescriptor, ProviderImplementation, ProviderSession } from '../source-control/provider-contract.js';
 import type { createSourceControlAuthStore } from '../source-control/auth-storage.js';
 import type { GitHubEnvelope, Octokit } from './contracts.js';
 import type { SummaryRef } from './pr-summaries.js';
@@ -282,6 +285,23 @@ export function createProvider({
       referenceDetail: resources.referenceDetail,
       reviewState: resources.reviewState,
       referenceStatuses: resources.referenceStatuses,
+      readUpload: async ({ session, context, directory, project, remote, secret, range, signal }: Parameters<NonNullable<ProviderImplementation['resources']['readUpload']>>[0]) => {
+        const { octokit } = accountOf(session);
+        const repository = { owner: project.owner, repo: project.name };
+        if (!context.linked) {
+          const { repo } = await resolveRepo(directory, remote);
+          if (!repo) throw new Error(`Unable to resolve GitHub repo from git remote "${remote}"`);
+          const network = requireGitHubRepoNetwork(await resolveNetwork(octokit, directory, remote, { strictErrors: true }), repo)
+            ?? [repo];
+          if (!network.some((entry) => entry.owner.toLowerCase() === repository.owner.toLowerCase()
+            && entry.repo.toLowerCase() === repository.repo.toLowerCase())) {
+            throw Object.assign(new Error('GitHub attachment is outside the bound repository'), { status: 404 });
+          }
+        }
+        const auth = await octokit.auth({ type: 'token' });
+        const token = isRecord(auth) && isString(auth.token) ? auth.token : undefined;
+        return readGitHubMedia({ secret, instance: session.instance, repository, token, range, signal });
+      },
       readChangeRequestHead: resources.readChangeRequestHead,
       resolveChangeRequestSource: resources.resolveChangeRequestSource,
 
