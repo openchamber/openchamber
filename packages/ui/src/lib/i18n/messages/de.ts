@@ -3293,6 +3293,8 @@ export const dict = {
   'markdownRenderer.code.actions.disableWrapTitle': 'Zeilenumbruch deaktivieren',
   'markdownRenderer.table.actions.enableWrapTitle': 'Zellenumbruch aktivieren',
   'markdownRenderer.table.actions.disableWrapTitle': 'Zellenumbruch deaktivieren',
+  'markdownRenderer.table.actions.expandTitle': 'Tabelle auf Chatbreite erweitern',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': 'Tabelle auf Nachrichtenbreite zurücksetzen',
   'markdownRenderer.table.actions.downloadTitle': 'Tabelle herunterladen',
   'markdownRenderer.table.toast.downloadedAsFormat': 'Tabelle als {format} heruntergeladen',
   'markdownRenderer.mermaid.actions.copyTitle': 'Kopieren',

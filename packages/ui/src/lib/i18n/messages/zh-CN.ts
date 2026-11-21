@@ -3554,6 +3554,8 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.disableWrapTitle': '禁用自动换行',
   'markdownRenderer.table.actions.enableWrapTitle': '启用单元格换行',
   'markdownRenderer.table.actions.disableWrapTitle': '禁用单元格换行',
+  'markdownRenderer.table.actions.expandTitle': '将表格展开至聊天宽度',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': '将表格缩回消息宽度',
   'markdownRenderer.table.actions.downloadTitle': '下载表格',
   'markdownRenderer.table.toast.downloadedAsFormat': '表格已下载为 {format}',
   'markdownRenderer.mermaid.actions.copyTitle': '复制',

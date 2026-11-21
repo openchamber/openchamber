@@ -3588,6 +3588,8 @@ export const dict = {
   'markdownRenderer.code.actions.disableWrapTitle': 'Regelafbreking uitzetten',
   'markdownRenderer.table.actions.enableWrapTitle': 'Celafbreking aanzetten',
   'markdownRenderer.table.actions.disableWrapTitle': 'Celafbreking uitzetten',
+  'markdownRenderer.table.actions.expandTitle': 'Tabel uitbreiden tot chatbreedte',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': 'Tabel aanpassen aan berichtbreedte',
   'markdownRenderer.table.actions.downloadTitle': 'Tabel downloaden',
   'markdownRenderer.table.toast.downloadedAsFormat': 'Tabel gedownload als {format}',
   'markdownRenderer.mermaid.actions.copyTitle': 'Kopiëren',

@@ -3584,6 +3584,8 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.disableWrapTitle': '行折り返しを無効にする',
   'markdownRenderer.table.actions.enableWrapTitle': 'セルの折り返しを有効にする',
   'markdownRenderer.table.actions.disableWrapTitle': 'セルの折り返しを無効にする',
+  'markdownRenderer.table.actions.expandTitle': '表をチャット幅に広げる',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': '表をメッセージ幅に戻す',
   'markdownRenderer.table.actions.downloadTitle': 'テーブルをダウンロード',
   'markdownRenderer.table.toast.downloadedAsFormat': 'テーブルを{format}としてダウンロードしました',
   'markdownRenderer.mermaid.actions.copyTitle': 'コピー',

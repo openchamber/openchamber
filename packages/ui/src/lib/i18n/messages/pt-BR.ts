@@ -3544,6 +3544,8 @@ export const dict: Record<I18nKey, string> = {
   "markdownRenderer.code.actions.disableWrapTitle": "Desativar quebra de linha",
   "markdownRenderer.table.actions.enableWrapTitle": "Ativar quebra nas células",
   "markdownRenderer.table.actions.disableWrapTitle": "Desativar quebra nas células",
+  "markdownRenderer.table.actions.expandTitle": "Expandir tabela até a largura do chat",
+  "markdownRenderer.table.actions.fitMessageWidthTitle": "Ajustar tabela à largura da mensagem",
   "markdownRenderer.table.actions.downloadTitle": "Baixar tabela",
   "markdownRenderer.table.toast.downloadedAsFormat": "Tabela baixada como {format}",
   "markdownRenderer.mermaid.actions.copyTitle": "Copiar",

@@ -3492,6 +3492,8 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.disableWrapTitle': 'تعطيل التفاف الأسطر',
   'markdownRenderer.table.actions.enableWrapTitle': 'تفعيل التفاف الخلايا',
   'markdownRenderer.table.actions.disableWrapTitle': 'تعطيل التفاف الخلايا',
+  'markdownRenderer.table.actions.expandTitle': 'توسيع الجدول إلى عرض المحادثة',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': 'إعادة الجدول إلى عرض الرسالة',
   'markdownRenderer.table.actions.downloadTitle': 'تنزيل الجدول',
   'markdownRenderer.table.toast.downloadedAsFormat': 'تم تنزيل الجدول بصيغة {format}',
   'markdownRenderer.mermaid.actions.copyTitle': 'نسخ',

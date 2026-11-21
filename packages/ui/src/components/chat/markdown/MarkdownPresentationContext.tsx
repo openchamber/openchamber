@@ -27,6 +27,7 @@ export interface MarkdownPresentation {
   disableLinkSafety?: boolean;
   guestLinks: readonly GuestLinkRule[] | null;
   tableWidthScope?: string;
+  chatTableExpansion: boolean;
   theme: Theme;
   mermaidControls: MermaidControls;
   onShowPopup?: (content: ToolPopupContent) => void;

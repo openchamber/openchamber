@@ -3544,6 +3544,8 @@ export const dict: Record<I18nKey, string> = {
   "markdownRenderer.code.actions.disableWrapTitle": "Вимкнути перенесення рядків",
   "markdownRenderer.table.actions.enableWrapTitle": "Увімкнути перенесення в клітинках",
   "markdownRenderer.table.actions.disableWrapTitle": "Вимкнути перенесення в клітинках",
+  "markdownRenderer.table.actions.expandTitle": "Розгорнути таблицю на ширину чату",
+  "markdownRenderer.table.actions.fitMessageWidthTitle": "Повернути таблицю до ширини повідомлення",
   "markdownRenderer.table.actions.downloadTitle": "Завантажити таблицю",
   "markdownRenderer.table.toast.downloadedAsFormat": "Таблицю завантажено як {format}",
   "markdownRenderer.mermaid.actions.copyTitle": "Копіювати",

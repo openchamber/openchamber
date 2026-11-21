@@ -3544,6 +3544,8 @@ export const dict: Record<I18nKey, string> = {
   "markdownRenderer.code.actions.disableWrapTitle": "Desactivar ajuste de línea",
   "markdownRenderer.table.actions.enableWrapTitle": "Activar ajuste de celdas",
   "markdownRenderer.table.actions.disableWrapTitle": "Desactivar ajuste de celdas",
+  "markdownRenderer.table.actions.expandTitle": "Ampliar tabla al ancho del chat",
+  "markdownRenderer.table.actions.fitMessageWidthTitle": "Ajustar tabla al ancho del mensaje",
   "markdownRenderer.table.actions.downloadTitle": "Descargar tabla",
   "markdownRenderer.table.toast.downloadedAsFormat": "Tabla descargada como {format}",
   "markdownRenderer.mermaid.actions.copyTitle": "Copiar",
