@@ -1038,6 +1038,216 @@ describe('session goal progress check', () => {
     expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject({ status: 'active', auditFailStreak: 1 });
     expect(calls.some((call) => call.path.endsWith('/prompt') && call.method === 'POST')).toBe(true);
   });
+
+  it('makes the second failed progress check on its own and settles, without another session event', async () => {
+    vi.useFakeTimers();
+    try {
+      quiet();
+      v2OpenCode({ messages: [assistantRecord()] });
+      const upstreamFetch = globalThis.fetch;
+      vi.stubGlobal('fetch', vi.fn(async (input, init) => {
+        if (new URL(String(input)).pathname.endsWith('/prompt')) {
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return upstreamFetch(input, init);
+      }));
+
+      let stored = activeGoal();
+      const seam = {
+        readSessionMetadata: vi.fn(async () => ({ openchamber: { goal: stored } })),
+        persistSessionGoal: vi.fn(async (_sessionId, _directory, goal) => { stored = goal; }),
+      };
+      const generate = vi.fn(async () => ({ text: '{"verdict":"complete"}' }));
+      const { runtime } = makeRuntime({
+        ...seam,
+        getSmallModelService: async () => ({ generateSmallModelText: generate }),
+      });
+
+      await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: stored } });
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(generate).toHaveBeenCalledTimes(2);
+      expect(stored).toMatchObject({
+        status: 'blocked',
+        statusReason: 'progress audit unavailable',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('session goal recovery after an unchecked continuation', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    quiet();
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  // A checker that never answers, an OpenCode whose /prompt answers as
+  // `onPrompt` says, and a goal store the runtime really writes to.
+  const setup = ({ messages, active = {}, goal = activeGoal(), onPrompt = () => Response.json({}), listed = null, onMessages = () => null, sessionRead }) => {
+    const server = v2OpenCode({ messages, active: () => active.value ?? {}, sessionRead });
+    const upstream = globalThis.fetch;
+    const prompts = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/prompt')) {
+        prompts.push(url.pathname);
+        return onPrompt();
+      }
+      if (url.pathname.endsWith('/message')) {
+        const replaced = onMessages();
+        if (replaced) return replaced;
+      }
+      if (listed && url.pathname === '/api/session' && url.searchParams.get('parentID') === 'null') {
+        return Response.json({ data: listed(), cursor: {} });
+      }
+      return upstream(input, init);
+    }));
+    const store = { goal };
+    const seam = {
+      readSessionMetadata: vi.fn(async () => ({ openchamber: { goal: store.goal } })),
+      persistSessionGoal: vi.fn(async (_sessionId, _directory, next) => { store.goal = next; }),
+    };
+    const generate = vi.fn(async () => ({ text: 'not the asked-for JSON' }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    return { ...server, runtime, store, prompts, generate };
+  };
+
+  it('rechecks after a rejected continuation and settles without sending it again', async () => {
+    const test = setup({
+      messages: [assistantRecord()],
+      onPrompt: () => new Response('upstream down', { status: 502 }),
+    });
+
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: test.store.goal } });
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(test.generate).toHaveBeenCalledTimes(2);
+    expect(test.prompts).toHaveLength(1);
+    expect(test.store.goal).toMatchObject({ status: 'blocked', statusReason: 'progress audit unavailable', turnsUsed: 1 });
+  });
+
+  it('keeps rechecking through a busy turn that ends without an idle event, then audits its reply', async () => {
+    const messages = [assistantRecord()];
+    const active = { value: {} };
+    const test = setup({
+      messages,
+      active,
+      onPrompt: () => {
+        messages.push({ id: 'msg_u2', sessionID: SESSION_ID, type: 'user', text: 'Continue', time: { created: 30 } });
+        active.value = { [SESSION_ID]: { type: 'busy' } };
+        return Response.json({});
+      },
+    });
+
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: test.store.goal } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(test.prompts).toHaveLength(1);
+    test.runtime.processPayload({ type: 'session.status', properties: { sessionID: SESSION_ID, status: { type: 'busy' } } });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(test.generate).toHaveBeenCalledTimes(1);
+    expect(test.store.goal).toMatchObject({ status: 'active', auditFailStreak: 1 });
+
+    messages.push(assistantRecord({ id: 'msg_a2', time: { created: 31, completed: 40 } }));
+    active.value = {};
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(test.generate).toHaveBeenCalledTimes(2);
+    expect(test.prompts).toHaveLength(1);
+    expect(test.store.goal).toMatchObject({ status: 'blocked', statusReason: 'progress audit unavailable' });
+  });
+
+  it('after a restart, waits a bounded time for the reply to a pending continuation, then blocks without resending', async () => {
+    const goal = activeGoal({ turnsUsed: 1, auditFailStreak: 1, lastAccountedMessageID: 'msg_a1' });
+    const messages = [
+      assistantRecord(),
+      { id: 'msg_u2', sessionID: SESSION_ID, type: 'user', text: 'Continue', time: { created: 30 } },
+    ];
+    const test = setup({
+      messages,
+      goal,
+      listed: () => [{ id: SESSION_ID, location: { directory: '/repo' }, metadata: { openchamber: { goal } } }],
+    });
+
+    await test.runtime.recoverActiveGoals();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(test.store.goal).toMatchObject({ status: 'active' });
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(test.generate).not.toHaveBeenCalled();
+    expect(test.prompts).toHaveLength(0);
+    expect(test.store.goal).toMatchObject({
+      status: 'blocked',
+      statusReason: 'The continuation produced no reply to check. Send a message, or Resume to check again.',
+      turnsUsed: 1,
+      auditFailStreak: 0,
+    });
+
+    // Resume with the same stuck tail checks again instead of sitting on Evaluating.
+    test.store.goal = { ...test.store.goal, status: 'active', statusReason: 'resumed' };
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: test.store.goal } });
+    await vi.advanceTimersByTimeAsync(400);
+
+    expect(test.prompts).toHaveLength(0);
+    expect(test.store.goal).toMatchObject({
+      status: 'blocked',
+      statusReason: 'The continuation produced no reply to check. Send a message, or Resume to check again.',
+    });
+  });
+
+  it('rechecks when the tail cannot be read before the continuation, without sending it', async () => {
+    let messageReads = 0;
+    const test = setup({
+      messages: [assistantRecord()],
+      onMessages: () => {
+        messageReads += 1;
+        return messageReads === 2 ? new Response('unavailable', { status: 503 }) : null;
+      },
+    });
+
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: test.store.goal } });
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(test.generate).toHaveBeenCalledTimes(2);
+    expect(test.prompts).toHaveLength(0);
+    expect(test.store.goal).toMatchObject({ status: 'blocked', statusReason: 'progress audit unavailable' });
+  });
+
+  it('keeps rechecking when a busy event arrives while a recovery tick reads the session', async () => {
+    const goal = activeGoal({ turnsUsed: 1, auditFailStreak: 1, lastAccountedMessageID: 'msg_a1' });
+    const messages = [
+      assistantRecord(),
+      { id: 'msg_u2', sessionID: SESSION_ID, type: 'user', text: 'Continue', time: { created: 30 } },
+    ];
+    let release = () => {};
+    let gated = true;
+    const test = setup({
+      messages,
+      goal,
+      listed: () => [{ id: SESSION_ID, location: { directory: '/repo' }, metadata: { openchamber: { goal } } }],
+      sessionRead: () => (gated ? new Promise((resolve) => { release = resolve; }) : Promise.resolve()),
+    });
+
+    await test.runtime.recoverActiveGoals();
+    await vi.advanceTimersByTimeAsync(1);
+    test.runtime.processPayload({ type: 'session.status', properties: { sessionID: SESSION_ID, status: { type: 'busy' } } });
+    await vi.advanceTimersByTimeAsync(0);
+    gated = false;
+    release();
+    messages.push(assistantRecord({ id: 'msg_a2', time: { created: 31, completed: 40 } }));
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(test.generate).toHaveBeenCalledTimes(1);
+    expect(test.prompts).toHaveLength(0);
+    expect(test.store.goal).toMatchObject({ status: 'blocked', statusReason: 'progress audit unavailable' });
+  });
 });
 
 describe('session goal runtime', () => {
