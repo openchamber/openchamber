@@ -321,7 +321,7 @@ describe("resyncBlockingRequestsForDirectory", () => {
     const [recovered] = deriveRecoveredQuestions(store.getState(), useRecoverableQuestionsStore.getState(), new Set(["ses_a"]))
     expect(recovered).toMatchObject({ form: question, evidence: "deferred-on-send" })
     const sendAnswer = mock(async () => {})
-    await submitRecoveredAnswer(recovered.form.id, sendAnswer)
+    await submitRecoveredAnswer(recovered.form.sessionID, recovered.form.id, sendAnswer)
     expect(sendAnswer).toHaveBeenCalledTimes(1)
   })
 
