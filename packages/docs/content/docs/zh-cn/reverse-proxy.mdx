@@ -35,6 +35,7 @@ description: 在 Nginx、Nginx Proxy Manager 或其他反向代理后正确配�
 - 如果 OpenChamber 已经压缩响应，请在代理上禁用 gzip。
 - 仅在一层中保持压缩开启。
 - 转发常规代理标头，例如 `Host`、`X-Forwarded-For` 和 `X-Forwarded-Proto`。
+- 如果代理运行在其他机器或其他容器中，请把它的地址加入 [`OPENCHAMBER_TRUSTED_PROXIES`](/zh-cn/environment/#openchamber_trusted_proxies)。否则它后面的所有人共用一个登录失败次数上限。
 - 如果用户上传文件，请增大请求体大小限制。
 
 ## 快速检查清单

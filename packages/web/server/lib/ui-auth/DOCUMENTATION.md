@@ -16,10 +16,19 @@ Pairing v2 is implemented by `packages/web/server/lib/client-auth/pairing.js`. I
 
 ## Invariants
 
-- Password and passkey sign-in share one attempt budget per trusted-proxy
-  resolved client IP. Reading X-Forwarded-For directly would let an attacker
-  choose a new bucket for each attempt. Only rejected passkey assertions spend
-  that budget; failures after accepted authentication do not.
+- Password and passkey sign-in share one attempt budget per client
+  (`../security/client-address.ts`). `X-Forwarded-For` names the client only
+  through a chain of trusted proxies: a loopback peer (a reverse proxy or tunnel
+  on this machine) or an address listed in `OPENCHAMBER_TRUSTED_PROXIES`. Every
+  other peer, link-local and private ones included, is keyed on its own socket
+  address, because Express's broader `trust proxy` would let any LAN host choose
+  a new bucket for each attempt. A proxy on another host or container that is not
+  listed shares one budget among all its clients. Requests the relay host
+  dispatches carry the remote client's headers, so they share one relay budget,
+  chosen by the relay proof the dispatcher adds (`relay/provenance.ts`, checked with `hasRelayProvenance`); the
+  `x-openchamber-relay-connection` header alone does not select it. Only rejected
+  passkey assertions spend that budget; failures after accepted authentication do
+  not.
 - Explicit bearer authentication decides session status on its own. Falling
   back to an ambient session cookie would hide a revoked native-client token
   while bearer-only API requests fail.

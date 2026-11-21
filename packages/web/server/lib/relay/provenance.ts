@@ -7,7 +7,7 @@ export const RELAY_PROOF_HEADER = 'x-openchamber-relay-proof';
 const proof = randomBytes(32).toString('base64url');
 const proofBytes = Buffer.from(proof, 'utf8');
 interface RelayIngressRequest {
-  headers?: IncomingHttpHeaders;
+  headers?: IncomingHttpHeaders | undefined;
 }
 
 const relayRequests = new WeakSet<RelayIngressRequest>();
