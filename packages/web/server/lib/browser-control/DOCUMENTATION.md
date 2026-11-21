@@ -136,10 +136,10 @@ itself; it can only ask and wait.
   500 ms behind an unchanging splash still ends the wait early; the next
   snapshot shows the splash, and nothing in the page can see a request in
   flight.
-  Agent work never takes keyboard focus from the user
-  (`useWebviewFocusGuard` beside `BrowserPane`): a page may take focus only
-  while the user can see it and no agent action is driving it, otherwise focus
-  goes straight back to where it was. A press inside the page moves focus to
+  Agent work guards keyboard focus
+  (`useWebviewFocusGuard` beside `BrowserPane`): outside a held input action a
+  page may take focus only while the user can see it and no agent action is
+  driving it; otherwise focus goes straight back to where it was. A press inside the page moves focus to
   the view with no `focusin` in the app, only a window `blur`, so the guard
   checks after that blur too; and when an action ends, focus it moved anywhere
   (a Tab out of the page's last field lands in the app, as in a browser) goes
@@ -148,8 +148,13 @@ itself; it can only ask and wait.
   that page: the page then behaves as focused, so pickers stay open and its
   clipboard calls work. The emulation stays for the page's lifetime. When it
   is unavailable (the debugger could not attach; an open DevTools does not
-  stop it), the action gives the page real focus (`holdPageFocus`) and
-  returns it before waiting out any load the action started.
+  stop it), the action gives the page real focus (`holdPageFocus`). Typing and
+  key presses also take real focus because Chromium sends keyboard input to the
+  focused widget even when emulation is enabled. The shell refuses input if
+  the page loses focus. Keyboard steps carry the drawn-stage deadline, and the
+  shell rejects expired input, a key release included, even if a later action
+  has focused the page. Focus returns before waiting out any load the action
+  started.
   A tab an agent opened browses in a profile of its own,
   `persist:openchamber-browser-agent`, without the user's logins: a page can
   steer the agent, and with the user's sessions it would act as the user on

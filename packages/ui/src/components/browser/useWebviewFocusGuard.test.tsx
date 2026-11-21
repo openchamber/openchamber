@@ -140,6 +140,18 @@ describe('webview focus guard', () => {
     expect(document.activeElement).toBe(webview);
   });
 
+  test('a user who leaves the page before the action takes focus gets their field back', async () => {
+    stageShown = true;
+    webview.focus();
+    await guardAgentAction(async (holdPageFocus) => {
+      composer.focus();
+      const release = holdPageFocus();
+      webview.focus();
+      release();
+    });
+    expect(document.activeElement).toBe(composer);
+  });
+
   test('a field the user picks while an action runs keeps focus when it ends', async () => {
     const other = document.createElement('input');
     document.body.appendChild(other);

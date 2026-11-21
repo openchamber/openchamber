@@ -494,11 +494,22 @@ export const createBrowserPanelDriver = () => {
       case 'press': {
         const events = keyEventsFor(args.key);
         return watchingDialog(state, async () => {
-          for (const event of events) await send(state, 'Input.dispatchKeyEvent', event);
+          for (const event of events) {
+            if (Date.now() >= args.expiresAt) throw new Error('Browser keyboard action expired');
+            if (!contents.isFocused()) {
+              if (event.type === 'keyUp') break;
+              throw new Error('Browser page lost keyboard focus');
+            }
+            await send(state, 'Input.dispatchKeyEvent', event);
+          }
         });
       }
       case 'insertText':
-        return watchingDialog(state, () => send(state, 'Input.insertText', { text: String(args.text ?? '') }));
+        return watchingDialog(state, async () => {
+          if (Date.now() >= args.expiresAt) throw new Error('Browser keyboard action expired');
+          if (!contents.isFocused()) throw new Error('Browser page lost keyboard focus');
+          return send(state, 'Input.insertText', { text: String(args.text ?? '') });
+        });
       case 'setFiles': {
         const frame = await frameById(state, String(args.frameId ?? ''));
         const files = Array.isArray(args.files) ? args.files.map(String) : [];
