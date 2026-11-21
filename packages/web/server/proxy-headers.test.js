@@ -60,6 +60,11 @@ describe('OpenCode proxy header handling', () => {
     expect(shouldForwardProxyResponseHeader('Transfer-Encoding')).toBe(false);
   });
 
+  it('drops an upstream set-cookie before it reaches the browser origin', () => {
+    expect(shouldForwardProxyResponseHeader('set-cookie')).toBe(false);
+    expect(shouldForwardProxyResponseHeader('Set-Cookie')).toBe(false);
+  });
+
   it('still keeps ordinary response headers', () => {
     expect(shouldForwardProxyResponseHeader('content-type')).toBe(true);
     expect(shouldForwardProxyResponseHeader('etag')).toBe(true);
