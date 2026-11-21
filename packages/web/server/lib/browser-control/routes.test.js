@@ -3,6 +3,7 @@ import express from 'express';
 import request from 'supertest';
 
 import { createBrowserControlBroker } from './broker.js';
+import { createPreferredBrowserClient } from './preferred-client.js';
 import { registerBrowserControlRoutes } from './routes.js';
 
 /**
@@ -25,10 +26,38 @@ const createApp = ({ listeners = 1 } = {}) => {
     },
   });
 
+  const preferredClient = createPreferredBrowserClient({
+    getClients: () => [{ openchamberConnectionId: 'desktop', openchamberBrowserCapable: true }],
+    broadcast: () => {},
+  });
+
   const app = express();
-  registerBrowserControlRoutes(app, { express, broker });
-  return { app, broker, emitted };
+  registerBrowserControlRoutes(app, { express, broker, preferredClient });
+  return { app, broker, emitted, preferredClient };
 };
+
+describe('browser control active route', () => {
+  it('makes the reporting window the preferred one', async () => {
+    const { app, preferredClient } = createApp();
+
+    await request(app)
+      .post('/api/browser-control/active')
+      .send({ connectionId: 'desktop' })
+      .expect(200, { preferredConnectionId: 'desktop' });
+
+    expect(preferredClient.current()).toBe('desktop');
+  });
+
+  it('refuses a connection that is not open', async () => {
+    const { app } = createApp();
+    await request(app).post('/api/browser-control/active').send({ connectionId: 'gone' }).expect(409);
+  });
+
+  it('rejects a body with no connection id', async () => {
+    const { app } = createApp();
+    await request(app).post('/api/browser-control/active').send({}).expect(400);
+  });
+});
 
 describe('browser control result route', () => {
   it('parses a posted JSON body and resolves the waiting request', async () => {
