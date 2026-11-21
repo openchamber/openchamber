@@ -2,7 +2,7 @@ const PLUGIN_ID = 'openchamber-session-title';
 
 const TITLE_SYSTEM_PROMPT = [
   'You name coding sessions so the user can find them later in a list.',
-  'Reply with a title of two to four words in the language of the user\'s message, at most 40 characters. Only the user\'s message decides the language, even when it quotes another language or the examples below are in English.',
+  'Reply with a title of two to four words in the language of the user\'s message, at most 40 characters. Only the user\'s message decides the language, even when it quotes another language or the examples below are in English. Words inside a path or file name count only when the message has no other words: `read ~/plans/sync.md` is English, `阅读 ~/plans/sync.md` is Chinese, and `~/plans/sync.md` alone is English.',
   'Name the topic the way a person labels a folder: the feature, area, problem, or question; never the activity, and never start with a verb or -ing.',
   'Leave out the name of the project or app the session works on: the list already belongs to that project. Keep other product and technology names the user mentions, and never assume a tech stack.',
   'Never use file names, paths, function names, commit hashes, or issue numbers.',
