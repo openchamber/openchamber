@@ -94,7 +94,7 @@ import { phoneGuestPanelModes } from '@/lib/guests/phone';
 import { useGuestsStore } from '@/lib/guests/store';
 import { isPluginContextPanelMode, pluginModeFromId } from '@/lib/surfaces/modes';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
-import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, suppressAutoConnectUntilManualConnect, type AutoConnectOutcome } from './mobileConnections';
+import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, suppressAutoConnectUntilManualConnect, switchToSavedInstance, type AutoConnectOutcome } from './mobileConnections';
 import { isCapacitorMobileApp, useAndroidParentSessionBack, useMobileBackHandlers, useMobileWebBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
 import { reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
 import { useAppFontEffects } from './useAppFontEffects';
@@ -1194,7 +1194,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
   useNativePushRegistration({ enabled: isNativeMobileApp && isConnected });
   useKeepScreenAwake(isConnected);
   useNativeWidgetSync({ enabled: isNativeMobileApp && isConnected && isInitialized });
-  useDeepLinkSource({ ready: isNativeMobileApp && isConnected && isInitialized });
+  useDeepLinkSource({ ready: isNativeMobileApp && isConnected && isInitialized, switchToServer: switchToSavedInstance });
   const fontsReady = useFontsReady();
 
   const isReconnecting = !isConnected && connectionPhase === 'reconnecting';

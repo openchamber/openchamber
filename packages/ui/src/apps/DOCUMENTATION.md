@@ -18,6 +18,9 @@
 - A header edit writes a fresh secure entry before publishing its metadata reference. Failure preserves the old reference and credentials. Replaced and removed references are deleted after the metadata commit. Native bridge calls remain bounded by the existing secure-storage timeout.
 - Native mobile with headers uses the existing fetch-based OpenChamber event stream reader and the native WebSocket adapter behind `openRuntimeWebSocket`. Files media previews use bounded runtime HTTP reads and owned object URLs; prepared chat images use the existing validated data-URL loader. HTML previews and inline Markdown video still use browser-owned URLs without proxy headers.
 - An empty welcome-form header editor preserves a saved connection's headers. Explicit clearing belongs to the prefilled Instances edit form. Cancelling a password prompt does not erase existing header credentials.
+- A native device token belongs to every saved instance. Registration and removal go to every saved server once, each on its own: the relay binds a token to each server that registered it, so one server failing, or answering `localOnly` (a phone paired with it for the home network only, which it neither stores nor binds), leaves the others as they are. Only a phone whose active server is home-network-only and that has no other saved server skips the permission prompt and registration, and only then does the Notifications page disable the switch and explain why; with another saved server the switch stays on and a line says only the active server stays silent. Registrations and removals for saved servers run one after another (`mobilePushTokens.ts`), so removing an instance sends its unregister after a registration already on its way to it. Their direct requests pass the same `/health` identity gate as a connect probe before the saved client token is attached. The device token is kept in secure storage, so turning notifications off or removing an instance also works after a cold launch that never registered in this process. Turning notifications off removes the token from each saved server and the active runtime; removing an instance reads that server's credentials before they disappear and then unregisters from it; when that request fails, the server keeps the token.
+- A push carries `serverId` next to `sessionId`. Before opening its session the app switches to the saved instance with that identity, also on a cold start before any instance has connected, and holds the intent until the new runtime initializes. The switch accepts only an address that answers `/health` with that identity. A saved instance that never reported its identity is asked for it when a push names an unknown one. An unknown or unreachable instance leaves the session unopened rather than opening it on the active server.
+- A direct connection learns the server's identity from `/health` into `pushServerId` when it connects, so an older manually-added instance can still be matched by a later push. This field does not key the stored client token, so learning it cannot orphan the token or change the active runtime key.
 
 - Chat-side Settings entry points request the native Settings tab through `RuntimeAPIs.vscode`. They preserve chat selection, drafts and the current layout. The source's in-page dialog flag is cleared so it cannot block chat shortcuts.
 - Only the Settings root receives page navigation. The bridge parses it before applying it to stores, and the mounted root signals readiness before the host consumes pending navigation.
@@ -124,6 +127,18 @@
 - Widget session ordering, unread state and project ownership match the shared lifecycle and sidebar, including worktrees and isolated spaces. The iOS bridge returns a JSON primitive or null so failed construction cannot overwrite a good App Group snapshot. Widget quotas use the Usage page's selected providers, models, formatting and theme colors without copying credentials.
 
 ## Decisions
+
+### Why mobile push registers with every saved instance and not only the connected one
+
+A phone with two saved servers stayed quiet for the one it was not connected to: the token went only to the active server, and the relay kept one owning server per token. The relay now keeps one binding per token and server (openchamber-website `apps/api`, `push_tokens`), and the app registers with every saved server, in no particular order. An ordering that left the active server registered last was weighed and dropped: it only mattered while each registration took the token from the previous server, and the relay change ships before this app. The cost is that every saved server can push to the phone.
+
+### Why a notification switch holds the tap until the runtime is ready
+
+Switching instances resets the shell and clears `ready`. Opening the session as soon as the endpoint changes would run against the previous server's stores or session list. The intent stays stashed until the shell reports ready again, then opens on the new runtime.
+
+### Why a direct connection learns its pushServerId from /health
+
+A manually added instance had no relay identity on file, so a push from it carried an id that matched no saved entry. The health probe already runs on every connect; keeping the reported id under a separate field makes a later notification switch possible without re-pairing, and without changing the key the client token is stored under.
 
 ### Why a visited extension tab keeps its frame and not a fresh load per visit
 

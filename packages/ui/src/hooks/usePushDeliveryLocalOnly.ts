@@ -1,12 +1,24 @@
 import React from 'react';
 
+import { nativePushHasTarget } from '@/apps/mobilePushTokens';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import type { I18nKey } from '@/lib/i18n';
 
 /**
- * Whether the server sends this device no push because it was paired for the
- * home network only. Asked once per mount; false until the server answers.
+ * Who stays silent because the active server was paired for the home network
+ * only: `device` when no other saved server delivers either, so this device
+ * gets no push at all; `server` when other saved servers still deliver.
+ * Asked once per mount; null until the server answers.
  */
-export const usePushDeliveryLocalOnly = (enabled: boolean): boolean => {
+type PushDeliveryLocalOnly = 'device' | 'server' | null;
+
+export const pushDeliveryLocalOnlyHintKey = (scope: PushDeliveryLocalOnly): I18nKey | null => {
+  if (scope === 'device') return 'settings.notifications.page.delivery.localOnlyDevice';
+  if (scope === 'server') return 'settings.notifications.page.delivery.localOnlyServer';
+  return null;
+};
+
+export const usePushDeliveryLocalOnly = (enabled: boolean): PushDeliveryLocalOnly => {
   const [localOnly, setLocalOnly] = React.useState(false);
 
   React.useEffect(() => {
@@ -20,5 +32,6 @@ export const usePushDeliveryLocalOnly = (enabled: boolean): boolean => {
     };
   }, [enabled]);
 
-  return enabled && localOnly;
+  if (!enabled || !localOnly) return null;
+  return nativePushHasTarget({ localOnly }) ? 'server' : 'device';
 };

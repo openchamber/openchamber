@@ -2193,6 +2193,7 @@ export const settingsDict = {
   'settings.notifications.page.delivery.enableAria': 'Enable notifications',
   'settings.notifications.page.delivery.enableLabel': 'Enable notifications',
   'settings.notifications.page.delivery.localOnlyDevice': 'This device is paired for your home network only, so it gets no notifications, because they reach a phone through the internet. To get them, add the device again and choose "Anywhere".',
+  'settings.notifications.page.delivery.localOnlyServer': 'This server is paired for your home network only, so it doesn\'t send notifications. Your other saved servers still do.',
   'settings.notifications.page.delivery.focusedAria': 'Notify while app is focused',
   'settings.notifications.page.delivery.focusedLabel': 'Notify while app is focused',
   'settings.notifications.page.delivery.testAction': 'Send test notification',

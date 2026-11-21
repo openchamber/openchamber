@@ -2167,6 +2167,7 @@ export const settingsDict = {
   'settings.notifications.page.delivery.enableAria': 'Meldingen aanzetten',
   'settings.notifications.page.delivery.enableLabel': 'Meldingen aanzetten',
   'settings.notifications.page.delivery.localOnlyDevice': 'Dit apparaat is alleen voor je thuisnetwerk gekoppeld en krijgt daarom geen meldingen, want die bereiken een telefoon via internet. Wil je ze wel krijgen, voeg het apparaat dan opnieuw toe en kies "Overal".',
+  'settings.notifications.page.delivery.localOnlyServer': 'Deze server is alleen voor je thuisnetwerk gekoppeld en stuurt daarom geen meldingen. Je andere opgeslagen servers doen dat nog wel.',
   'settings.notifications.page.delivery.focusedAria': 'Melden terwijl de app in de voorgrond is',
   'settings.notifications.page.delivery.focusedLabel': 'Melden terwijl de app in de voorgrond is',
   'settings.notifications.page.delivery.testAction': 'Testmelding versturen',

@@ -1,4 +1,5 @@
 import React from 'react';
+import { z } from 'zod';
 import { Capacitor } from '@capacitor/core';
 
 import { isCapacitorApp } from '@/lib/platform';
@@ -11,6 +12,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { openSession } from '@/lib/router/openSessionFromRoute';
 
 import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
+import type { SavedInstanceSwitchOutcome } from './mobileConnections';
 
 
 interface DeepLinkHandlers {
@@ -24,9 +26,9 @@ type ShortcutNewSessionIntent = { type: 'shortcut-new-session'; projectId?: stri
 
 type NavigationIntent = DeepLinkIntent | ShortcutNewSessionIntent;
 
+type InstanceSwitcher = (serverId: string) => Promise<SavedInstanceSwitchOutcome>;
+
 let handlers: DeepLinkHandlers = {};
-let ready = false;
-let pending: NavigationIntent | null = null;
 let launchUrlConsumed = false;
 
 const openShortcutSession = (intent: ShortcutNewSessionIntent): void => {
@@ -100,18 +102,65 @@ const execute = (intent: NavigationIntent): boolean => {
   }
 };
 
-const flush = (): void => {
-  if (!ready || !pending) return;
-  const intent = pending;
-  pending = null;
-  if (!execute(intent)) {
-    pending = intent;
-  }
+export const createDeepLinkQueue = <Intent extends { type: string; serverId?: string }>(run: (intent: Intent) => boolean) => {
+  let ready = false;
+  let pending: Intent | null = null;
+  let switchToServer: InstanceSwitcher | null = null;
+  let switching: Promise<void> | null = null;
+  let waitingForSwitchedRuntime = false;
+
+  const switchThenFlush = (switcher: InstanceSwitcher, serverId: string): Promise<void> => switcher(serverId).then((outcome) => {
+    switching = null;
+    if (!pending || pending.serverId !== serverId) return flush();
+    if (outcome === 'unavailable') {
+      pending = null;
+      return undefined;
+    }
+    if (outcome === 'switched') {
+      waitingForSwitchedRuntime = true;
+      ready = false;
+      return undefined;
+    }
+    pending.serverId = undefined;
+    return flush();
+  }, () => {
+    switching = null;
+    pending = null;
+  });
+
+  const flush = (): Promise<void> => {
+    if (switching) return switching;
+    if (!pending || waitingForSwitchedRuntime) return Promise.resolve();
+    const intent = pending;
+    if (intent.type === 'session' && intent.serverId && switchToServer) {
+      switching = switchThenFlush(switchToServer, intent.serverId);
+      return switching;
+    }
+    if (!ready) return Promise.resolve();
+    pending = null;
+    if (!run(intent)) pending = intent;
+    return Promise.resolve();
+  };
+
+  return {
+    apply: (intent: Intent): Promise<void> => {
+      pending = intent;
+      return flush();
+    },
+    setReady: (value: boolean, switcher: InstanceSwitcher | null): Promise<void> => {
+      ready = value;
+      switchToServer = switcher;
+      if (value) waitingForSwitchedRuntime = false;
+      return flush();
+    },
+    flush,
+  };
 };
 
+const queue = createDeepLinkQueue<NavigationIntent>(execute);
+
 const applyDeepLinkIntent = (intent: NavigationIntent): void => {
-  pending = intent;
-  flush();
+  void queue.apply(intent);
 };
 
 const applyDeepLinkUrl = (raw: string | null | undefined): void => {
@@ -121,15 +170,29 @@ const applyDeepLinkUrl = (raw: string | null | undefined): void => {
   }
 };
 
-const setReady = (value: boolean): void => {
-  ready = value;
-  flush();
+const notificationTapDataSchema = z.object({
+  serverId: z.string().min(1).optional().catch(undefined),
+  sessionId: z.string().min(1).optional().catch(undefined),
+  url: z.string().optional().catch(undefined),
+  deeplink: z.string().optional().catch(undefined),
+});
+
+export type NotificationTapData = z.input<typeof notificationTapDataSchema>;
+
+export const notificationTapIntent = (data: NotificationTapData | null | undefined): DeepLinkIntent | null => {
+  const parsed = notificationTapDataSchema.safeParse(data ?? {});
+  if (!parsed.success) return null;
+  const { serverId, sessionId, url, deeplink } = parsed.data;
+  const fromUrl = parseDeepLink(url ?? deeplink);
+  const intent: DeepLinkIntent | null = fromUrl ?? (sessionId ? { type: 'session', sessionId } : null);
+  if (intent?.type === 'session' && serverId) intent.serverId = serverId;
+  return intent;
 };
 
 export const useDeepLinkHandlers = (next: DeepLinkHandlers): void => {
   React.useEffect(() => {
     handlers = next;
-    flush();
+    void queue.flush();
     return () => {
       if (handlers === next) {
         handlers = {};
@@ -138,12 +201,15 @@ export const useDeepLinkHandlers = (next: DeepLinkHandlers): void => {
   }, [next]);
 };
 
-export const useDeepLinkSource = (options: { ready: boolean }): void => {
-  const { ready: isReady } = options;
+export const useDeepLinkSource = (options: {
+  ready: boolean;
+  switchToServer?: (serverId: string) => Promise<SavedInstanceSwitchOutcome>;
+}): void => {
+  const { ready: isReady, switchToServer } = options;
 
   React.useEffect(() => {
-    setReady(isReady);
-  }, [isReady]);
+    void queue.setReady(isReady, switchToServer ?? null);
+  }, [isReady, switchToServer]);
 
   React.useEffect(() => {
     if (!isCapacitorApp()) return;
@@ -178,16 +244,8 @@ export const useDeepLinkSource = (options: { ready: boolean }): void => {
       .then(async ({ PushNotifications }) => {
         if (disposed) return;
         const handle = await PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
-          const data = action?.notification?.data as Record<string, unknown> | undefined;
-          const url = typeof data?.url === 'string' ? data.url : typeof data?.deeplink === 'string' ? data.deeplink : undefined;
-          if (url) {
-            applyDeepLinkUrl(url);
-            return;
-          }
-          const sessionId = typeof data?.sessionId === 'string' ? data.sessionId : undefined;
-          if (sessionId) {
-            applyDeepLinkIntent({ type: 'session', sessionId });
-          }
+          const intent = notificationTapIntent(action?.notification?.data);
+          if (intent) applyDeepLinkIntent(intent);
         });
         if (disposed) {
           void handle.remove();

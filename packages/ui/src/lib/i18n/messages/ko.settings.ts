@@ -2143,6 +2143,7 @@ export const settingsDict = {
   'settings.notifications.page.delivery.enableAria': '알림 활성화',
   'settings.notifications.page.delivery.enableLabel': '알림 활성화',
   'settings.notifications.page.delivery.localOnlyDevice': '이 기기는 집 네트워크 전용으로 연결되어 있어 알림을 받지 않습니다. 알림은 인터넷을 거쳐 휴대폰에 도착하기 때문입니다. 알림을 받으려면 기기를 다시 추가하고 "어디서나"를 선택하세요.',
+  'settings.notifications.page.delivery.localOnlyServer': '이 서버는 집 네트워크 전용으로 연결되어 있어 알림을 보내지 않습니다. 저장된 다른 서버는 계속 알림을 보냅니다.',
   'settings.notifications.page.delivery.focusedAria': '앱에 포커스가 있을 때 알림',
   'settings.notifications.page.delivery.focusedLabel': '앱 포커스 중에도 알림',
   'settings.notifications.page.delivery.testAction': '테스트 알림 보내기',
