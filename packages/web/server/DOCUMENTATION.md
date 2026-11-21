@@ -440,6 +440,21 @@ a zero exit status alone does not prove the requested update landed. pnpm build
 approvals stay aligned with `scripts/install.sh` and the package's blocked
 dependencies so unattended updates do not wait for an approval prompt.
 
+On Windows, npm, pnpm and yarn are `.cmd` shims, so their probes (`--version`,
+global root, prefix and listing, the post-update version readback) run through
+`cmd.exe`. `cmd.exe` would look in the working directory before `PATH`, so
+`lib/package-manager-probe.ts` first resolves the shim itself: it walks only
+drive-rooted or UNC `PATH` entries, in `PATHEXT` order, and runs the quoted
+absolute path. A manager found nowhere else is reported unavailable, never run
+from the working directory. The `cmd.exe` running the probe is named by an
+absolute path too, from `ComSpec` or `SystemRoot`, because Node's fallback to the
+bare name would find one in the working directory first; without either the
+probe fails. The probe arguments must remain server-controlled
+literals because `cmd.exe` parses the joined command string. Bun and every POSIX
+probe keep argument-array spawning without a shell. The install command itself
+is a shell string on every platform and still names the manager by its bare
+name.
+
 ### Why update channels belong to the installed runtime and not every client
 
 The server's saved channel controls npm server updates. Without a selection a
