@@ -21,6 +21,7 @@ import type { ComposerEditorViewStore } from './viewStore';
 import { ComposerEditorView } from './ComposerEditorView';
 import { composerEditorTheme, composerSelectionExtension, isCodeMirrorIOSNavigator } from './theme';
 import { handleComposerHostMouseDown } from './hostMouseDown';
+import { scriptAwareWordGestures } from './wordBoundaries';
 import { getComposerHeightLimit, isComposerContentCapped } from './heightLimit';
 import { imeNewlineCleanup } from './imeNewline';
 import { restoreDeferredEnterModifiers } from '../keyboardPolicy';
@@ -79,6 +80,7 @@ export interface ComposerEditorProps {
     className?: string;
     contentClassName?: string;
     dataChatInput?: string;
+    scriptAwareWords?: boolean;
     viewStore?: ComposerEditorViewStore;
     'aria-label'?: string;
     'data-testid'?: string;
@@ -201,6 +203,7 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                         composerSelectionExtension(),
                         EditorView.lineWrapping,
                         Prec.highest(keymap.of(interceptKeys)),
+                        handlersRef.current.scriptAwareWords ? scriptAwareWordGestures : [],
                         keymap.of([
                             { key: 'Alt-Enter', run: insertNewline },
                             // external: https://code.haverbeke.berlin/codemirror/view/src/tag/6.43.15/src/input.ts Native page movement can scroll hidden-overflow ancestors when a boundary command yields.

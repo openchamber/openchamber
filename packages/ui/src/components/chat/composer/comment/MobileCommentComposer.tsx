@@ -130,6 +130,7 @@ export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: 
                 {fieldPicker.picker}
                 <ComposerEditor
                     ref={editorRef}
+                    scriptAwareWords
                     data-testid="mobile-comment-input"
                     dataChatInput="comment"
                     value={draft.text}

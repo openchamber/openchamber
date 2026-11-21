@@ -1067,6 +1067,31 @@ DOM-only tests cannot verify these.
 exactly what gets sent, so nothing downstream serializes a rich document model
 back into a prompt.
 
+### Why word gestures share a script-aware boundary
+
+CodeMirror groups adjacent alphabetic characters into one word, so it treats
+`检查openchamber的配置` as a single run. The composer keeps CodeMirror's
+grouping and whitespace transitions and adds one stop: a word run never crosses
+between Han and Latin (`editor/wordBoundaries.ts`). Digits, underscores, kana and
+every other script are neutral and stay with the run around them, so `設定を確認`
+or `إصدار٢` group exactly as CodeMirror groups them. Neutral characters between
+Han and Latin go with the run on their left (`API2|中`, `中2|API`), so gestures
+from either direction stop at the same offset. A double-click drag compares the
+hit side as well as the offset, because one offset at that boundary is the edge
+of two words. A broader per-script split
+was rejected because it changed grouping in text with no Han/Latin boundary.
+Double-click selection, word movement and selection extension, and word
+deletion use the same rule.
+Single and triple clicks still use CodeMirror's selection rules.
+Chat and comment composers opt in when creating their editor. The source
+control preview reuses the editor for Markdown with CodeMirror's word rules.
+
+Word shortcuts use Ctrl, or Alt on macOS, plus CodeMirror's macOS Ctrl+Alt+H
+word delete. Left and right follow
+`textDirectionAt` to preserve visual direction. Word deletion keeps a single
+adjacent space with the word, joins lines only from the line edge, and deletes
+atomic chips whole.
+
 Attachment citations (`[name.png]`) and finished skill tokens (`$name` followed
 by whitespace) render in the editor as atomic replace widgets shaped like the
 sent message's chips (`composerLanguage.ts`). The document keeps the source
