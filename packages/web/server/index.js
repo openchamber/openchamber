@@ -2818,6 +2818,8 @@ async function main(options = {}) {
     gracefulShutdown,
     isShuttingDown: () => isShuttingDown,
     entry: path.join(__dirname, '..', 'bin', 'cli.js'),
+    dataDir: OPENCHAMBER_DATA_DIR,
+    runningVersion: OPENCHAMBER_VERSION,
     apiOnly,
     log: console,
   });
