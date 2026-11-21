@@ -232,7 +232,7 @@ describe('project-config runtime', () => {
 
       // A branch with a space is not a ref, and says so instead of failing at 3am.
       await expect(runtime.upsertScheduledTask('project-test', { ...base, baseBranch: 'feature/with space' }))
-        .rejects.toThrow('baseBranch must be a branch name without spaces');
+        .rejects.toThrow('baseBranch is invalid: a branch name cannot contain spaces or control characters');
 
       // Turning isolation off keeps the pick for the next time it is on.
       const off = await runtime.upsertScheduledTask('project-test', {
@@ -296,8 +296,69 @@ describe('project-config runtime', () => {
       const before = await readFile(path.join(tempRoot, 'project-test.json'), 'utf8');
       await expect(runtime.upsertScheduledTask('project-test', {
         ...input, id: saved.task.id, baseBranch: `${input.baseBranch}x`,
-      })).rejects.toThrow('baseBranch must be at most 200 characters');
+      })).rejects.toThrow('baseBranch is invalid: at most 200 characters, got 201');
       expect(await readFile(path.join(tempRoot, 'project-test.json'), 'utf8')).toBe(before);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it.each([
+    ['prompt', 20_000, (task, value) => ({ ...task, execution: { ...task.execution, prompt: value } }), 'execution.prompt is invalid: at most 20000 characters, got 20001'],
+    ['name', 80, (task, value) => ({ ...task, name: value }), 'task.name is invalid: at most 80 characters, got 81'],
+  ])('refuses a %s over the limit on create and update, and saves one at the limit whole', async (_field, limit, withValue, message) => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    const input = {
+      name: 'Digest', enabled: false, schedule: { kind: 'daily', time: '09:00' },
+      execution: { prompt: 'Summarise', useDefaults: true },
+    };
+    const file = path.join(tempRoot, 'project-test.json');
+    try {
+      await expect(runtime.upsertScheduledTask('project-test', withValue(input, 'x'.repeat(limit + 1)))).rejects.toThrow(message);
+      expect(await runtime.listScheduledTasks('project-test')).toEqual([]);
+      await expect(readFile(file, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const saved = await runtime.upsertScheduledTask('project-test', withValue(input, 'x'.repeat(limit)));
+      const stored = await readFile(file, 'utf8');
+      expect(JSON.stringify(JSON.parse(stored).scheduledTasks[0])).toContain('x'.repeat(limit));
+
+      await expect(runtime.upsertScheduledTask('project-test', {
+        ...withValue(input, 'y'.repeat(limit + 1)), id: saved.task.id,
+      })).rejects.toThrow(message);
+      expect(await readFile(file, 'utf8')).toBe(stored);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('counts the limit after trimming, as the stored value is measured', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const saved = await runtime.upsertScheduledTask('project-test', {
+        name: ` ${'n'.repeat(80)} `, enabled: false, schedule: { kind: 'daily', time: '09:00' },
+        execution: { prompt: `\n${'p'.repeat(20_000)}\n`, useDefaults: true },
+      });
+      expect(saved.task.name).toHaveLength(80);
+      expect(saved.task.execution.prompt).toHaveLength(20_000);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('still lists a stored task whose prompt or name is over the limit, cut to it', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    try {
+      await writeFile(path.join(tempRoot, 'project-test.json'), JSON.stringify({
+        version: 1,
+        scheduledTasks: [{
+          id: 'task-long', name: 'n'.repeat(100), enabled: false, schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
+          execution: { prompt: 'p'.repeat(23_499), useDefaults: true },
+        }],
+      }));
+      const [listed] = await runtime.listScheduledTasks('project-test');
+      expect(listed.id).toBe('task-long');
+      expect(listed.name).toHaveLength(80);
+      expect(listed.execution.prompt).toHaveLength(20_000);
     } finally {
       await cleanup();
     }

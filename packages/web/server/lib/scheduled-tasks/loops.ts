@@ -6,7 +6,7 @@ import os from 'os';
 import path from 'path';
 import { parseMdFile, writeMdFile } from '../opencode/markdown-files.js';
 import { getAncestors, findWorktreeRoot } from '../opencode/config-files.js';
-import { MAX_TASK_NAME_LENGTH } from '../projects/project-config.js';
+import { MAX_TASK_NAME_LENGTH } from '../projects/task-text-limits.js';
 import { controlErrorFields } from '../openchamber-control/error.js';
 import { isBoolean } from '../shared/object-guards.js';
 

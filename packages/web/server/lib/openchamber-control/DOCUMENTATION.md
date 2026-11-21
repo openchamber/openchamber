@@ -63,6 +63,11 @@ constructor retains its existing `Object.assign` behavior.
   empty or null on update to clear the stored branch. Anything else is a 400
   before upsert, because the CLI HTTP route forwards raw JSON and a wrong type
   would turn isolation off or erase the branch.
+  A `name` over 80 characters or a `prompt` over 20,000 characters after
+  trimming is a 400 from either action that names the limit. The CLI exits
+  non-zero with that message. The refused request applies none of its fields.
+  The preceding scheduler sync on `schedule.update` can still write task
+  state and reconcile changes made to loop files.
 - `session-listing.js` owns `session.list` and `session.archive`. `mine`
   lists only the sessions the calling session created with `ownWork`
   (`metadata.openchamber.kind === 'operator-child'` with its id as
