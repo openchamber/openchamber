@@ -263,10 +263,11 @@ export interface ProviderImplementation<MutationInput = Json, ProviderTarget = J
     listChangeRequests(input: ReadInput & { page: number; query?: string | undefined; state: string; people: string; labels?: string[] }): Promise<object>;
     changeRequestContext(input: ReadInput & {
       number: number; project?: ProjectSelector | undefined; includeDiff: boolean; includeCIDetails: boolean; includeTimeline: boolean;
+      includeReferences?: boolean;
       revision?: string;
     }): Promise<object>;
     listIssues?(input: ReadInput & { page: number; query?: string | undefined; state: string; people: string; labels?: string[] }): Promise<object>;
-    getIssue?(input: ReadInput & { number: number; project?: ProjectSelector | undefined }): Promise<object | null>;
+    getIssue?(input: ReadInput & { number: number; project?: ProjectSelector | undefined; includeReferences?: boolean }): Promise<object | null>;
     issueComments?(input: ReadInput & { number: number; project?: ProjectSelector | undefined }): Promise<object>;
     projectUpstream(input: ReadInput): Promise<object>;
     projectBranches(input: ReadInput & { project: ProjectSelector }): Promise<object>;
@@ -290,7 +291,7 @@ export interface ProviderImplementation<MutationInput = Json, ProviderTarget = J
     }): Promise<ResolvedChangeRequestSource>;
     references?(input: ReadInput & { kind: 'issue' | 'pull' | 'discussion'; state: string; people: string; query: string; cursor: string | null }): Promise<object>;
     referencesAcross?(input: { body: SourceControlJson; validateReadContext(context: ReadContextRequest): Promise<ProviderReadContext | null> }): Promise<object>;
-    referenceDetail?(input: ReadInput & { project: ProjectSelector; number: number; host: string; kind: 'item' | 'discussion' }): Promise<object>;
+    referenceDetail?(input: ReadInput & { project: ProjectSelector; number: number; host: string; kind: 'item' | 'discussion'; includeReferences?: boolean }): Promise<object>;
     reviewState?(input: ReadInput & { project: ProjectSelector; number: number }): Promise<object>;
     referenceStatuses?(input: Omit<ReadInput, 'session'> & { pulls: string }): Promise<object>;
   };

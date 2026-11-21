@@ -71,6 +71,7 @@ export type ReferenceBrowserOptions = {
     retainedItems?: ReadonlyMap<string, ReferencePickerItem>;
     pinnedItem?: ReferencePickerItem | null;
     onScreen?: boolean;
+    crossReferences?: boolean;
 };
 
 export function useReferenceBrowser({
@@ -83,6 +84,7 @@ export function useReferenceBrowser({
     retainedItems = NO_ITEMS,
     pinnedItem = null,
     onScreen = true,
+    crossReferences = false,
 }: ReferenceBrowserOptions) {
     const [chosenRepositoryKind, setRepositoryKind] = React.useState<RepositoryReferenceKind>(initialGitHubKind ?? lastRepositoryKind);
     const [chosenRepositoryFilter, setRepositoryFilter] = React.useState<RepositoryReferenceFilter>(lastRepositoryFilter.get(initialGitHubKind ?? lastRepositoryKind) ?? DEFAULT_REPOSITORY_FILTER);
@@ -238,6 +240,7 @@ export function useReferenceBrowser({
         previewItem?.source === 'repository' ? previewItem.reference : null,
         previewSettled,
         previewRevision,
+        crossReferences,
     );
 
     const selectRepositoryKind = (kind: RepositoryReferenceKind) => {

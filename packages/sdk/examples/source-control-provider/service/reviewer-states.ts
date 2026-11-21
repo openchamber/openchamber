@@ -9,6 +9,38 @@ export type GiteaReview = {
   dismissed?: boolean;
 };
 
+type ReviewPage = { data: GiteaReview[]; total: number | null };
+type ReadReviewPage = (page: number, limit: number) => Promise<ReviewPage>;
+const REVIEW_SCAN_PAGES = 10;
+// Keep this optional read inside the host's 20-second deadline.
+const REVIEW_BUDGET_MS = 8_000;
+
+const scanReviews = async (limit: number, readPage: ReadReviewPage, expired: () => boolean): Promise<GiteaReview[] | null> => {
+  const reviews: GiteaReview[] = [];
+  for (let page = 1; page <= REVIEW_SCAN_PAGES; page += 1) {
+    const { data, total } = await readPage(page, limit);
+    if (expired() || !Array.isArray(data)) return null;
+    reviews.push(...data);
+    if (data.length < limit || (total !== null && reviews.length >= total)) return reviews;
+  }
+  return null;
+};
+
+export const readReviews = async (limit: number, readPage: ReadReviewPage, budgetMs = REVIEW_BUDGET_MS): Promise<GiteaReview[] | null> => {
+  let expired = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => { expired = true; resolve(null); }, budgetMs);
+  });
+  try {
+    return await Promise.race([scanReviews(limit, readPage, () => expired), timeout]);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const STATE = new Map<string, SourceControlReviewerState['state']>([
   ['APPROVED', 'approved'],
   ['REQUEST_CHANGES', 'changes_requested'],
@@ -24,6 +56,7 @@ const person = (user: GiteaPerson): SourceControlReviewerState['user'] => {
 };
 
 export type ReviewerStatesApi = {
+  readReviews: typeof readReviews;
   withReviewerStates: <T extends object>(context: T, reviews: GiteaReview[] | null, requested: GiteaPerson[]) => T & SourceControlChangeRequestContext;
 };
 

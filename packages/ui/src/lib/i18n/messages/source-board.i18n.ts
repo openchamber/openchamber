@@ -1,6 +1,8 @@
 /** The issues and pull requests board: its page, switches and actions. Merged into each locale's main dictionary. */
 export const sourceBoardI18n = {
   en: {
+    'sourceBoard.references.mentionedIn': 'mentioned this in',
+    'sourceBoard.references.open': 'Open {reference}',
     'sourceBoard.reply.startThread': 'Start thread',
     'sourceBoard.reply.startThreadHint': 'Post as a thread that someone has to resolve',
     'sourceBoard.reply.toast.threadStarted': 'Started a thread on {reference}',
@@ -124,6 +126,8 @@ export const sourceBoardI18n = {
     'sourceBoard.list.toggleAria': 'List of items, showing {item}',
   },
   de: {
+    'sourceBoard.references.mentionedIn': 'erwähnt dies in',
+    'sourceBoard.references.open': '{reference} öffnen',
     'sourceBoard.reply.startThread': 'Thread starten',
     'sourceBoard.reply.startThreadHint': 'Als Thread posten, den jemand als erledigt markieren muss',
     'sourceBoard.reply.toast.threadStarted': 'Thread zu {reference} gestartet',
@@ -247,6 +251,8 @@ export const sourceBoardI18n = {
     'sourceBoard.list.toggleAria': 'Liste der Einträge, zeigt {item}',
   },
   fr: {
+    'sourceBoard.references.mentionedIn': 'mentionné dans',
+    'sourceBoard.references.open': 'Ouvrir {reference}',
     'sourceBoard.reply.startThread': 'Démarrer un fil',
     'sourceBoard.reply.startThreadHint': 'Publier comme un fil que quelqu’un devra résoudre',
     'sourceBoard.reply.toast.threadStarted': 'Fil démarré sur {reference}',
@@ -370,6 +376,8 @@ export const sourceBoardI18n = {
     'sourceBoard.list.toggleAria': 'Liste des éléments, affiche {item}',
   },
   nl: {
+    'sourceBoard.references.mentionedIn': 'noemde dit in',
+    'sourceBoard.references.open': '{reference} openen',
     'sourceBoard.reply.startThread': 'Thread starten',
     'sourceBoard.reply.startThreadHint': 'Plaatsen als thread die iemand moet oplossen',
     'sourceBoard.reply.toast.threadStarted': 'Thread gestart op {reference}',
@@ -493,6 +501,8 @@ export const sourceBoardI18n = {
     'sourceBoard.list.toggleAria': 'Lijst met items, toont {item}',
   },
   es: {
+    'sourceBoard.references.mentionedIn': 'lo mencionó en',
+    'sourceBoard.references.open': 'Abrir {reference}',
     'sourceBoard.reply.startThread': 'Iniciar hilo',
     'sourceBoard.reply.startThreadHint': 'Publicar como un hilo que alguien debe resolver',
     'sourceBoard.reply.toast.threadStarted': 'Hilo iniciado en {reference}',
@@ -616,6 +626,8 @@ export const sourceBoardI18n = {
     'sourceBoard.list.toggleAria': 'Lista de elementos, muestra {item}',
   },
   ja: {
+    'sourceBoard.references.mentionedIn': 'で言及',
+    'sourceBoard.references.open': '{reference} を開く',
     'sourceBoard.reply.startThread': 'スレッドを開始',
     'sourceBoard.reply.startThreadHint': '誰かが解決する必要があるスレッドとして投稿します',
     'sourceBoard.reply.toast.threadStarted': '{reference} でスレッドを開始しました',
@@ -739,6 +751,8 @@ export const sourceBoardI18n = {
     'sourceBoard.list.toggleAria': '項目の一覧（{item} を表示中）',
   },
   'pt-BR': {
+    'sourceBoard.references.mentionedIn': 'mencionou isto em',
+    'sourceBoard.references.open': 'Abrir {reference}',
     'sourceBoard.reply.startThread': 'Iniciar thread',
     'sourceBoard.reply.startThreadHint': 'Publicar como uma thread que alguém precisa resolver',
     'sourceBoard.reply.toast.threadStarted': 'Thread iniciada em {reference}',
@@ -862,6 +876,8 @@ export const sourceBoardI18n = {
     'sourceBoard.list.toggleAria': 'Lista de itens, mostrando {item}',
   },
   uk: {
+    'sourceBoard.references.mentionedIn': 'згадує це в',
+    'sourceBoard.references.open': 'Відкрити {reference}',
     'sourceBoard.reply.startThread': 'Почати тред',
     'sourceBoard.reply.startThreadHint': 'Опублікувати як тред, який хтось має вирішити',
     'sourceBoard.reply.toast.threadStarted': 'Тред у {reference} почато',
@@ -985,6 +1001,8 @@ export const sourceBoardI18n = {
     'sourceBoard.list.toggleAria': 'Список елементів, показано {item}',
   },
   ko: {
+    'sourceBoard.references.mentionedIn': '에서 언급함',
+    'sourceBoard.references.open': '{reference} 열기',
     'sourceBoard.reply.startThread': '스레드 시작',
     'sourceBoard.reply.startThreadHint': '누군가 해결해야 하는 스레드로 게시합니다',
     'sourceBoard.reply.toast.threadStarted': '{reference}에서 스레드를 시작했습니다',
@@ -1108,6 +1126,8 @@ export const sourceBoardI18n = {
     'sourceBoard.list.toggleAria': '항목 목록, {item} 표시 중',
   },
   pl: {
+    'sourceBoard.references.mentionedIn': 'wspomniał o tym w',
+    'sourceBoard.references.open': 'Otwórz {reference}',
     'sourceBoard.reply.startThread': 'Rozpocznij wątek',
     'sourceBoard.reply.startThreadHint': 'Opublikuj jako wątek, który ktoś musi rozwiązać',
     'sourceBoard.reply.toast.threadStarted': 'Rozpoczęto wątek w {reference}',
@@ -1231,6 +1251,8 @@ export const sourceBoardI18n = {
     'sourceBoard.list.toggleAria': 'Lista elementów, pokazuje {item}',
   },
   'zh-CN': {
+    'sourceBoard.references.mentionedIn': '在以下位置提及',
+    'sourceBoard.references.open': '打开 {reference}',
     'sourceBoard.reply.startThread': '发起讨论串',
     'sourceBoard.reply.startThreadHint': '作为需要有人解决的讨论串发布',
     'sourceBoard.reply.toast.threadStarted': '已在 {reference} 发起讨论串',
@@ -1354,6 +1376,8 @@ export const sourceBoardI18n = {
     'sourceBoard.list.toggleAria': '条目列表，正在显示 {item}',
   },
   'zh-TW': {
+    'sourceBoard.references.mentionedIn': '在以下位置提及',
+    'sourceBoard.references.open': '開啟 {reference}',
     'sourceBoard.reply.startThread': '開始討論串',
     'sourceBoard.reply.startThreadHint': '以需要有人解決的討論串發佈',
     'sourceBoard.reply.toast.threadStarted': '已在 {reference} 開始討論串',
@@ -1477,6 +1501,8 @@ export const sourceBoardI18n = {
     'sourceBoard.list.toggleAria': '項目清單，正在顯示 {item}',
   },
   tr: {
+    'sourceBoard.references.mentionedIn': 'bunu şurada belirtti',
+    'sourceBoard.references.open': '{reference} öğesini aç',
     'sourceBoard.reply.startThread': 'Konu başlat',
     'sourceBoard.reply.startThreadHint': 'Birinin çözmesi gereken bir konu olarak gönder',
     'sourceBoard.reply.toast.threadStarted': '{reference} üzerinde konu başlatıldı',
@@ -1600,6 +1626,8 @@ export const sourceBoardI18n = {
     'sourceBoard.list.toggleAria': 'Öğe listesi, {item} gösteriliyor',
   },
   ar: {
+    'sourceBoard.references.mentionedIn': 'أشار إلى هذا في',
+    'sourceBoard.references.open': 'فتح {reference}',
     'sourceBoard.reply.startThread': 'بدء نقاش',
     'sourceBoard.reply.startThreadHint': 'انشر كنقاش يجب أن يحلّه أحد',
     'sourceBoard.reply.toast.threadStarted': 'بدأ نقاش في {reference}',
@@ -1723,6 +1751,8 @@ export const sourceBoardI18n = {
     'sourceBoard.list.toggleAria': 'قائمة العناصر، المعروض: {item}',
   },
   he: {
+    'sourceBoard.references.mentionedIn': 'הזכיר את זה ב',
+    'sourceBoard.references.open': 'פתח {reference}',
     'sourceBoard.reply.startThread': 'פתח שרשור',
     'sourceBoard.reply.startThreadHint': 'פרסום כשרשור שמישהו צריך לסמן כנפתר',
     'sourceBoard.reply.toast.threadStarted': 'נפתח שרשור ב-{reference}',

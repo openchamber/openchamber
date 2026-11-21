@@ -162,10 +162,10 @@ mutation reached the forge exactly once.
 against it through a stand-in for OpenChamber's outbound proxy.
 
 Rebuild after editing the service or the SDK. The service loads the reviewer
-state and diff mappings from their own bundles, so rebuild all three:
+state, reference, and diff mappings from their own bundles:
 
 ```bash
-for entry in main reviewer-states diff; do
+for entry in main reviewer-states references diff; do
   bun packages/sdk/scripts/bundle-guest.ts --node "packages/sdk/examples/source-control-provider/service/$entry.ts" "packages/sdk/examples/source-control-provider/service/$entry.js"
 done
 ```

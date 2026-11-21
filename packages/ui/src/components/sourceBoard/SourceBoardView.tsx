@@ -406,7 +406,7 @@ const SourceBoardBody: React.FC<{
         trackerContainerId,
         initialGitHubKind: initialRepositoryKind,
         pinnedItem,
-        onScreen,
+        onScreen, crossReferences: true,
     });
     const pinnedLinkFollowed = pinnedOutsideItem ? pinnedOutside.followed : pinnedLookup.followed;
     const pinnedFollowed = React.useMemo(() => (pinnedItem?.source === 'tracker'

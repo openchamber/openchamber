@@ -875,13 +875,13 @@ export function createProvider(options: GitLabProviderOptions) {
       listChangeRequests: ({ session, directory, page, query, state, people, labels, remote }: ReadInput & NonNullable<Parameters<Service['listChangeRequests']>[1]>) => serviceFor(session)
         .listChangeRequests(directory, { page, query, state, people, labels, remote }),
       reviewState: ({ session, directory, project, number, remote }: NumberedRead) => serviceFor(session).reviewState(directory, number, project, remote),
-      changeRequestContext: ({ session, context, directory, number, project, remote, includeDiff, includeCIDetails, includeTimeline }: NumberedRead & LinkedRead & NonNullable<Parameters<Service['changeRequestContext']>[2]>) => serviceFor(session)
+      changeRequestContext: ({ session, context, directory, number, project, remote, includeDiff, includeCIDetails, includeTimeline, includeReferences }: NumberedRead & LinkedRead & NonNullable<Parameters<Service['changeRequestContext']>[2]>) => serviceFor(session)
         .changeRequestContext(directory, number, {
-          includeDiff, includeCIDetails, includeTimeline, project, remote, constrainToPrimary: true, linked: context?.linked,
+          includeDiff, includeCIDetails, includeTimeline, includeReferences, project, remote, constrainToPrimary: true, linked: context?.linked,
         }),
       listIssues: ({ session, directory, page, query, state, people, labels, remote }: ReadInput & NonNullable<Parameters<Service['listIssues']>[1]>) => serviceFor(session)
         .listIssues(directory, { page, query, state, people, labels, remote }),
-      getIssue: ({ session, context, directory, number, project, remote }: NumberedRead & LinkedRead) => serviceFor(session).getIssue(directory, number, project, remote, { linked: context?.linked }),
+      getIssue: ({ session, context, directory, number, project, remote, includeReferences }: NumberedRead & LinkedRead & { includeReferences?: boolean }) => serviceFor(session).getIssue(directory, number, project, remote, { linked: context?.linked, includeReferences: Boolean(includeReferences) }),
       issueComments: ({ session, context, directory, number, project, remote }: NumberedRead & LinkedRead) => serviceFor(session).issueComments(directory, number, project, remote, { linked: context?.linked }),
       projectUpstream: ({ session, directory, remote }: ReadInput) => serviceFor(session).projectUpstream(directory, remote),
       projectBranches: ({ session, directory, project, remote }: ProjectRead) => serviceFor(session).projectBranches(directory, project, remote),

@@ -19,6 +19,22 @@ type ForgeItem = {
   pull: null | { head: string; headRepo: number; base: string; sha: string; merged: boolean; requestedReviewers?: ForgePerson[]; reviews?: ForgeReview[] };
 };
 
+type ForgeTimelineUser = { id: number; login: string; avatar_url?: string };
+type ForgeTimelineTarget = {
+  number?: number;
+  html_url?: string;
+  title?: string;
+  pull_request?: object | null;
+  repository?: { full_name?: string };
+};
+type ForgeTimelineEvent = {
+  type?: string;
+  created_at?: string;
+  user?: ForgeTimelineUser;
+  ref_issue?: ForgeTimelineTarget;
+  ref_comment?: { created_at?: string; user?: ForgeTimelineUser };
+};
+
 export type FakeForgeWrite = { method: string; path: string };
 
 export type FakeForge = {
@@ -92,6 +108,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
   let origin = '';
 
   const user = { ...FAKE_FORGE_USER, login: FAKE_FORGE_OWNER, avatar_url: '' };
+  const octo = { ...FAKE_FORGE_USER, id: 9, login: 'octo', avatar_url: 'https://avatars.example.com/octo.png' };
   type RepoJson = {
     id: number; name: string; full_name: string; owner: { id: number; login: string }; html_url: string; clone_url: string;
     default_branch: string; fork: boolean; parent: RepoJson | null;
@@ -132,6 +149,38 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       ...comment, user, html_url: `${itemUrl}#issuecomment-${comment.id}`,
       issue_url: item.pull ? '' : itemUrl, pull_request_url: item.pull ? itemUrl : '',
     };
+  };
+  const timelineJson = (item: ForgeItem): ForgeTimelineEvent[] => {
+    const target = (number: number) => {
+      const linked = items.find((entry) => entry.number === number) ?? item;
+      return {
+        number,
+        html_url: issueJson(linked).html_url,
+        title: linked.title,
+        repository: { full_name: `${FAKE_FORGE_OWNER}/${FAKE_FORGE_REPO}` },
+      };
+    };
+    if (item.number === 1) {
+      const pull = target(2);
+      return [
+        { type: 'pull_ref', created_at: '2026-10-04T10:00:00Z', user, ref_issue: pull },
+        { type: 'comment_ref', created_at: '2026-10-05T10:00:00Z', user, ref_issue: pull, ref_comment: { created_at: '2026-10-03T10:00:00Z', user: octo } },
+        { type: 'issue_ref', created_at: '2026-10-06T10:00:00Z', user, ref_issue: pull },
+        { type: 'issue_ref', created_at: '2026-10-07T10:00:00Z', user, ref_issue: { html_url: `${origin}/${FAKE_FORGE_OWNER}/${FAKE_FORGE_REPO}/issues/9` } },
+        { type: 'issue_ref', created_at: '2026-10-08T10:00:00Z', user, ref_issue: { number: 9 } },
+        { type: 'close', created_at: '2026-10-09T10:00:00Z' },
+      ];
+    }
+    return [
+      { type: 'issue_ref', created_at: '2026-10-06T10:00:00Z', user, ref_issue: target(1) },
+      {
+        type: 'issue_ref', created_at: '2026-10-02T10:00:00Z', user,
+        ref_issue: {
+          number: 5, title: 'Steam wand', html_url: `${origin}/${FAKE_FORGE_STRANGER.owner}/${FAKE_FORGE_STRANGER.name}/issues/5`,
+          repository: { full_name: `${FAKE_FORGE_STRANGER.owner}/${FAKE_FORGE_STRANGER.name}` },
+        },
+      },
+    ];
   };
   const pullJson = (item: ForgeItem) => {
     const pull = item.pull;
@@ -286,6 +335,9 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       const item = byNumber(number);
       if (!item) return notFound;
       if (method === 'GET' && rest.length === 2) return { status: 200, body: issueJson(item) };
+      if (method === 'GET' && action === 'timeline' && rest.length === 3) {
+        return { status: 200, body: page(timelineJson(item), url, response) };
+      }
       if (method === 'PATCH' && rest.length === 2) {
         const body = await readBody(request);
         if (body.state !== 'open' && body.state !== 'closed') return { status: 422, body: { message: 'state is open or closed' } };

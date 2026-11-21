@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import http from 'node:http';
 import type { GiteaPerson, GiteaReview, ReviewerStatesApi } from './reviewer-states.ts';
 import type { DiffApi } from './diff.ts';
+import type { ReferenceEvent, ReferencesApi } from './references.ts';
 import {
   SOURCE_CONTROL_PROVIDER_ERROR_MESSAGE_MAX,
   SOURCE_CONTROL_PROVIDER_PATH,
@@ -27,7 +28,9 @@ import {
 } from '@openchamber/sdk';
 
 const reviewerStatesPath = `./reviewer-states${'.js'}`;
-const { withReviewerStates }: ReviewerStatesApi = await import(reviewerStatesPath);
+const { readReviews, withReviewerStates }: ReviewerStatesApi = await import(reviewerStatesPath);
+const referencesPath = `./references${'.js'}`;
+const { readReferences, withReferences }: ReferencesApi = await import(referencesPath);
 const diffPath = `./diff${'.js'}`;
 const { mapChangedFile, splitUnifiedDiff }: DiffApi = await import(diffPath);
 
@@ -332,21 +335,6 @@ const readChangedFiles = async (call: Call, repo: string, number: number): Promi
   throw new CallError(`The pull request changes more files than this Git host reads (${FILE_SCAN_PAGES * SCAN_SIZE})`, 502, 'SCAN_LIMIT');
 };
 
-const REVIEW_SCAN_PAGES = 10;
-
-const readReviews = async (call: Call, repo: string, number: number): Promise<GiteaReview[] | null> => {
-  const reviews: GiteaReview[] = [];
-  for (let page = 1; page <= REVIEW_SCAN_PAGES; page += 1) {
-    const { data, total } = await api<GiteaReview[]>(call, 'GET', `${repo}/pulls/${number}/reviews`, {
-      query: { page: String(page), limit: String(SCAN_SIZE) },
-    });
-    if (!Array.isArray(data)) return null;
-    reviews.push(...data);
-    if (data.length < SCAN_SIZE || (total !== null && reviews.length >= total)) return reviews;
-  }
-  return null;
-};
-
 const COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 
 const branchRepoId = (ref: GiteaBranchRef): number | undefined => ref.repo_id ?? ref.repo?.id;
@@ -368,6 +356,12 @@ const findBranchPull = async (call: Call, repo: GiteaRepo, branch: string): Prom
   }
   throw new CallError(`The repository has more open pull requests than this Git host scans (${STATUS_SCAN_PAGES * SCAN_SIZE})`, 502, 'SCAN_LIMIT');
 };
+
+const readItemReferences = (call: Call, input: Input, repo: string, number: number) => readReferences(
+  input.includeReferences === true ? (page, limit) => api<ReferenceEvent[]>(call, 'GET', `${repo}/issues/${number}/timeline`, {
+    query: { page: String(page), limit: String(limit) },
+  }) : null,
+);
 
 type Handler = (call: Call, input: Input, request: SourceControlProviderRequest) => Promise<SourceControlJson>;
 
@@ -425,12 +419,14 @@ const handlers = {
   changeRequestContext: async (call, input) => {
     const { project } = await resolveRepo(call, text(input, 'directory'), text(input, 'remote'), selectorOf(input, 'project'));
     const number = integer(input, 'number'), repo = repoPath(project), includeDiff = input.includeDiff === true;
-    const [raw, { data: comments }, diff, changed, reviews] = await Promise.all([
+    const [raw, { data: comments }, diff, changed, reviews, references] = await Promise.all([
       readPull(call, project, number),
       api<GiteaComment[]>(call, 'GET', `${repo}/issues/${number}/comments`),
       includeDiff ? apiText(call, `${repo}/pulls/${number}.diff`) : Promise.resolve(''),
       includeDiff ? readChangedFiles(call, repo, number) : Promise.resolve([]),
-      input.includeTimeline === true ? readReviews(call, repo, number).catch(() => null) : Promise.resolve(null),
+      input.includeTimeline === true ? readReviews(SCAN_SIZE, (page, limit) =>
+        api<GiteaReview[]>(call, 'GET', `${repo}/pulls/${number}/reviews`, { query: { page: String(page), limit: String(limit) } })) : Promise.resolve(null),
+      readItemReferences(call, input, repo, number),
     ]);
     const pull = mapPull(call, raw, project), patches = splitUnifiedDiff(diff);
     const files = changed.map((file) => {
@@ -438,7 +434,7 @@ const handlers = {
       if (patch) mapped.patch = patch;
       return mapped;
     });
-    return withReviewerStates({
+    const context = withReviewerStates({
       identity: call.identity,
       project,
       changeRequest: pull,
@@ -448,6 +444,7 @@ const handlers = {
       diff,
       ci: null,
     }, reviews, raw.requested_reviewers ?? []);
+    return withReferences(context, references);
   },
 
   listIssues: async (call, input) => {
@@ -462,9 +459,12 @@ const handlers = {
 
   getIssue: async (call, input) => {
     const { project } = await resolveRepo(call, text(input, 'directory'), text(input, 'remote'), selectorOf(input, 'project'));
-    const { data } = await api<GiteaIssue>(call, 'GET', `${repoPath(project)}/issues/${integer(input, 'number')}`);
+    const [{ data }, references] = await Promise.all([
+      api<GiteaIssue>(call, 'GET', `${repoPath(project)}/issues/${integer(input, 'number')}`),
+      readItemReferences(call, input, repoPath(project), integer(input, 'number')),
+    ]);
     if (data.pull_request) throw new CallError(`#${data.number} is a pull request`, 404);
-    return mapIssue(call, data, project);
+    return withReferences(mapIssue(call, data, project), references);
   },
 
   issueComments: async (call, input) => {
