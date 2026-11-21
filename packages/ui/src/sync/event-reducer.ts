@@ -16,9 +16,8 @@ import { dropSessionCaches } from "./session-cache"
 import { syncDebug } from "./debug"
 import { shouldSkipStaleSessionEvent } from "./session-event-freshness"
 import {
-  compareMessagesChronologically,
   findMessageIndex,
-  insertMessageChronologically,
+  insertMessageInEventOrder,
 } from "./message-ordering"
 
 type DedupeMetadata = {
@@ -449,16 +448,16 @@ export function applyDirectoryEvent(
           return false
         }
         const next = [...messages]
-        if (compareMessagesChronologically(existing, info) === 0) {
+        if (existing.time.created === info.time.created) {
           next[messageIndex] = info
         } else {
           next.splice(messageIndex, 1)
-          insertMessageChronologically(next, info)
+          insertMessageInEventOrder(next, info)
         }
         draft.message[info.sessionID] = next
       } else {
         const next = [...messages]
-        insertMessageChronologically(next, info)
+        insertMessageInEventOrder(next, info)
         draft.message[info.sessionID] = next
       }
       return true
@@ -486,11 +485,11 @@ export function applyDirectoryEvent(
       const updated = applyMessagePatch(existing, patch)
       if (updated === existing || areJsonEquivalent(existing, updated)) return false
       const next = [...messages]
-      if (compareMessagesChronologically(existing, updated) === 0) {
+      if (existing.time.created === updated.time.created) {
         next[messageIndex] = updated
       } else {
         next.splice(messageIndex, 1)
-        insertMessageChronologically(next, updated)
+        insertMessageInEventOrder(next, updated)
       }
       draft.message[sessionID] = next
       return true

@@ -2170,6 +2170,46 @@ describe("optimisticSend target directory", () => {
     expect(sent).toEqual({ messageID: added[1].id, texts: ["quoted"] })
   })
 
+  test("keeps a confirmed prompt before an answer received during send recovery", async () => {
+    const targetStore = createStore({})
+    const sessionId = "session-confirmation-order"
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/target/project", targetStore]]), () => "/target/project")
+    setOptimisticRefs(
+      ({ message, parts }) => {
+        targetStore.setState((state) => ({
+          message: { ...state.message, [sessionId]: [...(state.message[sessionId] ?? []), message] },
+          part: { ...state.part, [message.id]: parts },
+        }))
+      },
+      () => {},
+      () => {},
+    )
+    let sentID = ""
+    await optimisticSend({
+      sessionId,
+      directory: "/target/project",
+      content: "hello",
+      send: async (messageID) => {
+        sentID = messageID
+        sessionMessageRecords.set(sessionId, [{
+          info: { id: messageID, role: "user", sessionID: sessionId, time: { created: 1 } },
+          parts: [{ id: "confirmed-part", sessionID: sessionId, messageID, type: "text", text: "hello" }],
+        }])
+        targetStore.setState((state) => ({
+          message: { ...state.message, [sessionId]: [
+            ...(state.message[sessionId] ?? []),
+            { id: "live-answer", role: "assistant", sessionID: sessionId, time: { created: 2 }, agent: "build", providerID: "test", modelID: "test" },
+          ] },
+        }))
+        throw Object.assign(new Error("gateway timeout"), { status: 504 })
+      },
+    })
+    expect(targetStore.getState().message[sessionId]?.map((message) => message.id)).toEqual([sentID, "live-answer"])
+    expect(targetStore.getState().message[sessionId]?.[0]?.time.created).toBe(1)
+    expect(targetStore.getState().part[sentID]?.[0]?.id).toBe("confirmed-part")
+  })
+
   test("runs appendSubmissions once for an ambiguous confirmation", async () => {
     const targetStore = createStore({})
     const childStores = createChildStores([["/target/project", targetStore]])

@@ -2023,7 +2023,7 @@ async function fetchRecentSendConfirmationRecords(
       )
       const records = page.items.filter((record) => !!record.info?.id)
       if (records.some((record) => record.info.id === messageID)) {
-        return records
+        return records.reverse()
       }
     } catch {
       // Confirmation is best-effort; if it fails, keep the original send error path.
@@ -2039,13 +2039,13 @@ function materializeConfirmedSendRecords(
   records: Array<{ info: Message; parts: Part[] }>,
 ): void {
   const optimistic = new Set(optimisticIDs)
+  const confirmed = new Map(records.map((record) => [record.info.id, record.info]))
   store.setState((state) => {
     const currentMessages = state.message[sessionId]
     const message = { ...state.message }
     const part = { ...state.part }
     if (currentMessages) {
-      const nextMessages = currentMessages.filter((message) => !optimistic.has(message.id))
-      message[sessionId] = nextMessages
+      message[sessionId] = currentMessages.flatMap((info) => optimistic.has(info.id) ? confirmed.get(info.id) ?? [] : [info])
     }
     for (const optimisticID of optimisticIDs) delete part[optimisticID]
 
@@ -2642,7 +2642,7 @@ export async function refetchSessionMessages(sessionId: string): Promise<void> {
   }
 
   const page = await opencodeClient.getSessionMessages(sessionId, { limit: MESSAGE_REFETCH_LIMIT }, directory)
-  const records = page.items.filter((record) => !!record.info?.id)
+  const records = page.items.filter((record) => !!record.info?.id).reverse()
   if (records.length === 0) return
 
   store.setState((state) => {
