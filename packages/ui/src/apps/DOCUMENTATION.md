@@ -213,3 +213,7 @@ CameraX previews behind the WebView, while independent portal roots can still pa
 ### Why tablet app pages use dialogs and not full-width pages
 
 Settings and Instances contain little content for a tablet-wide page, and a centered card preserves the visible chat context. App-level dialogs center on the window; content opened from chat centers on its column.
+
+### Why the mobile header falls back to the global title
+
+A nonblank title in the selected directory's live record owns the chat header. While that record is missing or blank, the global session entity supplies the title for the exact selected ID; the switcher already reads the global session list. The fallback follows the global store's runtime reset and is only used in chat.

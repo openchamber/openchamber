@@ -1525,7 +1525,7 @@ Rules:
 Examples of global-store updates performed in `session-actions.ts`:
 
 - `createSession()` -> `upsertSession(session)`
-- `updateSessionTitle()` -> `upsertSession(result.data)`
+- `updateSessionTitle()` re-reads the renamed session before updating the global and live lists. The rename and the follow-up metadata write each check their starting runtime instance after awaits, so a late reply cannot restore a title after switching servers, including switching away and back.
 - `shareSession()` / `unshareSession()` -> `upsertSession(result.data)`
 - `archiveSession()` / `archiveSessions()` -> wait for server confirmation, then upsert each archived session
 - `unarchiveSession()` / `unarchiveSessions()` -> wait for server confirmation, then upsert each restored session. Restoring a top-level session brings its archived subsessions back with it. A subsession under an archived or unknown parent comes back only with that parent, and its id alone fails. A subsession archived on its own while its parent stays active restores alone and brings its own archived subsessions; `isRestorableOnItsOwn` (`session-restore-rule.ts`) is the one rule, shared with the Archive page and the chat header's session menu. `undo` still puts back exactly what an archive just moved, where it was: a rollback of a worktree removal that failed must not carry sessions out of a worktree whose folder is gone.
