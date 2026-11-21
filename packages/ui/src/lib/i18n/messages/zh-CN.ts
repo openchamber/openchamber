@@ -2950,6 +2950,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.copySessionId': '复制会话 ID',
   'commandPalette.item.openMultiRun': '并行运行',
   'commandPalette.item.openArchive': '打开已归档会话',
+  'commandPalette.item.toggleReasoningTraces': '显示或隐藏推理轨迹',
   'commandPalette.item.openNotes': '打开笔记面板',
   'commandPalette.item.openTodos': '打开待办面板',
   'commandPalette.item.openSettings': '打开设置...',

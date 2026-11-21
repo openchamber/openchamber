@@ -2636,6 +2636,7 @@ export const settingsDict = {
   'settings.common.sidebar.clearSearch': 'Aramayı temizle',
   'settings.openchamber.keyboardShortcuts.findByKey.recording': 'Tuşlar kaydediliyor',
   'settings.openchamber.keyboardShortcuts.action.open_archive.label': 'Arşivlenmiş session\'ları aç',
+  'settings.openchamber.keyboardShortcuts.action.toggle_reasoning_traces.label': 'Akıl yürütme izlerini göster/gizle',
   'settings.openchamber.keyboardShortcuts.action.open_notes.label': 'Notlar yüzeyini aç',
   'settings.openchamber.keyboardShortcuts.action.open_todos.label': 'Yapılacaklar yüzeyini aç',
   'settings.openchamber.keyboardShortcuts.action.show_context_usage.label': 'Bağlam kullanımını göster',

@@ -1012,6 +1012,7 @@ export const settingsDict = {
   'settings.common.sidebar.clearSearch': 'Wyczyść wyszukiwanie',
   'settings.openchamber.keyboardShortcuts.findByKey.recording': 'Nagrywanie klawiszy',
   'settings.openchamber.keyboardShortcuts.action.open_archive.label': 'Otwórz zarchiwizowane sesje',
+  'settings.openchamber.keyboardShortcuts.action.toggle_reasoning_traces.label': 'Pokaż lub ukryj ślady rozumowania',
   'settings.openchamber.keyboardShortcuts.action.open_notes.label': 'Otwórz panel notatek',
   'settings.openchamber.keyboardShortcuts.action.open_todos.label': 'Otwórz panel zadań',
   'settings.openchamber.keyboardShortcuts.action.show_context_usage.label': 'Pokaż użycie kontekstu',

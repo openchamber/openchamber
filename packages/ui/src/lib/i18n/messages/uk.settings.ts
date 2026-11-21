@@ -1446,6 +1446,7 @@ export const settingsDict = {
   'settings.common.sidebar.clearSearch': 'Очистити пошук',
   'settings.openchamber.keyboardShortcuts.findByKey.recording': 'Запис клавіш',
   "settings.openchamber.keyboardShortcuts.action.open_archive.label": "Відкрити архівовані сесії",
+  "settings.openchamber.keyboardShortcuts.action.toggle_reasoning_traces.label": "Показати або приховати сліди міркувань",
   "settings.openchamber.keyboardShortcuts.action.open_notes.label": "Відкрити панель нотаток",
   "settings.openchamber.keyboardShortcuts.action.open_todos.label": "Відкрити панель завдань",
   "settings.openchamber.keyboardShortcuts.action.show_context_usage.label": "Показати використання контексту",

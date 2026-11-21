@@ -1762,6 +1762,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.copySessionId': 'Kopiuj ID sesji',
   'commandPalette.item.openMultiRun': 'Uruchom równolegle',
   'commandPalette.item.openArchive': 'Otwórz zarchiwizowane sesje',
+  'commandPalette.item.toggleReasoningTraces': 'Pokaż lub ukryj ślady rozumowania',
   'commandPalette.item.openNotes': 'Otwórz panel notatek',
   'commandPalette.item.openTodos': 'Otwórz panel zadań',
   'commandPalette.session.untitled': 'Nienazwana sesja',

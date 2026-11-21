@@ -2983,6 +2983,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.copySessionId': 'セッションIDをコピー',
   'commandPalette.item.openMultiRun': '並列実行',
   'commandPalette.item.openArchive': 'アーカイブ済みセッションを開く',
+  'commandPalette.item.toggleReasoningTraces': '推論トレースの表示切替',
   'commandPalette.item.openNotes': 'ノートパネルを開く',
   'commandPalette.item.openTodos': 'ToDoパネルを開く',
   'commandPalette.item.openSettings': '設定を開く...',

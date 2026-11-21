@@ -2667,6 +2667,7 @@ export const dict = {
   'commandPalette.item.copySessionId': 'Copier l\'ID de session',
   'commandPalette.item.openMultiRun': 'Exécuter en parallèle',
   'commandPalette.item.openArchive': 'Ouvrir les sessions archivées',
+  'commandPalette.item.toggleReasoningTraces': 'Afficher ou masquer les traces de raisonnement',
   'commandPalette.item.openNotes': 'Ouvrir le panneau de notes',
   'commandPalette.item.openTodos': 'Ouvrir le panneau de tâches',
   'commandPalette.item.openSettings': 'Ouvrez les paramètres...',

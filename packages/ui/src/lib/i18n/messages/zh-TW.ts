@@ -2961,6 +2961,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.copySessionId': '複製會話 ID',
   'commandPalette.item.openMultiRun': '平行執行',
   'commandPalette.item.openArchive': '開啟已封存會話',
+  'commandPalette.item.toggleReasoningTraces': '顯示或隱藏推理軌跡',
   'commandPalette.item.openNotes': '開啟筆記面板',
   'commandPalette.item.openTodos': '開啟待辦面板',
   'commandPalette.item.openSettings': '開啟設定...',

@@ -449,6 +449,12 @@ const SHORTCUT_GROUPS = {
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.cycle_theme.label',
     },
     {
+      id: 'toggle_reasoning_traces',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.toggle_reasoning_traces.label',
+    },
+    {
       id: 'open_archive',
       defaultBinding: UNASSIGNED_SHORTCUT,
       customizable: true,

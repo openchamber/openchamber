@@ -1324,6 +1324,7 @@ export const settingsDict = {
   'settings.common.sidebar.clearSearch': '清除搜尋',
   'settings.openchamber.keyboardShortcuts.findByKey.recording': '正在錄製按鍵',
   'settings.openchamber.keyboardShortcuts.action.open_archive.label': '開啟已封存會話',
+  'settings.openchamber.keyboardShortcuts.action.toggle_reasoning_traces.label': '顯示或隱藏推理軌跡',
   'settings.openchamber.keyboardShortcuts.action.open_notes.label': '開啟筆記面板',
   'settings.openchamber.keyboardShortcuts.action.open_todos.label': '開啟待辦面板',
   'settings.openchamber.keyboardShortcuts.action.show_context_usage.label': '顯示上下文用量',

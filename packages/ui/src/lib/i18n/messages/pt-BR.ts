@@ -2940,6 +2940,7 @@ export const dict: Record<I18nKey, string> = {
   "commandPalette.item.copySessionId": "Copiar ID da sessão",
   "commandPalette.item.openMultiRun": "Executar em paralelo",
   "commandPalette.item.openArchive": "Abrir sessões arquivadas",
+  "commandPalette.item.toggleReasoningTraces": "Mostrar ou ocultar rastros de raciocínio",
   "commandPalette.item.openNotes": "Abrir painel de notas",
   "commandPalette.item.openTodos": "Abrir painel de tarefas",
   "commandPalette.item.openSettings": "Abrir configurações...",

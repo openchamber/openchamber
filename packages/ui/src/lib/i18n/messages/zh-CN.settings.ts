@@ -1446,6 +1446,7 @@ export const settingsDict = {
   'settings.common.sidebar.clearSearch': '清除搜索',
   'settings.openchamber.keyboardShortcuts.findByKey.recording': '正在录制按键',
   'settings.openchamber.keyboardShortcuts.action.open_archive.label': '打开已归档会话',
+  'settings.openchamber.keyboardShortcuts.action.toggle_reasoning_traces.label': '显示或隐藏推理轨迹',
   'settings.openchamber.keyboardShortcuts.action.open_notes.label': '打开笔记面板',
   'settings.openchamber.keyboardShortcuts.action.open_todos.label': '打开待办面板',
   'settings.openchamber.keyboardShortcuts.action.show_context_usage.label': '显示上下文用量',

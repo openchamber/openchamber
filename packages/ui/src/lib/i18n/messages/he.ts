@@ -2884,6 +2884,7 @@ export const dict = {
   'commandPalette.item.copySessionId': 'העתק מזהה הפעלה',
   'commandPalette.item.openMultiRun': 'הרץ במקביל',
   'commandPalette.item.openArchive': 'פתח הפעלות בארכיון',
+  'commandPalette.item.toggleReasoningTraces': 'הצג/הסתר עקבות חשיבה',
   'commandPalette.item.openNotes': 'פתח את ההערות',
   'commandPalette.item.openTodos': 'פתח את המשימות',
   'commandPalette.item.openSettings': 'פתח הגדרות…',

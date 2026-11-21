@@ -54,6 +54,11 @@ export const openArchive: PaletteCommand = () => {
   ui.setArchivePageOpen(true);
 };
 
+export const toggleReasoningTraces: PaletteCommand = () => {
+  const ui = useUIStore.getState();
+  ui.setShowReasoningTraces(!ui.showReasoningTraces);
+};
+
 const openProjectNotesTab = (tab: 'notes' | 'todos'): boolean => {
   const directory = useDirectoryStore.getState().currentDirectory;
   if (!directory) return false;

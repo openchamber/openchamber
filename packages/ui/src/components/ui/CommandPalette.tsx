@@ -47,6 +47,7 @@ import {
   showContextUsage,
   showDiagnosticTimeline,
 } from '@/lib/paletteCommands';
+import { appearanceCommands } from './commandPaletteAppearance';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { toastContextFileOpenFailure, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
@@ -316,17 +317,7 @@ export const CommandPalette: React.FC = () => {
         searchText: t('commandPalette.item.showContextUsage'),
         onSelect: run(showContextUsage),
       },
-      {
-        id: 'cycle-theme',
-        secondary: true,
-        title: t('commandPalette.item.cycleTheme'),
-        icon: <Icon name="palette" className="me-2 h-4 w-4" />,
-        shortcutId: 'cycle_theme',
-        searchText: t('commandPalette.item.cycleTheme'),
-        onSelect: run(() => {
-          shortcutRegistry.invoke('cycle_theme');
-        }),
-      },
+      ...appearanceCommands(t, run),
       {
         id: 'open-status',
         secondary: true,

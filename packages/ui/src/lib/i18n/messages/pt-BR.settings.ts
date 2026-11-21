@@ -1446,6 +1446,7 @@ export const settingsDict = {
   'settings.common.sidebar.clearSearch': 'Limpar pesquisa',
   'settings.openchamber.keyboardShortcuts.findByKey.recording': 'Gravando teclas',
   "settings.openchamber.keyboardShortcuts.action.open_archive.label": "Abrir sessões arquivadas",
+  "settings.openchamber.keyboardShortcuts.action.toggle_reasoning_traces.label": "Mostrar ou ocultar rastros de raciocínio",
   "settings.openchamber.keyboardShortcuts.action.open_notes.label": "Abrir painel de notas",
   "settings.openchamber.keyboardShortcuts.action.open_todos.label": "Abrir painel de tarefas",
   "settings.openchamber.keyboardShortcuts.action.show_context_usage.label": "Mostrar uso do contexto",
