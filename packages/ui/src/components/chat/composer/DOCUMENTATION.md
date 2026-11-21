@@ -619,6 +619,65 @@ it renders only when what it shows changes.
 per streamed session update, and sends a text whose Enter lands before any
 render.
 
+### Why a share waits for the draft to be the one on screen
+
+A share (the Android share intent) always opens a new-session draft of its own
+(`openSharedFilesSession` in `apps/deepLinkNavigation.ts`). Its work draft id is
+marked with `keepWorkDraftOwnSlot` (`lib/chatDraftPersistence.ts`), so even a chat
+draft gets its own work-draft composer key instead of the one slot every chat
+draft shares, and it never claims the folder's draft text. A draft the user was
+writing keeps its text and attachments and receives nothing. The mark lives in
+memory: after a reload the share's draft is an ordinary draft again.
+
+The share leaves its files, text and the names the native side refused in
+`input-store.pendingDraftContent`, addressed by the draft's id. Taking it there
+calls its `accept`, which tells the native side the draft holds it.
+`usePendingSharedDraftContent` applies it from the composer that renders that
+draft, and only once the composer's column shows no session. The column renders
+the deferred selection (`chatColumnSession`, `sync/DOCUMENTATION.md` "Session
+switch commit"), so for one commit after `openNewSessionDraft()` it still names
+the session the user left; taking the share there would file its attachments
+under that session's draft and the draft would look empty.
+
+Files go through `attachSharedFiles`, not `attachFilesWithCitation`, and stay
+local until Send:
+
+- Every file names the share's draft identity and attaches with
+  `addAttachedFile(..., { shared: true })`. It lands in that draft even when the
+  user opened something else while it was read, and a HEIC the decoder cannot
+  read is refused by name instead of being written where OpenCode runs. Each
+  step resolves the draft's current identity by its work draft id
+  (`resolveOpenWorkDraftIdentity`), so a destination changed mid-read takes the
+  late files and their citations along.
+- When the share's draft is no longer on screen, its text and citations go to
+  that draft through `restoreDraft`, never into the editor that is showing.
+- The names are fixed before any read and held in
+  `pendingPastedAttachmentFilenamesRef` until each file lands, so a paste or drop
+  into the same draft meanwhile cannot take one of them.
+- Office documents follow the "Attach documents" setting and get the same
+  choice a dropped document gets. "Convert to text" attaches them locally.
+  "Attach as is" (and the Save setting) keeps the original in the draft with
+  `saveOnSend` (`addAttachmentSavedOnSend`); `saveAttachmentsHeldForSend` writes
+  it where OpenCode runs when Send or Queue is pressed and swaps it for the same
+  path reference a dropped document gets. A write that fails keeps the message
+  unsent with a toast naming the file. Each write is bound to the runtime the
+  send started on, and when the user left that draft or instance during the
+  writes the send stops instead of running in the composer now on screen. A
+  choice that goes away unanswered (the user leaves the draft, or another offer
+  replaces it and the offer's `onDismiss` runs) keeps
+  the originals held for Send, the choice that loses nothing, so Send never
+  waits on a choice nobody can answer.
+
+The work is tracked like every other intake, so a Send that arrives while a
+large file is still being prepared waits for it instead of going without it.
+The call returns the files the composer's policy refused, so the share reports
+them by name in the same toast as the native refusals; a share sheet gives no
+second chance, and a file that vanished silently is the failure mode to avoid.
+Shared text rides along as the attach call's `leadingText` rather than being set
+first: the citation is inserted into the editor's document, which still holds
+the text from before the commit, and that document overwrites `composerText` on
+the next edit, so text set first is lost.
+
 ### Why the draft text lives outside React state
 
 As `ChatInput` state, every keystroke rendered the whole composer: about

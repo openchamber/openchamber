@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug builds only: the share intake reads another app's content:// URI, so its device test needs
+  a provider the system knows about. The provider class lives in src/debug, so neither it nor this
+  declaration reaches a release APK.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <provider
+            android:name="com.openchamber.app.TestFilesProvider"
+            android:authorities="com.openchamber.app.testfiles"
+            android:exported="false" />
+    </application>
+</manifest>

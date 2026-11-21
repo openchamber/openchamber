@@ -9,10 +9,11 @@ import type { useComposerLargePasteState } from './useComposerLargePasteState';
 import type { useComposerMobileShell } from './useComposerMobileShell';
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
-import { MAX_ATTACHMENT_BYTES, useInputStore } from '@/sync/input-store';
+import { MAX_ATTACHMENT_BYTES, MAX_INLINE_ATTACHMENT_BYTES, useInputStore } from '@/sync/input-store';
 import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import { formatFileSize } from '@/lib/fileSize';
-import { getChatDraftIdentityKey } from '@/lib/chatDraftPersistence';
+import { getChatDraftIdentityKey, workDraftIdOfComposerKey, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
+import { resolveOpenWorkDraftIdentity } from './composerDraftIdentity';
 import { toast } from '@/components/ui';
 import { opencodeClient } from '@/lib/opencode/client';
 import { assignImageAttachmentFilenames, buildAttachmentCitationText, buildImagePathCitationText, findImagePathCitationNames, imageSaveModeForModel, prepareImageToSave, renameFileForAttachmentCitation } from '../../attachmentCitations';
@@ -23,6 +24,13 @@ import { isDocumentAttachmentFilename } from '@/sync/attachment-files';
 import { isCapacitorApp } from '@/lib/platform';
 import { beginLargeTextPasteOffer, resolveLargeTextPasteOffer } from '../../composer/largeTextPasteOffer';
 import type { LargeTextPasteChoiceAction } from '../../composer/ui/LargeTextPasteChoice';
+import type { RejectedSharedFile } from '@/lib/nativeSharedFiles';
+
+export type SharedAttachOptions = {
+    leadingText: string;
+    target: ChatDraftIdentity;
+    writeAway: (target: ChatDraftIdentity, text: string) => void;
+};
 
 type Dependencies = {
     editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
@@ -330,6 +338,132 @@ export function useComposerFileIntake({
         if (useUIStore.getState().isMobile && !mobileShell.expanded) mobileShell.expand();
     }, [attachFilesWithCitationNow, insertTextAtSelection, largeTextPasteOfferIdRef, mobileShell, saveDocumentsWithPathCitation, setLargeTextPasteOffer, trackAttachWork, composerRef]);
 
+    const attachSharedFiles = React.useCallback((
+        files: File[],
+        { leadingText, target, writeAway }: SharedAttachOptions,
+    ): Promise<RejectedSharedFile[]> => {
+        const workDraftId = workDraftIdOfComposerKey(target.sessionId);
+        let latestTarget = target;
+        const currentTarget = (): ChatDraftIdentity => {
+            const open = workDraftId ? resolveOpenWorkDraftIdentity(workDraftId, target.runtimeKey) : null;
+            if (open) latestTarget = open;
+            return latestTarget;
+        };
+        const followDraft = (used: ChatDraftIdentity) => {
+            const now = currentTarget();
+            if (getChatDraftIdentityKey(now) !== getChatDraftIdentityKey(used)) useInputStore.getState().moveAttachedFiles(used, now);
+        };
+        const isOnScreen = () => useInputStore.getState().attachmentDraftKey === getChatDraftIdentityKey(currentTarget());
+        const rejected: RejectedSharedFile[] = [];
+        const reserved = pendingPastedAttachmentFilenamesRef.current;
+        const place = (names: string[], text: string) => {
+            const citation = names.length > 0 ? buildAttachmentCitationText(names) : '';
+            if (!citation && !text) return;
+            if (isOnScreen()) insertCitationAtSelection(citation, text);
+            else writeAway(currentTarget(), buildImagePasteInsertion(text, citation));
+        };
+        const attachLocally = async (file: File, landedNames: string[]) => {
+            const used = currentTarget();
+            try {
+                const attached = await addAttachedFile(file, used, (landed) => {
+                    landedNames.push(...landed.map((entry) => entry.filename));
+                }, { shared: true });
+                followDraft(used);
+                if (!attached) rejected.push({ name: file.name, reason: 'unsupported-type' });
+            } catch {
+                rejected.push({ name: file.name, reason: file.size > MAX_INLINE_ATTACHMENT_BYTES ? 'too-large' : 'unreadable' });
+            } finally {
+                reserved.delete(file.name);
+            }
+        };
+        const attachAsIs = async (file: File, landedNames: string[]) => {
+            const used = currentTarget();
+            try {
+                await useInputStore.getState().addAttachmentSavedOnSend(file, used);
+                followDraft(used);
+                landedNames.push(file.name);
+            } catch {
+                rejected.push({ name: file.name, reason: file.size > MAX_ATTACHMENT_BYTES ? 'too-large' : 'unreadable' });
+            } finally {
+                reserved.delete(file.name);
+            }
+        };
+
+        const usedNames = [
+            ...useInputStore.getState().getAttachedFiles(currentTarget()).map((file) => file.filename),
+            ...reserved,
+            ...(isOnScreen() ? findImagePathCitationNames(composerRef.current?.getValue() ?? composerText.get()) : []),
+        ];
+        const images = files.filter((file) => file.type.startsWith('image/'));
+        const others = files.filter((file) => !file.type.startsWith('image/'));
+        const imageNames = assignImageAttachmentFilenames(images, usedNames);
+        const otherNames = assignFileAttachmentFilenames(others, [...usedNames, ...imageNames]);
+        const named = [
+            ...images.map((file, index) => renameFileForAttachmentCitation(file, imageNames[index])),
+            ...others.map((file, index) => (otherNames[index] === file.name ? file : renameFileForAttachmentCitation(file, otherNames[index]))),
+        ];
+        for (const file of named) reserved.add(file.name);
+
+        const behavior = useUIStore.getState().documentAttachBehavior;
+        const documents = behavior === 'convert' ? [] : named.filter((file) => isDocumentAttachmentFilename(file.name));
+        const now = named.filter((file) => !documents.includes(file));
+
+        const work = (async (): Promise<RejectedSharedFile[]> => {
+            const landed: string[] = [];
+            for (const file of now) await attachLocally(file, landed);
+            place(landed, leadingText);
+
+            if (documents.length === 0) return rejected;
+            const attachDocuments = async (asIs: boolean) => {
+                const landedDocuments: string[] = [];
+                for (const file of documents) {
+                    if (asIs) await attachAsIs(file, landedDocuments);
+                    else await attachLocally(file, landedDocuments);
+                }
+                place(landedDocuments, '');
+            };
+            if (behavior === 'save' || !isOnScreen()) {
+                await attachDocuments(true);
+                return rejected;
+            }
+            await new Promise<void>((settle) => {
+                let settled = false;
+                const offerId = beginLargeTextPasteOffer(largeTextPasteOfferIdRef.current);
+                largeTextPasteOfferIdRef.current = offerId;
+                const finish = (asIs: boolean) => {
+                    if (settled) return;
+                    settled = true;
+                    unsubscribe();
+                    void attachDocuments(asIs).then(settle, settle);
+                };
+                const unsubscribe = useInputStore.subscribe((state) => {
+                    if (state.attachmentDraftKey !== getChatDraftIdentityKey(currentTarget())) finish(true);
+                });
+                setLargeTextPasteOffer({
+                    id: offerId,
+                    kind: 'documents',
+                    onDismiss: () => finish(true),
+                    resolve: (action, explicitlyChosen, typedText) => {
+                        const resolution = resolveLargeTextPasteOffer(largeTextPasteOfferIdRef.current, offerId, { explicitlyChosen });
+                        largeTextPasteOfferIdRef.current = resolution.nextOfferId;
+                        if (!resolution.accepted) return;
+                        finish(action === 'attach');
+                        setLargeTextPasteOffer(null);
+                        if (typedText) insertTextAtSelection(typedText);
+                        if (resolution.restoreFocus) {
+                            if (composerRef.current) composerRef.current.focus({ preventScroll: isCapacitorApp() });
+                            else mobileShell.expand();
+                        }
+                    },
+                });
+                if (useUIStore.getState().isMobile && !mobileShell.expanded) mobileShell.expand();
+            });
+            return rejected;
+        })();
+        void trackAttachWork(work.then(() => undefined, () => undefined));
+        return work;
+    }, [addAttachedFile, composerRef, composerText, insertCitationAtSelection, insertTextAtSelection, largeTextPasteOfferIdRef, mobileShell, pendingPastedAttachmentFilenamesRef, setLargeTextPasteOffer, trackAttachWork]);
+
     const attachFilesWithCitation = React.useCallback((files: File[], leadingText: string = ''): Promise<void> => {
         const documents = files.filter((file) => isDocumentAttachmentFilename(file.name));
         const behavior = useUIStore.getState().documentAttachBehavior;
@@ -348,6 +482,6 @@ export function useComposerFileIntake({
     }, [attachFilesWithCitationNow, offerDocumentChoice, saveDocumentsWithPathCitation, trackAttachWork]);
 
     return {
-        attachFilesWithCitation, insertCitationAtSelection,
+        attachFilesWithCitation, attachSharedFiles, insertCitationAtSelection,
     };
 }

@@ -43,6 +43,7 @@ import { withRegisteredSharedPages } from '../../sharePages/received/takeShareLi
 import type { ChatInputProps } from './chatInputProps';
 import { collectInlineSkillMentions } from './composerMentionTokens';
 import { recordLinkedReferences } from './recordLinkedReferences';
+import { saveAttachmentsHeldForSend } from './saveAttachmentsHeldForSend';
 
 type Dependencies = {
     inlineContext: Pick<ReturnType<typeof useComposerInlineContext>, 'isMobileCommentOpen' | 'hasDrafts' | 'attachmentsToSend' | 'inlineDraftTarget' | 'consumeDrafts'>;
@@ -98,6 +99,12 @@ export function useComposerQueueActions({
         if (isMobileCommentOpen()) return;
         if (largeTextPasteOffer) return;
         if (await waitForPendingAttachments()) {
+            void handleQueueMessageRef.current();
+            return;
+        }
+        const held = await saveAttachmentsHeldForSend(chatDraftIdentity, messageQueueTarget?.directory ?? undefined, t);
+        if (held === 'stopped') return;
+        if (held === 'saved') {
             void handleQueueMessageRef.current();
             return;
         }
