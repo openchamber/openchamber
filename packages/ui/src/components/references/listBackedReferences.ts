@@ -212,6 +212,11 @@ const pullDetail = (context: ChangeRequestContext): RepositoryReferenceDetail['p
         commitTotal: context.commitsComplete === false ? null : commits.length,
     };
     if (context.stack !== undefined) pull.stack = context.stack;
+    if (context.reviewerStates) {
+        pull.reviewerStates = context.reviewerStates.map((entry) => (entry.user.avatarUrl
+            ? { id: entry.user.id, login: entry.user.username, avatarUrl: entry.user.avatarUrl, state: entry.state }
+            : { id: entry.user.id, login: entry.user.username, state: entry.state }));
+    }
     if (context.voteLabels) pull.voteLabels = context.voteLabels;
     if (context.submitRequirements) pull.submitRequirements = context.submitRequirements;
     if (context.revisions) pull.revisions = context.revisions;

@@ -934,6 +934,43 @@ describe('createWebSourceControlAPI', () => {
     });
   });
 
+  it('parses per-person reviewer state, skips an entry it cannot read, and leaves it out when the host did not say', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const ctx = { ...identity, directory: '/workspace', repositoryId: 'repo_one', accountId: 'github.com#7', bindingRevision: 4, primaryRemote: 'origin' };
+    const contextPayload = () => ({
+      identity: githubIdentity,
+      project: null,
+      changeRequest: null,
+      issueComments: [],
+      reviewComments: [],
+      files: [],
+    });
+    const reviewedContext = (reviewerStates: { user: ReturnType<typeof githubUser>; state: string }[]) => ({
+      ...contextPayload(),
+      reviewerStates,
+    });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(reviewedContext([
+      { user: githubUser('9', 'ann'), state: 'approved' },
+      { user: githubUser('10', 'bo'), state: 'pending' },
+    ])));
+    const result = await api.changeRequestContext(ctx, 4);
+    expect(result.reviewerStates).toEqual([
+      { user: expect.objectContaining({ id: '9', username: 'ann' }), state: 'approved' },
+      { user: expect.objectContaining({ id: '10', username: 'bo' }), state: 'pending' },
+    ]);
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(contextPayload()));
+    expect(await api.changeRequestContext(ctx, 4)).not.toHaveProperty('reviewerStates');
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(reviewedContext([
+      { user: githubUser('9', 'ann'), state: 'rejected' },
+      { user: githubUser('10', 'bo'), state: 'approved' },
+    ])));
+    expect((await api.changeRequestContext(ctx, 4)).reviewerStates).toEqual([
+      { user: expect.objectContaining({ id: '10', username: 'bo' }), state: 'approved' },
+    ]);
+  });
+
   it('rejects a comment whose capabilities are not booleans', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json([
       { ...githubIdentity, id: '10', url: 'https://example/comment/10', body: 'Looks good', canUpdate: 'yes' },

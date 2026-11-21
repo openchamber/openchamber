@@ -523,6 +523,10 @@ describe('fetchReferenceDetail', () => {
     expect(detail?.pull).toEqual({
       reviewDecision: 'changes_requested',
       reviewers: [{ id: 'hubot', login: 'hubot', avatarUrl: undefined }],
+      reviewerStates: [
+        { id: 'octo', login: 'octo', avatarUrl: 'https://avatars/octo', state: 'approved' },
+        { id: 'hubot', login: 'hubot', avatarUrl: undefined, state: 'pending' },
+      ],
       checks: expect.objectContaining({ state: 'failure', total: 2, success: 1, failure: 1 }),
       additions: 12,
       deletions: 3,
@@ -538,6 +542,26 @@ describe('fetchReferenceDetail', () => {
       commitTotal: 1,
       stack: null,
     });
+  });
+
+  it('reads one state per reviewer, the latest review deciding and outstanding requests pending', async () => {
+    const ann = { login: 'ann', avatarUrl: 'https://avatars/ann' };
+    const bo = { login: 'bo', avatarUrl: null };
+    const di = { login: 'di', avatarUrl: null };
+    const detail = await fetchReferenceDetail({ octokit: graphqlReturning(pull([
+      { author: ann, body: '', state: 'CHANGES_REQUESTED', createdAt: '2026-10-01T09:00:00Z', url: 'r1' },
+      { author: bo, body: 'nit', state: 'COMMENTED', createdAt: '2026-10-01T09:30:00Z', url: 'r2' },
+      { author: di, body: '', state: 'APPROVED', createdAt: '2026-10-01T10:30:00Z', url: 'r3' },
+      { author: di, body: '', state: 'DISMISSED', createdAt: '2026-10-01T10:45:00Z', url: 'r4' },
+      { author: ann, body: '', state: 'APPROVED', createdAt: '2026-10-01T11:00:00Z', url: 'r5' },
+    ])), owner: 'acme', repo: 'app', number: 9 });
+    // A team request names no person, so it has no state.
+    expect(detail?.pull?.reviewerStates).toEqual([
+      { id: 'ann', login: 'ann', avatarUrl: 'https://avatars/ann', state: 'approved' },
+      { id: 'bo', login: 'bo', avatarUrl: undefined, state: 'commented' },
+      { id: 'di', login: 'di', avatarUrl: undefined, state: 'pending' },
+      { id: 'hubot', login: 'hubot', avatarUrl: undefined, state: 'pending' },
+    ]);
   });
 
   it('reads the stack a PR is a layer of, bottom first, and leaves it unknown where the host has none', async () => {

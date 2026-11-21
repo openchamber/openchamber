@@ -131,6 +131,31 @@ describe('Gitea change request context', () => {
     expect(commentReads[0].url.searchParams.has('page')).toBe(false);
   });
 
+  it('reads one state per reviewer, the latest review deciding and asked reviewers still pending', async () => {
+    const ann = { id: 7, login: 'ann' };
+    const bo = { id: 8, login: 'bob' };
+    const review = (id, user, state, submittedAt, stale = false) => ({ id, user, state, stale, submitted_at: submittedAt });
+    const { service } = setup(contextRoutes({
+      'GET /repos/alice/app/pulls/1': { ...fixtures.forkPull, requested_reviewers: [{ id: 9, login: 'cy' }, { id: 7, login: 'ann' }] },
+      'GET /repos/alice/app/pulls/1/reviews': [
+        review(1, ann, 'COMMENT', '2026-10-01T09:00:00Z'),
+        review(2, bo, 'APPROVED', '2026-10-01T09:30:00Z'),
+        // A stale review still says what its author decided.
+        review(3, ann, 'REQUEST_CHANGES', '2026-10-01T10:00:00Z', true),
+        // A dismissed approval is no longer in force, so its author is not approved.
+        { ...review(4, { id: 10, login: 'di' }, 'APPROVED', '2026-10-01T10:30:00Z'), dismissed: true },
+        // A private draft after an approval leaves the approval in place.
+        review(5, bo, 'PENDING', '2026-10-01T11:00:00Z'),
+      ],
+    }));
+
+    const result = await service.changeRequestContext('/repo', 1, { includeTimeline: true, remote: 'origin' });
+
+    expect(result.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([
+      ['ann', 'changes_requested'], ['bob', 'approved'], ['di', 'pending'], ['cy', 'pending'],
+    ]);
+  });
+
   it('keeps commits made within one second in the order Gitea lists them', async () => {
     const sameSecond = fixtures.commits.map((commit) => ({
       ...commit, commit: { ...commit.commit, committer: { ...commit.commit.committer, date: '2026-10-22T17:40:14+03:00' } },
