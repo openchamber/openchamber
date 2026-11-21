@@ -32,25 +32,9 @@ interface ModelSelectorProps {
     tooltipsEnabled?: boolean;
     dropdownPortalToBody?: boolean;
     directory?: string;
-    /**
-     * Drop the model name and the chevron, leaving the provider logo. For
-     * headers that run out of room before they run out of controls — the logo
-     * still says which provider is answering, which is the part a glance is
-     * usually after.
-     */
     compact?: boolean;
-    /**
-     * Offer the Auto routing row on top, as the composer does. Only for
-     * selections that are later sent through the routing rewrite (Session
-     * Defaults); a routing category or fallback must name a real model.
-     */
     offerAuto?: boolean;
-    /**
-     * Tooltip on the desktop trigger alone, so it never catches focus or the
-     * mouse from the list.
-     */
     triggerTooltip?: string;
-    /** Shown but closed, so a row can keep its layout while its option is off. */
     disabled?: boolean;
 }
 
@@ -106,7 +90,6 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
     const handleSelect = React.useCallback((entry: ModelPickerEntry) => {
         onChange(entry.providerID, entry.modelID);
-        // Auto has its own pinned row; it does not belong in Recent.
         if (!isAutoModel(entry.providerID, entry.modelID)) addRecentModel(entry.providerID, entry.modelID);
         closePicker();
     }, [addRecentModel, closePicker, onChange]);
@@ -137,7 +120,6 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
     const selectedModel = providerId && modelId ? { providerID: providerId, modelID: modelId } : null;
     const displayReady = isReady || Boolean(selectedModel);
-    // Show the model's display name (as in the picker list), not the raw provider/model id.
     const triggerLabel = React.useMemo(() => {
         if (!providerId || !modelId) {
             return placeholder || t('settings.agents.modelSelector.notSelected');
@@ -229,8 +211,6 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     !canOpen && 'opacity-60 cursor-not-allowed',
                     className,
                 )}
-                // The name is gone from the trigger, so it has to stay
-                // reachable somewhere.
                 title={compact && displayReady && !triggerTooltip ? triggerLabel : undefined}
             >
                 {!displayReady ? (

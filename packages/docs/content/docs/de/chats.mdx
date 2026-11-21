@@ -13,6 +13,10 @@ Am direktesten geht es mit **+** im Bereich **Chats** in der Seitenleiste. Auf d
 
 **Mod+N** (Cmd+N unter macOS, sonst Strg+N) und **Neue Sitzung** in der Befehlspalette öffnen eine neue Sitzung auf der Seite, die du zuletzt benutzt hast: einen Chat, wenn deine letzte neue Sitzung ein Chat war, sonst dein Projekt. Du kannst sie auf Chats umstellen, bevor du die erste Nachricht sendest.
 
+## Modell und Agent
+
+Neue Chats starten mit dem Modell, der Denkstufe und dem Agenten aus **Einstellungen → Sitzungen → Chats**. Chats, die ein Agent startet, nutzen sie auch, ebenso Chats aus einer geplanten Aufgabe, die Sitzungsstandards verwendet. Ein leeres Feld übernimmt **Neue Sitzungen** auf derselben Seite. Eine Denkstufe gehört zu ihrem Modell: Ist das Chats-Modell leer, übernimmt ein Chat das Modell aus Neue Sitzungen samt seiner Stufe. Ist nur die Chats-Stufe leer, nutzt ein Chat die zuletzt für dieses Modell gewählte Stufe und danach die Stufe aus Neue Sitzungen, wenn beide dasselbe Modell nennen. Vor dem Senden kannst du im Chat trotzdem ein anderes Modell oder einen anderen Agenten wählen.
+
 ## Wo Chats wohnen
 
 Chats haben einen eigenen Bereich oben in der Seitenleiste, über [In Arbeit](/de/sessions-in-work/) und deinen Projekten. Sie sind wie andere Sitzungen sortiert, neueste Aktivität zuerst, und angeheftete Chats bleiben oben. Der Bereich zeigt die drei neuesten Chats, **Weitere Sitzungen anzeigen** lädt den Rest. Der Bereich lässt sich wie jeder andere einklappen.
@@ -40,7 +44,7 @@ Archiviere einen Chat, um ihn aus der Liste auszublenden. Lösche ihn, um ihn en
 
 Chat-Ordner liegen in `~/.config/openchamber/chats`, ein datierter Ordner pro Tag. Hast du die Daten von OpenChamber mit `OPENCHAMBER_DATA_DIR` verschoben, liegen sie stattdessen dort. Um Chats woanders abzulegen, setze `OPENCHAMBER_CHATS_DIR`; siehe [Umgebungsvariablen](/de/environment/). Das ist wichtig, wenn OpenCode als anderer Benutzer läuft und deinen Home-Ordner nicht lesen kann.
 
-> VS Code hat keine Chats. Die Erweiterung arbeitet immer in dem Ordner, den du geöffnet hast.
+> VS Code hat keine Chats. Die Erweiterung arbeitet immer in dem Ordner, den du geöffnet hast. Die Chats-Standards legst du in der App fest; die Erweiterung hat keinen Chats-Abschnitt.
 
 ## Verwandt
 

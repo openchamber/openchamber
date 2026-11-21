@@ -16,7 +16,7 @@ import { createSessionGoalRuntime, normalizeMaxAutoTurns } from './runtime.js';
  *
  * The previous suite drove the whole audit loop against a fake v1 OpenCode; it
  * is gone rather than rewritten because every route and shape it asserted on
- * belongs to v1. Subagents come from `GET /api/session?parentID=` now.
+ * belongs to v1. Active subagents are identified by their session parentID.
  */
 
 const SESSION_ID = 'ses_parent';
@@ -77,7 +77,7 @@ afterEach(() => {
  * `/api/session/active` for busy state, and the three continuation calls.
  */
 // Without `jobs` it is an OpenCode before 2.2.6, which has no job list.
-const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200, shells = [], shellStatus = 200, jobs, sessionRead = async () => {} }) => {
+const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200, shells = [], shellStatus = 200, jobs, sessionRead = async () => {}, messageRead = async () => {}, sessionRecord = {} }) => {
   const calls = [];
   const json = (data, status = 200) => new Response(JSON.stringify({ location: { directory: '/repo' }, data }), {
     status,
@@ -87,7 +87,7 @@ const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus =
     const url = new URL(String(input));
     calls.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), method: init.method ?? 'GET', body: init.body ? JSON.parse(init.body) : null });
     // Real shape: `{ data }` without a `location`, unlike directory-scoped routes.
-    if (url.pathname === '/api/session/active') return Response.json({ data: active });
+    if (url.pathname === '/api/session/active') return Response.json({ data: typeof active === 'function' ? await active() : active });
     if (url.pathname === '/api/session') {
       // Children of the parent, cursor paged: the first page is selected by
       // `parentID`, later ones by the cursor alone.
@@ -102,10 +102,18 @@ const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus =
       if (jobs === undefined) return new Response(null, { status: 404 });
       return Response.json({ data: typeof jobs === 'function' ? jobs() : jobs });
     }
-    if (url.pathname.endsWith('/message')) return json({ data: [...messages].reverse(), cursor: null });
+    if (url.pathname.endsWith('/message')) {
+      await messageRead();
+      return json({ data: [...messages].reverse(), cursor: null });
+    }
     if (url.pathname === `/api/session/${SESSION_ID}`) {
       await sessionRead();
-      return json({ id: SESSION_ID, location: { directory: '/repo' } });
+      return json({ id: SESSION_ID, location: { directory: '/repo' }, ...sessionRecord });
+    }
+    if (url.pathname.startsWith('/api/session/')) {
+      const id = decodeURIComponent(url.pathname.slice('/api/session/'.length));
+      const record = childPages.flat().find((item) => item.id === id);
+      return json(record ?? {}, record ? childrenStatus : 404);
     }
     return json({});
   });
@@ -157,7 +165,10 @@ describe('session goal session-read recovery', () => {
     const metadata = { openchamber: { goal: activeGoal() } };
     const seam = wired(metadata);
     seam.persistSessionGoal.mockImplementation(async (_sessionId, _directory, goal) => {
-      metadata.openchamber.goal = goal;
+      const next = goal.update ? goal.update(metadata) : goal;
+      if (!next) return false;
+      metadata.openchamber.goal = next;
+      return true;
     });
     const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }) }));
     const runtime = makeRuntime({
@@ -223,13 +234,62 @@ describe('session goal session-read recovery', () => {
     expect(test.emitGoalNotification).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ['statuses', { active: null }],
+    ['active session', { active: { ses_missing: { status: 'running' } } }],
+    ['background jobs', { jobs: null }],
+    ['shells', { shellStatus: 503 }],
+  ])('blocks after repeated unknown %s without auditing or continuing', async (_name, options) => {
+    const test = setup(vi.fn(async () => {}), options);
+    await test.start();
+    await vi.advanceTimersByTimeAsync(105_000);
+    expect(test.metadata.openchamber.goal).toMatchObject({
+      status: 'blocked',
+      statusReason: 'Session activity could not be read after repeated attempts. Resume to try again.',
+      turnsUsed: 0,
+    });
+    expect(test.generate).not.toHaveBeenCalled();
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+    expect(test.emitGoalNotification).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(test.sessionRead).toHaveBeenCalledTimes(4);
+  });
+
+  it('recovers after an unknown active session disappears', async () => {
+    const active = { ses_missing: { status: 'running' } };
+    const test = setup(vi.fn(async () => {}), { active });
+    await test.start();
+    expect(test.generate).not.toHaveBeenCalled();
+    delete active.ses_missing;
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(test.generate).toHaveBeenCalledTimes(1);
+    expect(test.metadata.openchamber.goal).toMatchObject({ status: 'active', turnsUsed: 1 });
+  });
+
+  it('preserves a paused goal while the final activity read is pending', async () => {
+    const gate = Promise.withResolvers();
+    const active = vi.fn().mockResolvedValue(null);
+    const test = setup(vi.fn(async () => {}), { active });
+    await test.start();
+    await vi.advanceTimersByTimeAsync(45_000);
+    active.mockImplementationOnce(() => gate.promise);
+    await vi.advanceTimersByTimeAsync(60_000);
+    test.metadata.openchamber.goal.status = 'paused';
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', test.metadata);
+    gate.resolve(null);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(test.metadata.openchamber.goal.status).toBe('paused');
+    expect(test.persistSessionGoal).not.toHaveBeenCalled();
+    expect(test.emitGoalNotification).not.toHaveBeenCalled();
+  });
+
   it('resets the failure count after a successful read', async () => {
     const sessionRead = vi.fn().mockRejectedValueOnce(new Error('fetch failed')).mockResolvedValue(undefined);
-    const test = setup(sessionRead, { childrenStatus: 500 });
+    const test = setup(sessionRead, { active: { ses_child: { status: 'running' } }, childPages: [[{ id: 'ses_child', parentID: SESSION_ID }]], childrenStatus: 500 });
     await test.start();
     await vi.advanceTimersByTimeAsync(15_000);
     expect(sessionRead).toHaveBeenCalledTimes(2);
-    // The children read arms another quiet window without a new session event.
+    // The failed active-child read arms another quiet window without a new session event.
     sessionRead.mockRejectedValue(new Error('fetch failed'));
     await vi.advanceTimersByTimeAsync(15_000);
     await vi.advanceTimersByTimeAsync(14_999);
@@ -277,11 +337,14 @@ describe('session goal session-read recovery', () => {
     expect(test.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
   });
 
-  it('pauses a goal whose user aborts while the tick reads the session', async () => {
+  it.each([
+    { type: 'aborted', message: 'Step interrupted' },
+    { name: 'MessageAbortedError', data: {} },
+  ])('pauses a goal whose user aborts while the tick reads the session: %j', async (error) => {
     const gate = Promise.withResolvers();
     const sessionRead = vi.fn().mockImplementationOnce(() => gate.promise).mockResolvedValue(undefined);
     const test = setup(sessionRead, {
-      messages: [assistantRecord({ finish: undefined, error: { name: 'MessageAbortedError', data: {} } })],
+      messages: [assistantRecord({ finish: undefined, error })],
     });
     await test.start();
     test.runtime.processPayload({
@@ -293,6 +356,295 @@ describe('session goal session-read recovery', () => {
 
     expect(test.metadata.openchamber.goal).toMatchObject({ status: 'paused' });
     expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it.each([
+    { stop: 'before Resume', newExecution: false, status: 'active', posts: 1 },
+    { stop: 'after Resume', newExecution: true, status: 'paused', posts: 0 },
+  ])('orders a Stop requested $stop against a resumed tick', async ({ newExecution, status, posts }) => {
+    const gate = Promise.withResolvers();
+    const test = setup(vi.fn().mockImplementationOnce(() => gate.promise).mockResolvedValue(undefined), {
+      messages: [assistantRecord({ finish: undefined, error: { type: 'aborted', message: 'Step interrupted' } })],
+    });
+    test.runtime.processPayload({ type: 'session.status', properties: { sessionID: SESSION_ID, status: { type: 'busy' } } });
+    test.metadata.openchamber.goal = activeGoal({ status: 'paused', statusReason: '' });
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', test.metadata);
+    test.metadata.openchamber.goal = activeGoal({ statusReason: 'resumed' });
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', test.metadata);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(test.sessionRead).toHaveBeenCalledTimes(1);
+    if (newExecution) {
+      test.runtime.processPayload({ type: 'session.status', properties: { sessionID: SESSION_ID, status: { type: 'busy' } } });
+    }
+    test.runtime.processPayload(idle());
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(test.metadata.openchamber.goal.status).toBe(status);
+    expect(test.calls.filter((call) => call.method === 'POST')).toHaveLength(posts);
+  });
+
+  it('honors an abort while a resumed goal reads the session', async () => {
+    const gate = Promise.withResolvers();
+    const test = setup(vi.fn().mockImplementationOnce(() => gate.promise).mockResolvedValue(undefined), {
+      messages: [assistantRecord({ finish: undefined, error: { type: 'aborted', message: 'Step interrupted' } })],
+    });
+    test.metadata.openchamber.goal = activeGoal({ statusReason: 'resumed' });
+    await test.start();
+    await vi.advanceTimersByTimeAsync(250);
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(test.metadata.openchamber.goal.status).toBe('paused');
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('does not start another tick while an abort pause is waiting to write', async () => {
+    const sessionGate = Promise.withResolvers();
+    const pauseGate = Promise.withResolvers();
+    const test = setup(vi.fn().mockImplementationOnce(() => sessionGate.promise).mockResolvedValue(undefined));
+    await test.start();
+    test.persistSessionGoal.mockImplementationOnce(async (_sessionId, _directory, { update }) => {
+      await pauseGate.promise;
+      const goal = update(test.metadata);
+      if (!goal) return false;
+      test.metadata.openchamber.goal = goal;
+      return true;
+    });
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    sessionGate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    test.runtime.processPayload(idle());
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(test.sessionRead).toHaveBeenCalledTimes(1);
+    pauseGate.resolve();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(test.metadata.openchamber.goal.status).toBe('paused');
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('retries a failed abort pause without continuing the goal', async () => {
+    const test = setup(vi.fn(async () => {}));
+    test.persistSessionGoal.mockRejectedValueOnce(new Error('metadata unavailable'));
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(test.metadata.openchamber.goal.status).toBe('paused');
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('stops retrying an abort pause once the session is gone', async () => {
+    const test = setup(vi.fn(async () => {}));
+    test.persistSessionGoal.mockRejectedValueOnce(Object.assign(new Error('session ses_1 was not found'), { _tag: 'SessionNotFoundError' }));
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels an abort retry when the user resumes', async () => {
+    const test = setup(vi.fn(async () => {}));
+    test.persistSessionGoal.mockRejectedValueOnce(new Error('metadata unavailable'));
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    test.metadata.openchamber.goal = activeGoal({ statusReason: 'resumed' });
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', test.metadata);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(test.metadata.openchamber.goal.status).toBe('active');
+    expect(test.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+  });
+
+  it('does not count a continuation paused during the final message read', async () => {
+    const gate = Promise.withResolvers();
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => gate.promise);
+    const test = setup(vi.fn(async () => {}), { messageRead });
+    await test.start();
+    expect(messageRead).toHaveBeenCalledTimes(2);
+    // The goal row's Pause on an idle session: OpenCode has nothing to
+    // interrupt, so only the paused goal reaches the runtime.
+    test.metadata.openchamber.goal = { ...test.metadata.openchamber.goal, status: 'paused', statusReason: '' };
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', test.metadata);
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(test.metadata.openchamber.goal).toMatchObject({ status: 'paused', turnsUsed: 0 });
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('reconciles a stop while the continuation accounting write is in flight', async () => {
+    const gate = Promise.withResolvers();
+    const test = setup(vi.fn(async () => {}));
+    test.persistSessionGoal.mockImplementationOnce(async (_sessionId, _directory, goal, canWrite) => {
+      expect(canWrite(test.metadata)).toBe(true);
+      test.metadata.openchamber.goal = goal;
+      await gate.promise;
+      return true;
+    });
+    await test.start();
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(test.metadata.openchamber.goal).toMatchObject({ status: 'paused', turnsUsed: 0 });
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('does not retry a failed rollback after runtime shutdown', async () => {
+    const gate = Promise.withResolvers();
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => gate.promise);
+    const test = setup(vi.fn(async () => {}), { messageRead });
+    await test.start();
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    test.runtime.stop();
+    test.persistSessionGoal.mockRejectedValueOnce(new Error('metadata unavailable'));
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(3);
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('keeps a continuation charged when the message tail changes without a stop', async () => {
+    const gate = Promise.withResolvers();
+    const messages = [assistantRecord()];
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => gate.promise);
+    const test = setup(vi.fn(async () => {}), { messages, messageRead });
+    await test.start();
+    messages.push({ id: 'msg_new', type: 'user', content: [] });
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(test.metadata.openchamber.goal.turnsUsed).toBe(1);
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(1);
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('retries failed continuation accounting rollback before the next tick', async () => {
+    const gate = Promise.withResolvers();
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => gate.promise);
+    const test = setup(vi.fn(async () => {}), { messageRead });
+    await test.start();
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    test.persistSessionGoal.mockRejectedValueOnce(new Error('metadata unavailable'));
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(test.metadata.openchamber.goal).toMatchObject({ status: 'paused', turnsUsed: 0 });
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('retries a pending rollback immediately on resume', async () => {
+    const gate = Promise.withResolvers();
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => gate.promise);
+    const test = setup(vi.fn(async () => {}), { messageRead });
+    await test.start();
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    test.persistSessionGoal.mockRejectedValueOnce(new Error('metadata unavailable'));
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    test.metadata.openchamber.goal = { ...test.metadata.openchamber.goal, status: 'active', statusReason: 'resumed' };
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/project', test.metadata);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(test.metadata.openchamber.goal.turnsUsed).toBe(0);
+  });
+
+  it('discards a queued rollback when Resume resets the turn count', async () => {
+    const gate = Promise.withResolvers();
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => gate.promise);
+    const test = setup(vi.fn(async () => {}), { messageRead });
+    await test.start();
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    test.persistSessionGoal.mockRejectedValueOnce(new Error('metadata unavailable'));
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    const writesBeforeResume = test.persistSessionGoal.mock.calls.length;
+    test.metadata.openchamber.goal = { ...test.metadata.openchamber.goal, status: 'active', statusReason: 'resumed', turnsUsed: 0 };
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/project', test.metadata);
+    await vi.advanceTimersByTimeAsync(15_000);
+    const laterWrites = test.persistSessionGoal.mock.calls.slice(writesBeforeResume);
+    expect(laterWrites.some((call) => 'update' in call[2])).toBe(false);
+    expect(test.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+    expect(test.metadata.openchamber.goal).toMatchObject({ status: 'active', turnsUsed: 1 });
+  });
+
+  it('does not lock a replacement goal behind an old continuation rollback', async () => {
+    const gate = Promise.withResolvers();
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => gate.promise);
+    const test = setup(vi.fn(async () => {}), { messageRead });
+    await test.start();
+    test.metadata.openchamber.goal = activeGoal({ id: 'replacement' });
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/project', test.metadata);
+    test.persistSessionGoal.mockRejectedValueOnce(new Error('metadata unavailable'));
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(1);
+    expect(test.metadata.openchamber.goal.id).toBe('replacement');
+  });
+
+  it('does not lock a reset resume behind an old continuation rollback', async () => {
+    const gate = Promise.withResolvers();
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => gate.promise);
+    const test = setup(vi.fn(async () => {}), { messageRead });
+    await test.start();
+    test.metadata.openchamber.goal = activeGoal({ statusReason: 'resumed' });
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/project', test.metadata);
+    test.persistSessionGoal.mockRejectedValueOnce(new Error('metadata unavailable'));
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a continuation charged after a failed final message read without a stop', async () => {
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('unavailable'));
+    const test = setup(vi.fn(async () => {}), { messageRead });
+    await test.start();
+    expect(test.metadata.openchamber.goal).toMatchObject({ status: 'active', turnsUsed: 1 });
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(1);
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('logs the abort pause only when the guarded write lands', async () => {
+    const test = setup(vi.fn(async () => {}), {
+      messages: [assistantRecord({ finish: undefined, error: { type: 'aborted', message: 'Step interrupted' } })],
+    });
+    test.persistSessionGoal.mockResolvedValueOnce(false);
+    await test.start();
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(1);
+    expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('paused after user abort'));
   });
 
   it('rechecks active status at the settlement write', async () => {
@@ -378,8 +730,6 @@ describe('session goal session-read recovery', () => {
     expect(test.persistSessionGoal).not.toHaveBeenCalled();
   });
 
-  // An abort is not here: the in-flight tick keeps its read so it can reach
-  // its own abort check and pause the goal (see the abort test above).
   for (const event of ['busy', 'pause', 'stop']) {
     it(`cancels recovery on ${event} during an in-flight read`, async () => {
       const gate = Promise.withResolvers();
@@ -404,6 +754,38 @@ describe('session goal session-read recovery', () => {
 });
 
 describe('session goal tick on v2 messages', () => {
+  it('blocks a goal after a non-abort assistant error', async () => {
+    quiet();
+    const { calls } = v2OpenCode({
+      messages: [assistantRecord({ finish: 'error', error: { type: 'unknown', message: 'Provider failed' } })],
+    });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const { runtime } = makeRuntime(seam);
+
+    await runTick(runtime);
+
+    expect(seam.persistSessionGoal.mock.calls.at(-1)?.[2]).toMatchObject({ status: 'blocked', statusReason: 'unknown' });
+    expect(calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('continues a resumed goal after an interrupted v2 turn', async () => {
+    quiet();
+    const { calls } = v2OpenCode({
+      messages: [
+        { id: 'msg_u1', sessionID: SESSION_ID, type: 'user', text: 'Finish the task', time: { created: 1 } },
+        assistantRecord({ finish: 'error', error: { type: 'aborted', message: 'Step interrupted' } }),
+      ],
+    });
+    const goal = activeGoal({ statusReason: 'resumed' });
+    const seam = wired({ openchamber: { goal } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }) }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+
+    await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal } });
+    await vi.waitFor(() => expect(calls.some((call) => call.method === 'POST' && call.path.endsWith('/prompt'))).toBe(true));
+    expect(seam.persistSessionGoal.mock.calls.some((call) => call[2].status === 'blocked')).toBe(false);
+  });
+
   it('reads the flat v2 assistant record, audits it, and continues on the same model and agent', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const { calls } = v2OpenCode({
@@ -434,6 +816,28 @@ describe('session goal tick on v2 messages', () => {
     expect(continuation).toEqual([
       [`/api/session/${SESSION_ID}/prompt`, { text: expect.stringContaining('Finish the task') }],
     ]);
+    runtime.stop();
+  });
+
+  it.each([
+    ['continues in a session an agent runs for its own work', { kind: 'operator-child', parentID: 'ses_operator' }, 1],
+    ['leaves a workflow agent to its run', { kind: 'workflow-agent', parentID: 'ses_run' }, 0],
+  ])('%s', async (_label, link, continuations) => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { calls } = v2OpenCode({
+      messages: [
+        { id: 'msg_u1', sessionID: SESSION_ID, type: 'user', text: 'Finish the task', time: { created: 1 } },
+        assistantRecord(),
+      ],
+      sessionRecord: { metadata: { openchamber: link } },
+    });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }), providerID: 'anthropic', modelID: 'claude-haiku-5' }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+
+    await runTick(runtime);
+
+    expect(calls.filter((call) => call.method === 'POST' && call.path.endsWith('/prompt'))).toHaveLength(continuations);
     runtime.stop();
   });
 
@@ -566,13 +970,34 @@ describe('session goal tick on v2 messages', () => {
 describe('session goal tick and subagents', () => {
   const child = (id) => ({ id, parentID: SESSION_ID, time: { updated: 1 } });
 
-  it('waits while a subagent listed on a later page is still working', async () => {
+  it('audits with 450 historical subagents and no active sessions', async () => {
+    vi.useFakeTimers();
+    quiet();
+    try {
+      const childPages = Array.from({ length: 9 }, (_, page) =>
+        Array.from({ length: 50 }, (_, index) => child(`ses_old_${page}_${index}`)));
+      const server = v2OpenCode({ messages: [assistantRecord()], childPages });
+      const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+      const seam = wired({ openchamber: { goal: activeGoal() } });
+      const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+      await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(generate).toHaveBeenCalledTimes(1);
+      expect(seam.persistSessionGoal.mock.calls.at(-1)?.[2]).toMatchObject({ status: 'complete' });
+      expect(server.calls.filter((call) => call.path === '/api/session')).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits while a subagent among 450 historical children is still working', async () => {
     quiet();
     const generate = vi.fn();
     const server = v2OpenCode({
       messages: [assistantRecord()],
-      active: { ses_child_2: { status: 'running' } },
-      childPages: [[child('ses_child_1')], [child('ses_child_2')]],
+      active: { ses_old_8_49: { status: 'running' } },
+      childPages: Array.from({ length: 9 }, (_, page) =>
+        Array.from({ length: 50 }, (_, index) => child(`ses_old_${page}_${index}`))),
     });
     const { runtime } = makeRuntime({
       ...wired({ openchamber: { goal: activeGoal() } }),
@@ -580,8 +1005,8 @@ describe('session goal tick and subagents', () => {
       recheckMs: 1_000,
     });
     await runTick(runtime);
-    const listCalls = server.calls.filter((call) => call.path === '/api/session');
-    expect(listCalls.map((call) => call.query.parentID ?? call.query.cursor)).toEqual([SESSION_ID, 'page-1']);
+    expect(server.calls.some((call) => call.path === '/api/session/ses_old_8_49')).toBe(true);
+    expect(server.calls.some((call) => call.path === '/api/session')).toBe(false);
     expect(server.calls.some((call) => call.method === 'POST')).toBe(false);
     expect(generate).not.toHaveBeenCalled();
   });
@@ -604,7 +1029,7 @@ describe('session goal tick and subagents', () => {
 
     await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
     await vi.waitFor(() => {
-      expect(server.calls.some((call) => call.path === '/api/session' && call.query.parentID === SESSION_ID)).toBe(true);
+      expect(server.calls.some((call) => call.path === '/api/session/ses_child_1')).toBe(true);
     });
     expect(generate).not.toHaveBeenCalled();
 
@@ -616,29 +1041,10 @@ describe('session goal tick and subagents', () => {
     });
   });
 
-  it('audits once every subagent is idle', async () => {
-    quiet();
-    const server = v2OpenCode({
-      messages: [assistantRecord()],
-      childPages: [[child('ses_child_1')]],
-    });
-    const seam = wired({ openchamber: { goal: activeGoal() } });
-    const { runtime } = makeRuntime({
-      ...seam,
-      getSmallModelService: async () => ({
-        describeSmallModel: async () => ({ inputCharBudget: 20_000 }),
-        generateSmallModelText: async () => ({ text: smallModelSays({ all_done: true }) }),
-      }),
-    });
-    await runTick(runtime);
-    expect(server.calls.some((call) => call.path === '/api/session' && call.query.parentID === SESSION_ID)).toBe(true);
-    expect(seam.persistSessionGoal).toHaveBeenCalled();
-  });
-
-  it('does not treat an unreadable children list as "no subagents"', async () => {
+  it('does not treat an unreadable active session as "no subagents"', async () => {
     quiet();
     const generate = vi.fn();
-    const server = v2OpenCode({ messages: [assistantRecord()], childrenStatus: 500 });
+    const server = v2OpenCode({ messages: [assistantRecord()], active: { ses_child: { status: 'running' } }, childPages: [[child('ses_child')]], childrenStatus: 500 });
     const seam = wired({ openchamber: { goal: activeGoal() } });
     const { runtime } = makeRuntime({
       ...seam,
@@ -646,7 +1052,7 @@ describe('session goal tick and subagents', () => {
       recheckMs: 1_000,
     });
     await runTick(runtime);
-    expect(server.calls.some((call) => call.path === '/api/session')).toBe(true);
+    expect(server.calls.some((call) => call.path === '/api/session/ses_child')).toBe(true);
     expect(server.calls.some((call) => call.path.endsWith('/message'))).toBe(false);
     expect(server.calls.some((call) => call.method === 'POST')).toBe(false);
     expect(generate).not.toHaveBeenCalled();
@@ -679,14 +1085,21 @@ describe('session goal and background commands', () => {
   });
 
   it('does not wait for a command from an earlier round, such as a dev server', async () => {
-    quiet();
-    v2OpenCode({ messages: [userRecord, assistantRecord()], shells: [shell(2, 'bun run dev'), { ...shell(8), metadata: { sessionID: 'ses_other' } }] });
-    const seam = wired({ openchamber: { goal: activeGoal() } });
-    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
-    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      quiet();
+      v2OpenCode({ messages: [userRecord, assistantRecord()], shells: [shell(2, 'bun run dev'), { ...shell(8), metadata: { sessionID: 'ses_other' } }] });
+      const seam = wired({ openchamber: { goal: activeGoal() } });
+      const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+      const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
 
-    await runTick(runtime);
-    expect(generate).toHaveBeenCalledTimes(1);
+      await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(generate).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('audits the turn as it stands once the command has run for 30 minutes', async () => {
@@ -703,15 +1116,22 @@ describe('session goal and background commands', () => {
   });
 
   it('does not wait after an explicit Resume', async () => {
-    quiet();
-    v2OpenCode({ messages: [userRecord, assistantRecord()], shells: [shell(7)] });
-    const goal = activeGoal({ turnsUsed: 1, statusReason: 'resumed' });
-    const seam = wired({ openchamber: { goal } });
-    const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }) }));
-    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      quiet();
+      v2OpenCode({ messages: [userRecord, assistantRecord()], shells: [shell(7)] });
+      const goal = activeGoal({ turnsUsed: 1, statusReason: 'resumed' });
+      const seam = wired({ openchamber: { goal } });
+      const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }) }));
+      const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
 
-    await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal } });
-    await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+      await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal } });
+      await vi.advanceTimersByTimeAsync(250);
+      expect(generate).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not treat an unreadable command list as "nothing running"', async () => {
@@ -797,14 +1217,21 @@ describe('session goal and the job list of OpenCode 2.2.6+', () => {
   });
 
   it('does not wait for a command from an earlier round', async () => {
-    quiet();
-    v2OpenCode({ messages: [userRecord, assistantRecord()], jobs: [job('shell', 2)] });
-    const seam = wired({ openchamber: { goal: activeGoal() } });
-    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
-    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      quiet();
+      v2OpenCode({ messages: [userRecord, assistantRecord()], jobs: [job('shell', 2)] });
+      const seam = wired({ openchamber: { goal: activeGoal() } });
+      const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+      const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
 
-    await runTick(runtime);
-    expect(generate).toHaveBeenCalledTimes(1);
+      await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(generate).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -939,20 +1366,219 @@ describe('session goal progress check', () => {
     expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject({ status: 'active', auditFailStreak: 1 });
     expect(calls.some((call) => call.path.endsWith('/prompt') && call.method === 'POST')).toBe(true);
   });
+
+  it('makes the second failed progress check on its own and settles, without another session event', async () => {
+    vi.useFakeTimers();
+    try {
+      quiet();
+      v2OpenCode({ messages: [assistantRecord()] });
+      const upstreamFetch = globalThis.fetch;
+      vi.stubGlobal('fetch', vi.fn(async (input, init) => {
+        if (new URL(String(input)).pathname.endsWith('/prompt')) {
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return upstreamFetch(input, init);
+      }));
+
+      let stored = activeGoal();
+      const seam = {
+        readSessionMetadata: vi.fn(async () => ({ openchamber: { goal: stored } })),
+        persistSessionGoal: vi.fn(async (_sessionId, _directory, goal) => { stored = goal; }),
+      };
+      const generate = vi.fn(async () => ({ text: '{"verdict":"complete"}' }));
+      const { runtime } = makeRuntime({
+        ...seam,
+        getSmallModelService: async () => ({ generateSmallModelText: generate }),
+      });
+
+      await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: stored } });
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(generate).toHaveBeenCalledTimes(2);
+      expect(stored).toMatchObject({
+        status: 'blocked',
+        statusReason: 'progress audit unavailable',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('session goal recovery after an unchecked continuation', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    quiet();
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  // A checker that never answers, an OpenCode whose /prompt answers as
+  // `onPrompt` says, and a goal store the runtime really writes to.
+  const setup = ({ messages, active = {}, goal = activeGoal(), onPrompt = () => Response.json({}), listed = null, onMessages = () => null, sessionRead }) => {
+    const server = v2OpenCode({ messages, active: () => active.value ?? {}, sessionRead });
+    const upstream = globalThis.fetch;
+    const prompts = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/prompt')) {
+        prompts.push(url.pathname);
+        return onPrompt();
+      }
+      if (url.pathname.endsWith('/message')) {
+        const replaced = onMessages();
+        if (replaced) return replaced;
+      }
+      if (listed && url.pathname === '/api/session' && url.searchParams.get('parentID') === 'null') {
+        return Response.json({ data: listed(), cursor: {} });
+      }
+      return upstream(input, init);
+    }));
+    const store = { goal };
+    const seam = {
+      readSessionMetadata: vi.fn(async () => ({ openchamber: { goal: store.goal } })),
+      persistSessionGoal: vi.fn(async (_sessionId, _directory, next) => { store.goal = next; }),
+    };
+    const generate = vi.fn(async () => ({ text: 'not the asked-for JSON' }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    return { ...server, runtime, store, prompts, generate };
+  };
+
+  it('rechecks after a rejected continuation and settles without sending it again', async () => {
+    const test = setup({
+      messages: [assistantRecord()],
+      onPrompt: () => new Response('upstream down', { status: 502 }),
+    });
+
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: test.store.goal } });
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(test.generate).toHaveBeenCalledTimes(2);
+    expect(test.prompts).toHaveLength(1);
+    expect(test.store.goal).toMatchObject({ status: 'blocked', statusReason: 'progress audit unavailable', turnsUsed: 1 });
+  });
+
+  it('keeps rechecking through a busy turn that ends without an idle event, then audits its reply', async () => {
+    const messages = [assistantRecord()];
+    const active = { value: {} };
+    const test = setup({
+      messages,
+      active,
+      onPrompt: () => {
+        messages.push({ id: 'msg_u2', sessionID: SESSION_ID, type: 'user', text: 'Continue', time: { created: 30 } });
+        active.value = { [SESSION_ID]: { type: 'busy' } };
+        return Response.json({});
+      },
+    });
+
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: test.store.goal } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(test.prompts).toHaveLength(1);
+    test.runtime.processPayload({ type: 'session.status', properties: { sessionID: SESSION_ID, status: { type: 'busy' } } });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(test.generate).toHaveBeenCalledTimes(1);
+    expect(test.store.goal).toMatchObject({ status: 'active', auditFailStreak: 1 });
+
+    messages.push(assistantRecord({ id: 'msg_a2', time: { created: 31, completed: 40 } }));
+    active.value = {};
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(test.generate).toHaveBeenCalledTimes(2);
+    expect(test.prompts).toHaveLength(1);
+    expect(test.store.goal).toMatchObject({ status: 'blocked', statusReason: 'progress audit unavailable' });
+  });
+
+  it('after a restart, waits a bounded time for the reply to a pending continuation, then blocks without resending', async () => {
+    const goal = activeGoal({ turnsUsed: 1, auditFailStreak: 1, lastAccountedMessageID: 'msg_a1' });
+    const messages = [
+      assistantRecord(),
+      { id: 'msg_u2', sessionID: SESSION_ID, type: 'user', text: 'Continue', time: { created: 30 } },
+    ];
+    const test = setup({
+      messages,
+      goal,
+      listed: () => [{ id: SESSION_ID, location: { directory: '/repo' }, metadata: { openchamber: { goal } } }],
+    });
+
+    await test.runtime.recoverActiveGoals();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(test.store.goal).toMatchObject({ status: 'active' });
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(test.generate).not.toHaveBeenCalled();
+    expect(test.prompts).toHaveLength(0);
+    expect(test.store.goal).toMatchObject({
+      status: 'blocked',
+      statusReason: 'The continuation produced no reply to check. Send a message, or Resume to check again.',
+      turnsUsed: 1,
+      auditFailStreak: 0,
+    });
+
+    // Resume with the same stuck tail checks again instead of sitting on Evaluating.
+    test.store.goal = { ...test.store.goal, status: 'active', statusReason: 'resumed' };
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: test.store.goal } });
+    await vi.advanceTimersByTimeAsync(400);
+
+    expect(test.prompts).toHaveLength(0);
+    expect(test.store.goal).toMatchObject({
+      status: 'blocked',
+      statusReason: 'The continuation produced no reply to check. Send a message, or Resume to check again.',
+    });
+  });
+
+  it('rechecks when the tail cannot be read before the continuation, without sending it', async () => {
+    let messageReads = 0;
+    const test = setup({
+      messages: [assistantRecord()],
+      onMessages: () => {
+        messageReads += 1;
+        return messageReads === 2 ? new Response('unavailable', { status: 503 }) : null;
+      },
+    });
+
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: test.store.goal } });
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(test.generate).toHaveBeenCalledTimes(2);
+    expect(test.prompts).toHaveLength(0);
+    expect(test.store.goal).toMatchObject({ status: 'blocked', statusReason: 'progress audit unavailable' });
+  });
+
+  it('keeps rechecking when a busy event arrives while a recovery tick reads the session', async () => {
+    const goal = activeGoal({ turnsUsed: 1, auditFailStreak: 1, lastAccountedMessageID: 'msg_a1' });
+    const messages = [
+      assistantRecord(),
+      { id: 'msg_u2', sessionID: SESSION_ID, type: 'user', text: 'Continue', time: { created: 30 } },
+    ];
+    let release = () => {};
+    let gated = true;
+    const test = setup({
+      messages,
+      goal,
+      listed: () => [{ id: SESSION_ID, location: { directory: '/repo' }, metadata: { openchamber: { goal } } }],
+      sessionRead: () => (gated ? new Promise((resolve) => { release = resolve; }) : Promise.resolve()),
+    });
+
+    await test.runtime.recoverActiveGoals();
+    await vi.advanceTimersByTimeAsync(1);
+    test.runtime.processPayload({ type: 'session.status', properties: { sessionID: SESSION_ID, status: { type: 'busy' } } });
+    await vi.advanceTimersByTimeAsync(0);
+    gated = false;
+    release();
+    messages.push(assistantRecord({ id: 'msg_a2', time: { created: 31, completed: 40 } }));
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(test.generate).toHaveBeenCalledTimes(1);
+    expect(test.prompts).toHaveLength(0);
+    expect(test.store.goal).toMatchObject({ status: 'blocked', statusReason: 'progress audit unavailable' });
+  });
 });
 
 describe('session goal runtime', () => {
-  it('arms the loop when a goal starts, without waiting for an OpenCode event', async () => {
-    const seam = wired();
-    const { runtime, buildOpenCodeUrl } = makeRuntime(seam);
-
-    await runtime.notifyGoalChanged('ses_1', '/repo', { openchamber: { goal: activeGoal() } });
-    // The kickoff timer is armed; the directory came with the notification, so
-    // nothing had to be looked up.
-    expect(buildOpenCodeUrl).not.toHaveBeenCalled();
-    runtime.stop();
-  });
-
   it('looks the directory up when a UI patch does not name one', async () => {
     const seam = wired();
     const fetchMock = vi.fn(async () => new Response(
@@ -1015,18 +1641,6 @@ describe('session goal runtime', () => {
     runtime.processPayload(idle());
 
     expect(log).not.toHaveBeenCalled();
-  });
-
-  it('reads a user abort off the aborted idle event v2 produces', () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    const { runtime } = makeRuntime(wired());
-
-    // The old signal was an assistant message carrying MessageAbortedError;
-    // accepting the new one must not throw or be mistaken for a normal idle.
-    expect(() => runtime.processPayload({
-      type: 'session.idle',
-      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
-    })).not.toThrow();
   });
 
   it('rejects an HTML continuation response on the v2 prompt route', async () => {

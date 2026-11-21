@@ -2,7 +2,6 @@ import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
-import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
@@ -13,50 +12,48 @@ import { legacyChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import { useChatQuoteHighlightApi } from '../../hooks/chatQuoteHighlightStore';
 import { fileWithDiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { isWholeFileComment } from '@/components/comments/wholeFileComment';
+import { ReceivedPageCard } from '../../sharePages/received/ReceivedPageCard';
+import { readBrowserAnnotationPrompt } from '@/lib/browser/annotationPrompt';
+import { quoteDisplayText } from '@/lib/messages/quoteDisplayText';
 
-/**
- * A context item attached to a user message: an inline code comment, a
- * terminal selection, a browser annotation, or GitHub PR context.
- *
- * The quoted material renders as a messenger-style reply: a source caption and
- * the quote behind a plain left bar, in muted text, clamped to a few lines
- * (click toggles the full quote). The user's comment follows below as regular
- * message text, so the pair reads as "a reply to this quote" instead of a
- * boxed widget inside the bubble.
- */
+
+const QUOTE_BAR_CLASS = 'border-s-3 border-primary/45 ps-3';
 
 const ContextCard: React.FC<{
     icon: IconName;
     summary: string;
-    /** Full untruncated context, shown on hover. */
     title?: string;
     body: string;
     text: string;
-    /** Render the quote in the code font (code, terminal output, CI logs). */
     mono?: boolean;
-    /**
-     * Message-level collapse: with collapsible messages on, the whole user
-     * message (text parts and cards alike) shares one expanded state, so a
-     * collapsed card is a two-line preview and a click asks the message to
-     * expand instead of toggling anything of its own.
-     */
+    captionless?: boolean;
     collapsed?: boolean;
     onExpand?: () => void;
-    /** Scroll to where the quote came from, with the button's label. */
     reveal?: { label: string; onReveal: () => void };
-    /** The message's file names: `[name]` in the user's comment renders as a file chip. */
     attachmentFilenames: readonly string[];
-}> = ({ icon, summary, title, body, text, mono, collapsed, onExpand, reveal, attachmentFilenames }) => {
+}> = ({ icon, summary, title, body, text, mono, captionless, collapsed, onExpand, reveal, attachmentFilenames }) => {
     const [expanded, setExpanded] = React.useState(false);
     const hasBody = body.trim().length > 0;
     const hasText = text.trim().length > 0;
+    const showCaption = !captionless || !hasBody;
+    const caption = (
+        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <Icon name={icon} className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{summary}</span>
+        </div>
+    );
+    const comment = hasText ? (
+        <div
+            className={cn(
+                'mt-1.5 break-words font-sans text-sm text-[var(--surface-foreground)]',
+                collapsed ? 'truncate' : 'whitespace-pre-wrap'
+            )}
+        >
+            {withAttachmentChips(text.trim(), attachmentFilenames, 'comment')}
+        </div>
+    ) : null;
 
     if (collapsed) {
-        // One line per attachment: the source caption, and the user's comment
-        // after it when there is one ("Quoted from an earlier message: thanks,
-        // that settles it"). Attachments without a comment (terminal output
-        // and the like) collapse to the caption alone.
-        const comment = text.trim();
         const handleKeyDown = (event: React.KeyboardEvent): void => {
             if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();
@@ -64,59 +61,56 @@ const ContextCard: React.FC<{
         };
         return (
             <div
-                className="my-1 flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 border-s-2 border-[var(--interactive-border)] ps-3 text-xs text-muted-foreground"
+                className="my-3 min-w-0 max-w-full cursor-pointer"
                 role="button"
                 tabIndex={0}
                 onClick={onExpand}
                 onKeyDown={handleKeyDown}
                 title={title}
             >
-                <Icon name={icon} className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">
-                    {comment.length > 0 ? `${summary}: ` : summary}
-                    {comment.length > 0 ? (
-                        <span className="text-sm text-[var(--surface-foreground)]">{withAttachmentChips(comment, attachmentFilenames, 'comment')}</span>
-                    ) : null}
-                </span>
-                <Icon name="arrow-down-s" className="ms-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <div className={QUOTE_BAR_CLASS}>
+                    {showCaption ? caption : (
+                        <div className="truncate text-sm text-muted-foreground">
+                            <span className="sr-only">{summary}: </span>
+                            {body.trim().split('\n')[0]}
+                        </div>
+                    )}
+                </div>
+                {comment}
             </div>
         );
     }
 
+    const activateQuote = reveal ? reveal.onReveal : () => setExpanded((value) => !value);
+    const handleQuoteKeyDown = (event: React.KeyboardEvent): void => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        activateQuote();
+    };
+
     return (
-        <div className="my-1.5 min-w-0 max-w-full">
+        <div className="my-3 min-w-0 max-w-full">
             <div
-                className={cn('min-w-0 border-s-2 border-[var(--interactive-border)] ps-3', hasBody && 'cursor-pointer')}
-                onClick={hasBody ? () => setExpanded((value) => !value) : undefined}
-                title={title}
+                className={cn(
+                    'min-w-0',
+                    QUOTE_BAR_CLASS,
+                    hasBody && 'cursor-pointer',
+                    reveal && hasBody && 'text-muted-foreground transition-colors hover:text-foreground',
+                )}
+                role={hasBody ? 'button' : undefined}
+                tabIndex={hasBody ? 0 : undefined}
+                onClick={hasBody ? activateQuote : undefined}
+                onKeyDown={hasBody ? handleQuoteKeyDown : undefined}
+                title={reveal?.label ?? title}
             >
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Icon name={icon} className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{summary}</span>
-                    {reveal ? (
-                        <HoverTooltip label={reveal.label}>
-                            <button
-                                type="button"
-                                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full hover:bg-interactive-hover hover:text-foreground"
-                                style={{ minHeight: 0, minWidth: 0 }}
-                                onClick={(event) => {
-                                    event.stopPropagation();
-                                    reveal.onReveal();
-                                }}
-                                aria-label={reveal.label}
-                                // Empty: keeps the card's native title off this button.
-                                title=""
-                            >
-                                <Icon name="arrow-up" className="h-3.5 w-3.5" />
-                            </button>
-                        </HoverTooltip>
-                    ) : null}
-                </div>
+                {showCaption ? caption : <span className="sr-only">{summary}</span>}
                 {hasBody ? (
                     <div
                         className={cn(
-                            'mt-1 whitespace-pre-wrap break-words text-muted-foreground',
+                            'whitespace-pre-wrap break-words',
+                            !reveal && 'text-muted-foreground',
                             mono ? 'font-mono text-xs leading-5' : 'text-sm',
+                            showCaption && 'mt-1',
                             !expanded && 'line-clamp-4'
                         )}
                     >
@@ -124,11 +118,7 @@ const ContextCard: React.FC<{
                     </div>
                 ) : null}
             </div>
-            {hasText ? (
-                <div className="mt-1.5 whitespace-pre-wrap break-words font-sans text-sm text-[var(--surface-foreground)]">
-                    {withAttachmentChips(text, attachmentFilenames, 'comment')}
-                </div>
-            ) : null}
+            {comment}
         </div>
     );
 };
@@ -140,14 +130,12 @@ const basename = (path: string): string => {
 
 const UserContextPart: React.FC<{
     payload: ContextPartPayload;
-    /** Message-level collapse state, shared with the text parts. */
     collapsed?: boolean;
     onExpand?: () => void;
     attachmentFilenames: readonly string[];
 }> = ({ payload, collapsed, onExpand, attachmentFilenames }) => {
     const { t } = useI18n();
     const quoteHighlights = useChatQuoteHighlightApi();
-    // A part without a provider was written before providers other than GitHub existed: a pull request.
     const changeRequestTerm = useChangeRequestTerm(payload.kind === 'pr-comment' || payload.kind === 'pr-check' ? payload.provider : null);
     const shared = { collapsed, onExpand, attachmentFilenames };
 
@@ -183,17 +171,19 @@ const UserContextPart: React.FC<{
                     {...shared}
                 />
             );
-        case 'browser-annotation':
+        case 'browser-annotation': {
+            const annotation = readBrowserAnnotationPrompt(payload.prompt);
             return (
                 <ContextCard
                     icon="global"
                     summary={t('chat.message.context.browserAnnotation', { page: payload.pageUrl })}
                     title={payload.pageUrl}
-                    body={payload.prompt}
-                    text={payload.text}
+                    body={annotation.texts.join('\n') || annotation.page || ''}
+                    text={payload.text || annotation.comment || ''}
                     {...shared}
                 />
             );
+        }
         case 'pr-comment':
             return (
                 <ContextCard
@@ -230,8 +220,9 @@ const UserContextPart: React.FC<{
                 <ContextCard
                     icon="chat-1"
                     summary={t('chat.message.context.chatQuote')}
-                    body={payload.quote}
+                    body={quoteDisplayText(payload.quote)}
                     text={payload.text}
+                    captionless
                     reveal={quoteHighlights && sourceMessageId
                         ? {
                             label: t('chat.message.context.showQuoteSource'),
@@ -250,8 +241,9 @@ const UserContextPart: React.FC<{
         case 'guest-pr':
         case 'session':
         case 'session-message':
-            // Rendered as link attachments by normalizeUserDisplayParts.
             return null;
+        case 'shared-page':
+            return <ReceivedPageCard payload={payload} />;
     }
 };
 

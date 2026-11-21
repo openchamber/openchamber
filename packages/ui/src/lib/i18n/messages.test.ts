@@ -57,6 +57,19 @@ describe('i18n dictionaries', () => {
       }
     }
   });
+
+  test('monthly spending labels and the unknown amount are translated in every locale', () => {
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      expect(dictionary['quota.window.monthlyTotal']).toBeTruthy();
+      expect(dictionary['quota.window.monthlyByok']).toContain('BYOK');
+      expect(dictionary['quota.value.unknown']).toBeTruthy();
+      if (locale !== 'en') {
+        expect(dictionary['quota.window.monthlyTotal']).not.toBe(enDict['quota.window.monthlyTotal']);
+        expect(dictionary['quota.window.monthlyByok']).not.toBe(enDict['quota.window.monthlyByok']);
+        expect(dictionary['quota.value.unknown']).not.toBe(enDict['quota.value.unknown']);
+      }
+    }
+  });
   test('repository links name either provider in every locale', () => {
     for (const dictionary of Object.values(localeDictionaries)) {
       expect(dictionary['gitView.header.openRepository']).toContain('{provider}');

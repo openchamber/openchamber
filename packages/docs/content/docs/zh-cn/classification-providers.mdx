@@ -22,7 +22,7 @@ Jev 从不写代码，也不会在你的聊天里回复。它只返回一个判�
 
 ## 设置
 
-在你开启之前，Jev 一直是关闭的：除非你选了一个分类提供方，否则你的对话内容不会发给任何分类提供方。打开 **设置 → 提供商 → 分类提供方**，选择 Jev 请求发往哪里。除了 **关闭**，共有六个选项。
+在你开启之前，Jev 一直是关闭的：除非你选了一个分类提供方，否则你的对话内容不会发给任何分类提供方。打开 **设置 → 提供商 → 分类提供方**，选择 Jev 请求发往哪里。除了 **关闭**，共有七个选项。
 
 ### OpenCode Zen 促销
 
@@ -52,6 +52,17 @@ Jev 从不写代码，也不会在你的聊天里回复。它只返回一个判�
 
 1. 打开 **设置 → 提供商**，给 **Vercel AI Gateway** 提供商添加一个 API 密钥。
 2. 回到 **分类提供方**，选择 **Vercel AI Gateway 密钥**。
+
+### Google Gemini
+
+通过 Google 的 Decisions API 使用 Google 自己的判定模型 Gemini Decision 1，费用记在你的 Google 账户上。OpenChamber 问它的问题和问 Jev 的一样。在 Google 的免费层级，Google 可能会用收到的内容改进其产品（[Gemini API 条款](https://ai.google.dev/gemini-api/terms#data-use-unpaid)）。
+
+1. 在 [Google AI Studio](https://aistudio.google.com/apikey) 获取一个 API 密钥。
+2. 把它粘贴到 **Gemini API 密钥** 输入框，然后点 **保存**。
+
+保存密钥的同时也会选中它。密钥单独存放在 OpenChamber 服务器上的一个文件里，从不发送到浏览器。
+
+如果 OpenCode 里的 **Google** 提供商已经有 API 密钥，可以跳过这个输入框，直接选择 **Google Gemini**。`GOOGLE_API_KEY`、`GOOGLE_GENERATIVE_AI_API_KEY` 或 `GEMINI_API_KEY` 里的密钥也可以用。保存在 OpenChamber 里的密钥优先于这两者。如果你只想把 Gemini 用于判定，就把密钥放在 OpenChamber 里：放在 OpenCode Google 提供商里的密钥还会在 OpenCode 中开放所有 Gemini 聊天模型，而 Gemini API 密钥无法限定到单个模型。
 
 ### TypeSafe API 密钥
 
@@ -90,7 +101,7 @@ OPENCHAMBER_JEV_API_KEY=...             # 可选
 
 ## 当你选的提供方不能用时
 
-如果你选的提供方无法使用（促销结束了、密钥被删了），OpenChamber 会改用你自己的密钥中第一个可用的：先 TypeSafe 密钥，再你的自定义端点，再 OpenRouter，再 Vercel AI Gateway，再 Zen 密钥。它绝不会退回到促销，**关闭** 也会保持关闭。页面会显示当前用的是哪一个。
+如果你选的提供方无法使用（促销结束了、密钥被删了），OpenChamber 会改用你自己的密钥中第一个可用的：先 TypeSafe 密钥，再你的自定义端点，再 OpenRouter，再 Vercel AI Gateway，再 Zen 密钥。它绝不会退回到促销或 Google Gemini，**关闭** 也会保持关闭。页面会显示当前用的是哪一个。
 
 即使 Jev 在某次请求中响应慢或出错，也不会有东西坏掉。每个功能都为这种情况准备了安全的处理方式：
 
@@ -101,9 +112,9 @@ OPENCHAMBER_JEV_API_KEY=...             # 可选
 
 ## Jev 能看到什么
 
-Jev 只拿到对话的简短摘录：你最新的一条消息，以及作为上下文的最多前三轮，每段都截取开头的几百个字符。对于安全网，它还会拿到被检查的操作，也就是 OpenCode 描述的样子：智能体想运行的命令，或者编辑时的文件和改动。它永远拿不到完整文件或图片。
+Jev 会拿到你最新的一条消息，以及作为上下文的近期对话摘录：最多前三轮，每段截取到几百个字符；一轮结束时，还有智能体回答的开头和结尾。对于安全网，它还会拿到智能体请求许可的操作，也就是 OpenCode 描述的样子：智能体想运行的命令，或者编辑时的文件和改动。智能体新建文件时，这个改动就是整个文件，包括以文本写成的图片，例如 SVG。Jev 检查目标时，会拿到目标和智能体的最后一个回答，最多 10,000 个字符。
 
-请求会根据你的选择，从 OpenChamber 服务器直接发往 OpenCode Zen、OpenRouter、Vercel AI Gateway、TypeSafe 或你的自定义端点。
+请求会根据你的选择，从 OpenChamber 服务器直接发往 OpenCode Zen、OpenRouter、Vercel AI Gateway、Google、TypeSafe 或你的自定义端点。
 
 ## 在哪里可用
 

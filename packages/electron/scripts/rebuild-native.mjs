@@ -133,9 +133,6 @@ const ensureWindowsNodeAddonApiForNodePty = async (rebuildRootPath) => {
 
 console.log(`[electron] rebuilding native modules against Electron ${electronVersion}...`);
 
-// Rebuild against the hoisted root node_modules (bun workspace layout).
-// force=true re-links regardless of cached state; prebuild-install lookup is
-// bypassed by @electron/rebuild in favor of direct node-gyp builds.
 const rebuildPath = createWindowsRebuildPath(repoRoot);
 let cleanupNodeAddonApi = async () => {};
 try {

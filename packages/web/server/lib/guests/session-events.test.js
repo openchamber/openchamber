@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { vi } from 'vitest';
 import { translateWireEvent } from '../event-stream/translate-v2.js';
 
 import {
@@ -32,7 +33,7 @@ const reader = (overrides = {}) => subscriber({
 const idle = (sessionID = 'ses_1', extra = {}) => ({ type: 'session.idle', id: 'evt_idle', created: 1_000, properties: { sessionID, directory: '/repo', ...extra } });
 
 /** The fakes one runtime needs: a catalog, a service proxy, OpenCode reads and manual timers. */
-const harness = ({ catalog = [subscriber()], sessions = {}, active = {}, children = {}, metadata = {}, reply = 'Done.', autoAccept = async () => false, inAutoReview = () => false, answer, beforeFetch = async () => {}, metadataRead } = {}) => {
+const harness = ({ catalog = [subscriber()], sessions = {}, active = {}, metadata = {}, reply = 'Done.', autoAccept = async () => false, inAutoReview = () => false, answer, beforeFetch = async () => {}, metadataRead } = {}) => {
   const calls = [];
   const warnings = [];
   const fetched = [];
@@ -46,12 +47,8 @@ const harness = ({ catalog = [subscriber()], sessions = {}, active = {}, childre
   const fetchImpl = async (url) => {
     fetched.push(url);
     await beforeFetch(url);
-    const { pathname, searchParams } = new URL(url);
+    const { pathname } = new URL(url);
     if (pathname === '/api/session/active') return Response.json({ data: active });
-    if (pathname === '/api/session') {
-      const parent = searchParams.get('parentID');
-      return Response.json({ data: (children[parent] ?? []).map((id) => ({ id })), cursor: {} });
-    }
     const match = pathname.match(/^\/api\/session\/([^/]+)$/);
     if (match) {
       const record = sessions[decodeURIComponent(match[1])];
@@ -216,7 +213,7 @@ describe('turn-finished', () => {
   });
 
   test('a stopped turn, a second idle of the same turn, a child still working, a goal step and an auto-review step announce nothing', async () => {
-    const h = harness({ active: { ses_child: { type: 'busy' } }, children: { ses_1: ['ses_child'] } });
+    const h = harness({ active: { ses_child: { type: 'busy' } }, sessions: { ses_child: { id: 'ses_child', parentID: 'ses_1' } } });
     h.runtime.processPayload(idle('ses_1', { aborted: true }));
     h.runtime.processPayload(idle('ses_1'));
     await settle();
@@ -619,11 +616,23 @@ describe('session lifecycle events', () => {
   });
 
   test('archiving announces, restoring does not', async () => {
-    const { runtime, calls } = harness({ catalog: [lifecycle()] });
-    runtime.processPayload({ type: 'openchamber:session-archived', properties: { sessionID: 'ses_1', archivedAt: null } }, '');
-    runtime.processPayload({ type: 'openchamber:session-archived', properties: { sessionID: 'ses_1', archivedAt: 5 } }, '');
-    await settle();
-    expect(typesPosted(calls)).toEqual(['session-archived']);
+    vi.useFakeTimers();
+    const settleEvents = async () => {
+      const pending = settle();
+      await vi.runAllTimersAsync();
+      await pending;
+    };
+    try {
+      const { runtime, calls } = harness({ catalog: [lifecycle()] });
+      runtime.processPayload({ type: 'openchamber:session-archived', properties: { sessionID: 'ses_1', archivedAt: null } }, '');
+      await settleEvents();
+      expect(typesPosted(calls)).toEqual([]);
+      runtime.processPayload({ type: 'openchamber:session-archived', properties: { sessionID: 'ses_1', archivedAt: 5 } }, '');
+      await settleEvents();
+      expect(typesPosted(calls)).toEqual(['session-archived']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test('an archive is announced once whoever reports it, and again after a restore or a while', async () => {

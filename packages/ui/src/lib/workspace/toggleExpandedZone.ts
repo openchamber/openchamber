@@ -1,20 +1,12 @@
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { canZoneExpand, getZoneView, resolveZoneActiveTabId, zoneOfMode, type ContextZone } from './zones';
 
-// The right zone first: it is the panel people mean when nothing says otherwise.
 const ZONE_PREFERENCE: readonly ContextZone[] = ['right', 'left', 'bottom'];
 
 const isContextZone = (value: string | null | undefined): value is ContextZone => (
   value === 'left' || value === 'right' || value === 'bottom'
 );
 
-/**
- * The expand shortcut and menu item, for whatever surface a zone shows: an
- * expanded zone collapses; else the zone that holds focus expands, else the
- * first one on screen (right, left, bottom); with none on screen the right
- * zone's last surface opens, expanded. A zone showing only the file tree
- * cannot expand, so it is skipped, and its suspended flag is left alone.
- */
 export const toggleExpandedContextZone = (directory: string | null): void => {
   if (!directory) return;
   const key = normalizeContextPanelDirectoryKey(directory);
@@ -35,8 +27,6 @@ export const toggleExpandedContextZone = (directory: string | null): void => {
     return;
   }
 
-  // Nothing to expand on screen: open the right zone's last surface, or Git
-  // wherever it is placed, and expand the zone it opened in.
   const rightTabId = panel
     ? resolveZoneActiveTabId(panel.tabs, state.contextSurfaceZones, 'right', getZoneView(panel, 'right').activeTabId)
     : null;
@@ -45,7 +35,6 @@ export const toggleExpandedContextZone = (directory: string | null): void => {
   const zone = rightTabId ? 'right' : zoneOfMode(state.contextSurfaceZones, 'git');
   const opened = useUIStore.getState();
   const openedPanel = opened.contextPanelByDirectory[key];
-  // A closed zone can keep a stale expanded flag; expand, never toggle it off.
   if (openedPanel && canZoneExpand(openedPanel, opened, zone) && !getZoneView(openedPanel, zone).expanded) {
     opened.toggleContextPanelExpanded(key, zone);
   }

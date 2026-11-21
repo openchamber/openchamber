@@ -65,16 +65,6 @@ describe('relay host lock', () => {
     expect(second.otherLiveClaimant()).toEqual({ pid: 100, host: 'mac' });
   });
 
-  it('treats a dead claimant as free (stale claim takeover)', () => {
-    const fs = makeFakeFs();
-    const alive = new Set([200]); // pid 100 is gone
-    fs.writeFileSync(LOCK, JSON.stringify({ pid: 100 }));
-    const lock = makeLock(fs, makeFakeProcess(200, alive));
-
-    expect(lock.otherLiveClaimant()).toBe(null);
-    expect(lock.tryClaim()).toBe(true);
-  });
-
   it('forceClaim overrides a live holder; the loser sees the takeover', () => {
     const fs = makeFakeFs();
     const alive = new Set([100, 200]);

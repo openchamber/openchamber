@@ -42,7 +42,7 @@ describe('extension usage providers follow the catalog', () => {
     const h = harness();
     await h.quotas.reconcile();
     expect(h.ids()).toEqual(['ext-teapot-usage']);
-    expect(h.attached.get('ext-teapot-usage')).toMatchObject({ providerName: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage' });
+    expect(h.attached.get('ext-teapot-usage')).toMatchObject({ providerName: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage', providers: ['teapot'] });
     expect(h.emitChanged).toHaveBeenCalledTimes(1);
     const first = h.attached.get('ext-teapot-usage');
 
@@ -112,11 +112,12 @@ describe('extension usage providers follow the catalog', () => {
     expect(h.state.proxied).toBe(1);
 
     // The administrator turns the mode on with this extension outside the allowlist. Nothing announced it yet: the next call refuses before sending.
+    const providersChanged = Promise.withResolvers();
+    h.emitChanged.mockImplementationOnce(() => { providersChanged.resolve(); });
     h.state.catalog = [underPolicy(guest, blocked)];
     expect(await provider.fetchQuota()).toMatchObject({ ok: false, configured: true, error: expect.stringContaining('may no longer report usage') });
     expect(h.state.proxied).toBe(1);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await h.quotas.reconcile();
+    await providersChanged.promise;
     expect(h.ids()).toEqual([]);
 
     // Added to the allowlist: the card is back and the credentials cross again.

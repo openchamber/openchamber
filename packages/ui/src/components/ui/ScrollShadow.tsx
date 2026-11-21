@@ -11,6 +11,7 @@ type ScrollShadowProps = React.HTMLAttributes<HTMLElement> & {
   hideTopShadow?: boolean;
   hideBottomShadow?: boolean;
   observeMutations?: boolean;
+  surface?: string;
   onVisibilityChange?: (state: ScrollShadowVisibility) => void;
 };
 
@@ -37,6 +38,7 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
         hideTopShadow = false,
         hideBottomShadow = false,
         observeMutations = true,
+        surface,
         onVisibilityChange,
         style,
         className,
@@ -68,13 +70,16 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
       onVisibilityChange,
     });
 
+    const mergedRef = React.useMemo(() => mergeRefs(internalRef, ref), [ref]);
+
     return (
       <Component
         {...rest}
-        ref={mergeRefs(internalRef, ref)}
+        ref={mergedRef}
         className={className}
         data-orientation={orientation}
         data-scroll-shadow={dataScrollShadow ?? true}
+        data-scroll-fade-bands={surface ? true : undefined}
         style={mergedStyle}
       >
         {children}
@@ -84,3 +89,14 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
 );
 
 ScrollShadow.displayName = "ScrollShadow";
+
+export function ScrollShadowBands({ surface, size = 48 }: { surface: string; size?: number }) {
+  // SAFETY: custom properties the band classes read.
+  const style = { "--scroll-fade-surface": surface, "--scroll-shadow-size": `${size}px` } as React.CSSProperties;
+  return (
+    <>
+      <div aria-hidden="true" className="scroll-fade-band scroll-fade-band--top" style={style} />
+      <div aria-hidden="true" className="scroll-fade-band scroll-fade-band--end" style={style} />
+    </>
+  );
+}

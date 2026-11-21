@@ -30,6 +30,7 @@ const emptyPersonal: PersonalProjectSetup = {
   draftStarters: [],
   hiddenSharedActionIds: [],
   sharedTrust: null,
+  notesTodosInRepository: false,
 };
 
 const projectIdFor = (projectPath: string): string => `path_${Buffer.from(projectPath, 'utf8').toString('base64url')}`;
@@ -70,6 +71,7 @@ describe('project setup sanitizers', () => {
       projectActions: [{ id: 'a', name: 'A', command: 'x' }],
       projectActionsPrimaryId: 'missing',
       hiddenSharedActionIds: ['dev', 'dev', 3],
+      notesTodosInRepository: true,
     }), {
       setupWorktree: ['bun install'],
       setupWorktreeWait: true,
@@ -81,6 +83,7 @@ describe('project setup sanitizers', () => {
       draftStarters: [],
       hiddenSharedActionIds: ['dev'],
       sharedTrust: null,
+      notesTodosInRepository: true,
     });
     assert.deepEqual(personalProjectSetupOf(null), emptyPersonal);
   });
@@ -151,6 +154,9 @@ describe('project setup sanitizers', () => {
     assert.throws(() => projectSetupPatchToStored({ setupWorktree: 'x' }), ProjectSetupValidationError);
     assert.throws(() => projectSetupPatchToStored(null), ProjectSetupValidationError);
     assert.deepEqual(projectSetupPatchToStored({ projectActionsPrimaryId: null }), { projectActionsPrimaryId: undefined });
+    assert.deepEqual(projectSetupPatchToStored({ notesTodosInRepository: true }), { notesTodosInRepository: true });
+    assert.deepEqual(projectSetupPatchToStored({ notesTodosInRepository: false }), { notesTodosInRepository: undefined });
+    assert.throws(() => projectSetupPatchToStored({ notesTodosInRepository: 'yes' }), ProjectSetupValidationError);
   });
 });
 

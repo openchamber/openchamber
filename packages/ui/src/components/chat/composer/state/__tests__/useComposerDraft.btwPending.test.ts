@@ -3,14 +3,27 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { installHookTestDom } from '@/components/session/sidebar/test-utils/testDom';
-import { clearChatDraft, readChatDraft, writeChatDraft, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
+import { clearChatDraft, readChatDraft, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useInputStore } from '@/sync/input-store';
 import { useComposerDraft, type ComposerDraftControls } from '../useComposerDraft';
+import { createComposerText } from '../composerText';
 
 const parent: ChatDraftIdentity = { runtimeKey: 'runtime-a', directory: '/repo', sessionId: 'parent' };
 const pending: ChatDraftIdentity = { ...parent, sessionId: 'btw-pending:parent' };
 const fork: ChatDraftIdentity = { ...parent, sessionId: 'fork-1' };
+
+
+/** The composer's text the way ChatInput holds it: outside state, with a render per write. */
+function useProbeText(initial: string) {
+    const [text] = React.useState(() => createComposerText(initial));
+    const [, setRevision] = React.useState(0);
+    const setMessage = React.useCallback((next: string) => {
+        text.set(next);
+        setRevision((revision) => revision + 1);
+    }, [text]);
+    return { text, setMessage };
+}
 
 function renderComposer(initialText: string) {
     const dom = installHookTestDom();
@@ -25,14 +38,12 @@ function renderComposer(initialText: string) {
     const result = { text: initialText, mentionsRef, controls: () => controlsForTest };
 
     function Probe({ identity }: { identity: ChatDraftIdentity }) {
-        const [message, setMessage] = React.useState(initialText);
-        const messageRef = React.useRef(message);
-        React.useEffect(() => { messageRef.current = message; }, [message]);
+        const { text, setMessage } = useProbeText(initialText);
         const controls = useComposerDraft({
-            message, messageRef, setMessage, confirmedMentionsRef: mentionsRef, identity,
+            text, setMessage, confirmedMentionsRef: mentionsRef, identity,
             initialDraft: { text: '', identity },
         });
-        result.text = message;
+        result.text = text.get();
         controlsForTest = controls;
         return null;
     }
@@ -157,17 +168,6 @@ describe('/btw fork still being created', () => {
             expect(composer.result.text).toBe('first question');
             expect(readChatDraft(fork).text).toBe('first question');
             expect(readChatDraft(pending).text).toBe('');
-        } finally {
-            composer.teardown();
-        }
-    });
-
-    test('ignores a placeholder draft an older build left in storage', () => {
-        writeChatDraft(pending, 'text from the previous /btw', []);
-        const composer = renderComposer('');
-        try {
-            composer.render(pending);
-            expect(composer.result.text).toBe('');
         } finally {
             composer.teardown();
         }

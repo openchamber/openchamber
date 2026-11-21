@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import fsPromises from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,9 +18,10 @@ class TestError extends Error {
 
 let actions;
 let runtime;
+let rootDir;
 
 beforeEach(async () => {
-  const rootDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-memory-actions-'));
+  rootDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-memory-actions-'));
   runtime = createAgentMemoryRuntime({
     fsPromises,
     path,
@@ -32,6 +33,63 @@ beforeEach(async () => {
     createError: (message, status) => new TestError(message, status),
     resolveProjectId: async (directory) => createProjectIdFromPath(directory),
   });
+});
+
+afterEach(async () => {
+  await fsPromises.rm(rootDir, { recursive: true, force: true });
+});
+
+describe('storage integrity through the dispatcher', () => {
+  for (const operation of ['create', 'update', 'delete']) {
+    test.each([
+      ['missing entries', '{}'],
+      ['wrong entries type', '{"entries":{}}'],
+      ['malformed JSON', '{ broken'],
+      ['array document', '[]'],
+      ['null document', 'null'],
+    ])(`${operation} preserves %s bytes, then permits a restored store to mutate`, async (_label, raw) => {
+      const saved = await actions.execute('memory.save', { scope: 'global', title: 'Keep', body: 'Original text' }, DIRECTORY);
+      const filePath = runtime.resolveTarget({ scope: 'global' }).filePath;
+      const valid = await fsPromises.readFile(filePath);
+      const memoryId = saved.memory.memoryId;
+      const [action, input] = {
+        create: ['memory.save', { scope: 'global', title: 'New', body: 'New text' }],
+        update: ['memory.save', { scope: 'global', memoryId, title: 'Keep', body: 'Changed text' }],
+        delete: ['memory.delete', { scope: 'global', memoryId }],
+      }[operation];
+      await fsPromises.writeFile(filePath, raw);
+      const before = await fsPromises.readFile(filePath);
+      await expect(actions.execute(action, input, DIRECTORY)).rejects.toThrow('malformed');
+      expect(await fsPromises.readFile(filePath)).toEqual(before);
+
+      await fsPromises.writeFile(filePath, valid);
+      await actions.execute(action, input, DIRECTORY);
+      expect(await fsPromises.readFile(filePath)).not.toEqual(valid);
+    });
+  }
+
+  for (const scope of ['global', 'project']) {
+    test.each(['{}', '{"entries":null}', '{ broken', '[]'])(`list keeps the healthy scope when ${scope} contains %s`, async (raw) => {
+      await actions.execute('memory.save', { scope: 'global', title: 'User', body: 'User text' }, DIRECTORY);
+      await actions.execute('memory.save', { scope: 'project', title: 'Project', body: 'Project text' }, DIRECTORY);
+      const projectId = createProjectIdFromPath(DIRECTORY);
+      const filePath = runtime.resolveTarget({ scope, projectId }).filePath;
+      await fsPromises.writeFile(filePath, raw);
+      const before = await fsPromises.readFile(filePath);
+
+      const listed = await actions.execute('memory.list', {}, DIRECTORY);
+      expect(listed.memories.map((entry) => [entry.title, entry.scope])).toEqual(
+        scope === 'global' ? [['Project', 'project']] : [['User', 'global']],
+      );
+      expect(listed.globalUnavailable).toBe(scope === 'global' ? true : undefined);
+      expect(listed.projectUnavailable).toBe(scope === 'project' ? true : undefined);
+      const all = await runtime.readAll(projectId);
+      expect(all.globalFailed).toBe(scope === 'global');
+      expect(all.projectFailed).toBe(scope === 'project');
+      await expect(actions.execute('memory.read', { title: 'Absent' }, DIRECTORY)).rejects.toThrow('could not be read');
+      expect(await fsPromises.readFile(filePath)).toEqual(before);
+    });
+  }
 });
 
 describe('scope', () => {

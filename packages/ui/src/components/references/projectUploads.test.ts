@@ -46,6 +46,142 @@ describe('rewriteProjectUploads', () => {
   });
 });
 
+describe('GitHub attachments', () => {
+  const context: SourceControlReadContext = {
+    provider: 'github', instance: 'github.com', directory: '/repo', repositoryId: 'repo', accountId: 'account', bindingRevision: 3, primaryRemote: 'origin',
+  };
+  const tunnel: RelayTunnelClient = {
+    fetch: async () => new Response(),
+    openWebSocket() { throw new Error('unused'); },
+    getStatus: () => ({ state: 'connected' }),
+    subscribeStatus: () => () => undefined,
+    retry: () => undefined,
+    close: () => undefined,
+  };
+  const originalWindow = globalThis.window;
+
+  beforeEach(() => {
+    Object.assign(globalThis, { window: new Window({ url: 'https://localhost/index.html' }) });
+    configureRuntimeUrlResolver({ apiBaseUrl: 'https://localhost' });
+  });
+  afterEach(() => {
+    deactivateRelayTunnel();
+    Object.assign(globalThis, { window: originalWindow });
+  });
+
+  const routeTarget = (output: string, name: string) => {
+    const match = new RegExp(`/api/source-control/github/uploads/([A-Za-z0-9_-]+)/${name}\\?`).exec(output);
+    return match ? Buffer.from(match[1]!, 'base64url').toString('utf8') : null;
+  };
+
+  test('reads a private blob link and a pasted screenshot through the bound account', () => {
+    const urls = uploadUrls(context, { owner: 'acme', repo: 'app', source: 'origin' }, true);
+    const markdown = [
+      '![iPad](https://github.com/acme/app/blob/e81f2ed/docs/ipad-landscape.png?raw=true)',
+      '![shot](https://github.com/user-attachments/assets/47f9b551-5ecf-4bb0-9122-0c1b8302e1b9)',
+      '<img src="https://raw.githubusercontent.com/acme/app/main/docs/menu.png" width="300">',
+    ].join('\n');
+
+    const output = rewriteProjectUploads(markdown, urls);
+
+    expect(routeTarget(output, 'ipad-landscape.png')).toBe('https://github.com/acme/app/blob/e81f2ed/docs/ipad-landscape.png?raw=true');
+    expect(routeTarget(output, '47f9b551-5ecf-4bb0-9122-0c1b8302e1b9')).toBe('https://github.com/user-attachments/assets/47f9b551-5ecf-4bb0-9122-0c1b8302e1b9');
+    expect(routeTarget(output, 'menu.png')).toBe('https://raw.githubusercontent.com/acme/app/main/docs/menu.png');
+    expect(output).not.toContain('https://github.com/acme/app/blob/e81f2ed');
+  });
+
+  test('leaves other hosts, blob pages and code as written', () => {
+    const urls = uploadUrls(context, { owner: 'acme', repo: 'app', source: 'origin' }, true);
+    const markdown = [
+      '![public](https://example.com/shot.png)',
+      '![page](https://github.com/acme/app/blob/main/docs/shot.png)',
+      `Write \`![x](https://github.com/acme/app/blob/main/docs/shot.png?raw=true)\` to embed.`,
+      `\`\`\`md\n![x](https://github.com/acme/app/blob/main/docs/shot.png?raw=true)\n\`\`\``,
+    ].join('\n\n');
+
+    expect(rewriteProjectUploads(markdown, urls)).toBe(markdown);
+  });
+
+  test('leaves absolute GitHub URLs when the descriptor does not ask for them', () => {
+    const urls = uploadUrls(context, { owner: 'acme', repo: 'app', source: 'origin' });
+    const markdown = '![iPad](https://github.com/acme/app/blob/e81f2ed/docs/ipad-landscape.png?raw=true)';
+
+    expect(rewriteProjectUploads(markdown, urls)).toBe(markdown);
+  });
+
+  test('leaves a GitHub clip as written on the relay', () => {
+    adoptRelayTunnel({ relayUrl: 'wss://relay.test/ws', serverId: 'srv_test', hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'eA', y: 'eQ' } }, tunnel);
+    const urls = uploadUrls(context, { owner: 'acme', repo: 'app', source: 'origin' }, true);
+    const markdown = '![clip](https://github.com/acme/app/blob/main/demo.mp4?raw=true)';
+
+    expect(rewriteProjectUploads(markdown, urls)).toBe(markdown);
+  });
+
+  test('keeps a GitHub picture on the bare uploads route over the relay', () => {
+    adoptRelayTunnel({ relayUrl: 'wss://relay.test/ws', serverId: 'srv_test', hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'eA', y: 'eQ' } }, tunnel);
+    const urls = uploadUrls(context, { owner: 'acme', repo: 'app', source: 'origin' }, true);
+    const output = rewriteProjectUploads('![shot](https://github.com/acme/app/blob/main/docs/shot.png?raw=true)', urls);
+
+    expect(output.startsWith('![shot](/api/source-control/github/uploads/')).toBe(true);
+    expect(output).not.toContain('oc_url_token');
+  });
+
+  test('leaves relative upload paths in GitHub Markdown as written', () => {
+    const urls = uploadUrls(context, { owner: 'acme', repo: 'app', source: 'origin' }, true);
+    const markdown = [
+      '![old](/uploads/0123456789abcdef0123456789abcdef/shot.png)',
+      '[log](/uploads/0123456789abcdef0123456789abcdef/build.log)',
+    ].join('\n');
+
+    expect(rewriteProjectUploads(markdown, urls)).toBe(markdown);
+  });
+
+  test('leaves an SVG and another repository file at their own URLs', () => {
+    const urls = uploadUrls(context, { owner: 'acme', repo: 'app', source: 'origin' }, true);
+    const markdown = [
+      '![badge](https://raw.githubusercontent.com/acme/app/main/docs/badge.svg)',
+      '![other](https://raw.githubusercontent.com/other/lib/main/docs/shot.png)',
+      '![other](https://github.com/other/lib/blob/main/docs/shot.png?raw=true)',
+    ].join('\n');
+
+    expect(rewriteProjectUploads(markdown, urls)).toBe(markdown);
+    expect(routeTarget(rewriteProjectUploads('![own](https://raw.githubusercontent.com/Acme/App/main/a.png)', urls), 'a.png'))
+      .toBe('https://raw.githubusercontent.com/Acme/App/main/a.png');
+  });
+
+  test('keeps a raw video source on the relay and reads a raw picture through it', () => {
+    adoptRelayTunnel({ relayUrl: 'wss://relay.test/ws', serverId: 'srv_test', hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'eA', y: 'eQ' } }, tunnel);
+    const urls = uploadUrls(context, { owner: 'acme', repo: 'app', source: 'origin' }, true);
+    const asset = 'https://github.com/user-attachments/assets/47f9b551-5ecf-4bb0-9122-0c1b8302e1b9';
+    const video = `<video src="${asset}" controls></video>\n<video controls><source src="${asset}"></video>`;
+
+    expect(rewriteProjectUploads(video, urls)).toBe(video);
+    expect(rewriteProjectUploads(`<img width="300" src="${asset}">`, urls).startsWith('<img width="300" src="/api/source-control/github/uploads/')).toBe(true);
+  });
+
+  test('leaves a Markdown clip named only by its alt text as written on the relay', () => {
+    adoptRelayTunnel({ relayUrl: 'wss://relay.test/ws', serverId: 'srv_test', hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'eA', y: 'eQ' } }, tunnel);
+    const urls = uploadUrls(context, { owner: 'acme', repo: 'app', source: 'origin' }, true);
+    const markdown = '![clip.mp4](https://github.com/user-attachments/assets/47f9b551-5ecf-4bb0-9122-0c1b8302e1b9)';
+
+    expect(rewriteProjectUploads(markdown, urls)).toBe(markdown);
+  });
+
+  test('leaves a repository clip at its own URL so the browser keeps byte ranges', () => {
+    const urls = uploadUrls(context, { owner: 'acme', repo: 'app', source: 'origin' }, true);
+    const markdown = '![clip](https://github.com/acme/app/blob/main/demo.mp4?raw=true)';
+
+    expect(rewriteProjectUploads(markdown, urls)).toBe(markdown);
+  });
+
+  test('leaves a fragment-bearing GitHub picture as written', () => {
+    const urls = uploadUrls(context, { owner: 'acme', repo: 'app', source: 'origin' }, true);
+    const markdown = '![shot](https://github.com/acme/app/blob/main/docs/shot.png?raw=true#L5)';
+
+    expect(rewriteProjectUploads(markdown, urls)).toBe(markdown);
+  });
+});
+
 describe('uploadUrls', () => {
   const context: SourceControlReadContext = {
     provider: 'gitlab', instance: 'https://gitlab.test', directory: '/repo', repositoryId: 'repo', accountId: 'account', bindingRevision: 3, primaryRemote: 'origin',

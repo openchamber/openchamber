@@ -1,22 +1,12 @@
 import type { ChangeContent, ContextContent, FileDiffMetadata, Hunk } from '@pierre/diffs';
 
-// Context kept around each remaining change, matching the patches git returns.
 const CONTEXT_LINES = 3;
-// Above this many line pairs a change block is left as it is: matching it
-// would cost more memory than hiding its whitespace is worth.
 const MAX_ALIGNMENT_CELLS = 1_000_000;
 
 type HunkBlock = ContextContent | ChangeContent;
 
 const filteredDiffs = new WeakMap<FileDiffMetadata, FileDiffMetadata>();
 
-/**
- * The same diff with whitespace-only line changes turned into context, as
- * `git diff -w` would show it. Each side keeps its own text, line numbers do
- * not move, and hunks are recut around the changes that remain, so a hunk
- * that only re-indented code disappears. Returns the input object when no
- * line changed by whitespace alone.
- */
 export const hideWhitespaceChanges = (fileDiff: FileDiffMetadata): FileDiffMetadata => {
   const cached = filteredDiffs.get(fileDiff);
   if (cached) return cached;
@@ -44,7 +34,6 @@ export const hideWhitespaceChanges = (fileDiff: FileDiffMetadata): FileDiffMetad
 
 const normalize = (line: string): string => line.replace(/\s+/g, '');
 
-/** Splits one change block at the line pairs that differ only by whitespace. */
 const refineChange = (fileDiff: FileDiffMetadata, change: ChangeContent): HunkBlock[] => {
   if (change.deletions === 0 || change.additions === 0) return [{ ...change }];
 
@@ -84,13 +73,11 @@ const refineChange = (fileDiff: FileDiffMetadata, change: ChangeContent): HunkBl
   return blocks;
 };
 
-/** Index pairs of the longest run of lines equal once whitespace is removed. */
 const alignIgnoringWhitespace = (deleted: string[], added: string[]): Array<[number, number]> => {
   const a = deleted.map(normalize);
   const b = added.map(normalize);
   const pairs: Array<[number, number]> = [];
 
-  // Re-indented code matches line for line, so most blocks end here.
   let prefix = 0;
   while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) {
     pairs.push([prefix, prefix]);
@@ -107,7 +94,6 @@ const alignIgnoringWhitespace = (deleted: string[], added: string[]): Array<[num
   const rows = a.length - prefix - suffix;
   const columns = b.length - prefix - suffix;
   if (rows > 0 && columns > 0 && (rows + 1) * (columns + 1) <= MAX_ALIGNMENT_CELLS) {
-    // lengths[i][j]: longest common run of a[prefix + i..] and b[prefix + j..].
     const width = columns + 1;
     const lengths = new Uint32Array((rows + 1) * width);
     for (let i = rows - 1; i >= 0; i -= 1) {
@@ -154,11 +140,6 @@ const sliceContext = (context: ContextContent, from: number, lines: number): Con
   additionLineIndex: context.additionLineIndex + from,
 });
 
-/**
- * Cuts a hunk's blocks into hunks with at most CONTEXT_LINES of context around
- * each change, never reaching past the original hunk: a patch has no lines
- * beyond it. A hunk without changes yields nothing.
- */
 const recutHunk = (hunk: Hunk, blocks: HunkBlock[]): Hunk[] => {
   const pieces: HunkBlock[][] = [];
   let current: HunkBlock[] | null = null;
@@ -257,12 +238,9 @@ const buildHunk = (source: Hunk, blocks: HunkBlock[], endsSourceHunk: boolean): 
   };
 };
 
-// A hunk side's start counts the lines before it, plus one unless the side is
-// empty: `-5,0` inserts after line 5, `-6,2` starts at line 6.
 const sideStartBoundary = (start: number, count: number): number => start - (count === 0 ? 0 : 1);
 const sideStart = (boundary: number, count: number): number => boundary + (count === 0 ? 0 : 1);
 
-/** Places the hunks the way the patch parser does: gaps, row offsets, totals. */
 const withHunks = (fileDiff: FileDiffMetadata, hunks: Hunk[]): FileDiffMetadata => {
   let splitLineCount = 0;
   let unifiedLineCount = 0;
@@ -291,12 +269,6 @@ const withHunks = (fileDiff: FileDiffMetadata, hunks: Hunk[]): FileDiffMetadata 
   };
 };
 
-/**
- * A patch diff holds only the lines its hunks show, in hunk order, and the
- * renderer rebuilds each side by joining its hunks' lines. A hunk dropped or
- * trimmed here would shift every later line and leave the last ones missing,
- * so the kept lines are copied out and the blocks point at their new places.
- */
 const compactPartialLines = (
   fileDiff: FileDiffMetadata,
   hunks: Hunk[],

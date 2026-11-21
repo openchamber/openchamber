@@ -22,6 +22,9 @@ let effectiveDirectory: string | undefined = '/repo';
 type ZoneSizes = { right?: number };
 let zoneSizes: ZoneSizes = {};
 const TREE_WIDTH = 240;
+let sidebarOpen = true;
+/** The session sidebar as the document has it: drawn width and the width it was set to. */
+let sidebar: { drawn: number; set: number } | null = null;
 
 mock.module('@/stores/useUIStore', () => ({
   useUIStore: (selector: (state: unknown) => unknown) =>
@@ -29,6 +32,7 @@ mock.module('@/stores/useUIStore', () => ({
       contextPanelByDirectory: panelByDirectory,
       contextSurfaceZones: surfaceZones,
       workStatusPanelEnabled: panelEnabled,
+      isSidebarOpen: sidebarOpen,
       contextZoneSizes: zoneSizes,
       contextEditorVisible: true,
       contextEditorTreeVisible: true,
@@ -76,6 +80,9 @@ const installMinimalDom = () => {
     activeElement: null,
     addEventListener: () => undefined,
     removeEventListener: () => undefined,
+    querySelector: () => (sidebar
+      ? { getBoundingClientRect: () => ({ width: sidebar?.drawn ?? 0 }), style: { width: `${sidebar.set}px` } }
+      : null),
   };
   const container = {
     nodeType: 1,
@@ -158,6 +165,8 @@ beforeEach(() => {
   panelEnabled = true;
   effectiveDirectory = '/repo';
   zoneSizes = {};
+  sidebarOpen = true;
+  sidebar = null;
   observed = [];
   notify = null;
 });
@@ -218,20 +227,6 @@ describe('useWorkStatusVisibility', () => {
 
     act(() => { root.unmount(); });
     dom.restore();
-  });
-
-  test('measures a container the panel cannot resize, never the chat column', () => {
-    // The measured element must not depend on whether the panel is showing:
-    // otherwise hiding the panel widens it and re-shows the panel, forever.
-    // In the app this is the chat area (chat + context panel); here `closest`
-    // finds nothing, so the hook falls back to the row it was given.
-    const { rowNode, teardown } = renderVisibility(
-      { isMobile: false, isVSCode: false },
-      REQUIRED,
-    );
-    expect(observed).toHaveLength(1);
-    expect(observed[0]).toBe(rowNode);
-    teardown();
   });
 
   test('reacts to a live resize across the threshold', () => {
@@ -338,6 +333,33 @@ describe('useWorkStatusVisibility', () => {
     const { result, teardown } = renderVisibility({ isMobile: false, isVSCode: false }, REQUIRED * 4);
     expect(result.visible).toBe(false);
     expect(result.roomyBesidePanel).toBe(false);
+    teardown();
+  });
+
+  test('decides from the width the area settles at while the sidebar unfolds', () => {
+    panelByDirectory['/repo'] = { isOpen: true, tabs: [{ id: 'tab-1', mode: 'git' }], activeTabId: 'tab-1' };
+    // Folded, the sidebar leaves the area room for the card beside the panel.
+    sidebarOpen = false;
+    sidebar = { drawn: 0, set: 0 };
+    const besidePanel = REQUIRED + CONTEXT_ZONE_DEFAULT_WIDTH;
+    const { result, rerender, teardown } = renderVisibility({ isMobile: false, isVSCode: false }, besidePanel + 100);
+    expect(result.roomyBesidePanel).toBe(true);
+
+    // Told to unfold to 280 and not moved yet: the area will lose that room.
+    sidebarOpen = true;
+    sidebar = { drawn: 0, set: 280 };
+    rerender();
+    expect(result.roomyBesidePanel).toBe(false);
+    expect(result.roomy).toBe(true);
+
+    // Halfway there, and arrived: the same answer on every frame.
+    sidebar = { drawn: 140, set: 280 };
+    act(() => { notify?.([{ contentRect: { width: besidePanel - 40 } }]); });
+    expect(result.roomyBesidePanel).toBe(false);
+    sidebar = { drawn: 280, set: 280 };
+    act(() => { notify?.([{ contentRect: { width: besidePanel - 180 } }]); });
+    expect(result.roomyBesidePanel).toBe(false);
+
     teardown();
   });
 

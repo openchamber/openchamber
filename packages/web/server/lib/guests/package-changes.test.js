@@ -35,15 +35,12 @@ describe('folder install edits', () => {
     await request(app).post('/api/guests').send({ path: packageRoot }).expect(201);
     const installed = await revisionOf(app);
     onGuestsChanged.mockClear();
+    const changed = Promise.withResolvers();
+    onGuestsChanged.mockImplementationOnce(() => changed.resolve());
 
     await fs.writeFile(path.join(packageRoot, 'main.js'), 'void 0; void 1;');
-    let revision = installed;
-    for (let attempt = 0; revision === installed && attempt < 40; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      revision = await revisionOf(app);
-    }
-
-    expect(revision).toBe(installed + 1);
+    await changed.promise;
+    expect(await revisionOf(app)).toBe(installed + 1);
     expect(onGuestsChanged).toHaveBeenCalled();
   });
 });

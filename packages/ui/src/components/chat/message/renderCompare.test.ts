@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { CompactionMessage } from '@/lib/opencode/model';
+import type { AssistantMessage, CompactionMessage, Part, StructuredError } from '@/lib/opencode/model';
 import type { TurnGroupingContext } from '../lib/turns/types';
 import { areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './renderCompare';
 
@@ -81,5 +81,39 @@ describe('running compaction', () => {
 
   test('preserves an equivalent rebuilt record', () => {
     expect(areRenderRelevantMessagesEqual({ info: running, parts: [] }, { info: { ...running }, parts: [] })).toBe(true);
+  });
+});
+
+describe('assistant error', () => {
+  const assistantInfo: AssistantMessage = {
+    id: 'msg_assistant',
+    sessionID: 'ses_1',
+    role: 'assistant',
+    time: { created: 1, completed: 2 },
+    agent: 'build',
+    providerID: 'provider',
+    modelID: 'model',
+    finish: 'stop',
+  };
+  const error: StructuredError = { type: 'provider.transport', message: 'ECONNRESET' };
+  const assistantInfoWithError: AssistantMessage = { ...assistantInfo, error };
+  const parts: Part[] = [];
+
+  test('invalidates the render when an assistant error is added or removed', () => {
+    const withoutError = { info: assistantInfo, parts };
+    const withError = { info: assistantInfoWithError, parts };
+
+    expect(areRenderRelevantMessagesEqual(withoutError, withError)).toBe(false);
+    expect(areRenderRelevantMessagesEqual(withError, withoutError)).toBe(false);
+  });
+
+  test('preserves a rebuilt message that retains the same error reference', () => {
+    const withError = { info: assistantInfoWithError, parts };
+    const rebuilt = {
+      info: { ...assistantInfoWithError, time: { ...assistantInfoWithError.time } },
+      parts,
+    };
+
+    expect(areRenderRelevantMessagesEqual(withError, rebuilt)).toBe(true);
   });
 });

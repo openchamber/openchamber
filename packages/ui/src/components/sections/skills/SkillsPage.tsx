@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { toast } from '@/components/ui';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
-import { selectSkillsForDirectory, useSkillsStore, type SkillConfig, type SkillScope, type SupportingFile, type PendingFile } from '@/stores/useSkillsStore';
+import { selectSkillsForDirectory, selectSkillsLoadedForDirectory, useSkillsStore, type SkillConfig, type SkillScope, type SupportingFile, type PendingFile } from '@/stores/useSkillsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -43,6 +43,7 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { SkillsCatalogPage } from './catalog/SkillsCatalogPage';
 import { SkillUseField } from './SkillUseField';
+import { useDraftFill } from './useDraftFill';
 import {
   SKILL_LOCATION_OPTIONS,
   locationPartsFrom,
@@ -53,7 +54,7 @@ import { useI18n } from '@/lib/i18n';
 import { languageByExtension } from '@/lib/codemirror/languageByExtension';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { codeHighlightExtension } from '@/lib/codemirror/codeHighlight';
-import { getCodeTokenTheme, getThemeRenderName } from '@/lib/shiki/appThemeRegistry';
+import { getCodeTokenTheme } from '@/lib/shiki/appThemeRegistry';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useUIStore } from '@/stores/useUIStore';
@@ -140,13 +141,12 @@ const SkillsInstalledPage: React.FC = () => {
     setSelectedSkill: s.setSelectedSkill,
   })));
 
-  // Settings browses whichever project its own selector points at; the app
-  // stays where it is.
   const settingsDirectory = useSettingsDirectory();
   const skills = useSkillsStore((state) => selectSkillsForDirectory(state, settingsDirectory));
   const selectedSkill = selectedSkillName ? getSkillByName(selectedSkillName, settingsDirectory) : null;
   const isNewSkill = Boolean(skillDraft && skillDraft.name === selectedSkillName && !selectedSkill);
-  const hasStaleSelection = Boolean(selectedSkillName && !selectedSkill && !skillDraft);
+  const skillsLoaded = useSkillsStore((state) => selectSkillsLoadedForDirectory(state, settingsDirectory));
+  const hasStaleSelection = Boolean(skillsLoaded && selectedSkillName && !selectedSkill && !skillDraft);
   const isReadOnlySkill = selectedSkill?.path === '<built-in>';
 
   React.useEffect(() => {
@@ -223,6 +223,7 @@ const SkillsInstalledPage: React.FC = () => {
 
   const skillEditorKey = JSON.stringify([settingsDirectory, selectedSkillName, selectedSkill?.path, isNewSkill]);
   const hydratedSkill = React.useRef<string | null>(null);
+  const draftNeedsFill = useDraftFill<NonNullable<typeof skillDraft>>();
   const currentEditor = React.useRef({ key: skillEditorKey, markdown: skillMarkdown, disableModelInvocation });
   currentEditor.current = { key: skillEditorKey, markdown: skillMarkdown, disableModelInvocation };
   const savedMarkdown = React.useRef('');
@@ -250,14 +251,12 @@ const SkillsInstalledPage: React.FC = () => {
       }
     };
     const loadSkillDetails = async () => {
-      if (isNewSkill && skillDraft) {
+      if (draftNeedsFill(skillEditorKey, isNewSkill ? skillDraft : null) && skillDraft) {
         setIsLoading(false);
-        const nextDescription = skillDraft.description || '';
-        const nextInstructions = skillDraft.instructions || '';
         setDraftName(skillDraft.name || '');
         setDraftScope(skillDraft.scope || 'user');
         setDraftSource(skillDraft.source === 'agents' ? 'agents' : 'opencode');
-        hydrateText(nextDescription, nextInstructions, false);
+        hydrateText(skillDraft.description || '', skillDraft.instructions || '', false);
         setOriginalDescription('');
         setOriginalInstructions('');
         setOriginalDisableModelInvocation(false);
@@ -288,7 +287,7 @@ const SkillsInstalledPage: React.FC = () => {
 
     void loadSkillDetails();
     return () => { cancelled = true; };
-  }, [selectedSkill, isNewSkill, selectedSkillName, settingsDirectory, skills, skillDraft, getSkillDetail, skillEditorKey]);
+  }, [selectedSkill, isNewSkill, selectedSkillName, settingsDirectory, skills, skillDraft, getSkillDetail, skillEditorKey, draftNeedsFill]);
 
   const editorFontSize = useUIStore((state) => state.editorFontSize);
 
@@ -304,19 +303,17 @@ const SkillsInstalledPage: React.FC = () => {
 
   const supportingFileEditorExtensions = React.useMemo<Extension[]>(() => {
     const filePath = newFileName.trim() || 'supporting-file.md';
-    // File-view token colors for code supporting files; markdown stays on lezer.
-    const shikiLanguage = getLanguageFromExtension(filePath);
-    const useShiki = Boolean(shikiLanguage) && shikiLanguage !== 'markdown';
-    const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme, useShiki ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
+    const highlightLanguage = getLanguageFromExtension(filePath);
+    const useHighlight = Boolean(highlightLanguage) && highlightLanguage !== 'markdown';
+    const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme, useHighlight ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
     const languageExtension = languageByExtension(filePath);
     if (languageExtension) {
       extensions.push(languageExtension);
     }
-    if (useShiki && shikiLanguage) {
+    if (useHighlight && highlightLanguage) {
       extensions.push(codeHighlightExtension({
-        language: shikiLanguage,
-        themeName: getThemeRenderName(currentTheme),
-        theme: getCodeTokenTheme(currentTheme),
+        language: highlightLanguage,
+        theme: getCodeTokenTheme(currentTheme).zed,
       }));
     }
     extensions.push(EditorView.lineWrapping);
@@ -343,8 +340,6 @@ const SkillsInstalledPage: React.FC = () => {
     return null;
   };
 
-  // An existing skill writes itself; a new one is only created once the user
-  // confirms it, so an abandoned draft never reaches disk.
   const save = React.useCallback(async (): Promise<AutosaveResult> => {
     const skillName = selectedSkillName?.trim();
     if (isNewSkill || isReadOnlySkill || !skillName) return AUTOSAVE_UNCHANGED;
@@ -399,7 +394,6 @@ const SkillsInstalledPage: React.FC = () => {
 
   const handleDisableModelInvocationChange = (next: boolean) => {
     setDisableModelInvocation(next);
-    // A new skill is written once, on Create.
     if (!isNewSkill) autosave.requestSave();
   };
 
@@ -713,8 +707,6 @@ const SkillsInstalledPage: React.FC = () => {
                 SKILL_EDITOR_HEIGHT_CLASS,
               )}
               onKeyDown={(event) => {
-                // The editor fills the section, so leaving it to save is a
-                // chore; the usual shortcut writes it where you are.
                 if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                   event.preventDefault();
                   autosave.requestSave();
@@ -825,7 +817,6 @@ const SkillsInstalledPage: React.FC = () => {
       </SettingsPageLayout>
 
 
-      {/* Add/Edit File Dialog */}
       <Dialog
         open={deleteFilePath !== null}
         onOpenChange={(open) => {
@@ -862,9 +853,6 @@ const SkillsInstalledPage: React.FC = () => {
           setIsFileDialogOpen(true);
           return;
         }
-        // Editing an existing supporting file has no Save button: closing the
-        // dialog writes it. A brand new file is only created on confirm, so
-        // closing it away leaves nothing behind.
         if (editingFilePath !== null && newFileContent !== originalFileContent) {
           void handleSaveFile();
           return;

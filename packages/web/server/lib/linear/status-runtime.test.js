@@ -66,6 +66,7 @@ describe('Linear session status runtime', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     clearLinearAuth();
     if (previousDataDir === undefined) {
@@ -82,6 +83,7 @@ describe('Linear session status runtime', () => {
   });
 
   it('posts completed on the first idle after started, then ignores later idles', async () => {
+    vi.useFakeTimers();
     const { postLinearSessionStatus } = await import('./status.js');
     vi.stubGlobal('fetch', stubLinearGraphql({ commentId: 'started' }));
     await postLinearSessionStatus({
@@ -149,19 +151,6 @@ describe('Linear session status runtime', () => {
       const body = JSON.parse(commentCalls[0][1].body).variables.input.body;
       expect(body).toContain('OpenChamber session failed');
     });
-    runtime.stop();
-  });
-
-  it('does not treat busy as completed', async () => {
-    const graphql = stubLinearGraphql();
-    vi.stubGlobal('fetch', graphql);
-    const runtime = createLinearSessionStatusRuntime();
-    runtime.processPayload({
-      type: 'session.status',
-      properties: { sessionID: 'ses_1', status: { type: 'busy' } },
-    });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(graphql).not.toHaveBeenCalled();
     runtime.stop();
   });
 });

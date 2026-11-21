@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
 
 const gitLibraries = {
   getPathDiff: vi.fn(),
@@ -34,6 +35,7 @@ const gitLibraries = {
   archiveWorktree: vi.fn(),
   listWorktreeArchives: vi.fn(),
   deleteWorktreeArchive: vi.fn(),
+  inspectContributorCheckoutActions: vi.fn(),
 };
 
 vi.mock('./index.js', () => ({
@@ -70,6 +72,7 @@ vi.mock('./index.js', () => ({
   archiveWorktree: gitLibraries.archiveWorktree,
   listWorktreeArchives: gitLibraries.listWorktreeArchives,
   deleteWorktreeArchive: gitLibraries.deleteWorktreeArchive,
+  inspectContributorCheckoutActions: gitLibraries.inspectContributorCheckoutActions,
 }));
 
 const { registerGitRoutes } = await import('./routes.js');
@@ -121,6 +124,27 @@ const createMockResponse = () => {
     },
   };
 };
+
+it('streams a complete non-repository status beside valid repository statuses', async () => {
+  const { app, getRoute } = createRouteRegistry();
+  registerGitRoutes(app);
+  gitLibraries.isGitRepository.mockImplementation(async directory => directory !== '/plain-folder');
+  const status = { current: 'main', tracking: null, ahead: 0, behind: 0, files: [], isClean: true };
+  gitLibraries.getStatus.mockResolvedValue(status);
+  // Resolve the route registry's lazy import before its concurrent workers.
+  await getRoute('GET', '/api/git/check')({ query: { directory: '/plain-folder' } }, createMockResponse());
+  gitLibraries.isGitRepository.mockClear();
+  const lines = [];
+  const response = Object.assign(new EventEmitter(), {
+    setHeader() {}, flushHeaders() {}, end() {},
+    write(line) { lines.push(JSON.parse(line)); return true; },
+  });
+  await getRoute('POST', '/api/git/status/batch')({ body: { directories: ['/plain-folder', '/repo'] } }, response);
+  expect(lines).toEqual([
+    { directory: '/plain-folder', isGitRepository: false, status: { ...status, current: '' } },
+    { directory: '/repo', isGitRepository: true, status },
+  ]);
+});
 
 describe('worktree title ownership', () => {
   it.each([[undefined, 'user'], ['user', 'user'], ['agent', 'agent']])('accepts %s ownership as %s', async (by, expected) => {
@@ -516,6 +540,26 @@ describe('contributor worktree authority', () => {
     gitLibraries.validateWorktreeCreate.mockReset();
     gitLibraries.validateWorktreeCreate.mockResolvedValue({ ok: true, errors: [] });
     gitLibraries.createWorktree.mockResolvedValue({ path: '/repo-pr-42' });
+  });
+
+  it('answers a stored source SHA that is not a string as a changed checkout without deciding trust', async () => {
+    const record = {
+      repositoryId: 'repo_one', revision: 4,
+      provenance: { kind: 'contributor-fork', sourceSha: ['a'.repeat(40)], setupCommand: '' },
+    };
+    const decideCheckoutTrust = vi.fn();
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, {
+      contributorProvenance: { read: vi.fn(async () => record) },
+      networkOperations: { decideCheckoutTrust },
+    });
+    for (const [method, body] of [['GET', undefined], ['POST', { digest: 'digest', decision: 'run' }]]) {
+      const response = createMockResponse();
+      await getRoute(method, '/api/git/worktrees/checkout-trust')({ query: { directory: '/repo' }, body }, response);
+      expect(response.statusCode).toBe(409);
+      expect(response.body).toEqual({ error: 'Git repository configuration changed', code: 'STALE_CONFIG' });
+    }
+    expect(decideCheckoutTrust).not.toHaveBeenCalled();
   });
 
   it('uses only a server-resolved endpoint and managed transfer', async () => {

@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { readFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { parseManifestJson } from '../src/schemas';
 
@@ -30,8 +33,23 @@ describe('the opencode-plugin example', () => {
     // SAFETY: the file is the example's own checked-in package.json; the assertion below checks the two fields read.
     const plugin = JSON.parse(await readFile(new URL('plugin/package.json', example), 'utf8')) as { type?: string };
     expect(plugin).toMatchObject({ type: 'module' });
-    // OpenCode imports the entry from a folder where nothing is installed.
-    expect(await readFile(new URL('plugin/index.js', example), 'utf8')).not.toMatch(/^\s*import\s/m);
+    // Only built files ship. Load outside the monorepo so its node_modules
+    // cannot hide an accidentally unbundled dependency.
+    const installed = await mkdtemp(join(tmpdir(), 'openchamber-plugin-example-'));
+    try {
+      await copyFile(new URL('plugin/package.json', example), join(installed, 'package.json'));
+      await copyFile(new URL('plugin/index.js', example), join(installed, 'index.js'));
+      const child = Bun.spawn(['node', '--input-type=module', '-e', `
+        const { default: plugin } = await import(${JSON.stringify(pathToFileURL(join(installed, 'index.js')).href)});
+        if (plugin.id !== 'teapot-tools' || typeof plugin.setup !== 'function') {
+          throw new Error('The installed entry must export the plugin');
+        }
+      `], { cwd: installed, stdout: 'pipe', stderr: 'pipe', env: { ...process.env, NODE_PATH: '' } });
+      const error = await new Response(child.stderr).text();
+      expect(await child.exited, error).toBe(0);
+    } finally {
+      await rm(installed, { recursive: true, force: true });
+    }
   });
 
   test('setup registers teapot_status, which answers without input', async () => {

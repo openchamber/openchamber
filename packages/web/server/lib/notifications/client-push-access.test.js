@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createRemoteClientAuthRuntime } from '../client-auth/remote-clients.js';
+import { consumeRelayProof, relayProofHeaders } from '../relay/provenance.js';
 import { createUiAuth } from '../ui-auth/ui-auth.js';
 import { createApnsRuntime } from './apns-runtime.js';
 import { createClientPushAccess } from './client-push-access.js';
@@ -72,12 +73,16 @@ describe('client push access', () => {
       }),
       PUSH_SUBSCRIPTIONS_FILE_PATH: path.join(dir, 'push-subscriptions.json'),
       readSettingsFromDiskMigrated: async () => ({}),
-      writeSettingsToDisk: async () => {},
+      updateSettingsFromDisk: async (mutate) => mutate({}),
       getInvalidSessionKeys,
     });
     access = createClientPushAccess({
       listClients: clients.listClients,
       removeDevicesOfSessions: [apns.removeApnsDevicesOfSessions, push.removePushDevicesOfSessions],
+      authenticateBearerClient: async (req) => {
+        const token = req.headers.authorization?.replace(/^Bearer /, '');
+        return token ? (await clients.authenticateBearerToken(token, req))?.client ?? null : null;
+      },
     });
   });
 
@@ -147,6 +152,40 @@ describe('client push access', () => {
     await clients.revokeClient(revoked.id);
 
     expect(await notify()).toEqual({ phones: ['phone-cookie'], browsers: ['https://push.test/cookie'] });
+  });
+
+  it('sends nothing to a device paired for the home network only, until it reaches the server through the relay', async () => {
+    const created = await clients.createClient({ label: 'Home phone', localOnly: true });
+    const anywhere = await pair('Anywhere phone');
+    await registerPhone(clientToken(created.client), 'phone-home');
+    await registerPhone(clientToken(anywhere), 'phone-anywhere');
+    await registerBrowser(clientToken(created.client), 'https://push.test/home');
+
+    const noBearer = { headers: {} };
+    expect(await access.isLocalOnlyRequest(noBearer, clientToken(created.client))).toBe(true);
+    expect(await access.isLocalOnlyRequest(noBearer, clientToken(anywhere))).toBe(false);
+    expect(await access.isLocalOnlyRequest(noBearer, 'cookie-session')).toBe(false);
+    expect(await access.isLocalOnlyRequest({ headers: { authorization: `Bearer ${created.token}` } }, 'cookie-session')).toBe(true);
+    expect(await notify()).toEqual({ phones: ['phone-anywhere'], browsers: [] });
+
+    const relayed = { headers: { 'x-openchamber-relay-connection': '1', ...relayProofHeaders() } };
+    consumeRelayProof(relayed);
+    await clients.authenticateBearerToken(created.token, relayed);
+
+    expect(await access.isLocalOnlyRequest(noBearer, clientToken(created.client))).toBe(false);
+    expect(await notify()).toEqual({ phones: ['phone-anywhere', 'phone-home'], browsers: ['https://push.test/home'] });
+  });
+
+  it('stops a phone that pairs again for the home network only from receiving through its replaced pairing', async () => {
+    const first = await clients.createClient({ label: 'Phone', dedupeKey: 'install-1' });
+    await registerPhone('older-cookie-session', 'same-phone');
+    await registerPhone(clientToken(first.client), 'same-phone');
+
+    const again = await clients.createClient({ label: 'Phone', dedupeKey: 'install-1', localOnly: true });
+    expect(again.replacedClientIds).toEqual([first.client.id]);
+    await access.removeDevicesOfClients(again.replacedClientIds);
+
+    expect(await notify()).toEqual({ phones: [], browsers: [] });
   });
 
   it('sends nothing when the client list cannot be read', async () => {

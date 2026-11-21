@@ -121,6 +121,26 @@ on the source-control side (`lib/source-control/`).
   second sign-in only where `multipleAccounts` is set, `TrackerProjectMapping`
   where `projectMapping` is, `TrackerSessionComments` where `sessionComments`
   is, and browser sign-in only where `authMethods` has `oauth`.
+- Item `id` is the provider's stable id for get and update calls; `identifier`
+  is the case-insensitive human key used for other identities. Related items
+  omit labels because the provider is not asked for them. Progress counts only
+  the first few children; `more` marks additional children. The children list
+  preserves provider order and contains only the first page, with
+  `childrenMore` marking additional pages.
+- Extension connect information belongs to the Settings card. Its `instance`
+  is null until a user-selected server is connected, and token and OAuth-client
+  inputs supply an instance only before the tracker has a server. Token inputs
+  carry a username for Basic auth. Built-in trackers omit connect information.
+- Every API call names its tracker, and unsupported capability actions reject.
+  `providers()` rejects on failure so an unavailable server cannot erase the
+  registry as an authoritative empty list. Session comments remain off until
+  the user opts in; the server decides whether the origin is public and a post
+  is enabled, and posting failure does not change the UI's session state.
+- List surfaces remain `ready` while the first auth status read is pending so
+  they do not flash a sign-in prompt. A checked disconnected tracker reads as
+  `disconnected`, and a missing tracker or API reads as `unsupported`. A failed
+  first registry read ends the sources-pending wait because there is no held
+  list to wait for; a failed auth read preserves an existing signed-in tab.
 
 ## Decisions
 
@@ -153,3 +173,30 @@ that asked to connect. A server ships trackers whether or not anyone uses
 them, so people who never use Linear saw a Linear tab and menu row that led
 only to a sign-in prompt. Connecting is a Settings task; the working surfaces
 show what the person can already read.
+
+### Why compiled patterns have a larger limit than templates
+
+The descriptor accepts regex sources up to 2,048 characters even though the
+server's link templates are limited to 256 characters. Anchors, escaping and
+bounded placeholders expand a template during compilation, so applying the
+template limit to its compiled pattern would reject valid links.
+
+### Why concurrent refreshes schedule a shared follow-up read
+
+A refresh requested during an in-flight read waits for a shared additional
+read because the server may answer the first read before the later caller's
+change takes effect. A runtime switch or an authoritative absence of the API
+invalidates outstanding reads so an old answer cannot replace the current list.
+
+### Why tracker nouns use complete translated sentences
+
+Tracker-specific nouns such as team and workspace use complete translation
+keys because interpolating those nouns breaks case and gender in German,
+Polish, Ukrainian and French. Sentences that only name the tracker use the
+generic `{provider}` keys.
+
+### Why desktop session links use the local HTTP origin
+
+The packaged desktop UI uses `openchamber-ui://`, which a browser opening a
+tracker comment cannot load. Session posts supply the local server's HTTP
+origin, and the server posts only when that origin is reachable publicly.

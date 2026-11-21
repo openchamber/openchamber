@@ -3,18 +3,12 @@ import { getProviderModelDisplayName, type DisplayProvider } from '@/lib/modelDi
 
 export type MobileControlsPanel = 'model' | 'agent' | 'variant' | null;
 
-/** What agent cycling reads from an agent. */
 type CyclableAgent = Pick<Agent, 'name' | 'mode'>;
 
 export const isPrimaryMode = (mode?: string) => mode === 'primary' || mode === 'all' || mode === undefined || mode === null;
 
 const getCyclablePrimaryAgents = (agents: readonly CyclableAgent[]) => agents.filter((agent) => isPrimaryMode(agent.mode));
 
-/**
- * The agent Tab moves to. While any starred agent is available, the cycle runs
- * through the starred ones only (from a non-starred agent it enters at the
- * first or last of them); otherwise through every primary agent, as before.
- */
 export const getCycledPrimaryAgentName = (
     agents: readonly CyclableAgent[],
     currentAgentName: string | undefined,
@@ -61,12 +55,6 @@ export const getModelDisplayName = (
     return getProviderModelDisplayName(provider, modelId, { fallbackLabel });
 };
 
-/**
- * The composer's effort label is tinted by how hard the model thinks: only the
- * `default` level stays grey; light levels and any unknown name read info,
- * medium and high warning, the top levels error. Pure status text colors, so
- * old WebViews without color-mix render them; opacity keeps them quiet.
- */
 const EFFORT_TONE_CLASS = {
     default: 'text-muted-foreground',
     info: 'text-[var(--status-info-text)] opacity-75',

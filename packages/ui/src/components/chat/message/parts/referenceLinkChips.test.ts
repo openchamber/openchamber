@@ -46,6 +46,30 @@ describe('referenceLinkChipsOf', () => {
         expect(chips.get('https://github.com/openchamber/openchamber/pull/12/files')?.chip.icon).toBe('git-pull-request');
     });
 
+    test('resolved source links draw each chip and open its canonical change request', () => {
+        const links = ['https://portal.example/review/42', 'https://portal.example/changes/42', 'https://portal.example/review/77'];
+        const canonical = ['https://github.com/acme/app/pull/42', 'https://github.com/acme/app/pull/77'];
+        const parts = normalizeUserDisplayParts([
+            contextPart('prt_42', { kind: 'change-request', provider: 'github', number: 42, title: 'First', url: canonical[0], sourceLinks: links.slice(0, 2) }),
+            contextPart('prt_77', { kind: 'change-request', provider: 'github', number: 77, title: 'Second', url: canonical[1], sourceLinks: [links[2]] }),
+        ], (id) => urls.descriptorOf(id ?? 'github'));
+        const chips = referenceLinkChipsOf([links.join(' ')], parts, urls, trackers);
+        expect([...chips.keys()]).toEqual(links);
+        expect(links.map((link) => chips.get(link)?.url)).toEqual([canonical[0], canonical[0], canonical[1]]);
+        expect(links.map((link) => chips.get(link)?.part)).toEqual([parts[0], parts[0], parts[1]]);
+        expect(referenceLinkChipsOf([`\`${links[0]}\``], parts, urls, trackers).size).toBe(0);
+    });
+
+    test('an exact source link wins over a native template match', () => {
+        const link = 'https://github.com/acme/app/pull/42';
+        const canonical = 'https://github.com/acme/app/pull/77';
+        const parts = normalizeUserDisplayParts([
+            contextPart('native', { kind: 'change-request', provider: 'github', number: 42, title: 'Native', url: link }),
+            contextPart('resolved', { kind: 'change-request', provider: 'github', number: 77, title: 'Resolved', url: canonical, sourceLinks: [link] }),
+        ], (id) => urls.descriptorOf(id ?? 'github'));
+        expect(referenceLinkChipsOf([link], parts, urls, trackers).get(link)).toMatchObject({ url: canonical, part: parts[1] });
+    });
+
     test('an item the text does not link, or links only inside code, stays above the text', () => {
         const chips = referenceLinkChipsOf([`see \`${ISSUE_URL}\` and https://github.com/openchamber/openchamber/issues/7`], displayParts, urls, trackers);
         expect(chips.size).toBe(0);

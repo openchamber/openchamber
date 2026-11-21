@@ -34,12 +34,6 @@ const SettingsErrorLine: React.FC<{ message: string | null }> = ({ message }) =>
   message ? <p className="typography-micro text-[var(--status-error)]">{message}</p> : null
 );
 
-/**
- * The desktop shell itself: how the app starts and lives on the system (login
- * item, menu bar, tray, keep awake). The system-wide shortcuts are
- * `DesktopQuickAccessSettings` below and network access is
- * `DesktopNetworkSettings`: General places each section on its own.
- */
 export const DesktopAppSettings: React.FC = () => {
   const { t } = useI18n();
   const isLocalDesktop = isDesktopShell() && isDesktopLocalOriginActive();
@@ -49,8 +43,6 @@ export const DesktopAppSettings: React.FC = () => {
   const isLinuxDesktop = isLocalDesktop
     && typeof window !== 'undefined'
     && window.__OPENCHAMBER_PLATFORM__ === 'linux';
-  // The Dock badge counts chats with unseen activity, local or remote host:
-  // the tray sync pumps the count to the main process. No relaunch needed.
   const dockBadgeSupported = isDesktopShell()
     && typeof window !== 'undefined'
     && window.__OPENCHAMBER_PLATFORM__ === 'darwin';
@@ -64,8 +56,6 @@ export const DesktopAppSettings: React.FC = () => {
   const [minimizeToTraySupported, setMinimizeToTraySupported] = React.useState(false);
   const [minimizeToTrayEnabled, setMinimizeToTrayEnabled] = React.useState(false);
   const [isSavingMinimizeToTray, setIsSavingMinimizeToTray] = React.useState(false);
-  // The menu bar icon and the Linux window frame apply on the next launch, so
-  // they stay drafts until "Save + restart".
   const [savedMacMenuBarEnabled, setSavedMacMenuBarEnabled] = React.useState(true);
   const [draftMacMenuBarEnabled, setDraftMacMenuBarEnabled] = React.useState(true);
   const [savedLinuxNativeFrame, setSavedLinuxNativeFrame] = React.useState(false);
@@ -183,8 +173,6 @@ export const DesktopAppSettings: React.FC = () => {
   const hasPendingRestart = useDesktopRestartDrafts((state) => Boolean(state.patches.app || state.patches.network));
   const restartBlocked = useDesktopRestartDrafts((state) => Boolean(state.blocked.network));
 
-  // Publishes this section's pending changes, so a restart from the network
-  // section saves them too.
   React.useEffect(() => {
     setRestartDraft('app', restartDraftsDirty ? {
       ...(draftMacMenuBarEnabled !== savedMacMenuBarEnabled ? { desktopMacMenuBarEnabled: draftMacMenuBarEnabled } : {}),
@@ -273,8 +261,6 @@ export const DesktopAppSettings: React.FC = () => {
     setAppError(null);
 
     try {
-      // Saves the network section's pending changes as well: the restart
-      // would drop them otherwise.
       if (!await saveDesktopRestartDrafts()) {
         throw new Error(t('settings.openchamber.desktopNetwork.error.saveFailed'));
       }
@@ -291,7 +277,6 @@ export const DesktopAppSettings: React.FC = () => {
     }
   }, [draftLinuxNativeFrame, draftMacMenuBarEnabled, t]);
 
-  // Every flag but the Dock badge is false away from a local desktop.
   const hasAppSettings = launchAtLoginSupported || isMacDesktop || isLinuxDesktop || minimizeToTraySupported || keepAwakeSupported || dockBadgeSupported;
 
   if (!hasAppSettings) {
@@ -384,8 +369,6 @@ export const DesktopAppSettings: React.FC = () => {
 
       <SettingsErrorLine message={appError} />
 
-      {/* The menu bar icon and the window frame take effect on the next
-          launch; the button is there only where such a toggle is. */}
       {isMacDesktop || isLinuxDesktop ? (
         <Button
           type="button"
@@ -401,11 +384,6 @@ export const DesktopAppSettings: React.FC = () => {
   );
 };
 
-/**
- * The system-wide shortcuts that bring OpenChamber up from any app: the Mini
- * Chat shortcut and Quake mode. They share one section because a combo taken
- * by one is offered as a replace when recording the other.
- */
 export const DesktopQuickAccessSettings: React.FC = () => {
   const { t } = useI18n();
   const isLocalDesktop = isDesktopShell() && isDesktopLocalOriginActive();
@@ -423,8 +401,6 @@ export const DesktopQuickAccessSettings: React.FC = () => {
   const [quickAccessError, setQuickAccessError] = React.useState<string | null>(null);
   const quake = useDesktopQuakeMode(isLocalDesktop, setQuickAccessError);
   const { release: releaseQuakeShortcut } = quake;
-  // Recording the Quake combo offers a replace instead of a silent collision
-  // the main process would then refuse to register.
   const miniChatRecorderOverrides = React.useMemo(
     () => (quake.combo ? { ...shortcutOverrides, quake_mode_global: quake.combo } : shortcutOverrides),
     [quake.combo, shortcutOverrides],
@@ -452,8 +428,6 @@ export const DesktopQuickAccessSettings: React.FC = () => {
     };
   }, [isLocalDesktop]);
 
-  // Resolves true only when the combo was stored, so callers can tie other
-  // changes to a successful save.
   const handleMiniChatGlobalShortcutSave = React.useCallback(async (combo: string | null): Promise<boolean> => {
     if (!miniChatGlobalShortcutSupported || isSavingMiniChatGlobalShortcut) {
       return false;
@@ -482,10 +456,6 @@ export const DesktopQuickAccessSettings: React.FC = () => {
     }
   }, [isSavingMiniChatGlobalShortcut, miniChatGlobalShortcutSupported, t]);
 
-  // Mirrors the in-app shortcut save flow: when the recorded combo collides
-  // with a customizable in-app action, free that binding so the global
-  // shortcut owns the combo (both would otherwise fire simultaneously). The
-  // in-app binding is released only after the global combo was stored.
   const handleMiniChatGlobalRecorderSave = React.useCallback((
     _actionId: string,
     combo: string,

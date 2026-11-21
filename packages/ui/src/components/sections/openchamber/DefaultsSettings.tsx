@@ -15,7 +15,8 @@ import { SessionWarmingModeField } from './SessionWarmingModeField';
 import { PermissionDefaultModeField } from './PermissionDefaultModeField';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
-import { selectIsModelMissingFromCatalog, useConfigStore } from '@/stores/useConfigStore';
+import { selectConfigAgentsForDirectory, selectIsModelMissingFromCatalog, selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
+import { useChatsRoot } from '@/hooks/useChatsRoot';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -24,7 +25,7 @@ import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { useCallableModelProviders } from '@/hooks/useCallableModelProviders';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
-import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
+import { listModelVariantIds, modelVariantNames, type ModelVariantSource } from '@/lib/modelVariants';
 import { ModelVariantSelect } from './ModelVariantSelect';
 
 const getDisplayModel = (
@@ -48,17 +49,28 @@ export const DefaultsSettings: React.FC = () => {
   const setSettingsDefaultModel = useConfigStore((state) => state.setSettingsDefaultModel);
   const setSettingsDefaultVariant = useConfigStore((state) => state.setSettingsDefaultVariant);
   const setSettingsDefaultAgent = useConfigStore((state) => state.setSettingsDefaultAgent);
-  // A default describes new sessions. Applying it to the open chat is a
-  // convenience, not the point, so it stops where the chat carries a choice the
-  // user made for it — the same pair of signals ModelControls restores from
-  // (`shouldPreserveManualModelOverride`).
+  const setChatsDefaultModel = useConfigStore((state) => state.setChatsDefaultModel);
+  const setChatsDefaultVariant = useConfigStore((state) => state.setChatsDefaultVariant);
+  const setChatsDefaultAgent = useConfigStore((state) => state.setChatsDefaultAgent);
+  const chatDraftOpen = useSessionUIStore((state) => (
+    !state.currentSessionId && Boolean(state.newSessionDraft?.open) && state.newSessionDraft?.target === 'chat'
+  ));
+  const chatsRoot = useChatsRoot();
+  const chatDraftKeepsModel = useConfigStore((state) => {
+    const chatsModel = chatDraftOpen ? parseModelIdentifier(state.chatsDefaultModel) : null;
+    return chatsModel !== null
+      && !selectIsModelMissingFromCatalog(state, chatsRoot, chatsModel.providerId, chatsModel.modelId);
+  });
+  const chatDraftKeepsAgent = useConfigStore((state) => {
+    if (!chatDraftOpen || !state.chatsDefaultAgent) return false;
+    const agents = selectConfigAgentsForDirectory(state, chatsRoot);
+    return agents.length === 0 || agents.some((agent) => agent.name === state.chatsDefaultAgent);
+  });
   const selectionIsManual = useConfigStore((state) => state.selectionSource === 'manual');
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const getSessionModelSelection = useSelectionStore((state) => state.getSessionModelSelection);
   const getSessionAgentSelection = useSelectionStore((state) => state.getSessionAgentSelection);
   const agentIsPicked = useConfigStore((state) => state.agentSelectionSource === 'manual');
-  // An agent picked for this chat brings the model its config pins, and a pin
-  // outranks the global default the same way it does in `setAgent`.
   const pickedAgentPinsModel = useConfigStore((state) => {
     if (state.agentSelectionSource !== 'manual') return false;
     const agent = state.agents.find((candidate) => candidate.name === state.currentAgentName);
@@ -82,19 +94,37 @@ export const DefaultsSettings: React.FC = () => {
   const [smallModelUseDefault, setSmallModelUseDefault] = React.useState(true);
   const [smallModelOverride, setSmallModelOverride] = React.useState<string | undefined>();
   const [smallModelVariant, setSmallModelVariant] = React.useState<string | undefined>();
-  // Fail closed: never offer providers whose credentials were not verified.
   const smallModelProviders = useCallableModelProviders() ?? [];
   const [walkthroughModelOverride, setWalkthroughModelOverride] = React.useState<string | undefined>();
   const [walkthroughModelVariant, setWalkthroughModelVariant] = React.useState<string | undefined>();
   const [fallbackModel, setFallbackModel] = React.useState<string | undefined>();
   const [fallbackVariant, setFallbackVariant] = React.useState<string | undefined>();
+  const [chatsModel, setChatsModel] = React.useState<string | undefined>();
+  const [chatsVariant, setChatsVariant] = React.useState<string | undefined>();
+  const [chatsAgent, setChatsAgent] = React.useState<string | undefined>();
+  const chatsProviders = useConfigStore((state) => selectProvidersForDirectory(state, chatsRoot));
   const [isLoading, setIsLoading] = React.useState(true);
 
   const parsedModel = React.useMemo(() => getDisplayModel(defaultModel), [defaultModel]);
-  // New sessions skip a model the live catalog no longer lists.
   const defaultModelMissing = useConfigStore((state) => (
     selectIsModelMissingFromCatalog(state, undefined, parsedModel.providerId, parsedModel.modelId)
   ));
+  const parsedChatsModel = React.useMemo(() => getDisplayModel(chatsModel), [chatsModel]);
+  const chatsModelNote = useConfigStore((state) => {
+    if (!chatsRoot || !selectIsModelMissingFromCatalog(state, chatsRoot, parsedChatsModel.providerId, parsedChatsModel.modelId)) return null;
+    const global = parseModelIdentifier(state.settingsDefaultModel);
+    return global && !selectIsModelMissingFromCatalog(state, chatsRoot, global.providerId, global.modelId)
+      ? 'settings.openchamber.defaults.field.chatsModelUnavailableUsesGlobal' as const
+      : 'settings.openchamber.defaults.field.chatsModelUnavailable' as const;
+  });
+  const chatsVariants = React.useMemo(() => {
+    const { providerId, modelId } = parsedChatsModel;
+    if (!providerId || !modelId) return [];
+    const model = chatsProviders
+      .find((provider) => provider.id === providerId)
+      ?.models.find((entry) => entry.id === modelId);
+    return modelVariantNames(model);
+  }, [chatsProviders, parsedChatsModel]);
 
   React.useEffect(() => {
     const loadSettings = async () => {
@@ -108,6 +138,9 @@ export const DefaultsSettings: React.FC = () => {
           if (model !== undefined) setDefaultModel(model);
           if (variant !== undefined) setDefaultVariant(variant);
           if (agent !== undefined) setDefaultAgent(agent);
+          setChatsModel(data.chatsDefaultModel?.trim() || undefined);
+          setChatsVariant(data.chatsDefaultVariant?.trim() || undefined);
+          setChatsAgent(data.chatsDefaultAgent?.trim() || undefined);
           if (data.smallModelUseDefault !== undefined) setSmallModelUseDefault(data.smallModelUseDefault);
           const smallOverride = data.smallModelOverride?.trim();
           if (smallOverride) {
@@ -151,12 +184,11 @@ export const DefaultsSettings: React.FC = () => {
       setSettingsDefaultVariant(undefined);
       setSettingsDefaultModel(newValue);
 
-      if (!chatHasOwnModel) {
+      if (!chatHasOwnModel && !chatDraftKeepsModel) {
         setCurrentVariant(undefined);
 
         if (providerId && modelId) {
           const provider = providers.find((p) => p.id === providerId);
-          // Auto is not a provider OpenCode lists; the picker only offers it while the server can honour it.
           if (provider || isAutoModel(providerId, modelId)) {
             setProvider(providerId);
             setModel(modelId);
@@ -170,14 +202,14 @@ export const DefaultsSettings: React.FC = () => {
         console.warn('Failed to save default model:', error);
       }
     },
-    [chatHasOwnModel, providers, setCurrentVariant, setModel, setProvider, setSettingsDefaultModel, setSettingsDefaultVariant]
+    [chatDraftKeepsModel, chatHasOwnModel, providers, setCurrentVariant, setModel, setProvider, setSettingsDefaultModel, setSettingsDefaultVariant]
   );
 
   const handleVariantChange = React.useCallback(
     async (newValue: string | undefined) => {
       setDefaultVariant(newValue);
       setSettingsDefaultVariant(newValue);
-      if (!chatHasOwnModel) {
+      if (!chatHasOwnModel && !chatDraftKeepsModel) {
         setCurrentVariantOverride(newValue ?? null, newValue);
       }
 
@@ -187,7 +219,7 @@ export const DefaultsSettings: React.FC = () => {
         console.warn('Failed to save default variant:', error);
       }
     },
-    [chatHasOwnModel, setCurrentVariantOverride, setSettingsDefaultVariant]
+    [chatDraftKeepsModel, chatHasOwnModel, setCurrentVariantOverride, setSettingsDefaultVariant]
   );
 
   const handleAgentChange = React.useCallback(
@@ -196,8 +228,8 @@ export const DefaultsSettings: React.FC = () => {
       setDefaultAgent(newValue);
       setSettingsDefaultAgent(newValue);
 
-      if (agentName && !chatHasOwnAgent) {
-        setAgent(agentName);
+      if (agentName && !chatHasOwnAgent && !chatDraftKeepsAgent) {
+        setAgent(agentName, chatDraftKeepsModel ? { keepModel: true } : undefined);
       }
 
       try {
@@ -206,7 +238,50 @@ export const DefaultsSettings: React.FC = () => {
         console.warn('Failed to save default agent:', error);
       }
     },
-    [chatHasOwnAgent, setAgent, setSettingsDefaultAgent]
+    [chatDraftKeepsAgent, chatDraftKeepsModel, chatHasOwnAgent, setAgent, setSettingsDefaultAgent]
+  );
+
+  const handleChatsModelChange = React.useCallback(
+    async (providerId: string, modelId: string) => {
+      const newValue = providerId && modelId ? `${providerId}/${modelId}` : undefined;
+      setChatsModel(newValue);
+      setChatsVariant(undefined);
+      setChatsDefaultVariant(undefined);
+      setChatsDefaultModel(newValue);
+      try {
+        await updateDesktopSettings({ chatsDefaultModel: newValue ?? '', chatsDefaultVariant: '' });
+      } catch (error) {
+        console.warn('Failed to save chats default model:', error);
+      }
+    },
+    [setChatsDefaultModel, setChatsDefaultVariant]
+  );
+
+  const handleChatsVariantChange = React.useCallback(
+    async (newValue: string | undefined) => {
+      setChatsVariant(newValue);
+      setChatsDefaultVariant(newValue);
+      try {
+        await updateDesktopSettings({ chatsDefaultVariant: newValue ?? '' });
+      } catch (error) {
+        console.warn('Failed to save chats default variant:', error);
+      }
+    },
+    [setChatsDefaultVariant]
+  );
+
+  const handleChatsAgentChange = React.useCallback(
+    async (agentName: string) => {
+      const newValue = agentName || undefined;
+      setChatsAgent(newValue);
+      setChatsDefaultAgent(newValue);
+      try {
+        await updateDesktopSettings({ chatsDefaultAgent: newValue ?? '' });
+      } catch (error) {
+        console.warn('Failed to save chats default agent:', error);
+      }
+    },
+    [setChatsDefaultAgent]
   );
 
   const handleSmallModelUseDefaultChange = React.useCallback(
@@ -225,7 +300,6 @@ export const DefaultsSettings: React.FC = () => {
     async (providerId: string, modelId: string) => {
       const newValue = providerId && modelId ? `${providerId}/${modelId}` : undefined;
       setSmallModelOverride(newValue);
-      // The effort belongs to the model it was picked for.
       setSmallModelVariant(undefined);
       try {
         await updateDesktopSettings({
@@ -255,11 +329,8 @@ export const DefaultsSettings: React.FC = () => {
     async (providerId: string, modelId: string) => {
       const newValue = providerId && modelId ? `${providerId}/${modelId}` : undefined;
       setWalkthroughModelOverride(newValue);
-      // The thinking level belongs to the model it was picked for.
       setWalkthroughModelVariant(undefined);
       try {
-        // Clearing the picker is how the user goes back to the small model, so
-        // an empty value is a real choice rather than a no-op.
         await updateDesktopSettings({ walkthroughModelOverride: newValue ?? '', walkthroughModelVariant: '' });
       } catch (error) {
         console.warn('Failed to save walkthrough model override:', error);
@@ -280,13 +351,10 @@ export const DefaultsSettings: React.FC = () => {
     []
   );
 
-  // Read by the server when a provider's usage limit stops a session; nothing
-  // in the client changes until then.
   const handleFallbackModelChange = React.useCallback(
     async (providerId: string, modelId: string) => {
       const newValue = providerId && modelId ? `${providerId}/${modelId}` : undefined;
       setFallbackModel(newValue);
-      // Thinking levels belong to a model; another model starts from its default.
       setFallbackVariant(undefined);
       try {
         await updateDesktopSettings({ fallbackModel: newValue ?? '', fallbackVariant: '' });
@@ -309,10 +377,6 @@ export const DefaultsSettings: React.FC = () => {
     []
   );
 
-  // The walkthrough cannot work at all without schema-shaped output, so models
-  // the catalog says cannot do it are hidden rather than offered and then
-  // refused. A missing capability is not a "no": roughly half the catalog omits
-  // the field, and those models usually work.
   const isStructuredOutputCapable = React.useCallback(
     (providerId: string, modelId: string) =>
       modelsMetadata.get(`${providerId}/${modelId}`)?.structured_output !== false,
@@ -398,7 +462,51 @@ export const DefaultsSettings: React.FC = () => {
         </div>
       </SettingsSection>
 
-      {/* Models the app runs on its own: summaries, titles, the changes walkthrough. */}
+      {isVSCode || !chatsRoot ? null : (
+        <SettingsSection
+          title={t('settings.openchamber.defaults.chatsTitle')}
+          info={t('settings.openchamber.defaults.chatsInfo')}
+        >
+          <div>
+            <SettingsFieldRow
+              settingsItem="sessions.chats-default-model"
+              label={t('settings.openchamber.defaults.field.model')}
+              description={chatsModelNote
+                ? <span className="text-[var(--status-warning)]">{t(chatsModelNote)}</span>
+                : undefined}
+            >
+              <ModelSelector
+                directory={chatsRoot}
+                providerId={parsedChatsModel.providerId}
+                modelId={parsedChatsModel.modelId}
+                onChange={handleChatsModelChange}
+                className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+                offerAuto
+              />
+              <ModelVariantSelect
+                variants={chatsVariants}
+                value={chatsVariant}
+                onChange={handleChatsVariantChange}
+                ariaLabel={t('settings.openchamber.defaults.field.defaultThinking')}
+              />
+            </SettingsFieldRow>
+
+            <SettingsFieldRow
+              settingsItem="sessions.chats-default-agent"
+              label={t('settings.openchamber.defaults.field.agent')}
+            >
+              <AgentSelector
+                directory={chatsRoot}
+                agentName={chatsAgent || ''}
+                onChange={handleChatsAgentChange}
+                filter={(agent) => isPrimaryMode(agent.mode)}
+                className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+              />
+            </SettingsFieldRow>
+          </div>
+        </SettingsSection>
+      )}
+
       <SettingsSection title={t('settings.layout.sessions.helperModels.title')} contentClassName="space-y-2">
         <SettingsCheckboxRow
           settingsItem="sessions.small-model"
@@ -454,7 +562,6 @@ export const DefaultsSettings: React.FC = () => {
         </div>
       </SettingsSection>
 
-      {/* The managed OpenCode plugin does both switches; VS Code runs its own OpenCode without it. */}
       {isVSCode ? null : (
         <SettingsSection title={t('settings.openchamber.defaults.usageLimitsTitle')} contentClassName="space-y-1">
           <SettingsFieldRow
@@ -477,7 +584,6 @@ export const DefaultsSettings: React.FC = () => {
               ariaLabel={t('settings.openchamber.defaults.field.fallbackThinking')}
             />
           </SettingsFieldRow>
-          {/* Account switching comes first and lives on each provider's page; without this line nobody finds it from here. */}
           <p className={SETTINGS_HELPER_CLASS}>
             {t('settings.openchamber.defaults.usageLimits.accountSwitching')}
             {' '}
@@ -491,7 +597,6 @@ export const DefaultsSettings: React.FC = () => {
   );
 };
 
-/** What happens to a session's context: compaction, then the prompt cache. */
 export const SessionContextSettings: React.FC = () => {
   const { t } = useI18n();
   const isVSCode = isVSCodeRuntime();
@@ -499,7 +604,6 @@ export const SessionContextSettings: React.FC = () => {
     <>
       <CompactionSettings />
       <SettingsSection title={t('settings.openchamber.defaults.promptCacheTitle')}>
-        {/* VS Code has no OpenChamber server to warm chosen sessions: OpenCode's switch for all of them only. */}
         {isVSCode ? <SessionWarmingCheckbox /> : <SessionWarmingModeField />}
       </SettingsSection>
     </>

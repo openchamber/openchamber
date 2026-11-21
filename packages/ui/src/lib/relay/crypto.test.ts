@@ -74,16 +74,15 @@ describe('relay crypto', () => {
     await expect(decryptor.decrypt(first)).rejects.toThrow('frame counter regression');
   });
 
-  test('skipped counters are tolerated but never regress', async () => {
+  test('a skipped counter (dropped frame) is rejected', async () => {
     const { clientKeys, hostKeys } = await setupSession();
     const encryptor = createFrameEncryptor(clientKeys.clientToHost);
     const decryptor = createFrameDecryptor(hostKeys.clientToHost);
     const first = await encryptor.encrypt(new Uint8Array([1]));
-    const second = await encryptor.encrypt(new Uint8Array([2]));
+    await encryptor.encrypt(new Uint8Array([2]));
     const third = await encryptor.encrypt(new Uint8Array([3]));
     await decryptor.decrypt(first);
-    await decryptor.decrypt(third);
-    await expect(decryptor.decrypt(second)).rejects.toThrow('frame counter regression');
+    await expect(decryptor.decrypt(third)).rejects.toThrow('frame counter gap');
   });
 
   test('oversized plaintext is rejected before encryption', async () => {

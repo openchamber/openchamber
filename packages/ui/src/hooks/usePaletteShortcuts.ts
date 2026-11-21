@@ -14,14 +14,10 @@ import {
   restartOpenCode,
   showContextUsage,
   showDiagnosticTimeline,
+  toggleReasoningTraces,
   toggleWorkCurrentSession,
 } from '@/lib/paletteCommands';
 
-/**
- * Keyboard shortcuts for commands that also appear in the command palette.
- * `MainLayout` mounts this, so the chords work before the palette has ever
- * been opened (the palette itself loads on demand).
- */
 export function usePaletteShortcuts(): void {
   const { t } = useI18n();
   useKeybinds({
@@ -31,6 +27,7 @@ export function usePaletteShortcuts(): void {
     show_opencode_status: showDiagnosticTimeline,
     open_overview: openOverview,
     reload_ui: reloadUi,
+    toggle_reasoning_traces: toggleReasoningTraces,
     open_archive: openArchive,
     open_notes: openNotes,
     open_todos: openTodos,

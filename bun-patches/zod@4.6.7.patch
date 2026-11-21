@@ -1,0 +1,94 @@
+diff --git a/v4/core/schemas.cjs b/v4/core/schemas.cjs
+index 0d9f7203c375d0ceb49e52f72529c8e3c285245f..bf02c00104860b5275be6e92dea8bb6741dc7c3a 100644
+--- a/v4/core/schemas.cjs
++++ b/v4/core/schemas.cjs
+@@ -948,17 +948,6 @@ function handlePropertyResult(result, final, key, input, optin, optout) {
+         }
+         final.issues.push(...util.prefixIssues(key, result.issues));
+     }
+-    if (!isPresent && optin === undefined) {
+-        if (!result.issues.length) {
+-            final.issues.push({
+-                code: "invalid_type",
+-                expected: "nonoptional",
+-                input: undefined,
+-                path: [key],
+-            });
+-        }
+-        return;
+-    }
+     if (result.value === undefined) {
+         if (isPresent || (optin === "defaulted" && !isOptionalOut)) {
+             final.value[key] = undefined;
+@@ -1189,23 +1178,10 @@ exports.$ZodObjectJIT = core.$constructor("$ZodObjectJIT", (inst, def) => {
+             }
+             else if (!isOptionalIn) {
+                 doc.write(`
+-        const ${id}_present = ${isPresent};
+         if (${id}.issues.length) {${prefixStr(id, k)}
+         }
+-        if (!${id}_present && !${id}.issues.length) {
+-          payload.issues.push({
+-            code: "invalid_type",
+-            expected: "nonoptional",
+-            input: undefined,
+-            path: [${k}]
+-          });
+-          if (ctx && ctx.abortEarly) {
+-            payload.value = newResult;
+-            return payload;
+-          }
+-        }
+ 
+-        if (${id}_present) {
++        if (${id}.value !== undefined || ${isPresent}) {
+           newResult[${k}] = ${id}.value;
+         }
+ 
+diff --git a/v4/core/schemas.js b/v4/core/schemas.js
+index c8c5de787d82e9c9db6df3fc21876d5924411f54..6bfd4ced745e2eb1f2d8c7cc1952f91bf4b20f52 100644
+--- a/v4/core/schemas.js
++++ b/v4/core/schemas.js
+@@ -904,17 +904,6 @@ function handlePropertyResult(result, final, key, input, optin, optout) {
+         }
+         final.issues.push(...util.prefixIssues(key, result.issues));
+     }
+-    if (!isPresent && optin === undefined) {
+-        if (!result.issues.length) {
+-            final.issues.push({
+-                code: "invalid_type",
+-                expected: "nonoptional",
+-                input: undefined,
+-                path: [key],
+-            });
+-        }
+-        return;
+-    }
+     if (result.value === undefined) {
+         if (isPresent || (optin === "defaulted" && !isOptionalOut)) {
+             final.value[key] = undefined;
+@@ -1145,23 +1134,10 @@ export const $ZodObjectJIT = /*@__PURE__*/ core.$constructor("$ZodObjectJIT", (i
+             }
+             else if (!isOptionalIn) {
+                 doc.write(`
+-        const ${id}_present = ${isPresent};
+         if (${id}.issues.length) {${prefixStr(id, k)}
+         }
+-        if (!${id}_present && !${id}.issues.length) {
+-          payload.issues.push({
+-            code: "invalid_type",
+-            expected: "nonoptional",
+-            input: undefined,
+-            path: [${k}]
+-          });
+-          if (ctx && ctx.abortEarly) {
+-            payload.value = newResult;
+-            return payload;
+-          }
+-        }
+ 
+-        if (${id}_present) {
++        if (${id}.value !== undefined || ${isPresent}) {
+           newResult[${k}] = ${id}.value;
+         }
+ 

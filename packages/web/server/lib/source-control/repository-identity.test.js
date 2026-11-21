@@ -6,6 +6,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrivateRepositoryIdentityResolver, createRepositoryIdResolver, resolvePrivateRepositoryIdentity, resolveRepositoryIdentity } from './repository-identity.js';
 import { createBindingService } from './binding-service.js';
+import { createBindingStore } from './binding-storage.js';
+import { createHttpsCredentialReference } from '../git/credential-resolver.js';
 import { parseBindingStore } from './binding-contract.js';
 import { fingerprintRemoteUrl, isDiskPathRemoteUrl, redactRemoteUrl, redactSensitiveText } from './url-redaction.js';
 
@@ -30,6 +32,51 @@ afterEach(() => {
 });
 
 describe('source-control repository identity', () => {
+  it('keeps an existing binding and its authority after only the device number changes', async () => {
+    const repository = makeDirectory();
+    git(repository, ['init', '-b', 'main']);
+    git(repository, ['remote', 'add', 'origin', 'https://example.com/team/repository.git']);
+    const commonDirectory = fs.realpathSync(path.join(repository, '.git'));
+    const stats = fs.statSync(commonDirectory);
+    let dev = 59;
+    const fsImpl = { ...fs.promises, stat: async (target) => ({ ...await fs.promises.stat(target), dev }) };
+    const resolve = () => createPrivateRepositoryIdentityResolver({ fsImpl });
+    const legacyId = `repo_${crypto.createHash('sha256').update(commonDirectory).update('\0')
+      .update(String(dev)).update('\0').update(String(stats.ino)).digest('base64url')}`;
+    const store = createBindingStore({ filePath: path.join(makeDirectory(), 'bindings.json') });
+    const credentialId = createHttpsCredentialReference({
+      provider: 'gitlab', instance: 'https://example.com', credentialId: 'fixture-account',
+      credentialRevision: 1, providerUserId: 'https://example.com#7',
+    });
+    const endpoint = { displayUrl: 'https://example.com/team/repository.git', fingerprint: fingerprintRemoteUrl('https://example.com/team/repository.git') };
+    await store.compareAndSwap(legacyId, 0, {
+      state: 'bound', configRevision: 'legacy-config', providers: [], auxiliary: [],
+      remotes: [{ name: 'origin', fetch: endpoint, push: endpoint, mode: 'managed', credentialId, readiness: 'ready' }],
+    });
+    const before = await resolve()(repository);
+    expect(before.repositoryId).toBe(legacyId);
+    const service = () => createBindingService({ store, resolveRepository: resolve(), resolveTransportRepository: resolve() });
+    expect((await service().get(repository)).revision).toBe(1);
+
+    dev = 63;
+    const after = await resolve()(repository);
+    expect(after.repositoryId).toBe(before.repositoryId);
+    expect(after.configRevision).toBe(before.configRevision);
+    expect((await service().get(repository)).binding.remotes[0].readiness).toBe('ready');
+    expect((await createRepositoryIdResolver({ fsImpl })(repository)).repositoryId).toBe(before.repositoryId);
+    await expect(service().validateGitTransportContext({
+      directory: repository, repositoryId: before.repositoryId, bindingRevision: 1,
+      configRevision: before.configRevision, remote: 'origin', endpointKind: 'fetch',
+    })).resolves.toMatchObject({ transportMode: 'managed', credentialId, repositoryId: before.repositoryId });
+
+    git(repository, ['remote', 'set-url', 'origin', 'https://elsewhere.example/team/repository.git']);
+    expect((await service().get(repository)).binding.remotes[0].readiness).toBe('config-changed');
+    await expect(service().validateGitTransportContext({
+      directory: repository, repositoryId: before.repositoryId, bindingRevision: 1,
+      configRevision: before.configRevision, remote: 'origin', endpointKind: 'fetch',
+    })).rejects.toMatchObject({ code: 'SOURCE_CONTROL_BINDING_STALE' });
+  });
+
   it('uses one identity for the checkout, linked worktree, and symlink', async () => {
     const repository = makeDirectory();
     const worktree = makeDirectory();

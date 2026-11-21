@@ -93,7 +93,6 @@ const readTextControlSelection = (element: Element): string | null => {
     if (!text) {
       return null;
     }
-    // Collapse so a duplicate menu delivery cannot append the same range twice.
     control.selectionStart = end;
     control.selectionEnd = end;
     return text;
@@ -190,21 +189,12 @@ const captureDomSelection = (): string | null => {
   return wrapMarkdownSelectionForChat(markdown);
 };
 
-/**
- * Capture the current non-composer selection as chat-ready markdown.
- * Returns null when nothing usable is selected.
- */
 export const captureSelectionMarkdownForChat = (): string | null => {
   return captureCodeMirrorSelection()
     ?? captureActiveElementSelection()
     ?? captureDomSelection();
 };
 
-/**
- * Append the current selection to the chat composer.
- * When nothing is selected, focuses the chat input unless focusWhenEmpty is false.
- * Returns true when selected text was appended.
- */
 export const addSelectionToChat = (options?: { focusWhenEmpty?: boolean }): boolean => {
   const markdown = captureSelectionMarkdownForChat();
   if (!markdown && options?.focusWhenEmpty === false) return false;

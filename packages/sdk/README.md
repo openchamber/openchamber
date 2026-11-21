@@ -4,7 +4,7 @@ Build extensions for [OpenChamber](https://openchamber.dev). An extension can sh
 
 Full guide: [Build an extension](https://docs.openchamber.dev/sdk/). Reference: [Host API](https://docs.openchamber.dev/sdk/host/) and [UI kit](https://docs.openchamber.dev/sdk/ui/). Extensions with a local process: [GUEST_SERVICES.md](./GUEST_SERVICES.md).
 
-Extensions load in OpenChamber web and desktop. VS Code and mobile do not load them yet.
+Extensions load in OpenChamber web, desktop and the mobile app. VS Code does not load them yet.
 
 Device-scoped extension storage is local browser preference data. It stays partitioned by the host's runtime identity and the extension installation. URL aliases are not guaranteed to share preferences; saved host and relay connections follow the host's existing runtime identity rules.
 
@@ -209,6 +209,7 @@ await host.startSession({
 await host.prompt({ text: 'Fix the login', send: true });
 await host.setBadge(3); // number on the rail icon; null clears it
 await host.openCommit(sha); // show a commit of the open project in the Diff view
+await host.openWalkthrough({ base: 'main' }); // Changes Walkthrough on This branch against main; the user clicks Generate
 await host.setHeight(document.body.scrollHeight); // Work Status section: frame height, clamped by the host
 const { text } = await host.generate({ prompt: task.description, system: 'One-line summary only.' }); // capability model
 

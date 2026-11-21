@@ -35,6 +35,7 @@ OpenChamber'ı Nginx, Nginx Proxy Manager, Caddy, Cloudflare ya da başka bir re
 - OpenChamber yanıtları zaten sıkıştırıyorsa proxy'de gzip'i kapatın.
 - Sıkıştırmayı yalnızca bir katmanda açık bırakın.
 - `Host`, `X-Forwarded-For` ve `X-Forwarded-Proto` gibi normal proxy başlıklarını iletin.
+- Proxy başka bir makinede veya başka bir konteynerde çalışıyorsa adresini [`OPENCHAMBER_TRUSTED_PROXIES`](/tr/environment/#openchamber_trusted_proxies) değişkenine ekleyin. Aksi halde arkasındaki herkes başarısız giriş denemeleri için tek bir sınırı paylaşır.
 - Kullanıcılar dosya yüklüyorsa body boyutu sınırlarını artırın.
 
 ## Hızlı kontrol listesi

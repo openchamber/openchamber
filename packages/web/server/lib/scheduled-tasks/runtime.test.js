@@ -11,6 +11,7 @@ import {
 } from './runtime.js';
 import { createProjectConfigRuntime } from '../projects/project-config.js';
 import { createChatsScope } from './chats-scope.js';
+import { createReadSessionDefaults } from './session-defaults.js';
 import { loopFingerprint, parseLoopDefinition } from './loops.js';
 import { createOpenCodeSessionMetadata, createSessionMetadataStore } from '../openchamber-sessions/session-metadata-store.js';
 import { readProcessInstance } from './process-instance.js';
@@ -1545,7 +1546,7 @@ describe('scheduled-tasks runtime chats scope', () => {
     state: { createdAt: 1, updatedAt: 1 },
   };
 
-  const createChatsRuntime = async ({ sessionStatus = 200 } = {}) => {
+  const createChatsRuntime = async ({ sessionStatus = 200, runTask = task, settings = null, models = null } = {}) => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-runtime-chats-'));
     const chatsScope = createChatsScope(path.join(tempRoot, 'chats'));
     const sessionBodies = [];
@@ -1555,19 +1556,25 @@ describe('scheduled-tasks runtime chats scope', () => {
         sessionBodies.push(JSON.parse(init.body));
         if (sessionStatus !== 200) return new Response(JSON.stringify({ error: 'boom' }), { status: sessionStatus });
       }
-      const data = pathname === '/api/session' ? { id: 'ses_chat' } : pathname === '/api/command' ? [] : {};
+      if (pathname === '/api/model' && models === 'unavailable') return new Response(JSON.stringify({ error: 'down' }), { status: 500 });
+      const data = pathname === '/api/session' ? { id: 'ses_chat' } : pathname === '/api/command' ? [] : pathname === '/api/model' && models ? models : {};
       return new Response(JSON.stringify({ data }), { status: 200, headers: { 'content-type': 'application/json' } });
     }));
     const projectConfigRuntime = {
-      listScheduledTasks: vi.fn(async () => [task]),
-      reconcileLoopTasks: vi.fn(async () => [task]),
-      updateScheduledTaskState: async () => ({ task, updated: true }),
-      updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      listScheduledTasks: vi.fn(async () => [runTask]),
+      reconcileLoopTasks: vi.fn(async () => [runTask]),
+      updateScheduledTaskState: async () => ({ task: runTask, updated: true }),
+      updateScheduledTaskStateIf: async () => ({ task: runTask, updated: true }),
     };
     const runtime = createScheduledTasksRuntime({
       projectConfigRuntime,
       listProjects: async () => [{ id: 'proj', path: '/repo' }],
       chatsScope,
+      readSessionDefaults: createReadSessionDefaults({
+        readSettings: async () => settings,
+        sanitizeProjects: (projects) => projects,
+        chatsScopeID: chatsScope.id,
+      }),
       buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
       getOpenCodeAuthHeaders: () => ({}),
       waitForOpenCodeReady: async () => {},
@@ -1610,6 +1617,65 @@ describe('scheduled-tasks runtime chats scope', () => {
         await expect(stat(result.directory)).resolves.toBeTruthy();
       }
       expect(sessionBodies.map((body) => body.location.directory)).toEqual([first.directory, second.directory]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('starts a run that follows the defaults on the Chats defaults, then the global ones', async () => {
+    const runTask = { ...task, execution: { prompt: 'Summarize the news', useDefaults: true } };
+    const settings = {
+      defaultModel: 'anthropic/claude-sonnet-5', defaultVariant: 'high', defaultAgent: 'build',
+      chatsDefaultModel: 'openai/gpt-6', chatsDefaultVariant: 'low', chatsDefaultAgent: 'plan',
+      projects: [],
+    };
+    const { runtime, chatsScope, sessionBodies, cleanup } = await createChatsRuntime({ runTask, settings });
+    try {
+      await runtime.start();
+      expect((await runtime.runNow(chatsScope.id, 'task-1')).ok).toBe(true);
+      Object.assign(settings, { chatsDefaultModel: '', chatsDefaultVariant: '', chatsDefaultAgent: '' });
+      expect((await runtime.runNow(chatsScope.id, 'task-1')).ok).toBe(true);
+      runtime.stop();
+
+      expect(sessionBodies.map(({ model, agent }) => ({ model, agent }))).toEqual([
+        { model: { providerID: 'openai', id: 'gpt-6', variant: 'low' }, agent: 'plan' },
+        { model: { providerID: 'anthropic', id: 'claude-sonnet-5', variant: 'high' }, agent: 'build' },
+      ]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('starts a Chats run on the New sessions model once the Chats model is gone from the catalog', async () => {
+    const runTask = { ...task, execution: { prompt: 'Summarize the news', useDefaults: true } };
+    const settings = {
+      defaultModel: 'anthropic/claude-sonnet-5', defaultVariant: 'high', defaultAgent: 'build',
+      chatsDefaultModel: 'openai/gone', chatsDefaultVariant: 'low', chatsDefaultAgent: 'plan',
+      projects: [],
+    };
+    const models = [{ providerID: 'anthropic', id: 'claude-sonnet-5', variants: [{ id: 'high' }] }];
+    const { runtime, chatsScope, sessionBodies, cleanup } = await createChatsRuntime({ runTask, settings, models });
+    try {
+      await runtime.start();
+      expect((await runtime.runNow(chatsScope.id, 'task-1')).ok).toBe(true);
+      runtime.stop();
+      expect(sessionBodies.map(({ model, agent }) => ({ model, agent }))).toEqual([
+        { model: { providerID: 'anthropic', id: 'claude-sonnet-5', variant: 'high' }, agent: 'plan' },
+      ]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps the Chats model when the catalog cannot be read', async () => {
+    const runTask = { ...task, execution: { prompt: 'Summarize the news', useDefaults: true } };
+    const settings = { defaultModel: 'anthropic/claude-sonnet-5', chatsDefaultModel: 'openai/gpt-6', projects: [] };
+    const { runtime, chatsScope, sessionBodies, cleanup } = await createChatsRuntime({ runTask, settings, models: 'unavailable' });
+    try {
+      await runtime.start();
+      expect((await runtime.runNow(chatsScope.id, 'task-1')).ok).toBe(true);
+      runtime.stop();
+      expect(sessionBodies.map(({ model }) => model)).toEqual([{ providerID: 'openai', id: 'gpt-6' }]);
     } finally {
       await cleanup();
     }

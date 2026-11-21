@@ -1,9 +1,12 @@
 import { Fragment, useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
+import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -14,23 +17,18 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Spinner } from '@/components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
-import { type Locale, useI18n } from '@/lib/i18n';
+import { saveFile } from '@/components/chat/message/parts/saveFile';
+import { type I18nKey, type Locale, useI18n } from '@/lib/i18n';
+import { type WalkthroughExportFormat, walkthroughExportFile } from '@/lib/walkthrough/export';
 import type { WalkthroughView } from '@/lib/walkthrough/model';
 import { cn } from '@/lib/utils';
 import type { WalkthroughReview } from './useWalkthroughReview';
 import { MENU_GROUP_LABEL_CLASS, openWalkthroughGuide } from './walkthroughAction';
 
-// Pickers inside the phone's options sheet open above it: the sheet sits at
-// z-60 and a menu's default layer would open underneath.
 const OVER_SHEET_POSITIONER_CLASS = 'z-[70]';
 
 type ControlSize = 'default' | 'mobile';
 
-/**
- * A walkthrough nobody can read is worth nothing, so the prose language is a
- * per-review choice like the model — defaulting to the interface language,
- * which is the best evidence of what the reader reads.
- */
 export const WalkthroughLanguagePicker = ({
   review,
   size = 'default',
@@ -46,7 +44,6 @@ export const WalkthroughLanguagePicker = ({
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
-          {/* The span takes the sizing and the header's fold class: an open tooltip marks its trigger as open, which would paint the picker pressed. */}
           <span className={cn('inline-flex min-w-0', className)}>
             <DropdownMenuTrigger asChild>
               <button
@@ -91,7 +88,6 @@ export const WalkthroughLanguagePicker = ({
   );
 };
 
-/** Choosing a roomier model for a risky change is a per-review call, so this is review state rather than a settings edit. */
 export const WalkthroughModelPicker = ({ review, className }: { review: WalkthroughReview; className?: string }) => {
   const { t } = useI18n();
   return (
@@ -99,7 +95,6 @@ export const WalkthroughModelPicker = ({ review, className }: { review: Walkthro
       providerId={review.activeProviderId ?? ''}
       modelId={review.activeModelId}
       onChange={review.selectModel}
-      // While the auth list is loading, allow none — not every provider.
       allowedProviderIds={review.modelProviders ?? []}
       isModelAllowed={review.isStructuredOutputCapable}
       tooltipsEnabled={false}
@@ -110,7 +105,6 @@ export const WalkthroughModelPicker = ({ review, className }: { review: Walkthro
   );
 };
 
-/** Generate, Regenerate or Cancel, whichever the walkthrough is ready for. */
 export const WalkthroughGenerateButton = ({
   review,
   hasView,
@@ -123,9 +117,7 @@ export const WalkthroughGenerateButton = ({
   hasView: boolean;
   size?: 'sm' | 'default' | 'lg';
   className?: string;
-  /** Lets a tight toolbar drop the text and keep the icon. */
   labelClassName?: string;
-  /** After the click, for a menu or sheet that should step aside. */
   onActed?: () => void;
 }) => {
   const { t } = useI18n();
@@ -156,7 +148,6 @@ export const WalkthroughGenerateButton = ({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        {/* The span keeps the tooltip on a disabled button, and takes the sizing and the header's fold class so a folded button leaves no gap. */}
         <span className={cn('inline-flex', className)}>
           <Button
             type="button"
@@ -182,10 +173,6 @@ export const WalkthroughGenerateButton = ({
   );
 };
 
-/**
- * Where the reader is, and the whole list of steps to jump to. Shown where the
- * contents column is not, so position and what is ahead stay one tap away.
- */
 export const WalkthroughStepMenu = ({
   review,
   view,
@@ -238,15 +225,11 @@ export const WalkthroughStepMenu = ({
   );
 };
 
-/** Status of what is on screen: generating over it, asked in another language or model, outdated, or failed. */
 export const WalkthroughBanners = ({ review, view }: { review: WalkthroughReview; view: WalkthroughView | null }) => {
   const { t, label } = useI18n();
   const { entry } = review;
   return (
     <>
-      {/* While regenerating over an existing walkthrough the stream keeps showing
-          the old content, so the only other signal would be the button swapping
-          to Cancel — far too quiet for something that runs for tens of seconds. */}
       {review.isGenerating && view && (
         <div className="flex shrink-0 items-center gap-2 bg-[var(--status-info-background)] px-3 py-2">
           <Spinner className="size-4 shrink-0 text-[var(--status-info)]" />
@@ -260,10 +243,6 @@ export const WalkthroughBanners = ({ review, view }: { review: WalkthroughReview
         </div>
       )}
 
-      {/* Switching the model or the language is a request for a walkthrough
-          that may not exist yet. Falling back to the last one is better than an
-          empty panel, but only if the panel says so — otherwise the picker
-          claims Ukrainian over English prose. */}
       {(review.languageMissing || review.modelMissing) && (
         <div className="flex shrink-0 items-center gap-2 bg-[var(--status-info-background)] px-3 py-2">
           <Icon name="information" className="size-4 shrink-0 text-[var(--status-info)]" />
@@ -285,9 +264,6 @@ export const WalkthroughBanners = ({ review, view }: { review: WalkthroughReview
                   variant="ghost"
                   size="xs"
                   disabled={review.generateDisabled}
-                  // Not forced: if an entry for this exact request existed the banner
-                  // would not be here, and a forced run would refuse the cache it may
-                  // find on the way.
                   onClick={() => review.handleGenerate(false)}
                 >
                   {t('walkthrough.action.generate')}
@@ -312,8 +288,6 @@ export const WalkthroughBanners = ({ review, view }: { review: WalkthroughReview
                 variant="ghost"
                 size="xs"
                 className="ms-auto shrink-0"
-                // Clicking this again mid-flight would abort the running generation
-                // and start another — paying for the same answer twice.
                 disabled={review.isGenerating}
                 onClick={() => review.handleGenerate(true)}
               >
@@ -328,8 +302,6 @@ export const WalkthroughBanners = ({ review, view }: { review: WalkthroughReview
       {review.errorMessage && (
         <div className="flex shrink-0 items-start gap-2 bg-status-error/10 px-3 py-2">
           <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-status-error" />
-          {/* Provider errors arrive as raw JSON bodies. Show a readable amount
-              and keep the rest reachable rather than filling the panel. */}
           <span className="typography-meta line-clamp-2 text-foreground" title={review.errorMessage}>
             {review.errorMessage}
           </span>
@@ -339,12 +311,6 @@ export const WalkthroughBanners = ({ review, view }: { review: WalkthroughReview
   );
 };
 
-/**
- * Before the first walkthrough: what it is, what it is asked with, and the
- * button that starts it. The model and the language sit here because this is
- * the moment they are decided; once a walkthrough exists they are rarely
- * touched again and live in the header or its options.
- */
 export const WalkthroughEmptyState = ({ review, size = 'default' }: { review: WalkthroughReview; size?: ControlSize }) => {
   const { t } = useI18n();
   if (review.entry.status === 'loading') {
@@ -374,11 +340,61 @@ export const WalkthroughEmptyState = ({ review, size = 'default' }: { review: Wa
   );
 };
 
-/**
- * The controls a narrow header has no room for, gathered in one place: the
- * model, the language, Generate, and the guide. The desktop header opens it
- * from "More", the phone from its own options button.
- */
+const EXPORT_CHOICES = [
+  { format: 'markdown', icon: 'file-text', labelKey: 'walkthrough.export.markdown' },
+  { format: 'html', icon: 'file-code', labelKey: 'walkthrough.export.html' },
+] as const satisfies ReadonlyArray<{ format: WalkthroughExportFormat; icon: IconName; labelKey: I18nKey }>;
+
+type ExportableReview = Pick<WalkthroughReview, 'view' | 'blocked' | 'showStages'> & {
+  entry: Pick<WalkthroughReview['entry'], 'result'>;
+};
+
+const useWalkthroughExport = (review: ExportableReview) => {
+  const { t } = useI18n();
+  const result = review.view && !review.blocked && !review.showStages ? review.entry.result : null;
+  if (!result) return null;
+  return async (format: WalkthroughExportFormat) => {
+    try {
+      const file = walkthroughExportFile(result, format, t);
+      if (!file) return;
+      await saveFile(file);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      toast.error(t('walkthrough.export.failed'));
+    }
+  };
+};
+
+export const WalkthroughExportMenu = ({ review, className }: { review: ExportableReview; className?: string }) => {
+  const { t } = useI18n();
+  const exportWalkthrough = useWalkthroughExport(review);
+  if (!exportWalkthrough) return null;
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className={cn('inline-flex shrink-0', className)}>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="ghost" size="sm" aria-label={t('walkthrough.export.menuAria')}>
+                <Icon name="download" className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>{t('walkthrough.export.menuAria')}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end">
+        {EXPORT_CHOICES.map((choice) => (
+          <DropdownMenuItem key={choice.format} className="flex items-center gap-2" onClick={() => { void exportWalkthrough(choice.format); }}>
+            <Icon name={choice.icon} className="size-4" />
+            <span className="typography-ui-label text-foreground">{t(choice.labelKey)}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
 export const WalkthroughOptions = ({
   review,
   hasView,
@@ -389,12 +405,11 @@ export const WalkthroughOptions = ({
   review: WalkthroughReview;
   hasView: boolean;
   size?: ControlSize;
-  /** The pull request's Changes, when the header had to drop its button. */
   onOpenChanges?: () => void;
-  /** After an action that leaves the options behind (Generate, Changes, the guide). */
   onActed?: () => void;
 }) => {
   const { t } = useI18n();
+  const exportWalkthrough = useWalkthroughExport(review);
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
@@ -421,6 +436,22 @@ export const WalkthroughOptions = ({
           {t('contextPanel.mode.diff')}
         </Button>
       )}
+      {exportWalkthrough && EXPORT_CHOICES.map((choice) => (
+        <Button
+          key={choice.format}
+          type="button"
+          variant="ghost"
+          size={size === 'mobile' ? 'default' : 'sm'}
+          className="w-full"
+          onClick={() => {
+            onActed?.();
+            void exportWalkthrough(choice.format);
+          }}
+        >
+          <Icon name={choice.icon} className="size-4" />
+          {t(choice.labelKey)}
+        </Button>
+      ))}
       <Button
         type="button"
         variant="ghost"

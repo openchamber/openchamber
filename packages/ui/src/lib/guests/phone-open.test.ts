@@ -24,8 +24,9 @@ describe('opening extension frames on the phone', () => {
 
   beforeEach(() => {
     // The surface check reads the boot stamp first; the test runs without a DOM.
+    // An https origin is hosted mobile, where the dev-server preview is not offered.
     previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-    Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: { __OPENCHAMBER_SURFACE__: 'mobile' } });
+    Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: { __OPENCHAMBER_SURFACE__: 'mobile', location: { protocol: 'https:' } } });
     requests = [];
     disconnect = connectMobileWorkspaceOpener((request) => { requests.push(request); });
     useGuestsStore.setState({

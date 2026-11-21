@@ -97,7 +97,6 @@ const resetRuntimeAuthGeneration = (): void => {
   runtimeAuthGeneration += 1;
   runtimeUrlAuthRefreshPromise = null;
   clearRuntimeUrlAuthToken();
-  // Credentials changed: if a consumer is active, re-mint promptly.
   scheduleUrlAuthRefresh();
 };
 
@@ -121,8 +120,6 @@ export const setRuntimeBearerToken = (token: string | null | undefined): void =>
 };
 
 export const setRuntimeExtraHeaders = (headers: Record<string, string> | null | undefined): void => {
-  // These headers are for runtime HTTP fetches and URL-token minting. Browser-owned
-  // realtime transports (EventSource/WebSocket) cannot attach arbitrary headers.
   const next = sanitizeRuntimeExtraHeaders(headers);
   if (runtimeExtraHeadersEqual(runtimeExtraHeaders, next)) return;
   runtimeExtraHeaders = next;
@@ -208,18 +205,12 @@ const getRuntimeAuthCredential = async (): Promise<RuntimeAuthCredential> => {
   return token ? { type: 'bearer', token } : null;
 };
 
-// Performs the actual network mint and swaps the new token in atomically (the
-// previous token stays valid until `setRuntimeUrlAuthToken` replaces it — no
-// empty-token window). Concurrent callers share one in-flight request.
 type UrlAuthScope = `guest:${string}`;
 
 type MintedUrlAuthToken = { token: string; expiresAt: number };
 
 const mintedUrlAuthTokenSchema = z.object({ token: z.string(), expiresAt: z.number(), expiresIn: z.number().optional() });
 
-// One POST to `/auth/url-token` with the current runtime credentials. In relay
-// mode the mint must ride the tunnel, not the network: there is no reachable
-// network base URL. Same auth headers, same route, tunneled.
 const postUrlAuthTokenMint = async (apiBaseUrl: string | null | undefined, scope?: UrlAuthScope): Promise<MintedUrlAuthToken> => {
   const credential = await getRuntimeAuthCredential();
   const headers = new Headers();
@@ -243,19 +234,10 @@ const postUrlAuthTokenMint = async (apiBaseUrl: string | null | undefined, scope
   }
   const parsed = mintedUrlAuthTokenSchema.safeParse(await response.json().catch(() => null));
   if (!parsed.success) return { token: '', expiresAt: 0 };
-  // `expiresAt` is on the server's clock, and every expiry check here reads this
-  // device's clock. A device even a minute ahead would discard each fresh token
-  // and open realtime sockets without one, so prefer the remaining lifetime.
-  // Servers older than `expiresIn` only send `expiresAt`.
   const { token, expiresAt, expiresIn } = parsed.data;
   return { token: token.trim(), expiresAt: expiresIn === undefined ? expiresAt : Date.now() + expiresIn };
 };
 
-/**
- * A token that opens only one guest's package files. It is never cached: the
- * guest iframe URL is readable by the guest's own script, so every mount gets a
- * fresh token that is worthless outside `/api/guests/<id>/`.
- */
 export const mintGuestFrameUrlAuthToken = async (guestId: string): Promise<MintedUrlAuthToken> => {
   const minted = await postUrlAuthTokenMint(null, `guest:${guestId}`);
   if (!minted.token) {
@@ -342,13 +324,33 @@ const mintLocalRuntimeUrlAuthToken = (localOrigin: string): Promise<string> => {
   return localRuntimeUrlAuthRefreshPromise;
 };
 
-// Returns a valid token without a network call, minting only when the current
-// token is missing or already inside the skew window.
 export const refreshRuntimeUrlAuthToken = async (apiBaseUrl?: string | null): Promise<string> => {
   const existing = readValidRuntimeUrlAuthTokenSync();
   if (existing) return existing;
   return mintRuntimeUrlAuthToken(apiBaseUrl);
 };
+
+export const hasSameOriginTunnelSession = async (sessionUrl: string): Promise<boolean> => {
+  if (!globalThis.window || getActiveRelayTunnel() || Object.keys(getRuntimeExtraHeadersSync()).length > 0) return false;
+  const generation = runtimeAuthGeneration;
+  try {
+    if (await getRuntimeAuthCredential()) return false;
+    if (new URL(sessionUrl, window.location.href).origin !== window.location.origin) return false;
+    const response = await fetch(sessionUrl, {
+      credentials: 'same-origin',
+      mode: 'same-origin',
+      redirect: 'error',
+      signal: AbortSignal.timeout(1_500),
+    });
+    if (!response.ok) return false;
+    const session = tunnelSessionStatus.safeParse(await response.json());
+    return generation === runtimeAuthGeneration && session.success;
+  } catch {
+    return false;
+  }
+};
+
+const tunnelSessionStatus = z.object({ authenticated: z.literal(true), scope: z.literal('tunnel') });
 
 export const refreshLocalRuntimeUrlAuthToken = async (localOrigin: string): Promise<string> => {
   const origin = normalizeOrigin(localOrigin);
@@ -364,12 +366,6 @@ export const refreshLocalRuntimeUrlAuthToken = async (localOrigin: string): Prom
   return mintLocalRuntimeUrlAuthToken(origin);
 };
 
-// ── Proactive URL auth token refresh ──────────────────────────────────────
-// The url token has a short server TTL. Instead of each consumer minting on its
-// own timer (and clearing the shared token, which 401s other consumers during
-// the refetch), a single scheduler refreshes it just before the skew window —
-// but only while at least one consumer is active, so we never poll
-// /auth/url-token in the background when nothing needs the token.
 let urlAuthConsumerCount = 0;
 let urlAuthRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let urlAuthApiBaseUrl: string | null = null;
@@ -386,8 +382,6 @@ const scheduleUrlAuthRefresh = (): void => {
   clearUrlAuthRefreshTimer();
   if (urlAuthConsumerCount <= 0 || typeof window === 'undefined') return;
 
-  // Refresh before the skew window so the old token is still valid when the new
-  // one swaps in. With no token yet (expiry 0), refresh immediately.
   const refreshAt = runtimeUrlAuthTokenExpiresAt - URL_AUTH_REFRESH_SKEW_MS - URL_AUTH_PROACTIVE_BUFFER_MS;
   const delay = runtimeUrlAuthTokenExpiresAt > 0 ? Math.max(0, refreshAt - Date.now()) : 0;
 
@@ -405,9 +399,6 @@ const scheduleUrlAuthRefresh = (): void => {
   }, delay);
 };
 
-// Register an active url-token consumer. While any consumer is held, the token
-// is proactively refreshed before it expires. Returns a release function;
-// the proactive loop stops once the last consumer releases.
 export const acquireRuntimeUrlAuthToken = (apiBaseUrl?: string | null): (() => void) => {
   if (typeof apiBaseUrl === 'string' && apiBaseUrl.trim()) {
     urlAuthApiBaseUrl = apiBaseUrl.trim();

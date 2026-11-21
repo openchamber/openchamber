@@ -138,8 +138,9 @@ Optional `config.fonts` accepts `sans`, `mono` and `heading`. Optional `config.t
   `selectionForeground` out to derive readable text from your body color.
   A selected row does not need the same bright fill as a primary button.
 - Set `markdown.inlineCode` to a distinct, readable accent and use
-  `markdown.inlineCodeBackground` for its quiet background. Keep `markdown.bold`
-  neutral, with a little more contrast than body text. Retired heading-color
+  `markdown.inlineCodeBackground` for its quiet background. Leave
+  `markdown.bold` out: bold then uses the body text color and stands out
+  through weight. Retired heading-color
   fields do not affect the theme.
 - Add a little of your accent to `chat.userMessageBackground`. Keep the tint
   faint enough that messages do not compete with buttons and selected rows.

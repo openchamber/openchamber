@@ -4,6 +4,7 @@ import type { GuestStatusControl, GuestStatusControlEvent } from './status-contr
 import { isGuestStatusControls } from './status-controls.ts';
 import type { GuestBlockCall, JsonValue } from './contract.ts';
 import { isGuestPopoverRequest, type GuestPopoverClosedEvent, type GuestPopoverRequest } from './popover.ts';
+import { guestNavigationCalls, type GuestNavigationClient } from './navigation.ts';
 import {
   GUEST_FILE_EDITOR_CONTENT_MAX,
   GUEST_FILE_EDITOR_VERSION_MAX,
@@ -32,7 +33,6 @@ import {
   clampAttachRequest,
   clampBadgeCount,
   clampFrameHeight,
-  isGuestCommitSha,
   clampPromptRequest,
   clampStartSessionRequest,
   readHostMessage,
@@ -77,6 +77,14 @@ import {
   isPromptResult,
   isStartSessionResult,
 } from './contract.ts';
+import {
+  GUEST_MICROPHONE_OPEN_TIMEOUT_MS,
+  GUEST_MICROPHONE_SAMPLE_RATE_MAX,
+  GUEST_MICROPHONE_SAMPLE_RATE_MIN,
+  createSampleQueue,
+  type GuestMicrophone,
+  type GuestMicrophoneEndReason,
+} from './microphone.ts';
 import { GUEST_SHELL_ID_MAX, GUEST_SHELL_OUTPUT_TAIL_MAX, type GuestRunningShellsSnapshot, type GuestShellOutputResult, type GuestShellStopResult, type GuestShellsScope } from './shells.ts';
 
 export type HostFrame = {
@@ -88,11 +96,8 @@ export type HostFrame = {
 };
 
 export type HostClientOptions = {
-  /** Test seam. Defaults to `window`. */
   target?: HostFrame;
-  /** Test seam. Defaults to `source === parent`. */
   acceptSource?: (source: MessageEvent['source']) => boolean;
-  /** Test seam. Defaults to `GUEST_REQUEST_TIMEOUT_MS`. */
   requestTimeoutMs?: number;
 };
 
@@ -119,64 +124,20 @@ export type HostClient = {
   onSessionLifecycle: (listener: (event: SessionLifecycleEvent) => void) => () => void;
   onConnection: (listener: (connection: GuestConnection) => void) => () => void;
   onSettings: (listener: (settings: GuestSettings) => void) => () => void;
-  /**
-   * The item this surface was opened for: a chip (`AttachIssueRequest`), a
-   * message (`GuestMessageItem`), or a session (`GuestSessionItem`). Replays
-   * the last value; `null` when there is none.
-   */
   onItem: (listener: (item: GuestItem | null) => void) => () => void;
-  /**
-   * The call this `block` frame draws, once and at once when already known.
-   * The arguments are written by a model: treat them as untrusted.
-   */
   onBlock: (listener: (block: GuestBlockCall) => void) => () => void;
-  /**
-   * From a `block` frame, in a click handler: hands the agent `text`, as a
-   * button of a block does, and starts its next turn. One answer per block.
-   * Refused without a click, or when the block cannot take an answer.
-   */
   answerBlock: (text: string) => Promise<void>;
-  /**
-   * What the extension's service sends with `createServiceHost(...).emit`.
-   * Nothing replays: a frame that opens later hears only what comes after,
-   * so read the current state from the service first.
-   */
   onServiceEvent: (listener: (event: { topic: string; data: JsonValue }) => void) => () => void;
-  /** Receive activation of a host-rendered Work Status control. */
   onStatusControl: (listener: (event: GuestStatusControlEvent) => void) => () => void;
   onPopoverClosed: (listener: (event: GuestPopoverClosedEvent) => void) => () => void;
-  /** Replace this status frame's host-rendered controls. Pass [] to clear them. */
   setStatusControls: (controls: GuestStatusControl[]) => Promise<void>;
   openPopover: (request: GuestPopoverRequest) => Promise<void>;
   closePopover: (id: string, reason?: 'closed' | 'escape') => Promise<void>;
   setPopoverAnchorActive: (id: string, active: boolean) => Promise<void>;
-  /**
-   * Answer the host when the user submits one of this package's
-   * `contributes.commands`. Return the chip to attach, or `null` for nothing
-   * (the host shows a short notice). A thrown error reaches the user as a
-   * toast. One handler at a time; the returned function removes it.
-   */
   onResolve: (handler: (request: ResolveRequest) => Promise<AttachIssueRequest | null> | AttachIssueRequest | null) => () => void;
-  /**
-   * Run a `mode: "background"` action. Register synchronously after connectHost.
-   * Await all work, including toast calls: the hidden frame is removed when
-   * this handler settles. Throw to report failure. One handler at a time.
-   */
   onAction: (handler: (item: GuestActionItem) => void | Promise<void>) => () => void;
   toast: (request: ToastRequest) => Promise<void>;
   openUrl: (url: string) => Promise<void>;
-  /**
-   * Show a commit of the open project in the host's Diff view (commit scope).
-   * `sha` is 7 to 64 hex characters; the host reads the commit itself. No open
-   * project is `NO_DIRECTORY`, an unknown commit `NOT_FOUND`, a host without a
-   * Diff view `UNSUPPORTED`.
-   */
-  openCommit: (sha: string) => Promise<void>;
-  /**
-   * Show a context panel surface (`git`, or `plugin:<panel id>`). Resolves once
-   * it is on screen; one already open stays open. No chat or project yet is
-   * `NO_DIRECTORY`, a surface that cannot open here `UNSUPPORTED`.
-   */
   openSurface: (surfaceId: string) => Promise<void>;
   writeClipboard: (text: string) => Promise<void>;
   compose: (request: ComposeRequest) => Promise<void>;
@@ -190,81 +151,25 @@ export type HostClient = {
   request: (request: GuestRequest) => Promise<GuestRequestResult>;
   serviceRequest: (request: GuestRequest) => Promise<GuestRequestResult>;
   serviceStatus: () => Promise<ServiceStatusResult>;
-  /**
-   * Read a UTF-8 text file. A relative path is inside the open project
-   * (capability `files`); `/…` or `~/…` must match a declared
-   * `contributes.filesystem` pattern (capability `filesystem`). Over
-   * `GUEST_FILE_CONTENT_MAX` characters is `FILE_TOO_LARGE`; a missing file
-   * is `NOT_FOUND`.
-   */
   readFile: (path: string) => Promise<FileReadResult>;
-  /**
-   * Write a UTF-8 text file atomically, creating parent directories. Same
-   * path rules as `readFile`. Content over `GUEST_FILE_CONTENT_MAX` is
-   * refused before sending.
-   */
   writeFile: (path: string, content: string) => Promise<FileWriteResult>;
-  /** Entries of a directory, sorted by name, capped at `GUEST_FILE_LIST_MAX`. Same path rules as `readFile`. */
   listDir: (path: string) => Promise<FileListResult>;
-  /** Kind, size, and mtime of a path. A missing path is `kind: 'missing'`, not an error. Same path rules as `readFile`. */
   stat: (path: string) => Promise<FileStatResult>;
-  /**
-   * One-off text generation with the user's Small Model (capability
-   * `model`). Nothing enters a session and no history is kept. `prompt` is
-   * 1 to `GUEST_GENERATE_PROMPT_MAX` characters, `system` up to
-   * `GUEST_GENERATE_SYSTEM_MAX`. No usable model is `NO_MODEL`; a model that
-   * failed is `MODEL_FAILED`. Waits up to `GUEST_GENERATE_TIMEOUT_MS`.
-   */
   generate: (request: GenerateRequest) => Promise<GenerateResult>;
-  /**
-   * `generate` outcomes that arrived after the frame that asked was gone:
-   * the user closed the panel, or the frame reloaded, before the model
-   * answered. The host keeps each one for a frame of this extension on the
-   * same surface and project and hands it over once, up to
-   * `GUEST_GENERATE_LATE_MAX` per extension for `GUEST_GENERATE_LATE_KEEP_MS`.
-   * One that lands while this frame listens arrives at once. Register when
-   * the frame can use them; the host hands nothing over before the first
-   * listener, or on a host without `ready.features.lateGenerateResults`.
-   * One that arrives after the last listener was removed waits in this frame
-   * for the next listener.
-   */
   onLateGenerateResult: (listener: (result: LateGenerateResult) => void) => () => void;
-  /** Count behind this guest's rail icon (0 to `GUEST_BADGE_MAX`): a dot on the icon, the number in its tooltip; `null` clears it. Opening the panel clears it too. */
+  openMicrophone: () => Promise<GuestMicrophone>;
   setBadge: (count: number | null) => Promise<void>;
-  /**
-   * The height the guest's content needs, in CSS px. On the Work Status
-   * `status` surface the host sizes the frame to it, clamped to
-   * `GUEST_STATUS_SECTION_HEIGHT_MIN`..`GUEST_STATUS_SECTION_HEIGHT_MAX`;
-   * taller content scrolls inside the frame. Other surfaces fill their host
-   * chrome and ignore it.
-   */
   setHeight: (height: number) => Promise<void>;
-  /**
-   * The file a `file` surface edits (`contributes.fileEditors`). Replays the
-   * last file; called again when the host reconnects the frame. Registering
-   * also routes Cmd/Ctrl+S inside the frame to the host's save.
-   */
   onFileOpen: (listener: (file: FileEditorDocument) => void) => () => void;
-  /**
-   * Answer the host when it needs the edited text: to save it (`save`) or to
-   * move it into its source view (`handoff`). Return the whole file and a
-   * version of the state it came from; a thrown error fails the save. One
-   * handler at a time.
-   */
   onFileSnapshot: (handler: (purpose: FileSnapshotPurpose) => Promise<FileEditorSnapshot> | FileEditorSnapshot) => () => void;
-  /** The snapshot with this version is on disk; edits made since keep the file dirty. */
   onFileSaved: (listener: (version: string) => void) => () => void;
-  /** Report the editor's state after a change. `edited` delays autosave until edits stop. */
   reportFileChange: (change: FileEditorChange) => void;
-  /** Ask the host to save now, as Cmd/Ctrl+S does. */
   requestFileSave: () => void;
-  /** This file cannot be opened here; the host shows its source instead. */
   reportFileUnsupported: () => void;
   dispose: () => void;
-};
+} & GuestNavigationClient;
 
-// Structural, not `instanceof KeyboardEvent`: the frame's own realm owns that
-// constructor, and non-browser runtimes have none.
+// external: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/instanceof#instanceof_and_multiple_realms Event constructors belong to their realm; non-browser runtimes may have none.
 const isKeyEvent = (event: Event): event is KeyboardEvent => 'key' in event && 'metaKey' in event && 'ctrlKey' in event;
 
 const isSaveShortcut = (event: KeyboardEvent): boolean => (
@@ -287,8 +192,6 @@ type Pending = {
   timer: ReturnType<typeof setTimeout>;
 };
 
-// The host drops a message its schema rejects without answering, so a bad
-// path would otherwise surface only as HOST_TIMEOUT twenty seconds later.
 const rejectBadPath = (): Promise<never> => Promise.reject(
   new HostRequestError('BAD_PATH', 'Request path must start with "/" and stay on the declared origin.'),
 );
@@ -298,7 +201,6 @@ const rejectBadFilePath = (): Promise<never> => Promise.reject(
 );
 
 const deviceStorageScope = (options: GuestStorageOptions | undefined): 'device' | undefined => {
-  // Typed callers supply GuestStorageOptions, but extensions may call this JavaScript API without TypeScript.
   if (options === undefined) return undefined;
   if (Object(options) !== options || Array.isArray(options)
     || (options.scope !== undefined && options.scope !== 'instance' && options.scope !== 'device')) {
@@ -332,8 +234,6 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
   const statusControlListeners = new Set<(event: GuestStatusControlEvent) => void>();
   const popoverClosedListeners = new Set<(event: GuestPopoverClosedEvent) => void>();
   const lateGenerateListeners = new Set<(result: LateGenerateResult) => void>();
-  // Answers the host handed over after the last listener left; each one comes
-  // from a `generate` this extension made.
   const unclaimedLateGenerate: LateGenerateResult[] = [];
   let resolveHandler: ((request: ResolveRequest) => Promise<AttachIssueRequest | null> | AttachIssueRequest | null) | null = null;
   let actionHandler: ((item: GuestActionItem) => void | Promise<void>) | null = null;
@@ -352,6 +252,11 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
   let popoverPointerActive = false;
   let popoverFocusActive = false;
   let popoverActivityReported: boolean | null = null;
+  let microphone: {
+    queue: ReturnType<typeof createSampleQueue>;
+    endedListeners: Set<(reason: GuestMicrophoneEndReason) => void>;
+    release: () => void;
+  } | null = null;
 
   const lifecycleFromSession = (session: SessionSnapshot | null): SessionLifecycleEvent | null => {
     if (!session) return null;
@@ -365,16 +270,12 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
     target.parent.postMessage(message, '*');
   };
 
-  // Sent again on every `ready`: the host forgets a listening frame when it
-  // re-attaches, and the notice costs nothing to repeat.
   const listenForLateGenerate = (): void => {
     if (disposed || target.parent === target || lateGenerateListeners.size === 0
       || lastReady?.features?.lateGenerateResults !== true) return;
     post({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION, type: 'generate-late-listen' });
   };
 
-  // One listener that throws must not starve the ones after it; the error
-  // surfaces on the console the way an event handler's would.
   const emit = <T,>(listeners: Iterable<(value: T) => void>, value: T): void => {
     for (const listener of listeners) {
       try {
@@ -402,6 +303,20 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       return;
     }
 
+    if (message.type === 'microphone-audio') {
+      microphone?.queue.push(message.payload.samples);
+      return;
+    }
+
+    if (message.type === 'microphone-ended') {
+      const open = microphone;
+      if (!open) return;
+      microphone = null;
+      open.release();
+      emit(open.endedListeners, message.payload.reason);
+      return;
+    }
+
     if (message.type === 'ready') {
       lastReady = message.payload;
       lastLifecycle = lifecycleFromSession(message.payload.session);
@@ -425,7 +340,6 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
     }
 
     if (message.type === 'generate-late') {
-      // The host already let go of it; keep it for the next listener.
       if (lateGenerateListeners.size === 0) unclaimedLateGenerate.push(message.payload);
       else emit(lateGenerateListeners, message.payload);
       return;
@@ -513,8 +427,6 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
     }
 
     if (message.type === 'file-open') {
-      // The host pushes on both `hello` and iframe load; the same file twice
-      // must not make the editor reload what the user may already be editing.
       const next = message.payload;
       if (lastFile && sameFileEditorDocument(lastFile, next)) return;
       lastFile = next;
@@ -626,14 +538,76 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
   );
 
   const envelope: Pick<GuestMessage, 'channel' | 'v'> = { channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION };
-  // Fire-and-forget notices: nothing to wait for, and nothing to post to
-  // without a host frame.
   const notify = (message: Extract<GuestMessage, { type: 'file-change' | 'file-save' | 'file-unsupported' }>): void => {
     if (!disposed && target.parent !== target) post(message);
   };
   const requestFileSave = (): void => notify({ ...envelope, type: 'file-save' });
-  // Capture phase, so an editor library that binds Cmd/Ctrl+S itself does not
-  // swallow the host's save.
+
+  const postMicrophoneClose = (): void => {
+    if (!disposed && target.parent !== target) post({ ...envelope, type: 'microphone-close', id: nextId(ids) });
+  };
+
+  const openMicrophone = async (): Promise<GuestMicrophone> => {
+    if (microphone) throw new HostRequestError('HOST_REJECTED', 'The microphone is already open in this frame.');
+    if (lastReady?.features?.microphone !== true) {
+      throw new HostRequestError('UNSUPPORTED', 'This OpenChamber cannot share the microphone with extensions.');
+    }
+    const AudioContextCtor = globalThis.AudioContext;
+    if (typeof AudioContextCtor !== 'function') throw new HostRequestError('UNSUPPORTED', 'This frame has no Web Audio.');
+    const context = new AudioContextCtor();
+    if (context.sampleRate < GUEST_MICROPHONE_SAMPLE_RATE_MIN || context.sampleRate > GUEST_MICROPHONE_SAMPLE_RATE_MAX) {
+      void context.close().catch(() => undefined);
+      throw new HostRequestError('UNSUPPORTED', `Audio at ${context.sampleRate} Hz is not supported.`);
+    }
+    const resumed = context.state === 'suspended' ? context.resume().catch(() => undefined) : undefined;
+    const queue = createSampleQueue(Math.round(context.sampleRate / 4));
+    const processor = context.createScriptProcessor(1024, 1, 1);
+    processor.onaudioprocess = (event) => queue.pull(event.outputBuffer.getChannelData(0));
+    const destination = context.createMediaStreamDestination();
+    processor.connect(destination);
+    const endedListeners = new Set<(reason: GuestMicrophoneEndReason) => void>();
+    const open = {
+      queue,
+      endedListeners,
+      release: () => {
+        processor.onaudioprocess = null;
+        processor.disconnect();
+        queue.clear();
+        for (const track of destination.stream.getTracks()) track.stop();
+        void context.close().catch(() => undefined);
+      },
+    };
+    microphone = open;
+    try {
+      const result = await send(
+        { ...envelope, type: 'microphone-open', id: nextId(ids), payload: { sampleRate: context.sampleRate } },
+        GUEST_MICROPHONE_OPEN_TIMEOUT_MS,
+      );
+      if (!result || !('opened' in result) || result.opened !== true) {
+        throw new HostRequestError('HOST_REJECTED', 'Host did not open the microphone.');
+      }
+      await resumed;
+      if (microphone !== open) throw new HostRequestError('DISCONNECTED', 'The microphone closed while it was opening.');
+    } catch (error) {
+      if (microphone === open) microphone = null;
+      open.release();
+      postMicrophoneClose();
+      throw error;
+    }
+    return {
+      stream: destination.stream,
+      close: () => {
+        if (microphone !== open) return;
+        microphone = null;
+        open.release();
+        postMicrophoneClose();
+      },
+      onEnded: (listener) => {
+        endedListeners.add(listener);
+        return () => { endedListeners.delete(listener); };
+      },
+    };
+  };
   const onSaveShortcut = (event: Event): void => {
     if (!isKeyEvent(event) || !isSaveShortcut(event)) return;
     event.preventDefault();
@@ -951,13 +925,7 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       id: nextId(ids),
       payload: { url },
     }),
-    openCommit: (sha) => (isGuestCommitSha(sha) ? request({
-      channel: OPENCHAMBER_SDK_CHANNEL,
-      v: OPENCHAMBER_SDK_API_VERSION,
-      type: 'open-commit',
-      id: nextId(ids),
-      payload: { sha },
-    }) : Promise.reject(new HostRequestError('HOST_REJECTED', 'Commit id must be 7 to 64 hex characters.'))),
+    ...guestNavigationCalls(request, () => nextId(ids), (message) => Promise.reject(new HostRequestError('HOST_REJECTED', message))),
     answerBlock: (text) => request({
       channel: OPENCHAMBER_SDK_CHANNEL,
       v: OPENCHAMBER_SDK_API_VERSION,
@@ -1161,7 +1129,6 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       const payload: GenerateRequest = { prompt };
       if (system !== undefined) payload.system = system;
       if (maxOutputTokens !== undefined) payload.maxOutputTokens = maxOutputTokens;
-      // The model answers slower than any other host call, so this one waits longer.
       return send({
         channel: OPENCHAMBER_SDK_CHANNEL,
         v: OPENCHAMBER_SDK_API_VERSION,
@@ -1181,6 +1148,7 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       listenForLateGenerate();
       return () => { lateGenerateListeners.delete(listener); };
     },
+    openMicrophone,
     setBadge: (count) => request({
       channel: OPENCHAMBER_SDK_CHANNEL,
       v: OPENCHAMBER_SDK_API_VERSION,
@@ -1230,6 +1198,11 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
         post({ ...envelope, type: 'shells-unsubscribe', id: nextId(ids), payload: { subscriptionId } });
       }
       shellsListeners.clear();
+      if (microphone) {
+        postMicrophoneClose();
+        microphone.release();
+        microphone = null;
+      }
       disposed = true;
       resolveHandler = null;
       actionHandler = null;

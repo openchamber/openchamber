@@ -1,6 +1,5 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
 import type { CustomRendererProps } from 'streamdown';
 import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { useI18n } from '@/lib/i18n';
@@ -8,6 +7,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMarkdownPresentation } from './MarkdownPresentationContext';
 import { createMermaidViewerController, MERMAID_BLOCK_SELECTOR } from './mermaidViewer';
+import { loadedMermaidRenderers, loadMermaidRenderers, type MermaidRenderers } from './mermaidRenderers';
 
 type MermaidResult = { svg?: string; ascii?: string };
 const renderCache = new Map<string, MermaidResult>();
@@ -21,9 +21,8 @@ const screenColors = {
   border: 'var(--interactive-border)',
 };
 
-// Keep the original 100-entry LRU across row remounts and fullscreen previews.
-// CSS variable colors let one geometry result serve every screen theme.
-function renderDiagram(source: string, mode: 'svg' | 'ascii'): MermaidResult {
+function renderDiagram(renderers: MermaidRenderers, source: string, mode: 'svg' | 'ascii'): MermaidResult {
+  const { renderMermaidASCII, renderMermaidSVG } = renderers;
   const key = `${mode}:${source}`;
   const cached = renderCache.get(key);
   if (cached) {
@@ -48,8 +47,6 @@ function renderDiagram(source: string, mode: 'svg' | 'ascii'): MermaidResult {
   return result;
 }
 
-// The viewer mutates viewBox inside this SVG. Unrelated toolbar/context updates
-// must leave that subtree alone; only a new diagram replaces its markup.
 const MermaidSvg = React.memo(function MermaidSvg({ svg, viewer }: { svg: string; viewer: boolean }) {
   return (
     <div
@@ -69,16 +66,22 @@ export function MarkdownMermaid({ code, isIncomplete }: CustomRendererProps) {
   const [copied, setCopied] = React.useState(false);
   const copyTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const source = code.trimEnd();
+  const [renderers, setRenderers] = React.useState(loadedMermaidRenderers);
+  React.useEffect(() => {
+    if (renderers || isIncomplete) return;
+    let cancelled = false;
+    loadMermaidRenderers().then((loaded) => { if (!cancelled) setRenderers(() => loaded); }, () => {});
+    return () => { cancelled = true; };
+  }, [renderers, isIncomplete]);
   const result = React.useMemo(
-    () => isIncomplete ? null : renderDiagram(source, mode),
-    [source, isIncomplete, mode],
+    () => isIncomplete || !renderers ? null : renderDiagram(renderers, source, mode),
+    [renderers, source, isIncomplete, mode],
   );
   const svg = result?.svg;
   const text = result?.ascii || source;
 
   React.useEffect(() => {
     if (!host.current || !svg || purpose) return;
-    // Button visibility does not disable drag, pinch or modified-wheel zoom.
     const active = createMermaidViewerController(host.current);
     controller.current = active;
     return () => {
@@ -91,8 +94,6 @@ export function MarkdownMermaid({ code, isIncomplete }: CustomRendererProps) {
     if (copyTimer.current) clearTimeout(copyTimer.current);
   }, []);
 
-  // Exports need self-contained colors and the original, uncropped geometry.
-  // Resolve only our known palette references; never serialize the panned DOM.
   const exportSvg = () => {
     const colors = {
       'var(--surface-elevated)': theme.colors.surface.elevated,
@@ -173,9 +174,6 @@ export function MarkdownMermaid({ code, isIncomplete }: CustomRendererProps) {
   );
 
   return (
-    // The controls sit in a row of their own above the diagram, like a shown
-    // page's: they never cover it, and fading in moves nothing. A surface with
-    // its own header (the full-screen viewer) takes them there instead.
     <div data-streamdown="mermaid-frame" className="group/mermaid">
       {showToolbar && controls.toolbarSlot ? createPortal(buttons, controls.toolbarSlot) : null}
       {showToolbar && !controls.toolbarSlot && (

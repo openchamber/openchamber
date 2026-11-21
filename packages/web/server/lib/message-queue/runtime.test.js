@@ -415,6 +415,7 @@ describe('parseQueuedItemInput', () => {
     ]);
     expect(() => parseQueuedItemInput(item({ context: [{ kind: 'context', text: 'no metadata' }] }))).toThrow(TypeError);
     expect(() => parseQueuedItemInput(item({ context: [{ kind: 'other', text: 'x' }] }))).toThrow(TypeError);
+    expect(parseQueuedItemInput(item({ context })).context[0].metadata).toBe(context[0].metadata);
   });
 
   it('accepts an item that is only context', () => {
@@ -520,6 +521,19 @@ describe('a message queued as a goal', () => {
 });
 
 describe('message queue runtime', () => {
+  it.each(['constructor', 'toString'])('delivers an idle session named %s despite inherited active-map members', async (sessionId) => {
+    const { runtime, openCode } = createRuntime();
+    runtime.start();
+    await runtime.enqueue(sessionId, DIRECTORY, item());
+    await vi.waitFor(() => {
+      expect(openCode.state.sent).toHaveLength(1);
+      expect(openCode.state.sent[0].path).toBe(`/api/session/${sessionId}/prompt`);
+      expect(runtime.sessionSnapshot(sessionId).items).toEqual([]);
+    });
+    runtime.stop();
+    await runtime.flush();
+  });
+
   it('delivers the head of the queue when the session goes idle, in order', async () => {
     const { runtime, openCode, emit, promptSent, broadcasts, replayAfterSend } = createRuntime();
     runtime.start();
@@ -604,68 +618,19 @@ describe('message queue runtime', () => {
     await runtime.flush();
   });
 
-  it('waits for a background subagent before sending the queued message', async () => {
+  it('sends the queued message to an idle parent while its background subagents run', async () => {
     const { runtime, openCode, emit } = createRuntime();
     runtime.start();
-    // The parent paused: it is idle while its background subagent works.
-    openCode.state.children = { [SESSION]: ['ses_child'] };
-    openCode.state.active = { ses_child: { type: 'running' } };
+    // The parent is idle while its subagent and that one's own subagent work.
+    openCode.state.children = { [SESSION]: ['ses_child'], ses_child: ['ses_grandchild'] };
+    openCode.state.active = { ses_child: { type: 'running' }, ses_grandchild: { type: 'running' } };
 
     await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'next', text: 'next' }));
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent).toHaveLength(0);
-
-    // The subagent finished and OpenCode ran the parent again with its result.
-    openCode.state.active = {};
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'busy' } } });
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await vi.waitFor(() => {
       expect(openCode.state.sent).toHaveLength(1);
       expect(openCode.state.sent[0].body).toEqual({ text: 'next' });
     });
-  });
-
-  it('keeps queued messages until a nested background subagent finishes', async () => {
-    const { runtime, openCode, emit, replayAfterSend } = createRuntime();
-    runtime.start();
-    openCode.state.children = { [SESSION]: ['ses_child'], ses_child: ['ses_grandchild'] };
-    openCode.state.active = { ses_grandchild: { type: 'running' } };
-    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'first', text: 'first' }));
-    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'second', text: 'second' }));
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent).toHaveLength(0);
-    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(2);
-
-    openCode.state.active = {};
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await vi.waitFor(() => {
-      expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['first']);
-      expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
-    });
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'busy' } } });
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await vi.waitFor(() => expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['first', 'second']));
-    await replayAfterSend();
-    expect(sendPosts(openCode).map((entry) => entry.body.text)).toEqual(['first', 'second']);
-    runtime.stop();
-  });
-
-  it('keeps the queue intact when a nested lineage read fails', async () => {
-    const { runtime, openCode, emit } = createRuntime();
-    runtime.start();
-    openCode.state.children = { [SESSION]: ['ses_child'], ses_child: ['ses_grandchild'] };
-    openCode.state.active = { ses_grandchild: { type: 'running' } };
-    openCode.state.failNext = /\/api\/session\/ses_child$/;
-    await runtime.enqueue(SESSION, DIRECTORY, item());
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent).toHaveLength(0);
-    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
-    openCode.state.active = {};
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await vi.waitFor(() => expect(openCode.state.sent).toHaveLength(1));
     runtime.stop();
   });
 
@@ -856,11 +821,10 @@ describe('message queue runtime', () => {
     const { runtime, openCode, emit } = createRuntime();
     runtime.start();
     let release;
-    // active map, message tail, the subagent check (empty active map),
-    // model switch, then the prompt itself (held open until released)
+    // active map, message tail, model switch, then the prompt itself (held
+    // open until released)
     openCode.fetchImpl.mockImplementationOnce(async () => Response.json({ location: {}, data: {} }))
       .mockImplementationOnce(async () => Response.json({ data: [], cursor: {} }))
-      .mockImplementationOnce(async () => Response.json({ data: {} }))
       .mockImplementationOnce(async () => new Response(null, { status: 204 }))
       .mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(new Response(null, { status: 204 })); }));
     const { itemId } = await runtime.enqueue(SESSION, DIRECTORY, item());
@@ -1013,6 +977,21 @@ describe('message queue runtime', () => {
     });
   });
 
+  it('delivers a path note and hands its original back only to take', async () => {
+    const { runtime, openCode, emit } = createRuntime();
+    runtime.start();
+    const original = { mimeType: 'application/pdf', dataUrl: 'data:application/pdf;base64,JVBERg==', saveOnSend: true };
+    const note = { id: 'a', filename: 'manual.pdf', mimeType: 'text/plain', size: 4, source: 'local', dataUrl: 'data:text/plain,saved', original };
+    const kept = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'keep', attachments: [note] }));
+    expect(runtime.sessionSnapshot(SESSION).items[0].attachments[0]).not.toHaveProperty('original');
+    expect((await runtime.take(SESSION, kept.itemId)).item.attachments[0].original).toEqual(original);
+
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'send', text: 'send', attachments: [note] }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await vi.waitFor(() => expect(openCode.state.sent).toHaveLength(1));
+    expect(openCode.state.sent[0].body.files).toEqual([{ uri: 'data:text/plain,saved', name: 'manual.pdf' }]);
+  });
+
   // OpenCode's commit deletes everything admitted past the revert's boundary (#6244).
   it('commits a staged revert before admitting captured context', async () => {
     const { runtime, openCode, emit, replayAfterSend } = createRuntime();
@@ -1098,6 +1077,7 @@ describe('message queue runtime', () => {
     });
 
     it('sends nothing while the ids cannot be saved, since a crash would mint them again', async () => {
+      vi.useFakeTimers();
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const { runtime, openCode, emit } = createRuntime({ retryDelayMs: () => 60_000 });
       runtime.start();
@@ -1108,7 +1088,7 @@ describe('message queue runtime', () => {
       const rename = vi.spyOn(fs.promises, 'rename').mockRejectedValueOnce(new Error('disk full'));
       idle(emit);
       await vi.waitFor(() => expect(rename).toHaveBeenCalled());
-      await settle();
+      await vi.waitFor(() => expect(runtime.sessionSnapshot(SESSION).sendingId).toBeNull());
       expect(openCode.state.sent).toEqual([]);
       expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
       rename.mockRestore();

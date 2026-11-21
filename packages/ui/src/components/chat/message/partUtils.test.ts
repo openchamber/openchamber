@@ -13,8 +13,8 @@ const textPart = (id: string, metadata?: Metadata): Part => ({
     metadata,
 });
 
-const quote = (id: string) => textPart(id, {
-    [CONTEXT_METADATA_KEY]: { kind: 'chat-quote', quote: id, text: '' },
+const quote = (id: string, comment = '') => textPart(id, {
+    [CONTEXT_METADATA_KEY]: { kind: 'chat-quote', quote: id, text: comment },
 });
 
 const sessionMention = (id: string) => textPart(id, {
@@ -36,6 +36,14 @@ describe('contextPartsPastCollapse', () => {
 
     test('two lines of text leave no context rows and never hide the text', () => {
         expect(hiddenIds([...quotes, textPart('prompt')], 2)).toEqual(['a', 'b', 'c']);
+    });
+
+    test('a quote with a comment takes two lines', () => {
+        expect(hiddenIds([quote('a', 'why?'), quote('b', 'and this?')], 0)).toEqual(['b']);
+    });
+
+    test('a quote with a comment that does not fit whole hides it and what follows', () => {
+        expect(hiddenIds([quote('a', 'why?'), quote('b'), textPart('prompt')], 1)).toEqual(['a', 'b']);
     });
 
     test('a session mention draws no row, so it takes no line', () => {

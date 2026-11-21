@@ -66,4 +66,61 @@ describe('tracker OAuth', () => {
     await oauth.refresh({ tokenUrl: target.tokenUrl, refreshToken: 'rt', client: { id: 'client-1', secret: 's3' } });
     expect(seen[1].body).toEqual({ grant_type: 'refresh_token', refresh_token: 'rt', client_id: 'client-1', client_secret: 's3' });
   });
+
+  for (const [label, client, secretField] of [
+    ['without a secret', { id: 'client-1' }, ''],
+    ['with a secret', { id: 'client-1', secret: 's +&' }, '&client_secret=s+%2B%26'],
+    ['with an empty secret', { id: 'client-1', secret: '' }, '&client_secret='],
+  ]) {
+    it(`sends exact exchange and refresh form bytes ${label}`, async () => {
+      const seen = [];
+      vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+        seen.push({ url: String(url), contentType: init.headers['Content-Type'], body: init.body });
+        return Response.json({ access_token: 'at' });
+      }));
+      const oauth = createTrackerOAuth();
+      const target = { authorizeUrl: 'https://tracker.example/auth', tokenUrl: 'https://tracker.example/token' };
+      await oauth.exchange({ target, redirectUri: 'https://app/cb', client, verifier: 'v +&' }, 'code +&');
+      await oauth.refresh({ tokenUrl: target.tokenUrl, refreshToken: 'rt +&', client });
+      expect(seen).toEqual([
+        {
+          url: target.tokenUrl,
+          contentType: 'application/x-www-form-urlencoded',
+          body: `grant_type=authorization_code&code=code+%2B%26&redirect_uri=https%3A%2F%2Fapp%2Fcb&client_id=client-1${secretField}&code_verifier=v+%2B%26`,
+        },
+        {
+          url: target.tokenUrl,
+          contentType: 'application/x-www-form-urlencoded',
+          body: `grant_type=refresh_token&refresh_token=rt+%2B%26&client_id=client-1${secretField}`,
+        },
+      ]);
+    });
+  }
+
+  it('omits a missing secret from the JSON exchange fallback too', async () => {
+    const seen = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      seen.push(init.body);
+      return seen.length === 1 ? Response.json({ error: 'invalid_request' }, { status: 400 }) : Response.json({ access_token: 'at' });
+    }));
+    await createTrackerOAuth().exchange({
+      target: { authorizeUrl: 'https://tracker.example/auth', tokenUrl: 'https://tracker.example/token' },
+      redirectUri: 'https://app/cb',
+      client: { id: 'client-1' },
+      verifier: 'v',
+    }, 'code');
+    expect(seen).toEqual([
+      'grant_type=authorization_code&code=code&redirect_uri=https%3A%2F%2Fapp%2Fcb&client_id=client-1&code_verifier=v',
+      '{"client_id":"client-1","code":"code"}',
+    ]);
+  });
+
+  it('omits scope from the authorize URL when no scopes are declared', () => {
+    const started = createTrackerOAuth().start({
+      providerId: 'ext-test', instance: 'https://tracker.example', client: { id: 'client-1' },
+      target: { authorizeUrl: 'https://tracker.example/auth', tokenUrl: 'https://tracker.example/token' },
+      scopes: [], redirectUri: 'https://app/cb', connection: Symbol('connect'),
+    });
+    expect(new URL(started.authorizationUrl).searchParams.has('scope')).toBe(false);
+  });
 });

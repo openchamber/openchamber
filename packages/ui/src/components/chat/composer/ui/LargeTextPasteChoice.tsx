@@ -5,14 +5,26 @@ import { cn } from '@/lib/utils';
 
 export type LargeTextPasteChoiceAction = 'attach' | 'inline';
 
+export type LargeTextPasteChoiceKind = 'text' | 'documents';
+
+const LABEL_KEYS = {
+    text: {
+        title: 'chat.chatInput.largeTextPaste.title',
+        attach: 'chat.chatInput.largeTextPaste.attach',
+        inline: 'chat.chatInput.largeTextPaste.inline',
+    },
+    documents: {
+        title: 'chat.chatInput.documentAttach.title',
+        attach: 'chat.chatInput.documentAttach.save',
+        inline: 'chat.chatInput.documentAttach.convert',
+    },
+} as const;
+
 type LargeTextPasteChoiceProps = {
-    /** Desktop: the choice takes focus so the keyboard answers it. Mobile keeps the editor focused, or the keyboard closes. */
+    kind: LargeTextPasteChoiceKind;
     takeFocus: boolean;
-    /** Focus mode: the composer fills the surface, so the choice sits inside its top edge. */
     expanded?: boolean;
-    /** `explicitlyChosen` is false when focus left for somewhere else and the paste went inline by default. */
     onChoose: (action: LargeTextPasteChoiceAction, explicitlyChosen: boolean) => void;
-    /** A printable key pressed while the choice has focus: paste inline, then type it. */
     onTypeThrough: (text: string) => void;
 };
 
@@ -24,15 +36,9 @@ const buttonClassName = cn(
     'transition-colors duration-150',
 );
 
-/**
- * Asks how a large paste lands, right above the composer. In focus mode the
- * composer fills the surface, so there is no room above it and the choice
- * sits inside the composer's top edge instead. Styled like the chat's
- * text-selection menu. Enter picks the focused option, arrows or Tab switch,
- * Escape and typing on paste inline.
- */
-export const LargeTextPasteChoice: React.FC<LargeTextPasteChoiceProps> = ({ takeFocus, expanded = false, onChoose, onTypeThrough }) => {
+export const LargeTextPasteChoice: React.FC<LargeTextPasteChoiceProps> = ({ kind, takeFocus, expanded = false, onChoose, onTypeThrough }) => {
     const { t } = useI18n();
+    const labels = LABEL_KEYS[kind];
     const attachRef = React.useRef<HTMLButtonElement>(null);
     const inlineRef = React.useRef<HTMLButtonElement>(null);
 
@@ -48,7 +54,6 @@ export const LargeTextPasteChoice: React.FC<LargeTextPasteChoiceProps> = ({ take
         if (event.nativeEvent.isComposing) return;
         const { key } = event;
         if (key === 'ArrowLeft' || key === 'ArrowRight' || key === 'Tab') {
-            // Two options: every step lands on the other one, in either direction.
             (focusedAction() === 'attach' ? inlineRef : attachRef).current?.focus();
         } else if (key === 'Enter') {
             onChoose(focusedAction(), true);
@@ -59,7 +64,6 @@ export const LargeTextPasteChoice: React.FC<LargeTextPasteChoiceProps> = ({ take
         } else {
             return;
         }
-        // The composer form and global shortcuts must not act on these keys too.
         event.preventDefault();
         event.stopPropagation();
     };
@@ -67,7 +71,6 @@ export const LargeTextPasteChoice: React.FC<LargeTextPasteChoiceProps> = ({ take
     const handleBlur = (event: React.FocusEvent<HTMLDivElement>) => {
         if (!takeFocus) return;
         if (event.currentTarget.contains(event.relatedTarget)) return;
-        // Switching to another window is not an answer; the choice waits.
         if (!document.hasFocus()) return;
         onChoose('inline', false);
     };
@@ -75,10 +78,10 @@ export const LargeTextPasteChoice: React.FC<LargeTextPasteChoiceProps> = ({ take
     return (
         <div
             role="group"
-            aria-label={t('chat.chatInput.largeTextPaste.title')}
+            aria-label={t(labels.title)}
+            data-composer-choice="true"
             onKeyDown={handleKeyDown}
             onBlur={handleBlur}
-            // Taps keep focus where it is, so the mobile keyboard stays up.
             onMouseDown={(event) => event.preventDefault()}
             className={cn(
                 'absolute inset-s-3 z-50',
@@ -89,11 +92,11 @@ export const LargeTextPasteChoice: React.FC<LargeTextPasteChoiceProps> = ({ take
             )}
         >
             <button ref={attachRef} type="button" className={buttonClassName} onClick={() => onChoose('attach', true)}>
-                {t('chat.chatInput.largeTextPaste.attach')}
+                {t(labels.attach)}
             </button>
             <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" />
             <button ref={inlineRef} type="button" className={buttonClassName} onClick={() => onChoose('inline', true)}>
-                {t('chat.chatInput.largeTextPaste.inline')}
+                {t(labels.inline)}
             </button>
         </div>
     );

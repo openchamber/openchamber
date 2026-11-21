@@ -1,19 +1,8 @@
 import fs from 'node:fs';
 
-/**
- * Pulls official brand glyphs and colors from simple-icons (CC0) and writes
- * the brand-icons module. A catalog card shows the glyph on a tile filled with
- * the brand color, the way the service presents itself; the glyph color is
- * picked here for contrast with that fill. Brands missing from simple-icons
- * fall back to the vendor logo from generate-vendor-logos.mjs, then to the
- * generic sprite icon in the view.
- *
- * Run with `node packages/ui/src/lib/integrations-catalog/generate-brand-icons.mjs`.
- */
 const TARGET = new URL('./brand-icons.ts', import.meta.url).pathname;
 const SIMPLE_ICONS = 'https://unpkg.com/simple-icons@15';
 
-/** Catalog entry id → simple-icons slug. */
 const BRANDS = {
   linear: 'linear',
   atlassian: 'atlassian',
@@ -91,7 +80,6 @@ const BRANDS = {
   ifttt: 'ifttt',
 };
 
-/** simple-icons' own title → slug rule, for entries without an explicit slug. */
 const titleToSlug = (title) => title
   .toLowerCase()
   .replaceAll('+', 'plus')
@@ -101,7 +89,6 @@ const titleToSlug = (title) => title
   .replace(/[̀-ͯ]/g, '')
   .replace(/[^a-z0-9]/g, '');
 
-/** Black or white, whichever reads better on the fill (YIQ brightness). */
 const glyphColorOn = (hex) => {
   const r = Number.parseInt(hex.slice(0, 2), 16);
   const g = Number.parseInt(hex.slice(2, 4), 16);

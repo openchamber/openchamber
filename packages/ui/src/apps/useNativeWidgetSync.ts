@@ -15,7 +15,6 @@ import { buildMobileWidgetSnapshot } from './mobileWidgetSnapshot';
 import { createWidgetUsageSnapshot } from './widgetUsageSnapshot';
 
 type InstalledWidgets = { usage: boolean; sessions: boolean };
-/** Either snapshot may be absent; the native side keeps the one it already has. */
 type WidgetSnapshots = { usage?: string; sessions?: string };
 
 type WidgetBridge = {
@@ -29,11 +28,9 @@ type WidgetBridge = {
 
 const WidgetBridge = registerPlugin<WidgetBridge>('WidgetBridge');
 
-/** Quotas older than this are fetched again when the app comes to the foreground. */
 const QUOTA_STALE_MS = 5 * 60_000;
 const WRITE_DEBOUNCE_MS = 1_000;
 
-/** Display colors from the active theme. Themes carry only colors, never credentials. */
 const themePalette = (theme?: Theme) => {
   const colors = theme?.colors;
   return {
@@ -51,16 +48,9 @@ const themePalette = (theme?: Theme) => {
 
 type WidgetLabels = Record<string, string>;
 
-/**
- * Feeds the Android home-screen widgets. The widgets render natively from snapshots this hook
- * writes: the session overview the iOS widgets read (`buildMobileWidgetSnapshot`) and the quota
- * readout of the Usage page. All network reads stay in the connected app; the snapshots hold
- * only what the widgets display. Nothing runs while no widget is placed.
- */
 export const useNativeWidgetSync = ({ enabled }: { enabled: boolean }): void => {
   const { t } = useI18n();
   const activeTheme = useOptionalThemeSystem()?.currentTheme;
-  // Reset times are formatted in the user's clock; a change rewrites the snapshots.
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const palette = React.useMemo(() => themePalette(activeTheme), [activeTheme]);
   const labels = React.useMemo<WidgetLabels>(() => ({
@@ -75,7 +65,6 @@ export const useNativeWidgetSync = ({ enabled }: { enabled: boolean }): void => 
     usageEmpty: t('mobile.androidWidget.usage.empty'),
     remaining: t('mobile.androidWidget.usage.remaining'),
     used: t('mobile.androidWidget.usage.used'),
-    // Native code puts the value in place of the marker.
     updated: t('mobile.androidWidget.updated', { time: '%s' }),
     refreshing: t('mobile.androidWidget.refreshing'),
     queued: t('mobile.androidWidget.queued'),
@@ -90,8 +79,6 @@ export const useNativeWidgetSync = ({ enabled }: { enabled: boolean }): void => 
     let timer: ReturnType<typeof setTimeout> | null = null;
     let refreshing = false;
 
-    // Until a store has loaded, its empty lists mean "not known yet", so the widget keeps the
-    // snapshot it has instead of showing "No sessions yet".
     const write = async () => {
       const sessionsKnown = installed.sessions && useGlobalSessionsStore.getState().hasLoaded;
       const quotas = useQuotaStore.getState();
@@ -100,13 +87,11 @@ export const useNativeWidgetSync = ({ enabled }: { enabled: boolean }): void => 
       const time = (at: number) => formatTimeForPreference(at, timeFormatPreference);
       const snapshots: WidgetSnapshots = {};
       if (usageKnown) {
-        // Quotas are as fresh as the last answer from the providers, not as this write.
         const updated = quotas.lastUpdated === null ? '' : time(quotas.lastUpdated);
         const usage = createWidgetUsageSnapshot(quotas, { t, timeFormatPreference });
         snapshots.usage = JSON.stringify({ updated, labels, palette, ...usage });
       }
       if (sessionsKnown) {
-        // The session list follows the live event stream while the app is connected.
         snapshots.sessions = JSON.stringify({ updated: time(Date.now()), labels, palette, ...buildMobileWidgetSnapshot() });
       }
       await WidgetBridge.update(snapshots);
@@ -125,8 +110,6 @@ export const useNativeWidgetSync = ({ enabled }: { enabled: boolean }): void => 
       return useQuotaStore.getState().ensureLoadedForRuntime({ refresh });
     };
 
-    // Refreshes what the placed widgets show. Resolves false when any of it got no answer,
-    // since old data rewritten as fresh would hide that the server never answered.
     const refreshPlaced = async (): Promise<boolean> => {
       const quotasBefore = useQuotaStore.getState().lastUpdated;
       const [, sessions] = await Promise.allSettled([
@@ -140,8 +123,6 @@ export const useNativeWidgetSync = ({ enabled }: { enabled: boolean }): void => 
       return sessionsOk && quotasOk;
     };
 
-    // A refresh tapped on a widget: the receiver counts it natively, the app fetches and acks.
-    // Taps that arrive during a fetch are picked up when it ends, so none is left waiting.
     const handleRefreshRequest = async () => {
       if (disposed || refreshing) return;
       refreshing = true;
@@ -170,7 +151,6 @@ export const useNativeWidgetSync = ({ enabled }: { enabled: boolean }): void => 
       const usageAdded = next.usage && !installed.usage;
       installed = next;
       if (usageAdded) void loadQuotas(false).finally(schedule);
-      // The session list loads on demand in the app; a placed widget is demand too.
       const sessions = useGlobalSessionsStore.getState();
       if (installed.sessions && !sessions.hasLoaded) void sessions.loadSessions().catch(() => undefined).finally(schedule);
       schedule();
@@ -191,7 +171,6 @@ export const useNativeWidgetSync = ({ enabled }: { enabled: boolean }): void => 
       useQuotaStore.subscribe(schedule),
       useGlobalSessionsStore.subscribe(schedule),
       useGlobalSessionStatusStore.subscribe(schedule),
-      // Worktrees tie a session's folder to its project; the rest of this store is unrelated.
       useSessionUIStore.subscribe((state, previous) => {
         if (state.availableWorktreesByProject !== previous.availableWorktreesByProject) schedule();
       }),
@@ -202,7 +181,6 @@ export const useNativeWidgetSync = ({ enabled }: { enabled: boolean }): void => 
       WidgetBridge.addListener('widgetsChanged', () => { void syncInstalled(); }).catch(() => null),
     ];
     document.addEventListener('visibilitychange', onVisible);
-    // A refresh tapped while the app was closed waits in the native queue until now.
     void syncInstalled().then(() => handleRefreshRequest());
 
     return () => {

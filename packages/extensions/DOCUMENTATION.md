@@ -18,7 +18,7 @@
 - `disabledGuests` persists the user's decision independently of code paths and versions. Provider credentials and extension storage stay in the instance data directory. Disable stops services and API access while retaining data and credentials.
 - A built-in may take a service role (`provides: ["browser"]` or `["source-control"]`) under the same rules as a user install: the same manifest contribution, the same host-derived provider id (`ext-<id>`, so the id must be at most 28 characters, which leaves eight after the `openchamber-builtin-` prefix), the same outbound proxy and host-owned accounts, and Disable withdraws the provider while keeping its accounts. Built-in status grants nothing beyond what the role grants any extension. A Git host the app should own outright (device flow, uploads, review threads, creating changes by push) belongs in core as a provider module instead (`packages/web/server/lib/source-control/DOCUMENTATION.md`).
 - Settings puts enabled built-in token/OAuth cards inside Built-in integrations. Other extension accounts stay in their existing section.
-- Current renderer support remains web and Electron, direct or relay. VS Code and mobile keep the existing explicit unsupported behavior. Migrate an existing core feature only after deciding its behavior on every surface where it already exists.
+- Built-ins render wherever user extensions do: web, Electron and the mobile shell, direct or relay, with the phone's per-surface rules (`packages/sdk/DOCUMENTATION.md`, *On the phone*). VS Code keeps the existing explicit unsupported behavior. Migrate an existing core feature only after deciding its behavior on every surface where it already exists.
 
 ## Adding a package
 

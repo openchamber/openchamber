@@ -36,6 +36,8 @@ Das ist kein einmaliger Mount-Callback. Mounte die UI und registriere Abonnement
 
 Zugriffstokens tauchen hier nie auf, auch nicht in einem `request`-Ergebnis.
 
+`ready.session` und `onSession` enthalten außerdem die optionalen Felder `context` und `tokens`. `context: { tokens, limit } | null` beschreibt die Auslastung des Kontextfensters nach dem letzten Assistant-Schritt; `limit` ist `null`, wenn die Modellgrenze unbekannt ist. Nach einer Kompaktierung bleibt `context` bis zur nächsten Messung `null`. `tokens: { prompt, output, reasoning, cacheRead, cacheWrite, cacheHitPercent } | null` enthält die aufsummierte Token-Nutzung der Session. `prompt` umfasst ungecachte Eingaben sowie Cache-Lese- und Schreibzugriffe. Ohne Prompt-Tokens ist `cacheHitPercent` `null`. Vor der ersten Messung sind beide Werte `null`; ältere Hosts lassen die Felder weg. Änderungen kommen über `onSession`.
+
 `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` und `onItem` liefern den letzten Wert nach, wenn du dich spät anmeldest, und feuern danach bei jeder Änderung weiter.
 
 `theme.tokens` enthält `primaryText`, `successText`, `warningText`, `errorText` und `infoText`. Diese Pflichtfelder enthalten vom Host berechnete Textfarben für neutrale Hintergründe und leicht getönte UI-Kit-Elemente, nicht für kräftige Farbfüllungen. `applyHostReady` wendet sie bei jedem Snapshot an. Die CSS-Variablen beschreibt das [UI kit](/sdk/ui/).
@@ -67,6 +69,7 @@ Zugriffstokens tauchen hier nie auf, auch nicht in einem `request`-Ergebnis.
 | `onResolve(handler)` | den Handler für deine Slash-Befehle registrieren. Er bekommt `{ command, args }` und liefert einen Eintrag zum Anhängen oder `null`. |
 | `setBadge(count)` | dein Symbol in der Leiste mit einem Punkt markieren und die Zahl (0 bis 999) im Tooltip zeigen, oder `null`, um sie zu entfernen |
 | `openCommit(sha)` | die Diff-Ansicht für diesen Commit des aktuellen Projekts öffnen. `sha` hat 7 bis 64 Hex-Zeichen; OpenChamber liest den Commit selbst. |
+| `openWalkthrough({ base })` | das Walkthrough im Bereich Branch des aktuellen Projekts öffnen, verglichen mit `base`: `main`, `origin/main` oder einer vollständigen Ref. Die Basis wird zur gewählten Basis des Branches; der Nutzer kann sie weiter ändern und klickt Generieren selbst. Eine Basis, die das Repository nicht hat, wird mit `NOT_FOUND` abgelehnt und ändert nichts. Auf dem Telefon, im Mini-Chat und in VS Code `UNSUPPORTED`. |
 | `setHeight(px)` | die Höhe deines Work-Status-Abschnitts setzen. OpenChamber hält sie zwischen 24 und 480 Pixeln; höherer Inhalt scrollt in deiner Seite. Anderswo wird es ignoriert. |
 | `onFileOpen(listener)` | Datei-Editoren: die zu bearbeitende Datei erhalten, `{ path, name, readOnly }` plus `encoding: "text"` mit `content` oder `encoding: "binary"` mit `bytes`. Sorgt außerdem dafür, dass Cmd/Ctrl+S in deiner Seite speichert. |
 | `onFileSnapshot(handler)` | Datei-Editoren: `{ content, version }` zurückgeben (oder `{ bytes, version }` bei einem binären Editor), die ganze bearbeitete Datei. OpenChamber ruft es zum Speichern auf und bevor zur Quelltextansicht oder in den Vollbildmodus gewechselt wird. |

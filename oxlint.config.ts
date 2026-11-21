@@ -26,8 +26,13 @@ export default defineConfig({
   ],
   overrides: [
     {
+      files: ["packages/web/server/lib/spaces/gatekeeper-program.cjs"],
+      rules: { "openchamber/gatekeeper-standard-library": "error" },
+    },
+    {
       files: TYPESCRIPT_FILES,
       rules: {
+        "openchamber/no-valueof-type-escape": "error",
         "for-direction": "error",
         "no-async-promise-executor": "error",
         "no-case-declarations": "error",
@@ -96,12 +101,29 @@ export default defineConfig({
         "react-hooks/rules-of-hooks": "error",
         "react-hooks/exhaustive-deps": "warn",
         "react/only-export-components": ["error", { allowConstantExport: true }],
+        "openchamber/no-virtualizer-return-from-hooks": "error",
+        "openchamber/no-session-list-scan-in-selectors": "error",
       },
+    },
+    {
+      files: ["packages/web/server/**/*.ts", "packages/web/bin/**/*.ts"],
+      rules: {
+        "openchamber/server-js-specifiers": "error",
+        "openchamber/origin-check-awaited": "error",
+        "typescript/no-non-null-assertion": "error",
+        "typescript/ban-ts-comment": ["error", {
+          "ts-ignore": "allow-with-description",
+          "ts-expect-error": "allow-with-description",
+          "ts-nocheck": true,
+          "minimumDescriptionLength": 10
+        }]
+      }
     },
     {
       files: ["packages/ui/src/**/*.ts", "packages/ui/src/**/*.tsx"],
       rules: {
         "openchamber/no-physical-sides": "error",
+        "openchamber/no-cross-runtime-imports": "error",
       },
     },
   ],

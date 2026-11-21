@@ -2,19 +2,16 @@ import { OpenCode, type OpenCodeClient, type OpenCodeEvent } from '@opencode/cli
 import type { OpenCodeManager } from './opencode';
 import { openCodeTrust } from './opencodeTrust';
 
-// Session activity tracking (mirrors web server and desktop behavior)
 type ActivityPhase = 'idle' | 'busy' | 'cooldown';
 
 interface SessionActivity {
   sessionId: string;
   phase: ActivityPhase;
-  /** When the turn began on this host's clock, when the event marks a start. */
   startedAt?: number;
 }
 
 type SessionActivitySnapshotEntry = {
   type: ActivityPhase;
-  /** How long the busy turn has been running, so the webview can put it on its own clock. */
   startedAgoMs?: number;
 };
 
@@ -40,11 +37,6 @@ const createActivityClient = (manager: OpenCodeManager, baseUrl: string): OpenCo
   headers: manager.getOpenCodeAuthHeaders(),
 });
 
-/**
- * `GET /api/session/active` is the authoritative set of sessions running an
- * agent loop. Anything not in it is idle, including sessions this process
- * believed were busy before the stream dropped.
- */
 const reconcileSessionActivityFromStatus = async (client: OpenCodeClient): Promise<void> => {
   const active = await client.session.active({ signal: AbortSignal.timeout(8_000) });
   const activeSessionIds = new Set(Object.keys(active || {}));
@@ -71,8 +63,6 @@ const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase, starte
 
   const current = sessionActivityPhases.get(sessionId);
   if (current?.phase === phase) {
-    // A new execution inside a session the watcher already calls busy is a new
-    // turn, while the other busy events repeat the running one.
     if (phase === 'busy' && startedAt !== undefined && startedAt !== current.startedAt) {
       sessionActivityPhases.set(sessionId, { ...current, updatedAt: Date.now(), startedAt });
     }
@@ -125,18 +115,6 @@ export const getSessionActivitySnapshot = (): Record<string, SessionActivitySnap
   return snapshot;
 };
 
-/**
- * Live activity comes from the live channel only.
- *
- * `session.execution.*` is the signal that matters: a normal OpenCode 2.x turn
- * emits started → succeeded and NO `session.status` or `session.idle` at all, so
- * anything waiting on those would never see the session go busy. The two status
- * events are still handled because they do arrive outside a normal turn (retry,
- * explicit status pushes) and they are cheap to honour.
- *
- * A finished run passes through `cooldown` so the UI does not flip the indicator
- * off the instant the last token lands.
- */
 const deriveSessionActivity = (event: OpenCodeEvent): SessionActivity | null => {
   switch (event.type) {
     case 'session.status': {
@@ -147,9 +125,6 @@ const deriveSessionActivity = (event: OpenCodeEvent): SessionActivity | null => 
       };
     }
     case 'session.execution.started':
-      // The one event that marks where a turn begins. Stamped on arrival so the
-      // start shares the clock the snapshot's age is measured on, even when
-      // OpenCode runs on another machine.
       return { sessionId: event.data.sessionID, phase: 'busy', startedAt: Date.now() };
     case 'session.execution.succeeded':
       return { sessionId: event.data.sessionID, phase: 'cooldown' };
@@ -234,18 +209,13 @@ export const startGlobalEventWatcher = async (
           );
         }
 
-        // The stream is lazy: it is only proven connected once a frame arrives.
         let connected = false;
 
         for await (const event of client.event.subscribe({ signal })) {
           if (!connected) {
             connected = true;
-            // A healthy connection clears the backoff, so a long-lived watcher
-            // does not carry a 30s delay into its next reconnect.
             attempt = 0;
             console.log('[VSCode:Activity] connected');
-            // Folder trust answers hold until OpenCode closes the folder, which
-            // this stream reports from now on.
             openCodeTrust.followLocations(true);
           }
 
@@ -268,7 +238,6 @@ export const startGlobalEventWatcher = async (
         }
         console.warn('[VSCode:Activity] disconnected', error instanceof Error ? error.message : error);
       }
-      // Closings go unreported until the stream is back.
       openCodeTrust.followLocations(false);
 
       const backoffMs = Math.min(1000 * Math.pow(2, Math.min(attempt, 5)), 30000);

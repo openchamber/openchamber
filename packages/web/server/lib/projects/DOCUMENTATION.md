@@ -18,9 +18,10 @@ that writes it:
 | Keys | Owner | Reached through |
 |---|---|---|
 | `version`, `scheduledTasks`, `scheduledWorktreeCleanups` | `project-config.js` (scheduled-task runtime) | `/api/projects/:projectId/scheduled-tasks/*` and internal cleanup recovery |
-| `setup-worktree`, `setup-worktree-wait`, `teardownWorktree`, `createWorktreeCommand`, `projectActions`, `projectActionsPrimaryId`, `draftStarters`, `projectPath` | `project-setup.js` via `readProjectSetup` / `updateProjectSetup` on the same runtime | `GET/PUT /api/projects/:projectId/config` (`routes.js`) |
+| `setup-worktree`, `setup-worktree-wait`, `teardownWorktree`, `createWorktreeCommand`, `projectActions`, `projectActionsPrimaryId`, `draftStarters`, `notesTodosInRepository`, `projectPath` | `project-setup.js` via `readProjectSetup` / `updateProjectSetup` on the same runtime | `GET/PUT /api/projects/:projectId/config` (`routes.js`) |
 
 Notes, todos, and plans moved out of this file to `packages/web/server/lib/project-context`.
+`notesTodosInRepository` (personal only, absent when off) tells that module to keep notes and todos in `<repo>/.openchamber/notes-todos.json`; `resolveNotesTodosFile` answers the path, and `updateProjectSetup` calls `onNotesTodosStorageChanged` when the value flips.
 A project's environment variables and environment command are not in this file either: values can be secrets, so they live in `environment.json` (mode 0600, `packages/web/server/lib/environment`).
 
 A second, optional source is the team's shared file, `<repo>/.openchamber/project.json`
@@ -105,7 +106,9 @@ command brings the prompt back. The client records an answer with a PUT of
 UI (`packages/ui/src/lib/sharedTrustConfirmation.ts`). A worktree the server
 makes for an agent has no client to ask, so `worktree-setup.js` gives the
 prompt's "skip" answer when the shared commands are not trusted: it leaves
-them out and returns them for the caller to report.
+them out and returns them for the caller to report. It resolves the same
+commands as the client's New worktree dialog (`resolveWorktreeSetupCommands`
+in `packages/ui/src/lib/sharedTrustConfirmation.ts`).
 
 ## Modules
 
@@ -114,7 +117,11 @@ session's unregistered host destination. It validates the directory, verifies
 the session still lives there, and checks the existing OpenCode fingerprint
 trust before appending. Empty configurations and already trusted fingerprints
 need no new answer. Untrusted code answers 403 `opencode_trust_required`; a
-changed destination answers 409; failed writes answer 503. It creates no folder,
+changed destination answers 409; failed writes answer 503. A session OpenCode
+recorded under a symlinked spelling of the folder (`/tmp` for `/private/tmp`)
+is no changed destination: after registering, the route moves it in OpenCode
+to the canonical folder. The answer always names the session's canonical
+folder as `directory`. It creates no folder,
 runs no project code, and never changes active-project or directory pointers.
 A destination inside a registered project returns that project. A linked
 worktree whose repository (the trust assessment's `repositoryKey`) matches a
@@ -122,8 +129,18 @@ registered project's also returns that project, appends nothing, and emits
 `openchamber:worktree-changed` so clients list the worktree. That match
 assesses each registered project inside the settings write queue, so a project
 whose assessment takes over 2 seconds (a hung mount) counts as no match instead
-of holding the queue. Web, desktop and both mobile surfaces use the active server. VS Code registers
+of holding the queue. A folder beside a registered project in the same checkout
+shares the repository but is no worktree that project lists, so it registers as
+its own project. Trust is assessed once before the settings write queue, so
+one-time seeding runs outside it, and again at the write boundary, because the
+answer can change between the dialog and the registration. A move made during
+registration wins: the route re-reads the session's directory before moving it
+and answers 409 instead of undoing the newer move. Moving a running session
+takes effect at its next step boundary. Web, desktop and both mobile surfaces use the active server. VS Code registers
 through its workspace-folder bridge instead.
+
+`project-directory-runtime.js` resolves and validates the project directory of
+a request, from the request itself or from settings.
 
 ### Why registration uses the settings write queue
 
@@ -134,16 +151,101 @@ would lose an intervening append. A malformed registry fails without repair.
 
 - `project-id.js` — `createProjectIdFromPath` / `projectPathFromId`: the path-derived id (`path_<base64url>`) that names the file, and the checkout path back from it. The shared UI derives the same id (`packages/ui/src/lib/projectId.ts`); both sides must agree. `projectConfigFileStemOf`: the stem that names the file and the sibling folder for an id, see the file name invariant below.
 - `project-config.js` — `createProjectConfigRuntime`: raw read, atomic write, the cross-process file lock (Electron and a CLI `serve` can share one projects dir), scheduled-task normalization, and the project-setup read/update.
+- `task-text-limits.ts` — the scheduled-task name (80) and prompt (20,000) limits. `upsertScheduledTask` checks them before normalizing a task for storage. A longer value is refused with an error naming the limit and the submitted task is not stored. Reads of a stored task still cut to the limit, so one old long task cannot hide the others.
 - `project-setup.js` — sanitizers, the shared-file parser (`parseSharedProjectConfig`, `normalizePlansDir`), the merge (`mergeProjectSetup`), and the personal view for the setup keys. Mirrored in the VS Code extension host (`packages/vscode/src/project-setup.ts`), which owns the same file when the webview has no OpenChamber server; keep the two in sync.
-- `routes.js` — directory activation and setup routes. `/api/openchamber/directory` and `/api/projects` are on the JSON-body allowlist in `opencode/core-routes.js`. Both register before the generic OpenCode proxy. Web, Electron, hosted mobile, and Capacitor use the server route. VS Code handles the directory route locally through `api:openchamber/directory` and keeps its existing manager-owned directory selection.
+- `routes.js` — directory activation and setup routes. `/api/openchamber/directory` and `/api/projects` are on the JSON-body allowlist in `server-frame/core-routes.js`. Both register before the generic OpenCode proxy. Web, Electron, hosted mobile, and Capacitor use the server route. VS Code handles the directory route locally through `api:openchamber/directory` and keeps its existing manager-owned directory selection.
 
 ## Invariants
+
+- `project-id`, `project-config`, `project-setup`, `worktree-setup`, `session-directory`, `routes`, and `project-directory-runtime` have TypeScript
+  implementations and retain their `.js` import specifiers. Setup contracts live
+  in `contracts.ts`. Raw shared documents have arbitrary, unvalidated values;
+  only the sanitized setup view carries the executable setup contract.
 
 - Scheduled worktree cleanup records are keyed by session id and survive task deletion. Each captures the created branch and directory identity. Scanning the project config files recovers runs even when their project is no longer registered; an unreadable file or malformed record does not erase other records. Claims and journal changes use the project lock, but Git removal runs outside it. A `removing` record carries both `ownerPID` and the native `ownerInstance` creation fingerprint until completion; PID reuse does not retain ownership. Failure releases ownership and a dead instance can be reclaimed. Unreadable process identity fails closed. Successful cleanup clears only that run's record. See `../scheduled-tasks/DOCUMENTATION.md` for the execution, goal and background-command gates.
 - Cleanup finalization accepts an abort signal and checks it after acquiring the project lock, after awaited claim checks, and before clearing the journal. An aborted claimed operation releases ownership without discarding the record; that release is allowed to finish after cancellation.
 
 - **Every write is a locked read-modify-write of the whole document.** Keys the writer does not own, and keys from newer builds, come back out unchanged. A setup update and a scheduled-task update never clobber each other.
+- **The project file lock recovers from a dead or unreadable owner, and only its owner removes it.** A lock whose PID is not running, or that is older than 60 seconds, is removed and retried; a process that answers EPERM is alive because it exists and belongs to another user. A lock file left unparseable by a crash between create and write falls back to its modification time. Release unlinks the file only while it still names this process, because a stale-recovery steal may have replaced it.
+- **A key named `__proto__` in a shared file is data.** Every shared key is set with `defineOwnEntry`; plain assignment would change the object's prototype and `JSON.stringify` would then drop the key, so a foreign `__proto__` entry would disappear on the next write.
+- **Enabling or disabling `notesTodosInRepository` moves the entries and commits the option through `switchNotesTodosStorage`.** That module holds its own lock while it moves the entries and calls back to write the option, so a write cannot land between the two.
 - **A wrongly shaped key is a 400, not a silent drop.** `projectSetupPatchToStored` throws; the file is untouched. Values inside a well-shaped key are sanitized (trimmed, capped, deduplicated) rather than rejected.
-- **The file name is bounded, and so is the folder beside it.** The file is `<projectId>.json` and the per-project folder is `<projectId>/` while the id is at most 200 characters. A `path_<base64url>` id grows with the checkout path, so a deeply nested project (a path of roughly 150 characters or more) would otherwise get a name beyond the 255-byte limit and every write, lock, and temp file would fail with ENAMETOOLONG. Such an id is stored as `path_sha256_<hex digest of the id>.json` instead, with the folder `path_sha256_<digest>/` beside it (`projectConfigFileStemOf`; every composer of either path goes through it: `project-config.js`, `project-context/runtime.js`, `agent-memory/runtime.js`, and the id migration and orphan recovery in `opencode/settings-runtime.js`). The digest keeps the `path_` prefix so orphan recovery skips it. A file an older build managed to write under the long name is still read when the bounded file is missing and is moved to the bounded name by the next write; a malformed one is a read failure, not an empty project. A folder an older build created under the raw id (possible only for ids of 201 to 255 characters; longer names never got one) is moved into the bounded folder once at startup, by the project id migration in `opencode/settings-runtime.js`, with `context.json` merged by entry identity when both exist. The VS Code extension host mirrors both the naming rule and the legacy read-then-move for the file (`bridge-project-setup-runtime.ts`), because a VS Code-only user has no server to do it; it never touches the folder.
+- **The file name is bounded, and so is the folder beside it.** The file is `<projectId>.json` and the per-project folder is `<projectId>/` while the id is at most 200 characters. The 200-character ceiling leaves room in the 255-byte name limit for the atomic-write `.tmp-<pid>-<ms>-<random>` suffix and the `.json.lock` sibling; ids are ASCII, so characters are bytes. A `path_<base64url>` id grows with the checkout path, so a deeply nested project (a path of roughly 150 characters or more) would otherwise get a name beyond the 255-byte limit and every write, lock, and temp file would fail with ENAMETOOLONG. Such an id is stored as `path_sha256_<hex digest of the id>.json` instead, with the folder `path_sha256_<digest>/` beside it (`projectConfigFileStemOf`; every composer of either path goes through it: `project-config.js`, `project-context/runtime.js`, `agent-memory/runtime.js`, and the id migration and orphan recovery in `settings/settings-runtime.js`). The digest keeps the `path_` prefix so orphan recovery skips it. A file an older build managed to write under the long name is still read when the bounded file is missing and is moved to the bounded name by the next write; a malformed one is a read failure, not an empty project. Reading that legacy name treats ENAMETOOLONG as "no such file", because the name may be longer than the filesystem accepts; on the bounded path the same error is a real failure of the projects directory. A folder an older build created under the raw id (possible only for ids of 201 to 255 characters; longer names never got one) is moved into the bounded folder once at startup, by the project id migration in `settings/settings-runtime.js`, with `context.json` merged by entry identity when both exist. The VS Code extension host mirrors both the naming rule and the legacy read-then-move for the file (`bridge-project-setup-runtime.ts`), because a VS Code-only user has no server to do it; it never touches the folder.
 - **The client never composes the path.** `packages/ui/src/lib/openchamberConfig.ts` speaks only HTTP; the same code serves web, desktop, VS Code, and the phone, including a phone on a remote instance.
 - **`OPENCHAMBER_DATA_DIR` moves this directory too.** Every OpenChamber folder hangs off the one root; a custom root gets `projects/`, `themes/`, and `speech-models/` copied in from `~/.config/openchamber` once at startup (copied, not moved: a second instance beside the default one must not strip it) (`lib/data-dir-migration.js`). A scratch server started with its own data dir therefore never touches the real project configs.
+- An explicit project directory retains its pre-realpath spelling alongside the canonical directory because file-tree requests can name paths under a symlinked project root. With no explicit directory, the UI's `lastDirectory` precedes the sidebar's active project because navigation can leave that project selection stale.
+
+## TypeScript boundaries
+
+### Why setup parsers retain their sanitizers
+
+The setup readers accept malformed file fields and patches. Schema transforms
+retain the existing sanitization, defaults and thrown errors, including unknown
+entries that other shared-file writers preserve. The record guard narrows only
+the document container; it does not claim its values are validated setup fields.
+
+### Why session registration retains a mutable match
+
+The settings write queue calls the registration resolver before returning the
+project. A nullable project field carries the linked-worktree match across that
+callback without asserting that a callback-assigned local has changed.
+Registration uses the trust owner's full assessment contract. Thrown values
+remain unchecked until their error code is read; both objects and callable
+errors can carry the trust refusal code.
+
+### Why the directory schema has a dependency augmentation
+
+`routes.ts` retains `z.literal(true).catch(false)`. Zod returns the fallback
+without validating it against the literal, although its published declarations
+require a fallback of `true`. `dependencies.d.ts` adds the `false` overload with
+the original output unioned with `false`; the runtime schema stays unchanged.
+Other truthy inputs still do not request directory creation.
+
+The active id of a newly appended project comes from the same pure path-to-id
+function as its stored id, avoiding an unchecked array index. Directory errors
+retain their original message-property behavior, including inherited properties,
+primitive values and the TypeError raised when a dependency throws null or
+undefined.
+
+### Why the shared file exposes JSON values
+
+Parsing the file establishes JSON values, and the object check establishes the
+top-level document. Setup normalization validates only the keys it owns.
+Magic Prompts receives the original JSON entries and checks its own key before
+using it. The shared setup writer keeps the other keys through a repair.
+
+### Why task normalization keeps input checks
+
+Scheduled-task fields come from disk and request bodies. Object checks still
+admit arrays where the JavaScript only checked for a non-null object. Time,
+weekday and status checks preserve the stored formats. The lock and cleanup
+code retain their error-property checks, including inherited properties. A task
+state update preserves `lastScheduledFor`, the slot claim shared by server
+instances.
+
+`dependencies.d.ts` extends the server's Luxon declaration with the ISO date
+parser and IANA zone validator used by this runtime.
+
+### Why directory resolution keeps external checks
+
+Directory candidates and settings are JSON inputs. The runtime checks strings
+before trimming directory values or comparing the active project id, and checks
+thrown values for an object before reading their error code. Those guards retain
+inherited properties and do not require errors to be `Error` instances.
+Repeated query parameters still select the first array entry.
+
+The filesystem, path, realpath cache, normalization and project sanitizer are
+injected internal contracts. The optional request getter and settings-reader
+getter have function types; their availability checks remain, while redundant
+function-type checks are removed. The directory-refusal callback returns a
+string or null, so only its non-null and non-empty checks remain.
+The settings-reader contract requires either the direct reader or its deferred
+getter, preserving late binding during server startup.
+
+## Public exports (project-directory-runtime.js)
+- `createProjectDirectoryRuntime(dependencies)`: creates runtime for request/project directory candidate normalization and validation. `dependencies.refuseDirectory(candidate)` answers the reason a resolved directory may not be used on this host, or null; `validateDirectoryPath` asks it before it looks at the disk, so a refused directory is never touched and never falls back to another one. The isolated-spaces host refuses `/spaces/...` through it while its switch is on.
+- Returned API:
+  - `resolveDirectoryCandidate(value)`
+  - `validateDirectoryPath(candidate)`
+  - `resolveProjectDirectory(req)`
+  - `resolveOptionalProjectDirectory(req)`

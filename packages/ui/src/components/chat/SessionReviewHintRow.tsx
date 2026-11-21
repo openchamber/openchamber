@@ -11,15 +11,9 @@ import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 interface SessionReviewHintRowProps {
   sessionId: string | null;
   directory?: string;
-  /** Opens the composer's review dialog, the one `/handoff-review` opens. */
   onAIReview: () => void;
 }
 
-/**
- * Jev thinks the last turn handed over changes worth a look. The same quiet
- * top row as the done hint, offering an AI review by another agent or a
- * walkthrough of the working tree; it goes away with the next message.
- */
 export const SessionReviewHintRow: React.FC<SessionReviewHintRowProps> = React.memo(({ sessionId, directory, onAIReview }) => {
   const { t } = useI18n();
   const session = useSession(sessionId ?? '', directory);
@@ -32,8 +26,6 @@ export const SessionReviewHintRow: React.FC<SessionReviewHintRowProps> = React.m
   if (!sessionId || !directory || !reviewOfferEnabled || !isIdle || !isReviewSuggested(session)) return null;
 
   const handleWalkthrough = () => {
-    // The whole working tree: what this session changed is not separable
-    // from other sessions working in the same directory.
     requestWalkthroughTarget(directory, { source: { kind: 'working-tree', scope: 'all' } });
     openContextSurface(directory, 'walkthrough');
   };

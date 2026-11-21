@@ -7,6 +7,7 @@ import { createInputHistoryIdentity, createInputHistorySubmission, selectInputHi
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
+import { GLOBAL_SESSION_TAB_SCOPE, useSessionTabsStore } from '@/stores/useSessionTabsStore';
 import { cleanupPersistedSessionState } from './session-deletion-cleanup';
 
 describe('cleanupPersistedSessionState', () => {
@@ -16,6 +17,7 @@ describe('cleanupPersistedSessionState', () => {
     useSessionFoldersStore.setState({ foldersMap: {}, collapsedFolderIds: new Set() });
     useInputHistoryStore.setState({ globalBuckets: {}, sessionBuckets: {}, scope: 'session' });
     useSessionMultiSelectStore.getState().disable();
+    useSessionTabsStore.setState({ tabIds: [], previewTabId: null, pinOnOpenIds: [], scope: GLOBAL_SESSION_TAB_SCOPE, sets: {} });
   });
 
   test('clears persisted session state only for the deleted composite session', () => {
@@ -62,6 +64,22 @@ describe('cleanupPersistedSessionState', () => {
     expect(useSessionFoldersStore.getState().getSessionFolderId('/repo-a', 'session-1')).toBeNull();
     expect(useSessionFoldersStore.getState().getSessionFolderId('__archived__:/repo-a', 'session-1')).toBeNull();
     expect(useSessionMultiSelectStore.getState().selectedIds.has('session-1')).toBe(false);
+  });
+
+  test('drops the deleted session from every header tab set', () => {
+    const runtimeKey = getRuntimeKey();
+    useSessionTabsStore.setState({
+      scope: `${runtimeKey}|/repo-a`,
+      tabIds: ['session-1', 'session-2'],
+      previewTabId: 'session-1',
+      sets: { [GLOBAL_SESSION_TAB_SCOPE]: { tabIds: ['session-1'], previewTabId: null } },
+    });
+
+    cleanupPersistedSessionState({ runtimeKey, directory: '/repo-a', sessionId: 'session-1' });
+
+    expect(useSessionTabsStore.getState().tabIds).toEqual(['session-2']);
+    expect(useSessionTabsStore.getState().previewTabId).toBeNull();
+    expect(useSessionTabsStore.getState().sets[GLOBAL_SESSION_TAB_SCOPE]?.tabIds).toEqual([]);
   });
 
   test('rejects stale runtime cleanup', () => {

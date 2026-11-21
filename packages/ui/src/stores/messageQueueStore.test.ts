@@ -1,9 +1,7 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { beforeEach, describe, expect, test } from "bun:test"
+import { directoryEnvironment } from './test-support/directoryEnvironment'
 
-// The local queue is the VS Code behavior; every other runtime hands the
-// queue to the server (see messageQueueStore.server.test.ts).
-const desktop = await import("@/lib/desktop")
-mock.module("@/lib/desktop", () => ({ ...desktop, isVSCodeRuntime: () => true }))
+directoryEnvironment({ vscode: true })
 
 const {
   createMessageQueueTarget,

@@ -11,7 +11,6 @@ import {
   SETTINGS_FIELDS_STACK_CLASS,
   SETTINGS_HELPER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
-import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useI18n } from '@/lib/i18n';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import type { ClassifierSource } from '@/lib/routing/routingApi';
@@ -22,20 +21,13 @@ import { CustomEndpointFields } from './CustomEndpointFields';
 import { ClassifierTestButton } from './ClassifierTestButton';
 import { SettingsInlineLink } from './JevAccessNote';
 
-// The docs keep the list of features Jev answers for, so this page never goes stale.
 const CLASSIFICATION_DOCS_URL = 'https://docs.openchamber.dev/classification-providers/';
 
 interface ClassificationProvidersPageProps {
   titleLeading: React.ReactNode;
-  /** Opens the OpenCode provider whose API key a source reads. */
   onOpenProvider: (providerId: string) => void;
 }
 
-/**
- * The "missing key" line with a link to the provider that holds the key. The
- * option row selects on click and swallows Enter and Space, so the link keeps
- * its events to itself.
- */
 const MissingKeyDescription: React.FC<{ text: string; linkLabel: string; onOpen: () => void }> = ({ text, linkLabel, onOpen }) => (
   <>
     {text}{' '}
@@ -45,12 +37,66 @@ const MissingKeyDescription: React.FC<{ text: string; linkLabel: string; onOpen:
   </>
 );
 
-/**
- * Settings → Providers → Classification providers: where Jev requests go, for
- * every feature that asks Jev. Not an OpenCode provider,
- * so it has its own page instead of the provider detail view. The server owns
- * the pick and the TypeSafe key (`packages/web/server/lib/routing`).
- */
+const GeminiKeyField: React.FC = () => {
+  const { t } = useI18n();
+  const keyPresent = useRoutingStore((state) => state.geminiKeyPresent);
+  const setGeminiKey = useRoutingStore((state) => state.setGeminiKey);
+  const clearGeminiKey = useRoutingStore((state) => state.clearGeminiKey);
+  const [input, setInput] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = () => {
+    const key = input.trim();
+    if (!key) return;
+    void run(async () => {
+      await setGeminiKey(key);
+      setInput('');
+    });
+  };
+
+  return (
+    <>
+      <SettingsFieldRow label={t('settings.classification.gemini.key.label')} info={t('settings.classification.gemini.key.info')}>
+        <div className="flex w-full min-w-0 items-center gap-2">
+          <Input
+            type="password"
+            autoComplete="off"
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter') save(); }}
+            placeholder={keyPresent ? t('settings.routing.token.replacePlaceholder') : t('settings.routing.token.placeholder')}
+            aria-label={t('settings.classification.gemini.key.label')}
+            className="h-8 rounded-md px-3 min-w-0 flex-1"
+            disabled={busy}
+          />
+          <Button size="sm" variant="outline" onClick={save} disabled={busy || input.trim().length === 0}>
+            {t('settings.routing.token.save')}
+          </Button>
+          {keyPresent ? (
+            <Button size="sm" variant="ghost" onClick={() => void run(clearGeminiKey)} disabled={busy}>
+              {t('settings.routing.token.remove')}
+            </Button>
+          ) : null}
+        </div>
+      </SettingsFieldRow>
+      {error ? <p className={SETTINGS_DESCRIPTION_CLASS}>{error}</p> : null}
+    </>
+  );
+};
+
 export const ClassificationProvidersPage: React.FC<ClassificationProvidersPageProps> = ({ titleLeading, onOpenProvider }) => {
   const { t } = useI18n();
   const available = useRoutingStore((state) => state.available);
@@ -59,7 +105,6 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
   const classifier = useRoutingStore((state) => state.classifier);
   const tokenPresent = useRoutingStore((state) => state.tokenPresent);
   const customEndpoint = useRoutingStore((state) => state.customEndpoint);
-  // The server refuses every other pick and any key; the controls only mirror that.
   const locked = useRoutingStore((state) => state.enterpriseMode);
   const load = useRoutingStore((state) => state.load);
   const setClassifierSource = useRoutingStore((state) => state.setClassifierSource);
@@ -93,7 +138,6 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
     setTokenBusy(true);
     setTokenError(null);
     try {
-      // The server also picks TypeSafe: pasting a key is choosing it.
       await setToken(token);
       setTokenInput('');
     } catch (error) {
@@ -129,6 +173,7 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
   const zenKeyUsable = usable('zen-key');
   const openrouterUsable = usable('openrouter');
   const vercelUsable = usable('vercel');
+  const geminiUsable = usable('gemini');
   const customUsable = usable('custom');
 
   return (
@@ -151,28 +196,21 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
       ) : (
         <>
         <SettingsSection
-          title={(
-            <span className="flex items-center gap-2">
-              <ProviderLogo providerId="typesafe" className="size-4 shrink-0" />
-              {t('settings.classification.jev.title')}
-            </span>
-          )}
-          info={t('settings.classification.jev.info')}
+          title={t('settings.classification.model.title')}
+          info={t('settings.classification.model.info')}
           settingsItem="providers.classification"
         >
           <div className={SETTINGS_FIELDS_STACK_CLASS}>
             {status ? <p className={SETTINGS_HELPER_CLASS}>{status}</p> : null}
-            <SettingsRadioGroup aria-label={t('settings.classification.jev.title')}>
+            <SettingsRadioGroup aria-label={t('settings.classification.model.title')}>
               <SettingsRadioOption
                 selected={classifier.selected === 'off'}
                 onSelect={() => void pick('off')}
                 label={t('settings.classification.source.off.name')}
                 description={t('settings.classification.source.off.description')}
               />
-              {/* Enterprise mode leaves Off as the only choice. */}
               {locked ? null : (
                 <>
-                  {/* The promotion is offered only while the server can use it; otherwise only an existing pick still shows it. */}
                   {promoUsable || classifier.selected === 'zen-promo' ? (
                     <SettingsRadioOption
                       selected={classifier.selected === 'zen-promo'}
@@ -230,6 +268,15 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
                       )}
                   />
                   <SettingsRadioOption
+                    selected={classifier.selected === 'gemini'}
+                    onSelect={() => void pick('gemini')}
+                    disabled={!geminiUsable}
+                    label={t('settings.classification.source.gemini.name')}
+                    description={geminiUsable
+                      ? t('settings.classification.source.gemini.description')
+                      : `${t('settings.classification.source.gemini.description')} ${t('settings.classification.source.gemini.missing')}`}
+                  />
+                  <SettingsRadioOption
                     selected={classifier.selected === 'typesafe'}
                     onSelect={() => void pick('typesafe')}
                     disabled={!tokenPresent}
@@ -240,7 +287,6 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
                   />
                 </>
               )}
-              {/* An endpoint pinned by the server environment stays a choice in enterprise mode. */}
               {!locked || customEndpoint?.pinned ? (
                 <SettingsRadioOption
                   selected={classifier.selected === 'custom'}
@@ -283,6 +329,7 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
               </SettingsFieldRow>
             )}
             {tokenError ? <p className={SETTINGS_DESCRIPTION_CLASS}>{tokenError}</p> : null}
+            {locked ? null : <GeminiKeyField />}
             <SettingsFieldRow label={null}>
               <ClassifierTestButton disabled={classifier.effective === null} />
             </SettingsFieldRow>

@@ -475,6 +475,35 @@ matched the old project would silently hide everything in the new one.
 
 ## Invariants
 
+- An unmounted add field writes no draft after a newer field takes ownership.
+  Failed-add restoration targets only an empty draft of the same project and
+  section, so it cannot overwrite subsequent typing or another owner's text.
+- Note editor views are built once per mounted note and read current callbacks.
+  External bodies arrive only after local edits save. Leaving the note flushes
+  pending keystrokes before the debounce can discard them.
+- Formatting hides markers only outside the selected lines. Code and fences keep
+  their typed content, ordered lists keep their numbers, and stored text remains
+  unchanged Markdown.
+- Returning from an entry restores its section's scroll position and focuses the
+  card or plan button that opened it. Switching sections forgets that position.
+- Search follows matches only when the query changes, so a manually chosen empty
+  tab or memory scope remains chosen. Match counts exclude pending deletions and
+  use the same matching rules as the displayed lists.
+- Plan creation and moves recheck the visible project and entry after awaiting.
+  A completed operation cannot open over a different entry or another project's
+  plan with the same id. Show-plan requests run after section resets so those
+  resets cannot immediately close the requested plan.
+- A move hold belongs to the plan across every open view, including a view opened
+  while the move runs. Reusing a view for another plan resets its hold state.
+- Pending-delete entries stay hidden until the store drops them, preventing a
+  flash between the deadline and refreshed data. Global memory deletion keys are
+  shared across projects because the underlying memory store is shared.
+- Withheld memories stay visible with their warning so the user can inspect the
+  entry excluded from agent context. Empty memory edits restore the prior value
+  because the server rejects blank writes and deletion is a separate action.
+- Imported plans split their title and body with the server's rule to preserve
+  the author's heading. Todo send prompts belong to the todo's project even when
+  the destination is a new worktree.
 - **An open note keeps a local, debounced draft.** Writing on every keystroke
   would put a request behind every character, and re-reading the store each
   render would fight the caret.
@@ -482,6 +511,9 @@ matched the old project would silently hide everything in the new one.
 - **An external note change is adopted only while the open note is untouched** since
   its last save. "Add to notes" from a chat selection must reach an open panel,
   but must never overwrite what the user is typing.
+- **A save echo leaves the open draft's whitespace intact.** The store trims
+  note bodies for persistence, so the editor compares the stored body with the
+  trimmed last-saved draft before treating it as an external change.
 - **List cards never change height.** A note card shows its title and a short
   clamped preview; editing happens in the opened note, never inside the list.
 - **A blanked note body is never persisted.** The server rejects it, so the row

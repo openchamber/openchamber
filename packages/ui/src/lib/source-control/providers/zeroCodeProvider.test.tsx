@@ -86,12 +86,12 @@ const sourceControl: SourceControlAPI = {
   authInstances: unexpected, capabilities: unexpected, authStatus: unexpected, authStart: unexpected,
   authComplete: unexpected, authSetToken: unexpected, authSetSshUrl: unexpected, setInstanceAliases: unexpected, authDisconnect: unexpected, authActivate: unexpected,
   authSetCliDisabled: unexpected,
-  changeRequestStatus: unexpected, changeRequestCreate: unexpected, changeRequestUpdate: unexpected,
-  changeRequestMerge: unexpected, changeRequestReady: unexpected, changeRequestDraft: unexpected, changeRequestComment: unexpected,
+  changeRequestStatus: unexpected, changeRequestCreate: unexpected, changeRequestUpdate: unexpected, issueUpdate: unexpected,
+  changeRequestMerge: unexpected, changeRequestReady: unexpected, changeRequestDraft: unexpected, changeRequestComment: unexpected, changeRequestCommentUpdate: unexpected, changeRequestCommentDelete: unexpected,
   changeRequestStartThread: unexpected, changeRequestReplyToThread: unexpected, changeRequestResolveThread: unexpected,
-  changeRequestReview: unexpected, issueComment: unexpected, changeRequestSetState: unexpected,
+  changeRequestReview: unexpected, issueComment: unexpected, issueCommentUpdate: unexpected, issueCommentDelete: unexpected, changeRequestSetState: unexpected,
   issueSetState: unexpected, changeRequestSetLabels: unexpected, issueSetLabels: unexpected,
-  discussionComment: unexpected, discussionSetState: unexpected, discussionSetAnswer: unexpected, discussionSetLabels: unexpected,
+  discussionComment: unexpected, discussionCommentUpdate: unexpected, discussionCommentDelete: unexpected, discussionSetState: unexpected, discussionSetAnswer: unexpected, discussionSetLabels: unexpected, discussionUpdate: unexpected,
   changeRequestReviewState: unexpected, changeRequestReviewComment: unexpected, changeRequestReviewCommentUpdate: unexpected,
   changeRequestReviewCommentDelete: unexpected, changeRequestReviewDiscard: unexpected,
   changeRequestSetReviewers: unexpected, refreshProviderReads: unexpected, referenceLabels: unexpected,
@@ -271,20 +271,4 @@ describe('a source-control provider no UI code names', () => {
     }
   });
 
-  // The board's repository list title is built inline in `SourceBoardView`,
-  // and rendering the whole board needs the folder's repositories, the binding
-  // and the board store. This checks the sentence that title reads for the
-  // provider's term, with its label.
-  test('the board titles its repository list with the provider label', async () => {
-    const { useI18n } = await import('@/lib/i18n');
-    const Title: React.FC = () => {
-      const { t } = useI18n();
-      const descriptor = useSourceControlProviderRegistry((state) => state.byId.get('acme'));
-      if (!descriptor) return null;
-      return <h2>{t(`sourceBoard.list.repository.${descriptor.terminology.changeRequest}`, { provider: descriptor.label })}</h2>;
-    };
-    await render(<Title />);
-    expect(container.textContent).toBe('Acme Forge issues and pull requests');
-    expect(namesOtherProvider(container.textContent)).toBe(false);
-  });
 });

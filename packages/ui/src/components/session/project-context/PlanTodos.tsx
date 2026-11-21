@@ -11,11 +11,6 @@ import { unfinishedDependencies, withTodoCompleted } from './todoList';
 
 const NO_TODOS: ProjectTodoItem[] = [];
 
-/**
- * The todos an agent filed under a plan, under the plan's text. They stay in
- * the Todos list too, named by their plan there; here the plan shows what is
- * left of it. Nothing shows for a plan without todos.
- */
 export const PlanTodos: React.FC<{ projectRef: ProjectRef; planId: string }> = ({ projectRef, planId }) => {
   const { t } = useI18n();
   const projectId = resolveProjectContextId(projectRef);
@@ -37,7 +32,6 @@ export const PlanTodos: React.FC<{ projectRef: ProjectRef; planId: string }> = (
   };
 
   return (
-    // A divider, because the block sits under a document that runs to it.
     <section className="flex-shrink-0 border-t border-edge-muted px-3 py-2">
       <button
         type="button"

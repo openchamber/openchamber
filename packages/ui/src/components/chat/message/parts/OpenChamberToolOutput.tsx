@@ -10,7 +10,7 @@ import { openWorkflowRunInPanel } from '@/lib/workflows/panel';
 import { useWorkflowRun } from '@/lib/workflows/store';
 import { workflowRunLook } from '../../workflows/workflowRunPresentation';
 import { useI18n } from '@/lib/i18n';
-import { formatQuotaResetLabel, formatWindowLabel } from '@/lib/quota';
+import { formatQuotaResetLabel, formatQuotaRowValue, formatWindowLabel } from '@/lib/quota';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useChatColumnActions } from '../../chatColumnSession';
@@ -32,7 +32,6 @@ import {
     scheduleRanSchema,
     fileOpenedSchema,
     workNamedSchema,
-    prWatchedSchema,
     sessionMessagesSchema,
     sessionStatusSchema,
     memoryReadSchema,
@@ -61,12 +60,8 @@ import { GeneratedImages } from './GeneratedImages';
 import { RawToggleContext, usePanelsAvailable } from './toolResultContext';
 import { Actions, Field, List, ListRow, Section, SessionLinkRow, Warning, WebLinkRow, type OpenActionInput } from './ToolResultParts';
 import type { ToolPopupContent } from '../types';
+import { PrWatchedBody, WaitListedBody, WaitStartedBody } from './WaitToolOutput';
 
-/**
- * Whether the call worked on the chat's own project. A panel shows the chat's
- * project, so an entry from another one stays readable in the row without a
- * button that would open the wrong project's panel.
- */
 const isOwnProject = (call: OpenChamberCallInput, directory: string): boolean => (
     !call.projectId && (!call.directory || call.directory === directory)
 );
@@ -262,14 +257,14 @@ const UsageBody: React.FC<{ data: unknown }> = ({ data }) => {
                     }
                     const { key, window } = tightest;
                     const percent = displayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
-                    const reset = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
+                    const reset = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference, provider.providerId);
                     const caption = [formatWindowLabel(key), reset ? t('settings.usage.card.resetsAt', { time: reset }) : undefined].filter(Boolean).join(' · ');
                     return (
                         <React.Fragment key={provider.providerId}>
                             <span className="truncate text-foreground">{name}</span>
-                            <UsageProgressBar percent={percent} tonePercent={window.usedPercent} className="h-1.5" />
+                            {percent === null ? <span aria-hidden className="h-1.5" /> : <UsageProgressBar percent={percent} tonePercent={window.usedPercent} className="h-1.5" />}
                             <span className="text-end tabular-nums text-foreground">
-                                {percent === null ? '' : `${Math.round(percent)}%`}
+                                {formatQuotaRowValue(window, percent, t)}
                             </span>
                             <span className="truncate text-muted-foreground" title={caption}>{reset}</span>
                         </React.Fragment>
@@ -347,7 +342,6 @@ const ModelsFoundBody: React.FC<{ data: unknown }> = ({ data }) => {
     const parsed = modelsFoundSchema.safeParse(data);
     if (!parsed.success) return null;
     const { models, total, next } = parsed.data;
-    // A later page of the search: what is left counts from where the next page starts.
     const more = total === undefined || next === undefined ? undefined : next === null ? 0 : total - next;
     return (
         <>
@@ -374,7 +368,6 @@ const MemoriesListedBody: React.FC<{ data: unknown; directory: string; isMobile:
     };
     return (
         <>
-            {/* A scope that failed to load is said so, never shown as empty. */}
             <Warning text={globalUnavailable ? t('chat.toolPart.openchamber.memory.globalUnavailable') : undefined} />
             <Warning text={projectUnavailable ? t('chat.toolPart.openchamber.memory.projectUnavailable') : undefined} />
             <List count={memories.length}>
@@ -470,7 +463,6 @@ const ScheduleListedBody: React.FC<{ data: unknown; call: OpenChamberCallInput; 
     );
 };
 
-/** The page a browser action worked on. */
 const PageLink: React.FC<{ url: string; title: string | undefined }> = ({ url, title }) => (
     <WebLinkRow url={url} icon="global" primary={title || url} secondary={title ? url : undefined} />
 );
@@ -499,7 +491,6 @@ const ScreenshotBody: React.FC<{ data: unknown; part: ToolPart; onShowPopup?: (c
     );
 };
 
-/** A memory the agent read: what kind it is, its title and its text. */
 const MemoryReadBody: React.FC<{ data: unknown; directory: string; isMobile: boolean }> = ({ data, directory, isMobile }) => {
     const { t } = useI18n();
     const panels = usePanelsAvailable(isMobile);
@@ -518,7 +509,6 @@ const MemoryReadBody: React.FC<{ data: unknown; directory: string; isMobile: boo
     );
 };
 
-/** A call whose description already says what it did: only where to look next. */
 const MemoryDeletedBody: React.FC<{ directory: string; isMobile: boolean }> = ({ directory, isMobile }) => {
     const { t } = useI18n();
     const panels = usePanelsAvailable(isMobile);
@@ -551,7 +541,6 @@ const SessionStatusBody: React.FC<{ data: unknown }> = ({ data }) => {
     );
 };
 
-/** The messages the agent read from another session, oldest first, each shortened to a few lines. */
 const SessionMessagesBody: React.FC<{ data: unknown }> = ({ data }) => {
     const { t } = useI18n();
     const { openSession } = useChatColumnActions();
@@ -580,29 +569,6 @@ const SessionMessagesBody: React.FC<{ data: unknown }> = ({ data }) => {
     );
 };
 
-const PR_STATUS_KEYS = {
-    waking: 'chat.toolPart.openchamber.pr.status.waking',
-    unknown: 'chat.toolPart.openchamber.pr.status.unknown',
-    pending: 'chat.toolPart.openchamber.pr.status.pending',
-    passed: 'chat.toolPart.openchamber.pr.status.passed',
-    failed: 'chat.toolPart.openchamber.pr.status.failed',
-    open: 'chat.toolPart.openchamber.pr.status.open',
-} as const;
-
-const PrWatchedBody: React.FC<{ data: unknown }> = ({ data }) => {
-    const { t } = useI18n();
-    const parsed = prWatchedSchema.safeParse(data);
-    if (!parsed.success) return null;
-    const { url, number, title, status } = parsed.data.watching;
-    const label = [number ? `#${number}` : undefined, title || undefined].filter(Boolean).join(' ');
-    return (
-        <>
-            <WebLinkRow url={url} icon="git-pull-request" primary={label || url} secondary={status ? t(PR_STATUS_KEYS[status]) : undefined} />
-            <Actions />
-        </>
-    );
-};
-
 const WorkNamedBody: React.FC<{ data: unknown }> = ({ data }) => {
     const { t } = useI18n();
     const parsed = workNamedSchema.safeParse(data);
@@ -612,7 +578,6 @@ const WorkNamedBody: React.FC<{ data: unknown }> = ({ data }) => {
         <>
             {title ? <Field label={t('chat.toolPart.openchamber.field.title')}>{title}</Field> : null}
             {branch ? <Field label={t('chat.toolPart.openchamber.field.branch')}>{branch}</Field> : null}
-            {/* The task kept the name it had: the user's own, or the session's title. */}
             {!named ? <div className="typography-meta text-muted-foreground">{t('chat.toolPart.openchamber.work.kept')}</div> : null}
             <Actions />
         </>
@@ -684,7 +649,6 @@ const BrowserSnapshotBody: React.FC<{ data: unknown }> = ({ data }) => {
     );
 };
 
-/** A browser action on one element: what it acted on, then the page it left. */
 const BrowserElementBody: React.FC<{ label: string; target: string | undefined; url: string | undefined }> = ({ label, target, url }) => (
     <>
         {target ? <Field label={label}>{target}</Field> : null}
@@ -731,14 +695,12 @@ const BrowserInspectedBody: React.FC<{ data: unknown }> = ({ data }) => {
     );
 };
 
-/** What a workflow left, as text: an answer that is not text reads as its JSON. */
 const answerText = (value: JsonValue | undefined): string | undefined => {
     if (value === undefined) return undefined;
     const plain = z.string().safeParse(value);
     return plain.success ? plain.data : JSON.stringify(value, null, 2);
 };
 
-/** A run's state as the workflow card and the Workflows panel show it. */
 const WorkflowRunState: React.FC<{ state: WorkflowRun['state'] }> = ({ state }) => {
     const { t } = useI18n();
     const look = workflowRunLook(state);
@@ -750,12 +712,6 @@ const WorkflowRunState: React.FC<{ state: WorkflowRun['state'] }> = ({ state }) 
     );
 };
 
-/**
- * Opens a run in the Workflows panel, where it is live; only where that panel
- * opens beside the chat. The panel shows a project's runs, so the run's own
- * folder decides which one: a session moved since keeps its old runs there.
- * A run the store does not hold yet gets no link.
- */
 const useOpenWorkflowRun = (isMobile: boolean, sessionId: string, runId: string | undefined): OpenActionInput | null => {
     const { t } = useI18n();
     const panels = usePanelsAvailable(isMobile);
@@ -881,12 +837,6 @@ const WorkflowSavedBody: React.FC<{ data: unknown }> = ({ data }) => {
     );
 };
 
-/**
- * What one of OpenChamber's own tools did, in its own terms: the pull
- * request it linked, the session it started, the memory it saved. `null`
- * for an action without its own view, and for an answer this view cannot
- * read, so the row falls back to the plain output.
- */
 export const OpenChamberToolOutput: React.FC<{
     envelope: OpenChamberEnvelope;
     part: ToolPart;
@@ -894,7 +844,6 @@ export const OpenChamberToolOutput: React.FC<{
     directory: string;
     isMobile: boolean;
     onShowPopup?: (content: ToolPopupContent) => void;
-    /** The switch to the raw answer; every view ends its actions row with it. */
     rawToggle: React.ReactNode;
 }> = ({ envelope, part, input, directory, isMobile, onShowPopup, rawToggle }) => (
     <RawToggleContext.Provider value={rawToggle}>
@@ -930,7 +879,10 @@ const OpenChamberView: React.FC<{
         case 'session.status': return <SessionStatusBody data={data} />;
         case 'session.messages': return <SessionMessagesBody data={data} />;
         case 'pr.watch': return <PrWatchedBody data={data} />;
+        case 'wait.start': return <WaitStartedBody data={data} />;
+        case 'wait.list': return <WaitListedBody data={data} />;
         case 'pr.unwatch':
+        case 'wait.stop':
         case 'browser.close': return <Actions />;
         case 'work.name': return <WorkNamedBody data={data} />;
         case 'file.open': return <FileOpenedBody data={data} />;

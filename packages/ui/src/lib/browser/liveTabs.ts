@@ -1,9 +1,3 @@
-/**
- * How many of the user's browser tabs keep their page loaded, across every
- * project. Each loaded tab is a Chromium process of its own, so the rest sleep:
- * the tab and its address stay, and the page loads again when shown.
- * Agent tabs are outside this count; they stay loaded for the session working them.
- */
 export const LIVE_BROWSER_TABS_DEFAULT = 5;
 export const LIVE_BROWSER_TABS_MIN = 1;
 export const LIVE_BROWSER_TABS_MAX = 20;
@@ -14,12 +8,22 @@ export const clampLiveBrowserTabs = (value: number): number => (
     : LIVE_BROWSER_TABS_DEFAULT
 );
 
-/** Tab keys by last use, newest first, each key once. */
 export const touchRecentBrowserTab = (recent: readonly string[], key: string): readonly string[] => (
   recent[0] === key ? recent : [key, ...recent.filter((entry) => entry !== key)]
 );
 
-/** The user's tabs that keep their page: the `limit` most recently used of those still open. */
+export const AGENT_TAB_IDLE_MS = 30 * 60_000;
+
+export const dropIdleAgentTabs = (
+  recent: readonly string[],
+  agentTabs: ReadonlySet<string>,
+  lastUsed: ReadonlyMap<string, number>,
+  idleBefore: number,
+): readonly string[] => {
+  const kept = recent.filter((key) => !agentTabs.has(key) || (lastUsed.get(key) ?? Infinity) >= idleBefore);
+  return kept.length === recent.length ? recent : kept;
+};
+
 export const pickLiveBrowserTabs = (
   recent: readonly string[],
   openUserTabs: ReadonlySet<string>,

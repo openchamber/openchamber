@@ -1,0 +1,367 @@
+{
+  "zone": "openchamber",
+  "name": "OpenChamber settings",
+  "sources": ["packages/ui/src/components/sections/openchamber/OpenChamberPage.tsx"],
+  "features": [
+    {
+      "id": "themes",
+      "name": "Color modes and local themes",
+      "sources": [
+        "packages/ui/src/components/sections/openchamber/OpenChamberPage.tsx",
+        "packages/ui/src/components/sections/openchamber/OpenChamberVisualSettings.tsx",
+        "packages/ui/src/components/sections/openchamber/ThemeAppearancePicker.tsx",
+        "packages/ui/src/contexts/ThemeSystemContext.tsx"
+      ],
+      "what": "Color mode and a chosen bundled theme apply immediately and survive reopening; a filter with no matches leaves a way back to the list.",
+      "reach": "Settings > Appearance > Color mode and Themes.",
+      "proof": "Light and Dark change the page's mode, the chosen theme remains selected after reload, and clearing an unmatched search restores the choices.",
+      "scenarios": [
+        {
+          "id": "mode",
+          "kind": "path",
+          "title": "Light applies immediately, survives reload, and the color mode cards also work with the keyboard",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "color mode"},
+            {"do": "click", "on": "settings.searchResult", "text": "Color mode", "exact": true},
+            {"do": "click", "on": "settings.colorMode", "text": "Light", "exact": true},
+            {"do": "see", "on": "app.colorMode", "mode": "light"},
+            {"do": "see", "on": "settings.colorModeOn", "text": "Light", "exact": true},
+            {"do": "click", "on": "settings.close"},
+            {"do": "reload"},
+            {"do": "see", "on": "app.colorMode", "mode": "light"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.colorMode", "text": "Light", "exact": true, "timeout": 60},
+            {"do": "press", "key": "ArrowRight"},
+            {"do": "see", "on": "settings.colorModeOn", "text": "Dark", "exact": true},
+            {"do": "see", "on": "app.colorMode", "mode": "dark"}
+          ]
+        },
+        {
+          "id": "choose",
+          "kind": "path",
+          "title": "Choosing a bundled dark theme keeps that choice after reload",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "color mode"},
+            {"do": "click", "on": "settings.searchResult", "text": "Color mode", "exact": true},
+            {"do": "click", "on": "settings.colorMode", "text": "Dark", "exact": true},
+            {"do": "click", "on": "settings.themeSearch"},
+            {"do": "type", "text": "Dracula"},
+            {"do": "hover", "on": "settings.theme", "text": "Dracula", "exact": true},
+            {"do": "see", "on": "settings.themeOn", "text": "Dracula", "exact": true, "count": 0},
+            {"do": "click", "on": "settings.theme", "text": "Dracula", "exact": true},
+            {"do": "see", "on": "settings.themeOn", "text": "Dracula", "exact": true},
+            {"do": "style", "on": "app.canvas", "property": "background-color", "equals": "rgb(21, 23, 32)"},
+            {"do": "click", "on": "settings.close"},
+            {"do": "reload"},
+            {"do": "style", "on": "app.canvas", "property": "background-color", "equals": "rgb(21, 23, 32)"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "see", "on": "settings.themeOn", "text": "Dracula", "exact": true, "timeout": 60}
+          ]
+        },
+        {
+          "id": "no-match",
+          "kind": "break",
+          "title": "An unmatched theme filter says so; clearing it restores the themes",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "color mode"},
+            {"do": "click", "on": "settings.searchResult", "text": "Color mode", "exact": true},
+            {"do": "click", "on": "settings.colorMode", "text": "Dark", "exact": true},
+            {"do": "click", "on": "settings.themeSearch"},
+            {"do": "type", "text": "no-such-fixture-theme"},
+            {"do": "see", "on": "dialog", "text": "No themes match \"no-such-fixture-theme\"."},
+            {"do": "gone", "on": "settings.theme"},
+            {"do": "click", "on": "settings.themeSearch"},
+            {"do": "press", "key": "End"},
+            {"do": "press", "key": "Backspace", "times": 30},
+            {"do": "see", "on": "settings.theme", "text": "Dracula", "exact": true}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "theme-import",
+      "name": "Rejected local theme files",
+      "sources": [
+        "packages/ui/src/components/sections/openchamber/OpenChamberPage.tsx",
+        "packages/ui/src/components/sections/openchamber/ThemeImportButton.tsx",
+        "packages/ui/src/components/sections/openchamber/ThemeCatalogDialog.tsx"
+      ],
+      "what": "An unavailable theme catalog leaves local import available. An invalid local theme is rejected with an explanation, and the picker remains open for another file.",
+      "reach": "Settings > Appearance > Browse themes > Choose JSON file.",
+      "proof": "The invalid-file toast shows, the picker stays open, and closing it returns to the unchanged theme selection.",
+      "scenarios": [
+        {
+          "id": "invalid-file",
+          "kind": "break",
+          "title": "With the catalog unavailable, an invalid local file reports its error without losing the current theme",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "color mode"},
+            {"do": "click", "on": "settings.searchResult", "text": "Color mode", "exact": true},
+            {"do": "remember", "on": "settings.themeOn", "attr": "data-theme-id", "as": "theme"},
+            {"do": "network.block", "urls": ["*/api/config/themes/catalog/*"]},
+            {"do": "click", "on": "settings.rowButton", "item": "appearance.import-theme", "text": "Browse themes"},
+            {"do": "see", "on": "dialog", "text": "Could not load themes from Open VSX. Try searching again."},
+            {"do": "chooseFiles", "files": [{"name": "broken-theme.json", "content": "not json"}]},
+            {"do": "click", "on": "dialog.button", "text": "Choose JSON file", "exact": true},
+            {"do": "see", "on": "toast", "text": "This file is not a supported VS Code color theme."},
+            {"do": "see", "on": "dialog.button", "text": "Choose JSON file", "exact": true},
+            {"do": "press", "key": "Escape"},
+            {"do": "see", "on": "settings.themeOn"},
+            {"do": "see", "on": "settings.themeById", "theme": "theme"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "shortcuts",
+      "name": "Editing keyboard shortcuts",
+      "sources": [
+        "packages/ui/src/components/sections/openchamber/OpenChamberPage.tsx",
+        "packages/ui/src/components/sections/openchamber/KeyboardShortcutsSettings.tsx",
+        "packages/ui/src/components/sections/openchamber/ShortcutRecordingDialog.tsx"
+      ],
+      "what": "A shortcut can be recorded, cancelled, cleared and reset.",
+      "reach": "Settings > Shortcuts > Toggle sidebar.",
+      "proof": "A saved replacement toggles the sidebar after reload; Cancel keeps the original keys; Clear disables the action until Reset restores it.",
+      "scenarios": [
+        {
+          "id": "rebind",
+          "kind": "path",
+          "title": "A recorded sidebar shortcut persists and toggles the sidebar after reload",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Shortcut rebind"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "Toggle sidebar"},
+            {"do": "click", "on": "settings.searchResult", "text": "Toggle sidebar", "exact": true},
+            {"do": "click", "on": "settings.rowButton", "item": "shortcuts.action.toggle_sidebar", "text": "Edit", "exact": true},
+            {"do": "see", "on": "dialog.button", "text": "Confirm", "exact": true, "disabled": true},
+            {"do": "press", "key": "y", "mods": ["mod", "alt"]},
+            {"do": "click", "on": "dialog.button", "text": "Confirm", "exact": true},
+            {"do": "see", "on": "settings.rowButton", "item": "shortcuts.action.toggle_sidebar", "text": "Reset", "exact": true},
+            {"do": "click", "on": "settings.close"},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.row", "session": "s"},
+            {"do": "press", "key": "y", "mods": ["mod", "alt"]},
+            {"do": "gone", "on": "sidebar.row", "session": "s"},
+            {"do": "press", "key": "y", "mods": ["mod", "alt"]},
+            {"do": "see", "on": "sidebar.row", "session": "s"}
+          ]
+        },
+        {
+          "id": "cancel",
+          "kind": "break",
+          "title": "Cancel discards a recorded replacement and keeps the original shortcut",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Shortcut cancel"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "Toggle sidebar"},
+            {"do": "click", "on": "settings.searchResult", "text": "Toggle sidebar", "exact": true},
+            {"do": "click", "on": "settings.rowButton", "item": "shortcuts.action.toggle_sidebar", "text": "Edit", "exact": true},
+            {"do": "press", "key": "y", "mods": ["mod", "alt"]},
+            {"do": "see", "on": "dialog", "text": "Edit Toggle sidebar"},
+            {"do": "click", "on": "dialog.button", "text": "Cancel", "exact": true},
+            {"do": "gone", "on": "dialog.button", "text": "Confirm", "exact": true},
+            {"do": "see", "on": "settings.rowButton", "item": "shortcuts.action.toggle_sidebar", "text": "Clear", "exact": true},
+            {"do": "click", "on": "settings.close"},
+            {"do": "see", "on": "sidebar.row", "session": "s"},
+            {"do": "press", "key": "b", "mods": ["mod"]},
+            {"do": "gone", "on": "sidebar.row", "session": "s"}
+          ]
+        },
+        {
+          "id": "clear-reset",
+          "kind": "path",
+          "title": "Clear unassigns the shortcut; Reset restores its default and its action",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Shortcut reset"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "Toggle sidebar"},
+            {"do": "click", "on": "settings.searchResult", "text": "Toggle sidebar", "exact": true},
+            {"do": "click", "on": "settings.rowButton", "item": "shortcuts.action.toggle_sidebar", "text": "Clear", "exact": true},
+            {"do": "see", "on": "settings.shortcutKeys", "action": "toggle_sidebar", "text": "Unassigned", "exact": true},
+            {"do": "click", "on": "settings.close"},
+            {"do": "press", "key": "b", "mods": ["mod"]},
+            {"do": "steady", "on": "sidebar.row", "session": "s", "count": 1, "ms": 500},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.rowButton", "item": "shortcuts.action.toggle_sidebar", "text": "Reset", "exact": true, "timeout": 60},
+            {"do": "see", "on": "settings.rowButton", "item": "shortcuts.action.toggle_sidebar", "text": "Clear", "exact": true},
+            {"do": "click", "on": "settings.close"},
+            {"do": "press", "key": "b", "mods": ["mod"]},
+            {"do": "gone", "on": "sidebar.row", "session": "s"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "chat",
+      "name": "Sending and reasoning preferences",
+      "sources": [
+        "packages/ui/src/components/sections/openchamber/OpenChamberPage.tsx",
+        "packages/ui/src/components/sections/openchamber/ChatSettings.tsx",
+        "packages/ui/src/components/chat/composer/keyboardPolicy.ts",
+        "packages/ui/src/components/chat/composer/input/createComposerKeyHandler.ts"
+      ],
+      "what": "The sending choice changes the keys that send a message, and reasoning suboptions follow the parent choices.",
+      "reach": "Settings > Chat, via Send message or reasoning search results.",
+      "proof": "With modifier sending selected, Enter inserts a newline and Cmd/Ctrl+Enter gets a fixture answer; disabling reasoning removes its nested controls and reopening preserves the parent choice.",
+      "scenarios": [
+        {
+          "id": "modifier-send",
+          "kind": "path",
+          "title": "Choosing modifier sending makes Enter a newline and Cmd/Ctrl+Enter send, also after reload",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "Send shortcut"},
+            {"do": "click", "on": "settings.searchResult", "text": "Send shortcut", "index": 0},
+            {"do": "click", "on": "settings.chip", "item": "chat.enter-to-send", "text": "Send with Ctrl/Cmd+Enter", "exact": true},
+            {"do": "see", "on": "settings.chipOn", "item": "chat.enter-to-send", "text": "Send with Ctrl/Cmd+Enter", "exact": true},
+            {"do": "click", "on": "settings.close"},
+            {"do": "reload"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "press", "key": "Enter"},
+            {"do": "type", "text": "Please."},
+            {"do": "editor", "equals": "Bump TypeScript to 5.7 and fix whatever breaks.\nPlease."},
+            {"do": "press", "key": "Enter", "mods": ["mod"]},
+            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "editor", "empty": true}
+          ]
+        },
+        {
+          "id": "reasoning-options",
+          "kind": "path",
+          "title": "Reasoning and collapsible blocks control which nested options are offered",
+          "steps": [
+            {"do": "settings", "values": {"showReasoningTraces": true, "collapsibleThinkingBlocks": true}},
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "reasoning traces"},
+            {"do": "click", "on": "settings.searchResult", "text": "Show reasoning traces", "exact": true},
+            {"do": "see", "on": "settings.checkedLabel", "label": "Enable collapsible reasoning blocks", "checked": "true"},
+            {"do": "click", "on": "settings.checkedLabel", "label": "Enable collapsible reasoning blocks", "checked": "true"},
+            {"do": "gone", "on": "settings.checkboxLabel", "label": "Expand reasoning blocks while the model is thinking"},
+            {"do": "click", "on": "settings.checkedLabel", "label": "Enable collapsible reasoning blocks", "checked": "false"},
+            {"do": "see", "on": "settings.checkboxLabel", "label": "Expand reasoning blocks while the model is thinking"},
+            {"do": "click", "on": "settings.checkboxOn", "item": "chat.reasoning-traces"},
+            {"do": "gone", "on": "settings.checkboxLabel", "label": "Enable collapsible reasoning blocks"},
+            {"do": "click", "on": "settings.close"},
+            {"do": "reload"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "see", "on": "settings.checkboxOff", "item": "chat.reasoning-traces", "timeout": 60},
+            {"do": "gone", "on": "settings.checkboxLabel", "label": "Enable collapsible reasoning blocks"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "editor",
+      "name": "Vim mapping validation",
+      "sources": [
+        "packages/ui/src/components/sections/openchamber/OpenChamberPage.tsx",
+        "packages/ui/src/components/sections/openchamber/GeneralWorkspaceSettings.tsx"
+      ],
+      "what": "Vim exposes custom mappings and identifies invalid lines so the user can correct them.",
+      "reach": "Settings > General > File editor keymap > Vim.",
+      "proof": "The mapping field appears only in Vim mode, an invalid line is named, and correcting it removes the warning.",
+      "scenarios": [
+        {
+          "id": "invalid-mapping",
+          "kind": "break",
+          "title": "An invalid Vim mapping names its line and a corrected mapping clears the warning",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "File editor keymap"},
+            {"do": "click", "on": "settings.searchResult", "text": "File editor keymap", "exact": true},
+            {"do": "gone", "on": "settings.field", "item": "appearance.file-editor-vim-mappings"},
+            {"do": "click", "on": "settings.chip", "item": "appearance.file-editor-keymap", "text": "Vim", "exact": true},
+            {"do": "click", "on": "settings.field", "item": "appearance.file-editor-vim-mappings"},
+            {"do": "type", "text": "not-a-vim-mapping"},
+            {"do": "see", "on": "settings.row", "item": "appearance.file-editor-vim-mappings", "text": "Not applied, the editor can't read these lines: 1"},
+            {"do": "press", "key": "Backspace", "times": 30},
+            {"do": "type", "text": "inoremap jk <Esc>"},
+            {"do": "see", "on": "settings.row", "item": "appearance.file-editor-vim-mappings", "text": "Not applied", "count": 0},
+            {"do": "click", "on": "settings.chip", "item": "appearance.file-editor-keymap", "text": "Default", "exact": true},
+            {"do": "gone", "on": "settings.field", "item": "appearance.file-editor-vim-mappings"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "retention",
+      "name": "Safe manual session cleanup",
+      "sources": [
+        "packages/ui/src/components/sections/openchamber/OpenChamberPage.tsx",
+        "packages/ui/src/components/sections/openchamber/SessionRetentionSettings.tsx"
+      ],
+      "what": "Archived cleanup cannot archive again or include In work. Manual cleanup with no old sessions says nothing was eligible and leaves a fresh session intact.",
+      "reach": "Settings > Sessions > Retention.",
+      "proof": "Archived disables Archive and Include In work; an empty manual cleanup reports no eligible sessions and the fresh session still opens.",
+      "scenarios": [
+        {
+          "id": "archived",
+          "kind": "path",
+          "title": "Archived cleanup disables Archive and Include In work without disabling the retention period",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "Retention period"},
+            {"do": "click", "on": "settings.searchResult", "text": "Retention period", "exact": true},
+            {"do": "click", "on": "settings.chip", "item": "sessions.retention-only-archived", "text": "Archived sessions", "exact": true},
+            {"do": "see", "on": "settings.chip", "item": "sessions.retention-action", "text": "Archive", "exact": true, "disabled": true},
+            {"do": "see", "on": "settings.checkbox", "item": "sessions.retention-include-in-work", "disabled": true},
+            {"do": "see", "on": "settings.field", "item": "sessions.retention-period", "disabled": false},
+            {"do": "click", "on": "settings.chip", "item": "sessions.retention-only-archived", "text": "Unarchived sessions", "exact": true},
+            {"do": "see", "on": "settings.chip", "item": "sessions.retention-action", "text": "Archive", "exact": true, "disabled": false},
+            {"do": "see", "on": "settings.checkbox", "item": "sessions.retention-include-in-work", "disabled": false}
+          ]
+        },
+        {
+          "id": "nothing-old",
+          "kind": "break",
+          "title": "Manual cleanup with no eligible sessions leaves a fresh session intact",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Keep fresh session"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "Retention period"},
+            {"do": "click", "on": "settings.searchResult", "text": "Retention period", "exact": true},
+            {"do": "click", "on": "settings.chip", "item": "sessions.retention-only-archived", "text": "Unarchived sessions", "exact": true},
+            {"do": "click", "on": "settings.chip", "item": "sessions.retention-action", "text": "Archive", "exact": true},
+            {"do": "see", "on": "dialog", "text": "Eligible for archiving right now: 0"},
+            {"do": "click", "on": "dialog.button", "text": "Run cleanup now", "exact": true},
+            {"do": "see", "on": "toast", "text": "No sessions eligible for archiving"},
+            {"do": "click", "on": "settings.close"},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.row", "session": "s", "text": "Keep fresh session"},
+            {"do": "see", "on": "composer.editor"}
+          ]
+        }
+      ]
+    }
+  ]
+}

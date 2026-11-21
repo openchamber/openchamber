@@ -4,11 +4,6 @@ import type { TurnSnapshotDiff } from '@/components/views/turnSnapshotDiff';
 
 import { extractFirstChangedLineFromDiff } from './parts/toolDiffUtils';
 
-/**
- * VS Code has no side panel for the turn diff, so a changed-file chip opens
- * the file's whole change in the turn in the editor's own diff view. A file
- * the turn diff does not list opens as it is.
- */
 export const openTurnFileDiffInEditor = async ({
     directory,
     editor,
@@ -27,5 +22,5 @@ export const openTurnFileDiffInEditor = async ({
         await editor.openFile(absolutePath);
         return;
     }
-    await editor.openDiff('', absolutePath, undefined, { line: extractFirstChangedLineFromDiff(patch), patch });
+    await editor.openDiff('', absolutePath, undefined, { line: extractFirstChangedLineFromDiff(patch), patch, snapshot: true });
 };

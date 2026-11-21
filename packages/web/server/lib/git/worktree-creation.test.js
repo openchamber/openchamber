@@ -154,6 +154,91 @@ describe('worktree creation from a change request', () => {
     });
   });
 
+  describe('GitHub Enterprise primary remote', () => {
+    const instance = 'git.example.com';
+    const context = { ...sourceRequest.context, instance };
+    const input = { ...request, changeRequestSource: { ...sourceRequest, context } };
+    const source = {
+      ...resolvedSource, context, classification: 'same-repository', sourceProject: sourceRequest.project,
+      endpoint: `https://${instance}/acme/app.git`,
+    };
+    const enterpriseSetup = (remoteUrl, mode) => setup({
+      libraries: { getRepositoryRemoteUrls: vi.fn(async () => [{ name: 'origin', fetchUrl: remoteUrl }]) },
+      dependencies: {
+        resolveChangeRequestSource: vi.fn(async () => source),
+        getSourceControlBinding: vi.fn(async () => ({
+          repository: { configRevision: 'config_one' },
+          binding: mode ? { remotes: [{ name: 'origin', mode }] } : null,
+        })),
+        networkOperations: {
+          plan: vi.fn(async () => ({ operationId: 'git_fetch' })),
+          execute: vi.fn(async () => ({ state: 'succeeded' })),
+          transferContributorHead: vi.fn(), hydrateBoundCheckout: vi.fn(),
+        },
+      },
+    });
+
+    it.each([
+      [`https://${instance}/acme/app.git`, undefined, 'system'],
+      [`git@${instance}:acme/app.git`, 'managed', 'managed'],
+    ])('uses the configured fetch transport for %s and pins the checkout revision', async (remoteUrl, mode, transportMode) => {
+      const { creation, dependencies, libraries } = enterpriseSetup(remoteUrl, mode);
+      await creation.create('/repo', input);
+      expect(dependencies.networkOperations.plan).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        operation: 'fetch', transportMode, sourceRef: source.headRef, destinationRef: 'refs/remotes/origin/feature',
+        remote: { name: 'origin', endpoint: { displayUrl: remoteUrl, fingerprint: expect.any(String) } },
+      }));
+      expect(dependencies.networkOperations.execute).toHaveBeenCalledExactlyOnceWith('git_fetch');
+      expect(dependencies.resolveChangeRequestSource).toHaveBeenCalledTimes(2);
+      expect(dependencies.createHttpsCredentialReference).not.toHaveBeenCalled();
+      expect(dependencies.networkOperations.transferContributorHead).not.toHaveBeenCalled();
+      expect(libraries.createWorktree).toHaveBeenCalledWith('/repo', expect.objectContaining({
+        existingBranch: 'remotes/origin/feature', expectedRevision: source.headSha,
+        ensureRemoteUrl: remoteUrl, contributorFork: false,
+      }), expect.anything());
+    });
+
+    it('fetches through System Git when the primary HTTPS remote carries only a username', async () => {
+      const remoteUrl = `https://alice@${instance}/acme/app.git`;
+      const { creation, dependencies, libraries } = enterpriseSetup(remoteUrl);
+      await creation.create('/repo', input);
+      expect(dependencies.networkOperations.plan).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        operation: 'fetch', transportMode: 'system',
+        remote: { name: 'origin', endpoint: { displayUrl: `https://${instance}/acme/app.git`, fingerprint: expect.any(String) } },
+      }));
+      expect(libraries.createWorktree).toHaveBeenCalledWith('/repo', expect.objectContaining({
+        ensureRemoteUrl: remoteUrl, expectedRevision: source.headSha,
+      }), expect.anything());
+    });
+
+    it.each([
+      [`https://alice:secret@${instance}/acme/app.git`, undefined],
+      [`https://alice@${instance}/acme/app.git`, 'managed'],
+    ])('rejects the primary remote %s outside a username-only System HTTPS remote', async (remoteUrl, mode) => {
+      const { creation, dependencies, libraries } = enterpriseSetup(remoteUrl, mode);
+      await expect(creation.create('/repo', input)).rejects.toMatchObject({ code: 'RUNTIME_UNSUPPORTED' });
+      expect(dependencies.networkOperations.plan).not.toHaveBeenCalled();
+      expect(libraries.createWorktree).not.toHaveBeenCalled();
+    });
+
+    it('treats a remote spelled in a different case as the head repository', async () => {
+      const { creation, dependencies } = enterpriseSetup(`https://${instance}/acme/app.git`);
+      dependencies.resolveChangeRequestSource.mockImplementation(async () => ({
+        ...source, sourceProject: { id: 'Acme/App', owner: 'Acme', name: 'App' }, endpoint: `https://${instance}/Acme/App.git`,
+      }));
+      await creation.create('/repo', input);
+      expect(dependencies.networkOperations.plan).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ operation: 'fetch' }));
+      expect(dependencies.createHttpsCredentialReference).not.toHaveBeenCalled();
+    });
+
+    it('rejects a primary remote that names a different repository', async () => {
+      const { creation, dependencies, libraries } = enterpriseSetup(`https://${instance}/someone/app.git`);
+      await expect(creation.create('/repo', input)).rejects.toMatchObject({ code: 'RUNTIME_UNSUPPORTED' });
+      expect(dependencies.networkOperations.plan).not.toHaveBeenCalled();
+      expect(libraries.createWorktree).not.toHaveBeenCalled();
+    });
+  });
+
   it('refuses contributor authority supplied by the caller before reading anything', async () => {
     const { libraries, dependencies, creation } = setup();
 

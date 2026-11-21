@@ -8,18 +8,21 @@ VS Code has no trackers (`RuntimeAPIs.trackers` is optional). Tracker UI hides w
 
 ## Entrypoints and structure
 
-- `packages/web/server/lib/linear/index.js`: the lazy boundary. It exports one object, `linearLibraries`, with exactly what `routes.js`, `tracker.js` and `auth-status.js` take; `routes.js` and `tracker.js` load it with `await import('./index.js')` on first use and hand it to `auth-status.js`, so Linear's libraries stay out of server startup. One named export keeps that boundary visible to the dead-code check (a namespace read through a variable is not).
+The `.js` paths below are import specifiers. The auth, client, issues, OAuth
+and session-status implementations have `.ts` source files.
+
+- `packages/web/server/lib/linear/index.ts`: the lazy boundary. It exports one object, `linearLibraries`, with exactly what `routes.js`, `tracker.js` and `auth-status.ts` take; `routes.js` and `tracker.js` load it with `await import('./index.js')` on first use and hand it to `auth-status.ts`, so Linear's libraries stay out of server startup. One named export keeps that boundary visible to the dead-code check (a namespace read through a variable is not).
 - `packages/web/server/lib/linear/routes.js`: Express registration for the public callback, `/api/linear/auth/*`, `/api/linear/issues/*`, `/api/linear/mapping`, and `/api/linear/session-status`. These are the legacy Linear-shaped routes; they stay for older bundled phone UIs and the SDK's host-Linear guests (see `../trackers/DOCUMENTATION.md`).
 - `packages/web/server/lib/linear/tracker.js`: Linear as the first tracker. Holds the plain-JSON descriptor and the adapter that maps Linear shapes to the neutral tracker contract (`../trackers/tracker-contract.d.ts`): state type to category (`triage`, `backlog`, `unstarted` → `todo`, `started` → `in-progress`, `completed` → `done`, `canceled` and `duplicate` → `canceled`), priority 0–4 to `none`/`urgent`/`high`/`medium`/`low`, team to container, `subIssueProgress` to progress, `subIssues` to children, comment `user` to author, workspaces to accounts. Neutral state filter ids map to the list `status` (`in-progress` → `started`, `done` → `completed`; `inReview` and `duplicate` are Linear's own extras). `matchUrl` follows the descriptor's URL pattern; the session-link writer (`../openchamber-sessions/session-link.js`) calls each registered tracker's `matchUrl` directly, and the UI matches links against the served descriptor's patterns. Both sides assert one URL table (`packages/ui/src/lib/trackers/linearUrlCases.fixture.ts`). Live summaries keep `state.type` beside `state.category` for older bundled UIs. A state type this build does not map (one Linear adds later) reads as `todo` in live summaries, because the live-summary category cannot be null in the UI's schema: the item keeps its badge and the open cadence instead of dropping out as no longer answered, which would blank its state. It loads the Linear libraries lazily through its registry entry.
-- `packages/web/server/lib/linear/auth-status.js`: auth status (broker claim, identity refresh, 401 handling), storing an OAuth result, and disconnecting the current workspace. Shared by `routes.js` and `tracker.js` so both answer from one code path.
+- `packages/web/server/lib/linear/auth-status.ts`: auth status (broker claim, identity refresh, 401 handling), storing an OAuth result, and disconnecting the current workspace. Shared by `routes.js` and `tracker.js` so both answer from one code path.
 - `packages/web/server/lib/linear/auth.js`: auth file, client id, scopes, redirect URI.
 - `packages/web/server/lib/linear/oauth.js`: authorization-code + PKCE S256, public callback broker handoff, refresh, revoke.
 - `packages/web/server/lib/linear/client.js`: GraphQL helper, viewer/organization lookup, and access-token refresh. GraphQL errors prefer `extensions.userPresentableMessage` / validation constraints over the generic `Argument Validation Error` label. User-facing Linear errors set `LinearApiError.userError`. Requests send `public-file-urls-expire-in: 3600` so file URLs in issue descriptions and comments are temporarily readable in the issue preview.
 - `packages/web/server/lib/linear/issues.js`: list/search/get issues, team workflow states, `issueUpdate`, and `commentCreate`. Parses identifiers and Linear URLs. `issueUpdate` resolves identifiers to UUIDs first because Linear's mutation does not accept `ENG-12`. List/get include `state.id`, `priority` (0–4), and labels (`id`, `name`, sanitized hex `color`) so the board can show them and update status. Every issue also carries `parent` (the issue's own fields without labels) and `subIssueProgress` (`{ total, done, more }`, done counts completed, canceled and duplicate states, null without sub-issues). Linear has no sub-issue count and every connection multiplies a query's complexity by its page size (one query may not exceed 10,000 points), so a list asks only the first 20 sub-issue states per issue; `more` says there are others. Get and update add `subIssues` (first 100, related-issue fields, in Linear's `subIssueSortOrder`) and `subIssuesMore`.
-- `packages/web/server/lib/linear/teams.js`: list Linear teams for mapping UI.
+- `packages/web/server/lib/linear/teams.ts`: list Linear teams for mapping UI.
 - `packages/web/server/lib/linear/mapping.js`: persist default and per-team OpenChamber project paths. Separate from the auth file so disconnect does not wipe maps.
 - `packages/web/server/lib/linear/status.js`: persist per-session started/completed/failure flags and post the matching Linear comment with an open-session URL. Posts nothing unless the user opted in and the session origin is public; `isPublicSessionOrigin` rejects loopback, private LAN, carrier-grade NAT, link-local and single-label hosts. The dedupe file keeps the newest 500 sessions.
-- `packages/web/server/lib/linear/status-runtime.js`: on the OpenCode event hub, first `session.status` idle after started posts completed once; `session.error` (except abort) posts failure once.
+- `packages/web/server/lib/linear/status-runtime.ts`: on the OpenCode event hub, first `session.status` idle after started posts completed once; `session.error` (except abort) posts failure once.
 - `packages/web/src/api/trackers.ts`: the web client for `/api/tracker/:provider/*` (`RuntimeAPIs.trackers`). Electron and hosted/Capacitor mobile reuse it; VS Code omits it. A server that predates `/api/tracker` answers 404 on `providers`; the adapter then serves Linear's built-in descriptor and reads every call through these legacy routes, mapped to the neutral shapes (`trackers-legacy-linear.ts`).
 
 ## Public routes
@@ -44,6 +47,16 @@ The shared UI reads Linear through the neutral tracker routes, `/api/tracker/lin
 `POST /api/linear/auth/start`, `PUT /api/linear/mapping`, `POST /api/linear/issues/update`, and `POST /api/linear/session-status` parse JSON on the route (`16kb`). They are not on the `/api` 50mb allowlist.
 
 Disconnected list/get/states/update/mapping/session-status return `{ connected: false }` with HTTP 200 so the picker and board can show an empty state. Missing `id` on get is 400. Missing `teamId` on states is 400.
+
+## Invariants
+
+- `readLinearAuthStatus` claims a finished broker result before it reads the stored workspace, so the first status poll after OAuth already reports connected.
+- Session status checks disconnection before the comment preference, so a disconnected user keeps the connect prompt whatever the preference says.
+- The descriptor's `stateFilters` order is the filter menu's. It has no triage entry because Linear has no triage list filter; `inReview` and `duplicate` are Linear's name-based filters, not neutral categories.
+- A state type `duplicate` maps to the `canceled` category. Some workspaces report it as its own type, and every category-based surface (badge, cadence, progress) treats it as canceled.
+- Related-issue fields (parent, sub-issue) leave labels out. Every field and connection multiplies a query's cost against Linear's 10,000-point limit, and a related issue's row and preview header do not show labels.
+- Linked-issue summaries ask at most 50 identifiers per request. The sidebar shows a handful and Linear rates by query complexity.
+- `hostAccess` serves a host-Linear SDK guest through the guest proxy, which keeps the token on `apiOrigin`; no method here returns it to a client.
 
 ## Auth storage and config
 
@@ -101,3 +114,58 @@ callback could not support packaged desktop or arbitrary self-hosted servers.
 - Do not add Linear under Git or as a third-party plugin row.
 - Actor is `user`. Do not enable Linear client-credentials tokens for this flow.
 - One OAuth grant is still one Linear organization. The server stores many grants and keeps one current. Webhooks and inbound Linear issue actions are out of scope until a later change.
+
+## Decisions
+
+### Why parsed values and wire fields have separate contracts
+
+The shared `isString` checks primitive strings. `readTrimmedString`
+therefore returns a string, and `readFiniteNumber` returns a finite number or
+null. Auth and issue contracts describe those validated results. Raw file,
+OAuth and GraphQL fields remain unchecked until their existing readers run.
+`issue-contracts.ts` owns the issue shapes shared by readers and adapters.
+
+The parser re-exports shared predicates by identity. Its text and number
+parsers accept unchecked inputs and preserve their original fallback values.
+
+### Why mapping retains its stored lookup semantics
+
+`readStoredLinearMapping` returns `document.workspaces[mappingOrgKey()]`
+without checking ownership. A stored workspace id of `constructor` can
+therefore return the inherited `Object` constructor. `mergeLinearMappingView`
+then reads its unchecked fields and can throw while indexing
+`mapping.teamProjectPaths`. A team id of `constructor` can likewise produce an
+inherited function as `projectPath`. Declaring these results to be normalized
+mapping slices or string paths would promise validation that has not occurred.
+The TypeScript mapping and tracker keep the existing lookup behavior.
+
+### Why legacy route rejection handling retains unchecked fields
+
+`registerLinearRoutes` reads `error.message` directly from caught rejections.
+`isLinearUserError` checks `code` and `userError` without establishing a message
+shape. A null rejection throws during that property access. Error-only types
+would overstate the contract; adding a fallback would change the failure
+behavior. Type-only changes to neighbouring modules cannot constrain arbitrary
+JavaScript rejections.
+
+### Why permission failures do not abort storage writes
+
+Auth and session-status storage keep best-effort `chmod` calls before and after
+the atomic rename. A platform's unsupported permission operation must not
+prevent the file write. Their empty handlers use the repository's `void 0`
+precedent so the handlers need no product-code comments.
+
+### Why event fields retain their existing declarations
+
+`status-runtime.ts` implements `TrackerSessionStatusRuntime` and keeps nested
+event fields unchecked. It compares parsed event names and passes the session
+id to the status writer, which validates it. Its alias order, abort handling
+and stopped-runtime behavior remain unchanged. The auth-status rejection guard
+also retains handling for inherited status properties and plain-object errors.
+
+### Why the mapping mode assertion runs only on POSIX
+
+Windows reports the mapping file's mode as `0666` after `chmod(0600)`.
+The storage code keeps its best-effort permission calls on every platform;
+the test checks exact POSIX bits only outside Windows. Its round-trip assertions
+still run on Windows.

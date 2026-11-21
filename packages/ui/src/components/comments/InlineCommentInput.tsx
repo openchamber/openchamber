@@ -22,7 +22,6 @@ import { runGuestAction } from '@/lib/guests/run-action';
 export interface InlineCommentInputProps {
   initialText?: string;
   onTextChange?: (text: string) => void;
-  /** False keeps the field open with its text: the save did not land. */
   onSave: (text: string, range?: { start: number; end: number; side?: 'additions' | 'deletions' }) => boolean | void;
   onCancel: () => void;
   fileLabel?: string;
@@ -30,32 +29,14 @@ export interface InlineCommentInputProps {
   isEditing?: boolean;
   className?: string;
   maxWidth?: number;
-  /** Fill of the selected lines the comment belongs to, when the host knows it. */
   bandColor?: string;
-  /**
-   * A floating pill like the chat's comment field, with no band: for rendered
-   * previews, where there are no selected lines for a band to continue.
-   */
   floating?: boolean;
-  /**
-   * The tinted band around the field. Off for a comment on no lines (a whole
-   * file's, in its header), where there are no selected lines to continue.
-   */
   band?: boolean;
-  /** Names a comment on no lines in the footer. */
   wholeFile?: boolean;
-  /** The primary button's label where it does not attach to the chat, such as saving a review comment. */
   saveLabel?: string;
-  /** The save is on its way to the host: the button waits and takes no second press. */
   saving?: boolean;
-  /**
-   * The change request review the comment can go to instead of the chat. Set
-   * only by a change request's diff on a host that takes comments on lines.
-   */
   review?: {
-    /** True when the comment landed; the field closes then. */
     add: (text: string, range?: { start: number; end: number; side?: 'additions' | 'deletions' }) => Promise<boolean>;
-    /** The selected lines, to start a suggested change from; absent where one cannot apply. */
     suggestionCode?: () => string;
   };
 }
@@ -63,23 +44,6 @@ export interface InlineCommentInputProps {
 const MAX_FIELD_HEIGHT_PX = 120;
 const baseName = (path: string) => path.split('/').pop() || path;
 
-/**
- * The comment editor shown under selected diff, editor and preview lines. It
- * sits in a band tinted like the selected lines it comments on (the editor's
- * selected-line fill, or `bandColor` from a diff), with the field and a round
- * attach button inside. Over a rendered preview it floats as a glass pill
- * instead (`floating`), like the chat's comment field.
- *
- * Attaching to the chat is the primary action everywhere; a change request's
- * diff adds the review beside it. The footer names the file and lines the
- * comment is on, since a selection may have scrolled out of view.
- *
- * The field is a plain textarea because it lives inside other editors' DOM: an
- * annotation slot of the diff viewer's shadow tree and a block widget of the
- * file editor. The composer's CodeMirror editor there lost its caret and
- * jumped to the start of the line while typing; a textarea owns its caret and
- * selection and is not affected by the host editor's DOM.
- */
 export function InlineCommentInput({
   initialText = '',
   onTextChange,
@@ -121,7 +85,6 @@ export function InlineCommentInput({
 
   React.useLayoutEffect(resizeTextarea, [text]);
 
-  // Stable range snapshot to prevent race with selection clearing
   const stableRangeRef = useRef(lineRange);
   useEffect(() => {
     if (lineRange) {
@@ -148,9 +111,6 @@ export function InlineCommentInput({
     displayRange ? t('inlineComment.range.lines', { start: displayRange.start, end: displayRange.end }) : null,
   ].filter(Boolean).join(' • ') || t('inlineComment.actions.comment');
 
-  // Opens ready to type, caret after any text the comment started with. The
-  // field focuses without scrolling; on mobile the band comes into view above
-  // the keyboard.
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
@@ -160,8 +120,6 @@ export function InlineCommentInput({
     if (isMobile) textarea.scrollIntoView({ behavior: 'auto', block: 'nearest' });
   }, [isMobile]);
 
-  // A pasted image becomes a citation in the text; the caret lands after it
-  // once the new text renders. Snippets chosen from the picker do the same.
   const imagePaste = useCommentImagePaste();
   const pendingCaretRef = useRef<number | null>(null);
   React.useLayoutEffect(() => {
@@ -178,7 +136,6 @@ export function InlineCommentInput({
     textareaRef.current?.focus();
   };
 
-  // `#` opens the composer's snippet picker; references expand on send.
   const getCaret = React.useCallback(() => textareaRef.current?.selectionStart ?? 0, []);
   const caretCoords = React.useCallback((position: number) => (textareaRef.current ? textareaCaretCoords(textareaRef.current, position) : null), []);
   const fieldPicker = useCommentFieldPicker({ text, getCaret, replaceRange, caretCoords });
@@ -224,7 +181,6 @@ export function InlineCommentInput({
     }
   };
 
-  // Starts from the selected lines, so the reviewer edits them in place.
   const suggestionCode = review?.suggestionCode;
   const insertSuggestion = () => {
     if (!suggestionCode) return;
@@ -236,12 +192,10 @@ export function InlineCommentInput({
   };
 
   const handleSaveClick = (e: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
-    // Stop propagation to prevent parent selection clearing before save
     e.stopPropagation();
     save();
   };
 
-  // Three worded actions do not fit one row on a phone; the paperclip reads without its word.
   const compactAttach = isMobile && Boolean(suggestionCode) && !saveLabel;
 
   const commentContext = (
@@ -254,7 +208,7 @@ export function InlineCommentInput({
   return (
     <div
       className={cn(
-        'w-full max-w-[min(100%,calc(var(--oc-context-panel-width,100vw)-var(--oc-editor-gutter-width,0px)))] font-sans',
+        'w-full max-w-[min(100%,calc(var(--oc-editor-width,var(--oc-context-panel-width,100vw))-var(--oc-editor-gutter-width,0px)))] font-sans',
         !floating && band && 'oc-inline-comment-band px-3 py-2',
         className
       )}
@@ -321,8 +275,6 @@ export function InlineCommentInput({
             <TooltipContent side="top" sideOffset={6}>{t('inlineComment.actions.comment')}</TooltipContent>
           </Tooltip>
         ) : (
-          // A phone has no tooltips and no room for one line: the context heads
-          // the field and the actions say what they do in words.
           <div className="flex min-w-0 items-center gap-1.5 pb-1.5 pe-1.5 ps-3">
             {isMobile ? null : commentContext}
             <div className={isMobile ? 'flex flex-1 flex-wrap items-center justify-end gap-1.5' : 'contents'}>

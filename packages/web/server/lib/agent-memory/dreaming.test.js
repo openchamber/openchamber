@@ -34,10 +34,10 @@ afterEach(async () => {
 
 const WORDS = ['amber', 'basalt', 'cobalt', 'dune', 'ember', 'fjord', 'granite', 'harbor', 'indigo', 'jasper', 'kelp', 'lagoon', 'meadow', 'nickel'];
 
-const fill = async (count) => {
+const fill = async (count, target = PROJECT) => {
   for (let index = 0; index < count; index += 1) {
     const word = WORDS[index];
-    await memory.create(PROJECT, { title: `Fact ${index}`, body: `${word} ${word}stone ${word}field ${word}wood` });
+    await memory.create(target, { title: `Fact ${index}`, body: `${word} ${word}stone ${word}field ${word}wood` });
   }
 };
 
@@ -82,7 +82,7 @@ const createOpenCode = ({ active = {}, onPrompt = async () => {}, reply = 'Done.
   return { calls, fetchImpl };
 };
 
-const createDreaming = ({ openCode, settings = {}, clock = { now: Date.now() }, hiddenSessions = createHiddenSessionRegistry(), passTimeoutMs } = {}) => createMemoryDreaming({
+const createDreaming = ({ openCode, settings = {}, clock = { now: Date.now() }, hiddenSessions = createHiddenSessionRegistry(), passTimeoutMs, resolveProjectId = async () => PROJECT_ID, log = () => {} } = {}) => createMemoryDreaming({
   agentMemoryRuntime: memory,
   readSettings: async () => ({
     agentMemoryToolEnabled: true,
@@ -90,7 +90,7 @@ const createDreaming = ({ openCode, settings = {}, clock = { now: Date.now() }, 
     projects: [{ id: 'acme', path: PROJECT_DIR }],
     ...settings,
   }),
-  resolveProjectId: async () => PROJECT_ID,
+  resolveProjectId,
   measureIndex: () => ({ budget: 8000, used: 100, omitted: 0 }),
   hiddenSessions,
   buildOpenCodeUrl: (pathname) => `http://opencode.test${pathname}`,
@@ -101,7 +101,7 @@ const createDreaming = ({ openCode, settings = {}, clock = { now: Date.now() }, 
   setTimer: (callback, ms) => setTimeout(callback, Math.min(ms, passTimeoutMs ?? ms)),
   passTimeoutMs,
   pollIntervalMs: 1,
-  log: () => {},
+  log,
 });
 
 describe('when a pass runs', () => {
@@ -198,6 +198,72 @@ describe('a pass', () => {
     expect(state.record).toMatchObject({ status: 'failed', error: 'The pass did not finish in time', removed: 1 });
     // What it changed before stopping can still be undone.
     expect(state.snapshot).toHaveLength(12);
+  });
+});
+
+describe('a store that cannot be read', () => {
+  const BROKEN_DIR = '/work/broken';
+  const BROKEN = { scope: 'project', projectId: 'path_broken' };
+  const GLOBAL = { scope: 'global' };
+  const twoProjects = {
+    settings: { projects: [{ id: 'broken', path: BROKEN_DIR }, { id: 'acme', path: PROJECT_DIR }] },
+    resolveProjectId: async (directory) => (directory === BROKEN_DIR ? BROKEN.projectId : PROJECT_ID),
+  };
+  const passes = (openCode) => openCode.calls.filter((call) => call.method === 'POST' && call.pathname.endsWith('/prompt'));
+  const passDirectory = (openCode) => openCode.calls.find((call) => call.method === 'POST' && call.pathname === '/api/session')?.body.location.directory;
+
+  /** Fills a scope, then replaces its store with a valid-JSON document missing its entries; returns both byte sets. */
+  const corrupt = async (target) => {
+    await fill(12, target);
+    const filePath = memory.resolveTarget(target).filePath;
+    const valid = await fsPromises.readFile(filePath);
+    await fsPromises.writeFile(filePath, '{}');
+    return { filePath, valid, broken: await fsPromises.readFile(filePath) };
+  };
+
+  test('a broken project store is skipped, a healthy project still dreams, and the repaired one dreams later', async () => {
+    const broken = await corrupt(BROKEN);
+    await fill(12);
+    const logged = [];
+    const clock = { now: Date.now() };
+    const openCode = createOpenCode();
+    await createDreaming({ openCode, clock, ...twoProjects, log: (line) => logged.push(line) }).check();
+
+    expect(passDirectory(openCode)).toBe(PROJECT_DIR);
+    expect(await fsPromises.readFile(broken.filePath)).toEqual(broken.broken);
+    expect(logged.some((line) => line.includes(`skipped project memory of ${BROKEN_DIR}`))).toBe(true);
+    expect((await memory.readDreamState(BROKEN)).record).toBeNull();
+
+    await fsPromises.writeFile(broken.filePath, broken.valid);
+    clock.now += 1000;
+    const afterRepair = createOpenCode();
+    await createDreaming({ openCode: afterRepair, clock, ...twoProjects }).check();
+    expect(passDirectory(afterRepair)).toBe(BROKEN_DIR);
+    expect((await memory.readDreamState(BROKEN)).record).toMatchObject({ status: 'done' });
+  });
+
+  test('a broken global store stays out of the pass, the project still dreams, and the repaired one dreams later', async () => {
+    const broken = await corrupt(GLOBAL);
+    await fill(12);
+    const logged = [];
+    const clock = { now: Date.now() };
+    const openCode = createOpenCode();
+    await createDreaming({ openCode, clock, log: (line) => logged.push(line) }).check();
+
+    const [prompt] = passes(openCode);
+    expect(prompt.body.text).toContain('## Project memory');
+    expect(prompt.body.text).not.toContain('The user\'s memory (scope "global")');
+    expect(await fsPromises.readFile(broken.filePath)).toEqual(broken.broken);
+    expect(logged.some((line) => line.includes('skipped global memory'))).toBe(true);
+    expect((await memory.readDreamState(GLOBAL)).record).toBeNull();
+    expect((await memory.readDreamState(PROJECT)).record).toMatchObject({ status: 'done' });
+
+    await fsPromises.writeFile(broken.filePath, broken.valid);
+    const afterRepair = createOpenCode({ reply: 'Done.\nDREAM {"project": 0, "global": 0, "toDocs": []}' });
+    await createDreaming({ openCode: afterRepair, clock }).check();
+    const [repaired] = passes(afterRepair);
+    expect(repaired.body.text).toContain('The user\'s memory (scope "global")');
+    expect((await memory.readDreamState(GLOBAL)).record).toMatchObject({ status: 'done' });
   });
 });
 

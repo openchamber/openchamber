@@ -1,0 +1,75 @@
+{
+  "zone": "workflows",
+  "name": "Workflows",
+  "sources": ["packages/web/server/lib/workflows/runtime.ts", "packages/ui/src/components/sections/openchamber/OpenChamberToolsSettings.tsx", "packages/ui/src/components/chat/workflows/WorkflowRunCard.tsx"],
+  "features": [
+    {
+      "id": "approval",
+      "name": "Approving a workflow run",
+      "what": "A run the agent starts waits for Run workflow in the chat, unless the user lets runs start without approval; then it starts at once and Stop still ends it.",
+      "reach": "Settings > General > OpenChamber Tools: the Workflow tool switch and, under it, Start runs without my approval with the choices No, For leads and Always. The agent then starts a run from a chat message.",
+      "proof": "With No chosen the run's card says Waiting for you and offers Run workflow; with Always chosen the card says Running, has no Run workflow, and Stop ends the run.",
+      "scenarios": [
+        {
+          "id": "asks-first",
+          "kind": "path",
+          "title": "With No chosen, a run the agent starts waits for Run workflow",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "see", "on": "settings.switch", "item": "sessions.agent-workflow-tool", "timeout": 60},
+            {"do": "click", "on": "settings.switch", "item": "sessions.agent-workflow-tool"},
+            {"do": "see", "on": "settings.switchOn", "item": "sessions.agent-workflow-tool"},
+            {"do": "click", "on": "settings.chip", "item": "sessions.agent-workflow-auto-approve", "text": "No", "exact": true},
+            {"do": "see", "on": "settings.chipOn", "item": "sessions.agent-workflow-auto-approve", "text": "No", "exact": true},
+            {"do": "settings", "expect": {"agentWorkflowToolEnabled": true, "agentWorkflowAutoApprove": false, "agentWorkflowAutoApproveLeads": false}},
+            {"do": "session.create", "as": "s", "title": "Workflow asks first"},
+            {"do": "session.send", "session": "s", "prompt": "Run the workflow we agreed on over the API files.", "model": "perf/agent-20tools-20000cps"},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "workflow.card", "text": "Waiting for you"},
+            {"do": "see", "on": "workflow.button", "text": "Run workflow"},
+            {"do": "click", "on": "workflow.button", "text": "Don't run"},
+            {"do": "see", "on": "workflow.card", "text": "Not run"},
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.switch", "item": "sessions.agent-workflow-tool"},
+            {"do": "see", "on": "settings.switchOff", "item": "sessions.agent-workflow-tool"},
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "see", "on": "settings.switchOff", "item": "sessions.agent-workflow-tool", "timeout": 60}
+          ]
+        },
+        {
+          "id": "starts-without-approval",
+          "kind": "path",
+          "title": "With Start runs without my approval set to Always, the run starts at once and Stop still ends it",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "see", "on": "settings.switch", "item": "sessions.agent-workflow-tool", "timeout": 60},
+            {"do": "click", "on": "settings.switch", "item": "sessions.agent-workflow-tool"},
+            {"do": "click", "on": "settings.chip", "item": "sessions.agent-workflow-auto-approve", "text": "Always", "exact": true},
+            {"do": "see", "on": "settings.chipOn", "item": "sessions.agent-workflow-auto-approve", "text": "Always", "exact": true},
+            {"do": "settings", "expect": {"agentWorkflowToolEnabled": true, "agentWorkflowAutoApprove": true}},
+            {"do": "session.create", "as": "s", "title": "Workflow starts at once"},
+            {"do": "session.send", "session": "s", "prompt": "Run the workflow we agreed on over the API files.", "model": "perf/agent-20tools-20000cps"},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "workflow.card", "text": "Running"},
+            {"do": "see", "on": "workflow.button", "text": "Run workflow", "count": 0},
+            {"do": "click", "on": "workflow.button", "text": "Stop"},
+            {"do": "see", "on": "workflow.card", "text": "Stopped"},
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.chip", "item": "sessions.agent-workflow-auto-approve", "text": "No", "exact": true},
+            {"do": "see", "on": "settings.chipOn", "item": "sessions.agent-workflow-auto-approve", "text": "No", "exact": true},
+            {"do": "click", "on": "settings.switch", "item": "sessions.agent-workflow-tool"},
+            {"do": "see", "on": "settings.switchOff", "item": "sessions.agent-workflow-tool"},
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "see", "on": "settings.switchOff", "item": "sessions.agent-workflow-tool", "timeout": 60}
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -91,15 +91,25 @@ describe('useSessionTabsStore', () => {
     expect(state().tabIds).toBe(before);
   });
 
-  test('caps pinned tabs at 10, evicting the oldest pinned one', () => {
-    useSessionTabsStore.setState({ tabIds: Array.from({ length: 10 }, (_, i) => `s${i}`) });
-    state().ensureTab('s-new');
-    expect(state().tabIds).toHaveLength(11);
-    state().pinTab('s-new');
-    const ids = state().tabIds;
-    expect(ids).toHaveLength(10);
-    expect(ids[0]).toBe('s1');
-    expect(ids.at(-1)).toBe('s-new');
+  test('pinning never closes another pinned tab, however many are open', () => {
+    const open = Array.from({ length: 30 }, (_, i) => `s${i}`);
+    useSessionTabsStore.setState({ tabIds: open });
+
+    state().ensureTab('sent');
+    state().pinTab('sent');
+    expect(state().tabIds).toEqual([...open, 'sent']);
+
+    state().pinTab('created');
+    state().ensureTab('created');
+    expect(state().tabIds).toEqual([...open, 'sent', 'created']);
+
+    state().ensureTab('dragged');
+    state().reorderTabs('dragged', 's0');
+    expect(state().tabIds).toEqual(['dragged', ...open, 'sent', 'created']);
+
+    useSessionTabsStore.setState({ scope: 'rt|/repo', tabIds: ['moved'], previewTabId: null, sets: { 'rt|/wt': { tabIds: open, previewTabId: null } } });
+    state().followSessionMove('moved', 'rt|/wt', 'rt|', () => []);
+    expect(state().sets['rt|/wt']?.tabIds).toEqual([...open, 'moved']);
   });
 
   test('removeTabs drops only confirmed-gone ids and no-ops otherwise', () => {
@@ -146,6 +156,17 @@ describe('useSessionTabsStore', () => {
     expect(state().sets[GLOBAL_SESSION_TAB_SCOPE]?.tabIds).toEqual(['a']);
   });
 
+  test('deleting a session on one server leaves its imported copy pinned on another', () => {
+    useSessionTabsStore.setState({ scope: 'a|/repo', tabIds: ['gone', 'a1'], previewTabId: null, sets: {
+      'b|/repo': { tabIds: ['gone', 'b1'], previewTabId: null },
+      global: { tabIds: ['gone'], previewTabId: null },
+    } });
+    state().removeTabs(['gone'], 'a');
+    expect(state().tabIds).toEqual(['a1']);
+    expect(state().sets['b|/repo']?.tabIds).toEqual(['gone', 'b1']);
+    expect(state().sets.global?.tabIds).toEqual([]);
+  });
+
   test('a moved session takes its tab from the folder it left to the one it went to', () => {
     useSessionTabsStore.setState({ scope: 'rt|/repo', tabIds: ['slack', 'moved'], previewTabId: 'moved', sets: { global: { tabIds: ['moved'], previewTabId: null } } });
     state().followSessionMove('moved', 'rt|/wt', 'rt|', () => ['moved']);
@@ -161,6 +182,13 @@ describe('useSessionTabsStore', () => {
     expect(state().tabIds).toEqual(['w1', 'moved']);
     expect(state().sets['rt|/repo']?.tabIds).toEqual([]);
     expect(state().sets['other|/repo']?.tabIds).toEqual(['moved']);
+  });
+
+  test('a move into a never-shown folder keeps the moved tab and seeds at most nine others', () => {
+    const recent = Array.from({ length: 12 }, (_, index) => `s${index}`);
+    useSessionTabsStore.setState({ scope: 'rt|/repo', tabIds: ['moved'], previewTabId: null, sets: {} });
+    state().followSessionMove('moved', 'rt|/wt', 'rt|', () => [...recent, 'moved']);
+    expect(state().sets['rt|/wt']?.tabIds).toEqual([...recent.slice(0, 9), 'moved']);
   });
 
   test('a move before the session list loaded leaves the destination to its first visit', () => {

@@ -36,6 +36,7 @@ test('falls back to the rendered message list when the timeline index misses', a
         captureViewportAnchor: () => null,
         restoreViewportAnchor: () => false,
         alignViewportAnchor: () => 'missing',
+        hasMessageRow: () => false,
         holdViewportAnchor: () => undefined,
         isHistoryVirtualized: () => false,
         scrollToBottom: () => undefined,

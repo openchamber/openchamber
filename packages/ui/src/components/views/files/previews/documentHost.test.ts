@@ -96,6 +96,17 @@ describe('changed cells on a laid out sheet', () => {
 });
 
 describe('a capped query', () => {
+  test('delimited results carry logical columns separately from retained width', async () => {
+    const rows: string[][] = [];
+    const result = await handleDocumentCall('delimited.read', {
+      bytes: new TextEncoder().encode('a\tb\n1\t2\n3\t4\t5\n'),
+      path: 'table.tsv',
+      rowCap: 1,
+    }, (chunk) => rows.push(...chunk.rows));
+    expect(result).toEqual({ columns: ['a', 'b'], totalRows: 2, columnCount: 2, dataColumnCount: 3 });
+    expect(rows).toEqual([['1', '2']]);
+  });
+
   const statement = (rows: number, names: string[]) => {
     let left = rows;
     return { step: () => (left -= 1) >= 0, get: () => [left], getColumnNames: () => names };

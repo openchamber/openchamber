@@ -10,13 +10,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { withoutInjectedEnv } from '../../packages/web/server/lib/injected-env.js';
+import { bundledOpenCodeServerEnv, devOpenCodeEnv } from '../lib/bundled-opencode-server.mjs';
+
+if (!process.versions.bun) await import('../../packages/web/scripts/register-server-sources.mjs');
+const { withoutInjectedEnv } = await import('../../packages/web/server/lib/injected-env.js');
 
 const BENCH_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(BENCH_DIR, '../..');
 const CASES = JSON.parse(fs.readFileSync(path.join(BENCH_DIR, 'cases.json'), 'utf8'));
 const REAL_OPENCODE_DB = path.join(os.homedir(), '.local/share/opencode/opencode.db');
-const OPENCODE_BINARY = process.env.OPENCODE_BINARY ?? '/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode';
 const OPENCHAMBER_TOOL = /^openchamber(_|$)/;
 const STALL_MS = 120_000;
 
@@ -136,7 +138,8 @@ const createInstance = async ({ mode, apiPort, models, instances }) => {
     XDG_CACHE_HOME: dirs.cache,
     XDG_STATE_HOME: dirs.state,
     OPENCHAMBER_DATA_DIR: dirs.oc,
-    OPENCODE_BINARY,
+    // A CLI the caller names, else this checkout's pinned OpenCode, the one the desktop app bundles.
+    ...devOpenCodeEnv(process.env, () => bundledOpenCodeServerEnv(REPO_ROOT)),
     OPENCHAMBER_RELAY_HOST: 'off',
   });
   // The API server alone: the bench needs no UI, and `bun run dev` instances

@@ -52,6 +52,19 @@ per session object (records are replaced on update), so the index can be
 rebuilt on every session-list change. Lanes sort by variant then creation;
 fusions come first.
 
+### Why the index resolves the legacy scope lazily and keeps its last result
+
+`RunAutoFusion` rebuilds the index on every streamed step of any session,
+because each step changes the deferred spend and the live records. Resolving
+every session's project scope (a worktree lookup and a path normalization) per
+step cost more than the rest of the index together, and only a session whose
+title names a run without membership metadata reads that scope.
+`readMultiRunIdentityWith` therefore asks for the scope only in that case and
+caches whether the identity read it. The index itself reads only the sessions
+that carry an identity, so `buildMultiRunIndex` returns the index it built last
+when those members are the same records with the same identities in the same
+order.
+
 Consumers: the sidebar row model and mobile sheet (see the sidebar
 DOCUMENTATION), the overview (`useMultiRun`), the header title
 (`useMultiRunTitle`) and the header tabs (`useMultiRunMemberIds`: the lanes of a
@@ -199,3 +212,10 @@ Old titles ending in `/2` or `/fusion` are inherently ambiguous. Preserve their
 previous suffix interpretation; do not write guessed membership back to them.
 Legacy names can still collide or lose recognition after renaming. Only new
 ID-bound records provide exact membership.
+
+## Invariants
+
+- Fusion reads prompt overrides before creating worktrees so a failed read leaves no checkout behind. Each fusion has its own branch, and detaching also clears a legacy lane title so it cannot rejoin through title parsing.
+- Lane prompt lookup walks beyond a fixed oldest page because plumbing records can fill it without a user message. Summary caches use runtime, session and latest idle time, and request identity rejects stale reads while busy lanes retain previous results.
+- Lane creation never cleans up through a switched runtime, leaving an unbound marker ineligible. Membership serialization omits undefined optional values so the record remains plain JSON.
+- The launcher ID is page-local and tolerates insecure contexts because module initialization must not fail when `randomUUID` is absent. Legacy title parsing caches include project scope because title-only membership depends on it.

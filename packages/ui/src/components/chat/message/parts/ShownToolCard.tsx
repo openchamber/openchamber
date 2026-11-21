@@ -1,34 +1,34 @@
 import React from 'react';
 
-import type { ToolPart } from '@/lib/opencode/model';
+import type { TextPart, ToolPart } from '@/lib/opencode/model';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { useChatSurfaceMode } from '../../useChatSurfaceMode';
+import { TextSelectionMenu } from '../TextSelectionMenu';
 import { isSettledAsk, type ShownPart } from '../../lib/turns/liveActivity';
+import { ShownPartStreamPhaseContext } from '../../components/liveActivityContext';
 import AssistantTextPart from './AssistantTextPart';
 import { PageAskStatus } from './PageAskStatus';
-import { generatedImagePaths, proposedWorkflowRunId, renderedPage, requestedSecret, requestedSecretRun } from '@/lib/opencode/tools';
+import { generatedImagePaths, proposedWorkflowRunId, renderedPage, requestedSecret, requestedSecretForget, requestedSecretRun } from '@/lib/opencode/tools';
 import { WorkflowRunCard } from '@/components/chat/workflows/WorkflowRunCard';
 import type { ToolPopupContent } from '../types';
 import { GeneratedImages } from './GeneratedImages';
 import { ShownPage } from './HtmlRenderFrame';
-import { SecretRequestCard, SecretRunCard } from './SecretRequestCard';
+import { SecretForgetCard, SecretRequestCard, SecretRunCard } from './SecretRequestCard';
 
-/**
- * What a call the chat shows in place (`isShownInPlace`) draws instead of its
- * row: the run a `workflow.run` call proposed, the images `image.generate`
- * made, the card a secret request asks on, else the page it showed.
- */
 export function ShownToolCard({ part, onShowPopup }: { part: ToolPart; onShowPopup?: (content: ToolPopupContent) => void }) {
   const runId = React.useMemo(() => proposedWorkflowRunId(part.tool, part.state), [part.tool, part.state]);
   const images = React.useMemo(() => generatedImagePaths(part.tool, part.state), [part.tool, part.state]);
   const secret = React.useMemo(() => requestedSecret(part.tool, part.state), [part.tool, part.state]);
   const secretRun = React.useMemo(() => requestedSecretRun(part.tool, part.state), [part.tool, part.state]);
+  const secretForget = React.useMemo(() => requestedSecretForget(part.tool, part.state), [part.tool, part.state]);
   if (runId) return <WorkflowRunCard sessionId={part.sessionID} runId={runId} />;
   if (images.length > 0) return <GeneratedImages part={part} paths={images} onShowPopup={onShowPopup} />;
   if (secret) return <SecretRequestCard part={part} request={secret} />;
   if (secretRun) return <SecretRunCard part={part} run={secretRun} />;
+  if (secretForget) return <SecretForgetCard part={part} />;
   return <ShownPage part={part} />;
 }
 
-/** A settled form a collapsed Activity keeps in view: one line, no form. */
 function SettledAskLine({ part }: { part: ToolPart }) {
   const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
   if (!page) return null;
@@ -39,23 +39,31 @@ function SettledAskLine({ part }: { part: ToolPart }) {
   );
 }
 
-/**
- * A part a collapsed Activity keeps in view (`getShownPages`): a call drawn in
- * place, the line of a settled form, or the text with a UI block the agent
- * wrote before a later step.
- */
 export function ShownPartCard({ part, onShowPopup }: { part: ShownPart; onShowPopup?: (content: ToolPopupContent) => void }) {
   if (part.type === 'tool') {
     if (isSettledAsk(part)) return <SettledAskLine part={part} />;
     return <ShownToolCard part={part} onShowPopup={onShowPopup} />;
   }
+  return <ShownText part={part} onShowPopup={onShowPopup} />;
+}
+
+function ShownText({ part, onShowPopup }: { part: TextPart; onShowPopup?: (content: ToolPopupContent) => void }) {
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const surface = useChatSurfaceMode();
+  const showTTS = useConfigStore((state) => state.showMessageTTSButtons);
+  const streamPhaseOf = React.useContext(ShownPartStreamPhaseContext);
   return (
-    <AssistantTextPart
-      part={part}
-      sessionId={part.sessionID}
-      messageId={part.messageID}
-      streamPhase={part.time?.end === undefined ? 'streaming' : 'completed'}
-      onShowPopup={onShowPopup}
-    />
+    <div data-message-id={part.messageID} data-message-hoisted={part.id}>
+      <div ref={rootRef} data-chat-quote-root="true" className="relative">
+        <TextSelectionMenu containerRef={rootRef} readingKey={part.messageID} canReadAloud={surface !== 'mini-chat' && showTTS} />
+        <AssistantTextPart
+          part={part}
+          sessionId={part.sessionID}
+          messageId={part.messageID}
+          streamPhase={streamPhaseOf(part.messageID)}
+          onShowPopup={onShowPopup}
+        />
+      </div>
+    </div>
   );
 }

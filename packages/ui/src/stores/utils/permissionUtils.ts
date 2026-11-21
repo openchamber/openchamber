@@ -2,7 +2,6 @@ import type { EditPermissionMode } from "../types/sessionTypes";
 
 type PermissionEffect = 'allow' | 'deny' | 'ask';
 
-/** One entry of an OpenCode 2 ruleset; evaluation is last-match-wins. */
 type PermissionRule = {
     action: string;
     resource: string;
@@ -47,10 +46,6 @@ const getAgentDefinition = (agentName?: string): ConfigStoreAgent | undefined =>
     return undefined;
 };
 
-/**
- * What the agent's resolved ruleset says about an action with no particular
- * resource. The scan runs backwards because the last matching rule wins.
- */
 const resolvePermissionEffect = (ruleset: PermissionRule[] | undefined, action: string): PermissionEffect => {
     if (!ruleset || ruleset.length === 0) {
         return 'ask';

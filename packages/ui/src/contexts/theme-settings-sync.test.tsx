@@ -6,10 +6,11 @@ import { useThemeSystem } from './useThemeSystem';
 import type { ThemeContextValue } from './theme-system-context';
 import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { getThemePreferencesStorageKey, writeThemePreferencesForRuntime } from './theme-storage';
+import { getSettingsSaveState } from '@/lib/persistence';
 
 type Variant = 'light' | 'dark';
 
-async function withProvider(prefersColorScheme: Variant, run: (current: () => ThemeContextValue, settingsWrites: string[], dom: Window) => Promise<void>) {
+async function withProvider(prefersColorScheme: Variant, run: (current: () => ThemeContextValue, settingsWrites: string[], dom: Window, advanceTimers: () => Promise<void>) => Promise<void>) {
   const dom = new Window({ url: 'http://theme.test', settings: { device: { prefersColorScheme } } });
   Object.assign(dom, {
     __OPENCHAMBER_API_BASE_URL__: 'http://theme.test',
@@ -17,6 +18,18 @@ async function withProvider(prefersColorScheme: Variant, run: (current: () => Th
   });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const settingsWrites: string[] = [];
+  const timers = new Map<number, () => void>();
+  let timerId = 0;
+  const advanceTimers = async () => {
+    await act(async () => {
+      while (timers.size) {
+        const callbacks = [...timers.values()];
+        timers.clear();
+        callbacks.forEach((callback) => callback());
+      }
+    });
+    expect(getSettingsSaveState()).toBe('idle');
+  };
   const fetchResponse = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = input instanceof Request ? input.url : String(input);
     if (init?.method === 'PUT' && url.includes('/api/config/settings')) settingsWrites.push(url);
@@ -29,6 +42,12 @@ async function withProvider(prefersColorScheme: Variant, run: (current: () => Th
     localStorage: dom.localStorage, Element: dom.Element, HTMLElement: dom.HTMLElement,
     Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent, StorageEvent: dom.StorageEvent,
     fetch: fetchResponse, IS_REACT_ACT_ENVIRONMENT: true,
+    setTimeout: (callback: (...args: unknown[]) => void, _delay?: number, ...args: unknown[]) => {
+      const id = ++timerId;
+      timers.set(id, () => callback(...args));
+      return id;
+    },
+    clearTimeout: (id: number) => { timers.delete(id); },
   })) {
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
@@ -48,22 +67,25 @@ async function withProvider(prefersColorScheme: Variant, run: (current: () => Th
   };
   try {
     await act(async () => root.render(<ThemeSystemProvider><Probe /></ThemeSystemProvider>));
-    await run(current, settingsWrites, dom);
+    await run(current, settingsWrites, dom, advanceTimers);
   } finally {
-    await act(async () => root.unmount());
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    for (const [name, descriptor] of originals) {
-      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-      else Reflect.deleteProperty(globalThis, name);
+    try {
+      await act(async () => root.unmount());
+      await advanceTimers();
+    } finally {
+      for (const [name, descriptor] of originals) {
+        if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+        else Reflect.deleteProperty(globalThis, name);
+      }
+      await dom.happyDOM.close();
     }
-    await dom.happyDOM.close();
   }
 }
 
 test('incoming System mode waits for the OS-variant palette without writing settings back', async () => {
-  await withProvider('dark', async (current, settingsWrites) => {
+  await withProvider('dark', async (current, settingsWrites, _dom, advanceTimers) => {
     await act(async () => current().setThemeMode('light'));
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 250)));
+    await advanceTimers();
     const before = current().currentTheme;
     const dark = current().availableThemes.find((theme) => theme.metadata.variant === 'dark');
     if (!dark) throw new Error('No dark theme is available for the fixture');
@@ -84,7 +106,7 @@ test('incoming System mode waits for the OS-variant palette without writing sett
     expect(current().themeMode).toBe('system');
     expect(current().currentTheme.metadata.id).toBe(arriving.metadata.id);
     expect(document.documentElement.classList.contains('dark')).toBe(true);
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 250)));
+    await advanceTimers();
     expect(settingsWrites).toHaveLength(0);
   });
 });
@@ -108,7 +130,7 @@ test('pending System adoption checks the current OS variant when palettes arrive
 });
 
 test('an explicit custom theme uses its actual metadata despite a stale saved variant', async () => {
-  await withProvider('light', async (current, settingsWrites) => {
+  await withProvider('light', async (current, settingsWrites, _dom, advanceTimers) => {
     const dark = current().availableThemes.find((theme) => theme.metadata.variant === 'dark');
     if (!dark) throw new Error('No dark theme is available for the fixture');
     const selected = { ...dark, metadata: { ...dark.metadata, id: 'selected-custom-dark' } };
@@ -120,7 +142,7 @@ test('an explicit custom theme uses its actual metadata despite a stale saved va
     })));
     expect(current().themeMode).toBe('dark');
     expect(current().currentTheme.metadata.id).toBe(selected.metadata.id);
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 250)));
+    await advanceTimers();
     expect(settingsWrites).toHaveLength(0);
   });
 });

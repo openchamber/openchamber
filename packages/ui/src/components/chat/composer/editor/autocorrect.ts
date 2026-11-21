@@ -4,7 +4,7 @@ type PlatformNavigator = Pick<Navigator,
     'maxTouchPoints' | 'platform' | 'userAgent' | 'vendor'
 >;
 
-/** Keep desktop autocorrect off without triggering CodeMirror's period revert. */
+// external: https://html.spec.whatwg.org/multipage/interaction.html#attr-autocorrect Autocorrect keywords are ASCII case-insensitive.
 export function composerAutoCorrect(options: {
     isMobile: boolean;
     navigator?: PlatformNavigator;
@@ -15,7 +15,7 @@ export function composerAutoCorrect(options: {
         ?? (typeof navigator === 'undefined'
             ? { maxTouchPoints: 0, platform: '', userAgent: '', vendor: '' }
             : navigator);
-    // These must match CodeMirror's flags because its revert checks exact "off".
+    // external: https://code.haverbeke.berlin/codemirror/view/src/tag/6.43.15/src/input.ts The period revert requires an exact lowercase "off" and matching browser flags.
     const ios = /Apple Computer/.test(nav.vendor)
         && (/Mobile\/\w+/.test(nav.userAgent) || nav.maxTouchPoints > 2);
     return ios || /Mac/.test(nav.platform) || /Android\b/.test(nav.userAgent)

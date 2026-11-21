@@ -36,10 +36,12 @@ let trustFailures = 0;
 let registrationReads = 0;
 let registrationFailures = 0;
 let registeredProjectPath: string | null = null;
+let canonicalDirectory: string | null = null;
 
 beforeEach(() => {
   trusted = false; runsCode = true; registrations = []; trustWrites = 0;
   trustReads = 0; trustFailures = 0; registrationReads = 0; registrationFailures = 0; registeredProjectPath = null;
+  canonicalDirectory = null;
   forgetOpenCodeTrustDeclines();
   configureRuntimeUrlResolver({ apiBaseUrl: 'https://admission.test' });
   useProjectsStore.setState({ projects: [{ id: 'kept', path: '/kept' }], activeProjectId: 'kept' });
@@ -65,7 +67,11 @@ beforeEach(() => {
       const body = JSON.parse(String(init?.body));
       registrations.push(body.directory);
       const path = registeredProjectPath ?? body.directory;
-      return Response.json({ project: { id: path, path } });
+      if (!canonicalDirectory) return Response.json({ project: { id: path, path } });
+      // The server moved the session; OpenCode reports it after the answer.
+      const moved = canonicalDirectory;
+      setTimeout(() => applySessionEventsToGlobalSessions([patchDirectory(body.sessionId, moved)]), 5);
+      return Response.json({ project: { id: path, path }, directory: moved });
     }
     return Response.json({});
   }) as typeof fetch;
@@ -204,7 +210,7 @@ describe('session admission', () => {
   });
 
   test('resolves the server-owned chat root before importing a persisted managed chat', async () => {
-    expect(await admitSession('chat', '/managed/chats/day/session-chat')).toBe(true);
+    expect(await admitSession('chat', '/managed/chats/day/session-chat')).toBe('/managed/chats/day/session-chat');
     expect(registrations).toEqual([]);
     expect(getOpenCodeTrustSnapshot()).toBeNull();
   });
@@ -220,7 +226,7 @@ describe('session admission', () => {
 
   test('auto-adds a folder without executable configuration, without activation or a dialog', async () => {
     runsCode = false;
-    expect(await admitSession('one', '/empty')).toBe(true);
+    expect(await admitSession('one', '/empty')).toBe('/empty');
     expect(registrations).toEqual(['/empty']);
     expect(getOpenCodeTrustSnapshot()).toBeNull();
     expect(trustWrites).toBe(0);
@@ -230,7 +236,7 @@ describe('session admission', () => {
 
   test('auto-adds an already trusted fingerprint without asking again', async () => {
     trusted = true;
-    expect(await admitSession('one', '/trusted')).toBe(true);
+    expect(await admitSession('one', '/trusted')).toBe('/trusted');
     expect(registrations).toEqual(['/trusted']);
     expect(getOpenCodeTrustSnapshot()).toBeNull();
   });
@@ -243,8 +249,8 @@ describe('session admission', () => {
     expect(getOpenCodeTrustSnapshot()?.directory).toBe('/outside');
     expect(registrations).toEqual([]);
     expect(await settleOpenCodeTrust('trust')).toBe('saved');
-    expect(await first).toBe(true);
-    expect(await second).toBe(true);
+    expect(await first).toBe('/outside');
+    expect(await second).toBe('/outside');
     expect(trustWrites).toBe(1);
     expect(registrations).toEqual(['/outside']);
   });
@@ -253,8 +259,8 @@ describe('session admission', () => {
     const first = admitSession('one', '/declined');
     await settle();
     await settleOpenCodeTrust('skip');
-    expect(await first).toBe(false);
-    expect(await admitSession('one', '/declined')).toBe(false);
+    expect(await first).toBeNull();
+    expect(await admitSession('one', '/declined')).toBeNull();
     expect(getOpenCodeTrustSnapshot()).toBeNull();
     expect(registrations).toEqual([]);
     expect(trustWrites).toBe(0);
@@ -266,7 +272,7 @@ describe('session admission', () => {
     await settle();
     useGlobalSessionsStore.getState().upsertSession(session('moving', '/new'));
     await settleOpenCodeTrust('trust');
-    expect(await admission).toBe(false);
+    expect(await admission).toBeNull();
     expect(registrations).toEqual([]);
   });
 
@@ -351,6 +357,50 @@ describe('session admission', () => {
     await settle(); await settle();
     expect(useSessionUIStore.getState().currentSessionId).toBe('in-new-worktree');
     expect(registrationReads).toBe(1);
+  });
+
+  test('opening a session recorded under a symlinked spelling of a listed worktree opens it at the canonical path', async () => {
+    trusted = true;
+    registeredProjectPath = '/kept';
+    canonicalDirectory = '/private/tmp/respelled';
+    useSessionUIStore.setState({ availableWorktreesByProject: new Map([
+      ['/kept', [{ path: '/private/tmp/respelled', projectDirectory: '/kept', branch: 'task', label: 'task' }]],
+    ]) });
+    useGlobalSessionsStore.getState().upsertSession(session('respelled', '/tmp/respelled'));
+    useSessionUIStore.getState().setCurrentSession('respelled', '/tmp/respelled');
+    for (let round = 0; round < 10; round += 1) { await new Promise((resolve) => setTimeout(resolve, 5)); await settle(); }
+    expect(registrations).toEqual(['/tmp/respelled']);
+    expect(useSessionUIStore.getState().currentSessionId).toBe('respelled');
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe('/private/tmp/respelled');
+  });
+
+  test('admitting an unindexed session recorded under a symlinked spelling answers the canonical folder', async () => {
+    trusted = true;
+    registeredProjectPath = '/kept';
+    canonicalDirectory = '/private/tmp/unindexed';
+    useSessionUIStore.setState({ availableWorktreesByProject: new Map([
+      ['/kept', [{ path: '/private/tmp/unindexed', projectDirectory: '/kept', branch: 'task', label: 'task' }]],
+    ]) });
+    expect(await admitSession('unindexed', '/tmp/unindexed', true)).toBe('/private/tmp/unindexed');
+    expect(registrations).toEqual(['/tmp/unindexed']);
+  });
+
+  test('a live move to a symlinked spelling of a listed worktree is admitted once the record follows', async () => {
+    trusted = true;
+    registeredProjectPath = '/kept';
+    canonicalDirectory = '/private/tmp/live-respelled';
+    useSessionUIStore.setState({ availableWorktreesByProject: new Map([
+      ['/kept', [{ path: '/private/tmp/live-respelled', projectDirectory: '/kept', branch: 'task', label: 'task' }]],
+    ]) });
+    const stop = subscribeSessionAdmission();
+    try {
+      moveSession('live-respelled', '/tmp/live-respelled');
+      for (let round = 0; round < 10; round += 1) { await new Promise((resolve) => setTimeout(resolve, 5)); await settle(); }
+      expect(registrations).toEqual(['/tmp/live-respelled']);
+      const record = useGlobalSessionsStore.getState().entityById.get('live-respelled');
+      expect(record?.directory).toBe('/private/tmp/live-respelled');
+      expect(isSessionAdmitted(record?.directory)).toBe(true);
+    } finally { stop(); }
   });
 
   test('notification and restore selection waits before publishing or changing the directory', async () => {

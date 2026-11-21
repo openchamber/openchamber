@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
 import { UI_BLOCK_EXAMPLES, buildUiBlocksGuidance } from './guidance';
-import { UI_BLOCKS_GUIDANCE_PATH, renderUiBlocksGuidanceModule } from './guidanceModule';
+import { UI_BLOCKS_GUIDANCE_PATH } from './guidanceModule';
 import { parseUiBlock } from './catalog';
 
 describe('UI block guidance', () => {
-  test('the server copy matches the catalog (run ui-blocks:generate after a catalog change)', () => {
-    expect(readFileSync(UI_BLOCKS_GUIDANCE_PATH, 'utf8')).toBe(renderUiBlocksGuidanceModule(buildUiBlocksGuidance()));
+  test('the server copy matches the catalog (run ui-blocks:generate after a catalog change)', async () => {
+    const { UI_BLOCKS_GUIDANCE } = await import(UI_BLOCKS_GUIDANCE_PATH);
+    expect(UI_BLOCKS_GUIDANCE).toBe(buildUiBlocksGuidance());
   });
 
   test('every example the agent reads is a valid block', () => {

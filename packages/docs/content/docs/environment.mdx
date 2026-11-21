@@ -50,6 +50,10 @@ Starts OpenChamber in headless mode when set to `true` or `1`. API routes stay a
 
 Origins allowed to show OpenChamber inside a frame on their own page, separated by spaces, for example `https://dash.example.com`. `*` allows any site. By default only OpenChamber itself and its desktop and mobile apps may frame it, which keeps other sites from overlaying its buttons.
 
+### `OPENCHAMBER_TRUSTED_PROXIES`
+
+Addresses of reverse proxies that run on another machine or in another container, separated by commas, such as `192.168.1.10` or `172.18.0.0/16`. OpenChamber limits failed sign-in attempts per client and reads the client's address from `X-Forwarded-For` only when the request comes from this machine or from an address listed here. A proxy that isn't listed counts as one client, so one person's failed attempts can keep everyone behind it from signing in for a while.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 Overrides the OpenChamber data directory. The default is `~/.config/openchamber`.

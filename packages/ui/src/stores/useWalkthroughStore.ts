@@ -48,16 +48,12 @@ export const walkthroughSourceKey = (source: WalkthroughSource): string => {
   if (source.kind === 'branch') return `branch:${source.baseRef}...${source.headRef}`;
   if (source.kind === 'commit') return `commit:${source.hash}`;
   const pr = source.sourceRepo ? `pr:${joinProjectPath(source.sourceRepo.owner, source.sourceRepo.repo)}:${source.number}` : `pr:${source.number}`;
-  // An earlier revision is its own walkthrough; the current one keeps the key it always had.
   return source.revision ? `${pr}@${source.revision}` : pr;
 };
 
 const walkthroughTargetKey = (target: WalkthroughTarget): string => {
   if (!('context' in target)) return walkthroughSourceKey(target.source);
   const { context, source } = target;
-  // The named repository keeps equal numbers in different repositories apart,
-  // even under one binding: the server refuses the one that is not bound, and
-  // that refusal must not be cached under the other's key.
   return JSON.stringify([
     'pr',
     source.number,
@@ -97,11 +93,6 @@ interface WalkthroughState {
 
 interface WalkthroughActions {
   getEntry: (directory: string, target: WalkthroughTarget) => WalkthroughEntry;
-  /**
-   * `providerID` / `modelID` are the composer's: without a model of its own
-   * the walkthrough stays on that provider, and on that model when the
-   * provider has no small one.
-   */
   load: (directory: string, target: WalkthroughTarget, options?: { language?: string; providerID?: string; modelID?: string }) => Promise<void>;
   generate: (
     directory: string,

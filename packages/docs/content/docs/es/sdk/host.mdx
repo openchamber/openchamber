@@ -36,6 +36,8 @@ No es un callback de montaje único. Monta la UI y registra suscripciones una ve
 
 Los tokens de acceso nunca aparecen aquí ni en el resultado de un `request`.
 
+`ready.session` y `onSession` también incluyen los campos opcionales `context` y `tokens`. `context: { tokens, limit } | null` muestra la ocupación de la ventana de contexto tras el último paso del asistente; `limit` es `null` si se desconoce el límite del modelo. Después de compactar, `context` sigue siendo `null` hasta una nueva medición. `tokens: { prompt, output, reasoning, cacheRead, cacheWrite, cacheHitPercent } | null` contiene los totales acumulados de la sesión. `prompt` incluye la entrada sin caché y las lecturas y escrituras de caché. `cacheHitPercent` es `null` si no hay tokens de prompt. Ambos valores son `null` antes de conocerse; los hosts antiguos omiten los campos. Los cambios llegan por `onSession`.
+
 `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` y `onItem` reproducen el último valor si te suscribes tarde, y luego siguen disparándose cada vez que cambia.
 
 `theme.tokens` incluye `primaryText`, `successText`, `warningText`, `errorText` e `infoText`. Estos campos obligatorios contienen colores de texto calculados por el host para fondos neutros y controles con tintes suaves del UI kit, no para rellenos de color sólido. `applyHostReady` los aplica en cada instantánea. Consulta [UI kit](/sdk/ui/) para las variables CSS.
@@ -67,6 +69,7 @@ Los tokens de acceso nunca aparecen aquí ni en el resultado de un `request`.
 | `onResolve(handler)` | registra el manejador de tus comandos de barra. Recibe `{ command, args }` y devuelve un elemento para adjuntar o `null`. |
 | `setBadge(count)` | marca tu icono de la barra lateral con un punto y muestra el número (0 a 999) en su descripción emergente, o `null` para quitarlo |
 | `openCommit(sha)` | abrir la vista Diff en ese commit del proyecto actual. `sha` tiene de 7 a 64 caracteres hexadecimales; OpenChamber lee el commit por su cuenta. |
+| `openWalkthrough({ base })` | abrir el Recorrido en Esta rama del proyecto actual, comparado con `base`: `main`, `origin/main` o una ref completa. La base pasa a ser la base elegida de la rama; el usuario aún puede cambiarla y es quien pulsa Generar recorrido. Una base que el repositorio no tiene se rechaza con `NOT_FOUND` y no cambia nada. En el teléfono, en Mini Chat y en VS Code, `UNSUPPORTED`. |
 | `setHeight(px)` | fijar la altura de tu sección de Work Status. OpenChamber la mantiene entre 24 y 480 píxeles; el contenido más alto se desplaza dentro de tu página. En otros sitios se ignora. |
 | `onFileOpen(listener)` | editores de archivos: recibir el archivo que se va a editar, `{ path, name, readOnly }` más `encoding: "text"` con `content`, o `encoding: "binary"` con `bytes`. También hace que Cmd/Ctrl+S guarde dentro de tu página. |
 | `onFileSnapshot(handler)` | editores de archivos: devolver `{ content, version }` (o `{ bytes, version }` en un editor binario), el archivo editado completo. OpenChamber lo llama para guardar y antes de cambiar a la vista de código fuente o a pantalla completa. |

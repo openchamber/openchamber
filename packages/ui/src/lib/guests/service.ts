@@ -54,7 +54,6 @@ const parseGuestServiceProxyResponse = async (
 export const proxyGuestServiceRequest = async (
   guestId: string,
   request: GuestRequest,
-  /** The shared-surface viewer open in this window (`surface-viewers.ts`). */
   viewerId?: string,
 ): Promise<GuestRequestProxyResult> => {
   try {
@@ -91,7 +90,6 @@ const serviceFailureSchema = z.object({
   failure: z.object({ at: z.number(), output: z.string() }).nullable(),
 });
 
-/** Why the service last stopped working, for the extension's card; null when it is fine or the read failed. */
 export const loadGuestServiceFailure = async (guestId: string): Promise<{ at: number; output: string } | null> => {
   try {
     const response = await runtimeFetch(`/api/guests/${guestId}/service/failure`);

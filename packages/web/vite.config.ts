@@ -6,6 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { readFileSync, realpathSync } from 'node:fs';
 import { VitePWA } from 'vite-plugin-pwa';
 import { cacheReactBabel } from './vite-react-babel-cache';
+import { SHARE_DOCUMENT_FILE, shareDocumentPlugin } from './vite-share-document';
+import { localeSlicesPlugins } from './vite-locale-slices';
+import { oneByteChunksPlugin } from './vite-one-byte-chunks';
+import { preloadAppGraph } from './vite-preload-app-graph';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
@@ -15,6 +19,14 @@ const enableReactScan = reactScanToggle === '1' || reactScanToggle === 'true' ||
 const themeDirectory = path.resolve(__dirname, '../ui/src/lib/theme/themes');
 
 const reactBabel = { plugins: ['babel-plugin-react-compiler'] };
+
+const aliases = [
+  { find: '@openchamber/sdk/schemas', replacement: path.resolve(__dirname, '../sdk/src/schemas.ts') },
+  { find: '@openchamber/sdk', replacement: path.resolve(__dirname, '../sdk/src/index.ts') },
+  { find: '@openchamber/ui', replacement: path.resolve(__dirname, '../ui/src') },
+  { find: '@web', replacement: path.resolve(__dirname, './src') },
+  { find: '@', replacement: path.resolve(__dirname, '../ui/src') },
+];
 
 const themeJsonHmrPlugin = () => ({
   name: 'openchamber-theme-json-hmr',
@@ -29,12 +41,8 @@ const themeJsonHmrPlugin = () => ({
         event: 'openchamber:theme-updated',
         data: JSON.parse(readFileSync(file, 'utf-8')),
       });
-      // Theme JSON is applied by the runtime event listener. Returning no
-      // modules prevents Vite's otherwise unavoidable page-reload fallback.
       return [];
     } catch {
-      // Leave the previous valid theme active while an editor writes invalid
-      // or incomplete JSON; the next valid save will replace it.
       return [];
     }
   },
@@ -42,16 +50,10 @@ const themeJsonHmrPlugin = () => ({
 
 export default defineConfig({
   root: path.resolve(__dirname, '.'),
-  // Each dev server started by scripts/dev-web-hmr.mjs gets its own
-  // dependency cache; see the note there.
   cacheDir: process.env.OPENCHAMBER_VITE_CACHE_DIR || undefined,
   plugins: [
-    // The React Compiler is most of a cold dev start; its output is kept on
-    // disk for every checkout of the repository, so a restart or a new
-    // worktree compiles only what changed.
     ...cacheReactBabel(react({ babel: reactBabel }), {
       directory: path.join(os.homedir(), '.cache', 'openchamber', 'react-babel'),
-      // Real path: module ids are, and a checkout under a symlink (/tmp on macOS) would never match.
       root: realpathSync(path.resolve(__dirname, '../..')),
       setup: reactBabel,
     }),
@@ -74,6 +76,18 @@ export default defineConfig({
       },
     },
     themeJsonHmrPlugin(),
+    ...localeSlicesPlugins(),
+    oneByteChunksPlugin(),
+    preloadAppGraph({
+      appModule: path.resolve(__dirname, '../ui/src/main.tsx'),
+      document: 'index.html',
+      protocols: ['openchamber-ui:'],
+    }),
+    shareDocumentPlugin({
+      uiSource: path.resolve(__dirname, '../ui/src'),
+      aliases,
+      react: () => react({ babel: reactBabel }),
+    }),
     VitePWA({
       strategies: 'injectManifest',
       srcDir: 'src',
@@ -83,9 +97,8 @@ export default defineConfig({
       manifest: false,
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,ttf,otf,eot,wasm}'],
-        // iOS Safari/PWA is much more reliable with a classic (non-module) SW bundle.
+        globIgnores: [SHARE_DOCUMENT_FILE],
         rollupFormat: 'iife',
-        // We already keep a custom manifest in index.html
         injectionPoint: undefined,
       },
       devOptions: {
@@ -95,13 +108,7 @@ export default defineConfig({
     }),
   ],
   resolve: {
-    alias: [
-      { find: '@openchamber/sdk/schemas', replacement: path.resolve(__dirname, '../sdk/src/schemas.ts') },
-      { find: '@openchamber/sdk', replacement: path.resolve(__dirname, '../sdk/src/index.ts') },
-      { find: '@openchamber/ui', replacement: path.resolve(__dirname, '../ui/src') },
-      { find: '@web', replacement: path.resolve(__dirname, './src') },
-      { find: '@', replacement: path.resolve(__dirname, '../ui/src') },
-    ],
+    alias: aliases,
   },
   worker: {
     format: 'es',
@@ -149,25 +156,12 @@ export default defineConfig({
       external: ['node:child_process', 'node:fs', 'node:path', 'node:url'],
       output: {
         manualChunks(id) {
-          // Pin Vite's tiny runtime helpers to their own stable chunk. Otherwise
-          // Rollup co-locates the `__vitePreload` helper into an arbitrary vendor
-          // chunk (e.g. `shiki`), and since every dynamic import pulls the helper,
-          // that whole vendor (here Shiki core + the 629KB oniguruma engine) gets
-          // dragged into the eager bootstrap graph.
           if (id.includes('vite/preload-helper') || id.includes('vite/modulepreload-polyfill')) {
             return 'vendor-vite-runtime';
           }
           if (!id.includes('node_modules')) return undefined;
-          // A stylesheet stays with the chunk that imports it. Grouping KaTeX's
-          // eager stylesheet into `vendor-katex` made that chunk eager, and with
-          // it the 260KB KaTeX engine only the lazy markdown renderer uses.
           if (id.endsWith('.css')) return undefined;
 
-          // Resolve the real package from the LAST `node_modules/` segment.
-          // bun's isolated install nests packages as
-          // `node_modules/.bun/<pkg>@<ver>/node_modules/<pkg>/...`, so the first
-          // `node_modules/` segment is `.bun` — using it collapses every dependency
-          // (incl. lazy-only ones) into a single giant eager `vendor-.bun` chunk.
           const lastNodeModules = id.lastIndexOf('node_modules/');
           const match = id.slice(lastNodeModules + 'node_modules/'.length);
           if (!match) return undefined;
@@ -175,12 +169,6 @@ export default defineConfig({
           const segments = match.split('/');
           const packageName = match.startsWith('@') ? `${segments[0]}/${segments[1]}` : segments[0];
 
-          // Shiki grammars/themes and CodeMirror legacy modes are dynamically
-          // imported one at a time by their registries. Forcing them into a
-          // single vendor chunk makes the first language request download every
-          // grammar (7.4 MB raw for @shikijs/langs). Let Rollup split them per
-          // dynamically imported module so only used languages are fetched —
-          // the worker build already behaves this way.
           if (
             packageName === '@shikijs/langs' ||
             packageName === '@shikijs/themes' ||
@@ -189,11 +177,6 @@ export default defineConfig({
             return undefined;
           }
 
-          // Split @pierre/diffs by usage as well: the eager tool renderer needs
-          // only its pure patch parser, while the highlighting render stack
-          // must stay loadable on demand. One merged vendor chunk would make
-          // the parser import download the whole stack eagerly. Highlights
-          // ships its themes as separately imported modules, like Shiki's.
           if (packageName === '@pierre/diffs' || packageName === '@pierre/highlights') {
             return undefined;
           }

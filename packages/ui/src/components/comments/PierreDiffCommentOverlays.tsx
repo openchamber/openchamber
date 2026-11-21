@@ -21,7 +21,6 @@ interface PierreDiffCommentOverlaysProps {
   onCancel: () => void;
   onEdit: (draft: InlineCommentDraft) => void;
   onDelete: (draft: InlineCommentDraft) => void;
-  /** Present on a change request's diff on a host that takes review comments. */
   review: ChangeRequestReview | null;
   reviewItems: readonly ReviewLineItem[];
   reviewField: InlineCommentInputProps['review'];
@@ -179,10 +178,6 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
     return clampMaxWidth(fallbackMaxWidth);
   }, [diffRootRef, fallbackMaxWidth]);
 
-  // The comment band takes the fill of the selected rows it comments on, which
-  // depends on the row type (an added row mixes the addition tint in). The
-  // computed selected-line variable leaves out the hover tint the "+" click
-  // leaves on the row.
   const resolveSelectedLineColor = (): string | undefined => {
     const shadowRoot = diffRootRef.current?.querySelector('diffs-container')?.shadowRoot;
     const line = shadowRoot ? Array.from(shadowRoot.querySelectorAll('[data-line][data-selected-line]')).at(-1) : undefined;

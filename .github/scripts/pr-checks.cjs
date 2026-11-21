@@ -5,6 +5,10 @@
 //
 // - The contribution gate: a PR from outside the team needs a linked issue
 //   that is a bug report or a feature request the maintainer marked `accepted`.
+//   An issue labeled `in-house` is built by the core team (the chambermakers,
+//   who hold maintain or admin on the repository): a PR from anyone else that
+//   links one is closed whatever else it links, triage collaborators, trusted
+//   contributors and docs-only changes included.
 // - Visual evidence: screenshots belong in the PR description, never in the
 //   branch, and a PR that changes UI shows one.
 //
@@ -50,10 +54,25 @@ const MISSING_SCREENSHOTS = {
   marker: "<!-- pr-intake:needs-visual-evidence -->",
 };
 
+const UNPROVEN_RUNTIME = {
+  label: {
+    name: "needs-live-run",
+    color: "fbca04",
+    description: "Touches a runtime it was not run in, or lists a known problem. Not reviewed until fixed.",
+  },
+  marker: "<!-- pr-intake:needs-live-run -->",
+};
+
 // PRs opened before the gate existed keep the rules they were opened under.
 const GATE_CUTOVER = "2026-10-28T14:00:00Z";
 
 const PASSING_ISSUE_LABELS = ["bug", "accepted"];
+
+const IN_HOUSE_LABEL = {
+  name: "in-house",
+  color: "0e8a16",
+  description: "The team builds this one. Outside PRs that link it are closed.",
+};
 
 const isDocsFile = (file) => {
   if (file.startsWith("packages/docs/")) return true;
@@ -65,6 +84,69 @@ const isDocsFile = (file) => {
 
 const isTestFile = (file) =>
   /(^|\/)(__tests__|test|tests)\//.test(file) || /\.(test|spec)\.[^/]+$/.test(file) || /\.snap$/.test(file);
+
+const FENCE_OPEN = /^ {0,3}(`{3,}(?=[^`\n]*$)|~{3,})/;
+
+// The text of a PR description a reader sees: each HTML comment replaced by a
+// space, one pass from left to right, so removing one never joins its
+// neighbours into another comment, number or image. `<!--` inside Markdown
+// code (fenced block or code span) is visible text. An unclosed comment that
+// starts a line hides the rest of the description, as GitHub does; a mid-line
+// one is shown as text.
+const stripComments = (text) => {
+  let out = "";
+  let fence = null;
+  let i = 0;
+  while (i < text.length) {
+    if (i === 0 || text[i - 1] === "\n") {
+      const eol = text.indexOf("\n", i);
+      const end = eol === -1 ? text.length : eol + 1;
+      const line = text.slice(i, end).replace(/\r?\n$/, "");
+      if (fence !== null) {
+        if (new RegExp(`^ {0,3}${fence[0]}{${fence.length},}\\s*$`).test(line)) fence = null;
+        out += text.slice(i, end);
+        i = end;
+        continue;
+      }
+      const open = FENCE_OPEN.exec(line);
+      if (open) {
+        fence = open[1];
+        out += text.slice(i, end);
+        i = end;
+        continue;
+      }
+    }
+    if (text[i] === "\\") {
+      out += text.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    if (text[i] === "`") {
+      const run = /^`+/.exec(text.slice(i))[0];
+      // A code span closes on the same number of backticks within its paragraph,
+      // which a blank line or a line-start comment ends.
+      const closer = new RegExp(`(?<!\`)${run}(?!\`)|\\n[ \\t]*\\n|\\n {0,3}<!--`, "g");
+      closer.lastIndex = i + run.length;
+      const match = closer.exec(text);
+      const spanEnd = match && match[0][0] === "`" ? match.index + run.length : i + run.length;
+      out += text.slice(i, spanEnd);
+      i = spanEnd;
+      continue;
+    }
+    if (text.startsWith("<!--", i)) {
+      // `<!-->` and `<!--->` are complete, empty comments.
+      const close = text.indexOf("-->", i + 2);
+      if (close !== -1 || /^ {0,3}<!--/.test(text.slice(text.lastIndexOf("\n", i - 1) + 1))) {
+        out += " ";
+        i = close === -1 ? text.length : close + 3;
+        continue;
+      }
+    }
+    out += text[i];
+    i += 1;
+  }
+  return out;
+};
 
 const readTrustedContributors = (workspace) => {
   try {
@@ -126,7 +208,7 @@ const linkedIssueNumbers = async ({ github, owner, repo, pr }) => {
     `\\bpart of\\s+(?:${owner}/${repo}#|#|https://github\\.com/${owner}/${repo}/issues/)(\\d+)`,
     "gi",
   );
-  for (const match of (pr.body ?? "").matchAll(partOf)) numbers.add(Number(match[1]));
+  for (const match of stripComments(pr.body ?? "").matchAll(partOf)) numbers.add(Number(match[1]));
   return [...numbers];
 };
 
@@ -146,12 +228,23 @@ const linkedIssues = async ({ github, owner, repo, pr }) => {
 
 // Returns { exempt } when the gate does not apply to this PR, otherwise
 // { passes, issues } with the linked issues and their labels.
+// { passes: false, issues, inHouse } when a linked issue is one the team builds.
 const evaluateContributionGate = async ({ github, owner, repo, pr, files, workspace }) => {
   if (pr.created_at < GATE_CUTOVER) return { exempt: "opened before the gate" };
   if (pr.draft) return { exempt: "draft" };
   if (pr.user.type === "Bot") return { exempt: "bot" };
-  if (readTrustedContributors(workspace).includes(pr.user.login.toLowerCase())) return { exempt: "trusted contributor" };
+
+  const issues = await linkedIssues({ github, owner, repo, pr });
+  const inHouse = issues.filter((issue) => issue.labels.includes(IN_HOUSE_LABEL.name)).map((issue) => issue.number);
+  // Team membership needs an org permission the app token lacks; the core
+  // team is exactly the maintain/admin role on this repository.
+  if (inHouse.length > 0 && !(await isMaintainer({ github, owner, repo, username: pr.user.login }))) {
+    return { passes: false, issues, inHouse };
+  }
+
   if (await hasRepoAccess({ github, owner, repo, pr })) return { exempt: "collaborator" };
+
+  if (readTrustedContributors(workspace).includes(pr.user.login.toLowerCase())) return { exempt: "trusted contributor" };
 
   // A rename counts by both names, so moving code into a test path is not a test change.
   const paths = files.flatMap(({ filename, previous_filename }) => (previous_filename ? [filename, previous_filename] : [filename]));
@@ -159,7 +252,6 @@ const evaluateContributionGate = async ({ github, owner, repo, pr, files, worksp
     return { exempt: "docs or tests only" };
   }
 
-  const issues = await linkedIssues({ github, owner, repo, pr });
   const passes = issues.some((issue) => issue.labels.some((label) => PASSING_ISSUE_LABELS.includes(label)));
   return { passes, issues };
 };
@@ -200,8 +292,70 @@ const evaluateVisualEvidence = ({ pr, files }) => ({
     .filter(({ status }) => status !== "removed")
     .map(({ filename }) => filename)
     .filter(isEvidenceFile),
-  missingScreenshots: !pr.draft && files.some(({ filename }) => isRenderedUiFile(filename)) && !DESCRIPTION_IMAGE.test(pr.body ?? ""),
+  missingScreenshots: !pr.draft && files.some(({ filename }) => isRenderedUiFile(filename)) && !DESCRIPTION_IMAGE.test(stripComments(pr.body ?? "")),
 });
+
+// The runtimes a change has to be run in, by the paths it touches: code that
+// only that runtime executes, or that behaves there in its own way. Shared UI
+// outside these paths renders the same everywhere and is proven once.
+const RUNTIME_PATHS = [
+  {
+    runtime: "Desktop (Electron)",
+    paths: /^packages\/(electron\/|ui\/src\/(components\/(desktop|mini-chat)\/|apps\/(ElectronMiniChat|renderElectronMiniChat|miniChat)|(?!assets\/).*(MiniChat|Electron)[^/]*\.tsx?$))/,
+  },
+  {
+    runtime: "VS Code",
+    paths: /^packages\/(vscode\/|ui\/src\/apps\/(VSCode|vscode|renderVSCode))/,
+  },
+  {
+    runtime: "Capacitor mobile",
+    paths: /^packages\/(mobile\/|ui\/src\/(apps\/(Mobile|mobile|renderMobile|Ipad|ipad|useNative|useEdgeSwipe)|(?!assets\/).*[Mm]obile[^/]*\.tsx?$))/,
+  },
+  // The relay has two kinds of client with their own transport code, so a
+  // change to it is run from both.
+  {
+    runtime: "Relay",
+    paths: /^packages\/(ui\/src\/lib\/relay\/|web\/server\/lib\/relay\/|electron\/relay-)/,
+    proof: [/\b(desktop|electron)\b/i, /\b(phone|mobile|simulator|ios|iphone|ipad|android)\b/i],
+  },
+];
+
+const NOT_RUN = /\b(not\s+(yet\s+)?(run|ran|tested|verified|checked|exercised|applicable|available)\b|same\s+code\b|does\s+not\s+run\s+here|untested|unverified|n\/a|(could|can|did|was|were)\s?(not|n['’]t)\s+(be\s+)?(run|ran|test|tested|verify|verified|check|launch|build)|unable\s+to|no\s+access|no\s+(device|simulator|mac)\b)/i;
+
+const runtimeRow = (body, runtime) => {
+  const escaped = runtime.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`^\\|\\s*${escaped}\\s*\\|(.*)\\|\\s*$`, "im").exec(body);
+  return match ? match[1].trim() : null;
+};
+
+const sectionText = (body, heading) => {
+  const match = new RegExp(`^##\\s+${heading}\\s*$([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, "im").exec(body);
+  return match ? match[1].trim() : null;
+};
+
+// PRs opened before the check existed keep the description they were opened with.
+const RUNTIME_PROOF_CUTOVER = "2026-11-16T00:00:00Z";
+
+// A change is ready when it was run in every runtime its paths require and
+// its author knows of no problem in it. Drafts are still being worked on.
+const evaluateRuntimeProof = ({ pr, files }) => {
+  const body = stripComments(pr.body ?? "");
+  // Deleting or moving a runtime's code changes that runtime too.
+  const changed = files
+    .flatMap(({ filename, previous_filename: previous }) => (previous ? [filename, previous] : [filename]))
+    .filter((file) => !isDocsFile(file) && !isTestFile(file));
+  const predates = pr.created_at !== undefined && pr.created_at < RUNTIME_PROOF_CUTOVER;
+  if (pr.draft || predates || changed.length === 0) return { unproven: [], knownProblems: false };
+  const unproven = RUNTIME_PATHS
+    .filter(({ paths }) => changed.some((file) => paths.test(file)))
+    .filter(({ runtime, proof = [] }) => {
+      const row = runtimeRow(body, runtime);
+      return row === null || row === "" || NOT_RUN.test(row) || proof.some((needed) => !needed.test(row));
+    })
+    .map(({ runtime }) => runtime);
+  const known = sectionText(body, "Known problems");
+  return { unproven, knownProblems: known !== null && !/^none(\s+(identified|known))?\.?$/i.test(known) };
+};
 
 const hasMarkerComment = (comments, marker) =>
   comments.some((comment) => comment.user?.type === "Bot" && (comment.body ?? "").includes(marker));
@@ -219,12 +373,16 @@ module.exports = {
   COMMITTED_MEDIA,
   GATE_LABEL,
   GATE_MARKER,
+  IN_HOUSE_LABEL,
   MISSING_SCREENSHOTS,
   TEAM_LABEL,
+  UNPROVEN_RUNTIME,
   evaluateContributionGate,
+  evaluateRuntimeProof,
   evaluateVisualEvidence,
   hasMarkerComment,
   isMaintainer,
   isWaived,
+  linkedIssueNumbers,
   listPullFiles,
 };

@@ -22,13 +22,10 @@
     /* Shared glass surfaces. Semantic surface tokens provide each tint. */
     --oc-glass-blur: 22px;
     --oc-glass-opacity: 52%;
-    /* Menus and popovers open over text: the fill and blur keep what is
-       behind them a soft wash, never words that can still be read. The blur
-       leaves a faint sharp trace of text in Chromium (measured: 3 levels of
-       contrast under a 92% fill, enough to read letters), so the fill is
-       97%, where the trace drops to a single level. */
-    --oc-glass-popover-opacity: 97%;
-    --oc-glass-popover-blur: 40px;
+    /* Menus and popovers are glass like the panels: what is behind them
+       shows through, softened. The maintainer set this by eye; a fill high
+       enough to hide text behind them reads as an opaque box and was reverted. */
+    --oc-glass-popover-opacity: 50%;
     --oc-glass-tooltip-opacity: 62%;
     --oc-glass-saturation: 1.24;
     /* Tone steps of flat tiles (.oc-tile and its inset and hover). Dark themes
@@ -171,8 +168,7 @@
       0 4px 8px 0 rgb(0 0 0 / 0.25);
     --oc-glass-blur: 26px;
     --oc-glass-opacity: 50%;
-    --oc-glass-popover-opacity: 97%;
-    --oc-glass-popover-blur: 40px;
+    --oc-glass-popover-opacity: 52%;
     --oc-glass-tooltip-opacity: 64%;
     --oc-glass-saturation: 1.16;
     /* Default Dark Theme - using OKLCH color space */
@@ -441,7 +437,6 @@
 .oc-glass-popover {
   --oc-glass-color: var(--surface-elevated);
   --oc-glass-opacity: var(--oc-glass-popover-opacity);
-  --oc-glass-blur: var(--oc-glass-popover-blur);
 }
 
 .oc-glass-tooltip {
@@ -462,11 +457,24 @@
   background-color: var(--surface-elevated);
 }
 
+/* In dark themes the elevated fill stood out against the chat as a bright
+   block under everything the user reads. These surfaces sit 40% of the way
+   from the chat's background to it; their ring, lit top line and shadow
+   still lift them. Menus and cards keep the full elevated fill. */
+.dark .oc-surface-floating {
+  --oc-chrome-fill: color-mix(in oklab, var(--surface-elevated) 40%, var(--surface-background));
+  background-color: var(--oc-chrome-fill);
+}
+
+.dark .oc-composer-surface {
+  --oc-composer-background: var(--oc-chrome-fill);
+}
+
 /* The composer in light themes: light themes paint --surface-elevated darker
    than the page, which made the app's main raised surface read greyer than
    the canvas, as if recessed or disabled. Like every raised control in a
    light theme it takes the canvas colour and lifts on its ring and shadow.
-   Dark themes keep the elevated fill, lighter than the page. */
+   Dark themes take the chrome fill above, between the page and elevated. */
 .oc-composer-surface {
   --oc-composer-foreground: var(--surface-elevated-foreground);
   --oc-composer-background: var(--surface-elevated);

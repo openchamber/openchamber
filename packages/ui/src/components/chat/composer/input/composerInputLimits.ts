@@ -1,0 +1,5 @@
+export const MAX_VISIBLE_COMPOSER_LINES = 8;
+
+export const MAX_MOBILE_COMPOSER_LINES = 16;
+
+export const MOBILE_COMPOSER_BOUND_GAP_PX = 4;

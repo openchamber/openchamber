@@ -35,7 +35,7 @@ Adding or porting a WS endpoint needs every step below, or it breaks over the re
 - **Two implementations must stay byte-compatible.** Any wire-format, frame-type, handshake, or batching change must update both the TS implementation and the JS host mirror and keep `packages/web/server/lib/relay/cross-compat.test.js` green.
 - **Frame types live in `protocol.ts`** and must match across `protocol.ts`, `tunnel-codec.ts`, and `tunnel-codec.js`. Adding a frame type without mirroring it corrupts the stream on one side.
 - **Frame batching is capability-negotiated** in the handshake with a legacy fallback, so mixed client/host app versions still interoperate. Preserve the negotiation and the single-frame fallback; do not make batching unconditional.
-- **The encrypted-frame counter/IV is per-direction and strictly increasing.** One encrypted WS message = one encrypt call = one counter tick. Keep encrypt+send serialized per direction; do not reorder or parallelize it.
+- **The encrypted-frame counter/IV is per-direction and consecutive.** One encrypted WS message = one encrypt call = one counter tick, and the receiver rejects any counter other than the previous one plus one. Keep encrypt+send serialized per direction; do not reorder or parallelize it.
 
 ## Runtime Transport Branch
 

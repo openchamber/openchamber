@@ -150,6 +150,47 @@ describe('PAT account auth', () => {
     expect(accounts.tokenFor({ ...session })).toBeUndefined();
   });
 
+  it.each([null, undefined, 7, 'offline', Symbol('offline')])('passes a thrown value unchanged to the classifier: %s', async (failure) => {
+    const store = fakeStore();
+    let failing = false;
+    const classifyFailure = vi.fn(() => 'unreachable');
+    const accounts = createPatAccountAuth({
+      descriptor,
+      store,
+      events: { connected: vi.fn(), invalidated: vi.fn(), removed: vi.fn() },
+      verify: async () => {
+        if (failing) throw failure;
+        return { id: 7, login: 'alice' };
+      },
+      probe: async () => ({ supported: true }),
+      classifyFailure,
+    });
+    await accounts.auth.connectToken({ instance: ORIGIN, token: 'pat-1' });
+    failing = true;
+
+    await expect(accounts.auth.status({ instance: ORIGIN })).resolves.toMatchObject({ status: 'unreachable', connected: false });
+    expect(classifyFailure).toHaveBeenCalledWith(failure);
+  });
+
+  it('retains an unchecked error message in the SSH response body', async () => {
+    const message = { toString: () => 'bad address' };
+    const accounts = createPatAccountAuth({
+      descriptor: { ...descriptor, settings: [{ key: 'sshUrl' }] },
+      store: fakeStore(),
+      events: { connected: vi.fn(), invalidated: vi.fn(), removed: vi.fn() },
+      verify: async () => ({ id: 7, login: 'alice' }),
+      probe: async () => ({ supported: true }),
+      classifyFailure: () => 'provider-error',
+      normalizeSshUrl: () => { throw { message }; },
+      parseSshUrl: () => null,
+    });
+
+    await expect(accounts.auth.setSshUrl({ instance: ORIGIN, sshUrl: 'bad' })).rejects.toMatchObject({
+      message: 'bad address',
+      sourceControlResponse: { status: 400, body: { error: message, code: 'INVALID_SSH_URL' } },
+    });
+  });
+
   it('answers 401 naming the exact account when it does not resolve', async () => {
     const { auth } = setup();
     await expect(auth.resolveAccount({ instance: ORIGIN })).rejects.toMatchObject({

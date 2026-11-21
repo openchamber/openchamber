@@ -19,7 +19,7 @@ Target: Gerrit 3.8 or newer, verified against live 3.8.9 and 3.10.9 (see *Verifi
 - A change maps to a `ChangeRequest` with `draft` = `work_in_progress`, `private`, `topic`, hashtags as read-only `labels`, `head` = the current patchset ref (`refs/changes/NN/N/P`), `headLabel` = `Patchset P`, `revisionNumber`, and `mergeable` = `submittable` (open changes only; `mergeableState` `clean` or `blocked`).
 - Status is found by the Change-Id trailer of the local branch tip, never by branch name: `change:<id> project:<name>`, up to 10 candidates. Among cherry-picks of one Change-Id the open change on the branch the local branch tracks on the primary remote wins (`git rev-parse --symbolic-full-name <branch>@{upstream}` with `branch.<b>.remote`; an upstream on another remote counts as none), then the one on the project's default branch (`/projects/{name}/HEAD`), then the only open one, then the most recently updated open one, then the newest merged or abandoned one as history. No Change-Id answers `changeRequest: null` without asking Gerrit. `localRevision.uploadedAs` is the patchset whose commit is the local tip, null when local commits are not uploaded. A local Git failure (no such branch) fails the read.
 - An open change's status and context carry `stack` from `/revisions/current/related`, reversed to bottom-first (`number: null`, `base` = the change's branch, each `head` the layer's current patchset ref). Entries without a change number or of another project are left out; one relative is no stack (null). An unreadable chain leaves `stack` absent, except a 401.
-- Context reads `ALL_REVISIONS`, `CURRENT_COMMIT`, `LABELS`, `DETAILED_LABELS`, `DETAILED_ACCOUNTS`, `MESSAGES`, `SUBMITTABLE`, `SUBMIT_REQUIREMENTS`: 3.8 leaves a label's `approved` / `rejected` / `recommended` / `disliked` summary out under `DETAILED_LABELS` alone. `reviewers` comes with `LABELS`, so mutation reads and reviewer candidates ask for that, not the detailed labels. `voteLabels` list each label's values, the caller's `permitted` values, `blocking`, a status (rejected over approved over disliked over recommended) and the non-zero votes; a zero in `all` only means that person may vote. Change messages are `issueComments` (with `revision`), published inline comments are `reviewComments`. `verdicts` are absent: votes hosts have none. `ci` is null: a Verified label is a vote.
+- Context reads `ALL_REVISIONS`, `CURRENT_COMMIT`, `LABELS`, `DETAILED_LABELS`, `DETAILED_ACCOUNTS`, `MESSAGES`, `SUBMITTABLE`, `SUBMIT_REQUIREMENTS`: 3.8 leaves a label's `approved` / `rejected` / `recommended` / `disliked` summary out under `DETAILED_LABELS` alone. `reviewers` comes with `LABELS`, so mutation reads and reviewer candidates ask for that, not the detailed labels. `voteLabels` list each label's values, the caller's `permitted` values, `blocking`, a status (rejected over approved over disliked over recommended) and the non-zero votes; a zero in `all` only means that person may vote, so it is not an activity. `reviewerStates` reads the `Code-Review` label's `all` votes (the label's top value, +2 without `values`, `approved`; a lower positive vote `commented`; any negative vote `changes_requested`), a zero or value-less entry as `pending`, and `pending_reviewers` and assigned reviewers (`reviewers.REVIEWER`) without a vote as `pending`, one entry per account and never the change owner; a change with no `Code-Review` label leaves the field out. Change messages are `issueComments` (with `revision`), published inline comments are `reviewComments`. `verdicts` are absent: votes hosts have none. `ci` is null: a Verified label is a vote.
 - Files, diff, patch and file contents are those of `revision` (a patchset commit SHA the change has; another is a 404), the current patchset when none is named. The diff is the diff part of `/revisions/{rev}/patch` (base64 `format-patch` mail; headers and signature dropped). That patch has no rename detection: a renamed file's patch is the addition of its new path (the deletion of the old path is in `diff` too), while the file list still says renamed with `previousPath`. `/COMMIT_MSG`, `/MERGE_LIST` and `/PATCHSET_LEVEL` are not listed as files; `/COMMIT_MSG` can still be read, with no earlier side. The earlier side of a file is the patchset's first parent (`parent=1`). File contents over 5 MiB are `413 file-too-large`.
 - Mutation kinds and digests are the standard table's (`source-control/standard-mutations.js`), including its votes branch: `/pr/review` takes `{ votes, body? }` under `change-request-review`, `/pr/merge` `{ method: 'submit' }` under `change-request-merge`. Both digests are frozen in `provider.test.js`. A review answer is accepted with or without `change_info` beside `labels` (3.10.9 adds it, 3.8.9 does not); only an `error` in it fails the vote. Routes performed: merge (submit), ready, draft, review (votes), comment, state, reviewers. `/pr/create` is not among them (a change is created by push), nor are update, labels and the issue routes; the shell answers 501.
 - Submit and votes require `target.headSha` (the standard table answers 400 without it; its `/pr/merge` digest stays `{ method }`) and check the current patchset against it first, so a newer upload is `SOURCE_CONTROL_MUTATION_TARGET_MISMATCH`, never a submit or vote on unread code. `submit()` also refuses a target without one, so no other path posts an unchecked submit. Votes are posted to that commit (`/revisions/{sha}/review`). Submit reconciles by `status === 'MERGED'`, ready by `work_in_progress` not set, draft by `work_in_progress` set, state by the change status (closed = abandoned, open = restored); votes and comments stay `outcome-unknown`.
@@ -27,6 +27,14 @@ Target: Gerrit 3.8 or newer, verified against live 3.8.9 and 3.10.9 (see *Verifi
 - Reviewer candidates are the owners and reviewers of the project's 25 most recent changes: Gerrit has no project-member list a user can read.
 - A worktree from a change uses the branch `change-<number>`, the current patchset ref as `headRef`, classification `same-repository`, and `<origin>/a/<project>` as the endpoint.
 - List filters: `open` = `status:open`, `closed` = `status:closed` (merged and abandoned), `merged` = `status:merged`; `created` = `owner:self`, `reviewRequested` = `reviewer:self -owner:self`, `assigned` = `attention:self`; a search is the change number when it is one, else a quoted `message:` term. Pages are 20 changes, `S` offset, more while the last one says `_more_changes`.
+- Upstream lookup accepts only a branch name that Git reads as one argument. `rev-parse` needs the short `<branch>@{upstream}` form after its options, so option, range and revision syntax must be rejected before the call.
+- Tracking refs strip the full configured remote name. A remote name can contain slashes, so splitting the tracking ref on its first slash can select the wrong target branch.
+- Branch collections must be complete. Branch lists have no continuation marker, so a full page requires another read; reaching the collection bound fails the read because a capped list cannot claim completeness.
+- Live summaries omit changes that cannot be read, leaving their state unknown. A 401 fails the whole read so the account is reconciled.
+- A linked read may select a project outside the binding's primary project. Ordinary bound reads must reject that selector.
+- A change represents one commit, so its timeline always describes the current patchset, even when the diff shows an older revision.
+- Published messages and inline comments retain their ids but cannot be edited or deleted through this provider. Only the viewer's own drafts may change; Gerrit exposes no other viewer's drafts.
+- Discarding a review deletes draft comments individually because Gerrit has no whole-draft deletion call. A failure leaves the remaining comments available for another discard.
 
 ## Enterprise mode
 
@@ -63,6 +71,80 @@ Still unverified:
 Gerrit is the last built-in in `BUILT_IN_DESCRIPTORS` (`source-control/provider-descriptors.js`) and `BUILT_IN_LOADERS` (`source-control/provider-registry.js`), so the web adapter's older-server fallback keeps the leading entries. Its submit and votes digests are frozen in `source-control/mutation-digest-freeze.test.js` as well as `provider.test.js`; `source-control/provider-routes.gerrit.test.js` drives every route through the shell.
 
 ## Decisions
+
+### Why wire values retain their JSON type
+
+The REST client parses JSON without validating an endpoint-specific schema.
+Mapper inputs therefore use the JSON schema's inferred type until a mapper
+checks the fields it needs. Revision timestamps can be null when Gerrit omits
+them or sends an invalid timestamp; the local revision contract preserves that
+value even though the shared `ChangeRequestRevision` declaration requires a
+string.
+
+The same shared declaration requires a string local-tip SHA, while missing local
+tips produce null here. Its mutation-route collection is mutable; the provider's
+published collection is frozen. These mismatches belong to
+`source-control/provider-contract.d.ts`. `ProbeInstance` already accepts the null
+version produced by an anonymously refused version read.
+
+`client.ts` retains an explicitly present `body: undefined` for bodyless calls
+to its injected fetch function. `fetch.d.ts` adds the overload that accepts this
+runtime-supported input without dropping the property or substituting null.
+The global fetch guard's header reader accepts header-bearing options, and its
+body reader accepts an explicitly undefined body, which their code already
+handles. `GerritRequestError.status` stays absent when no status was supplied.
+
+`resources.ts` consumes a resource-client contract whose JSON answers retain
+the schema's inferred type. It does not depend on the JavaScript client's
+credential defaults. Its mutation context and target fields use the shared
+`ProviderReadContext` and SDK `SourceControlMutationTarget`; the standard
+mutation normalizers require a change number before target resolution.
+
+The provider uses `StandardMutationInput` from the shared normalizer. The
+mutation route selects which normalized fields are required by its operation.
+The resource wrapper attaches the acting account to rejected objects. A
+rejection that cannot take those fields still fails with `TypeError`.
+
+Review draft maps validate their container only. Draft members, timeline commit
+fields and published comment bodies retain their JSON types until their
+individual checks. Copying published comments must preserve own `__proto__`
+properties without changing the copy's prototype. A null draft still fails
+before a deletion is sent for that entry. Line-range comparison retains
+JavaScript's numeric coercion of the unchecked ending line.
+
+### Why optional property probes retain their runtime checks
+
+Dictionary lookups retain `Array.isArray` and own-property checks because names
+can select inherited Object members. String, integer and object checks still
+validate provider JSON and Git output before those values enter mapped results.
+
+### Why Gerrit defaults remain explicit
+
+The 16 KiB comment limit follows Gerrit's documented
+[`change.commentSizeLimit`](https://gerrit-review.googlesource.com/Documentation/config-gerrit.html#change.commentSizeLimit)
+default. [Related changes](https://gerrit-review.googlesource.com/Documentation/rest-api-changes.html#related-change-and-commit-info)
+omit work-in-progress status, so stack layers retain `draft: false`.
+
+Manual redirects can produce an opaque response under the
+[Fetch specification](https://fetch.spec.whatwg.org/#concept-filtered-response-opaque-redirect).
+The client rejects that response alongside ordinary HTTP redirects before
+reading the body.
+
+### Why writes are sent once and not retried
+
+A write answered with 502 may already be applied. The durable executor handles that uncertainty; a client retry can duplicate the write.
+
+### Why reconciliation requires evidence and not a matching value alone
+
+A matching vote can predate the call, and a comment provides no evidence that distinguishes a lost write from an unsent one, so their outcomes stay unknown. Reviewer reconciliation requires an exact set match because a later edit can change the set in either direction.
+
+### Why one resource service per session and not per operation
+
+A session's reads, mutation target resolution and provider calls share one client. Errors retain the acting account identity so the route shell applies 401 handling to that account.
+
+### Why the icon uses fewer lines than the original logo
+
+The icon uses one removed line and one added line in a 24x24 box with the other provider icons' line weight. This keeps it legible at 16 pixels.
 
 ### Why a fetch client and not a Gerrit SDK
 

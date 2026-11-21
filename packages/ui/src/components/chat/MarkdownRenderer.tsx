@@ -5,9 +5,6 @@ import { cn } from '@/lib/utils';
 import { getLoadedMarkdownRendererModule, loadMarkdownRendererModule } from './markdownRendererLoader';
 import type { MarkdownContentProps, MarkdownRendererProps, SimpleMarkdownRendererProps as SimpleRendererProps } from './MarkdownRendererImpl';
 
-// Thin lazy wrapper around the MarkdownRenderer implementation.
-// Streamdown, its official plugins and beautiful-mermaid load on demand, keeping the
-// initial bundle lean.
 
 const MarkdownRendererLazy = lazyWithChunkRecovery(() =>
   loadMarkdownRendererModule().then((m) => ({ default: m.MarkdownRenderer }))
@@ -52,8 +49,6 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = (props) => {
 };
 
 export const MarkdownContent: React.FC<MarkdownContentProps> = (props) => {
-  // Chosen once per mount: swapping the lazy component for the loaded one at
-  // the same spot would remount the content and load its media again.
   const [loaded] = React.useState(getLoadedMarkdownRendererModule);
   if (loaded) return <loaded.MarkdownContent {...props} />;
   return (

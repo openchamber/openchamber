@@ -6,6 +6,7 @@ import { ConsoleBudgetsSection } from './ConsoleBudgetsSection';
 import { useQuotaAutoRefresh, useQuotaProviders, useQuotaStore } from '@/stores/useQuotaStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { QuotaProviderLogo } from '@/components/usage/QuotaProviderLogo';
+import { selectVisibleModelNames, toggleVisibleModel } from '@/components/usage/usageModelSelection';
 import {
   Collapsible,
   CollapsibleContent,
@@ -53,7 +54,7 @@ export const UsagePage: React.FC = () => {
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const setProviderInDropdown = useQuotaStore((state) => state.setProviderInDropdown);
   const selectedModels = useQuotaStore((state) => state.selectedModels);
-  const toggleModelSelected = useQuotaStore((state) => state.toggleModelSelected);
+  const setSelectedModels = useQuotaStore((state) => state.setSelectedModels);
   const applyDefaultSelections = useQuotaStore((state) => state.applyDefaultSelections);
   const providers = useQuotaProviders();
 
@@ -75,12 +76,13 @@ export const UsagePage: React.FC = () => {
   const providerMeta = providers.find((provider) => provider.id === selectedProviderId);
   const providerName = providerMeta?.name ?? selectedProviderId ?? t('settings.usage.sidebar.title');
   const usage = selectedResult?.usage;
+  const accountLabel = selectedResult?.accountLabel;
+  const isOpenCodeGo = selectedProviderId === 'opencode-go';
   const refreshError = selectedProviderId ? refreshErrors[selectedProviderId] : undefined;
   const selectedProviderError = refreshError
     ? usage
       ? t('header.services.usageRefreshFailedStale', { error: refreshError })
       : refreshError
-    // OpenCode Go reports a failed Go read beside the Console budgets it still has.
     : selectedResult?.configured && selectedResult.error
       ? selectedResult.error
       : null;
@@ -139,19 +141,24 @@ export const UsagePage: React.FC = () => {
     }));
   }, []);
 
+  const providerSelectedModels = React.useMemo(
+    () => (selectedProviderId ? (selectedModels[selectedProviderId] ?? []) : []),
+    [selectedModels, selectedProviderId],
+  );
+  const providerModelNames = React.useMemo(() => providerModels.map((model) => model.name), [providerModels]);
+  const visibleModelNames = React.useMemo(
+    () => new Set(selectedProviderId
+      ? selectVisibleModelNames(selectedProviderId, providerModelNames, providerSelectedModels)
+      : []),
+    [providerModelNames, providerSelectedModels, selectedProviderId],
+  );
+
   const handleModelToggle = React.useCallback((modelName: string) => {
     if (!selectedProviderId) return;
-    toggleModelSelected(selectedProviderId, modelName);
-    const currentSelected = selectedModels[selectedProviderId] ?? [];
-    const isSelected = currentSelected.includes(modelName);
-    const nextSelected = isSelected
-      ? currentSelected.filter((m) => m !== modelName)
-      : [...currentSelected, modelName];
-    const nextSettings: Record<string, string[]> = { ...selectedModels, [selectedProviderId]: nextSelected };
-    void updateDesktopSettings({ usageSelectedModels: nextSettings });
-  }, [selectedProviderId, selectedModels, toggleModelSelected]);
-
-  const providerSelectedModels = selectedProviderId ? (selectedModels[selectedProviderId] ?? []) : [];
+    const nextSelected = toggleVisibleModel(selectedProviderId, providerModelNames, providerSelectedModels, modelName);
+    setSelectedModels(selectedProviderId, nextSelected);
+    void updateDesktopSettings({ usageSelectedModels: { ...selectedModels, [selectedProviderId]: nextSelected } });
+  }, [providerModelNames, providerSelectedModels, selectedModels, selectedProviderId, setSelectedModels]);
 
   if (!selectedProviderId) {
     return (
@@ -173,9 +180,9 @@ export const UsagePage: React.FC = () => {
             plan: selectedResult.planLabel,
             time: formatTime(lastUpdated, timeFormatPreference),
           })
-        ) : selectedResult?.accountLabel ? (
+        ) : accountLabel && !isOpenCodeGo ? (
           t('settings.usage.page.header.lastUpdatedWithAccount', {
-            account: selectedResult.accountLabel,
+            account: accountLabel,
             time: formatTime(lastUpdated, timeFormatPreference),
           })
         ) : (
@@ -198,10 +205,6 @@ export const UsagePage: React.FC = () => {
         <p className="typography-ui-label text-foreground pb-8">{t('settings.usage.page.state.noData')}</p>
       )}
 
-      {/* Only the selected provider's own failure belongs in its panel. The
-          store's global `error` is whichever provider failed first and has no
-          UI consumer left; shown here it labeled DeepSeek with Claude's
-          rate-limit message. */}
       {selectedProviderError && (
         <div className="mb-8 rounded-lg bg-[var(--status-error-background)] px-4 py-3">
           <p className="typography-ui-label font-medium text-[var(--status-error)]">{t('settings.usage.page.state.refreshFailedTitle')}</p>
@@ -209,10 +212,8 @@ export const UsagePage: React.FC = () => {
         </div>
       )}
 
-      {/* Providers with an inline credentials form don't need the "go to Providers" banner — the form IS the fix. */}
       {selectedResult && !selectedResult.configured && !hasCredentialsForm && (
         <div className="mb-8 rounded-lg bg-[var(--status-warning-background)] px-4 py-3">
-          {/* Claude usage comes from Claude Code's own login, which Providers cannot add. */}
           {selectedProviderId === 'claude' ? (
             <>
               <p className="typography-ui-label font-medium text-[var(--status-warning)]">{t('settings.usage.page.state.claudeSignedOutTitle')}</p>
@@ -234,10 +235,13 @@ export const UsagePage: React.FC = () => {
       )}
 
       {usage?.windows && Object.keys(usage.windows).length > 0 && (
-        <SettingsSection settingsItem="usage.model-quotas">
+        <SettingsSection
+          settingsItem="usage.model-quotas"
+          description={isOpenCodeGo && accountLabel ? <bdi className="wrap-anywhere">{accountLabel}</bdi> : undefined}
+        >
           <div className="divide-y divide-[var(--surface-subtle)]">
             {Object.entries(usage.windows).map(([label, window]) => (
-              <UsageCard key={label} title={label} window={window} providerId={selectedProviderId} />
+              <UsageCard key={label} title={label} window={window} providerId={selectedProviderId} showGiftReset />
             ))}
           </div>
         </SettingsSection>
@@ -281,7 +285,7 @@ export const UsagePage: React.FC = () => {
                         const entries = Object.entries(model.windows.windows);
                         if (entries.length === 0) return null;
                         const [label, window] = entries[0];
-                        const isSelected = providerSelectedModels.includes(model.name);
+                        const isShown = visibleModelNames.has(model.name);
 
                         return (
                           <UsageCard
@@ -289,8 +293,10 @@ export const UsagePage: React.FC = () => {
                             title={label}
                             subtitle={getDisplayModelName(model.name)}
                             window={window}
+                            providerId={selectedProviderId}
                             showToggle
-                            toggleEnabled={isSelected}
+                            toggleEnabled={isShown}
+                            toggleDisabled={isShown && visibleModelNames.size === 1}
                             onToggle={() => handleModelToggle(model.name)}
                           />
                         );
@@ -333,7 +339,7 @@ export const UsagePage: React.FC = () => {
                         const entries = Object.entries(model.windows.windows);
                         if (entries.length === 0) return null;
                         const [label, window] = entries[0];
-                        const isSelected = providerSelectedModels.includes(model.name);
+                        const isShown = visibleModelNames.has(model.name);
 
                         return (
                           <UsageCard
@@ -341,8 +347,10 @@ export const UsagePage: React.FC = () => {
                             title={label}
                             subtitle={getDisplayModelName(model.name)}
                             window={window}
+                            providerId={selectedProviderId}
                             showToggle
-                            toggleEnabled={isSelected}
+                            toggleEnabled={isShown}
+                            toggleDisabled={isShown && visibleModelNames.size === 1}
                             onToggle={() => handleModelToggle(model.name)}
                           />
                         );

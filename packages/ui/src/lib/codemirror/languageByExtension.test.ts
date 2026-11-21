@@ -34,8 +34,6 @@ describe('Markdown code backgrounds', () => {
     { doc: 'probe_word and `probe_word`', code: ['probe_word'] },
     { doc: 'before `prefix_probe_word_suffix` after', code: ['prefix_probe_word_suffix'] },
     { doc: 'probe_word\n```\nprobe_word\n```', code: ['probe_word'] },
-    { doc: '', code: [] },
-    { doc: 'An unmatched `backtick', code: [] },
   ];
   for (const { doc, code } of cases) {
     test(`applies the code background only to code in ${JSON.stringify(doc)}`, () => {

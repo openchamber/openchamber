@@ -11,7 +11,7 @@ export const meta = {
 // Agree the models with the maintainer before the run.
 const REPO = 'openchamber/openchamber';
 const SKILL = '.agents/skills/triage-prs/SKILL.md';
-const SOL = 'openai/gpt-6.1-sol';
+const SOL = 'openai/gpt-6.2-sol';
 const models = { sweep: SOL, review: SOL, report: SOL, ...(args.models || {}) };
 const onlyPrs = Array.isArray(args.prs) ? args.prs.map(Number) : [];
 const skip = Array.isArray(args.skip) ? args.skip.map(String) : [];

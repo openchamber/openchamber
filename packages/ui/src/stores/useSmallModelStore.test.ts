@@ -1,22 +1,18 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
+import { directoryEnvironment } from './test-support/directoryEnvironment';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+
+const environment = directoryEnvironment();
 
 let responses: Array<{ status: number; body: unknown }> = [];
 let calls: string[] = [];
 
-mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: async (url: string) => {
-    calls.push(url);
-    const next = responses.shift() ?? { status: 200, body: { available: true } };
-    return new Response(JSON.stringify(next.body), { status: next.status, headers: { 'Content-Type': 'application/json' } });
-  },
-}));
-mock.module('@/lib/runtime-switch', () => ({
-  getRuntimeKey: () => 'runtime-a',
-  subscribeRuntimeEndpointChanged: () => () => {},
-}));
-mock.module('@/lib/configSync', () => ({
-  subscribeToConfigChanges: () => () => {},
-}));
+environment.respond(async (url) => {
+  if (url.pathname !== '/api/small-model') throw new Error(`Unexpected request: ${url}`);
+  calls.push(`${url.pathname}${url.search}`);
+  const next = responses.shift() ?? { status: 200, body: { available: true } };
+  return Response.json(next.body, { status: next.status });
+});
 
 const { useSmallModelStore, selectSmallModelAvailability } = await import('./useSmallModelStore');
 
@@ -50,7 +46,7 @@ describe('useSmallModelStore', () => {
     responses = [{ status: 200, body: { available: true } }];
     await useSmallModelStore.getState().ensureFresh('/p');
     useSmallModelStore.setState((state) => ({
-      byKey: { ...state.byKey, 'runtime-a::/p': { availability: 'available', fetchedAt: 0 } },
+      byKey: { ...state.byKey, [`${getRuntimeKey()}::/p`]: { availability: 'available', fetchedAt: 0 } },
     }));
     responses = [{ status: 500, body: { error: 'down' } }];
     await useSmallModelStore.getState().ensureFresh('/p');
