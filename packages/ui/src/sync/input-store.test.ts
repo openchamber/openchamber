@@ -149,7 +149,8 @@ describe("input-store attachments", () => {
       // The original bytes, unconverted, under the original name.
       const [, files] = write.mock.calls[0]
       expect(files.map(({ filename }) => filename)).toEqual(["IMG_4015.heic"])
-      expect(new TextDecoder().decode(files[0].bytes)).toBe("heic-data")
+      const bytes = files[0].bytes
+      expect(new TextDecoder().decode(bytes instanceof Uint8Array ? bytes : await bytes())).toBe("heic-data")
       const [file] = useInputStore.getState().attachedFiles
       expect(file?.mimeType).toBe("text/plain")
       expect(file?.filename).toBe("IMG_4015.heic")

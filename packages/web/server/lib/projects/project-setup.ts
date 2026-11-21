@@ -1,6 +1,7 @@
 import { isRecord } from '../shared/guards.js';
 import crypto from 'node:crypto';
 import { z } from 'zod';
+import type { JsonObject, JsonValue } from '../magic-prompts/runtime.js';
 import type { ActionPlatform, DraftStarter, PersonalProjectSetup, ProjectAction, SharedProjectConfig, SharedProjectDocument, SharedProjectRead, StoredProjectSetupPatch } from './contracts.js';
 
 const isObjectRecord = (value: unknown): value is SharedProjectDocument => isRecord(value);
@@ -224,17 +225,19 @@ const EMPTY_SHARED: Readonly<SharedProjectConfig> = Object.freeze({
   plansDir: null,
 });
 
-export const parseSharedProjectConfig = (raw: string): Exclude<SharedProjectRead, { status: 'missing' }> => {
-  let parsed: unknown;
+const isJsonObject = (value: JsonValue): value is JsonObject => isObjectRecord(value);
+
+export const parseSharedProjectConfig = (raw: string): Exclude<SharedProjectRead<JsonObject>, { status: 'missing' }> => {
+  let parsed: JsonValue;
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
     return { status: 'invalid', reason: `invalid JSON: ${error instanceof Error ? error.message : String(error)}` };
   }
-  if (!isObjectRecord(parsed)) return { status: 'invalid', reason: 'not an object' };
+  if (!isJsonObject(parsed)) return { status: 'invalid', reason: 'not an object' };
   if (parsed.version !== SHARED_CONFIG_VERSION) return { status: 'invalid', reason: `unsupported version ${JSON.stringify(parsed.version)}` };
   const document = parsed;
-  const invalid = (reason: string): Extract<SharedProjectRead, { status: 'invalid' }> => ({ status: 'invalid', reason, document });
+  const invalid = (reason: string): Extract<SharedProjectRead<JsonObject>, { status: 'invalid' }> => ({ status: 'invalid', reason, document });
   if ('setupWorktree' in parsed && !Array.isArray(parsed.setupWorktree)) return invalid('setupWorktree must be an array');
   if ('setupWorktreeWait' in parsed && !isBoolean(parsed.setupWorktreeWait)) return invalid('setupWorktreeWait must be a boolean');
   if ('teardownWorktree' in parsed && !Array.isArray(parsed.teardownWorktree)) return invalid('teardownWorktree must be an array');

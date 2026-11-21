@@ -6,24 +6,27 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { type FileNode } from './fileViewTypes';
 import { getParentDirectoryPath } from './fileViewPaths';
 import { type useFileDirectory } from './useFileDirectory';
+import { type useFileImageFullscreen } from './useFileImageFullscreen';
 import { type useFileKinds } from './useFileKinds';
 import { type useFileScope } from './useFileScope';
 import { type useFileTabs } from './useFileTabs';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 
-export function useFileImageNavigation({ fileDirectory, fileKinds, scope, tabs, files, visible }: {
+export function useFileImageNavigation({ fileDirectory, fileKinds, imageFullscreen, scope, tabs, files, visible }: {
   fileDirectory: Pick<ReturnType<typeof useFileDirectory>, 'mapDirectoryEntries'>;
   fileKinds: Pick<ReturnType<typeof useFileKinds>, 'isSelectedImage' | 'isSvgSource'>;
+  imageFullscreen: Pick<ReturnType<typeof useFileImageFullscreen>, 'open'>;
   scope: Pick<ReturnType<typeof useFileScope>, 'panelRoot' | 'showGitignored' | 'treeScope' | 'treeScopeRef'>;
   tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile' | 'selectedFilePath'>;
-  files: ReturnType<typeof useRuntimeAPIs>['files'];
+  files: Pick<ReturnType<typeof useRuntimeAPIs>['files'], 'listDirectory'>;
   visible: boolean;
 }) {
   const { mapDirectoryEntries } = fileDirectory;
   const { isSelectedImage, isSvgSource } = fileKinds;
   const { panelRoot, showGitignored, treeScope, treeScopeRef } = scope;
   const { selectedFile, selectedFilePath } = tabs;
-  const imageFolder = visible && selectedFile && isSelectedImage && !isSvgSource ? getParentDirectoryPath(selectedFile.path) : '';
+  const showsImage = isSelectedImage && (!isSvgSource || imageFullscreen.open);
+  const imageFolder = visible && selectedFile && showsImage ? getParentDirectoryPath(selectedFile.path) : '';
   const [imageFolderListing, setImageFolderListing] = React.useState<{ scope: string; folder: string; readFor: string; entries: FileNode[] } | null>(null);
   const imageFolderListingCurrent = Boolean(imageFolder && imageFolderListing?.scope === treeScope && imageFolderListing.folder === imageFolder);
   const imageFolderHasSelected = Boolean(imageFolderListingCurrent && imageFolderListing?.entries.some((entry) => entry.path === selectedFilePath));

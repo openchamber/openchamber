@@ -3,8 +3,8 @@ import type { TunnelCapabilities, TunnelStartRequest } from './types.js';
 export interface TunnelController {
   provider?: string;
   mode?: string;
-  httpsPort?: number;
-  stop?: () => void;
+  httpsPort?: number | undefined;
+  stop: () => void;
   getPublicUrl?: () => string | null;
   getEffectiveConfigPath?: () => string | null;
   getResolvedHostname?: () => string | null;

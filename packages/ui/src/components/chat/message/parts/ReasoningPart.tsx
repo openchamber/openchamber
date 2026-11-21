@@ -13,7 +13,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import { MarkdownRenderer } from '../../MarkdownRenderer';
 import type { MarkdownVariant } from '../../MarkdownRendererImpl';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
-import { commitStreamedText } from '../../lib/streamTextCommit';
 import type { StreamPhase } from '../types';
 import { useReasoningReveal } from '@/components/chat/search/reasoningReveal';
 import { dispatchRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
@@ -37,7 +36,7 @@ const cleanReasoningText = (text: string): string => {
         .trim();
 };
 
-const SUMMARY_MAX_CHARS = 80;
+const SUMMARY_MAX_CHARS = 400;
 const SUMMARY_SOURCE_CHARS = 4000;
 const EXPANDED_CONTENT_UNMOUNT_DELAY_MS = 200;
 const EXPANDED_CONTENT_TRANSITION = { duration: 0.2, ease: 'easeOut' as const };
@@ -482,13 +481,11 @@ const ReasoningPart = React.memo(({
     // external: #2020 Cached reasoning without time.end is not evidence of live streaming.
     const isLiveStreamPhase = streamPhase === 'streaming' || streamPhase === 'cooldown';
     const isStreaming = isLiveStreamPhase && typeof time?.end !== 'number';
-    const throttledTextRaw = useStreamingTextThrottle({
+    const throttledText = useStreamingTextThrottle({
         text: textContent,
         isStreaming,
         identityKey: `${messageId}:${part.id ?? 'reasoning'}`,
     });
-    const throttledText = isStreaming ? commitStreamedText(throttledTextRaw) : throttledTextRaw;
-
     if (!isStreaming && isInvisibleText(throttledText)) {
         return null;
     }

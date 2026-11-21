@@ -21,7 +21,6 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ScheduledTask } from '@/lib/scheduledTasksApi';
-import { fetchEligibleScheduledTaskTargets } from '@/lib/scheduledTasksApi';
 import { BranchSelector, useBranchOptions } from '@/components/multirun/BranchSelector';
 import {
   buildScheduledTaskPayload,
@@ -29,12 +28,12 @@ import {
   validateDraft,
   type ScheduledTaskDraft,
 } from './scheduledTaskEditorDraft';
+import { ScheduledTaskTargetPicker } from './ScheduledTaskTargetPicker';
+import { useScheduledTaskTargets } from './useScheduledTaskTargets';
 import { useI18n } from '@/lib/i18n';
 import { isValidCronExpression, getNextRuns, CRON_EXAMPLES } from '@/lib/cron';
 import { canonicalizeTimezone } from '@/lib/timezones';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
-import { useGlobalSessionsStore, refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
-import { useAllLiveSessions } from '@/sync/sync-context';
 import { SettingsStackedField } from '@/components/sections/shared/SettingsSection';
 import { DatePicker, TimePill } from '@/components/ui/date-time';
 import { useCalendarPreferences } from '@/components/ui/useCalendarPreferences';
@@ -188,49 +187,7 @@ export function ScheduledTaskEditorDialog(props: {
   React.useEffect(() => {
     if (open) setProjectId(props.projectId);
   }, [open, props.projectId]);
-  const globalSessions = useGlobalSessionsStore((state) => state.activeSessions);
-  const liveSessions = useAllLiveSessions();
-  const candidates = React.useMemo(() => {
-    const merged = new Map(globalSessions.map((session) => [session.id, session]));
-    for (const session of liveSessions) merged.set(session.id, session);
-    return [...merged.values()].filter((session) => !session.time?.archived);
-  }, [globalSessions, liveSessions]);
-  const candidatesKey = React.useMemo(
-    () => candidates.map((session) => `${session.id}:${session.directory ?? ''}`).sort().join('\n'),
-    [candidates],
-  );
-  const candidatesRef = React.useRef(candidates);
-  candidatesRef.current = candidates;
-  const [eligibility, setEligibility] = React.useState<
-    { status: 'idle' | 'loading' | 'error' } | { status: 'ready'; ids: ReadonlySet<string> }
-  >({ status: 'idle' });
-  const [eligibilityAttempt, setEligibilityAttempt] = React.useState(0);
-  React.useEffect(() => {
-    if (!open || !projectId || !candidatesKey) {
-      setEligibility({ status: 'idle' });
-      return undefined;
-    }
-    const controller = new AbortController();
-    setEligibility((current) => (current.status === 'ready' ? current : { status: 'loading' }));
-    fetchEligibleScheduledTaskTargets(
-      projectId,
-      candidatesRef.current.map((session) => ({ sessionId: session.id, directory: session.directory ?? '' })),
-      controller.signal,
-    ).then(
-      (ids) => setEligibility({ status: 'ready', ids }),
-      () => {
-        if (!controller.signal.aborted) setEligibility({ status: 'error' });
-      },
-    );
-    return () => controller.abort();
-  }, [open, projectId, candidatesKey, eligibilityAttempt]);
-  const sessions = React.useMemo(
-    () => (eligibility.status === 'ready' ? candidates.filter((session) => eligibility.ids.has(session.id)) : []),
-    [candidates, eligibility],
-  );
-  React.useEffect(() => {
-    if (open) void refreshGlobalSessions().catch(() => undefined);
-  }, [open]);
+  const { known: knownTargets, eligible: sessions, load: targetLoad, retry: retryTargets } = useScheduledTaskTargets({ open, projectId });
   const loadProviders = useConfigStore((state) => state.loadProviders);
   const loadAgents = useConfigStore((state) => state.loadAgents);
   const providers = useConfigStore((state) => state.providers);
@@ -594,7 +551,6 @@ export function ScheduledTaskEditorDialog(props: {
   const changeProject = React.useCallback((nextProjectId: string) => {
     if (nextProjectId === projectId) return;
     setProjectId(nextProjectId);
-    setEligibility({ status: 'loading' });
     setDraft((prev) => ({ ...prev, targetSessionId: '', baseBranch: '' }));
   }, [projectId]);
 
@@ -640,20 +596,18 @@ export function ScheduledTaskEditorDialog(props: {
       </SettingsStackedField>
       {draft.sessionMode === 'existing' ? (
         <SettingsStackedField label={t('sessions.scheduledTasks.editor.targetSession')} info={t('sessions.scheduledTasks.editor.targetHint')}>
-          <Select value={draft.targetSessionId} onValueChange={(targetSessionId) => setDraft((prev) => ({ ...prev, targetSessionId }))}>
-            <SelectTrigger><SelectValue placeholder={t('sessions.scheduledTasks.editor.targetSession')}>
-              {candidates.find((session) => session.id === draft.targetSessionId)?.title || draft.targetSessionId || undefined}
-            </SelectValue></SelectTrigger>
-            <SelectContent>
-              {eligibility.status === 'loading'
-                ? <SelectItem value="__loading" disabled>{t('common.loading')}</SelectItem>
-                : sessions.map((session) => <SelectItem key={session.id} value={session.id}>{session.title || session.id}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          {eligibility.status === 'error' ? (
+          <ScheduledTaskTargetPicker
+            value={draft.targetSessionId}
+            eligible={sessions}
+            known={knownTargets}
+            load={targetLoad}
+            isMobile={isMobile}
+            onSelect={(targetSessionId) => setDraft((prev) => ({ ...prev, targetSessionId }))}
+          />
+          {targetLoad === 'error' ? (
             <div className="flex items-center gap-2 typography-meta text-muted-foreground">
               <span>{t('sessions.scheduledTasks.editor.targetLoadFailed')}</span>
-              <Button type="button" variant="ghost" size="xs" onClick={() => setEligibilityAttempt((attempt) => attempt + 1)}>
+              <Button type="button" variant="ghost" size="xs" onClick={retryTargets}>
                 {t('sessions.scheduledTasks.editor.targetRetry')}
               </Button>
             </div>

@@ -48,6 +48,7 @@ export type GitHubCredential = AuthCredentialFields & {
 };
 type StoredCredential = OriginCredential | GitHubCredential;
 export type AuthCredential = StoredCredential & { id: string; credentialRevision: number; accountId?: string };
+type GitHubStoredAccount = GitHubCredential & { id: string; credentialRevision: number; accountId: string };
 type SerializedGitHubCredential = Omit<GitHubCredential, 'accessToken' | 'tokenType' | 'createdAt'> & {
   [Key in 'accessToken' | 'tokenType' | 'createdAt']-?: AuthCredential[Key];
 };
@@ -59,13 +60,13 @@ export type AuthInstance<Credential = AuthCredential> = {
   cliLogin?: string | null;
   sshUrl?: string | null;
 };
-export type AuthSection = {
-  instances: { [instance: string]: AuthInstance };
+export type AuthSection<Credential = AuthCredential> = {
+  instances: { [instance: string]: AuthInstance<Credential> };
   raw?: never;
 };
-export interface PublicAuthInstance {
+export interface PublicAuthInstance<Credential = AuthCredential> {
   activeAccountId: string | null;
-  accounts: AuthCredential[];
+  accounts: Credential[];
   cliDisabled: boolean;
   cliActive: boolean;
   sshUrl?: string;
@@ -74,11 +75,11 @@ export interface PublicAuthInstance {
 type RawAuthSection = { raw: { [key: string]: AuthJson }; instances?: never };
 interface AuthState {
   version: number;
-  providers: { [provider: string]: AuthSection | RawAuthSection; gitlab: AuthSection; github: AuthSection };
+  providers: { [provider: string]: AuthSection | RawAuthSection; gitlab: AuthSection; github: AuthSection<GitHubStoredAccount> };
 }
-interface InstanceParser {
+interface InstanceParser<Credential> {
   parseInstanceKey: (raw: string) => string;
-  parseCredentialFor: (credential: AuthJson, instance: string) => AuthCredential;
+  parseCredentialFor: (credential: AuthJson, instance: string) => Credential;
   allowSshUrl?: boolean;
 }
 export interface OriginAccountInput {
@@ -86,15 +87,18 @@ export interface OriginAccountInput {
   user: AuthUserInput;
   source: 'oauth' | 'pat';
   scope?: string;
-  refreshToken?: string;
-  expiresIn?: number;
+  refreshToken?: string | undefined;
+  expiresIn?: number | undefined;
 }
 export interface GitHubAccountInput {
-  accessToken: string;
+  accessToken: AuthJson;
   user: AuthUserInput;
   source: 'oauth' | 'pat';
-  scope?: string;
-  tokenType?: string;
+  scope?: string | undefined;
+  tokenType?: string | undefined;
+}
+export interface GitHubCredentialInvalidation<Host, Id> {
+  markAccountInvalid(host: Host, credentialId: Id, reason?: string): Promise<boolean>;
 }
 export interface AuthStoreOptions {
   filePath: string;
@@ -111,7 +115,7 @@ const EXTRA_SECTIONS_VERSION = 4;
 const INSTANCE_SSH_URL_VERSION = 5;
 const BUILT_IN_SECTIONS = ['gitlab', 'github'];
 const emptyState = (): AuthState => ({ version: AUTH_VERSION, providers: { gitlab: { instances: {} }, github: { instances: {} } } });
-const emptyInstance = (): AuthInstance => ({ activeCredentialId: null, credentials: [], cliDisabled: false, cliActive: false });
+const emptyInstance = <Credential = never>(): AuthInstance<Credential> => ({ activeCredentialId: null, credentials: [], cliDisabled: false, cliActive: false });
 const invalidState = (cause?: ErrorOptions['cause']) => Object.assign(new Error('Source control auth storage is invalid', { cause }), {
   code: 'INVALID_SOURCE_CONTROL_AUTH',
 });
@@ -211,9 +215,9 @@ function parseGitHubCredential(value: AuthJson, host: string) {
   return runtimeGitHubCredential({ ...value, user });
 }
 
-function parseProviderInstances(rawInstances: AuthJson | undefined, { parseInstanceKey, parseCredentialFor, allowSshUrl = false }: InstanceParser) {
+function parseProviderInstances<Credential extends AuthCredential>(rawInstances: AuthJson | undefined, { parseInstanceKey, parseCredentialFor, allowSshUrl = false }: InstanceParser<Credential>) {
   if (!jsonObject(rawInstances)) throw invalidState();
-  const instances: AuthSection['instances'] = {};
+  const instances: AuthSection<Credential>['instances'] = {};
   for (const [rawKey, rawInstance] of Object.entries(rawInstances)) {
     const key = parseInstanceKey(rawKey);
     if (key !== rawKey || !instanceInput(rawInstance, allowSshUrl)) throw invalidState();
@@ -262,7 +266,7 @@ function parseGitLabSection(value: AuthJson | undefined) {
   return { gitlab: { instances: parseProviderInstances(value.gitlab.instances, gitlabInstanceParser) } };
 }
 
-function parseSection(value: AuthJson | undefined, parser: InstanceParser, allowSshUrl = false): AuthSection {
+function parseSection<Credential extends AuthCredential>(value: AuthJson | undefined, parser: InstanceParser<Credential>, allowSshUrl = false): AuthSection<Credential> {
   if (!jsonObject(value) || !exactKeys(value, ['instances'])) throw invalidState();
   return { instances: parseProviderInstances(value.instances, { ...parser, allowSshUrl }) };
 }
@@ -367,8 +371,8 @@ function serializeState(state: AuthState) {
   return { version: AUTH_VERSION, providers };
 }
 
-function publicInstance(instance: AuthInstance) {
-  const result: PublicAuthInstance = {
+function publicInstance<Credential extends AuthCredential>(instance: AuthInstance<Credential>) {
+  const result: PublicAuthInstance<Credential> = {
     activeAccountId: instance.activeCredentialId,
     accounts: instance.credentials,
     cliDisabled: instance.cliDisabled,
@@ -423,7 +427,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     if (result.changed) await writeState(state);
     return result.value;
   });
-  const findInInstance = (instance: AuthInstance, credentialId: string, revision?: number) => {
+  const findInInstance = <Credential extends AuthCredential>(instance: AuthInstance<Credential>, credentialId: string | undefined, revision?: number) => {
     const credential = instance.credentials.find((candidate) => candidate.credentialId === credentialId);
     if (!credential || credential.status !== 'valid'
       || (revision !== undefined && credential.revision !== revision)) return null;
@@ -436,7 +440,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       ?? instance.credentials[0]?.credentialId
       ?? null;
   };
-  const retainInstance = (instances: AuthSection['instances'], key: string, instance: AuthInstance) => {
+  const retainInstance = <Credential extends AuthCredential>(instances: AuthSection<Credential>['instances'], key: string, instance: AuthInstance<Credential>) => {
     if (!instance.credentials.length && !instance.cliDisabled && !instance.cliActive && !instance.sshUrl) delete instances[key];
     else instances[key] = instance;
   };
@@ -518,7 +522,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     },
     readInstance: async (origin: string) => {
       await renewExpiring(provider, origin);
-      return read((state) => publicInstance(sectionInstances(state, provider)[origin] ?? emptyInstance()));
+      return read((state) => publicInstance<AuthCredential>(sectionInstances(state, provider)[origin] ?? emptyInstance()));
     },
     readAccount: async (origin: string, credentialId: string, revision?: number | null) => {
       await renewExpiring(provider, origin, credentialId);
@@ -571,7 +575,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       if (!instance || index < 0) return { changed: false, value: false };
       instance.credentials.splice(index, 1);
       chooseActive(instance);
-      retainInstance(instances, origin, instance);
+      retainInstance<AuthCredential>(instances, origin, instance);
       return { changed: true, value: true };
     }),
     markAccountInvalid: (origin: string, credentialId: string, reason = 'unauthorized') => mutate((state) => {
@@ -644,7 +648,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       listAccounts: (host: string) => read((state) => state.providers.github.instances[host]?.credentials ?? []),
       readInstance: (host: string) => read((state) => publicInstance(state.providers.github.instances[host] ?? emptyInstance())),
       readAccount: (host: string, credentialId: string, revision?: number) => read((state) => findInInstance(state.providers.github.instances[host] ?? emptyInstance(), credentialId, revision)),
-      readAccountAnyInstance: (credentialId: string, revision?: number) => read((state) => {
+      readAccountAnyInstance: (credentialId: string | undefined, revision?: number) => read((state) => {
         for (const [host, instance] of Object.entries(state.providers.github.instances)) {
           const credential = findInInstance(instance, credentialId, revision);
           if (credential) return { ...credential, host };
@@ -688,7 +692,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
         state.providers.github.instances[host] = instance;
         return { changed, value: true };
       }),
-      markAccountInvalid: (host: string, credentialId: string, reason = 'unauthorized') => mutate((state) => {
+      markAccountInvalid: <Id>(host: string, credentialId: Id, reason = 'unauthorized') => mutate((state) => {
         const instance = state.providers.github.instances[host];
         const credential = instance?.credentials.find((candidate) => candidate.credentialId === credentialId);
         if (!instance || !credential) return { changed: false, value: false };
@@ -725,7 +729,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
         retainInstance(instances, host, instance);
         return { changed, value: instance.cliDisabled };
       }),
-      setCliActive: (host: string, active: boolean, login?: string) => mutate((state) => {
+      setCliActive: (host: string, active: boolean, login?: string | null) => mutate((state) => {
         const instances = state.providers.github.instances;
         const instance = instances[host] ?? emptyInstance();
         const nextActive = Boolean(active) && !instance.cliDisabled;

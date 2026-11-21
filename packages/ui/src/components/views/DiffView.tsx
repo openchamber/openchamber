@@ -70,7 +70,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const rootDirectory = targetDirectory ?? panelDirectory;
     const runtimeKey = useGitStore((state) => state.runtimeKey);
     const {
-        gitDirectory: nestedGitDirectory, rootIsGitRepo, repositoryOptions, repositoriesKnown,
+        gitDirectory: nestedGitDirectory, rootIsGitRepo, nestedRepos, repositoryOptions, repositoriesKnown,
         unreadable,
     } = useNestedGitDirectory(rootDirectory ?? null, { enabled: visible, recheckOnOpen: true });
     const effectiveDirectory = nestedGitDirectory ?? rootDirectory;
@@ -194,8 +194,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
         shouldPinAfterAlignRef, pendingScrollTargetRef, expandStackedFile, setScrollRequestNonce,
         pendingTurnDiffFile, diffScope, currentSessionId, setPendingTurnDiffFile, turnDiffSettled, rootDirectory,
         lastTurnDiffs, onDiffScopeChange,
-        effectiveDirectory, repositoriesKnown, rootIsGitRepo, repositoryOptions, selectNestedRepo, fetchStatus, git,
-        changedFiles,
+        effectiveDirectory, repositoriesKnown, rootIsGitRepo, nestedRepos, repositoryOptions, selectNestedRepo, fetchStatus, git,
+        changedFiles, files,
     });
     React.useEffect(() => {
         if (!displayFile) {

@@ -130,6 +130,32 @@ const standWorktrees = ({ root, project }) => {
   return linked
 }
 
+const OPENCODE_FOLDER = ".opencode"
+
+const emptyOpenCodeFolder = (project) => {
+  const folder = join(project, OPENCODE_FOLDER)
+  // A link a scenario left here would send the cleanup outside the stand.
+  if (lstatSync(folder, { throwIfNoEntry: false })?.isDirectory() === false) rmSync(folder, { force: true })
+  mkdirSync(folder, { recursive: true })
+  for (const entry of readdirSync(folder)) rmSync(join(folder, entry), { recursive: true, force: true })
+}
+
+/**
+ * Saved drafts stay in the sidebar of every later scenario. They go through
+ * the server, whose queue also holds a save the last page sent as it closed;
+ * removing the file under it would let that save bring the drafts back.
+ */
+export const deleteSavedDrafts = async (apiUrl) => {
+  const listed = await fetch(`${apiUrl}/api/session-drafts`)
+  if (!listed.ok) throw new Error(`Reading the stand's saved drafts answered ${listed.status}`)
+  const { drafts } = await listed.json()
+  if (!Array.isArray(drafts)) throw new Error("The stand's saved drafts are invalid")
+  for (const draft of drafts) {
+    const response = await fetch(`${apiUrl}/api/session-drafts/${encodeURIComponent(draft.id)}`, { method: "DELETE" })
+    if (!response.ok && response.status !== 404) throw new Error(`Deleting saved draft ${draft.id} answered ${response.status}`)
+  }
+}
+
 export const resetWorktrees = ({ root, project, initialCommit, initialBranch = "main", initialGitConfig }) => {
   const linked = standWorktrees({ root, project })
   if (initialGitConfig !== undefined) writeFileSync(join(project, ".git/config"), initialGitConfig)
@@ -138,7 +164,8 @@ export const resetWorktrees = ({ root, project, initialCommit, initialBranch = "
   if (existsSync(join(project, ".git/rebase-merge")) || existsSync(join(project, ".git/rebase-apply"))) gitIn(project, ["rebase", "--abort"])
   // Hard reset clears an unfinished merge and its unmerged index before checkout.
   gitIn(project, ["reset", "-q", "--hard", baseline])
-  gitIn(project, ["clean", "-ffdqx"])
+  gitIn(project, ["clean", "-ffdqx", "-e", `/${OPENCODE_FOLDER}`])
+  emptyOpenCodeFolder(project)
   gitIn(project, ["checkout", "-q", "-B", initialBranch, baseline])
   // Every branch other than the initial one was made by a scenario. Keeping
   // it changes the next worktree's branch name even after its folder is gone.
@@ -173,6 +200,7 @@ const writeProject = (project) => {
   writeFileSync(join(project, ".git/info/exclude"), "perf-read/\n")
   gitIn(project, ["add", "-A"])
   gitIn(project, ["commit", "-q", "-m", "Initial import of the support inbox"])
+  emptyOpenCodeFolder(project)
 }
 
 const writeSettings = (dataDir, home, project) => {
@@ -469,6 +497,7 @@ const attachStand = (info) => {
     // Sidebar folders, which the server keeps for every window. The Detailed
     // rows switch a scenario may leave on is a profile setting, dropped below.
     rmSync(join(info.data, "sessions-directories.json"), { force: true })
+    await deleteSavedDrafts(info.apiUrl)
     await resetProfile(info.data, info.apiUrl)
     return { failure }
   }

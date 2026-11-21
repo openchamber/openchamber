@@ -72,7 +72,7 @@ Sync and multi-run code reached by the manager also need containment helpers. Ke
 
 ### Why branch search ranks local and remote candidates together
 
-Match quality determines the shared order so exact and prefix matches appear before weaker matches regardless of branch source or alphabetic grouping.
+Match quality determines the shared order so exact and prefix matches appear before weaker matches regardless of branch source or alphabetic grouping. Pinned remote defaults lead only the untyped list for the same reason: a query never shows a default branch it does not match.
 
 ### Why benchmark imports happen before measurement
 

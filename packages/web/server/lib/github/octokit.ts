@@ -11,6 +11,8 @@ import { forgetGhCliToken, getGhCliToken } from './gh-cli-credential.js';
 import { findGhCliLogin, getGhCliLoginToken } from './gh-cli-logins.js';
 import { isTrustedGitHubHostOrStored } from './host-trust.js';
 import { hasProperty } from './contracts.js';
+import { isString } from '../shared/guards.js';
+import type { AuthJson } from '../source-control/auth-storage.js';
 
 interface EtagEntry {
   etag: string;
@@ -93,12 +95,13 @@ const createConditionalFetch = (cacheIdentity: string, host = '') => async (url:
   return response;
 };
 
-export function createOctokit(token: string, accountId = '', host = ''): IdentifiedOctokit {
-  const cacheIdentity = `github:${crypto.createHash('sha256')
+export function createOctokit(token: AuthJson, accountId = '', host = ''): IdentifiedOctokit {
+  const hash = crypto.createHash('sha256')
     .update(accountId)
-    .update('\0')
-    .update(token)
-    .digest('base64url')}`;
+    .update('\0');
+  if (isString(token)) hash.update(token);
+  else hash.update(token);
+  const cacheIdentity = `github:${hash.digest('base64url')}`;
   const options: ConstructorParameters<typeof Octokit>[0] = { auth: token, request: { fetch: createConditionalFetch(cacheIdentity, host) } };
   const normalizedHost = String(host ?? '').trim().toLowerCase();
   if (normalizedHost && normalizedHost !== 'github.com') {
@@ -169,13 +172,13 @@ export async function getGitHubCliCredential(accountId: string | null | undefine
   const token = await getGhCliLoginToken(host, login);
   if (!token) return null;
   return {
-    credentialId: accountId,
+    credentialId: cliMatch[0],
     accountId,
     credentialRevision: 1,
     providerUserId: `${host}#${login.id}`,
     accessToken: token,
-    source: 'cli',
-    status: 'valid',
+    source: 'cli' as const,
+    status: 'valid' as const,
     user: login.profile,
   };
 }

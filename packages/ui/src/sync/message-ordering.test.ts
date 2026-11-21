@@ -1,10 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import type { Message } from "@/lib/opencode/model"
 import {
-  insertMessageChronologically,
+  insertMessageInEventOrder,
   messagesBefore,
   messagesFrom,
-  sortMessagesChronologically,
 } from "./message-ordering"
 
 const message = (id: string, created: number): Message => ({
@@ -23,25 +22,22 @@ const context = (id: string, created: number): Message => ({
 })
 
 describe("message chronology", () => {
-  test("orders post-rollover IDs after legacy IDs by creation time", () => {
+  test("appends post-rollover IDs in event order", () => {
     const legacy = message("msg_ffffffffffffLegacy", 100)
     const current = message("msg_000000000000Current", 200)
 
-    expect(sortMessagesChronologically([current, legacy])).toEqual([legacy, current])
-
     const messages = [legacy]
-    insertMessageChronologically(messages, current)
+    insertMessageInEventOrder(messages, current)
     expect(messages).toEqual([legacy, current])
   })
 
-  test("uses ID only as a deterministic equal-time tie breaker", () => {
+  test("keeps arrival order despite clock skew or equal timestamps", () => {
     const second = message("msg_b", 100)
     const first = message("msg_a", 100)
-    expect(sortMessagesChronologically([second, first])).toEqual([first, second])
-
-    const messages = [second]
-    insertMessageChronologically(messages, first)
-    expect(messages).toEqual([first, second])
+    const skewed = message("msg_future", 50_000)
+    const messages = [skewed, second]
+    insertMessageInEventOrder(messages, first)
+    expect(messages).toEqual([skewed, second, first])
   })
 
   test("puts context that shares the prompt's millisecond before the prompt", () => {
@@ -51,10 +47,8 @@ describe("message chronology", () => {
     const earlierContext = context("msg_0e9dc5c52001runEUuNdAOJEFu", 51)
     const sameMsContext = context("msg_0e9dc5c570010BvEsKh7unRZV5", 52)
 
-    expect(sortMessagesChronologically([prompt, sameMsContext, earlierContext])).toEqual([earlierContext, sameMsContext, prompt])
-
     const messages = [earlierContext, prompt]
-    insertMessageChronologically(messages, sameMsContext)
+    insertMessageInEventOrder(messages, sameMsContext)
     expect(messages).toEqual([earlierContext, sameMsContext, prompt])
   })
 

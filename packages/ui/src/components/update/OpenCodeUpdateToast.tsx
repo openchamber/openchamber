@@ -118,16 +118,20 @@ export const OpenCodeUpdateToast: React.FC = () => {
     const timeoutIds: Array<ReturnType<typeof setTimeout>> = [];
 
     const checkForUpdate = async (attempt: number, runtimeKey = getRuntimeKey()) => {
+      const scheduleRetry = () => {
+        const delay = CHECK_RETRY_DELAYS_MS[attempt];
+        if (!cancelled && runtimeKey === getRuntimeKey() && delay !== undefined) {
+          timeoutIds.push(setTimeout(() => { void checkForUpdate(attempt + 1, runtimeKey); }, delay));
+        }
+      };
       try {
         const status = await fetchOpenCodeUpgradeStatus();
         if (!cancelled && runtimeKey === getRuntimeKey() && status.availableVersion) {
           showUpdateAvailableToast(status.availableVersion, status.supported);
         }
+        if (status.latestVersionLookupFailed) scheduleRetry();
       } catch {
-        const delay = CHECK_RETRY_DELAYS_MS[attempt];
-        if (!cancelled && runtimeKey === getRuntimeKey() && delay !== undefined) {
-          timeoutIds.push(setTimeout(() => { void checkForUpdate(attempt + 1, runtimeKey); }, delay));
-        }
+        scheduleRetry();
       }
     };
 

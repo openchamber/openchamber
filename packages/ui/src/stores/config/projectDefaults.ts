@@ -1,3 +1,4 @@
+import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useConfigStore } from '../useConfigStore';
@@ -26,14 +27,23 @@ export const isChatDraftOpen = (): boolean => {
 
 export const getProjectDefaultsForConfigDirectory = (directory: string | null | undefined): ProjectDefaults => {
     const configDirectory = normalizeConfigPath(directory);
+    if (isChatDraftOpen() && (!configDirectory || toDirectoryKey(configDirectory) === useConfigStore.getState().activeDirectoryKey)) return readChatDefaults();
     if (!configDirectory) {
         return {};
     }
-    if (isChatDraftOpen() && toDirectoryKey(configDirectory) === useConfigStore.getState().activeDirectoryKey) return {};
-    return readProjectDefaults(configDirectory);
+    return readScopeDefaults(configDirectory);
 };
 
-export const readProjectDefaults = (configDirectory: string): ProjectDefaults => {
+export const readScopeDefaults = (configDirectory: string): ProjectDefaults => (
+    isChatDirectoryPath(configDirectory) ? readChatDefaults() : readProjectDefaults(configDirectory)
+);
+
+const readChatDefaults = (): ProjectDefaults => {
+    const { chatsDefaultAgent, chatsDefaultModel, chatsDefaultVariant } = useConfigStore.getState();
+    return { projectDefaultAgent: chatsDefaultAgent, projectDefaultModel: chatsDefaultModel, projectDefaultVariant: chatsDefaultVariant };
+};
+
+const readProjectDefaults = (configDirectory: string): ProjectDefaults => {
     const projectDirectory = resolveProjectDirectory(configDirectory);
     const project = useProjectsStore.getState().projects.find((entry) => normalizeConfigPath(entry.path) === projectDirectory);
     return {

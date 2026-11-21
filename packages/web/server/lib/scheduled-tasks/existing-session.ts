@@ -4,7 +4,7 @@ import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { asNonEmptyString } from '../shared/guards.js';
 import { expandSnippets } from '../snippets/snippets.js';
 import type { OpenCode } from '@opencode/client';
-import type { ScheduledTask, ScheduledTaskConfig, ScheduledTaskStatePatch, ScheduledTaskStatus, SessionProject } from '../projects/contracts.js';
+import type { ScheduledTask, ScheduledTaskConfig, ScheduledTaskInput, ScheduledTaskStatePatch, ScheduledTaskStatus, SessionProject } from '../projects/contracts.js';
 import type { createMessageQueueRuntime } from '../message-queue/runtime.js';
 import type { createChatsScope } from './chats-scope.js';
 import type { resolvePrimaryWorktreeRoot } from '../git/service.js';
@@ -59,7 +59,7 @@ export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueR
     return Boolean(owner?.root) && path.resolve(owner.root) === path.resolve(project.path);
   };
 
-  const validateTarget = async (projectId: string, targetSessionId: string | undefined) => {
+  const validateTarget = async (projectId: string, targetSessionId: ScheduledTaskInput['targetSessionId']) => {
     const parsed = z.string().regex(/^[A-Za-z0-9_-]{4,128}$/).safeParse(targetSessionId);
     if (!parsed.success) {
       throw new OpenChamberControlError('targetSessionId is invalid', 400);
@@ -192,6 +192,6 @@ export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueR
   return {
     validateTarget, listEligibleTargets, run, beforeSend,
     result: ({ projectId, taskId }: ScheduledTaskProvenance, status: ScheduledTaskStatus, cause?: unknown) => record(projectId, taskId, status, cause),
-    cancel: (projectId: string, taskId: string) => messageQueueRuntime.cancelScheduledTask(projectId, taskId),
+    cancel: (projectId: string, taskId: ScheduledTaskInput['id']) => messageQueueRuntime.cancelScheduledTask(projectId, taskId),
   };
 };

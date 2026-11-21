@@ -2,6 +2,7 @@ import { type ConfigSlice, type DirectoryScopedConfig, type ConfigStore } from '
 import {
     isStaleAutoSelection,
     resolveProviderModelSelection,
+    scopeDefaultCandidates,
     inheritedDefaultsFor,
     readFallbackModelPrefs,
     resolveDefaultAgentModelSelection,
@@ -15,7 +16,7 @@ import {
     toDirectoryKey,
     toConfigDirectoryKey,
 } from './directories';
-import { getProjectDefaultsForConfigDirectory, readProjectDefaults } from './projectDefaults';
+import { getProjectDefaultsForConfigDirectory, readScopeDefaults } from './projectDefaults';
 import { hasLiveCatalog, createEmptyDirectoryScopedConfig } from './directorySnapshots';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
@@ -39,10 +40,11 @@ export const createDefaultSelection: ConfigSlice<
         const resolved = resolveProviderModelSelection({
             providers: current.providers,
             catalogLoaded: hasLiveCatalog(current, current.activeDirectoryKey),
-            configuredDefaults: [
-                { model: projectDefaults.projectDefaultModel, variant: projectDefaults.projectDefaultVariant },
-                { model: current.settingsDefaultModel, variant: current.settingsDefaultVariant },
-            ],
+            configuredDefaults: scopeDefaultCandidates({
+                ...projectDefaults,
+                settingsDefaultModel: current.settingsDefaultModel,
+                settingsDefaultVariant: current.settingsDefaultVariant,
+            }),
             inheritedDefaults: inheritedDefaultsFor(current.agents, current.currentAgentName, current.opencodeDefaultModel),
             allowFallback: true,
             fallbackPrefs: readFallbackModelPrefs(get().settingsDefaultsLoaded),
@@ -181,7 +183,7 @@ export const createDefaultSelection: ConfigSlice<
             agents: isActive ? state.agents : (snapshot?.agents ?? []),
             providers: isActive ? state.providers : (snapshot?.providers ?? []),
             catalogLoaded: hasLiveCatalog(state, directoryKey),
-            ...readProjectDefaults(configDirectory),
+            ...readScopeDefaults(configDirectory),
             settingsDefaultAgent: state.settingsDefaultAgent,
             settingsDefaultModel: state.settingsDefaultModel,
             settingsDefaultVariant: state.settingsDefaultVariant,

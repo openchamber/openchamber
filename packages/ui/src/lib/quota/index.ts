@@ -3,6 +3,7 @@ export { isExtensionQuotaProviderId, quotaProviderList } from './extensionProvid
 export {
   clampPercent,
   formatQuotaWindowValueLabel,
+  formatQuotaRowValue,
   formatQuotaResetLabel,
   formatQuotaResetShort,
   compactQuotaValueLabel,

@@ -16,6 +16,7 @@ interface UsageCardProps {
   toggleDisabled?: boolean;
   onToggle?: (enabled: boolean) => void;
   providerId?: QuotaProviderId;
+  showGiftReset?: boolean;
 }
 
 export const UsageCard: React.FC<UsageCardProps> = ({
@@ -27,6 +28,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   toggleDisabled = false,
   onToggle,
   providerId,
+  showGiftReset = false,
 }) => {
   const { t } = useI18n();
   const displayMode = useQuotaStore((state) => state.displayMode);
@@ -37,7 +39,12 @@ export const UsageCard: React.FC<UsageCardProps> = ({
     ? t('settings.usage.card.bar.remaining')
     : t('settings.usage.card.bar.used');
   const percentLabel = formatQuotaWindowValueLabel(window, displayPercent, t);
-  const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
+  const resetLabel = formatQuotaResetLabel(
+    window.resetAt,
+    window.resetAfterFormatted ?? window.resetAtFormatted,
+    timeFormatPreference,
+    providerId,
+  );
   const resetText = resetLabel ? t('settings.usage.card.resetsAt', { time: resetLabel }) : '';
   const windowLabel = formatWindowLabel(title);
 
@@ -61,7 +68,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
           </div>
         </div>
         <div className="flex items-center justify-end gap-1">
-          {providerId && <UsageGiftResetButton window={window} providerId={providerId} />}
+          {showGiftReset && providerId && <UsageGiftResetButton window={window} providerId={providerId} />}
           <div className="typography-ui-label text-foreground tabular-nums">
             {percentLabel === '-' ? '' : percentLabel}
           </div>

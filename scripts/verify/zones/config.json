@@ -6,8 +6,8 @@
     {
       "id": "defaults",
       "name": "The model and agent a new session starts with",
-      "what": "A new session starts on the default model and agent: the ones chosen in Settings, or else OpenCode's configured model and Build. A default model the providers no longer offer is skipped.",
-      "reach": "Open the app on a new session's draft; the composer footer names the model and the agent. Settings > Sessions > New sessions sets the defaults.",
+      "what": "A new session starts on the default model and agent: the ones chosen in Settings, or else OpenCode's configured model and Build. A new chat outside a project starts on the Chats defaults first. A default model the providers no longer offer is skipped.",
+      "reach": "Open the app on a new session's draft; the composer footer names the model and the agent. Settings > Sessions > New sessions sets the defaults, and Settings > Sessions > Chats sets the ones for chats.",
       "proof": "The composer footer names the default model and agent, and the first prompt's answer names them in its footer.",
       "scenarios": [
         {
@@ -91,6 +91,76 @@
             {"do": "gone", "on": "settings.search"},
             {"do": "see", "on": "composer.control", "text": "Build", "exact": true},
             {"do": "click", "on": "sidebar.newSession"},
+            {"do": "see", "on": "composer.control", "text": "Plan", "exact": true}
+          ]
+        },
+        {
+          "id": "chats-model",
+          "kind": "path",
+          "title": "The Chats model from Settings starts a new chat and answers its first prompt, ahead of the New sessions model",
+          "steps": [
+            {"do": "settings", "values": {"defaultModel": "perf/unicode-20000cps", "chatsDefaultModel": "perf/code-20000cps"}},
+            {"do": "session.create", "as": "s", "title": "Chats default host"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.newSession"},
+            {"do": "see", "on": "composer.projectPicker", "text": "Choose project"},
+            {"do": "see", "on": "composer.model", "text": "Fixture code, seeding speed"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Removed lines in the diff viewer are almost unreadable in dark mode. What contrast do we have now?"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.answer", "text": "a contrast of 3.1:1"},
+            {"do": "see", "on": "chat.footer", "text": "Fixture code, seeding speed"}
+          ]
+        },
+        {
+          "id": "chats-agent",
+          "kind": "path",
+          "title": "A Chats agent with no model set anywhere starts a new chat on Plan over the New sessions Build",
+          "steps": [
+            {"do": "settings", "values": {"defaultModel": "", "defaultAgent": "build", "chatsDefaultAgent": "plan"}},
+            {"do": "session.create", "as": "s", "title": "Chats agent host"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.newSession"},
+            {"do": "see", "on": "composer.projectPicker", "text": "Choose project"},
+            {"do": "see", "on": "composer.control", "text": "Plan", "exact": true},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Removed lines in the diff viewer are almost unreadable in dark mode. What contrast do we have now?"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.footer", "text": "plan"}
+          ]
+        },
+        {
+          "id": "chats-missing-model",
+          "kind": "break",
+          "title": "A Chats model the providers no longer offer falls back to the New sessions model and stays there",
+          "steps": [
+            {"do": "settings", "values": {"defaultModel": "perf/code-20000cps", "chatsDefaultModel": "perf/retired-model"}},
+            {"do": "session.create", "as": "s", "title": "Chats missing host"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.newSession"},
+            {"do": "see", "on": "composer.model", "text": "Fixture code, seeding speed"},
+            {"do": "steady", "on": "composer.model", "text": "Fixture code, seeding speed", "count": 1, "ms": 1500}
+          ]
+        },
+        {
+          "id": "chats-settings-page",
+          "kind": "path",
+          "title": "The Chats agent picked in Settings leaves the open session alone and starts the next new chat on it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chats settings host"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "agent for chats"},
+            {"do": "click", "on": "settings.searchResult", "text": "Default agent for chats"},
+            {"do": "click", "on": "settings.menu", "item": "sessions.chats-default-agent"},
+            {"do": "click", "on": "menu.item", "text": "Plan", "exact": true},
+            {"do": "see", "on": "settings.menu", "item": "sessions.chats-default-agent", "text": "plan"},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "settings.search"},
+            {"do": "see", "on": "composer.control", "text": "Build", "exact": true},
+            {"do": "click", "on": "sidebar.newSession"},
+            {"do": "see", "on": "composer.projectPicker", "text": "Choose project"},
             {"do": "see", "on": "composer.control", "text": "Plan", "exact": true}
           ]
         }

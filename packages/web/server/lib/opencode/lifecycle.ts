@@ -6,7 +6,7 @@ import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-e
 import { assignInjectedEnv } from '../injected-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 import { hasChildProcessExited, stopOpenCodeByClosingStdin, waitForChildProcessClose } from './managed-process-stop.js';
-import { applyProviderEnvAliases } from './provider-env-aliases.js';
+import { prepareManagedOpenCodeEnv } from './managed-opencode-env.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { recordStartupPerformance } from '../diagnostics/startup-performance.js';
 import { topUpV1Migration } from './v1-migration-topup.js';
@@ -121,7 +121,7 @@ export interface OpenCodeLifecycleDependencies {
   normalizeApiPrefix: (prefix: string) => string;
   applyOpencodeBinaryFromSettings: (options?: { strict: boolean }) => Promise<string | null | void>;
   ensureOpencodeCliEnv: () => string | null | undefined;
-  ensureLocalOpenCodeServerPassword: (options: { rotateManaged: boolean }) => Promise<string>;
+  ensureLocalOpenCodeServerPassword: (options: { rotateManaged: boolean }) => Promise<string | null>;
   resolveManagedOpenCodeLaunchSpec: (binary: string | null | undefined) => ManagedOpenCodeLaunchSpec;
   setOpenCodePort: (port: number) => void;
   setDetectedOpenCodeApiPrefix: (prefix: string) => void;
@@ -473,7 +473,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
 
     if (process.platform === 'win32') {
       await stopOpenCodeByClosingStdin(child, {
-        forceKillTree: (treePid: number) => {
+        forceKillTree: (treePid: number | undefined) => {
           try {
             spawnSync('taskkill', ['/pid', String(treePid), '/f', '/t'], {
               stdio: 'ignore',
@@ -902,13 +902,13 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
       console.warn('[OpenCode] V1 session migration top-up failed:', error instanceof Error ? error.message : error);
     }
 
-    const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases(assignInjectedEnv(
+    const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(prepareManagedOpenCodeEnv(assignInjectedEnv(
       { ...inheritedEnv },
       {
         ...managedOpenCodeEnv,
         PATH: inheritedEnv.PATH,
-        OPENCODE_PASSWORD: openCodePassword,
-        OPENCODE_SERVER_PASSWORD: openCodePassword,
+        OPENCODE_PASSWORD: openCodePassword ?? undefined,
+        OPENCODE_SERVER_PASSWORD: openCodePassword ?? undefined,
       },
     ))));
     managedProcessEnv = processEnv;

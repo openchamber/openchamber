@@ -256,6 +256,23 @@
           }
         },
         {
+          "label": "Leads",
+          "link": "/leads/",
+          "translations": {
+            "nl": "Leads",
+            "uk": "Ліди",
+            "zh-CN": "负责人",
+            "es": "Leads",
+            "pt-BR": "Leads",
+            "ko": "리드",
+            "pl": "Leady",
+            "fr": "Leads",
+            "ja": "リード",
+            "de": "Leads",
+            "tr": "Liderler"
+          }
+        },
+        {
           "label": "Session Goals",
           "link": "/session-goals/",
           "translations": {

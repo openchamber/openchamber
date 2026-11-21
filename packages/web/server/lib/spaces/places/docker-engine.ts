@@ -1,6 +1,8 @@
 
 import { SpaceError } from '../errors.js';
 import type { CommandOptions, CommandResult, RunCommand } from '../command-contracts.js';
+import { parseInspectOutput } from './docker-wire.js';
+import type { DockerLabelledEntry, DockerResourceKind } from './docker-wire.js';
 
 export interface DockerEngineOptions {
   runCommand: RunCommand;
@@ -15,12 +17,10 @@ export interface DockerRemovalFailure {
 }
 
 interface DockerEntryFields {
-  0?: unknown;
-  Name?: unknown;
-  Config?: unknown;
-  Labels?: unknown;
   code?: unknown;
   message?: unknown;
+  details?: unknown;
+  errno?: unknown;
 }
 
 const canReadEntry = (value: unknown): value is DockerEntryFields => value !== null && value !== undefined;
@@ -31,6 +31,15 @@ const entryFields = <Value>(value: Value, key: keyof DockerEntryFields): DockerE
   }
   return value;
 };
+
+const readableEntry = <Entry>(value: Entry, key: string) => {
+  if (value === null || value === undefined) {
+    throw new TypeError(`Cannot read properties of ${value} (reading '${key}')`);
+  }
+  return value;
+};
+
+export const failureField = <Cause>(error: Cause, key: keyof DockerEntryFields) => entryFields(error, key)[key];
 
 const QUERY_TIMEOUT_MS = 30_000;
 export const CHANGE_TIMEOUT_MS = 120_000;
@@ -52,27 +61,14 @@ const isNotFound = (result: CommandResult) => result.code !== 0 && NOT_FOUND_PAT
 const REMOVAL_IN_PROGRESS = /removal of container .* is already in progress/i;
 const isAlreadyGone = (result: CommandResult) => isNotFound(result) || (result.code !== 0 && REMOVAL_IN_PROGRESS.test(result.stderr));
 
-const parseJson = (text: string) => {
-  try {
-    const parsed: unknown = JSON.parse(text);
-    return parsed;
-  } catch {
-    throw new SpaceError('docker_output_unreadable', 'Docker printed something that is not JSON');
-  }
-};
-
 const inspectArgs = (kind: string, names: string[]) => (kind === 'container' ? ['inspect', '--type', 'container', ...names] : [kind, 'inspect', ...names]);
 const listArgs = (kind: string, filters: string[]) => (kind === 'container'
   ? ['ps', '--all', ...filters, '--format', '{{.Names}}']
   : [kind, 'ls', ...filters, '--format', '{{.Name}}']);
 const removeArgs = (kind: string, name: string) => (kind === 'container' ? ['rm', '--force', name] : [kind, 'rm', name]);
 
-export const entryLabels = <Entry>(kind: string, entry: Entry) => {
-  if (kind !== 'container') return entryFields(entry, 'Labels').Labels;
-  const config = entryFields(entry, 'Config').Config;
-  return config == null ? undefined : entryFields(config, 'Labels').Labels;
-};
-export const entryName = <Entry>(entry: Entry) => String(entryFields(entry, 'Name').Name ?? '').replace(/^\//, '');
+export const entryLabels = (kind: string, entry: DockerLabelledEntry) => (kind === 'container' ? readableEntry(entry, 'Config').Config?.Labels : readableEntry(entry, 'Labels').Labels);
+export const entryName = (entry: DockerLabelledEntry) => String(readableEntry(entry, 'Name').Name ?? '').replace(/^\//, '');
 
 export const pause = (milliseconds: number) => new Promise<void>((resolve) => { setTimeout(resolve, milliseconds); });
 
@@ -93,7 +89,7 @@ export function createDockerEngine({ runCommand, dockerPath, dockerHost = null }
     return result.stdout;
   };
 
-  const inspect = async (kind: string, name: string) => {
+  const inspect = async <Kind extends DockerResourceKind>(kind: Kind, name: string) => {
     const args = inspectArgs(kind, [name]);
     const result = await run(args, QUERY_TIMEOUT_MS);
     if (isNotFound(result)) {
@@ -102,10 +98,10 @@ export function createDockerEngine({ runCommand, dockerPath, dockerHost = null }
     if (result.code !== 0) {
       throw failure(args, result);
     }
-    return entryFields(parseJson(result.stdout), 0)[0];
+    return readableEntry(parseInspectOutput<Kind>(result.stdout), '0')[0];
   };
 
-  const findByLabel = async (kind: string, filters: string[]) => {
+  const findByLabel = async <Kind extends DockerResourceKind>(kind: Kind, filters: string[]) => {
     const names = (await docker(listArgs(kind, filters), QUERY_TIMEOUT_MS)).split('\n').filter(Boolean);
     if (names.length === 0) {
       return [];
@@ -115,7 +111,7 @@ export function createDockerEngine({ runCommand, dockerPath, dockerHost = null }
     if (result.code !== 0 && !isNotFound(result)) {
       throw failure(args, result);
     }
-    return parseJson(result.stdout);
+    return parseInspectOutput<Kind>(result.stdout);
   };
 
   const removeWith = async (args: string[], kind: string, name: string): Promise<DockerRemovalFailure | null> => {
@@ -131,7 +127,7 @@ export function createDockerEngine({ runCommand, dockerPath, dockerHost = null }
 
   const removeStoppedContainer = (nameOrId: string) => removeWith(['rm', nameOrId], 'container', nameOrId);
 
-  const removeByName = async (names: [string, string][]) => {
+  const removeByName = async (names: [DockerResourceKind, string][]) => {
     const failed: DockerRemovalFailure[] = [];
     for (const [kind, name] of names) {
       try {
@@ -148,3 +144,5 @@ export function createDockerEngine({ runCommand, dockerPath, dockerHost = null }
 
   return { run, docker, failure, inspect, findByLabel, removeOne, removeStoppedContainer, removeByName, argsFor };
 }
+
+export type DockerEngine = ReturnType<typeof createDockerEngine>;

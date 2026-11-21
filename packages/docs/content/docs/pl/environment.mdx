@@ -50,6 +50,10 @@ Uruchamia OpenChamber w trybie headless, gdy ustawione na `true` lub `1`. Trasy 
 
 Originy, które mogą pokazywać OpenChamber w ramce na własnej stronie, rozdzielone spacjami, np. `https://dash.example.com`. `*` dopuszcza dowolną stronę. Domyślnie osadzać go mogą tylko sam OpenChamber i jego aplikacje desktopowe i mobilne, więc żadna inna strona nie nałoży niczego na jego przyciski.
 
+### `OPENCHAMBER_TRUSTED_PROXIES`
+
+Adresy reverse proxy działających na innej maszynie lub w innym kontenerze, rozdzielone przecinkami, na przykład `192.168.1.10` albo `172.18.0.0/16`. OpenChamber ogranicza nieudane próby logowania dla każdego klienta i odczytuje adres klienta z `X-Forwarded-For` tylko wtedy, gdy żądanie przychodzi z tej maszyny albo z adresu z tej listy. Proxy spoza listy liczy się jako jeden klient, więc nieudane próby jednej osoby mogą na jakiś czas zablokować logowanie wszystkim za nim.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 Nadpisuje katalog danych OpenChamber. Domyślnie jest to `~/.config/openchamber`.

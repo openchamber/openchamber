@@ -93,6 +93,29 @@ describe('ChatSettings', () => {
     expect(fourth.getAttribute('aria-checked')).toBe('true');
   });
 
+  test('the office document radios start on Ask each time and keep the chosen one', async () => {
+    useChatSettingsTabStore.setState({ tab: 'composer' });
+    useUIStore.getState().setDocumentAttachBehavior('ask');
+    try {
+      await act(async () => root.render(<I18nProvider><ChatSettings /></I18nProvider>));
+      const group = host.querySelector('[data-settings-item="chat.document-attach"]');
+      const radios = [...(group?.querySelectorAll<HTMLElement>('[role="radio"]') ?? [])];
+      expect(radios.map((radio) => radio.getAttribute('aria-label'))).toEqual([
+        'Office documents: Ask each time',
+        'Office documents: Attach as is',
+        'Office documents: Convert to text',
+      ]);
+      expect(radios[0]?.getAttribute('aria-checked')).toBe('true');
+      await act(async () => radios[1]?.click());
+      expect(useUIStore.getState().documentAttachBehavior).toBe('save');
+      const partialize = useUIStore.persist.getOptions().partialize;
+      if (!partialize) throw new Error('Missing persisted slice');
+      expect(z.object({ documentAttachBehavior: z.string() }).parse(partialize(useUIStore.getState())).documentAttachBehavior).toBe('save');
+    } finally {
+      useUIStore.getState().setDocumentAttachBehavior('ask');
+    }
+  });
+
   test('the Questions chips on the Composer tab switch questions into the chat and the choice persists', async () => {
     useChatSettingsTabStore.setState({ tab: 'composer' });
     useUIStore.setState({ questionsInChat: false });

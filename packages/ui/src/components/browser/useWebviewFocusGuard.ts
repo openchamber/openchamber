@@ -72,7 +72,7 @@ export const useWebviewFocusGuard = (
   }, [giveFocusBack, stageRef, webview]);
 
   return React.useCallback(async <T>(run: (holdPageFocus: HoldPageFocus) => Promise<T>): Promise<T> => {
-    const userWasInPage = webview !== null && document.activeElement === webview;
+    let userWasInPage = webview !== null && document.activeElement === webview;
     let holding = false;
     const releasePageFocus = () => {
       if (!holding) return;
@@ -83,6 +83,7 @@ export const useWebviewFocusGuard = (
     };
     const holdPageFocus: HoldPageFocus = () => {
       if (!holding) {
+        userWasInPage = webview !== null && document.activeElement === webview;
         holding = true;
         agentFocusActionsRef.current += 1;
       }

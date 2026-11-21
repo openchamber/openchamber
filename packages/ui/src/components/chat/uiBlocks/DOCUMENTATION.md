@@ -12,7 +12,7 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 - While a block streams, a node keeps drawing its last props that parsed against its schema; a node that never parsed draws nothing.
 - Fields and Buttons act only once a block is finished and has somewhere to answer: an assistant reply that has settled, or a page whose call still waits. Anywhere else they show disabled.
 - A page takes one answer: a press answers the waiting call at once, and the block freezes.
-- In a reply a press only chooses. A decision is the buttons of one card whose title no other card in the block shares, named by the title; elsewhere, the buttons that share a `value` (buttons without one make one more). Each decision takes one answer: a button, the card's note alone, or both. Once every decision has one, or the user presses "Send chosen", the answers go to the agent in one piece and the block freezes. An answered card without fields folds to one line with its answer and a way to change it before sending; the fold and the notes come back after a reload.
+- In a reply a press only chooses. A decision is the buttons of one card whose title no other card in the block shares, named by the title; elsewhere, the buttons that share a `value` (buttons without one make one more). Each decision takes one answer: a button, the card's note alone, or both. Once every decision has one, or the user presses "Send chosen", the answers go to the agent in one piece and the block freezes. An answered card without fields folds with its answer and a way to change it before sending. Narrow cards give the title its own row.
 - A reply block with fields and no Button has no press to send them, so it gets the "Send" button a waiting form gets and the same Sent / Not sent line. It stays disabled until a field has a value and is gone after the send. After a failed send, clearing every field leaves it disabled and hides only the "Not sent" line, which returns with a value; a block with a frame that answers keeps the line. A block with any Button sends through its buttons alone, so it gets no second one.
 - A primary button is the agent's pick and is tinted until its decision has an answer; then only the chosen button is, with a check.
 - `@openuidev/lang-core` is a dependency of this private package only, bundled at build time. It never goes into `packages/web`'s dependencies.
@@ -51,7 +51,13 @@ The language streams well: the parser returns a partial tree for any prefix, so 
 
 ### Why a reply's answer is synthetic input and not a user message
 
-The choices in a reply's block reach the agent as OpenCode synthetic input with `resume: true` (`replyAnswer.ts`), which starts the agent's next turn without a user bubble. Sending each press as a user message, as the first version did, gave the agent a turn per press: with four cards it answered the first choice and drew the other three again. Collected into one input, the agent gets the whole decision at once. The input's metadata (`openchamberUiBlockAnswer`: message id, block key, answer) is the record the block reads back after a reload, so no store of our own keeps answers. A block on a waiting `openchamber_render` call answers that call through `/api/openchamber/render/answer`, like an HTML page.
+The choices in a reply's block reach the agent as OpenCode synthetic input with `resume: true` (`replyAnswer.ts`), which starts the agent's next turn without a user bubble. Sending each press as a user message, as the first version did, gave the agent a turn per press: with four cards it answered the first choice and drew the other three again. Collected into one input, the agent gets the whole decision at once. The input's metadata (`openchamberUiBlockAnswer`: message id, block key, answer) is the authoritative record. A block on a waiting `openchamber_render` call answers that call through `/api/openchamber/render/answer`, like an HTML page.
+
+### Why unsent reply choices stay in the current browser session
+
+The reply host saves drafts in session storage so switching threads or reloading does not lose a partially answered block. Drafts are scoped to the runtime, directory, session, message and block. Sending successfully or loading a recorded answer clears the draft. Closing the browser session ends draft retention; waiting pages and exports do not use this storage.
+
+A restored draft can be sent again after a send whose response was lost, so the synthetic input's ID is kept in session storage under the same scope (`stableReplyInputId` in `answer.ts`). OpenCode admits an input ID once, and a retry with the same ID returns the first admission: the block gets one answer and the agent one turn.
 
 ### Why Table draws as a Markdown table
 
@@ -101,7 +107,7 @@ The guidance asks for one `value` per item, but in the triage benchmark four of 
 
 ### Why an answered card folds
 
-A triage of five cards was a wall of buttons in which the undecided cards were hard to find. A card folds once answered, so what is left to decide stays open and what is decided reads as one line: the title, the answer, "Change". The recommended button is tinted rather than marked by its text colour, which did not read as a recommendation; with the chosen card folded, a tint no longer looks like a choice already made.
+A triage of five cards was a wall of buttons in which the undecided cards were hard to find. A card folds once answered, so what is left to decide stays open. The answer and "Change" sit below the title when the card is too narrow to show them side by side without squeezing the question. The recommended button is tinted rather than marked by its text colour, which did not read as a recommendation; with the chosen card folded, a tint no longer looks like a choice already made.
 
 ### Why an `<openui-lang>` tag and an `openui` fence draw as a block
 

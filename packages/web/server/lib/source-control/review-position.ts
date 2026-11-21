@@ -6,8 +6,8 @@ export interface ReviewDraftContext {
   target: { number?: number; headSha?: string };
 }
 
-interface ReviewDraftDependencies {
-  commentText(value: SourceControlJson | undefined, required: boolean): string | undefined;
+interface ReviewDraftDependencies<Body extends string | undefined = string | undefined> {
+  commentText(value: SourceControlJson | undefined, required: true): Body;
   fail(message: string): never;
 }
 
@@ -27,7 +27,7 @@ export function reviewCommentPosition(body: SourceControlJsonObject, fail: Revie
   return { path: body.path, side: body.side, startLine: body.startLine, line: body.line };
 }
 
-export function reviewDraftEntries({ commentText, fail }: ReviewDraftDependencies) {
+export function reviewDraftEntries<Body extends string | undefined>({ commentText, fail }: ReviewDraftDependencies<Body>) {
   const requireTarget = (context: ReviewDraftContext) => {
     if (!context.target.number) fail('target number is required');
   };

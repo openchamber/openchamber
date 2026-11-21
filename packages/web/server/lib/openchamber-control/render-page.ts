@@ -60,7 +60,7 @@ export const RENDER_PAGE_MAX_TITLE_LENGTH = 120;
 const RENDER_PAGE_MAX_SUMMARY_LENGTH = 500;
 const RENDER_PAGE_MAX_ANSWER_DATA_LENGTH = 16_000;
 
-const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>\n]*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
+const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])(?:(?!\1)[^<>\n])*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
 export const RENDER_PAGE_IMAGE_BUDGET_BYTES = 25 * 1024 * 1024;
 
 export const renderPageImageSources = (html: string) => {

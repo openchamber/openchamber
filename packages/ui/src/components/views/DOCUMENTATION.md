@@ -513,8 +513,8 @@ re-renders every row.
 
 The Files editor's row (`renderFileToolbar`, an `ActionToolbar`) has the actions
 the open file's type allows, the same in every mode. The row itself keeps save
-state, the mode toggle (and HTML annotation), find, comment on the file and
-full screen; go to line, symbols, line wrap, read aloud, the file's own actions
+state, the mode toggle (and HTML annotation), find and comment on the file;
+go to line, symbols, line wrap, read aloud, the file's own actions
 (open in app, copy contents, copy path, download) and auto-save live in "More
 actions". With every action on the row it ran to a dozen icons, most of them
 rarely used (maintainer, 2026-10-28). A tool the current mode cannot run opens
@@ -629,15 +629,27 @@ current state the view shows loading; a failed read keeps its error and retry.
 A file that is there is expanded and scrolled to, on every click, since the
 chip's absolute path only matches the relative list through this request.
 A file that is not there opens Changed instead, in the repository holding the
-file, read afresh, expanded. A repository the picker drops again ends the
-attempt on the repository left on screen. Picking Last turn by hand asks
-nothing and stays there, empty or not. The phone's Changes surface
-(`apps/MobileChangesSurface.tsx`) answers the same way and opens the file's own
-diff screen, since it has no expanded list to scroll. VS Code has no Diff view
-panel: the chip reads the turn's diff once and opens the file's patch in the
-editor's own diff (`editor.openDiff` with `patch`; a file the turn deleted shows
-its old content against an empty side). A file the list does not hold opens as
-it is, and a failed read shows an error toast.
+file, read afresh, expanded. Only a file inside a project that is not a
+repository, once discovery found no repository in the project holding it,
+opens in the editor instead (`files/openChangedFileWithoutRepository.ts`):
+there is no working-tree diff for it. Unknown or failed discovery, a file
+outside the project and a repository-owned file the list misses (a staged-only
+entry) keep the Changed path. The open checks the file with a stat first,
+since the optional read answers a deleted file with an empty success: a
+deleted file shows the not-found toast, an empty one opens. The read belongs to
+the click that started it, from the click through discovery to the read: a
+newer chip click, leaving the session or the runtime (even to return) drops it
+without a tab, focus change or toast.
+A repository the picker drops
+again ends the attempt on the repository left on screen. Picking Last turn by
+hand asks nothing and stays there, empty or not. The phone's Changes surface
+(`apps/MobileChangesSurface.tsx`) answers the same way when a repository holds
+the file and opens its own diff screen, since it has no expanded list to
+scroll; when no repository holds it, the phone stays on the Changes list. VS
+Code has no Diff view panel: the chip reads the turn's diff once and opens the
+file's patch in the editor's own diff (`editor.openDiff` with `patch`; a file
+the turn deleted shows its old content against an empty side). A file the list
+does not hold opens as it is, and a failed read shows an error toast.
 
 ### Why the click is a one-shot request and not derived from the tab
 
@@ -725,7 +737,7 @@ unsaved, so an empty editor never stays stuck open.
 Files view takes the same comment from its toolbar, as a `file` draft beside
 its line comments. Its editor and cards sit between the toolbar and the
 scroller, so they stay on screen at any scroll; the CodeMirror line widgets
-filter those drafts out, and the fullscreen overlay shows them while it is open.
+filter those drafts out.
 Changes hands its PR source to walkthrough; walkthrough's Changes action opens
 PR mode with the shared selection. Picking a PR never generates a walkthrough.
 
@@ -897,6 +909,13 @@ after it stops. The check runs on the live `exit` event and on a snapshot that
 reports `exited`, so a tab whose process ended while the panel was closed goes
 away when it is shown. VS Code has neither tabs nor the setting and keeps the
 exited terminal.
+
+A tab started from a command in a reply (a `terminal` tab in command mode) is
+the exception: it never closes on its own, whatever the setting, since its
+output is the point of running it. When its server session is gone (a server
+restart, a close from another client), the tab stays exited with its command mode and output instead of
+going back to idle, which would start an interactive shell in it; a reload
+restores it exited too (`stores/DOCUMENTATION.md`).
 
 In the desktop app Cmd/Ctrl+W closes the shown terminal tab the same way,
 without asking, so a command still running in it ends. The key goes through

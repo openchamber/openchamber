@@ -37,6 +37,8 @@ export type FileEditorKeymap = 'default' | 'vim';
 
 export type LargeTextPasteBehavior = 'ask' | 'attach' | 'inline' | 'inline-double-paste';
 
+export type DocumentAttachBehavior = 'ask' | 'save' | 'convert';
+
 export type ChatWidth = 'default' | 'wider' | 'full';
 
 export type SessionGoalChecker = 'classifier' | 'small-model';
@@ -297,6 +299,7 @@ export interface UIStore {
   agentSecretToolEnabled: boolean;
   agentWorkflowToolEnabled: boolean;
   agentWorkflowAutoApprove: boolean;
+  agentWorkflowAutoApproveLeads: boolean;
   isolatedSpacesEnabled: boolean;
   permissionDefaultMode: PermissionMode;
   agentMemoryFeatureAvailable: boolean;
@@ -308,6 +311,7 @@ export interface UIStore {
   projectKnowledgePlanRequest: { projectContextId: string; planId: string } | null;
   inputSpellcheckEnabled: boolean;
   largeTextPasteBehavior: LargeTextPasteBehavior;
+  documentAttachBehavior: DocumentAttachBehavior;
   enterToSend: boolean;
   enterToSendConfigured: boolean;
   mobileReturnKeySends: boolean;
@@ -575,6 +579,7 @@ export interface UIStore {
   clearProjectKnowledgePlanRequest: () => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setLargeTextPasteBehavior: (value: LargeTextPasteBehavior) => void;
+  setDocumentAttachBehavior: (value: DocumentAttachBehavior) => void;
   setEnterToSend: (value: boolean) => void;
   setMobileReturnKeySends: (value: boolean) => void;
   setEnterToSendConfigured: (value: boolean) => void;

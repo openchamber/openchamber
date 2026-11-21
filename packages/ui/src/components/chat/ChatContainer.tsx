@@ -1,8 +1,10 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
+import type { Session } from '@/lib/opencode/model';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSyncStore } from '@/sync/global-sync-store';
+import { useSessionSelector } from '@/sync/sync-context';
 import ChatEmptyState from './ChatEmptyState';
 import { type MessageListHandle } from './MessageList';
 import { useScrollShadow } from '@/components/ui/useScrollShadow';
@@ -22,6 +24,7 @@ import { ChatViewport } from './column/ChatViewport';
 import { ComposerSlot } from './column/ComposerSlot';
 import { HoistedUiPageSelection } from './column/HoistedUiPageSelection';
 import { ReturnToParentButton } from './column/ReturnToParentButton';
+import { LeadDigestRow } from './column/LeadDigestRow';
 import { resolveSessionPlaceholder } from './column/sessionPlaceholder';
 import { useAutoOpenDraft, useChatColumnSelection } from './column/useChatColumnSelection';
 import { useChatColumnScope } from './column/useChatColumnScope';
@@ -45,13 +48,17 @@ type ChatContainerProps = {
     autoOpenDraft?: boolean;
     readOnly?: boolean;
     pinnedSession?: { sessionId: string; directory: string | null };
+    registerParentSessionBack?: (handler: (() => void) | null) => void;
 };
+
+const selectSessionLastIdleAt = (session: Session | undefined): number | null => session?.time.idle ?? null;
 
 export const ChatContainer: React.FC<ChatContainerProps> = ({
     active = true,
     autoOpenDraft: autoOpenDraftProp = true,
     readOnly = false,
     pinnedSession,
+    registerParentSessionBack,
 }) => {
     const { t } = useI18n();
     const {
@@ -109,6 +116,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         sessionMessages,
         sync,
     });
+    const lastIdleAt = useSessionSelector(currentSessionId, effectiveSessionDirectory, selectSessionLastIdleAt);
     useColumnAutoReadAloud({
         pinned,
         currentSessionKey,
@@ -118,7 +126,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         sessionMessages,
         olderCompletedReplyIds: sessionMessageLoadState.olderCompletedReplyIds,
     });
-    const retryOverlay = useRetryOverlay(currentSessionId, sessionStatusForCurrent);
+    const retryOverlay = useRetryOverlay(currentSessionId, sessionStatusForCurrent, lastIdleAt);
 
     const { isMobile } = useDeviceInfo();
     const isVSCode = isVSCodeRuntime();
@@ -313,6 +321,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             isDesktopExpandedInput={isDesktopExpandedInput}
             isMobile={isMobile}
             formsInChat={formsInChat}
+            tableExpansion={!pinned}
             floatingComposer={floatingComposer}
             statusRowClearance={sessionIsWorking ? composerOverlayHeight : 0}
             directory={effectiveSessionDirectory}
@@ -381,7 +390,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                         directory={effectiveSessionDirectory}
                         hidden={hideReturnToParent}
                         openSession={columnActions.openSession}
+                        registerParentSessionBack={registerParentSessionBack}
                     />
+                    {!pinned && !draftOpen ? <LeadDigestRow key={currentSessionId ?? ''} sessionId={currentSessionId} directory={effectiveSessionDirectory} /> : null}
                     {sessionSurface}
                     {chatSearch.open && currentSessionId && messageSearchEnabled ? (
                         <div className="pointer-events-none absolute inset-e-3 top-2 z-20">

@@ -4,6 +4,42 @@ import type { BlockField } from './catalog';
 const fieldValue = z.union([z.string(), z.array(z.string())]);
 export type UiBlockFieldValue = z.infer<typeof fieldValue>;
 
+export const uiBlockReplyDraft = z.object({
+  values: z.record(z.string(), fieldValue),
+  chosen: z.array(z.tuple([z.string(), z.string().nullable()])),
+  notes: z.array(z.tuple([z.string(), z.string()])),
+  note: z.string(),
+});
+export type UiBlockReplyDraft = z.infer<typeof uiBlockReplyDraft>;
+
+type InputIdStorage = Pick<Storage, 'getItem' | 'setItem'>;
+
+const readStored = (storage: InputIdStorage | undefined, key: string): string | null => {
+  try {
+    return storage?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const writeStored = (storage: InputIdStorage | undefined, key: string, value: string): boolean => {
+  try {
+    storage?.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export function stableReplyInputId(key: string, storage: InputIdStorage | undefined, memory: Map<string, string>, create: () => string): string {
+  const storageKey = `oc.ui-block.reply-input.v1:${key}`;
+  const known = memory.get(key) ?? readStored(storage, storageKey);
+  const id = known ?? create();
+  if (!known) writeStored(storage, storageKey, id);
+  memory.set(key, id);
+  return id;
+}
+
 export const uiBlockAnswerData = z.object({
   button: z.string(),
   value: z.string().optional(),

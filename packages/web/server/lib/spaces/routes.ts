@@ -33,8 +33,8 @@ interface SwitchOptions {
   setHost: (host: SpacesHost | null) => void;
   buildHost: () => Promise<SpacesHost>;
   startHost: (host: SpacesHost) => void;
-  persist: (enabled: boolean) => Promise<void>;
-  persistMachine?: (machine: string) => Promise<void>;
+  persist: (enabled: boolean) => Promise<void | object>;
+  persistMachine?: (machine: string) => Promise<void | object>;
 }
 interface RouteOptions {
   getJourney: () => Journey | null;

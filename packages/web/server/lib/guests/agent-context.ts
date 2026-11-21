@@ -81,14 +81,14 @@ export const createGuestAgentContext = ({ listGuests, instructions, fsPromises =
   return { instructionText, skillDirectories, pluginDirectories };
 };
 
-const pinAuthoringSkill = (template: string, openchamberVersion: string) => {
+const pinAuthoringSkill = (template: string, openchamberVersion = '') => {
   const core = parseOpenChamberVersion(openchamberVersion);
   return template
     .replaceAll('{{sdkVersion}}', core ? openchamberVersion : 'latest')
     .replaceAll('{{engineFloor}}', core ? `${core.major}.${core.minor}.${core.patch}` : '0.0.0');
 };
 
-export const materializeAuthoringSkill = async ({ fsPromises, instanceDir, openchamberVersion }: { fsPromises: typeof fs; instanceDir: string; openchamberVersion: string }) => {
+export const materializeAuthoringSkill = async ({ fsPromises, instanceDir, openchamberVersion }: { fsPromises: typeof fs; instanceDir: string; openchamberVersion?: string | undefined }) => {
   const skillsRoot = path.join(instanceDir, 'skills');
   const directory = path.join(skillsRoot, AUTHORING_SKILL_NAME);
   const target = path.join(directory, 'SKILL.md');

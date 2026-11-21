@@ -14,7 +14,7 @@ import { opencodeClient } from "@/lib/opencode/client"
 
 const FILE_URI_PREFIX = "file://"
 const MAX_INLINE_ATTACHMENT_BYTES = 10 * 1024 * 1024
-const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 const MAX_ATTACHMENT_PREPARATION_ATTEMPTS = 3
 const INTAKE_REDACTED_FILENAME = /\.(har|ipynb)$/i
 const pendingVSCodeSelectionKeys = new Set<string>()

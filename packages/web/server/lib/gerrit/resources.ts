@@ -1,5 +1,5 @@
 import { documentDataUrl } from '../source-control/document-versions.js';
-import { isPlainObject, isString } from '../shared/guards.js';
+import { isPlainObject, isPresent, isString } from '../shared/guards.js';
 import { mapLimited } from '../shared/map-limited.js';
 import { joinProjectPath } from '../source-control/project-path.js';
 import { readLocalRevision as readLocalRevisionDefault, readUpstreamBranch as readUpstreamBranchDefault } from './local-revision.js';
@@ -9,6 +9,7 @@ import {
   mapGerritVoteLabels, splitUnifiedDiff,
 } from './mappers.js';
 import { resolveGerritProjectsFromDirectory } from './repo.js';
+import type { BindingMutationTarget } from '../source-control/binding-service-contracts.js';
 import type { GerritChange, GerritComment, GerritFile, GerritIdentity, GerritJson, GerritProject, GerritQuery, GerritRevision, GerritSubmitRequirement, GerritVoteLabel } from './contracts.js';
 import type { ProviderReadContext } from '../source-control/provider-contract.js';
 import type { SourceControlMutationTarget } from '@openchamber/sdk';
@@ -95,6 +96,7 @@ const LIVE_OPTIONS = ['CURRENT_REVISION', 'SUBMITTABLE'];
 
 const LIST_STATES = { open: 'status:open', closed: 'status:closed', merged: 'status:merged', all: '' };
 const LIST_PEOPLE = { any: '', created: 'owner:self', assigned: 'attention:self', reviewRequested: 'reviewer:self -owner:self' };
+const listTerm = <Terms extends Readonly<Record<string, string>>>(terms: Terms, key: string) => (Object.hasOwn(terms, key) ? terms[key] : undefined);
 
 const notFound = (message: string) => Object.assign(new Error(message), { status: 404 });
 const malformed = (message: string) => new Error(message);
@@ -211,7 +213,7 @@ export function createGerritResourceService({
     }
     return target;
   };
-  const requireExpected = (expected: SourceControlMutationTarget, actual: GerritChange) => {
+  const requireExpected = (expected: BindingMutationTarget, actual: GerritChange) => {
     const keys: Array<'number' | 'head' | 'base' | 'headSha'> = ['number', 'head', 'base', 'headSha'];
     for (const key of keys) {
       if (expected[key] !== undefined && expected[key] !== actual[key]) throw mismatch(key);
@@ -283,12 +285,12 @@ export function createGerritResourceService({
       return status;
     },
 
-    async listChangeRequests(directory: string, options: { page?: number | undefined; remote?: string | undefined; state?: keyof typeof LIST_STATES | undefined; people?: keyof typeof LIST_PEOPLE | undefined; query?: string | undefined } = {}) {
+    async listChangeRequests(directory: string, options: { page?: number | undefined; remote?: string | undefined; state?: string | undefined; people?: string | undefined; query?: string | undefined } = {}) {
       const page = options.page ?? 1;
       const primary = await primaryProject(directory, options.remote);
       const project = projectOf(primary, { remoteName: primary.remoteName });
-      const q = [`project:${primary.project}`, LIST_STATES[options.state ?? 'open'] ?? LIST_STATES.open,
-        LIST_PEOPLE[options.people ?? 'any'] ?? '', searchTerm(options.query)].filter(Boolean).join(' ');
+      const q = [`project:${primary.project}`, listTerm(LIST_STATES, options.state ?? 'open') ?? LIST_STATES.open,
+        listTerm(LIST_PEOPLE, options.people ?? 'any') ?? '', searchTerm(options.query)].filter(Boolean).join(' ');
       const result = await client.page('/changes/', { q, o: LIST_OPTIONS }, { start: (page - 1) * LIST_PAGE, limit: LIST_PAGE });
       return { items: result.items.map((raw) => requireChange(raw, project)), page, hasMore: result.hasMore };
     },
@@ -413,7 +415,7 @@ export function createGerritResourceService({
       return { original, modified };
     },
 
-    async liveSummaries({ refs = [] }: { refs?: Array<{ owner: string; repo: string; number: number }> }) {
+    async liveSummaries({ refs = [] }: { refs?: Array<{ owner: string; repo: string; number: number }> | undefined }) {
       const summaries = await mapLimited(refs, LIVE_SUMMARY_CONCURRENCY, async (ref) => {
         try {
           if (ref === undefined) return null;
@@ -423,7 +425,7 @@ export function createGerritResourceService({
           return null;
         }
       });
-      return { summaries: summaries.filter(Boolean), issueSummaries: [] };
+      return { summaries: summaries.filter(isPresent), issueSummaries: [] };
     },
 
     async findChangeRequest(directory: string, number: number, selector: ProjectSelector | null | undefined, remote?: string) {
@@ -432,7 +434,7 @@ export function createGerritResourceService({
     },
 
 
-    async resolveChangeRequestMutation(context: Pick<ProviderReadContext, 'directory' | 'repositoryId' | 'bindingRevision' | 'primaryRemote'>, expected: SourceControlMutationTarget & { number: number }) {
+    async resolveChangeRequestMutation(context: Pick<ProviderReadContext, 'directory' | 'repositoryId' | 'bindingRevision' | 'primaryRemote'>, expected: BindingMutationTarget & { number: number }) {
       const { primary, project, request } = await findChange(context.directory, expected.number, expected.project, context.primaryRemote, MUTATION_OPTIONS);
       requireExpected(expected, request);
       return {

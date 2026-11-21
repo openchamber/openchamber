@@ -178,9 +178,30 @@ describe("ask outcome classification", () => {
     expect(classifyQuestionToolError("Tool execution interrupted", "aborted", false)).toBe("turn-death")
     expect(classifyQuestionToolError("Interaction cancelled because the location shut down", "aborted", false)).toBe("shutdown")
     expect(classifyQuestionToolError("Step interrupted", "aborted", false)).toBe("unresolved")
-    expect(classifyQuestionToolError("form cancelled", "tool.execution", false)).toBe("dismissed")
+    expect(classifyQuestionToolError("The user dismissed this question", "tool.execution", false)).toBe("dismissed")
     expect(classifyQuestionToolError("not needed", "tool.execution", false)).toBe("dismissed")
     expect(classifyQuestionToolError("Interrupted", undefined, true)).toBe("turn-death")
+  })
+
+  test("an untyped interrupt is turn death, not a dismissal", () => {
+    // What the app's own interrupt stores: the message with the wrapper type
+    // OpenCode gives an error it did not classify. Read as a typed error it
+    // made an interrupted question look like the reader had dismissed it.
+    expect(classifyQuestionToolError("All fibers interrupted without error", "unknown", false)).toBe("turn-death")
+    expect(classifyQuestionToolError("All fibers interrupted without error", undefined, false)).toBe("turn-death")
+    // The wording of OpenCode's own dismissal. Typed either way, it is not
+    // turn death: adding it to that list would offer every dismissed question
+    // for recovery, which this test would catch.
+    expect(classifyQuestionToolError("The user dismissed this question", "aborted", false)).toBe("unresolved")
+    expect(classifyQuestionToolError("The user dismissed this question", "unknown", false)).toBe("dismissed")
+  })
+
+  test("an interrupt wrapped with the tool and the session is turn death", () => {
+    // `settleStaleToolCalls` fails a stale question with the tool's name, and
+    // OpenCode appends the session it ran in. The bare wording is one shape.
+    expect(classifyQuestionToolError("Tool execution interrupted: question", undefined, false)).toBe("turn-death")
+    expect(classifyQuestionToolError("Tool execution interrupted: question (sessionID: ses_ask)", undefined, false)).toBe("turn-death")
+    expect(classifyQuestionToolError("Tool execution interrupted: question (sessionID: ses_ask)", "aborted", false)).toBe("turn-death")
   })
 
   test("fails closed on evidence it does not recognize", () => {
@@ -222,6 +243,68 @@ describe("recovery of a question whose ask died", () => {
     ])
     const recovered = deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)
     expect(recovered.map((entry) => entry.form.id)).toEqual(["frm_1"])
+  })
+
+  test("offers the question an interrupt killed under the wrapper type unknown", () => {
+    applyRecoverableQuestionEvents("/repo", [
+      formCreated(questionForm("frm_1")),
+      formSettled("frm_1", "cancelled"),
+      toolFailed("All fibers interrupted without error", "unknown"),
+    ])
+    const recovered = deriveRecoveredQuestions(
+      viewWith(failedTool("All fibers interrupted without error", "unknown")),
+      recoveryView(),
+      allSessions,
+    )
+    expect(recovered.map((entry) => entry.form.id)).toEqual(["frm_1"])
+  })
+
+  test("offers the question a stale tool settlement killed during the next run", () => {
+    const stale = "Tool execution interrupted: question (sessionID: ses_ask)";
+    applyRecoverableQuestionEvents("/repo", [
+      formCreated(questionForm("frm_1")),
+      formSettled("frm_1", "cancelled"),
+      toolFailed(stale, "aborted"),
+    ])
+    const recovered = deriveRecoveredQuestions(
+      viewWith(failedTool(stale, "aborted")),
+      recoveryView(),
+      allSessions,
+    )
+    expect(recovered.map((entry) => entry.form.id)).toEqual(["frm_1"])
+  })
+
+  test("does not offer a question the reader dismissed", () => {
+    const dismissed = "The user dismissed this question";
+    for (const errorType of ["aborted", "unknown"]) {
+      resetRecoverableQuestions()
+      applyRecoverableQuestionEvents("/repo", [
+        formCreated(questionForm("frm_1")),
+        formSettled("frm_1", "cancelled"),
+        toolFailed(dismissed, errorType),
+      ])
+      const recovered = deriveRecoveredQuestions(
+        viewWith(failedTool(dismissed, errorType)),
+        recoveryView(),
+        allSessions,
+      )
+      expect(recovered).toEqual([])
+    }
+  })
+
+  test("keeps a dismissal seen from another client final when an interrupt follows", () => {
+    const dismissed = "The user dismissed this question";
+    applyRecoverableQuestionEvents("/repo", [
+      formCreated(questionForm("frm_1")),
+      toolFailed(dismissed, "unknown"),
+      toolFailed("Tool execution interrupted"),
+    ])
+    const recovered = deriveRecoveredQuestions(
+      viewWith(failedTool("Tool execution interrupted", undefined)),
+      recoveryView(),
+      allSessions,
+    )
+    expect(recovered).toEqual([])
   })
 
   test("never shows a question whose request is still pending", () => {
@@ -275,14 +358,33 @@ describe("settlement beats recovery", () => {
     expect(recovered).toEqual([])
   })
 
+  test("a dismissed outcome is final where an unresolved one is not", () => {
+    applyRecoverableQuestionEvents("/repo", [
+      formCreated(questionForm("frm_1")),
+      toolFailed("The user dismissed this question", "tool.execution"),
+    ])
+    applyRecoverableQuestionEvents("/repo", [toolFailed("Tool execution interrupted", "aborted")])
+    expect(recoveryView().dispositions.get("msg_ask\u0000tool_ask")?.outcome).toBe("dismissed")
+
+    resetRecoverableQuestions()
+    applyRecoverableQuestionEvents("/repo", [
+      formCreated(questionForm("frm_1")),
+      toolFailed("Step interrupted", "aborted"),
+    ])
+    expect(recoveryView().dispositions.get("msg_ask\u0000tool_ask")?.outcome).toBe("unresolved")
+    applyRecoverableQuestionEvents("/repo", [toolFailed("Tool execution interrupted", "aborted")])
+    expect(recoveryView().dispositions.get("msg_ask\u0000tool_ask")?.outcome).toBe("turn-death")
+  })
+
   test("a deliberate dismissal is not recovered", () => {
+    const dismissed = "The user dismissed this question";
     applyRecoverableQuestionEvents("/repo", [
       formCreated(questionForm("frm_1")),
       formSettled("frm_1", "cancelled"),
-      toolFailed("form cancelled", "tool.execution"),
+      toolFailed(dismissed, "tool.execution"),
     ])
     expect(deriveRecoveredQuestions(
-      viewWith(failedTool("form cancelled", "tool.execution")),
+      viewWith(failedTool(dismissed, "tool.execution")),
       recoveryView(),
       allSessions,
     )).toEqual([])

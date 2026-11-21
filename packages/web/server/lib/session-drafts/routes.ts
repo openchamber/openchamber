@@ -29,6 +29,7 @@ const storedDraftSchema = z.object({
   id,
   directory: z.string().min(1).max(4096),
   projectId: z.string().max(512).nullable(),
+  targetFolderId: z.string().min(1).max(512).optional(),
   text: z.string().max(MAX_TEXT_LENGTH),
   mentions: z.array(z.string().max(4096)).max(500),
   attachments: z.array(storedAttachmentSchema).max(MAX_ATTACHMENTS),
@@ -54,6 +55,7 @@ const incomingAttachmentSchema = z.object({
 const putBodySchema = z.object({
   directory: z.string().min(1).max(4096),
   projectId: z.string().max(512).nullable().optional(),
+  targetFolderId: z.string().min(1).max(512).optional(),
   text: z.string().max(MAX_TEXT_LENGTH),
   mentions: z.array(z.string().max(4096)).max(500).optional(),
   attachments: z.array(incomingAttachmentSchema).max(MAX_ATTACHMENTS).optional(),
@@ -69,6 +71,7 @@ const toPublicDraft = (draft: StoredDraft) => ({
   id: draft.id,
   directory: draft.directory,
   projectId: draft.projectId,
+  targetFolderId: draft.targetFolderId,
   text: draft.text,
   mentions: draft.mentions,
   attachments: draft.attachments.map((attachment) => ({
@@ -201,6 +204,7 @@ export const registerSessionDraftRoutes = (app: Application, dependencies: Sessi
           id: draftId.data,
           directory: body.data.directory,
           projectId: body.data.projectId ?? null,
+          targetFolderId: body.data.targetFolderId,
           text: body.data.text,
           mentions: body.data.mentions ?? [],
           attachments,

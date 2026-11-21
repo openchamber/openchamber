@@ -110,7 +110,7 @@ const sequenceInProgress = async (directory: string, git: GitCommand) => {
   return paths.some((statePath) => fs.existsSync(path.resolve(directory, statePath)));
 };
 
-export async function addChangeIdToHead(directory: string, expectedHead: string, { git = runGit } = {}) {
+export async function addChangeIdToHead<Head>(directory: string, expectedHead: Head, { git = runGit } = {}) {
   const expected = isString(expectedHead) ? expectedHead.trim().toLowerCase() : '';
   if (!/^[0-9a-f]{40}$/.test(expected)) throw refused('expectedHead must be a full commit SHA', 'INVALID_REQUEST', 400);
   let branchRef;

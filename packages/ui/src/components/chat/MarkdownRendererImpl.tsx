@@ -27,6 +27,7 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import type { ToolPopupContent } from './message/types';
 import { getMarkdownCjk, getMarkdownProcessingOptions, markdownMath, remarkLiteralText } from './markdown/streamdownPlugins';
+import { parseMarkdownBlocksWithMath } from './markdown/mathBlocks';
 import { remarkEmojiShortcodes } from './markdown/remarkEmojiShortcodes';
 import { remarkRepositoryReferences } from './markdown/remarkRepositoryReferences';
 import { fenceUiBlocks } from './uiBlocks/taggedBlocks';
@@ -272,6 +273,7 @@ export interface MarkdownContentProps {
   onShowPopup?: (content: ToolPopupContent) => void;
   mermaidControls?: MermaidControls;
   purpose?: 'copy' | 'image';
+  chatTableExpansion?: boolean;
   theme?: Theme;
   preparedHighlights?: ReadonlyMap<string, ReadonlyMap<string, HighlightResult>>;
   onExportCode?: (source: string, language: string) => void;
@@ -305,6 +307,7 @@ export function MarkdownContent({
   onShowPopup,
   mermaidControls = defaultMermaidControls,
   purpose,
+  chatTableExpansion = false,
   theme: exportTheme,
   preparedHighlights,
   onExportCode,
@@ -435,6 +438,7 @@ export function MarkdownContent({
     disableLinkSafety,
     guestLinks: activeGuestLinks,
     tableWidthScope,
+    chatTableExpansion: chatTableExpansion && variant === 'assistant' && !purpose,
     theme,
     mermaidControls,
     onShowPopup,
@@ -443,7 +447,7 @@ export function MarkdownContent({
     confirmFile,
     code,
   }), [
-    directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, uiBlocks, svgFences, sessionId, messageId, disableLinkSafety, activeGuestLinks, tableWidthScope, theme,
+    directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, uiBlocks, svgFences, sessionId, messageId, disableLinkSafety, activeGuestLinks, tableWidthScope, chatTableExpansion, variant, theme,
     mermaidControls, onShowPopup, onExportCode, preparedHighlights, confirmFile, code,
   ]);
 
@@ -456,7 +460,7 @@ export function MarkdownContent({
       mode={windowed ? 'streaming' : mode}
       isAnimating={isStreaming}
       BlockComponent={windowed ? WindowedMarkdownBlock : MarkdownArrivalBlock}
-      parseMarkdownIntoBlocksFn={mode === 'static' && !windowed ? wholeDocument : undefined}
+      parseMarkdownIntoBlocksFn={mode === 'static' && !windowed ? wholeDocument : parseMarkdownBlocksWithMath}
       parseIncompleteMarkdown={isStreaming}
       normalizeHtmlIndentation={false}
       animated={false}
@@ -560,6 +564,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
       isStreaming={isStreaming}
       variant={variant}
       className={className}
+      chatTableExpansion={variant === 'assistant'}
       directory={directory}
       settled={!isStreaming}
       sessionId={settledPart?.sessionID}

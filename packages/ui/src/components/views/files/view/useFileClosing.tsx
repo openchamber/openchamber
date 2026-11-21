@@ -1,5 +1,5 @@
 import React from 'react';
-import { type FileNode, type FilesViewOptions } from './fileViewTypes';
+import { type FileNode, type FilesViewProps } from './fileViewTypes';
 import { registerCloseTabTarget } from '@/lib/closeTabTarget';
 import { type useFileSaving, type useFileDraft } from './useFileSaving';
 import { type useFileOpening } from './useFileOpening';
@@ -29,7 +29,7 @@ export function useFileClosing({ canvasState, closeState, draft, fileDocument, f
   scope: Pick<ReturnType<typeof useFileScope>, 'root'>;
   tabs: Pick<ReturnType<typeof useFileTabs>, 'openFiles' | 'removeOpenPath' | 'selectedFile' | 'setSelectedPath'>;
   isMobile: boolean;
-  onCloseFile: FilesViewOptions['onCloseFile'];
+  onCloseFile: FilesViewProps['onCloseFile'];
   visible: boolean;
 }) {
   const { setCanvasDirty, setCanvasRemountNonce } = canvasState;
@@ -154,6 +154,6 @@ export function useFileClosing({ canvasState, closeState, draft, fileDocument, f
     return registerCloseTabTarget(() => handleCloseFileRef.current(closeTargetPath), rootRef);
   }, [closeTargetPath, visible]);
   return {
-  discardAndContinue, saveAndContinue, handleCloseFile, rootRef,
+  discardAndContinue, saveAndContinue, rootRef,
   };
 }

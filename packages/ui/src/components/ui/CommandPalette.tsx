@@ -37,7 +37,6 @@ import {
   copyCurrentSessionId,
   openArchive,
   openMultiRun,
-  openNewWorktreeDialog,
   openNotes,
   openOverview,
   openTodos,
@@ -47,11 +46,12 @@ import {
   showContextUsage,
   showDiagnosticTimeline,
 } from '@/lib/paletteCommands';
+import { appearanceCommands } from './commandPaletteAppearance';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { toastContextFileOpenFailure, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import type { Session } from '@/lib/opencode/model';
-import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
+import { createCommands, type CommandEntry } from './commandPaletteCreateCommands';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo, shortcutRegistry, type ShortcutActionId } from '@/lib/shortcuts';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { SETTINGS_PAGE_METADATA, type SettingsRuntimeContext } from '@/lib/settings/metadata';
@@ -95,17 +95,6 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import { rankConversationMetadata } from '@/lib/search/conversationSearch';
 import { Button } from './button';
 
-type CommandEntry = {
-  id: string;
-  title: string;
-  icon: React.ReactNode;
-  shortcutId?: ShortcutActionId;
-  searchText: string;
-  detail?: string;
-  keywords?: string;
-  secondary?: boolean;
-  onSelect: () => void;
-};
 
 type FileHit = { path: string; name: string; relativePath: string };
 const EMPTY_SESSIONS: Session[] = [];
@@ -242,35 +231,10 @@ export const CommandPalette: React.FC = () => {
   const overviewAvailable = useUIStore((state) => state.overviewFeatureAvailable);
   const commands = React.useMemo<CommandEntry[]>(() => {
     const list: CommandEntry[] = [
-      {
-        id: 'new-session',
-        title: t('commandPalette.item.newSession'),
-        icon: <Icon name="add" className="me-2 h-4 w-4" />,
-        shortcutId: 'new_chat',
-        searchText: t('commandPalette.item.newSession'),
-        onSelect: run(() => {
-          setSessionSwitcherOpen(false);
-          openNewSessionDraft();
-        }),
-      },
-      {
-        id: 'new-worktree',
-        title: t('commandPalette.item.quickWorktree'),
-        icon: <Icon name="flashlight" className="me-2 h-4 w-4" />,
-        shortcutId: 'new_chat_worktree',
-        searchText: t('commandPalette.item.quickWorktree'),
-        onSelect: run(() => {
-          void createWorktreeSession();
-        }),
-      },
-      {
-        id: 'new-worktree-dialog',
-        title: t('commandPalette.item.newWorktreeDialog'),
-        icon: <Icon name="worktree" className="me-2 h-4 w-4" />,
-        shortcutId: 'open_new_worktree_dialog',
-        searchText: t('commandPalette.item.newWorktreeDialog'),
-        onSelect: run(openNewWorktreeDialog),
-      },
+      ...createCommands({ t, run, startSession: () => {
+        setSessionSwitcherOpen(false);
+        openNewSessionDraft();
+      } }),
       {
         id: 'add-project',
         title: t('commandPalette.item.addProject'),
@@ -316,17 +280,7 @@ export const CommandPalette: React.FC = () => {
         searchText: t('commandPalette.item.showContextUsage'),
         onSelect: run(showContextUsage),
       },
-      {
-        id: 'cycle-theme',
-        secondary: true,
-        title: t('commandPalette.item.cycleTheme'),
-        icon: <Icon name="palette" className="me-2 h-4 w-4" />,
-        shortcutId: 'cycle_theme',
-        searchText: t('commandPalette.item.cycleTheme'),
-        onSelect: run(() => {
-          shortcutRegistry.invoke('cycle_theme');
-        }),
-      },
+      ...appearanceCommands(t, run),
       {
         id: 'open-status',
         secondary: true,

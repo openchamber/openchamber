@@ -10,6 +10,11 @@ export interface LimitFailoverSettings {
   accountSwitchProviders?: string[];
 }
 
+export interface LimitFailoverConfigurationInput {
+  fallbackModel?: unknown;
+  accountSwitchProviders?: unknown;
+}
+
 export interface FailoverModel {
   providerID: string;
   id: string;
@@ -88,12 +93,12 @@ export const classifyLimitFailure = (report: LimitReport, now: number): LimitFai
   return { resetAt: now + (proposedDelay >= LONG_WAIT_MS ? proposedDelay : DEFAULT_EXHAUSTION_MS) };
 };
 
-export const isLimitFailoverConfigured = (settings: LimitFailoverSettings | null | undefined) => (
+export const isLimitFailoverConfigured = (settings: LimitFailoverConfigurationInput | null | undefined) => (
   parseModelSetting(settings?.fallbackModel) !== null
   || (Array.isArray(settings?.accountSwitchProviders) && settings.accountSwitchProviders.length > 0)
 );
 
-export const parseModelSetting = (value: string | null | undefined, variantValue?: string | null): FailoverModel | null => {
+export const parseModelSetting = (value: LimitFailoverConfigurationInput['fallbackModel'], variantValue?: string | null): FailoverModel | null => {
   const text = asNonEmptyString(value);
   if (!text) return null;
   const slash = text.indexOf('/');

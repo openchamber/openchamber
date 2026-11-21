@@ -196,13 +196,19 @@ environment:
 }
 ```
 
-拒否されたプロバイダーは、誰かがキーを追加しても表示されません。ポリシーは、プロジェクトから解除できないグローバルの `~/.config/opencode/opencode.jsonc` に置くか、最終的な決定権を持つ OpenCode Console のワークスペースから配布してください。エンタープライズモードが扱うのは、それに加えて OpenChamber 自身が送るものです。
+拒否されたプロバイダーは、誰かがキーを追加しても表示されません。ポリシーは、OpenCode のシステム設定（Linux では `/etc/opencode/opencode.jsonc`、Windows では `%ProgramData%\opencode\opencode.jsonc`、macOS では `/Library/Application Support/opencode/opencode.jsonc`）に置いて、上の Windows の例のように、そのフォルダーに書き込めるのを管理者だけにするか、OpenCode Console のワークスペースから配布してください。システム設定のパスは、OpenCode を実行しているマシン上のものです。上の Docker 構成では OpenCode はコンテナ内で動くので、`docker-compose.yml` の `volumes` でファイルをコンテナ内に読み取り専用でマウントしてください: `- ./opencode-policy.jsonc:/etc/opencode/opencode.jsonc:ro`。どちらも、ユーザーのグローバルな `~/.config/opencode/opencode.jsonc` やプロジェクトのファイルより優先され、システム設定は Console よりも優先されます。Console のポリシーはワークスペースが接続している間だけ適用され、切断すると消えます。切断後も維持する必要がある制限は、システム設定に置いてください。グローバルなファイルは、プロジェクトによるポリシーの解除を防ぎますが、ユーザーは編集できます。エンタープライズモードが扱うのは、それに加えて OpenChamber 自身が送るものです。
 
-エージェントの Web 検索やページ取得も OpenCode を経由し、検索サービスやページそのものに接続します。これらをネットワークの外に出したくない場合は、同じ種類のポリシーで拒否してください。
+エージェントの Web 検索やページ取得も OpenCode を経由し、検索サービスやページそのものに接続します。これらをネットワークの外に出したくない場合は、同じ種類のポリシーで拒否してください。設定にすでにポリシーがある場合は、そのリストの末尾に 2 つの `tool.use` エントリを追加し、プロバイダーのエントリやほかのポリシーはそのまま残してください。ファイルにトップレベルの `policies` 配列と `experimental.policies` の両方がある場合は、トップレベルのほうに追加してください。OpenCode は `experimental.policies` を先に読み、一致した最後のエントリが優先されます。新しい設定では、次の例だけでそのまま使えます。
 
 ```jsonc
-{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
-{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+{
+  "experimental": {
+    "policies": [
+      { "action": "tool.use", "resource": "websearch:*", "effect": "deny" },
+      { "action": "tool.use", "resource": "webfetch:*", "effect": "deny" }
+    ]
+  }
+}
 ```
 
 ## 関連

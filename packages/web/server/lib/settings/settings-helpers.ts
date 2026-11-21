@@ -166,9 +166,13 @@ import {
   isInputHistoryScope,
 } from './input-history-scope.js';
 
+const largeTextPasteBehaviorSchema = z.string().trim().pipe(z.enum(['ask', 'attach', 'inline', 'inline-double-paste']));
+const documentAttachBehaviorSchema = z.string().trim().pipe(z.enum(['ask', 'save', 'convert']));
+const fileEditorKeymapSchema = z.string().trim().pipe(z.enum(['default', 'vim']));
+
 const AGENT_TOOL_BOOLEAN_KEYS = [
   'agentControlToolEnabled', 'agentScheduleToolEnabled', 'agentMemoryToolEnabled', 'agentMemoryDreamingEnabled',
-  'agentKnowledgeToolEnabled', 'agentWorkflowToolEnabled', 'agentWorkflowAutoApprove', 'agentNotifyToolEnabled',
+  'agentKnowledgeToolEnabled', 'agentWorkflowToolEnabled', 'agentWorkflowAutoApprove', 'agentWorkflowAutoApproveLeads', 'agentNotifyToolEnabled',
   'agentRenderToolEnabled', 'agentImageToolEnabled', 'agentSecretToolEnabled', 'agentUsageToolEnabled', 'agentTerminalToolEnabled',
 ] as const;
 
@@ -251,7 +255,7 @@ type StringSettingsKey =
 type ClearableStringSettingsKey =
   | 'managedRemoteTunnelHostname' | 'managedRemoteTunnelSelectedPresetId' | 'defaultModel' | 'defaultVariant'
   | 'defaultAgent' | 'smallModelOverride' | 'smallModelVariant' | 'walkthroughModelOverride' | 'walkthroughModelVariant'
-  | 'fallbackModel' | 'fallbackVariant' | 'defaultGitIdentityId' | 'zenModel';
+  | 'fallbackModel' | 'fallbackVariant' | 'defaultGitIdentityId' | 'zenModel' | 'chatsDefaultModel' | 'chatsDefaultVariant' | 'chatsDefaultAgent';
 
 type NumberSettingsKey =
   | 'inputHistoryLimit' | 'sidebarSessionBatchSize' | 'liveBrowserTabLimit' | 'sessionGoalMaxAutoTurns'
@@ -299,6 +303,7 @@ export type SanitizedSettings = Partial<Record<BooleanSettingsKey, boolean>>
     draftStarters?: { type: 'command' | 'skill'; name: string }[];
     fileTreeSide?: 'left' | 'right';
     largeTextPasteBehavior?: 'ask' | 'attach' | 'inline' | 'inline-double-paste';
+    documentAttachBehavior?: 'ask' | 'save' | 'convert';
     fileEditorKeymap?: 'default' | 'vim';
     sessionGoalChecker?: 'classifier' | 'small-model';
     notificationMode?: 'always' | 'hidden-only';
@@ -837,18 +842,12 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (candidate.terminalOpenOnProjectAction === true || candidate.terminalOpenOnProjectAction === false) {
       result.terminalOpenOnProjectAction = candidate.terminalOpenOnProjectAction;
     }
-    if (isString(candidate.largeTextPasteBehavior)) {
-      const mode = candidate.largeTextPasteBehavior.trim();
-      if (mode === 'ask' || mode === 'attach' || mode === 'inline' || mode === 'inline-double-paste') {
-        result.largeTextPasteBehavior = mode;
-      }
-    }
-    if (isString(candidate.fileEditorKeymap)) {
-      const mode = candidate.fileEditorKeymap.trim();
-      if (mode === 'default' || mode === 'vim') {
-        result.fileEditorKeymap = mode;
-      }
-    }
+    const largeTextPasteBehavior = largeTextPasteBehaviorSchema.safeParse(candidate.largeTextPasteBehavior);
+    if (largeTextPasteBehavior.success) result.largeTextPasteBehavior = largeTextPasteBehavior.data;
+    const documentAttachBehavior = documentAttachBehaviorSchema.safeParse(candidate.documentAttachBehavior);
+    if (documentAttachBehavior.success) result.documentAttachBehavior = documentAttachBehavior.data;
+    const fileEditorKeymap = fileEditorKeymapSchema.safeParse(candidate.fileEditorKeymap);
+    if (fileEditorKeymap.success) result.fileEditorKeymap = fileEditorKeymap.data;
     if (isString(candidate.fileEditorVimMappings)) {
       result.fileEditorVimMappings = candidate.fileEditorVimMappings.slice(0, 10_000);
     }
@@ -1039,7 +1038,7 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (candidate.walkthroughModelVariant !== undefined) {
       result.walkthroughModelVariant = asNonEmptyString(candidate.walkthroughModelVariant) ?? undefined;
     }
-    for (const key of ['fallbackModel', 'fallbackVariant'] as const) {
+    for (const key of ['fallbackModel', 'fallbackVariant', 'chatsDefaultModel', 'chatsDefaultVariant', 'chatsDefaultAgent'] as const) {
       const value = z.string().trim().safeParse(candidate[key]);
       if (value.success) result[key] = value.data.length > 0 ? value.data : undefined;
     }

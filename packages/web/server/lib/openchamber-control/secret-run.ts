@@ -1,7 +1,7 @@
 import { isRecord, isString } from '../shared/guards.js';
 import { runCommand } from '../spaces/run-command.js';
 import { OpenChamberControlError, controlErrorFields } from './error.js';
-import type { createPageAnswers } from './render-page.js';
+import type { PageWaitOptions, createPageAnswers } from './render-page.js';
 import type { ActionContext } from './contracts.js';
 
 export interface SecretRunInput {
@@ -19,6 +19,34 @@ interface SecretValues {
 interface SubmittedSecrets {
   values: SecretValues;
   remember: string[];
+  save: string[];
+  saveGlobally: string[];
+}
+
+type SavedScope = 'project' | 'global';
+
+export interface StoredSecrets {
+  projectId: string | null;
+  project: SecretValues;
+  global: SecretValues;
+}
+
+export interface SavedSecretStore {
+  read: (directory: string) => Promise<StoredSecrets>;
+  write: (scope: SavedScope, projectId: string | null, patch: Record<string, string | null>) => Promise<void>;
+  remove: (projectId: string | null, expected: { project: SecretValues; global: SecretValues }) => Promise<void>;
+}
+
+interface SecretSlot {
+  kind: 'run' | 'forget';
+  fields: string[];
+  reused: string[];
+  savedValues: SecretValues;
+  savedScopes: Record<string, SavedScope>;
+  savedInBoth: string[];
+  projectId: string | null;
+  canSaveGlobally: boolean;
+  deliver: (answer: SubmittedSecrets) => void;
 }
 
 interface SecretSubmission {
@@ -39,6 +67,8 @@ export interface SecretRunResult {
   stderr: string;
   remembered: string[];
   note: string;
+  saved?: string[];
+  notSaved?: string[];
   truncated?: { stdout: boolean; stderr: boolean };
   error?: string;
 }
@@ -63,12 +93,16 @@ export interface SecretRunsOptions {
   waits: Pick<ReturnType<typeof createPageAnswers>, 'wait'>;
   hasUnreadChat: (sessionId: string) => Promise<boolean>;
   leases?: ReturnType<typeof createSecretLeases> | undefined;
+  saved?: SavedSecretStore | null | undefined;
   run?: CommandRunner | undefined;
 }
 
 interface SecretSubmissionInput {
   values?: unknown;
   remember?: unknown;
+  save?: unknown;
+  saveGlobally?: unknown;
+  saved?: unknown;
 }
 
 interface SubmittedValuesInput {
@@ -89,9 +123,12 @@ const CAPTURE_BYTES = 1024 * 1024;
 const OUTPUT_LIMIT = 32_000;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 
-const RAN_NOTE = "The command ran once, with the secrets in its environment. In stdout and stderr every secret value is replaced by [secret:NAME]. Fix a failing command and call secret.run again; the env names in remembered are reused without asking the user while they last.";
+const RAN_NOTE = "The command ran once, with the secrets in its environment. In stdout and stderr every secret value is replaced by [secret:NAME]. Fix a failing command and call secret.run again; the env names in remembered are reused without asking the user while they last. The ones in saved are kept for this project or for all projects: a later secret.run shows them on the card, and the user confirms them with one click.";
 const DECLINED_NOTE = "The user declined to give the secrets, so the command did not run. Continue without it or say what it blocks; ask again only if they want to.";
 const CHAT_SENT_EARLIER_NOTE = "The card did not wait and the command did not run: the user had already written in the chat before it appeared, and that message follows this result. Continue from that message; call again only if it still fits.";
+const SAVED_CHANGED_NOTE = "The command did not run: a saved secret was forgotten or changed while the card waited. Call secret.run again; the card asks the user for what is no longer saved.";
+const KEPT_NOTE = "The user kept the saved secrets; the ones this chat remembered are forgotten. Ask to forget the saved ones again only if the user asks.";
+const FORGET_CHAT_SENT_EARLIER_NOTE = "The card did not wait and the saved secrets are kept: the user had already written in the chat before it appeared, and that message follows this result. Continue from that message.";
 
 export function secretRunCommandLine(program: string, args: readonly string[]) {
   const hidden = (code: number) => code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x61c
@@ -201,6 +238,8 @@ export const createSecretLeases = ({ now = Date.now, leaseMs = SECRET_LEASE_MS }
 
 const NUL = String.fromCharCode(0);
 
+const ownValue = <T>(record: Record<string, T> | undefined, key: string) => (record && Object.hasOwn(record, key) ? record[key] : undefined);
+
 const retainedValue = (values: SecretValues, env: string) => {
   const value = values[env];
   if (value === undefined) throw new TypeError(`Missing submitted secret: ${env}`);
@@ -299,9 +338,41 @@ const runOnce = async ({ program, args, timeoutMs }: Pick<ReturnType<typeof norm
   }
 };
 
-export const createSecretRuns = ({ waits, hasUnreadChat, leases = createSecretLeases(), run = runCommand }: SecretRunsOptions) => {
-  const pending = new Map<string, { fields: string[]; reused: string[]; deliver: (answer: SubmittedSecrets) => void }>();
+export const createSecretRuns = ({ waits, hasUnreadChat, leases = createSecretLeases(), saved = null, run = runCommand }: SecretRunsOptions) => {
+  const pending = new Map<string, SecretSlot>();
   const key = (sessionId: string, callId: string) => `${sessionId}\u0000${callId}`;
+
+  const readSaved = async (directory: string) => {
+    if (!saved) return null;
+    try {
+      return await saved.read(directory);
+    } catch (error) {
+      console.warn('[secret.run] saved secrets unavailable:', error instanceof Error ? error.message : String(error));
+      return null;
+    }
+  };
+
+  const savedEntry = (stored: StoredSecrets | null, env: string): { value: string; scope: SavedScope } | null => {
+    const project = ownValue(stored?.project, env);
+    if (project !== undefined) return { value: project, scope: 'project' };
+    const global = ownValue(stored?.global, env);
+    if (global !== undefined) return { value: global, scope: 'global' };
+    return null;
+  };
+
+  const awaitCard = async (slot: Omit<SecretSlot, 'deliver'>, { sessionId, callId, title, directory, signal }: PageWaitOptions) => {
+    const slotKey = key(sessionId, callId);
+    const submission: SecretSubmission = { answer: null };
+    pending.set(slotKey, { ...slot, deliver: (answer) => { submission.answer = answer; } });
+    try {
+      const answer = await waits.wait({ sessionId, callId, title: title.slice(0, SECRET_RUN_MAX_LABEL_LENGTH), directory, signal });
+      if (answer.summary !== 'submitted' || !submission.answer) return null;
+    } finally {
+      pending.delete(slotKey);
+    }
+    if (signal?.aborted) throw new OpenChamberControlError('The card stopped waiting before the user answered', 499);
+    return submission.answer;
+  };
 
   const execute = async (input: SecretRunInput, { sessionId, callId, directory, signal, authorized }: SecretRunContext) => {
     if (!authorized) throw new OpenChamberControlError('secret.run is only available to agents, through the openchamber_secret tool', 403);
@@ -309,12 +380,19 @@ export const createSecretRuns = ({ waits, hasUnreadChat, leases = createSecretLe
     if (!sessionId || !callId) throw new OpenChamberControlError('This connection cannot wait for a secret', 400);
     if (!directory) throw new OpenChamberControlError('This session has no directory to run the command in', 400);
 
+    const stored = await readSaved(directory);
     const values: SecretValues = {};
-    const missing = [];
+    const savedValues: SecretValues = {};
+    const savedScopes: Record<string, SavedScope> = {};
+    const missing: ReturnType<typeof normalizeSecretRun>['inputs'] = [];
     for (const field of request.inputs) {
       const value = leases.read(sessionId, field.env);
-      if (value === null) missing.push(field);
-      else values[field.env] = value;
+      const entry = value === null ? savedEntry(stored, field.env) : null;
+      if (value !== null) values[field.env] = value;
+      else if (entry) {
+        savedValues[field.env] = entry.value;
+        savedScopes[field.env] = entry.scope;
+      } else missing.push(field);
     }
     const reused = Object.keys(values);
 
@@ -322,24 +400,44 @@ export const createSecretRuns = ({ waits, hasUnreadChat, leases = createSecretLe
       return { answer: { answered: false, reason: 'chat-sent-earlier' }, note: CHAT_SENT_EARLIER_NOTE };
     }
     let remember: string[] = [];
-    if (missing.length > 0) {
-      const slotKey = key(sessionId, callId);
-      const submission: SecretSubmission = { answer: null };
-      pending.set(slotKey, { fields: missing.map((field) => field.env), reused, deliver: (answer) => { submission.answer = answer; } });
-      try {
-        const title = missing.map((field) => field.label).join(', ').slice(0, SECRET_RUN_MAX_LABEL_LENGTH);
-        const answer = await waits.wait({ sessionId, callId, title, directory, signal });
-        if (answer.summary !== 'submitted' || !submission.answer) {
-          return { answer: { status: 'declined' }, note: DECLINED_NOTE };
-        }
-      } finally {
-        pending.delete(slotKey);
+    let save: string[] = [];
+    let saveGlobally: string[] = [];
+    if (missing.length > 0 || Object.keys(savedValues).length > 0) {
+      const submitted = await awaitCard(
+        { kind: 'run', fields: missing.map((field) => field.env), reused, savedValues, savedScopes, savedInBoth: [], projectId: stored?.projectId ?? null, canSaveGlobally: stored !== null },
+        { sessionId, callId, title: request.inputs.filter((field) => !reused.includes(field.env)).map((field) => field.label).join(', '), directory, signal },
+      );
+      if (!submitted) return { answer: { status: 'declined' }, note: DECLINED_NOTE };
+      const confirmedSaved = Object.keys(savedValues).filter((env) => !Object.hasOwn(submitted.values, env));
+      const current = confirmedSaved.length > 0 ? await readSaved(directory) : null;
+      const changed = confirmedSaved.filter((env) => savedEntry(current, env)?.value !== savedValues[env]);
+      if (changed.length > 0) {
+        return {
+          answer: { status: 'ran', outcome: 'not-started', exitCode: null },
+          stdout: '',
+          stderr: '',
+          remembered: [],
+          error: `${changed.join(', ')} stopped being saved while the card waited`,
+          note: SAVED_CHANGED_NOTE,
+        };
       }
-      if (signal?.aborted) throw new OpenChamberControlError('The card stopped waiting before the user answered', 499);
-      Object.assign(values, submission.answer.values);
-      remember = submission.answer.remember;
+      Object.assign(values, savedValues, submitted.values);
+      remember = submitted.remember;
+      save = submitted.save;
+      saveGlobally = submitted.saveGlobally;
     }
     for (const env of remember) leases.keep(sessionId, env, retainedValue(values, env));
+    const notSaved: string[] = [];
+    const writes: [SavedScope, string[]][] = [['project', save], ['global', saveGlobally]];
+    for (const [scope, names] of writes) {
+      if (names.length === 0 || !saved) continue;
+      try {
+        await saved.write(scope, stored?.projectId ?? null, Object.fromEntries(names.map((env) => [env, retainedValue(values, env)])));
+      } catch (error) {
+        console.warn('[secret.run] could not save secrets:', error instanceof Error ? error.message : String(error));
+        notSaved.push(...names);
+      }
+    }
 
     const result = await runOnce(request, { values, directory, signal, run });
     const stdout = shownOutput(result.stdout, values);
@@ -352,14 +450,49 @@ export const createSecretRuns = ({ waits, hasUnreadChat, leases = createSecretLe
       remembered,
       note: RAN_NOTE,
     };
+    const savedNames = request.inputs.map((field) => field.env)
+      .filter((env) => (Object.hasOwn(savedValues, env) && values[env] === savedValues[env]) || ([...save, ...saveGlobally].includes(env) && !notSaved.includes(env)));
+    if (savedNames.length > 0) data.saved = savedNames;
+    if (notSaved.length > 0) data.notSaved = notSaved;
     if (stdout.truncated || stderr.truncated) data.truncated = { stdout: stdout.truncated, stderr: stderr.truncated };
     if (result.error) data.error = redactSecrets(result.error, values);
     return data;
   };
 
+  const describe = (slot: SecretSlot) => ({
+    fields: [...slot.fields, ...Object.keys(slot.savedValues)],
+    reused: slot.reused,
+    saved: Object.keys(slot.savedValues),
+    savedGlobally: Object.keys(slot.savedValues).filter((env) => slot.savedScopes[env] === 'global'),
+    savedInBoth: slot.savedInBoth.filter((env) => Object.hasOwn(slot.savedValues, env)),
+    canSave: slot.projectId !== null,
+    canSaveGlobally: slot.canSaveGlobally,
+  });
+
   const fieldsFor = (sessionId: string, callId: string) => {
     const slot = pending.get(key(sessionId, callId));
-    return slot ? { fields: slot.fields, reused: slot.reused } : null;
+    return slot ? describe(slot) : null;
+  };
+
+  const forgetSaved = async (sessionId: string, callId: string, env: string) => {
+    const slot = pending.get(key(sessionId, callId));
+    if (!slot) return null;
+    if (slot.kind !== 'run') throw new OpenChamberControlError('This card forgets the saved secrets all together, not one by one', 400);
+    if (slot.fields.includes(env)) return describe(slot);
+    const value = ownValue(slot.savedValues, env);
+    const scope = ownValue(slot.savedScopes, env);
+    if (value === undefined || scope === undefined || !saved) throw new OpenChamberControlError(`${env} is not saved for this card`, 400);
+    delete slot.savedValues[env];
+    slot.fields = [...slot.fields, env];
+    try {
+      await saved.remove(slot.projectId, scope === 'project' ? { project: { [env]: value }, global: {} } : { project: {}, global: { [env]: value } });
+    } catch (error) {
+      if (controlErrorFields(error)?.statusCode === 409) throw error;
+      slot.savedValues[env] = value;
+      slot.fields = slot.fields.filter((field) => field !== env);
+      throw error;
+    }
+    return describe(slot);
   };
 
   const submit = (sessionId: string, callId: string, input: SecretSubmissionInput, settle: SettleSecret) => {
@@ -375,18 +508,51 @@ export const createSecretRuns = ({ waits, hasUnreadChat, leases = createSecretLe
       if (value.includes(NUL)) throw new OpenChamberControlError(`The value for ${env} contains a NUL character`, 400);
       values[env] = value;
     }
-    const extra = Object.keys(raw).find((env) => !slot.fields.includes(env));
+    for (const env of Object.keys(slot.savedValues)) {
+      const value = ownValue(raw, env);
+      if (value === undefined) continue;
+      if (!isText(value) || !value.trim()) throw new OpenChamberControlError(`A value for ${env} is required`, 400);
+      if (value.length > SECRET_MAX_VALUE_LENGTH) throw new OpenChamberControlError(`The value for ${env} is ${value.length} characters; the limit is ${SECRET_MAX_VALUE_LENGTH}`, 413);
+      if (value.includes(NUL)) throw new OpenChamberControlError(`The value for ${env} contains a NUL character`, 400);
+      values[env] = value;
+    }
+    const extra = Object.keys(raw).find((env) => !Object.hasOwn(values, env));
     if (extra) throw new OpenChamberControlError(`${extra} is not a field of this card`, 400);
-    const remember = Array.isArray(input.remember) ? [...new Set(input.remember.filter((env): env is string => slot.fields.includes(env)))] : [];
-    slot.deliver({ values, remember });
+    const confirmed = Array.isArray(input.saved) ? input.saved : [];
+    const unseen = Object.keys(slot.savedValues).find((env) => !confirmed.includes(env) && !Object.hasOwn(values, env));
+    if (unseen) throw new OpenChamberControlError(`The answer neither confirms the saved ${unseen} nor gives a value for it`, 409);
+    const typed = (list: SecretSubmissionInput['save']) => (Array.isArray(list) ? [...new Set(list.filter((env): env is string => Object.hasOwn(values, env)))] : []);
+    const save = slot.projectId ? typed(input.save) : [];
+    const saveGlobally = slot.canSaveGlobally ? typed(input.saveGlobally).filter((env) => !save.includes(env)) : [];
+    slot.deliver({ values, remember: typed(input.remember), save, saveGlobally });
     settle(sessionId, callId, 'submitted', null);
     return { status: 'submitted' };
   };
 
-  const forget = (sessionId: string | null) => {
+  const forget = async ({ includeSaved = false }: { includeSaved?: boolean }, { sessionId, callId, directory, signal }: SecretRunContext) => {
     if (!sessionId) throw new OpenChamberControlError('secret.forget needs the calling session', 400);
-    return { forgotten: leases.forget(sessionId) };
+    if (includeSaved && saved && !directory) throw new OpenChamberControlError('This session has no directory to find its project in', 400);
+    const forgotten = leases.forget(sessionId);
+    if (!includeSaved) return { forgotten };
+    if (!saved || !directory) return { forgotten, forgottenSaved: [] };
+    const stored = await saved.read(directory);
+    const projectNames = Object.keys(stored.project);
+    const globalNames = Object.keys(stored.global);
+    const names = [...new Set([...projectNames, ...globalNames])];
+    if (names.length === 0) return { forgotten, forgottenSaved: [] };
+    if (!callId) throw new OpenChamberControlError('This connection cannot wait for the user to confirm', 400);
+    if (await hasUnreadChat(sessionId)) {
+      return { forgotten, forgottenSaved: [], answer: { answered: false, reason: 'chat-sent-earlier' }, note: FORGET_CHAT_SENT_EARLIER_NOTE };
+    }
+    const savedScopes: Record<string, SavedScope> = Object.fromEntries(names.map((env) => [env, projectNames.includes(env) ? 'project' : 'global']));
+    const confirmed = await awaitCard(
+      { kind: 'forget', fields: [], reused: [], savedValues: { ...stored.global, ...stored.project }, savedScopes, savedInBoth: globalNames.filter((env) => projectNames.includes(env)), projectId: stored.projectId, canSaveGlobally: false },
+      { sessionId, callId, title: names.join(', '), directory, signal },
+    );
+    if (!confirmed) return { forgotten, forgottenSaved: [], note: KEPT_NOTE };
+    await saved.remove(stored.projectId, { project: stored.project, global: stored.global });
+    return { forgotten, forgottenSaved: names };
   };
 
-  return { execute, fieldsFor, submit, forget };
+  return { execute, fieldsFor, submit, forgetSaved, forget };
 };

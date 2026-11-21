@@ -1,28 +1,43 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
+import { directoryEnvironment } from './test-support/directoryEnvironment';
+import { ChildStoreManager } from '@/sync/child-store';
+import { setSyncRefs } from '@/sync/sync-refs';
 
+const environment = directoryEnvironment({ home: '/home/test' });
 type FetchInit = RequestInit & { directory?: string | null };
 let fetchImpl: (input: string, init?: FetchInit) => Promise<Response>;
-mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: (input: string, init?: FetchInit) => fetchImpl(input, init),
-}));
-// The sessions the sync layer knows, by id, with the directory each one runs in.
-let sessionMap = new Map<string, { id: string; directory: string }>();
-let sessionDirectory = '/project';
-mock.module('@/sync/sync-refs', () => ({ getAllSyncSessionMap: () => sessionMap }));
-mock.module('@/sync/session-ui-store', () => ({
-  useSessionUIStore: { getState: () => ({ getDirectoryForSession: () => sessionDirectory }) },
-}));
-mock.module('@/lib/opencode/client', () => ({
-  opencodeClient: { getDirectory: () => '/fallback' },
-}));
+environment.respond(async (url, init) => {
+  if (url.pathname.startsWith('/api/permission-auto-accept')) {
+    const directory = new Headers(init?.headers).get('x-opencode-directory');
+    return fetchImpl(`${url.pathname}${url.search}`, { ...init, directory: directory ? decodeURIComponent(directory) : undefined });
+  }
+  if (url.pathname === '/api/fs/home') return Response.json({ home: '/home/test', chatsRoot: '/home/test/chats' });
+  if (url.pathname === '/api/location' || url.pathname === '/api/session') return Response.json({}, { status: 401 });
+  throw new Error(`Unexpected request: ${url}`);
+});
+const { opencodeClient } = await import('@/lib/opencode/client');
+let childStores = new ChildStoreManager();
+const configureSessions = (sessions: Array<{ id: string; directory: string }>) => {
+  childStores.disposeAll();
+  childStores = new ChildStoreManager();
+  setSyncRefs(opencodeClient.getSdkClient(), childStores, '/project');
+  for (const session of sessions) {
+    const store = childStores.ensureChild(session.directory, { bootstrap: false });
+    store.setState((state) => ({ session: [...state.session, {
+      ...session, projectID: 'project', title: session.id, time: { created: 1, updated: 1 },
+      cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    }] }));
+  }
+};
+environment.cleanup(() => childStores.disposeAll());
 
 const { usePermissionStore } = await import('./permissionStore');
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 
 describe('permission store server policy', () => {
   beforeEach(() => {
-    sessionMap = new Map();
-    sessionDirectory = '/project';
+    configureSessions([]);
+    opencodeClient.setDirectory('/project');
     usePermissionStore.getState().reset();
     usePermissionStore.setState({ legacyCandidate: null, legacyRuntimeKey: null });
     fetchImpl = async () => json({ sessions: {} });
@@ -89,6 +104,7 @@ describe('permission store server policy', () => {
     const oldResponse = new Promise<Response>((resolve) => { resolveOld = resolve; });
     fetchImpl = async () => oldResponse;
     const oldHydration = usePermissionStore.getState().hydrate();
+    await environment.settle();
 
     usePermissionStore.getState().reset();
     fetchImpl = async () => json({ sessions: { current: true }, revision: 2 });
@@ -103,6 +119,7 @@ describe('permission store server policy', () => {
     let resolveOld!: (response: Response) => void;
     fetchImpl = async () => new Promise<Response>((resolve) => { resolveOld = resolve; });
     const mutation = usePermissionStore.getState().setSessionMode('stale', 'auto');
+    await environment.settle();
 
     usePermissionStore.getState().reset();
     resolveOld(json({ sessions: { stale: true }, revision: 1 }));
@@ -117,6 +134,7 @@ describe('permission store server policy', () => {
     fetchImpl = async () => new Promise<Response>((resolve) => { resolvers.push(resolve); });
     const first = usePermissionStore.getState().setSessionMode('first', 'auto');
     const second = usePermissionStore.getState().setSessionMode('second', 'auto');
+    await environment.settle();
 
     resolvers[1](json({ sessions: { first: true, second: true }, revision: 2 }));
     await second;
@@ -143,11 +161,11 @@ describe('permission modes of a session in an isolated space', () => {
 
   beforeEach(() => {
     usePermissionStore.getState().reset();
-    sessionMap = new Map([
-      ['space-1', { id: 'space-1', directory: spaceDirectory }],
-      ['host-1', { id: 'host-1', directory: '/project' }],
+    configureSessions([
+      { id: 'space-1', directory: spaceDirectory },
+      { id: 'host-1', directory: '/project' },
     ]);
-    sessionDirectory = spaceDirectory;
+    opencodeClient.setDirectory(spaceDirectory);
   });
 
   test('a mode set in a space chat goes to the space and is read from its answer', async () => {

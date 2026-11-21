@@ -14,7 +14,9 @@ The tool is off until the user turns it on (`agentWorkflowToolEnabled`, Settings
 → General → OpenChamber Tools). Off means no `openchamber_workflow` tool and no
 session guidance, and the runtime refuses every action that proposes, runs or
 saves one. Under it, `agentWorkflowAutoApprove` (off by default) lets
-`workflow.run` start a run at once. The app hides the Workflows panel, its rail entry and work-status
+`workflow.run` start a run at once, and `agentWorkflowAutoApproveLeads` does
+the same only for a run a lead proposes (`../session-lead/`); Settings shows
+the pair as one choice: no, for leads, always. The app hides the Workflows panel, its rail entry and work-status
 section, reads no runs, and a past run's card says workflows are off
 (`packages/ui/src/lib/workflows/availability.ts`).
 
@@ -37,7 +39,7 @@ card and the Workflows panel open them.
   folder, its permission rules, and its model when the call names none. An
   agent asked for a schema answer also gets an allow for
   `openchamber_workflow_answer`. Also posts the report as a synthetic message.
-- `json-schema.js`: the small part of JSON Schema `agent({ schema })` checks.
+- `json-schema.ts`: the small part of JSON Schema `agent({ schema })` checks.
 - `store.ts`: run files under `<data-dir>/workflow-runs/`, one per run. A
   settled run (finished, report delivered) stays in memory only as
   `lightenWorkflowRun(run)`: no script, prompts or full answers, enough for
@@ -77,7 +79,8 @@ workflow in `../session-knowledge/runtime.js` (`WORKFLOW_GUIDANCE`).
 
 1. `workflow.run` parses the script (or reads a saved one by name), stores a
    run in `awaiting-approval` and answers at once with its id. Nothing runs.
-   With `agentWorkflowAutoApprove` on, the run is admitted as if approved
+   With `agentWorkflowAutoApprove` on, or `agentWorkflowAutoApproveLeads` on
+   and the proposing session a lead, the run is admitted as if approved
    instead: its first save is already `running`, its first log line says it
    started without approval, and the answer says so. A failed first save
    publishes no run.
@@ -107,8 +110,9 @@ session proposed. `workflow.save` writes a script to
 ## Invariants
 
 - No run starts for the first time without the user's approval: their click
-  through the route, or `agentWorkflowAutoApprove`, which the server reads
-  from the settings file on every `workflow.run`. The agent tool has no approve
+  through the route, or `agentWorkflowAutoApprove` (or, for a lead's run,
+  `agentWorkflowAutoApproveLeads`), which the server reads from the settings
+  file and the proposing session's metadata on every `workflow.run`. The agent tool has no approve
   action and no input that skips approval, so no client can start a run
   without one of the two. `workflow.resume` restarts a
   `failed` or `stopped` run without asking again: it is the plan the user
@@ -146,7 +150,7 @@ session proposed. `workflow.save` writes a script to
   runs.
 - The schema check covers `type`, `properties`, `required`,
   `additionalProperties: false`, `items` and `enum`; other keywords pass
-  unchecked (`json-schema.js`).
+  unchecked (`json-schema.ts`).
 - A script is at most 100 000 characters and its `args` at most 50 000 as JSON;
   a run without `args` reads `{}`.
 - A report is minted with its message id before the first delivery attempt
@@ -301,33 +305,13 @@ permits the existing incremental request construction without changing the
 SDK's readonly contract elsewhere. The parent model is never rewritten to
 satisfy the declaration.
 
-### Why the schema implementation remains JavaScript
+### Why schema keys still use native coercion
 
-`json-schema.js` accepts loose schema objects through `../shared/guards.js`,
-which exposes a record predicate. Array entries in `type` and
-`required` are unchecked and receive native property-key coercion. Its type
-dictionary also exposes inherited members. Declaring those arrays as string
-arrays, or filtering them to strings, would overstate validation or change
-acceptance. In particular, the outside `ObjectConstructor.hasOwn` declaration
-accepts `PropertyKey`, while the JavaScript call coerces unchecked entries,
-including objects and null. The shared record predicate establishes neither a
-keyword contract nor property-key arrays.
-
-Even a local overload for `Object.hasOwn` cannot type `TYPE_CHECKS[type]`:
-the key is unchecked and a coerced key can select either a function or an
-inherited non-callable value. The optional call deliberately throws for
-`__proto__` and accepts `constructor`. A callable dictionary would overstate
-the contract; validating or converting keys would change its runtime behavior.
-
-Type-only corrections to neighbouring modules cannot resolve
-`validateJsonSchema`'s `TYPE_CHECKS[type]?.(value)` expression. TypeScript
-requires an index key and a callable optional-call target, while the existing
-checks establish neither for an entry of `schema.type`. Widening
-`Object.hasOwn` can describe its native coercion of `schema.required` entries,
-but cannot describe that indexed optional call. Exporting types, converting
-the shared re-export helper or augmenting dependency declarations leaves this
-local expression unchanged. The whole file remains JavaScript to preserve
-these unchecked-input behaviors.
+Entries in `type` and `required` are unchecked. `Object.fromEntries` supplies
+native property-key coercion for entries that are not already keys. Type
+lookups still see inherited members and bind the dictionary as the receiver.
+A missing entry does not match; a non-callable entry such as `__proto__`
+still throws a `TypeError`.
 
 `../opencode/session-activity.d.ts` supplies the activity probe's optional
 signal and leaves active-status values unchecked. `agent-session.ts` keeps its

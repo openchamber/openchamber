@@ -10,3 +10,9 @@ export const LiveFinalActivityContext = createContext<{
 } | null>(null);
 
 export const LiveTurnHoistedPagesContext = createContext<ReadonlySet<string> | null>(null);
+
+export const LiveActivityInteractionContext = createContext<{
+    hold: () => void;
+    release: () => void;
+    pagesShown: boolean;
+} | null>(null);

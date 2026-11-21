@@ -125,15 +125,15 @@ Server routes (authenticated UI session):
 
 The panel never receives `OPENCHAMBER_SERVICE_TOKEN` and never dials the port itself. Opaque iframe origin stays. Only the host proxy talks to loopback.
 
-VS Code and mobile stay `unsupported` for the guest catalog. They do not spawn services.
+VS Code stays `unsupported` for the guest catalog. Hosted mobile and Capacitor mobile load the catalog from the connected OpenChamber server. None of them spawn services.
 
 | Runtime | Extension services |
 |---|---|
 | Web | Supported on the connected OpenChamber server |
 | Electron desktop | Supported through the connected OpenChamber server |
 | VS Code | Unsupported; the extension catalog is unavailable |
-| Hosted mobile | Unsupported; the extension catalog is unavailable |
-| Capacitor mobile | Unsupported; the extension catalog is unavailable |
+| Hosted mobile | Supported through the connected OpenChamber server; the phone spawns no services |
+| Capacitor mobile | Supported through the connected OpenChamber server; the phone spawns no services |
 
 Services approved on a web or desktop instance continue on that server regardless of which clients are connected. Mobile clients do not expose extension setup.
 
@@ -604,7 +604,7 @@ OpenChamber posts `POST /quota` (`QUOTA_PROVIDER_PATH`) with the service bearer,
 
 A listed provider OpenCode holds no credential for is answered as not configured by OpenChamber itself; the service is not called. OpenChamber refreshes no login for the service: an expired one is the service's to report in `error`, as a built-in reports it. `configured: false` draws the card's "not configured" state, which points at the Providers page, so answer it only when a listed OpenCode credential is what is missing; a key of the extension's own that is missing is `configured: true` with an `error` that says where to enter it.
 
-Parse the body with `readQuotaProviderRequest` (`QuotaProviderRequest`; `null` → HTTP 400) and answer HTTP 200 `{ ok: true, data }` or `{ ok: false, error: { message, status?, code? } }` (`QuotaProviderResult`); the envelope's `ok: false` is for a call the service could not handle at all, and its message reaches the card as the error. OpenChamber checks `data` with `quotaProviderSchemasV1`, bounded in count and length (32 windows, 64 models); an answer that does not parse is `502 MALFORMED_PROVIDER_RESPONSE`, never an empty result, and the card keeps its last reading with the failure beside it. OpenChamber adds the provider id, the name and the time of the read, and derives each window's remaining share, reset countdown and formatted strings (`toUsageWindow`), so the card matches a built-in's field for field. The service runs on demand and stops after `QUOTA_PROVIDER_IDLE_MS` (ten minutes) without a call; the Usage page refreshes every three minutes while open, so the service stays up while someone watches.
+Parse the body with `readQuotaProviderRequest` (`QuotaProviderRequest`; `null` → HTTP 400) and answer HTTP 200 `{ ok: true, data }` or `{ ok: false, error: { message, status?, code? } }` (`QuotaProviderResult`); the envelope's `ok: false` is for a call the service could not handle at all, and its message reaches the card as the error. OpenChamber checks `data` with `quotaProviderSchemasV1`, bounded in count and length (32 windows, 64 models); an answer that does not parse is `502 MALFORMED_PROVIDER_RESPONSE`, never an empty result, and the card keeps its last reading with the failure beside it. OpenChamber adds the provider id, the name and the time of the read, and derives each window's remaining share, reset countdown and formatted strings (`toUsageWindow`), so the card uses the same window fields as a built-in. `QuotaProviderWindowValue` keeps `spent: number`; the internal built-in OpenRouter representation may carry `spent: null` for an unreadable month, and the extension schema rejects that value. The service runs on demand and stops after `QUOTA_PROVIDER_IDLE_MS` (ten minutes) without a call; the Usage page refreshes every three minutes while open, so the service stays up while someone watches.
 
 The service reaches its provider's API itself with the credential it was handed. Quota requests use no outbound proxy. The user approved exactly which credentials cross in the dialog.
 
@@ -674,7 +674,7 @@ The host rechecks approval and extension policy on every request and on every ch
 
 Each response, the event stream included, is limited to `GUEST_REQUEST_RESPONSE_MAX` bytes, so a long-lived event subscription has to reconnect. OpenCode inactivity is limited to `GUEST_REQUEST_TIMEOUT_MS`. Exceeding either limit terminates the transfer.
 
-Web and Electron desktop use the connected OpenChamber backend in direct and relay modes. The connection stays on loopback between that backend and its service and is unavailable through UI APIs, relay routes or tunnels. VS Code, hosted mobile and Capacitor mobile keep the guest catalog unsupported.
+Web and Electron desktop use the connected OpenChamber backend in direct and relay modes. The connection stays on loopback between that backend and its service and is unavailable through UI APIs, relay routes or tunnels. VS Code keeps the guest catalog unsupported. Hosted mobile and Capacitor mobile load the catalog from the backend they are connected to and do not spawn services: a service and its connection stay on that backend.
 
 ## Session events (`contributes.sessionEvents`)
 

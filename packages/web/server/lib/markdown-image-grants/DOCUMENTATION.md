@@ -82,35 +82,15 @@ raw non-ASCII header values.
 
 ## Decisions
 
-### Why the route remains JavaScript
+### Why message fields are checked where they are read
 
-`inspect-image.ts` owns the local inspection options and result union. Its
-filesystem error guard preserves missing-file and permission/symlink failures;
-other failures still propagate.
+A stored message can have a content array or legacy top-level text. A string
+message ID is enough to read the response as a message record; it does not prove
+any part or tool input has the expected shape. Each reader checks the fields it
+uses so one malformed part does not discard references from other parts.
 
-`routes.js` consumes `fitRenderPageImages` from
-`../openchamber-control/render-page.js`. That helper accepts an untyped
-inspection callback and returns an untyped image array, including its own
-`too-heavy` results. Its owning module must type that contract before the
-route can consume a checked discriminated union without a cast or new runtime
-validation. The same module's `renderPageImageSources` also infers an untyped
-source array. These contracts belong to the neighbouring folder's conversion.
-
-The required contracts in `../openchamber-control/render-page.js` are:
-
-- `renderPageImageSources(html: string): string[]`.
-- `fitRenderPageImages(html: string, inspect: (source: string) =>
-  Promise<LocalImageInspection>)` returning
-  `Promise<{ images: PageImageInspection[]; totalBytes: number }>`, where
-  `PageImageInspection` is `{ source: string } & (LocalImageInspection |
-  { status: 'too-heavy'; size: number })`. `LocalImageInspection` is exported
-  by `inspect-image.ts`; the page result belongs to the render module.
-
-The emitted declarations still expose `(html: any) => any[]` and
-`(html: any, inspect: any) => Promise<{ images: any[]; totalBytes: number }>`.
-Annotating the route's map with the desired union would trust unchecked values
-from those declarations. Converting the route therefore still requires typing
-these two outside exports first.
+When comparing a tool result path, a failed percent decode leaves the literal
+path intact. A filename can contain a stray `%`.
 
 ### Why a weight budget per page and not a count
 

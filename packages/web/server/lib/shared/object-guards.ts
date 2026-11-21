@@ -22,3 +22,7 @@ export function isRecord(value: unknown): value is Record<string, unknown>;
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
+
+export const isPresent = <Value>(value: Value): value is NonNullable<Value> => Boolean(value);
+
+export const hasProperties = <Value>(value: Value): value is Value & Readonly<Record<string, unknown>> => value != null;

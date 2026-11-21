@@ -1,4 +1,4 @@
-// external: https://github.com/anomalyco/opencode/blob/v2.3.0/packages/cli/vite.node.config.ts
+// external: https://github.com/anomalyco/opencode/blob/v2.3.2/packages/cli/vite.node.config.ts
 import { registerHooks } from 'node:module';
 import * as PromiseSdk from '@opencode/plugin';
 import * as EffectSdk from '@opencode/plugin/effect';

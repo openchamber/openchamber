@@ -5,7 +5,9 @@ import { existsSync } from 'node:fs';
 const sourceLoader = new URL('../scripts/register-server-sources.mjs', import.meta.url);
 if (!process.versions.bun && existsSync(sourceLoader)) await import(sourceLoader.href);
 
-const runtime = await import('./cli-runtime.js');
+const builtCli = new URL('../build/bin/cli.js', import.meta.url);
+const legacyEntry = !existsSync(sourceLoader) && existsSync(builtCli);
+const runtime = await import(legacyEntry ? new URL('../build/bin/cli-runtime.js', import.meta.url).href : './cli-runtime.js');
 
 export const {
   main, commands, parseArgs, assertAuthenticatedNetworkExposure,

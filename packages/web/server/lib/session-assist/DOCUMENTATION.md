@@ -9,7 +9,7 @@ unchanged; an empty suggestion is a successful outcome.
 
 - `runtime.ts` owns idle timers, cancellation, provider selection, SDK reads,
   freshness checks, settings gates, and metadata writes.
-- `context.js` reads bounded history and constructs human turns. It removes
+- `context.ts` reads bounded history and constructs human turns. It removes
   tool payloads and injected prompts before retaining message text.
 - `prompt.ts` owns the generation instructions and total input budget.
 - `../small-model/DOCUMENTATION.md` owns provider/auth resolution, generation,
@@ -164,19 +164,16 @@ runs while a cold catalog has not published the model yet.
 
 ## Decisions
 
-### Why context remains JavaScript
+### Why malformed attachment text still fails the context read
 
 `attachedText` reads `metadata.openchamberContext` and `metadata.opencodeComment`
-from SDK message records. The SDK declares their contents as `JsonValue`.
-The implementation calls `.trim()` on selected attachment fields without checking
-their types. Malformed fields throw, as the context tests require. Declaring
-these fields as strings would claim validation that never happened; validating
-them would change the existing failure path. A type-only correction to another
-server module cannot establish those attachment fields. The SDK declaration
-already describes what the transport accepts, so widening it would not help.
+from SDK message records. Their values stay JSON until read. Nullish optional
+fields default to empty text; a non-string field where trimming is required
+throws `TypeError`, preserving the failed read rather than building a recap
+from incomplete context.
 
 `answeredBy` in `../routing/history.ts` accepts present `undefined` provider and
-model properties, matching the objects returned by `context.js`.
+model properties, matching the objects returned by `context.ts`.
 `Array.prototype.findLast` is supported by the shared check's ES2023 declarations.
 
 ### Why runtime inputs keep field checks

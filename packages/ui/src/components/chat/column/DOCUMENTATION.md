@@ -23,7 +23,9 @@ The column binds one shown session to its transcript, composer, navigation, load
 - Loading older history releases live follow before prepending so content growth cannot pull the reader back to the end. Short, non-scrollable histories remain manually pageable, and hash navigation releases follow while its handler owns positioning.
 - Linked-message probing precedes history traversal to avoid paging through a session for a nonexistent target. Only a 404 establishes absence; other failures leave existence unknown.
 - Work-status readouts follow a draft's pending worktree or directory override so they describe where the draft runs. Pinned columns leave app-wide work-status flags to the main chat, which clears them on unmount so the header can restore its own readouts.
+- A lead with a digest shows it as one row between the header and the transcript (`LeadDigestRow`, main column only): what needs the user as a count in the waiting colour, then the first line of its current work and how long ago it was written. The row sits in the column's flow, so the transcript's top fade stays right under it and no line separates them. Opened, the full digest is a popover over the transcript, which keeps its height and position. Each question there offers the lead's answers as buttons, its recommendation first and filled; a click sends the answer as synthetic input with `openchamberLeadAnswer` metadata, which wakes the lead, shows in the transcript as a notice and marks the question answered until the lead next writes its digest. Reply in chat quotes the question into the composer instead. Suggestions items fill the composer on Start, unsent, and Dismiss records them in `lead.dismissed`, which the server keeps the lead from offering again.
 - Transcript edge fades track the scroller. Dragging its overlay scrollbar transfers ownership from automatic follow to the reader.
+- `ChatTranscriptContext` marks the main transcript as eligible for settled assistant table expansion. Each table finds its own nearest chat scroller in the DOM, so retained timelines never measure against the currently selected session's scroller. Pinned columns mount the same viewport with the context off, so their tables keep the message-width layout and controls; the context is also absent from Btw transcripts and other Markdown surfaces.
 
 ## Decisions
 
@@ -50,6 +52,10 @@ Automatic speech uses the reply message ID so its message button shows playback 
 ### Why retain timelines by session ID and not the full session key
 
 The directory can settle after opening, so caching by the full key can retain a second hidden copy of the same session. The list still remounts on a full-key change; mobile retains only the open timeline because retained DOM increases web-view memory pressure, while other surfaces reuse recent timelines.
+
+### Why transcript eligibility uses context and geometry follows the table
+
+The context marks only the main transcript. A table reads the nearest chat scroller that contains it, so a retained timeline cannot borrow the active session's viewport through a shared ref.
 
 ### Why keep a fixed history header and not toggle its slot
 

@@ -34,6 +34,7 @@ const getNotificationTarget = (payload?: NotificationPayload): NotificationTarge
 
 type NotificationOptionsWithTarget = NotificationOptions & {
   data?: NotificationTarget;
+  renotify?: boolean;
 };
 
 const withNotificationTarget = (
@@ -44,6 +45,9 @@ const withNotificationTarget = (
     body: payload?.body,
     tag: payload?.tag,
   };
+  if (payload?.tag) {
+    options.renotify = true;
+  }
   if (target) {
     options.data = target;
   }

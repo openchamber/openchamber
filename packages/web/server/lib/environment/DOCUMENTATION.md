@@ -46,22 +46,39 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
   retried on the next call. A file that exists but cannot be read or parsed
   throws `EnvironmentStoreError`; it never reads as empty, because a write
   on top would erase every stored value. Patches: a string sets, `null`
-  removes, an absent name stays.
+  removes, an absent name stays. `secrets` are the values the user saved on
+  an agent's `secret.run` card (`../openchamber-control/secret-run.ts`), per
+  project or, under `user`, for all projects: `projectSecrets` and
+  `userSecrets` read them for that command, `projectEntry` and
+  `userVariables` leave them out, so no spawn gets them, and Settings
+  (Projects → Environment, and General) lists their names and offers only
+  removal. `removeSecrets` is the card's Forget: it removes names from both
+  places in one write, only while each holds the value the card showed, and
+  throws `EnvironmentConflictError` otherwise without removing anything.
+  Inside an isolated space the store is created with `savesSecrets: false`
+  and refuses any `secrets` change, since the container's file is not the
+  host's and Settings would never show it. A version from before `secrets` drops them when it reads the file
+  (zod strips unknown keys), and its next write leaves them out: going back a
+  version loses the saved secrets, while the variables survive.
 - `runtime.ts`: `createEnvironmentRuntime` decides what each spawn gets.
   `forDirectory(dir)` finds the project (a configured project containing the
   directory, or for a linked worktree the project at the same place in the
   primary checkout, read from the `.git` file because Git itself asks this
   runtime for its environment) and layers user variables, command output,
   then project variables. The lookup runs only when the store holds a
-  project entry, so the Git polling of a user who configured nothing pays
-  nothing. `forOpenCode()` answers `opencode service set env` variables under
+  project's variables or command, so the Git polling of a user who
+  configured nothing, saved secrets aside, pays nothing. `forOpenCode()` answers `opencode service set env` variables under
   the user variables. `applyToDirectory(dir, env)` is the overlay consumers
-  call.
+  call. `projectIdFor(dir)` answers the same project lookup alone, for the
+  saved secrets.
 - `opencode-service-env.ts`: reads `env` from `service.json` in OpenCode's
   global config directory (the stable channel's file only). Not a published
   OpenCode contract; anything unexpected reads as no variables.
 - `routes.ts`: `/api/environment` (user) and `/api/environment/projects/:id`
-  (+ `/reload`). On the JSON-body allowlist in `server-frame/core-routes.js`.
+  (+ `/reload`). On the JSON-body allowlist in `server-frame/core-routes.js`. A
+  project save drops the command output the runtime kept only when it
+  changes `variables` or `command`; removing a saved secret keeps it, since
+  background spawns read that cache without running the command.
 
 ## Who receives what
 

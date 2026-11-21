@@ -1,5 +1,6 @@
 import type { Message } from '@/lib/opencode/model';
 
+import type { RetryOverlay } from '../../timeline/types';
 import type { ChatMessageEntry } from './types';
 
 const resolveMessageRole = (message: ChatMessageEntry): string | null => {
@@ -9,26 +10,14 @@ const resolveMessageRole = (message: ChatMessageEntry): string | null => {
         ?? null;
 };
 
-interface RetryOverlayInput {
-    sessionId: string | null;
-    message: string;
-    confirmedAt?: number;
-    fallbackTimestamp: number;
-}
-
 export const applyRetryOverlay = (
     messages: ChatMessageEntry[],
-    input: RetryOverlayInput,
+    overlay: RetryOverlay | null,
 ): ChatMessageEntry[] => {
-    if (!input.sessionId) {
+    if (!overlay || !overlay.sessionId) {
         return messages;
     }
-
-    const retryError = {
-        name: 'SessionRetry',
-        message: input.message,
-        data: { message: input.message },
-    };
+    const { sessionId, lastIdleAt, notice } = overlay;
 
     let lastUserIndex = -1;
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -50,33 +39,42 @@ export const applyRetryOverlay = (
         }
     }
 
-    if (targetAssistantIndex >= 0) {
-        const existing = messages[targetAssistantIndex];
-        const existingInfo = existing.info as { error?: unknown };
-        if (existingInfo.error) {
-            return messages;
-        }
-
-        return messages.map((message, index) => {
-            if (index !== targetAssistantIndex) {
-                return message;
-            }
-            return {
-                ...message,
-                info: {
-                    ...(message.info as Record<string, unknown>),
-                    error: retryError,
-                } as unknown as Message,
-            };
-        });
+    const existing = targetAssistantIndex >= 0 ? messages[targetAssistantIndex] : undefined;
+    if (
+        existing?.info.role === 'assistant'
+        && existing.info.sessionID === sessionId
+        && existing.info.retry
+        && existing.info.error
+        && (lastIdleAt === null || (existing.info.time.completed ?? existing.info.retry.at) > lastIdleAt)
+    ) {
+        const info = { ...existing.info };
+        delete info.error;
+        const next = messages.slice();
+        next[targetAssistantIndex] = { ...existing, info };
+        return next;
     }
 
-    const eventTime = typeof input.confirmedAt === 'number' ? input.confirmedAt : input.fallbackTimestamp;
-    const syntheticId = `synthetic_retry_notice_${input.sessionId}`;
+    const existingInfo = existing?.info as { error?: unknown } | undefined;
+    if (!notice || existingInfo?.error) {
+        return messages;
+    }
+
+    const { message, confirmedAt, fallbackTimestamp } = notice;
+    const retryError = { name: 'SessionRetry', message, data: { message } };
+    const next = messages.slice();
+    if (existing) {
+        next[targetAssistantIndex] = {
+            ...existing,
+            info: { ...existing.info, error: retryError } as unknown as Message,
+        };
+        return next;
+    }
+
+    const eventTime = confirmedAt ?? fallbackTimestamp ?? 0;
     const synthetic: ChatMessageEntry = {
         info: {
-            id: syntheticId,
-            sessionID: input.sessionId,
+            id: `synthetic_retry_notice_${sessionId}`,
+            sessionID: sessionId,
             role: 'assistant',
             time: { created: eventTime, completed: eventTime },
             finish: 'stop',
@@ -85,7 +83,6 @@ export const applyRetryOverlay = (
         parts: [],
     };
 
-    const next = messages.slice();
     next.splice(lastUserIndex + 1, 0, synthetic);
     return next;
 };

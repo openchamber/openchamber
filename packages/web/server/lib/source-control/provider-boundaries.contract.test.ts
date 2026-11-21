@@ -34,7 +34,7 @@ describe('provider owner contracts', () => {
     };
     const mutation: ProviderMutationContext = {
       ...context, idempotencyKey: 'key',
-      target: { repositoryId: 'repo', bindingRevision: 1, primaryRemote: 'origin', project: { id: 'o/r', owner: 'o', name: 'r' } },
+      target: { project: { owner: 'o', name: 'r' }, number: 7 },
     };
     const session: ProviderSession = {
       instance: 'github.com', accountId: 'account', credentialRevision: 1,
@@ -44,10 +44,17 @@ describe('provider owner contracts', () => {
       directory: context.directory, primaryRemote: context.primaryRemote,
     });
     const resolve: ProviderMutations<{ number: number }, { number: number }>['resolveTarget'] = async ({ context, replayOf, input }) => ({
-      providerTarget: { number: input.number }, target: replayOf?.target ?? context.target,
+      providerTarget: { number: input.number },
+      target: replayOf?.target ?? {
+        repositoryId: context.repositoryId, bindingRevision: context.bindingRevision, primaryRemote: context.primaryRemote,
+        project: { id: `${context.target.project.owner}/${context.target.project.name}`, ...context.target.project },
+        number: context.target.number,
+      },
     });
     expect(await read({ context, session, directory: context.directory, remote: context.primaryRemote }))
       .toEqual({ directory: '/repo', primaryRemote: 'origin' });
-    expect((await resolve({ context: mutation, session, kind: 'create', input: { number: 7 } })).target).toBe(mutation.target);
+    expect((await resolve({ context: mutation, session, kind: 'create', input: { number: 7 } })).target).toEqual({
+      repositoryId: 'repo', bindingRevision: 1, primaryRemote: 'origin', project: { id: 'o/r', owner: 'o', name: 'r' }, number: 7,
+    });
   });
 });

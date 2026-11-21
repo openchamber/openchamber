@@ -49,7 +49,7 @@ export interface SearchInput extends ReferenceFilters {
   octokit: Octokit; repos: ReferenceRepo[]; text: string; labels?: string[] | undefined; cursor: string | null;
 }
 export interface AcrossGroup {
-  accountId: string; octokit: Octokit; authority: AcrossContext[];
+  accountId: string; octokit: Octokit; authority: AcrossContext[]; host?: string;
   repos: (ReferenceRepo & { directory: string })[];
 }
 export interface AcrossPosition { cursor: string | null; offset: number; done: boolean; total: number }

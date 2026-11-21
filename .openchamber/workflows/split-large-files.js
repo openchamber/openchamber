@@ -1,7 +1,7 @@
 export const meta = { name: 'split-large-files', description: 'Split large source files into focused modules under the behavior net, one worktree per file', phases: ['Net', 'Split', 'Verify', 'Review', 'Fix', 'Land'] };
 
 const files = args.files ?? [];
-const models = { net: 'claude-agent/opus', split: 'claude-agent/sonnet', verify: 'opencode-go/deepseek-v4.1-flash', review: 'openai/gpt-6.1-sol', land: 'claude-agent/sonnet', ...(args.models ?? {}) };
+const models = { net: 'claude-agent/opus', split: 'claude-agent/sonnet', verify: 'opencode-go/deepseek-v4.1-flash', review: 'openai/gpt-6.2-sol', land: 'claude-agent/sonnet', ...(args.models ?? {}) };
 const width = args.width ?? 2;
 
 const slug = (file) => file.split('/').pop().replace(/\.[a-z]+$/, '').replace(/[^A-Za-z0-9]+/g, '-').toLowerCase();

@@ -35,6 +35,7 @@ Use this page if you run OpenChamber behind Nginx, Nginx Proxy Manager, Caddy, C
 - Disable gzip on the proxy if OpenChamber is already compressing responses.
 - Keep compression enabled in only one layer.
 - Forward normal proxy headers such as `Host`, `X-Forwarded-For`, and `X-Forwarded-Proto`.
+- If the proxy runs on another machine or in another container, list its address in [`OPENCHAMBER_TRUSTED_PROXIES`](/environment/#openchamber_trusted_proxies). Otherwise everyone behind it shares one limit of failed sign-in attempts.
 - Increase body size limits if users upload files.
 
 ## Quick checklist

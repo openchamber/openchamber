@@ -25,6 +25,8 @@ import {
 import { useStreamingStore } from '@/sync/streaming';
 import { destroyBtwSession, filterBtwTailMessages, promoteBtwSession, type BtwSessionRef } from '@/lib/btw';
 import type { BtwPanelState } from './useBtwPanelState';
+import { attachSyntheticContext } from '../lib/attachSyntheticContext';
+import { readSessionNotice } from '@/lib/opencode/session-notices';
 import { ChatSurfaceProvider } from '../ChatSurfaceContext';
 import { ChatTranscriptDirectoryContext } from '../chatColumnSession';
 import { useMobileAutocompleteMaxHeight } from '../useMobileAutocompleteMaxHeight';
@@ -147,7 +149,7 @@ const useBtwSessionData = (
     const sessionRecoveredQuestions = useRecoveredQuestions(sessionId, directory);
 
     const tailRecords = React.useMemo(
-        () => filterBtwTailMessages(messageRecords, boundaryMessageID),
+        () => attachSyntheticContext(filterBtwTailMessages(messageRecords, boundaryMessageID).filter((record) => !readSessionNotice(record.info))),
         [boundaryMessageID, messageRecords],
     );
 

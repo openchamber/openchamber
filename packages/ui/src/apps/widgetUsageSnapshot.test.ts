@@ -116,4 +116,20 @@ describe('Android Usage widgets from built-in quota state', () => {
     expect(snapshot.providers[0]?.windows).toHaveLength(1);
     expect(snapshot.providers[0]?.windows[0]?.label).toContain('gemini/pro');
   });
+
+  test('a monthly spending total keeps its money with no percent or warning tone', () => {
+    const openrouter = provider('openrouter', 'OpenRouter', {
+      monthly_total: { ...quotaWindow(null, null), value: { kind: 'spend', spent: 226.64374512, limit: null } },
+      monthly_credits: { ...quotaWindow(null, null), value: { kind: 'spend', spent: 14.297788398, limit: null } },
+      monthly_byok: { ...quotaWindow(null, null), value: { kind: 'spend', spent: null, limit: null } },
+    });
+    const snapshot = snapshotOf({ ...data, dropdownProviderIds: ['openrouter'], results: [openrouter] });
+    const rows = snapshot.providers[0]?.windows ?? [];
+
+    expect(rows[0]).toMatchObject({ label: 'Monthly Total', tone: 'safe' });
+    expect(rows[0]?.value).toContain('quota.value.spent');
+    expect(rows[0]?.value).toContain('226.64');
+    expect(rows[0]?.percent).toBeUndefined();
+    expect(rows[2]?.value).toContain('quota.value.unknown');
+  });
 });

@@ -29,9 +29,15 @@ Agenci działającego workflow nie mogą uruchomić własnego workflow.
 
 ## Uruchamianie bez zatwierdzenia
 
-Pod **Narzędzie workflow** włącz **Uruchamiaj bez mojego zatwierdzenia**, aby uruchomienie rozpoczęte przez agenta startowało od razu. Jego karta pokazuje, że trwa, bez przycisku **Uruchom workflow**, a nadal możesz je przerwać przyciskiem **Zatrzymaj**. To ustawienie jest dla pracy, którą uzgodniłeś, a potem zostawiłeś: na przykład prosisz agenta, żeby wypróbował kilka modeli na małym pilotażu i całe zadanie uruchomił na najlepszym, a on może wystartować to uruchomienie pod twoją nieobecność.
+Pod **Narzędzie workflow** ustawienie **Uruchamiaj bez mojego zatwierdzenia** decyduje, czy uruchomienie rozpoczęte przez agenta czeka na Twoje kliknięcie:
 
-Agent nadal proponuje plan i modele w czacie, zanim wystartuje uruchomienie. Ustawienie pomija tylko kliknięcie. Serwer odczytuje je przy każdym uruchomieniu, więc po odznaczeniu pola każde uruchomienie znów czeka na ciebie. Limity opisane niżej się nie zmieniają.
+- **Nie**: każde uruchomienie czeka, aż wybierzesz **Uruchom workflow**
+- **Dla leadów**: uruchomienia rozpoczęte przez [leada](/pl/leads/) startują od razu, każda inna sesja nadal czeka
+- **Zawsze**: każde uruchomienie startuje od razu
+
+Uruchomienie, które startuje od razu, ma na karcie stan trwającego, bez przycisku **Uruchom workflow**, a nadal możesz je przerwać przyciskiem **Zatrzymaj**. To ustawienie jest dla pracy, którą uzgodniłeś, a potem zostawiłeś: na przykład prosisz agenta, żeby wypróbował kilka modeli na małym pilotażu i całe zadanie uruchomił na najlepszym, a on może wystartować to uruchomienie pod Twoją nieobecność.
+
+Zwykła sesja nadal proponuje plan i modele w czacie, zanim wystartuje uruchomienie; ustawienie pomija tylko kliknięcie. Lead prowadzi swoją pracę sam, więc przy **Dla leadów** może wystartować uruchomienie bez pytania. Serwer odczytuje ustawienie przy każdym uruchomieniu, więc po powrocie do **Nie** każde uruchomienie znów czeka na Ciebie. Limity opisane niżej się nie zmieniają.
 
 ## Modele i koszty
 

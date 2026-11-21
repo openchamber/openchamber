@@ -7,7 +7,7 @@ import type { GlobalMessageStreamHub, GlobalStreamEvent } from '../event-stream/
 import type { createSessionKnowledgeRuntime } from '../session-knowledge/runtime.js';
 import type { createRoutingRuntime } from '../routing/runtime.js';
 import type { ScheduledTaskProvenance, createExistingSessionTasks } from '../scheduled-tasks/existing-session.js';
-import type { ScheduledTaskStatus } from '../projects/contracts.js';
+import type { ScheduledTaskInput, ScheduledTaskStatus } from '../projects/contracts.js';
 import type { RoutingModelRef } from '../routing/contracts.js';
 import { createMessageId } from '../dispatch-results/runtime.js';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
@@ -987,7 +987,7 @@ export function createMessageQueueRuntime({
     timers.clear();
   };
 
-  const cancelScheduledTask = async (projectId: string, taskId: string) => {
+  const cancelScheduledTask = async (projectId: string, taskId: ScheduledTaskInput['id']) => {
     await load();
     for (const [sessionId, queue] of queues) {
       const items = queue.items.filter((item) => item.scheduledTask?.projectId !== projectId || item.scheduledTask.taskId !== taskId || sending.get(sessionId) === item.id);

@@ -32,6 +32,8 @@ import type { Session } from '@/lib/opencode/model';
 import { ensureGlobalSessionsLoaded, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useAutocompleteSelectionScroll } from './composer/ui/useAutocompleteSelectionScroll';
 import { useHeightMorph } from '@/lib/motion/useSizeMorph';
+import { keepGuestItemsInScope } from '@/lib/guests/folders';
+import { useGuestScopeOf } from '@/hooks/useGuestScopeSync';
 import { guestsOfferMentions, searchGuestMentions, type GuestMention } from '@/lib/guests/mentions';
 import { useGuestsStore } from '@/lib/guests/store';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
@@ -55,7 +57,7 @@ type MentionRows = {
   recentFiles: FileInfo[];
   results: FileMentionHit[];
   sessions: Session[];
-  extensions: GuestMention[];
+  extensions: readonly GuestMention[];
 };
 
 const ExtensionMentionIcon = ({ guestId }: { guestId: string }) => {
@@ -289,7 +291,9 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     return rankFileMentionResults(files, settledSearch.directories, normalizedSearchQuery, 20);
   }, [settledSearch, visibleRecentFiles, normalizedSearchQuery]);
   const settledSearchKey = settledSearch?.key ?? null;
-  const asksExtensions = useGuestsStore((state) => onExtensionMentionSelect !== undefined && guestsOfferMentions(state.guests));
+  const guests = useGuestsStore((state) => state.guests);
+  const mentionScope = useGuestScopeOf(currentDirectory || null);
+  const asksExtensions = onExtensionMentionSelect !== undefined && guestsOfferMentions(guests, mentionScope);
   const [extensionRows, setExtensionRows] = React.useState<GuestMention[]>([]);
   React.useEffect(() => {
     if (!asksExtensions) {
@@ -315,7 +319,11 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   if (!searchPending && heldView !== liveView) {
     setHeldView(liveView);
   }
-  const view = searchPending ? heldView : liveView;
+  const shownView = searchPending ? heldView : liveView;
+  const view = React.useMemo(() => {
+    const extensions = keepGuestItemsInScope(shownView.extensions, guests, mentionScope);
+    return extensions === shownView.extensions ? shownView : { ...shownView, extensions };
+  }, [guests, mentionScope, shownView]);
   const rowCount = view.agents.length + view.recentFiles.length + view.results.length + view.sessions.length + view.extensions.length;
   const listState = mentionListState(rowCount, searchPending);
 

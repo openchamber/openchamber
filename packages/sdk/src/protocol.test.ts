@@ -174,6 +174,25 @@ describe('parseHostMessage', () => {
     expect(older.payload.device).toBeUndefined();
   });
 
+  test('passes context and token totals to guests on ready and session updates', () => {
+    const session = { id: 'ses-1', title: 'Hello', busy: false,
+      context: { tokens: 12_000, limit: 200_000 },
+      tokens: { prompt: 120_000, output: 5_000, reasoning: 800, cacheRead: 90_000, cacheWrite: 10_000, cacheHitPercent: 75 },
+    };
+    const ready = parseHostMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1,
+      type: 'ready', payload: { ...readyPayload, session } });
+    const push = parseHostMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1,
+      type: 'session', payload: { session } });
+    expect(ready?.type === 'ready' ? ready.payload.session : null).toEqual(session);
+    expect(push?.type === 'session' ? push.payload.session : null).toEqual(session);
+    const unknown = { ...session, context: null, tokens: null };
+    expect(parseHostMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1,
+      type: 'session', payload: { session: unknown } })).toMatchObject({ payload: { session: unknown } });
+    const invalid = { ...session, tokens: { ...session.tokens, prompt: -1 } };
+    expect(hostMessageSchema.safeParse({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1,
+      type: 'session', payload: { session: invalid } }).success).toBe(false);
+  });
+
   test('accepts a null directory', () => {
     const message = parseHostMessage({
       channel: OPENCHAMBER_SDK_CHANNEL,
@@ -945,6 +964,14 @@ describe('actions, commands, and badge wire shapes', () => {
     for (const sha of ['abc12', 'HEAD', '--output=x', 'abc1234 ', 'g'.repeat(40), 'a'.repeat(65)]) {
       expect(parseGuestMessage({ ...envelope, type: 'open-commit', id: 'c-1', payload: { sha } })).toBeNull();
     }
+  });
+
+  test('accepts open-walkthrough with a bounded base and drops the rest', () => {
+    expect(parseGuestMessage({ ...envelope, type: 'open-walkthrough', id: 'w-1', payload: { base: ' main ' } })).toMatchObject({ payload: { base: 'main' } });
+    for (const base of ['', '   ', 'x'.repeat(256)]) {
+      expect(parseGuestMessage({ ...envelope, type: 'open-walkthrough', id: 'w-1', payload: { base } })).toBeNull();
+    }
+    expect(parseGuestMessage({ ...envelope, type: 'open-walkthrough', id: 'w-1', payload: {} })).toBeNull();
   });
 
   test('accepts resize heights in range and drops the rest', () => {

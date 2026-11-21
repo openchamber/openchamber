@@ -29,9 +29,15 @@ Agents of a running workflow cannot start a workflow of their own.
 
 ## Start runs without approval
 
-Under **Workflow tool**, turn on **Start runs without my approval** to let a run the agent starts begin right away. Its card shows it running, with no **Run workflow** button, and you can still **Stop** it. This is for work you agreed on and then left: for example, you ask the agent to try a few models on a small pilot and run the whole job on the best one, and it can start that run while you are away.
+Under **Workflow tool**, **Start runs without my approval** decides whether a run the agent starts waits for your click:
 
-The agent still proposes the plan and the models in the chat before it starts a run. The setting skips only the click. The server reads it on every run, so with the box cleared every run waits for you again. The limits below stay the same.
+- **No**: every run waits until you select **Run workflow**
+- **For leads**: runs a [lead](/leads/) starts begin right away, every other session still waits
+- **Always**: every run begins right away
+
+A run that begins right away shows as running on its card, with no **Run workflow** button, and you can still **Stop** it. This is for work you agreed on and then left: for example, you ask the agent to try a few models on a small pilot and run the whole job on the best one, and it can start that run while you are away.
+
+An ordinary session still proposes the plan and the models in the chat before it starts a run; the setting skips only the click. A lead runs its work on its own, so with **For leads** it can start a run without asking first. The server reads the setting on every run, so switching back to **No** makes every run wait for you again. The limits below stay the same.
 
 ## Models and cost
 

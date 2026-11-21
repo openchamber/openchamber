@@ -228,26 +228,30 @@ Its response contract accepts both stream types. HTTP client responses have a
 numeric status code; the dispatcher's response type distinguishes them from
 server-side requests covered by Node's general `IncomingMessage` declaration.
 
-### Why unchecked Docker consumers remain JavaScript
+### Why hardening trusts Docker's inspect shapes
 
-`hardening.js` calls `filter`, `map`, `some` and `includes` on nested inspect
-fields without checking their shapes. `docker-engine.inspect` returns an
-unchecked first entry. Declaring its `Config.Env`, `HostConfig` arrays, mounts
-or network entries as validated objects would overstate that boundary.
-`host.js` also passes the Docker label parser's unchecked ids and project values
-into string-only space and directory operations. The label parser deliberately
-accepts coercible ids and passes other label values through. Neither boundary
-can become a checked shape through a type-only correction.
+`hardening.ts` reads `docker inspect` through the wire shapes of
+`places/docker-wire.ts`: Docker CLI output is a documented format of a program
+we run, so its fields are typed and not validated, see "Why Docker CLI output
+is typed and not validated" in `places/DOCUMENTATION.md`. Each checker keeps
+its fallbacks for fields that may be absent, and verification still fails
+closed on whatever the inspect output says.
 
-`createDockerEngine.inspect` returns `unknown` after parsing JSON and selecting
-its first entry. Typing `findCommonViolations` needs the existing calls on
-`Config.Env`, `HostConfig.ExtraHosts`, `SecurityOpt`, `Mounts` and
-`IPAM.Config` to remain possible without claiming those fields were checked.
-An exported type, a corrected declaration or a dependency augmentation cannot
-establish those array shapes. In `createSpacesHost`, `knownSpaces` forwards
-unchecked label ids into `spaceProjectPath` and the manager's string-id
-operations. Widening those signatures alone still leaves the unchanged
-string-only regular-expression checks and path operations untyped.
+Space ids reach `spaceProjectPath` in `host.ts` from Docker labels, which are
+strings, or from record file names, which match the id pattern; both are
+checked against that pattern before a path is built. Nothing a container
+controls reaches it.
+
+### Why the host copies journey announcements as JSON
+
+The journey announces progress with a failure whose `code`, `message` and
+`details` are unknown values, and the event hub takes only JSON values,
+because it serializes every payload for the UI streams and its subscribers
+read fields of it. The host passes the hub a JSON copy of the announcement.
+Clients receive the same bytes as before; a payload that cannot be serialized
+now fails at the announcement instead of at the hub's first serialization.
+Typing the journey's failures as JSON would need a check of every error
+detail, which belongs to the journey and buys nothing the copy does not.
 
 ### Why control ranges use Unicode categories
 

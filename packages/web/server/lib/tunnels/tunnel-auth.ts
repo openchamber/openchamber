@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import type { NextFunction, Request, Response } from '../shared/http-contracts.js';
+import { rateLimitKey } from '../security/client-address.js';
 
 interface BootstrapRecord {
   id: string;
@@ -237,24 +238,7 @@ const isForwardedForRemoteClient = (req: Request) => {
   return value.split(',').some((entry) => entry.trim() && !isLoopbackIp(entry));
 };
 
-const getClientIp = (req: Request) => {
-  const ip = req.ip || req.socket?.remoteAddress;
-  if (ip) {
-    if (ip.startsWith('::ffff:')) {
-      return ip.substring(7);
-    }
-    return ip;
-  }
-  return null;
-};
-
-const getRateLimitKey = (req: Request) => {
-  const ip = getClientIp(req);
-  if (ip) {
-    return ip;
-  }
-  return 'connect-rate-limit:no-ip';
-};
+const getRateLimitKey = (req: Request) => rateLimitKey(req, 'connect-rate-limit:no-ip');
 
 const rateLimitMaxForKey = (key: string) => {
   if (key === 'connect-rate-limit:no-ip') {

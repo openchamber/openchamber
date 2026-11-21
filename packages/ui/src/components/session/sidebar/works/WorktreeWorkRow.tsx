@@ -135,7 +135,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   const projectNamed = useZoneProjectNames();
   const namesProject = mixed && projectNamed && project !== null && project !== undefined;
   const lineName = namesProject && secondName === title ? null : secondName;
-  const guestMarks = useWorkRowGuestMarks({ space: Boolean(space), projectId: project?.id ?? projectId ?? null, directory, branch });
+  const guestMarks = useWorkRowGuestMarks({ space: Boolean(space), projectId: project?.id ?? projectId ?? null, projectPath: project?.path ?? null, directory, branch });
   const openGuestMark = (mark: RowGuestMark): void => {
     if (!mark.panel) {
       if (mark.url) void openGuestUrl(mark.url, resolveEffectiveDirectory() ?? null, true);

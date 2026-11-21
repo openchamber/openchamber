@@ -6,7 +6,7 @@ import type { HtmlRenderMark } from './parts/htmlRender';
 export interface PageFrameHandle {
     partId: string;
     reveal: (anchor: ChatQuoteAnchor) => void;
-    clearSelection: () => void;
+    clearSelection: (dismiss?: boolean) => void;
 }
 
 const frames = new Set<PageFrameHandle>();
@@ -22,9 +22,9 @@ export function revealPageMark(partId: string, anchor: ChatQuoteAnchor): boolean
     return Boolean(handle);
 }
 
-export function clearOtherPageSelections(except: PageFrameHandle): void {
+export function clearOtherPageSelections(except: PageFrameHandle, dismiss = true): void {
     for (const handle of frames) {
-        if (handle !== except) handle.clearSelection();
+        if (handle !== except) handle.clearSelection(dismiss);
     }
 }
 

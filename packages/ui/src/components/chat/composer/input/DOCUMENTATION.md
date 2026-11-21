@@ -93,6 +93,9 @@ preferences are inputs to these owners.
 - Reference-picking and large-paste choices remain scoped to their original
   draft. Delayed paste actions read live text and attachments, and unmounting a
   focused composer disables native image commits for the next keyboard field.
+- An explicit large-paste choice restores the post-insertion selection after
+  focusing the editor, so the choice's focus handoff keeps subsequent typing
+  beside the inserted text or file reference.
 - Programmatic text restoration does not open typed-token pickers. Completion
   marks its occurrence before the synchronous edit callback resolves another
   trigger, and caret edits place text and selection in one transaction.

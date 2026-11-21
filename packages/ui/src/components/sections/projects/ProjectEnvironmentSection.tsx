@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { EnvironmentVariablesEditor } from '@/components/sections/shared/EnvironmentVariablesEditor';
+import { SavedSecretsList } from '@/components/sections/shared/SavedSecretsList';
 import {
   SettingsSection,
   SETTINGS_FIELD_LABEL_CLASS,
@@ -14,7 +15,7 @@ import {
   reloadProjectEnvironment,
   updateProjectEnvironment,
   type EnvironmentCommandStatus,
-  type EnvironmentVariablesPatch,
+  type EnvironmentUpdate,
   type ProjectEnvironment,
 } from '@/lib/environmentApi';
 import type { ProjectRef } from '@/lib/openchamberConfig';
@@ -78,10 +79,12 @@ export const ProjectEnvironmentSection: React.FC<{ projectRef: ProjectRef }> = (
     };
   }, [applyEnvironment, projectRef.id]);
 
-  const save = React.useCallback(async (patch: { variables?: EnvironmentVariablesPatch; command?: string | null }): Promise<boolean> => {
+  const save = React.useCallback(async (patch: EnvironmentUpdate): Promise<boolean> => {
     reportSettingsSaveState('saving');
     try {
-      applyEnvironment(await updateProjectEnvironment(projectRef.id, patch));
+      const environment = await updateProjectEnvironment(projectRef.id, patch);
+      if (patch.command !== undefined) applyEnvironment(environment);
+      else setLoad({ state: 'ready', environment });
       reportSettingsSaveState('saved');
       return true;
     } catch {
@@ -187,6 +190,12 @@ export const ProjectEnvironmentSection: React.FC<{ projectRef: ProjectRef }> = (
               </p>
             ) : null}
           </div>
+
+          <SavedSecretsList
+            names={load.state === 'ready' ? load.environment.secrets : []}
+            disabled={disabled}
+            onRemove={(name) => void save({ secrets: { [name]: null } })}
+          />
         </div>
       )}
     </SettingsSection>

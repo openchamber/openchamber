@@ -36,6 +36,8 @@ To nie jest jednorazowy callback montowania. Zamontuj UI i zarejestruj subskrypc
 
 Tokeny dostępu nigdy nie pojawiają się tutaj ani w wyniku `request`.
 
+`ready.session` i `onSession` udostępniają też opcjonalne pola `context` i `tokens`. `context: { tokens, limit } | null` opisuje zajętość okna kontekstu po ostatnim kroku asystenta; `limit` ma wartość `null`, jeśli limit modelu jest nieznany. Po kompakcji `context` pozostaje `null` aż do następnego pomiaru. `tokens: { prompt, output, reasoning, cacheRead, cacheWrite, cacheHitPercent } | null` zawiera skumulowane zużycie tokenów sesji. `prompt` obejmuje wejście bez pamięci podręcznej oraz odczyty i zapisy z pamięci podręcznej. Bez tokenów promptu `cacheHitPercent` wynosi `null`. Przed pomiarem obie wartości są `null`; starsze hosty pomijają te pola. Zmiany trafiają przez `onSession`.
+
 `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` i `onItem` odtwarzają ostatnią wartość, gdy subskrybujesz późno, a potem odpalają się dalej przy każdej zmianie.
 
 `theme.tokens` zawiera `primaryText`, `successText`, `warningText`, `errorText` i `infoText`. Te wymagane pola zawierają kolory tekstu obliczone przez hosta dla neutralnych teł i delikatnie zabarwionych kontrolek zestawu UI, nie dla pełnych kolorowych wypełnień. `applyHostReady` stosuje je przy każdym nowym stanie. Zmienne CSS opisuje [zestaw UI](/sdk/ui/).
@@ -67,6 +69,7 @@ Tokeny dostępu nigdy nie pojawiają się tutaj ani w wyniku `request`.
 | `onResolve(handler)` | rejestruje obsługę Twoich poleceń z ukośnikiem. Dostaje `{ command, args }` i zwraca element do dołączenia albo `null`. |
 | `setBadge(count)` | oznacza Twoją ikonę na pasku bocznym kropką i pokazuje liczbę (0 do 999) w jej podpowiedzi, albo `null`, żeby ją usunąć |
 | `openCommit(sha)` | otworzyć widok Diff na tym commicie bieżącego projektu. `sha` ma od 7 do 64 znaków szesnastkowych; OpenChamber sam odczytuje commit. |
+| `openWalkthrough({ base })` | otworzyć Przewodnik w zakresie Ta gałąź bieżącego projektu, w porównaniu z `base`: `main`, `origin/main` albo pełną referencją. Baza staje się wybraną bazą gałęzi; użytkownik może ją dalej zmienić i sam klika Wygeneruj przewodnik. Baza, której repozytorium nie ma, kończy się `NOT_FOUND` i niczego nie zmienia. Na telefonie, w Mini Chat i w VS Code `UNSUPPORTED`. |
 | `setHeight(px)` | ustawić wysokość twojej sekcji Work Status. OpenChamber trzyma ją między 24 a 480 pikselami; wyższa treść przewija się wewnątrz strony. W innych miejscach jest ignorowane. |
 | `onFileOpen(listener)` | edytory plików: odebrać plik do edycji, `{ path, name, readOnly }` plus `encoding: "text"` z `content` albo `encoding: "binary"` z `bytes`. Sprawia też, że Cmd/Ctrl+S w twojej stronie zapisuje. |
 | `onFileSnapshot(handler)` | edytory plików: zwrócić `{ content, version }` (albo `{ bytes, version }` w edytorze binarnym), cały zmieniony plik. OpenChamber wywołuje to przy zapisie oraz przed przełączeniem na widok źródła lub pełny ekran. |

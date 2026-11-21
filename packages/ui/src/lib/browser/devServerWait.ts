@@ -10,10 +10,22 @@ export const DEV_SERVER_ANSWER_WAIT_MS = 120_000;
 const tabKey = (directory: string, tabID: string): string => `${directory}\n${tabID}`;
 
 const tabsOpenedWithAddress = new Set<string>();
+const firstLoadReferrers = new Map<string, BrowserTabReferrer>();
+
+export type BrowserTabReferrer = { readonly url: string; readonly policy: string };
 
 export const noteBrowserTabOpenedWithAddress = (directory: string, tabID: string): void => {
   tabsOpenedWithAddress.add(tabKey(directory, tabID));
+  firstLoadReferrers.delete(tabKey(directory, tabID));
 };
+
+export const noteBrowserTabFirstLoadReferrer = (directory: string, tabID: string, referrer: BrowserTabReferrer): void => {
+  firstLoadReferrers.set(tabKey(directory, tabID), referrer);
+};
+
+export const browserTabFirstLoadReferrer = (directory: string, tabID: string): BrowserTabReferrer | undefined => (
+  firstLoadReferrers.get(tabKey(directory, tabID))
+);
 
 export const wasBrowserTabOpenedWithAddress = (directory: string, tabID: string): boolean => (
   tabsOpenedWithAddress.has(tabKey(directory, tabID))
@@ -21,16 +33,28 @@ export const wasBrowserTabOpenedWithAddress = (directory: string, tabID: string)
 
 export const forgetBrowserTabOpenedWithAddress = (directory: string, tabID: string): void => {
   tabsOpenedWithAddress.delete(tabKey(directory, tabID));
+  firstLoadReferrers.delete(tabKey(directory, tabID));
 };
 
-type LoadRequestListener = (url: string) => void;
+type LoadRequestListener = (url: string, referrer: BrowserTabReferrer | undefined) => void;
 
 const loadRequestListeners = new Map<string, Set<LoadRequestListener>>();
+let linkReferrer: BrowserTabReferrer | undefined;
+
+export const openWithBrowserTabLinkReferrer = (referrer: BrowserTabReferrer | undefined, open: () => void): void => {
+  const outer = linkReferrer;
+  linkReferrer = referrer;
+  try {
+    open();
+  } finally {
+    linkReferrer = outer;
+  }
+};
 
 export const requestBrowserTabLoad = (directory: string, tabID: string, url: string): void => {
   const listeners = loadRequestListeners.get(tabKey(directory, tabID));
   if (!listeners) return;
-  for (const listener of listeners) listener(url);
+  for (const listener of listeners) listener(url, linkReferrer);
 };
 
 export const acceptsBrowserTabLoadRequest = (status: BrowserNavStatus, hasShownPage: boolean): boolean => (

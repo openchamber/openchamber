@@ -65,6 +65,16 @@ const FIND_ELEMENTS = `(selector, text, exact, all, inView, pathText) => {
   return matches
 }`
 
+/** The `/api/...` path of a request address, without its query; null for anything else. */
+export const apiPathOf = (address) => {
+  try {
+    const { pathname } = new URL(address)
+    return pathname === "/api" || pathname.startsWith("/api/") ? pathname : null
+  } catch {
+    return null
+  }
+}
+
 export class Page {
   constructor(client) {
     this.client = client
@@ -72,6 +82,15 @@ export class Page {
     client.on("Runtime.exceptionThrown", ({ exceptionDetails }) => {
       this.consoleErrors.push(exceptionDetails.exception?.description?.split("\n")[0] ?? exceptionDetails.text)
     })
+    // What the page asked the server for, as `METHOD /api/...`: `--changed`
+    // selects the scenarios of a changed server file by them.
+    this.apiRequests = new Set()
+    const noteRequest = (method, url) => {
+      const path = apiPathOf(url)
+      if (path) this.apiRequests.add(`${method} ${path}`)
+    }
+    client.on("Network.requestWillBeSent", ({ request }) => noteRequest(request.method, request.url))
+    client.on("Network.webSocketCreated", ({ url }) => noteRequest("WS", url))
     this.sourceUpdates = []
     this.expectedLoads = 0
     client.on("Page.loadEventFired", () => {
@@ -98,6 +117,7 @@ export class Page {
     const page = new Page(client)
     await client.send("Page.enable")
     await client.send("Runtime.enable")
+    await client.send("Network.enable")
     await client.send("Emulation.setDeviceMetricsOverride", { ...VIEWPORT, mobile: false })
     await client.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }, { name: "prefers-reduced-motion", value: "reduce" }] })
     await client.send("Emulation.setFocusEmulationEnabled", { enabled: true })

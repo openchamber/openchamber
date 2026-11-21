@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Session } from '@/lib/opencode/model';
+import { useParentSessionBack } from '@/hooks/useParentSessionBack';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -11,14 +11,11 @@ export const ReturnToParentButton: React.FC<{
     directory: string | undefined;
     hidden: boolean;
     openSession: (sessionId: string, directory: string | null) => void;
-}> = ({ sessionId, directory, hidden, openSession }) => {
+    registerParentSessionBack?: (handler: (() => void) | null) => void;
+}> = ({ sessionId, directory, hidden, openSession, registerParentSessionBack }) => {
     const { t } = useI18n();
     const parentSession = useParentSession(sessionId, directory);
-    const handleReturnToParentSession = React.useCallback(() => {
-        if (!parentSession) return;
-        const parentDirectory = (parentSession as Session & { directory?: string | null }).directory ?? null;
-        openSession(parentSession.id, parentDirectory);
-    }, [openSession, parentSession]);
+    const handleReturnToParentSession = useParentSessionBack(parentSession, hidden, openSession, registerParentSessionBack);
 
     if (!parentSession || hidden) return null;
     return (

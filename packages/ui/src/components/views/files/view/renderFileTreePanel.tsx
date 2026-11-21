@@ -19,7 +19,7 @@ import { type useFileTabs } from './useFileTabs';
 import { type useFileUploads } from './useFileUploads';
 import { useI18n } from '@/lib/i18n';
 
-export function renderFileTreePanel({ fileDirectory, fileOpening, fileTreeRendering, operations, scope, search, tabs, uploads, isMobile, t }: {
+export function renderFileTreePanel({ fileDirectory, fileOpening, fileTreeRendering, operations, scope, search, tabs, uploads, t }: {
   fileDirectory: Pick<ReturnType<typeof useFileDirectory>, 'childrenByDir' | 'loadErrorsByDir' | 'refreshRoot'>;
   fileOpening: Pick<ReturnType<typeof useFileOpening>, 'handleSelectFile'>;
   fileTreeRendering: Pick<ReturnType<typeof useFileTreeRendering>, 'renderTree' | 'treeListRef'>;
@@ -28,7 +28,6 @@ export function renderFileTreePanel({ fileDirectory, fileOpening, fileTreeRender
   search: Pick<ReturnType<typeof useFileSearch>, 'debouncedSearchQuery' | 'searchInputRef' | 'searchQuery' | 'searchResults' | 'searching' | 'setSearchQuery'>;
   tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile'>;
   uploads: Pick<ReturnType<typeof useFileUploads>, 'canUpload' | 'isUploading' | 'pickFiles'>;
-  isMobile: boolean;
   t: ReturnType<typeof useI18n>['t'];
 }) {
   const { childrenByDir, loadErrorsByDir, refreshRoot } = fileDirectory;
@@ -46,11 +45,8 @@ export function renderFileTreePanel({ fileDirectory, fileOpening, fileTreeRender
   const showsTree = hasTree && !searching && !isSearchActive && searchResults.length === 0 && !rootLoadError;
 
   return treeEnabled ? (
-    <section className={cn(
-      "flex min-h-0 flex-col overflow-hidden",
-      isMobile ? "h-full w-full bg-background" : "h-full rounded-xl border border-edge bg-background/70"
-    )}>
-      <div className={cn("flex flex-col gap-2 py-2", isMobile ? "px-3" : "px-2")}>
+    <section className="flex h-full w-full min-h-0 flex-col overflow-hidden bg-background">
+      <div className="flex flex-col gap-2 px-3 py-2">
         <div className="flex items-center gap-2">
           <div className="relative flex-1 min-w-0">
             <Icon name="search" className="pointer-events-none absolute inset-s-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -115,7 +111,7 @@ export function renderFileTreePanel({ fileDirectory, fileOpening, fileTreeRender
         </div>
       </div>
 
-      <ScrollableOverlay outerClassName="flex-1 min-h-0" className={cn("@container py-2", isMobile ? "px-3" : "px-2")}>
+      <ScrollableOverlay outerClassName="flex-1 min-h-0" className="@container px-3 py-2">
         <ul ref={treeListRef} className={cn('relative flex flex-col', showsTree && 'w-max min-w-full')}>
           {searching ? (
             <li className="flex items-center gap-1.5 px-2 py-1 typography-meta text-muted-foreground">

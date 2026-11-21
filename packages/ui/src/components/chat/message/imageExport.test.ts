@@ -2,7 +2,7 @@ import { afterAll, describe, expect, spyOn, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { getDefaultTheme } from '@/lib/theme/themes';
 
-import { buildTurnImageExportSource, cloneMessageImageExportSource, fitMessageImageExportLayout, MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE, resolveMessageImageExportPixelRatio, resolveMessageImageExportWidth, widenMessageImageExportOverflow } from './imageExport';
+import { buildTurnImageExportSource, cloneMessageImageExportSource, collapseMessageImageExportTables, fitMessageImageExportLayout, MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE, resolveMessageImageExportPixelRatio, resolveMessageImageExportWidth, widenMessageImageExportOverflow } from './imageExport';
 
 const browser = new Window({ url: 'http://localhost/' });
 browser.document.write('<!doctype html><html><head></head><body></body></html>');
@@ -60,6 +60,36 @@ describe('message image export', () => {
         expect(Boolean(clone.querySelector('img[alt="Message image"]'))).toBe(true);
         expect(Boolean(source.querySelector(`[${MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE}="true"]`))).toBe(true);
         expect(Boolean(source.querySelector('[data-export-ignore]'))).toBe(true);
+    });
+
+    test('draws an expanded, scrolled chat table at its message-width layout without edge fades', () => {
+        const source = document.createElement('div');
+        source.innerHTML = `
+            <div data-streamdown="table-wrapper" data-table-expanded="true" data-chat-table="true" data-table-overflow-start="true" data-table-overflow-end="true" style="width: 400px">
+                <div class="overlay-scrollbar-wrapper" style="width: 700px; transform: translateX(-120px)">
+                    <div><table data-streamdown="table" data-collapsed-widths="250,150" data-collapsed-capped="10" style="width: 650px; table-layout: fixed">
+                        <colgroup><col style="width: 450px"><col style="width: 200px"></colgroup>
+                        <thead><tr><th style="--oc-table-code-wrap: nowrap">A</th><th style="--oc-table-code-wrap: nowrap">B</th></tr></thead>
+                        <tbody><tr><td style="--oc-table-code-wrap: nowrap">1</td><td style="--oc-table-code-wrap: nowrap">2</td></tr></tbody>
+                    </table></div>
+                </div>
+            </div>
+        `;
+        const clone = cloneMessageImageExportSource(source);
+        collapseMessageImageExportTables(clone);
+        const wrapper = clone.querySelector<HTMLElement>('[data-streamdown="table-wrapper"]');
+        const frame = clone.querySelector<HTMLElement>('.overlay-scrollbar-wrapper');
+        const table = clone.querySelector<HTMLTableElement>('table');
+        expect(wrapper?.hasAttribute('data-table-expanded')).toBe(false);
+        expect(wrapper?.hasAttribute('data-chat-table')).toBe(false);
+        expect(wrapper?.hasAttribute('data-table-overflow-start')).toBe(false);
+        expect(wrapper?.hasAttribute('data-table-overflow-end')).toBe(false);
+        expect(frame?.style.transform).toBe('');
+        expect(frame?.style.width).toBe('');
+        expect(table?.style.width).toBe('400px');
+        expect(Array.from(clone.querySelectorAll<HTMLElement>('col'), (col) => col.style.width)).toEqual(['250px', '150px']);
+        expect(Array.from(clone.querySelectorAll<HTMLElement>('td'), (cell) => cell.style.getPropertyValue('--oc-table-code-wrap'))).toEqual(['normal', 'nowrap']);
+        expect(source.querySelector<HTMLElement>('.overlay-scrollbar-wrapper')?.style.transform).toBe('translateX(-120px)');
     });
 
     test('canvas width follows the message column instead of the widest line', () => {

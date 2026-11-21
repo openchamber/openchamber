@@ -36,11 +36,38 @@ test('emits server and CLI with declarations, inline source maps and runtime sib
     expect(map.sourcesContent[0].length).toBeGreaterThan(0);
     expect(map.sources[0]).toMatch(/server\/index.js$/);
     await fs.copyFile(new URL('../package.json', import.meta.url), path.join(packageRoot, 'package.json'));
+    await fs.mkdir(path.join(packageRoot, 'bin'));
+    await fs.copyFile(new URL('../bin/cli.js', import.meta.url), path.join(packageRoot, 'bin/cli.js'));
     await fs.symlink(
       fileURLToPath(new URL('../node_modules', import.meta.url)),
       path.join(packageRoot, 'node_modules'),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
+    const legacy = spawnSync(process.execPath, [path.join(packageRoot, 'bin/cli.js'), '--version'], {
+      encoding: 'utf8', env: process.env,
+    });
+    expect(legacy.status, legacy.stderr).toBe(0);
+    expect(legacy.stdout).toContain(JSON.parse(await fs.readFile(path.join(packageRoot, 'package.json'), 'utf8')).version);
+    if (process.platform === 'linux') {
+      const globalDir = path.join(directory, 'pnpm', 'global', 'v11');
+      const stableLink = path.join(globalDir, 'installation');
+      const home = path.join(directory, 'home');
+      const fakeBin = path.join(directory, 'fake-bin');
+      await fs.mkdir(globalDir, { recursive: true });
+      await fs.mkdir(home);
+      await fs.mkdir(fakeBin);
+      await fs.symlink(directory, stableLink, 'dir');
+      await fs.writeFile(path.join(fakeBin, 'systemctl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      await fs.writeFile(path.join(fakeBin, 'loginctl'), '#!/bin/sh\necho Linger=yes\n', { mode: 0o755 });
+      const stableEntry = path.join(stableLink, 'node_modules', '@openchamber', 'web', 'bin', 'cli.js');
+      const startup = spawnSync(process.execPath, [stableEntry, 'startup', 'enable', '--api-only', '--json'], {
+        encoding: 'utf8',
+        env: { HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, USER: 'test' },
+      });
+      expect(startup.status, startup.stderr).toBe(0);
+      const unit = await fs.readFile(path.join(home, '.config', 'systemd', 'user', 'openchamber.service'), 'utf8');
+      expect(unit).toContain(`"${stableEntry}"`);
+    }
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
       await import(${JSON.stringify(pathToFileURL(path.join(output, 'server/index.js')).href)});
       const {getWebPackagePaths} = await import(${JSON.stringify(pathToFileURL(path.join(output, 'server/lib/web-package-paths.js')).href)});

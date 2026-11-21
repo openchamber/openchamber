@@ -148,7 +148,7 @@ describe('extension workspace projection', () => {
       expect(activity).toEqual(['idle', 'unknown', 'idle']);
     } finally { stop(); }
   });
-  test('worktree loading and errors retain data, and token updates do not publish', async () => {
+  test('worktree loading and errors retain data, and unrelated part updates do not publish', async () => {
     const snapshots: number[] = [];
     const stop = observeGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board', () => snapshots.push(1));
     const child = manager.ensureChild('/b-tree', { bootstrap: false });
@@ -268,6 +268,28 @@ describe('extension workspace projection', () => {
       expect(tools.some((entry) => JSON.stringify(entry) === JSON.stringify({ name: 'edit', target: 'src/layout.ts' }))).toBe(true);
     } finally { stop(); }
   });
+  test('publishes a running session\'s token totals before idle without republishing the global list', async () => {
+    expect(readB().sessions[0].tokens).toBeNull();
+    const seen: unknown[] = [];
+    const stop = observeGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board', (next) => {
+      if (next.kind === 'sessions') seen.push(next.sessions[0].tokens);
+    });
+    const listBefore = useGlobalSessionsStore.getState().activeSessions;
+    try {
+      applySessionEventToGlobalSessions({ type: 'session.patched', properties: { sessionID: 'b-session', patch: {
+        tokens: { input: 200, output: 50, reasoning: 30, cache: { read: 700, write: 100 } }, time: { updated: 2 },
+      } } });
+      await Promise.resolve();
+      const totals = { prompt: 1000, output: 50, reasoning: 30, cacheRead: 700, cacheWrite: 100, cacheHitPercent: 70 };
+      expect(useGlobalSessionsStore.getState().activeSessions).toBe(listBefore);
+      expect(readB().sessions[0].tokens).toEqual(totals);
+      expect(seen).toEqual([null, totals]);
+    } finally {
+      stop();
+      applySessionEventToGlobalSessions({ type: 'session.idle', properties: { sessionID: 'b-session' } });
+    }
+  });
+
   test('context fill is the latest step against the session model window, unknown after a compaction', () => {
     const wire = { id: 'evt', created: 1, location: { directory: '/b-tree' } };
     const durable = { aggregateID: 'b-session', seq: 1, version: 1 as const };

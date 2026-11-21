@@ -480,6 +480,7 @@ describe('quota provider contract', () => {
     expect(usage.safeParse({ ...result, usage: { windows: { '5h': { usedPercent: 1, resetAt: 1.5 } } } }).success).toBe(false);
     expect(usage.safeParse({ ...result, usage: { windows: { '5h': { usedPercent: 1, valueLabel: 'x'.repeat(129) } } } }).success).toBe(false);
     expect(usage.safeParse({ ...result, usage: { windows: { '5h': { usedPercent: 1, value: { kind: 'spend', spent: 1, limit: 0 } } } } }).success).toBe(false);
+    expect(usage.safeParse({ ...result, usage: { windows: { '5h': { usedPercent: 1, value: { kind: 'spend', spent: null, limit: null } } } } }).success).toBe(false);
     expect(usage.safeParse({ ...result, planLabel: 'x'.repeat(129) }).success).toBe(false);
     expect(usage.safeParse({ ok: true, configured: true, usage: { windows: {}, models: Object.fromEntries(Array.from({ length: 65 }, (_, index) => [`m${index}`, { windows: {} }])) } }).success).toBe(false);
     expect(quotaProviderSchemasV1.envelope.safeParse({ ok: false, error: { message: 'down', status: 503 } }).success).toBe(true);

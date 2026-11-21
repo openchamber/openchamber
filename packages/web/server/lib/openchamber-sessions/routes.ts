@@ -20,7 +20,7 @@ import {
 import { expandSnippets } from '../snippets/snippets.js';
 import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
 import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
-import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
+import { CHATS_SCOPE_PUBLIC_ID, readChatsDefaults } from '../scheduled-tasks/chats-scope.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { OpenChamberControlError, asControlError, controlErrorFields } from '../openchamber-control/error.js';
 import type { ControlErrorDetails } from '../openchamber-control/error.js';
@@ -28,11 +28,12 @@ import { readObjective, writeObjective } from '../session-goal/objectives.js';
 import { worktreeSetupOf } from '../projects/worktree-setup.js';
 import { createArchiveStore } from './archive-store.js';
 import { createOpenCodeSessionArchive, createSessionArchive } from './session-archive.js';
-import { applyForkInheritance } from './fork-inheritance.js';
+import { applyForkInheritance, listForkMessages } from './fork-inheritance.js';
 import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
+import { compareAndSetSessionMetadata, registerConditionalMetadataRoute, setSessionMetadata } from './session-metadata-route.js';
 import { createSession } from './create-session.js';
-import { fetchSelectionInputs, fetchWarmSelectionInputs } from './selection-inputs.js';
+import { fetchSelectionInputs } from './selection-inputs.js';
 import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
 import { createSessionWorktreeMover } from './worktree-move.js';
 import { sessionParentId } from '../session-lineage.js';
@@ -42,7 +43,6 @@ import { hasMessage } from './contracts.js';
 import type { AgentInfo, ModelInfo, SessionPromptInput, SessionForkInput, SessionSwitchModelInput } from '@opencode/client';
 import type { SessionClient } from './opencode-client-contract.js';
 import type { SessionMetadata, MetadataDecider } from './session-metadata-store.js';
-import type { SelectionWarmUpOptions } from './selection-inputs.js';
 import type { SessionMoveWorktree } from './worktree-move.js';
 import type { StartDirectoryResult } from './worktree-start-directory.js';
 import type { Application, Request, Response } from '../shared/http-contracts.js';
@@ -69,6 +69,7 @@ export interface SessionPayload {
   worktree?: unknown;
   setUpstream?: unknown;
   patch?: unknown;
+  expected?: unknown;
   title?: unknown;
   prompt?: unknown;
   agent?: unknown;
@@ -90,6 +91,7 @@ interface SessionSettings {
   defaultAgent?: unknown;
   defaultModel?: unknown;
   defaultVariant?: unknown;
+  chatsDefaultAgent?: unknown; chatsDefaultModel?: unknown; chatsDefaultVariant?: unknown;
   lastUsedEfforts?: unknown;
   hiddenModels?: unknown;
   lastSelectedModel?: unknown;
@@ -113,11 +115,10 @@ export interface SessionServiceDependencies {
   broadcastGlobalUiEvent?: (event: { type: string; properties: { sessionID: string; archivedAt?: number | null; metadata?: SessionMetadata | undefined } }) => void;
   onSessionArchived?: ((sessionID: string, archivedAt: number | null) => void) | null;
   createSessionGoal?: typeof createSessionGoal;
-  sessionKnowledgeRuntime?: { sync: (sessionID: string, directory: string, responseStyle?: string) => Promise<void> } | null;
+  sessionKnowledgeRuntime?: { sync: (sessionID: string, directory: string, responseStyle?: string) => Promise<boolean | void> } | null;
   worktreeBootstrapStore: BootstrapStore;
   hydrateWorktreeCheckout: FeatureRoutesRuntime['hydrateBoundCheckout'];
   createChangeRequestWorktree?: ((input: { directory: string; number: number; name?: string; branchName?: string; startCommand?: string; createCommand?: string }) => Promise<SessionMoveWorktree>) | null;
-  selectionWarmUp?: SelectionWarmUpOptions;
   dataDir?: string | null;
   archiveStore?: ReturnType<typeof createArchiveStore> | null;
   openCodeArchive?: Parameters<typeof createSessionArchive>[0]['openCode'] | null;
@@ -176,7 +177,6 @@ interface SessionSelectionInput extends SelectionRequest {
   directory: string;
   projectId: string | undefined;
   reuseSessionSelection?: boolean;
-  warmUp?: boolean;
 }
 type GoalInput = { ok: true; enabled: boolean; tokenBudget: number | null } | { ok: false; error: string };
 interface DispatchInput extends SessionSelectionInput {
@@ -241,7 +241,6 @@ const worktreeFields = ({ worktree }: Pick<SessionPayload, 'worktree'>) => hasWo
 const isSafeInteger = (value: unknown): value is number => Number.isSafeInteger(value);
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
 const isText = (value: unknown): value is string => typeof value === 'string';
-const isMetadata = (value: unknown): value is SessionMetadata => !!value && typeof value === 'object' && !Array.isArray(value);
 const isGoalError = (value: unknown): value is { goalConfigured?: unknown } => !!value && typeof value === 'object';
 const isList = (value: unknown): value is unknown[] => Array.isArray(value);
 const asList = <T>(value: readonly T[] | null | undefined): readonly T[] => Array.isArray(value) ? value : [];
@@ -366,14 +365,14 @@ const resolveSelectionVariant = ({
     : undefined;
   const projectDefaultModel = splitModel(projectDefaults?.defaultModel);
   const settingsDefaultModel = splitModel(asNonEmptyString(settings?.defaultModel));
-  const configuredVariant = projectDefaultModel?.providerID === providerID && projectDefaultModel.modelID === modelID
-    ? projectDefaults?.defaultVariant ?? undefined
-    : settingsDefaultModel?.providerID === providerID && settingsDefaultModel.modelID === modelID
-      ? settings?.defaultVariant ?? undefined
-      : undefined;
+  const isThisModel = (candidate: ModelSelection | null) => candidate?.providerID === providerID && candidate.modelID === modelID;
+  const settingsVariant = isThisModel(settingsDefaultModel) ? settings?.defaultVariant ?? undefined : undefined;
+  const scopeVariant = isThisModel(projectDefaultModel) ? projectDefaults?.defaultVariant ?? undefined : undefined;
   const remembered = hasEffortEntries(settings?.lastUsedEfforts) ? settings.lastUsedEfforts[`${providerID}/${modelID}`] : undefined;
+  const sources = !isThisModel(projectDefaultModel) ? [agentVariant, settingsVariant, remembered]
+    : scopeVariant === undefined ? [agentVariant, remembered, settingsVariant] : [agentVariant, scopeVariant, remembered];
 
-  for (const source of [agentVariant, configuredVariant, remembered]) {
+  for (const source of sources) {
     if (source === null) return null;
     const parsed = z.enum(offered).safeParse(source);
     if (parsed.success) return parsed.data;
@@ -399,10 +398,9 @@ const resolveFallbackModel = (models: readonly ModelInfo[], hiddenModels: readon
 };
 
 const resolveProjectDefaults = (settings: SessionSettings | null, directory: string, projectId: string | undefined) => {
+  if (projectId === CHATS_SCOPE_PUBLIC_ID) return readChatsDefaults(settings);
   const projects: readonly unknown[] = Array.isArray(settings?.projects) ? settings.projects : [];
-  const matchedProject = projectId
-    ? projects.find((entry) => hasProjectFields(entry) && entry.id === projectId) || null
-    : projects.find((entry) => hasProjectFields(entry) && entry.path === directory) || null;
+  const matchedProject = projects.find((entry) => hasProjectFields(entry) && (projectId ? entry.id === projectId : entry.path === directory)) || null;
   const project = hasProjectFields(matchedProject) ? matchedProject : undefined;
   return {
     defaultAgent: asNonEmptyString(project?.defaultAgent),
@@ -428,7 +426,7 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, co
   const opencodeDefaultModel = config.defaultModel;
   const configuredAgent = projectDefaultAgent || settingsDefaultAgent || opencodeDefaultAgent;
   if (requireDefaultAgent && configuredAgent && !findAgentBySetting(agents, configuredAgent)) {
-    throw new OpenChamberControlError(`Configured agent '${configuredAgent}' is not available in this directory. Update the default agent in project/global settings or OpenCode config, or pass an explicit agent.`, 503);
+    throw new OpenChamberControlError(`Configured agent '${configuredAgent}' is not available in this directory. Update the default agent in the project, Chats or global settings, or in OpenCode config, or pass an explicit agent.`, 503);
   }
   if (projectDefaultAgent) resolvedAgent = findAgentBySetting(agents, projectDefaultAgent);
   if (!resolvedAgent && settingsDefaultAgent) resolvedAgent = findAgentBySetting(agents, settingsDefaultAgent);
@@ -590,7 +588,7 @@ const parseArchiveRequest = (payload: SessionPayload): { ok: true; ids: string[]
 };
 
 type ResolvedDirectory =
-  | { ok: true; directory: string; projectId?: string; projectPath?: string }
+  | { ok: true; directory: string; projectId?: string; projectPath?: string; chats?: boolean }
   | { ok: false; status?: number; error: string };
 
 const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated, sanitizeProjects, validateDirectoryPath, chatsScope }: Pick<SessionServiceDependencies, 'readSettingsFromDiskMigrated' | 'sanitizeProjects' | 'validateDirectoryPath' | 'chatsScope'> & { payload: SessionPayload }): Promise<ResolvedDirectory> => {
@@ -616,7 +614,7 @@ const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated
     if (chatsRoot.ok) {
       const relative = path.relative(chatsRoot.directory, validated.directory);
       if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
-        return { ok: true, directory: validated.directory };
+        return { ok: true, directory: validated.directory, chats: true };
       }
     }
   }
@@ -686,7 +684,6 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     worktreeBootstrapStore,
     hydrateWorktreeCheckout,
     createChangeRequestWorktree = null,
-    selectionWarmUp = undefined,
     dataDir = null,
     archiveStore: injectedArchiveStore = null,
     openCodeArchive: injectedOpenCodeArchive = null,
@@ -854,13 +851,16 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
 
   const validateRequestedSelection = async ({ directory, requestedModel, requestedAgent, requestedVariant }: SelectionRequest & { directory: string }) => {
     if (!requestedModel && !requestedAgent && !requestedVariant) return;
-    const { models, agents } = await fetchSelectionInputs({
+    const { models, agents, notReadyReason } = await fetchSelectionInputs({
       client: clientFor(directory),
       readSettingsFromDiskMigrated,
     });
 
     if (requestedAgent && agents && agents.length > 0) {
       const agent = agents.find((entry) => entry?.id === requestedAgent) || null;
+      if (!agent && notReadyReason) {
+        throw new OpenChamberControlError(`Session selection is not ready: ${notReadyReason}`, 503);
+      }
       if (!agent) {
         throw new OpenChamberControlError(`Unknown agent '${requestedAgent}' for ${directory}`, 400);
       }
@@ -895,17 +895,13 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     requestedAgent,
     requestedVariant,
     reuseSessionSelection = false,
-    warmUp = false,
   }: SessionSelectionInput) => {
     let model = requestedModel;
     let agent = requestedAgent;
-    let variant = requestedVariant;
+    let variant = requestedVariant, reusedModel = false;
     let selectionInputs: Awaited<ReturnType<typeof fetchSelectionInputs<SessionSettings | null>>> | null = null;
-    const readSelectionInputs = async ({ waitForAgents = false } = {}) => {
-      if (!selectionInputs) {
-        const read = () => fetchSelectionInputs({ client, readSettingsFromDiskMigrated });
-        selectionInputs = await (warmUp && waitForAgents ? fetchWarmSelectionInputs(read, selectionWarmUp) : read());
-      }
+    const readSelectionInputs = async () => {
+      selectionInputs ??= await fetchSelectionInputs({ client, readSettingsFromDiskMigrated });
       return selectionInputs;
     };
     if (reuseSessionSelection && (!model || !agent)) {
@@ -913,14 +909,17 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
       const previous = await fetchSessionSelection({ client, sessionID });
       if (previous) {
         if (!model && previous.model) {
-          model = previous.model;
+          [model, reusedModel] = [previous.model, true];
           if (variant == null) variant = previous.variant ?? undefined;
         }
         if (!agent && previous.agent) agent = previous.agent;
       }
     }
     if (!model || !agent) {
-      const inputs = await readSelectionInputs({ waitForAgents: true });
+      const inputs = await readSelectionInputs();
+      if (inputs.notReadyReason) {
+        throw new OpenChamberControlError(`Session selection is not ready: ${inputs.notReadyReason}`, 503);
+      }
       if (!inputs.agents || !inputs.agents.length || inputs.config === null) {
         throw new OpenChamberControlError('Session selection is not ready: agent configuration is unavailable', 503);
       }
@@ -956,7 +955,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
       const error = Object.assign(new Error('No model is configured or available for the requested directory'), { statusCode: 400 });
       throw error;
     }
-    if (variant == null && !isAutoModel(model) && (!reuseSessionSelection || requestedModel)) {
+    if (variant == null && !isAutoModel(model) && !reusedModel) {
       try {
         const inputs = await readSelectionInputs();
         variant = resolveSelectionVariant({
@@ -1125,16 +1124,10 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     return metadata;
   };
 
-  const setMetadata = async (sessionID: string | undefined, payload: SessionPayload = {}) => {
-    const id = asNonEmptyString(sessionID);
-    if (!id) throw new OpenChamberControlError('a session id is required', 400);
-    const patch = payload?.patch;
-    if (!isMetadata(patch)) {
-      throw new OpenChamberControlError('patch must be an object', 400);
-    }
-
-    return { metadata: await writeMetadata(id, patch, asNonEmptyString(payload?.directory) || '') };
-  };
+  const setMetadata = (sessionID: string | undefined, payload: SessionPayload = {}) =>
+    setSessionMetadata(sessionID, payload, writeMetadata);
+  const compareAndSetMetadata = (sessionID: string | undefined, payload: SessionPayload = {}) =>
+    compareAndSetSessionMetadata(sessionID, payload, updateMetadata);
 
   const getMetadata = async (sessionID: string | undefined, directory = '') => {
     const id = asNonEmptyString(sessionID);
@@ -1193,7 +1186,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     const variant = asNonEmptyString(payload.variant);
 
     const resolvedDirectory: ResolvedDirectory = payload.projectId === CHATS_SCOPE_PUBLIC_ID
-      ? await validateDirectoryPath(asNonEmptyString(payload.directory))
+      ? await validateDirectoryPath(asNonEmptyString(payload.directory)).then((result) => (result.ok ? { ...result, chats: true } : result))
       : await resolveRequestedDirectory({
         chatsScope,
         payload,
@@ -1282,11 +1275,10 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
         selection = await selectForSession({
           client,
           directory: sessionDirectory,
-          projectId: resolvedDirectory.projectId,
+          projectId: resolvedDirectory.chats ? CHATS_SCOPE_PUBLIC_ID : resolvedDirectory.projectId,
           requestedModel: model,
           requestedAgent: agent,
           requestedVariant: variant,
-          warmUp: Boolean(worktree),
         });
       }
     } catch (error) {
@@ -1320,7 +1312,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
         authHeaders,
         sessionID,
         directory: sessionDirectory,
-        projectId: resolvedDirectory.projectId,
+        projectId: resolvedDirectory.chats ? CHATS_SCOPE_PUBLIC_ID : resolvedDirectory.projectId,
         prompt,
         goalInput,
         requestedModel: selection.model,
@@ -1460,6 +1452,8 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
           writeObjective,
           writeMetadata: (sessionID, patch) => writeMetadata(sessionID, patch, resolvedDirectory.directory),
           writePermissions: (sessionID, permissions) => client.session.update({ sessionID, permissions }),
+          readMessages: (sessionID) => listForkMessages(client, sessionID),
+          updatePins: async (sessionID, decide) => { await updateMetadata(sessionID, decide, resolvedDirectory.directory); },
         });
       }
 
@@ -1475,7 +1469,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
         authHeaders,
         sessionID: targetSessionID,
         directory,
-        projectId: resolvedDirectory.projectId,
+        projectId: resolvedDirectory.chats ? CHATS_SCOPE_PUBLIC_ID : resolvedDirectory.projectId,
         prompt,
         goalInput,
         requestedModel,
@@ -1607,6 +1601,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     sessionArchive,
     sessionMetadataStore,
     setMetadata,
+    compareAndSetMetadata,
     getMetadata,
     setSessionLinks,
     send: (sessionID: string | undefined, payload: SessionPayload | null | undefined) => runExisting('send', sessionID, payload),
@@ -1676,6 +1671,8 @@ export const registerOpenChamberSessionRoutes = (app: Application, dependencies:
       return sendServiceError(res, error, 'Failed to store session metadata');
     }
   });
+
+  registerConditionalMetadataRoute(app, service.compareAndSetMetadata, sendServiceError);
 
   app.post('/api/openchamber/sessions/unarchive', express.json({ limit: '1mb' }), async (req, res) => {
     try {

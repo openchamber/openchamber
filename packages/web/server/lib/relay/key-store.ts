@@ -25,23 +25,24 @@ type IdentityFile = z.infer<typeof storeSchema>;
 type WritableIdentity = { [Field in 'signingKey' | 'encryptionKey']?: IdentityFile[Field] | RelayJwkPair };
 const legacySettingsSchema = z.looseObject({ relaySigningKey: z.unknown().optional(), relayEncryptionKey: z.unknown().optional() });
 export type RelayLegacySettings = z.infer<typeof legacySettingsSchema>;
-export interface RelaySettingsAccess {
-  readSettingsFromDiskMigrated: () => Promise<RelayLegacySettings>;
-  readSettingsStrict: () => Promise<RelayLegacySettings>;
+type RelayLegacyKeyFields = Pick<RelayLegacySettings, typeof SLOTS[RelayKeySlot]['legacySettingsKey']>;
+export interface RelaySettingsAccess<MigratedSettings = RelayLegacySettings> {
+  readSettingsFromDiskMigrated: () => Promise<MigratedSettings>;
+  readSettingsStrict: () => Promise<RelayLegacyKeyFields>;
   writeSettingsToDisk: (settings: RelayLegacySettings) => Promise<void>;
 }
 
 const isJwkPair = (value: unknown): value is z.infer<typeof jwkPairSchema> => jwkPairSchema.safeParse(value).success;
 const hasErrorCode = (value: unknown): value is { code: unknown } => value !== null && typeof value === 'object' && 'code' in value;
 
-interface RelayKeyStoreDependencies extends RelaySettingsAccess {
+interface RelayKeyStoreDependencies<MigratedSettings> extends RelaySettingsAccess<MigratedSettings> {
   fsPromises: typeof import('node:fs/promises');
   path: typeof import('node:path');
   dataDir: string;
   logger?: Pick<Console, 'warn'>;
 }
 export type RelayKeyStore = ReturnType<typeof createRelayKeyStore>;
-export const createRelayKeyStore = ({
+export const createRelayKeyStore = <MigratedSettings>({
   fsPromises,
   path,
   dataDir,
@@ -49,7 +50,7 @@ export const createRelayKeyStore = ({
   readSettingsStrict,
   writeSettingsToDisk,
   logger = console,
-}: RelayKeyStoreDependencies) => {
+}: RelayKeyStoreDependencies<MigratedSettings>) => {
   const filePath = path.join(dataDir, 'relay-identity.json');
   let queue = Promise.resolve();
   const serialized = <T>(task: () => Promise<T>) => {

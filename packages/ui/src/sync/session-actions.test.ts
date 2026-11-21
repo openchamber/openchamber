@@ -2170,6 +2170,46 @@ describe("optimisticSend target directory", () => {
     expect(sent).toEqual({ messageID: added[1].id, texts: ["quoted"] })
   })
 
+  test("keeps a confirmed prompt before an answer received during send recovery", async () => {
+    const targetStore = createStore({})
+    const sessionId = "session-confirmation-order"
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/target/project", targetStore]]), () => "/target/project")
+    setOptimisticRefs(
+      ({ message, parts }) => {
+        targetStore.setState((state) => ({
+          message: { ...state.message, [sessionId]: [...(state.message[sessionId] ?? []), message] },
+          part: { ...state.part, [message.id]: parts },
+        }))
+      },
+      () => {},
+      () => {},
+    )
+    let sentID = ""
+    await optimisticSend({
+      sessionId,
+      directory: "/target/project",
+      content: "hello",
+      send: async (messageID) => {
+        sentID = messageID
+        sessionMessageRecords.set(sessionId, [{
+          info: { id: messageID, role: "user", sessionID: sessionId, time: { created: 1 } },
+          parts: [{ id: "confirmed-part", sessionID: sessionId, messageID, type: "text", text: "hello" }],
+        }])
+        targetStore.setState((state) => ({
+          message: { ...state.message, [sessionId]: [
+            ...(state.message[sessionId] ?? []),
+            { id: "live-answer", role: "assistant", sessionID: sessionId, time: { created: 2 }, agent: "build", providerID: "test", modelID: "test" },
+          ] },
+        }))
+        throw Object.assign(new Error("gateway timeout"), { status: 504 })
+      },
+    })
+    expect(targetStore.getState().message[sessionId]?.map((message) => message.id)).toEqual([sentID, "live-answer"])
+    expect(targetStore.getState().message[sessionId]?.[0]?.time.created).toBe(1)
+    expect(targetStore.getState().part[sentID]?.[0]?.id).toBe("confirmed-part")
+  })
+
   test("runs appendSubmissions once for an ambiguous confirmation", async () => {
     const targetStore = createStore({})
     const childStores = createChildStores([["/target/project", targetStore]])
@@ -2824,6 +2864,128 @@ describe("forkAfterMessage", () => {
     }])
   })
 
+  test("opens a fork with inherited pins only after the pin repair", async () => {
+    const pins = [{ id: "msg-user-1", createdAt: 1, role: "user", sessionID: sourceSession.id }]
+    sessionForkResult = { ...forkedSession, metadata: { openchamber: { context_obligatory_messages: pins } } }
+    const source = createStore({}, { session: [sourceSession], message: { [sourceSession.id]: transcript } })
+    const { forkAfterMessage, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+    let releaseRead = () => {}
+    messageReadGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    try {
+      const forking = forkAfterMessage(sourceSession.id, "msg-answer-1")
+      while (!replyCalls.some((call) => call.method === "session.messages")) await Promise.resolve()
+      expect(selectedSessions).toEqual([])
+      releaseRead()
+      await forking
+      expect(selectedSessions).toEqual([{ sessionId: forkedSession.id, directoryHint: sourceSession.directory }])
+    } finally {
+      messageReadGate = null
+    }
+  })
+
+  test("does not repeat a pin edit on a runtime chosen while it was pending", async () => {
+    sessionRecords.set(sourceSession.id, { ...sourceSession, metadata: {} })
+    const previousResponse = archiveBatchResponse
+    beforeArchiveRouteResolve = () => {
+      runtimeKey = "another-runtime"
+      archiveBatchResponse = { status: 200, body: { conflict: true, metadata: {} } }
+    }
+    openchamberRouteRequests.length = 0
+    try {
+      const { setContextObligatoryMessage } = await import("./session-actions")
+      expect(await setContextObligatoryMessage(sourceSession.id, sourceSession.directory, { id: "mine", createdAt: 2, role: "user" }, true)).toBeNull()
+      expect(openchamberRouteRequests).toHaveLength(1)
+    } finally {
+      beforeArchiveRouteResolve = null
+      archiveBatchResponse = previousResponse
+      sessionRecords.delete(sourceSession.id)
+    }
+  })
+
+  test("retries a pin edit against the record a concurrent edit left", async () => {
+    const concurrent = { openchamber: { context_obligatory_messages: [{ id: "other", createdAt: 1, role: "user", sessionID: sourceSession.id }] } }
+    sessionRecords.set(sourceSession.id, { ...sourceSession, metadata: {} })
+    const previousResponse = archiveBatchResponse
+    let calls = 0
+    beforeArchiveRouteResolve = (path) => {
+      if (!path.endsWith("/metadata/compare-and-set")) return
+      calls += 1
+      archiveBatchResponse = { status: 200, body: calls === 1 ? { conflict: true, metadata: concurrent } : { conflict: false, metadata: {} } }
+    }
+    openchamberRouteRequests.length = 0
+    try {
+      const { setContextObligatoryMessage } = await import("./session-actions")
+      await setContextObligatoryMessage(sourceSession.id, sourceSession.directory, { id: "mine", createdAt: 2, role: "user" }, true)
+      const requests = openchamberRouteRequests.filter((entry) => entry.path.endsWith("/metadata/compare-and-set"))
+      expect(requests).toHaveLength(2)
+      expect(requests[1]?.body).toMatchObject({ expected: concurrent, patch: { openchamber: { context_obligatory_messages: [
+        { id: "other", createdAt: 1, role: "user", sessionID: sourceSession.id },
+        { id: "mine", createdAt: 2, role: "user", sessionID: sourceSession.id },
+      ] } } })
+    } finally {
+      beforeArchiveRouteResolve = null
+      archiveBatchResponse = previousResponse
+      sessionRecords.delete(sourceSession.id)
+    }
+  })
+
+  test("pins through the plain route on a server without the conditional one", async () => {
+    sessionRecords.set(sourceSession.id, { ...sourceSession, metadata: {} })
+    const previousResponse = archiveBatchResponse
+    beforeArchiveRouteResolve = (path) => {
+      archiveBatchResponse = path.endsWith("/compare-and-set")
+        ? { status: 404, body: { error: "not found" } }
+        : { status: 200, body: { metadata: {} } }
+    }
+    openchamberRouteRequests.length = 0
+    try {
+      const { setContextObligatoryMessage } = await import("./session-actions")
+      await setContextObligatoryMessage(sourceSession.id, sourceSession.directory, { id: "mine", createdAt: 2, role: "user" }, true)
+      expect(openchamberRouteRequests.map((entry) => entry.path)).toEqual([
+        `/api/openchamber/sessions/${sourceSession.id}/metadata/compare-and-set`,
+        `/api/openchamber/sessions/${sourceSession.id}/metadata`,
+      ])
+    } finally {
+      beforeArchiveRouteResolve = null
+      archiveBatchResponse = previousResponse
+      sessionRecords.delete(sourceSession.id)
+    }
+  })
+
+  test("never repairs fork pins through the plain route", async () => {
+    sessionRecords.set(sourceSession.id, { ...sourceSession, metadata: {} })
+    const previousResponse = archiveBatchResponse
+    archiveBatchResponse = { status: 404, body: { error: "not found" } }
+    openchamberRouteRequests.length = 0
+    try {
+      const { patchSessionMetadata } = await import("./session-actions")
+      await expect(patchSessionMetadata(sourceSession.id, sourceSession.directory, () => ({ pinned: true }), undefined, "required")).rejects.toThrow()
+      expect(openchamberRouteRequests.map((entry) => entry.path)).toEqual([
+        `/api/openchamber/sessions/${sourceSession.id}/metadata/compare-and-set`,
+      ])
+    } finally {
+      archiveBatchResponse = previousResponse
+      sessionRecords.delete(sourceSession.id)
+    }
+  })
+
+  test("keeps every other metadata edit on the plain route", async () => {
+    sessionRecords.set(sourceSession.id, { ...sourceSession, metadata: {} })
+    const previousResponse = archiveBatchResponse
+    archiveBatchResponse = { status: 200, body: { metadata: { pinned: true } } }
+    openchamberRouteRequests.length = 0
+    try {
+      const { patchSessionMetadata } = await import("./session-actions")
+      await patchSessionMetadata(sourceSession.id, sourceSession.directory, () => ({ pinned: true }))
+      expect(openchamberRouteRequests.map((entry) => entry.path)).toEqual([`/api/openchamber/sessions/${sourceSession.id}/metadata`])
+      expect(openchamberRouteRequests[0]?.body).toEqual({ patch: { pinned: true } })
+    } finally {
+      archiveBatchResponse = previousResponse
+      sessionRecords.delete(sourceSession.id)
+    }
+  })
+
   test("leaves a workflow report that followed the answer out of the fork", async () => {
     const workflowReport: Message = {
       id: "msg-workflow-report",
@@ -2939,14 +3101,16 @@ describe("forkAfterMessage", () => {
         try {
           const { forkAfterMessage, forkFromMessage, setActionRefs } = await import("./session-actions")
           setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+          const switched = outcome === "runtime-switch" || outcome === "write-failure-after-switch"
           if (forkPoint === "answer") {
-            expect(await forkAfterMessage(sourceSession.id, "msg-answer-2")).toBe(inheritedFork)
+            expect(await forkAfterMessage(sourceSession.id, "msg-answer-2")).toBe(switched ? null : inheritedFork)
           } else {
             await forkFromMessage(sourceSession.id, "msg-user-2")
           }
           expect(permissionPolicy.get(forkedSession.id)).toBeUndefined()
           expect(usePermissionStore.getState().getSessionMode(forkedSession.id)).toBe("ask")
-          expect(selectedSessions).toEqual([{ sessionId: forkedSession.id, directoryHint: sourceSession.directory }])
+          // The fork opens after inheritance, so a server switch meanwhile keeps the new server's view.
+          expect(selectedSessions).toEqual(switched ? [] : [{ sessionId: forkedSession.id, directoryHint: sourceSession.directory }])
           const metadataRequest = openchamberRouteRequests.find((entry) => entry.path.endsWith(`/${forkedSession.id}/metadata`))
           const objectiveRequests = openchamberRouteRequests.filter((entry) => entry.path.startsWith("/api/goals/objective/"))
           if (outcome === "runtime-switch" || outcome === "write-failure-after-switch") {

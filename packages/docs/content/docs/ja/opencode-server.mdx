@@ -32,6 +32,41 @@ OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
 
 `OPENCODE_HOST` にポートがない、またはパスが含まれている場合、OpenChamber はそれを無視し、自分のサーバー起動にフォールバックします。期待した接続が行われなかった場合は、起動ログの `[config]` 警告を確認してください。
 
+## VS Code と 1 つのサーバーを共有する
+
+デスクトップアプリと VS Code 拡張機能は、通常それぞれ別の OpenCode サーバーを起動します。Windows では、`opencode-mem` などの一部のプラグインが、同じデータベースを 2 つのプロセスで開けません。この競合を避けるには、両方のアプリを 1 つのサーバーに接続します。
+
+共有サーバーには OpenCode 2.2.4 以降が必要です。古いバージョンでは、両方のアプリが「OpenCode を更新」画面で止まります。
+
+1. OpenChamber Desktop と VS Code を終了し、それぞれが管理するサーバーを停止します。ターミナルで動いているものなど、同じプラグインデータを使うほかの OpenCode サーバーも停止します。OpenCode の TUI もバックグラウンドサーバーを起動し、TUI を閉じても動き続けます。`opencode service status` で確認し、`opencode service stop` で停止します。
+2. OpenCode サーバーを 1 つ起動し、そのまま動かしておきます:
+
+   ```bash
+   opencode serve --port 4096
+   ```
+
+   OpenCode は待ち受けているアドレスを `server listening on` の行に表示します。以下の手順で `http://localhost:4096` と書かれている箇所には、そのアドレスを使います。
+
+   `OPENCODE_PASSWORD` と `OPENCODE_SERVER_PASSWORD` のどちらも設定されていない場合、OpenCode は生成した `server password` も表示します。どちらかが設定されている場合はパスワードを表示せず、設定したパスワードをサーバーが使います。パスワードは他人に見せず、次の手順で使います。
+
+3. `OPENCODE_HOST=http://localhost:4096`、`OPENCODE_SKIP_START=true`、サーバーのパスワードを入れた `OPENCODE_PASSWORD` を設定して OpenChamber Desktop を起動します。Windows では PowerShell ウィンドウから起動します:
+
+   ```powershell
+   $env:OPENCODE_HOST = 'http://localhost:4096'
+   $env:OPENCODE_SKIP_START = 'true'
+   $password = Read-Host 'OpenCode server password' -AsSecureString
+   $env:OPENCODE_PASSWORD = [System.Net.NetworkCredential]::new('', $password).Password
+   & "$env:LOCALAPPDATA\Programs\@openchamberelectron\OpenChamber.exe"
+   ```
+
+   Desktop を別の場所にインストールした場合は、お使いの `OpenChamber.exe` のパスを指定します。
+
+4. 同じ PowerShell ウィンドウから `code` で VS Code を起動します。VS Code の設定で `openchamber.apiUrl` を `http://localhost:4096` にし、**Developer: Reload Window** を実行します。
+
+これで両方のアプリがそのアドレスのサーバーを使います。どちらかのアプリを使っている間は、サーバーを動かしたままにしてください。両方のアプリは毎回、手順 3 と 4 のように PowerShell から起動してください。スタートメニューから開くと、Desktop は再び自分のサーバーを起動し、VS Code は共有サーバーのパスワードを持ちません。パスワードを設定せずにサーバーを再起動すると新しいパスワードが表示されるので、そちらを使います。`OPENCODE_PASSWORD` が設定されていない場合は、古い名前の `OPENCODE_SERVER_PASSWORD` も使えます。信頼できないネットワークにサーバーを公開しないでください。Desktop が自動で管理するサーバーではポートとパスワードが変わるため、この方法は使えません。
+
+外部サーバーには OpenChamber が管理するプラグインは入りません。どちらかのアプリが接続できない場合は、[OpenCode 接続](/ja/troubleshooting/opencode-connection/) を参照してください。
+
 ## CLI からサーバーを管理する
 
 ```bash
@@ -88,9 +123,9 @@ openchamber tunnel stop --port 3000
 
 ## "OpenCode is restarting"
 
-サーバーの起動中または再起動中、OpenChamber は "OpenCode is restarting" 状態を表示し、準備が整うまでリクエストを一時停止します。これは起動直後や再起動直後には正常です。いつまでも消えない場合は、[OpenCode 接続](/troubleshooting/opencode-connection/) を参照してください。
+サーバーの起動中または再起動中、OpenChamber は "OpenCode is restarting" 状態を表示し、準備が整うまでリクエストを一時停止します。これは起動直後や再起動直後には正常です。いつまでも消えない場合は、[OpenCode 接続](/ja/troubleshooting/opencode-connection/) を参照してください。
 
 ## 関連
 
-- [プロバイダー、モデル、エージェント](/providers/) — サーバーの接続先を設定する
-- [OpenCode 接続](/troubleshooting/opencode-connection/) — 接続できない場合
+- [プロバイダー、モデル、エージェント](/ja/providers/) — サーバーの接続先を設定する
+- [OpenCode 接続](/ja/troubleshooting/opencode-connection/) — 接続できない場合

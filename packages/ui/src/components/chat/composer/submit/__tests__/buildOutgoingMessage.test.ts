@@ -242,7 +242,7 @@ describe('context drafts', () => {
             .toEqual(contextPayloadFromDraft(commentDraft()));
         expect(result.additionalParts[1].metadata?.[CONTEXT_METADATA_KEY])
             .toEqual(contextPayloadFromDraft(commentDraft({ id: 'icd-2', source: 'file', side: undefined })));
-        expect(result.additionalParts[0].text).toContain('Comment on `src/app.ts` lines 3-5 (modified):');
+        expect(result.additionalParts[0].text).toContain('The user selected `src/app.ts` lines 3-5 (modified):');
         expect(result.additionalParts[0].text).toContain('fix this');
     });
 
@@ -252,7 +252,7 @@ describe('context drafts', () => {
             inlineComments: [commentDraft()],
             syntheticTexts: ['conflict note'],
         }), deps());
-        expect(result.additionalParts.map((p) => p.text.startsWith('Comment on') ? 'comment' : p.text))
+        expect(result.additionalParts.map((p) => p.text.startsWith('The user selected') ? 'comment' : p.text))
             .toEqual(['comment', 'conflict note']);
     });
 
@@ -473,7 +473,7 @@ describe('capturing composer context for the queue', () => {
 
         expect(context.map((part) => part.kind)).toEqual(['context', 'synthetic', 'context', 'context', 'context', 'instruction']);
         expect(context[0]?.kind).toBe('context');
-        expect(context[0]?.text).toContain('Comment on `src/app.ts` lines 3-5 (modified):');
+        expect(context[0]?.text).toContain('The user selected `src/app.ts` lines 3-5 (modified):');
         expect(context[0]?.kind === 'context' ? context[0].metadata[CONTEXT_METADATA_KEY] : null)
             .toEqual(contextPayloadFromDraft(commentDraft()));
         expect(context[3]).toEqual({

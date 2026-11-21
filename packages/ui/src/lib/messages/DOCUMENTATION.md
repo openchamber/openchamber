@@ -28,6 +28,10 @@ This module owns attached-context encoding and read-back, message-derived model 
 
 Adding structured metadata preserves the existing model-facing wording so a transport change does not change model behavior. Linked items require their picker's fetched context because their metadata alone cannot recreate it.
 
+### Why selections say the user wrote to the agent and not "Comment on <file>"
+
+Code comments and quotes reach the model as synthetic parts, often with no typed text beside them. A bare "Comment on `file` lines 3-16 in the changes of branch …" header read like a review comment from someone else, and models drafted a reply to paste into the pull request. The text names the user as the author and the agent as the addressee: "The user selected …" for the quoted code, "The user wrote this to you about …" before the user's words.
+
 ### Why an early metadata-key check and not unconditional schema parsing
 
 Most message parts carry neither context key, and both schemas reject undefined. Checking the keys first avoids allocating a ZodError for ordinary parts.

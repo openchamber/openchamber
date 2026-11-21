@@ -39,6 +39,7 @@ const SEARCH_TARGET_TABS = new Map<string, ChatSettingsTab>([
   ['chat.follow-up-behavior', 'composer'],
   ['chat.questions-placement', 'composer'],
   ['chat.large-text-paste', 'composer'],
+  ['chat.document-attach', 'composer'],
   ['chat.subagent-read-only-banner', 'composer'],
   ['chat.save-pasted-images', 'composer'],
   ['chat.spellcheck', 'composer'],

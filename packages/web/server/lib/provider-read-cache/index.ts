@@ -12,7 +12,7 @@ export interface RefreshedTrackerItem {
   identifier: string;
 }
 
-type TrackerIds = string[] | (() => string[]);
+type TrackerIds = readonly string[] | (() => readonly string[]);
 
 export interface ProviderReadCacheOptions {
   sourceControlProviderIds?: string[];
@@ -25,7 +25,7 @@ export interface ProviderReadCacheOptions {
 interface ProviderReadRequest {
   path: string;
   originalUrl: string;
-  method: string;
+  method?: string | undefined;
 }
 
 interface ProviderReadResponse {
@@ -62,7 +62,7 @@ const hasResponseFields = (value: ProviderReadBody): value is { [key: string]: P
   value !== null && typeof value === 'object'
 );
 
-const isTrackerIdReader = (value: TrackerIds): value is () => string[] => typeof value === 'function';
+const isTrackerIdReader = (value: TrackerIds): value is () => readonly string[] => typeof value === 'function';
 
 const SECOND = 1000;
 const MAX_ENTRIES = 300;

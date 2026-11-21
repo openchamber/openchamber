@@ -79,12 +79,83 @@ describe('hasOpenChamberView', () => {
 
 describe('tightestWindow', () => {
   const window = (usedPercent: number | null) => ({ usedPercent, remainingPercent: usedPercent === null ? null : 100 - usedPercent, resetAt: null });
+  const spend = (spent: number | null) => ({
+    usedPercent: null,
+    remainingPercent: null,
+    resetAt: null,
+    value: { kind: 'spend' as const, spent, limit: null },
+  });
 
   test('is the window closest to its limit, skipping ones without a share', () => {
     const provider = { providerId: 'go', ok: true, usage: { windows: { '5h': window(1), weekly: window(82), credits: window(null) } } };
     expect(tightestWindow(provider)?.key).toBe('weekly');
     expect(tightestWindow({ providerId: 'x', ok: true, usage: { windows: { credits: window(null) } } })).toBeNull();
     expect(tightestWindow({ providerId: 'x', ok: false, usage: null })).toBeNull();
+  });
+
+  test('falls back to the monthly total for an uncapped monthly key', () => {
+    const provider = {
+      providerId: 'openrouter',
+      ok: true,
+      usage: { windows: { monthly_total: spend(226.64), monthly_credits: spend(14.3) } },
+    };
+    expect(tightestWindow(provider)?.key).toBe('monthly_total');
+  });
+
+  test('keeps a cap ahead of the monthly total', () => {
+    const provider = {
+      providerId: 'openrouter',
+      ok: true,
+      usage: { windows: { monthly: window(82), monthly_total: spend(5) } },
+    };
+    expect(tightestWindow(provider)?.key).toBe('monthly');
+  });
+
+  test('a threshold-zero cap still outranks the monthly total', () => {
+    const provider = {
+      providerId: 'openrouter',
+      ok: true,
+      usage: {
+        windows: {
+          monthly: { ...window(null), valueLabel: '$0.00 / $0.00' },
+          monthly_total: spend(5),
+        },
+      },
+    };
+    expect(tightestWindow(provider)?.key).toBe('monthly');
+  });
+
+  test('a set cap with an unreadable amount still outranks the monthly total', () => {
+    const provider = {
+      providerId: 'openrouter',
+      ok: true,
+      usage: {
+        windows: {
+          monthly_total: spend(5),
+          key_limit: { ...window(null), value: { kind: 'spend' as const, spent: null, limit: 30 } },
+        },
+      },
+    };
+    expect(tightestWindow(provider)?.key).toBe('key_limit');
+  });
+
+  test('shows a readable OpenRouter counter when the monthly total is unknown', () => {
+    const provider = {
+      providerId: 'openrouter',
+      ok: true,
+      usage: { windows: { monthly_total: spend(null), monthly_credits: spend(3.18) } },
+    };
+    expect(tightestWindow(provider)?.key).toBe('monthly_credits');
+  });
+
+  test('keeps the generic rule for another provider with a monthly_total window', () => {
+    const requests = (count: number) => ({ ...window(null), value: { kind: 'requests' as const, count } });
+    const provider = {
+      providerId: 'ext-quota',
+      ok: true,
+      usage: { windows: { daily: requests(12), monthly_total: requests(300) } },
+    };
+    expect(tightestWindow(provider)).toBeNull();
   });
 });
 
@@ -100,6 +171,11 @@ describe('secretRowView', () => {
     expect(run({ answer: { status: 'ran', outcome: 'not-started', exitCode: null } })?.key).toBe('chat.toolPart.openchamber.action.secretRunNotStarted');
     expect(run({ answer: { status: 'declined' } })?.key).toBe('chat.toolPart.openchamber.action.secretRunDeclined');
     expect(run({ answer: { answered: false, reason: 'chat' } })?.key).toBe('chat.toolPart.openchamber.action.secretRunNotRun');
+  });
+
+  test('names the values a finished run could not save', () => {
+    expect(secretRowView({ ok: true, action: 'secret.run', data: { answer: { status: 'ran', outcome: 'exited', exitCode: 0 }, notSaved: ['API_TOKEN'] } }))
+      .toEqual({ key: 'chat.toolPart.openchamber.action.secretRun', output: '', notSaved: ['API_TOKEN'] });
   });
 
   test('leaves other answers alone', () => {

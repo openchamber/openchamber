@@ -1,6 +1,7 @@
 import type fs from 'node:fs/promises';
 import type { ChildProcess } from 'node:child_process';
-import type { ProviderDescriptor, TransportCredential } from '../source-control/provider-contract.js';
+import type { ProviderDescriptor } from '../source-control/provider-contract.js';
+import type { BindingTransportAccount } from '../source-control/binding-service-contracts.js';
 import type { createSshPassphraseStore } from './ssh-passphrases.js';
 import type { ManagedSshCredentialRecord } from './ssh-credential-storage.js';
 
@@ -55,7 +56,7 @@ export interface CredentialResolverOptions {
     instance: string;
     credentialId: string;
     credentialRevision: number;
-  }) => Promise<TransportCredential | null>;
+  }) => Promise<BindingTransportAccount | null>;
   describeProvider?: (provider: string) => ProviderDescriptor | null | undefined;
   lookupManagedSshKey?: (keyId: string) => Promise<ManagedSshCredentialRecord | null>;
   passphrases?: SshPassphrases;

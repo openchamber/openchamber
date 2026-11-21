@@ -174,14 +174,12 @@ describe('bounded history loading', () => {
   test('uses the real shared loader and stops paging as soon as three pairs are available', async () => {
     let requests = 0;
     const childStores = new ChildStoreManager();
-    // Records that go through a child store come back ordered by creation
-    // time, so this fixture stamps each pair with its own slot.
     const orderedPair = (ordinal: number, id: string): RecordEntry[] => {
       const created = ordinal * 10;
       const prompt = user(id);
       return [
-        { ...prompt, info: { id: `msg_${ordinal}_1`, sessionID: 'session', role: 'user', time: { created } } },
         assistant(id, { id: `msg_${ordinal}_2`, time: { created: created + 1, completed: created + 2 } }),
+        { ...prompt, info: { id: `msg_${ordinal}_1`, sessionID: 'session', role: 'user', time: { created } } },
       ];
     };
     // v2 pages messages newest-first through the loader's page source rather
@@ -190,7 +188,7 @@ describe('bounded history loading', () => {
       getSessionMessages: async () => {
         requests += 1;
         return {
-          items: requests === 1 ? orderedPair(3, 'three') : [...orderedPair(1, 'one'), ...orderedPair(2, 'two')],
+          items: requests === 1 ? orderedPair(3, 'three') : [...orderedPair(2, 'two'), ...orderedPair(1, 'one')],
           cursor: { next: requests === 1 ? 'older' : 'much-older' },
         };
       },

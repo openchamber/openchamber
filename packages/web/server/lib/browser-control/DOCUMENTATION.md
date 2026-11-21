@@ -17,8 +17,9 @@ itself; it can only ask and wait.
 - `uploads.js` decides which files `browser.upload` may send and holds them
   under a short-lived token for the client that attaches them
   (`GET /api/browser-control/uploads/:token/:index`).
-- `../../index.js` supplies `emitRequest`, which writes the request to the
-  OpenChamber SSE clients and returns how many were reached. The event carries
+- `client-events.js` supplies `emitRequest`, which writes the request to the
+  OpenChamber SSE clients `../../runtime.js` hands it and returns how many were
+  reached. The event carries
   the same `context` (`directory`, `sessionId`, each `null` when unknown) the
   extension provider receives, so the in-app browser knows which session asked.
 - `provider.js` sits between the control service and the broker. It reads
@@ -47,6 +48,27 @@ itself; it can only ask and wait.
   an action is refused with 409 while the user holds the surface, and every
   action that runs is reported as agent activity so the panel says "Agent is
   working".
+- `preferred-client.js` names the window an action goes to when several
+  could serve it: the connection, among those opened with `browser=1`, whose
+  window reported input last over `POST /api/browser-control/active`. Each change is broadcast to those
+  connections as `openchamber:browser-control-preferred`, and every request
+  carries the current value as `preferredConnectionId`, null when the
+  preferred connection has closed or nobody has reported. The client half is
+  `packages/ui/src/lib/browser/preferredClient.ts`: a window reports its first
+  click or key press while another connection is preferred. A window that was
+  preferred reports again when its stream reconnects, naming its old
+  connection as `previousConnectionId`, and the server hands the preference
+  back only if no other window took it meanwhile, since a disconnected window
+  missed that broadcast. A window that took it counts even after its own
+  stream closed: the hand-back is refused, nobody is preferred, and the next
+  click or key press in any window takes the preference. A failed report is
+  retried on the next input, except a 404 or 405: a server without the route
+  is asked once per connection, never once per key press. An answer that a
+  broadcast overtook is ignored, and so is an answer for a connection that has
+  since closed. Input that arrives while the window's own report is still out
+  is reported once that report settles, if the window is still not preferred. A
+  reloaded window starts unpreferred: the page keeps no record of its old
+  connection, so its next click or key press takes the preference back.
 - `../openchamber-control/service.js` is the only caller. It maps the
   `browser.*` actions of the `openchamber_web` tool onto the router's
   `request()` (same signature as the broker) and owns their parameter
@@ -136,10 +158,10 @@ itself; it can only ask and wait.
   500 ms behind an unchanging splash still ends the wait early; the next
   snapshot shows the splash, and nothing in the page can see a request in
   flight.
-  Agent work never takes keyboard focus from the user
-  (`useWebviewFocusGuard` beside `BrowserPane`): a page may take focus only
-  while the user can see it and no agent action is driving it, otherwise focus
-  goes straight back to where it was. A press inside the page moves focus to
+  Agent work guards keyboard focus
+  (`useWebviewFocusGuard` beside `BrowserPane`): outside a held input action a
+  page may take focus only while the user can see it and no agent action is
+  driving it; otherwise focus goes straight back to where it was. A press inside the page moves focus to
   the view with no `focusin` in the app, only a window `blur`, so the guard
   checks after that blur too; and when an action ends, focus it moved anywhere
   (a Tab out of the page's last field lands in the app, as in a browser) goes
@@ -148,8 +170,13 @@ itself; it can only ask and wait.
   that page: the page then behaves as focused, so pickers stay open and its
   clipboard calls work. The emulation stays for the page's lifetime. When it
   is unavailable (the debugger could not attach; an open DevTools does not
-  stop it), the action gives the page real focus (`holdPageFocus`) and
-  returns it before waiting out any load the action started.
+  stop it), the action gives the page real focus (`holdPageFocus`). Typing and
+  key presses also take real focus because Chromium sends keyboard input to the
+  focused widget even when emulation is enabled. The shell refuses input if
+  the page loses focus. Keyboard steps carry the drawn-stage deadline, and the
+  shell rejects expired input, a key release included, even if a later action
+  has focused the page. Focus returns before waiting out any load the action
+  started.
   A tab an agent opened browses in a profile of its own,
   `persist:openchamber-browser-agent`, without the user's logins: a page can
   steer the agent, and with the user's sessions it would act as the user on
@@ -300,6 +327,13 @@ in `input`. The tab stays in the background, as an agent's does, and the page
 inside it is a `webview` target on the instance's debugging port for reading
 what the actions alone do not show (frame rate, animations).
 
+Which window claims needs no Electron. Against `bun run dev`, a web tab of the
+UI plays one window, and a short Node script plays a desktop window: it reads
+`GET /api/openchamber/events?browser=1`, posts its `connectionId` to
+`/api/browser-control/active`, and on each `openchamber:browser-control-request`
+claims after a delay and posts a result. The `browser.open` answer then says
+who served it: the script's own data, or `drivable: false` from the web tab.
+
 ## Invariants
 
 - Capability belongs to the connection, not to configuration. A client declares
@@ -319,6 +353,19 @@ what the actions alone do not show (frame rate, animations).
   wins and every other client does nothing. Deciding by whose result arrives
   first would be too late, because by then each of them has already clicked.
   A claim for a settled request is refused for the same reason.
+- What every window could serve goes to the window the user is at. A
+  `browser.open` without `tabId`, or an action on the user's tab, is claimed
+  at once by the preferred window; the others wait
+  `PREFERRED_CLIENT_HEAD_START_MS` (`controlClient.ts`) and claim only if it
+  did not. An action on a session's own tab claims at once wherever the user
+  is, because that tab lives in one window. A window with no tab for the
+  session waits out the head start before saying so, the preferred one too,
+  so a window that holds the user's tab and deferred to it can still answer.
+  With no preferred window the first claim wins, as before.
+- Only a window that can drive a page becomes the preferred one. A browser
+  tab never reports, and the route refuses a connection without `browser=1`,
+  so a tab that can only display a page never wins a `browser.open` over a
+  desktop window that has reported.
 - Nobody listening is answered immediately with a 503 describing the
   environment, never by blocking for the full timeout. A blocked wait followed
   by a timeout cannot be told apart from a page that hung.
@@ -409,3 +456,42 @@ rejected: few would turn it on, so the safe setup would stay the rare one. A
 profile cleared after every session was rejected too: the agent would sign in
 to a dev server again every time. The setting `agentBrowserSharesLogins`
 covers whoever prefers convenience.
+
+### Why the window the user acted in last, and not a setting
+
+The user moves between devices: a desktop app on another machine connected to
+this server beside the window on this one. A per-device setting would have to
+be flipped on each move and goes stale the moment it is forgotten; the last
+input is a fact the windows already have. It follows the same rule as
+`browser=1`: what a connection can do is declared by the connection.
+
+### Why the server names the window, and not the clients racing by idle time
+
+Each client could delay its own claim by how long its user has been idle, with
+no server state at all. A remote window's round trip over a relay or a tunnel
+is often longer than the gap between two idle times, so the local window would
+still win. The server compares windows on one clock and puts the answer in the
+request, so the preferred window only has to arrive within the head start.
+
+### Why a window reports only while another one is preferred
+
+Reporting every input, throttled, would send requests through the relay for as
+long as the user works, and a throttle long enough to be cheap leaves the
+preference on the old window for that long after the user comes back. The
+broadcast tells a window when it lost the preference, so it reports once on
+the next input and stays quiet otherwise.
+
+### Why input inside a page does not count
+
+A click or key press inside a tab's `<webview>` reaches the app only as a
+focus event, and an agent action in that page fires the same event. Counting
+it would hand the preference to the window the agent works in while the user
+sits at another machine. The user's next click or key press in the app itself
+reports instead.
+
+### Why the head start is 1.5 s
+
+The preferred window may reach the server over a relay or a tunnel, so its
+claim can arrive well after a local window's. The wait costs time only when
+the preferred window does not claim: it lacks the tab, or it has gone away
+without its stream closing yet.

@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="tile_new_session">Nowa sesja</string>
+    <string name="tile_new_session_description">Rozpocznij nową sesję OpenChamber</string>
+    <string name="sealed_push_channel_name">Aktualizacje agenta</string>
+    <string name="widget_usage_label">Użycie</string>
+    <string name="widget_sessions_label">Sesje</string>
+    <string name="widget_usage_description">Limity użycia połączonych dostawców</string>
+    <string name="widget_sessions_description">Ostatnie sesje i skrót do nowego czatu</string>
+    <string name="widget_open_to_sync">Otwórz OpenChamber, aby zsynchronizować</string>
+    <string name="widget_refresh">Odśwież</string>
+    <string name="widget_new_session">Nowa sesja</string>
+</resources>

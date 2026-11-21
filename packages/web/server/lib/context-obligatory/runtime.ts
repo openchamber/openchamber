@@ -22,7 +22,7 @@ export interface ContextObligatoryOptions {
   persistContextCursor?: ((sessionId: string, directory: string, patch: {
     openchamber: { context_obligatory_last_compaction_message_id: unknown };
   }) => Promise<StoredMetadata | void>) | null;
-  readSessionMetadata?: ((sessionId: string) => Promise<StoredMetadata | null>) | null;
+  readSessionMetadata?: ((sessionId: string) => Promise<StoredMetadata | null | undefined>) | null;
 }
 
 export interface StoredMetadata {
@@ -53,7 +53,7 @@ interface FetchOptions {
 
 export interface ContextObligatoryEvent {
   type?: string;
-  properties?: { sessionID?: unknown; directory?: string };
+  properties?: { sessionID?: unknown; directory?: string | undefined };
 }
 
 const isMetadataRecord = (value: unknown): value is BoundaryFields => isRecord(value);

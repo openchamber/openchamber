@@ -1,7 +1,13 @@
 import crypto from 'node:crypto';
+import { execFile } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
 import { describe, expect, it, vi } from 'vitest';
 import { readEffectiveGitTransportRevision } from './transport-config.js';
 
+const execFileAsync = promisify(execFile);
 const hash = (value) => crypto.createHash('sha256').update(value).digest('base64url');
 
 describe('effective Git transport configuration', () => {
@@ -51,6 +57,76 @@ describe('effective Git transport configuration', () => {
     expect(execFileImpl.mock.calls[1][1]).toEqual([
       'ls-tree', '-z', 'HEAD', '--', '.gitmodules', '.lfsconfig', '.gitattributes',
     ]);
+  });
+
+  it('ignores per-invocation trace headers and still moves on every other transport change', async () => {
+    const records = (...extra) => Buffer.from([
+      'global', 'file:/private/global.gitconfig', 'credential.helper\nsecret-helper',
+      ...extra,
+    ].join('\0') + '\0');
+    const trace = (id) => [
+      'command', 'command line:', `http.extraheader\ntraceparent: 00-${id}-${'c'.repeat(16)}-01`,
+      'command', 'command line:', `http.https://example.com/.extraheader\nTraceState: vendor=${id}`,
+    ];
+    const revisionFor = (configOutput) => readEffectiveGitTransportRevision('/repository', {
+      execFileImpl: vi.fn(async (_binary, args) => ({
+        stdout: args[0] === 'config' ? configOutput : Buffer.alloc(0),
+        stderr: Buffer.alloc(0),
+      })),
+    });
+
+    const first = await revisionFor(records(...trace('a'.repeat(32))));
+    expect(await revisionFor(records(...trace('b'.repeat(32))))).toBe(first);
+    expect(first).toBe(hash(Buffer.concat([
+      Buffer.from([
+        'global', 'file:/private/global.gitconfig', 'credential.helper\nsecret-helper',
+        'command', 'command line:', 'http.extraheader\ntraceparent:',
+        'command', 'command line:', 'http.https://example.com/.extraheader\ntracestate:',
+      ].join('\0') + '\0'),
+      Buffer.from([0]),
+    ])));
+    const [globalTrace, scopedTrace] = [trace('a'.repeat(32)).slice(0, 3), trace('a'.repeat(32)).slice(3)];
+    expect(await revisionFor(records(...globalTrace)), 'scoped trace entry added').not.toBe(first);
+    expect(await revisionFor(records(...scopedTrace, ...globalTrace)), 'trace entries reordered').not.toBe(first);
+
+    for (const [label, record] of [
+      ['command-scope proxy', ['command', 'command line:', 'http.proxy\nhttp://proxy.example:3128']],
+      ['command-scope SSH command', ['command', 'command line:', 'core.sshcommand\nssh -i other-key']],
+      ['command-scope credential helper', ['command', 'command line:', 'credential.helper\nother-helper']],
+      ['command-scope non-trace header', ['command', 'command line:', 'http.extraheader\nAuthorization: Bearer x']],
+      ['command-scope include', ['command', 'file:/private/included.gitconfig', 'remote.origin.proxy\nhttp://proxy']],
+      ['trace header in a file scope', ['local', 'file:.git/config', 'http.extraheader\ntraceparent: fixed']],
+      ['trace header from a command-scope include', ['command', 'file:/private/included.gitconfig', 'http.extraheader\ntracestate: fixed']],
+    ]) {
+      expect(await revisionFor(records(...trace('a'.repeat(32)), ...record)), label).not.toBe(first);
+    }
+    const otherHelper = Buffer.from(records(...trace('a'.repeat(32))).toString().replace('secret-helper', 'other-helper'));
+    expect(await revisionFor(otherHelper)).not.toBe(first);
+  });
+
+  it('reads the same revision through real Git when only a command-scope trace header changes', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-transport-config-'));
+    try {
+      await execFileAsync('git', ['init', '--quiet', directory]);
+      const withCommandScope = (...pairs) => (file, args, options) =>
+        execFileAsync(file, [...pairs.flatMap((pair) => ['-c', pair]), ...args], options);
+      const read = (...pairs) => readEffectiveGitTransportRevision(directory, { execFileImpl: withCommandScope(...pairs) });
+
+      const first = await read(`http.extraheader=traceparent: 00-${'a'.repeat(32)}-${'1'.repeat(16)}-01`);
+      expect(await read(`http.extraheader=traceparent: 00-${'b'.repeat(32)}-${'2'.repeat(16)}-01`)).toBe(first);
+      expect(await read(
+        `http.extraheader=traceparent: 00-${'a'.repeat(32)}-${'1'.repeat(16)}-01`,
+        'http.proxy=http://proxy.example:3128',
+      )).not.toBe(first);
+
+      const included = path.join(directory, 'included.gitconfig');
+      await fs.writeFile(included, '[http]\n\textraheader = tracestate: vendor=1\n');
+      const withInclude = await read(`include.path=${included}`);
+      await fs.writeFile(included, '[http]\n\textraheader = tracestate: vendor=2\n');
+      expect(await read(`include.path=${included}`)).not.toBe(withInclude);
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('treats no matching keys as authoritative empty and propagates command failure', async () => {

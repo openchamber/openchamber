@@ -12,7 +12,7 @@ concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-# Five independent jobs on their own Blacksmith runners (same image as
+# Six independent jobs on their own Blacksmith runners (same image as
 # ubuntu-24.04, faster CPUs, colocated cache; the Blacksmith GitHub App is
 # installed on the openchamber org). None of them reads another's output: the
 # tests and type-check need only what `bun install` prepares (postinstall
@@ -66,6 +66,45 @@ jobs:
         run: bun run dead-code
       - name: Ratchet and file size
         run: node scripts/check-changed.mjs --base HEAD^1 --ratchet-only
+
+  # The scenarios of the behavior net that the pull request's files can break
+  # (scripts/verify/DOCUMENTATION.md), in four parts so a wide change still
+  # finishes in minutes. A change that selects nothing starts no stand. Not a
+  # required check: a scenario that fails and then passes is reported as flaky.
+  behavior-net:
+    name: behavior-net (${{ matrix.part }}/4)
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4]
+    steps:
+      # A pull request is checked out as its merge commit, whose first parent
+      # is the base. A run started by hand compares the branch with where it
+      # left origin/main, which needs the history.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 0 }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Play the scenarios the change touches
+        run: bun run verify -- --changed ${{ github.event_name == 'pull_request' && '--base HEAD^1' || '' }} --retry-failed --shard ${{ matrix.part }}/4
+      - name: Keep the failures, also of a scenario that passed when played again
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: behavior-net-${{ matrix.part }}
+          if-no-files-found: ignore
+          path: |
+            tmp/verify/**/summary.json
+            tmp/verify/**/failure.png
+            tmp/verify/**/logs/**
+          retention-days: 7
 
   tests:
     runs-on: blacksmith-4vcpu-ubuntu-2404

@@ -7,7 +7,7 @@ import { managedSshCommand } from '../git/network-operations.js';
 import type { createGitCredentialResolver } from '../git/credential-resolver.js';
 
 export interface CatalogGitIdentity {
-  credentialId?: string;
+  credentialId?: string | undefined;
   endpoint?: string;
   anonymous?: boolean;
   transport?: string;

@@ -8,17 +8,15 @@ import { type useFileComments } from './useFileComments';
 import { type useFileEditorExtensions } from './useFileEditorExtensions';
 import { type useFilePreviewRendering } from './useFilePreviewRendering';
 import { type useFileDocument } from './useFileDocument';
-import { type useFileFullscreen } from './useFileCanvas';
 import { type useFileMarkdownPreview } from './useFileMarkdownPreview';
 import { type useFileTabs } from './useFileTabs';
 import { useI18n } from '@/lib/i18n';
 
-export function renderFileMarkdownPreview({ fileComments, fileDocument, fileEditorExtensions, filePreviewRendering, fullscreen, markdownPreview, tabs, t }: {
+export function renderFileMarkdownPreview({ fileComments, fileDocument, fileEditorExtensions, filePreviewRendering, markdownPreview, tabs, t }: {
   fileComments: Pick<ReturnType<typeof useFileComments>, 'markdownPreviewRef'>;
   fileDocument: Pick<ReturnType<typeof useFileDocument>, 'fileContent'>;
   fileEditorExtensions: Pick<ReturnType<typeof useFileEditorExtensions>, 'previewFontStyle'>;
   filePreviewRendering: Pick<ReturnType<typeof useFilePreviewRendering>, 'markdownDocumentAssets' | 'setMainMarkdownScroller'>;
-  fullscreen: Pick<ReturnType<typeof useFileFullscreen>, 'isFullscreen'>;
   markdownPreview: Pick<ReturnType<typeof useFileMarkdownPreview>, 'focusMdPreviewContainer' | 'mdPreviewContainerRef' | 'mdPreviewFindFocusNonce' | 'mdPreviewFindOpen' | 'mdPreviewOutlineOpen' | 'setMdPreviewFindOpen' | 'setMdPreviewOutlineOpen'>;
   tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile'>;
   t: ReturnType<typeof useI18n>['t'];
@@ -27,7 +25,6 @@ export function renderFileMarkdownPreview({ fileComments, fileDocument, fileEdit
   const { fileContent } = fileDocument;
   const { previewFontStyle } = fileEditorExtensions;
   const { markdownDocumentAssets, setMainMarkdownScroller } = filePreviewRendering;
-  const { isFullscreen } = fullscreen;
   const { focusMdPreviewContainer, mdPreviewContainerRef, mdPreviewFindFocusNonce, mdPreviewFindOpen, mdPreviewOutlineOpen, setMdPreviewFindOpen, setMdPreviewOutlineOpen } = markdownPreview;
   const { selectedFile } = tabs;
   if (!selectedFile) return null;
@@ -75,21 +72,17 @@ export function renderFileMarkdownPreview({ fileComments, fileDocument, fileEdit
                 </ErrorBoundary>
               </div>
               <OverlayScrollbar containerRef={mdPreviewContainerRef} />
-              {!isFullscreen && (
-                <>
-                  <MarkdownPreviewSearch
-                    containerRef={mdPreviewContainerRef}
-                    open={mdPreviewFindOpen}
-                    onOpenChange={setMdPreviewFindOpen}
-                    focusNonce={mdPreviewFindFocusNonce}
-                  />
-                  <MarkdownPreviewOutline
-                    containerRef={mdPreviewContainerRef}
-                    open={mdPreviewOutlineOpen}
-                    onOpenChange={setMdPreviewOutlineOpen}
-                  />
-                </>
-              )}
+              <MarkdownPreviewSearch
+                containerRef={mdPreviewContainerRef}
+                open={mdPreviewFindOpen}
+                onOpenChange={setMdPreviewFindOpen}
+                focusNonce={mdPreviewFindFocusNonce}
+              />
+              <MarkdownPreviewOutline
+                containerRef={mdPreviewContainerRef}
+                open={mdPreviewOutlineOpen}
+                onOpenChange={setMdPreviewOutlineOpen}
+              />
             </div>
   );
 }

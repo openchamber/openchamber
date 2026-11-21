@@ -12,6 +12,7 @@
 - A module that fails to load is tried again and then reloads the page once. A dropped connection during dev compilation or a chunk replaced by an update otherwise leaves an empty page for good.
 - Pushes clear handled notifications by `tag@nid`: the entry names the newest push it covers, and a notification from a newer push with the same tag stays because pushes can arrive out of order. A notification without a `nid` is older and is closed.
 - A push must show a notification; browsers revoke or warn on silent ones, so a cleared cause rides on the next push instead of a push of its own.
+- A tagged push requests `renotify` so replacing a session's earlier notification alerts again. Untagged pushes omit it because browsers require a nonempty tag when `renotify` is true.
 - Only the mounted app may accept notification navigation. An older page may not understand the message, so navigation is skipped only after the app explicitly accepts it; focus first to wake suspended pages.
 
 ## Decisions

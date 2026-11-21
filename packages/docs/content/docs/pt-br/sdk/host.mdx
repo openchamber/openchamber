@@ -36,6 +36,8 @@ Não é um callback de montagem única. Monte a UI e registre assinaturas uma ve
 
 Tokens de acesso nunca aparecem aqui nem no resultado de um `request`.
 
+`ready.session` e `onSession` também fornecem os campos opcionais `context` e `tokens`. `context: { tokens, limit } | null` indica o uso da janela de contexto após a última etapa do assistente; `limit` é `null` quando o limite do modelo é desconhecido. Após uma compactação, `context` permanece `null` até a próxima medição. `tokens: { prompt, output, reasoning, cacheRead, cacheWrite, cacheHitPercent } | null` contém os totais acumulados da sessão. `prompt` inclui entradas sem cache e leituras e gravações de cache. Sem tokens de prompt, `cacheHitPercent` é `null`. Ambos são `null` antes de haver dados; hosts antigos omitem os campos. As mudanças chegam por `onSession`.
+
 `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` e `onItem` repetem o último valor quando você assina tarde, e depois continuam disparando conforme ele muda.
 
 `theme.tokens` inclui `primaryText`, `successText`, `warningText`, `errorText` e `infoText`. Esses campos obrigatórios contêm cores de texto calculadas pelo host para fundos neutros e controles com tons suaves do UI kit, não para preenchimentos de cor sólida. `applyHostReady` aplica essas cores a cada snapshot. Veja [UI kit](/sdk/ui/) para as variáveis CSS.
@@ -67,6 +69,7 @@ Tokens de acesso nunca aparecem aqui nem no resultado de um `request`.
 | `onResolve(handler)` | registra o handler dos seus comandos de barra. Ele recebe `{ command, args }` e devolve um item para anexar ou `null`. |
 | `setBadge(count)` | marca o seu ícone da barra lateral com um ponto e mostra o número (0 a 999) na dica dele, ou `null` para limpá-lo |
 | `openCommit(sha)` | abrir a visualização Diff nesse commit do projeto atual. `sha` tem de 7 a 64 caracteres hexadecimais; o OpenChamber lê o commit sozinho. |
+| `openWalkthrough({ base })` | abrir o Percurso em Este branch do projeto atual, comparado com `base`: `main`, `origin/main` ou uma ref completa. A base passa a ser a base escolhida do branch; o usuário ainda pode mudá-la e é ele quem clica em Gerar percurso. Uma base que o repositório não tem é rejeitada com `NOT_FOUND` e nada muda. No celular, no Mini Chat e no VS Code, `UNSUPPORTED`. |
 | `setHeight(px)` | definir a altura da sua seção do Work Status. O OpenChamber a mantém entre 24 e 480 pixels; conteúdo mais alto rola dentro da sua página. Em outros lugares é ignorado. |
 | `onFileOpen(listener)` | editores de arquivos: receber o arquivo a editar, `{ path, name, readOnly }` mais `encoding: "text"` com `content`, ou `encoding: "binary"` com `bytes`. Também faz Cmd/Ctrl+S salvar dentro da sua página. |
 | `onFileSnapshot(handler)` | editores de arquivos: devolver `{ content, version }` (ou `{ bytes, version }` num editor binário), o arquivo editado inteiro. O OpenChamber chama isso para salvar e antes de trocar para a visualização do código-fonte ou para tela cheia. |

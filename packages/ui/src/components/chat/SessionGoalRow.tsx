@@ -48,6 +48,7 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
       })
     : (goal.tokensUsed > 0 ? t('chat.goal.usage.tokens', { used: formatGoalTokens(goal.tokensUsed) }) : null);
 
+  const paused = goal.status === 'paused';
   const pauseResume = goal.status === 'active'
     ? { icon: 'pause' as const, labelKey: 'chat.goal.action.pause' as const, tooltipKey: 'contextTooltips.chat.goalPause' as const, next: 'paused' as const }
     : (goal.status === 'paused' || goal.status === 'blocked' || goal.status === 'budgetLimited'
@@ -57,11 +58,11 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
   return (
     <div
       role="group"
-      className="flex oc-composer-row min-w-0 items-center gap-2 border-b border-edge ps-3 pe-1.5"
+      className="@container flex oc-composer-row min-w-0 items-center gap-2 border-b border-edge ps-3 pe-1.5"
       aria-label={t('chat.goal.row.aria')}
     >
       <Icon name="target" className="size-3.5 flex-shrink-0" style={{ color: sessionGoalStatusColor[goal.status] }} aria-hidden="true" />
-      <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align text-sm text-foreground" title={objectiveContent ?? undefined}>
+      <span dir="auto" className={`${paused ? 'min-w-6' : 'min-w-0'} flex-1 truncate oc-ui-start-align text-sm text-foreground`} title={objectiveContent ?? undefined}>
         {objectiveContent || t('chat.goal.dialog.titleManage')}
       </span>
       {evaluating ? (
@@ -69,13 +70,17 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
           <Spinner className="h-3 w-3" aria-hidden="true" />
           {t('chat.goal.status.evaluating')}
         </span>
+      ) : paused ? (
+        <span className="shrink-0 whitespace-nowrap typography-meta text-muted-foreground">
+          {t('chat.goal.row.pausedHint')}
+        </span>
       ) : (
         <span className="flex-shrink-0 typography-meta text-muted-foreground">
           {t(sessionGoalStatusLabelKey[goal.status] as never)}
         </span>
       )}
       {usage ? (
-        <span className="flex-shrink-0 typography-meta tabular-nums text-muted-foreground">
+        <span className={`${paused ? 'hidden min-w-0 max-w-fit flex-1 truncate @md:inline' : 'flex-shrink-0'} typography-meta tabular-nums text-muted-foreground`} title={paused ? usage : undefined}>
           {usage}
         </span>
       ) : null}

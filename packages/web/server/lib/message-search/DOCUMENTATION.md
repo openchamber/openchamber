@@ -87,7 +87,7 @@ overlays before the file closes under them.
 - `sqlite.ts` opens the builtin SQLite (`node:sqlite` on Node and Electron,
   `bun:sqlite` on Bun). No dependency; without either the runtime reports
   itself unavailable and the route answers 503.
-- `store.js` owns the file `<dataDir>/message-search.sqlite`: `sessions`,
+- `store.ts` owns the file `<dataDir>/message-search.sqlite`: `sessions`,
   `messages`, and an external-content FTS5 index with the trigram tokenizer
   (any 3+ characters inside a word, any script, case-insensitive). The schema
   version lives in `meta`; schema 4 migrates schema 3 in one transaction to
@@ -101,8 +101,8 @@ overlays before the file closes under them.
   when its text changed.
   It also builds snippets: FTS5's `snippet()` counts trigrams and cuts a hit to
   a few characters, so the window is taken in JS on the returned hits.
-- `indexer.js` keeps the index in step with OpenCode.
-- `runtime.js` follows the setting, wires the indexer to the global event hub
+- `indexer.ts` keeps the index in step with OpenCode.
+- `runtime.ts` follows the setting, wires the indexer to the global event hub
   while on, answers queries, reports status (state, file size, progress) and
   deletes the file (while on, a fresh index starts at once: "rebuild").
 - `routes.ts` serves `GET /api/openchamber/message-search`,
@@ -117,79 +117,21 @@ call would put the parse cost inside that loop.
 
 ### Why SQLite exposes native rows
 
-The SQLite adapter returns the driver's column-value records. Node's
-`StatementSync.all`, `StatementSync.get` and `StatementSync.iterate` in
-`node:sqlite` return `Record<string, SQLOutputValue>` rows, without associating
-SQL strings with domain result types. A schema-aware result contract for those
-methods would have to establish the selected columns and their nullability.
-Assigning session or search-hit types to those records would need an unchecked
-assertion; validating each row would add rejection behavior to existing reads.
-`store.js` and its indexer and runtime consumers therefore remain JavaScript
-until that boundary is settled. The indexer reads stored cursors, archive times
-and sync times; the runtime reads message text, ids, times and directory counts.
-Their types cannot promise domain values that the SQLite reader never checked.
-The external symbols are `node:sqlite.StatementSync.all`, `.get` and `.iterate`.
-Their result contract would need to establish each selected column's type and
-presence before the local `SqliteConnection` could expose domain rows. In
-particular, grouped paging compares `createdAt` with a number and `sessionId`
-with a string, and directory totals use `directory` as an object key. The native
-row type permits null, bigint and byte arrays as well as strings and numbers;
-`noUncheckedIndexedAccess` also permits a missing column. Returning a stricter
-interface from the store would conceal this unchecked-file boundary.
+SQLite column affinities do not guarantee types in these tables. Reads preserve
+the driver's column-value records, including blob cursors and text timestamps.
+The grouped queries select `sessionId` explicitly and use its native value as
+the grouping key and SQL binding. Cursor comparisons retain JavaScript's
+numeric, lexical and bigint rules. Directory totals retain string key coercion
+and the existing behavior of inherited keys. Only snippet construction needs a
+string body, so it keeps the existing `TypeError` for other SQLite values.
 
-The tables are not `STRICT`, so their declared column affinities do not enforce
-those domain types. In the existing schema, updating `user_cursor` with a
-`Uint8Array` returns a byte array from `readSession`; writing `'unchecked'` to
-`synced_updated_at` or `messages.created_at` returns a string from the session
-reader or search. A blob in `messages.text` reaches `buildSnippet` and fails
-at `text.toLowerCase()`. These reads do not validate or coerce the stored values.
-Narrowing the SQLite declaration would conceal accepted database contents;
-adding validation or coercion would change the existing failure behavior.
-
-`store.test.js` pins this boundary against an in-memory database: blob cursors
-and text timestamps survive store reads, and a blob message body reaches the
-snippet builder and throws `TypeError`. The test prevents a type conversion
-from silently adding row validation or coercion.
-
-The runtime cannot convert independently while those store methods remain
-JavaScript: their inferred search parameters narrow `directories` and `exclude`
-to `never[]`, and `sessionId`, `role` and `before` to null. The indexer's inferred
-`getArchivedSessions` default similarly returns only `Promise<null>`, although
-the archive store supplies a timestamp dictionary. These are local consequences
-of the unresolved row boundary, not additional external contracts to widen.
-
-The indexer's archive-event schema also uses `z.number().finite().catch(null)`.
-Zod's `ZodNumber.catch` accepts a numeric fallback in its declaration, while this
-existing runtime fallback returns null. Its declaration would need to include
-that fallback in the inferred output to describe the current expression.
-The installed external declaration is `ZodType.catch` in
-`zod/v4/classic/schemas.d.ts`; both overloads bind the fallback and output to
-`core.output<this>`, which is `number` for this schema. A signature supporting
-this expression would need to accept null and infer `number | null`.
-
-### Why type-only boundary corrections cannot complete the conversion
-
-The remaining implementations depend on unchecked SQLite output. Correcting
-another server module's declarations, exporting its types or augmenting Zod's
-nullable fallback does not establish SQLite column types. The native
-`node:sqlite.StatementSync.all`, `.get` and `.iterate` declarations accurately
-describe what an unchecked database can return, so a type-only correction
-cannot narrow them to the expected schema.
-
-`store.js` uses `createdAt` in ordered comparisons and `sessionId` in string
-comparisons, and uses `directory` as a dictionary key. `indexer.js` compares
-`readSession().synced_updated_at` with a number and passes stored cursors and
-anchors to OpenCode. `runtime.js` passes returned `text` to `buildSnippet`,
-which calls string methods. A strict compiler probe against `SqliteConnection`
-rejects those uses because a column can be missing, null, a number, a bigint
-or a byte array as well as a string.
-
-Converting these files requires either runtime row validation or assertions
-about the unchecked file. Validation would change acceptance and failure
-behavior; assertions would promise values the reader never checked. Both are
-outside a behavior-preserving, assertion-free conversion. The three files
-therefore retain their JavaScript implementations. No external declaration
-change resolves this boundary.
+The OpenCode client declares `message.list` cursors and `session.message.get`
+message ids as strings. Its query encoder sends byte-array cursors as indexed
+parameters, and its path encoder sends byte-array anchors as comma-separated
+segments. Filtering them would change what the indexer sends.
+The indexer declares the transport inputs locally and parses the SDK responses
+with its own schemas before using them. The archive event timestamp falls back
+to `null` for missing or invalid values, including non-finite numbers.
 
 The server check includes Node types only. The Bun constructor contract here
 describes the database and statement methods this adapter uses, including

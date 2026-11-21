@@ -14,13 +14,13 @@ const storedKeysSchema = z.object({
   stt: storedKey.optional().catch(undefined),
 });
 const patchValue = z.union([z.literal(''), z.null(), storedKey]);
-const patchSchema = z.object({
+export const voiceKeysPatchSchema = z.object({
   openai: patchValue.optional(),
   openaiCompatible: patchValue.optional(),
   stt: patchValue.optional(),
 }).strict();
 
-export type VoiceKeysPatch = z.input<typeof patchSchema>;
+export type VoiceKeysPatch = z.input<typeof voiceKeysPatchSchema>;
 
 const resolveDataDir = () => (process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
@@ -57,7 +57,7 @@ export const describeVoiceKeys = () => {
 };
 
 export const updateVoiceKeys = (body: VoiceKeysPatch) => {
-  const patch = patchSchema.parse(body);
+  const patch = voiceKeysPatchSchema.parse(body);
   const next = { ...readStoredKeys() };
   for (const kind of VOICE_KEY_KINDS) {
     if (!(kind in patch)) continue;

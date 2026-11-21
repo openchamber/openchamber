@@ -1,6 +1,6 @@
 import React from 'react';
 import { getLastConversationRecord, isIncompleteAssistantTurn } from '@/lib/opencode/model';
-import type { Message, Part } from '@/lib/opencode/model';
+import type { Message, Part, SessionStatus } from '@/lib/opencode/model';
 import {
     useSessionStatus,
     useSessionStatusSnapshotReady,
@@ -9,6 +9,7 @@ import {
 } from '@/sync/sync-context';
 import type { useSync } from '@/sync/use-sync';
 import { hasActiveFormToolInCurrentTurn, recoverPendingFormWithRetry } from '@/sync/form-recovery';
+import type { RetryOverlay } from '../timeline/types';
 
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
@@ -74,28 +75,38 @@ export const useColumnSessionActivity = ({
 
 export const useRetryOverlay = (
     currentSessionId: string | null,
-    sessionStatusForCurrent: { type: string },
-) => {
-    const activeRetryStatus = React.useMemo(() => {
-        if (!currentSessionId || sessionStatusForCurrent.type !== 'retry') {
+    sessionStatusForCurrent: SessionStatus,
+    lastIdleAt: number | null,
+): RetryOverlay | null => {
+    const activeRetryStatus = React.useMemo<RetryOverlay | null>(() => {
+        if (!currentSessionId || (sessionStatusForCurrent.type !== 'retry' && sessionStatusForCurrent.type !== 'busy')) {
             return null;
         }
 
-        const rawMessage = typeof (sessionStatusForCurrent as { message?: string }).message === 'string'
-            ? (((sessionStatusForCurrent as { message?: string }).message) ?? '').trim()
-            : '';
+        if (sessionStatusForCurrent.type === 'busy') {
+            return { sessionId: currentSessionId, lastIdleAt };
+        }
 
+        const rawMessage = sessionStatusForCurrent.message.trim();
+        const confirmedAt = 'confirmedAt' in sessionStatusForCurrent
+            && typeof sessionStatusForCurrent.confirmedAt === 'number'
+            ? sessionStatusForCurrent.confirmedAt
+            : undefined;
         return {
             sessionId: currentSessionId,
-            message: rawMessage || DEFAULT_RETRY_MESSAGE,
-            confirmedAt: (sessionStatusForCurrent as { confirmedAt?: number }).confirmedAt,
+            lastIdleAt,
+            notice: {
+                message: rawMessage || DEFAULT_RETRY_MESSAGE,
+                confirmedAt,
+            },
         };
-    }, [currentSessionId, sessionStatusForCurrent]);
+    }, [currentSessionId, lastIdleAt, sessionStatusForCurrent]);
     const [retryFallbackTimestamp, setRetryFallbackTimestamp] = React.useState<number>(0);
     const retryFallbackSessionRef = React.useRef<string | null>(null);
 
     React.useEffect(() => {
-        if (!activeRetryStatus || typeof activeRetryStatus.confirmedAt === 'number') {
+        const notice = activeRetryStatus?.notice;
+        if (!activeRetryStatus || !notice || typeof notice.confirmedAt === 'number') {
             retryFallbackSessionRef.current = null;
             setRetryFallbackTimestamp(0);
             return;
@@ -108,13 +119,16 @@ export const useRetryOverlay = (
     }, [activeRetryStatus]);
 
     return React.useMemo(() => {
-        if (!activeRetryStatus) {
-            return null;
+        if (!activeRetryStatus?.notice) {
+            return activeRetryStatus;
         }
 
         return {
             ...activeRetryStatus,
-            fallbackTimestamp: retryFallbackTimestamp,
+            notice: {
+                ...activeRetryStatus.notice,
+                fallbackTimestamp: retryFallbackTimestamp,
+            },
         };
     }, [activeRetryStatus, retryFallbackTimestamp]);
 };

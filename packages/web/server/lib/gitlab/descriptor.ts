@@ -9,7 +9,7 @@ export const gitlabDescriptor = Object.freeze({
   instance: Object.freeze({
     form: 'origin',
     defaultInstances: Object.freeze(['https://gitlab.com']),
-    normalize: (raw: string) => normalizeOriginInstance(raw, { label: 'GitLab' }),
+    normalize: (raw: string | undefined) => normalizeOriginInstance(raw, { label: 'GitLab' }),
     origin: (instance: string) => new URL(instance),
   }),
   repositoryPath: 'namespace/name',

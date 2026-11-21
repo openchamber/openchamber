@@ -2,7 +2,7 @@ import React from 'react';
 import { File as PierreFile, VirtualizerContext, WorkerPoolContext } from '@pierre/diffs/react';
 import { DEFAULT_VIRTUAL_FILE_METRICS } from '@pierre/diffs';
 import { useWorkerPool } from '@/contexts/DiffWorkerProvider';
-import { useFileViewVirtualizer, type FileViewVirtualizer } from '../../useFileViewVirtualizer';
+import { useFileViewVirtualizer } from '../../useFileViewVirtualizer';
 import { useFilePreviewScrollPosition } from '../../useFilePreviewScrollPosition';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { LARGE_FILE_CHAR_THRESHOLD, makeFileContentCacheKey } from '../../fileEditorContent';
@@ -31,7 +31,7 @@ export function useFilePreviewRendering({ draft, editor, fileComments, fileDocum
   fileEditorExtensions: Pick<ReturnType<typeof useFileEditorExtensions>, 'editorCode' | 'pierreTheme'>;
   fileKinds: Pick<ReturnType<typeof useFileKinds>, 'canMountCanvas' | 'canUseShikiFileView' | 'hasCanvas' | 'isJson' | 'isMarkdown'>;
   filePreviewModes: Pick<ReturnType<typeof useFilePreviewModes>, 'getMdViewMode'>;
-  markdownPreview: Pick<ReturnType<typeof useFileMarkdownPreview>, 'mdFullscreenPreviewContainerRef' | 'mdPreviewContainerRef'>;
+  markdownPreview: Pick<ReturnType<typeof useFileMarkdownPreview>, 'mdPreviewContainerRef'>;
   scope: Pick<ReturnType<typeof useFileScope>, 'panelRoot' | 'root'>;
   tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile' | 'selectedFilePath'>;
   themes: Pick<ReturnType<typeof useFileThemes>, 'currentTheme'>;
@@ -44,7 +44,7 @@ export function useFilePreviewRendering({ draft, editor, fileComments, fileDocum
   const { editorCode, pierreTheme } = fileEditorExtensions;
   const { canMountCanvas, canUseShikiFileView, hasCanvas, isJson, isMarkdown } = fileKinds;
   const { getMdViewMode } = filePreviewModes;
-  const { mdFullscreenPreviewContainerRef, mdPreviewContainerRef } = markdownPreview;
+  const { mdPreviewContainerRef } = markdownPreview;
   const { panelRoot, root } = scope;
   const { selectedFile, selectedFilePath } = tabs;
   const { currentTheme } = themes;
@@ -75,7 +75,6 @@ export function useFilePreviewRendering({ draft, editor, fileComments, fileDocum
   }, [cancel, commentText, deleteDraft, editingDraftId, filesLineDrafts, handleSaveComment, isDragging, lineSelection, selectedFile?.path, setCommentText, startEdit]);
 
   const mainViewVirtualizer = useFileViewVirtualizer();
-  const fullscreenViewVirtualizer = useFileViewVirtualizer();
   const previewReady = !fileLoading && !fileError && loadedFilePath === selectedFilePath;
   const showCanvas = React.useMemo(
     () => Boolean(selectedFilePath) && shouldShowFileCanvas({ hasCanvas, viewMode: canvasViewMode, previewReady, mountable: canMountCanvas }),
@@ -85,29 +84,18 @@ export function useFilePreviewRendering({ draft, editor, fileComments, fileDocum
     && !(isJson && jsonViewMode === 'tree');
   const markdownPreviewActive = previewReady && isMarkdown && getMdViewMode() === 'preview';
   const { setScroller: setMainCodeScroller, restore: restoreMainCodeScroll } = useFilePreviewScrollPosition(codePreviewActive ? `${filePositionKey}:code` : null);
-  const { setScroller: setFullscreenCodeScroller, restore: restoreFullscreenCodeScroll } = useFilePreviewScrollPosition(codePreviewActive ? `${filePositionKey}:code:fullscreen` : null);
   const { setScroller: setMainMarkdownScroll } = useFilePreviewScrollPosition(markdownPreviewActive ? `${filePositionKey}:markdown` : null);
-  const { setScroller: setFullscreenMarkdownScroll } = useFilePreviewScrollPosition(markdownPreviewActive ? `${filePositionKey}:markdown:fullscreen` : null);
   const { setScroller: connectMainVirtualizer } = mainViewVirtualizer;
-  const { setScroller: connectFullscreenVirtualizer } = fullscreenViewVirtualizer;
 
   const setMainPreviewScroller = React.useCallback((node: HTMLElement | null) => {
     connectMainVirtualizer(node);
     setMainCodeScroller(node);
   }, [connectMainVirtualizer, setMainCodeScroller]);
-  const setFullscreenPreviewScroller = React.useCallback((node: HTMLElement | null) => {
-    connectFullscreenVirtualizer(node);
-    setFullscreenCodeScroller(node);
-  }, [connectFullscreenVirtualizer, setFullscreenCodeScroller]);
   const setMainMarkdownScroller = React.useCallback((node: HTMLDivElement | null) => {
     markdownPreviewRef.current = node;
     mdPreviewContainerRef.current = node;
     setMainMarkdownScroll(node);
   }, [setMainMarkdownScroll]);
-  const setFullscreenMarkdownScroller = React.useCallback((node: HTMLDivElement | null) => {
-    mdFullscreenPreviewContainerRef.current = node;
-    setFullscreenMarkdownScroll(node);
-  }, [setFullscreenMarkdownScroll]);
   const openLinkedFile = React.useCallback((absolutePath: string) => {
     if (!panelRoot) return;
     useUIStore.getState().openContextFile(panelRoot, absolutePath);
@@ -128,7 +116,7 @@ export function useFilePreviewRendering({ draft, editor, fileComments, fileDocum
     [codePreviewActive, draftContent, isLargeFile],
   );
 
-  const renderShikiFileView = React.useCallback((file: FileNode, content: string, virtualizer: FileViewVirtualizer, restoreScroll: ReturnType<typeof useFilePreviewScrollPosition>['restore']) => {
+  const renderShikiFileView = React.useCallback((file: FileNode, content: string) => {
     const fileContents = {
       name: file.name,
       contents: content,
@@ -144,7 +132,7 @@ export function useFilePreviewRendering({ draft, editor, fileComments, fileDocum
           theme: pierreTheme,
           themeType: currentTheme.metadata.variant === 'dark' ? 'dark' : 'light',
           preferredHighlighter: DIFFS_HIGHLIGHTER,
-          onPostRender: restoreScroll,
+          onPostRender: restoreMainCodeScroll,
         }}
         className={isLargeFile ? 'block w-full' : 'block h-full w-full'}
         style={isLargeFile ? undefined : { height: '100%' }}
@@ -158,17 +146,16 @@ export function useFilePreviewRendering({ draft, editor, fileComments, fileDocum
 
     return (
       <div className="h-full" style={editorCode?.style}>
-        <VirtualizerContext.Provider value={virtualizer.virtualizer}>
+        <VirtualizerContext.Provider value={mainViewVirtualizer.virtualizer}>
           <WorkerPoolContext.Provider value={shikiWorkerPool}>
             {pierreFile(`${file.path}:${shikiWorkerPool ? 'pool' : 'pending'}:${editorCode?.lineHeight ?? 'default'}`)}
           </WorkerPoolContext.Provider>
         </VirtualizerContext.Provider>
       </div>
     );
-  }, [currentTheme.metadata.variant, editorCode, isLargeFile, largeFileCacheKey, pierreTheme, shikiWorkerPool, wrapLines]);
+  }, [currentTheme.metadata.variant, editorCode, isLargeFile, largeFileCacheKey, mainViewVirtualizer.virtualizer, pierreTheme, restoreMainCodeScroll, shikiWorkerPool, wrapLines]);
   return {
-  blockWidgets, mainViewVirtualizer, fullscreenViewVirtualizer, showCanvas,
-  restoreMainCodeScroll, restoreFullscreenCodeScroll, setMainPreviewScroller, setFullscreenPreviewScroller,
-  setMainMarkdownScroller, setFullscreenMarkdownScroller, markdownDocumentAssets, isLargeFile, renderShikiFileView,
+  blockWidgets, showCanvas, setMainPreviewScroller, setMainMarkdownScroller, markdownDocumentAssets, isLargeFile,
+  renderShikiFileView,
   };
 }

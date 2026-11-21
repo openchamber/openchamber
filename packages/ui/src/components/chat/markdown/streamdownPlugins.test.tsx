@@ -4,12 +4,14 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { Window } from 'happy-dom';
 import { Streamdown } from 'streamdown';
 import { getMarkdownCjk, getMarkdownProcessingOptions, markdownMath, remarkLiteralText } from './streamdownPlugins';
+import { parseMarkdownBlocksWithMath } from './mathBlocks';
 import { prepareUserMarkdownContent } from '../message/parts/userTextPartContent';
 
 const dom = new Window();
-function render(source: string, raw = false, vscode = false, singleTilde = false) {
+function render(source: string, raw = false, vscode = false, singleTilde = false, streaming = false) {
   const html = renderToStaticMarkup(<Streamdown
-    mode="static" parseIncompleteMarkdown={false} controls={false}
+    mode={streaming ? 'streaming' : 'static'} parseIncompleteMarkdown={false} controls={false}
+    parseMarkdownIntoBlocksFn={streaming ? parseMarkdownBlocksWithMath : undefined}
     plugins={{ math: markdownMath, cjk: getMarkdownCjk(singleTilde) }}
     {...getMarkdownProcessingOptions(raw, vscode, singleTilde)}
     urlTransform={(value) => value}
@@ -28,6 +30,79 @@ function render(source: string, raw = false, vscode = false, singleTilde = false
 }
 
 describe('Streamdown processing policy', () => {
+  test('renders blank lines inside display math without consuming surrounding content', () => {
+    const source = 'Before\n\n\\[\n\\boxed{x+\n\ny}\n\\]\n\nAfter';
+    const result = render(source);
+    expect(result.querySelector('.katex-display annotation')?.textContent).toBe('\n\\boxed{x+\n\ny}\n');
+    expect(result.textContent).toContain('Before');
+    expect(result.textContent).toContain('After');
+    const blocks = parseMarkdownBlocksWithMath(source);
+    expect(blocks.join('')).toBe(source);
+    expect(blocks).toHaveLength(3);
+    expect(render(blocks[1]).querySelector('.katex-display')).not.toBeNull();
+    expect(render('```\n\\[\nx\n\ny\n\\]\n```').querySelector('.katex')).toBeNull();
+    expect(render('\\[\nx\n\ny').textContent).toContain('y');
+    for (const equation of ['\\[\nx\n+ y\n\\]', 'text\n\\[\nx\n\ny\n\\]', '\\[\nx\n\ny\n    \\]']) {
+      expect(render(equation).querySelector('.katex-display')).not.toBeNull();
+      expect(parseMarkdownBlocksWithMath(equation)).toHaveLength(1);
+    }
+    expect(render('> \\[\n> x\nnot quoted\n\n> \\]').querySelector('.katex-display')).toBeNull();
+  });
+  test('closes display math at the first line ending in a bracket, in static and streaming rendering', () => {
+    const source = '\\[\nx\\]\n\nOrdinary prose.\n\n\\]';
+    for (const streaming of [false, true]) {
+      const result = render(source, false, false, false, streaming);
+      expect(Array.from(result.querySelectorAll('.katex-display annotation')).map(node => node.textContent)).toEqual(['\nx']);
+      expect(Array.from(result.querySelectorAll('p')).map(node => node.textContent)).toContain('Ordinary prose.');
+      const closedInLine = render('\\[\na\n\nb\\]\n\nAfter', false, false, false, streaming);
+      expect(closedInLine.querySelector('.katex-display annotation')?.textContent).toBe('\na\n\nb');
+      expect(Array.from(closedInLine.querySelectorAll('p')).map(node => node.textContent)).toEqual(['After']);
+      const blankLines = render('Before\n\n\\[\n\\boxed{x+\n\ny}\n\\]\n\nAfter', false, false, false, streaming);
+      expect(blankLines.querySelector('.katex-display annotation')?.textContent).toBe('\n\\boxed{x+\n\ny}\n');
+      expect(Array.from(blankLines.querySelectorAll('p')).map(node => node.textContent)).toEqual(['Before', 'After']);
+      const quoted = render('Before\n\n> \\[\n> x\n>\n> y\n> \\]\n\nAfter', false, false, false, streaming);
+      expect(quoted.querySelector('blockquote .katex-display annotation')?.textContent).toBe('\nx\n\ny\n');
+      expect(Array.from(quoted.querySelectorAll('p')).filter(node => !node.closest('blockquote')).map(node => node.textContent)).toEqual(['Before', 'After']);
+    }
+  });
+  test('preserves blank-line display math inside quotes and list items', () => {
+    for (const [container, equation] of [
+      ['blockquote', '> \\[\n> x\n>\n> y\n> \\]'],
+      ['ul li', '- item\n\n  \\[\n  x\n\n  y\n  \\]'],
+      ['ol li', '1. item\n\n   \\[\n   x\n\n   y\n   \\]'],
+    ]) {
+      const source = `Before\n\n${equation}\n\nAfter`;
+      const blocks = parseMarkdownBlocksWithMath(source);
+      expect(blocks.join('')).toBe(source);
+      const result = render(source);
+      expect(result.querySelectorAll('.katex-display')).toHaveLength(1);
+      expect(result.querySelector(`${container} .katex-display annotation`)?.textContent).toBe('\nx\n\ny\n');
+      expect(Array.from(result.querySelectorAll('p')).filter(node => !node.closest(container)).map(node => node.textContent)).toEqual(['Before', 'After']);
+      expect(blocks.flatMap(block => Array.from(render(block).querySelectorAll(`${container} .katex-display annotation`))).map(node => node.textContent)).toEqual(['\nx\n\ny\n']);
+    }
+  });
+  test('keeps adjacent multiline equations intact and accepts tabs on delimiters', () => {
+    const source = '\\[\nx\n\\]\n\\[\ny\n\nz\n\\]';
+    const blocks = parseMarkdownBlocksWithMath(source);
+    expect(blocks.join('')).toBe(source);
+    expect(blocks.flatMap(block => Array.from(render(block).querySelectorAll('.katex-display')))).toHaveLength(2);
+    for (const source of ['\\[\t\nx\n\ny\n\\]', '\\[\nx\n\ny\n\t\\]']) {
+      expect(render(source).querySelector('.katex-display')).not.toBeNull();
+    }
+  });
+  test('keeps a code span over bracket lines and windows prose after a fenced example in a list', () => {
+    for (const streaming of [false, true]) {
+      const result = render('`sample\n\\[\nx\n\\]\nfinish`', false, false, false, streaming);
+      expect(result.querySelector('.katex')).toBeNull();
+      expect(result.querySelector('p code')?.textContent).toBe('sample \\[ x \\] finish');
+    }
+    const source = `- item\n\n  \`\`\`text\n  \\[\n  \`\`\`\n\n${Array.from({ length: 20 }, (_, i) => `P${i}`).join('\n\n')}\n\n\\]\n`;
+    expect(parseMarkdownBlocksWithMath(source)).toHaveLength(22);
+  });
+  test('keeps an unclosed bracket line in its paragraph', () => {
+    const result = render('text\n\\[\nnext');
+    expect(result.querySelectorAll('p')).toHaveLength(1);
+  });
   test('keeps blockquoted disclosures inside their container in both HTML policies', () => {
     const source = '> <details><summary>S</summary>\n>\n> Body $100$ and $$x$$\n>\n> </details>\n\nAfter';
     for (const raw of [false, true]) {

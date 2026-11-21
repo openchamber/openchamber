@@ -216,6 +216,9 @@
     "agentWorkflowAutoApprove": {
       "scope": "instance"
     },
+    "agentWorkflowAutoApproveLeads": {
+      "scope": "instance"
+    },
     "isolatedSpacesEnabled": {
       "scope": "instance"
     },
@@ -623,6 +626,9 @@
     "largeTextPasteBehavior": {
       "scope": "profile"
     },
+    "documentAttachBehavior": {
+      "scope": "profile"
+    },
     "savePastedImagesAsFiles": {
       "scope": "profile"
     },
@@ -699,6 +705,15 @@
       "scope": "profile"
     },
     "defaultAgent": {
+      "scope": "profile"
+    },
+    "chatsDefaultModel": {
+      "scope": "profile"
+    },
+    "chatsDefaultVariant": {
+      "scope": "profile"
+    },
+    "chatsDefaultAgent": {
       "scope": "profile"
     },
     "smallModelUseDefault": {

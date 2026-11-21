@@ -11,7 +11,7 @@ import { randomBytes } from 'crypto';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkingDirectoryChange } from './workingDirectoryChange';
 import { reapOrphanedProcesses } from './opencodeProcessRegistry';
-import { applyProviderEnvAliases } from './provider-env-aliases';
+import { prepareManagedOpenCodeEnv } from '../../web/server/lib/opencode/managed-opencode-env.js';
 import { assignInjectedEnv } from './injected-env';
 import { checkOpenCodeVersionOutput } from './opencodeVersion';
 import { isSameOpenCodeServer } from './opencodeServiceUrl';
@@ -816,7 +816,7 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
       const port = await allocateManagedOpenCodePort();
       startup.signal.throwIfAborted();
       userOwnsOpenCodeConfig = (process.env.OPENCODE_CONFIG ?? '').trim().length > 0;
-      serverEnv = applyProviderEnvAliases({ ...process.env });
+      serverEnv = prepareManagedOpenCodeEnv({ ...process.env });
       applyPluginSwitchPolicies(serverEnv, serverWorkingDirectory(), { userOwnsConfig: userOwnsOpenCodeConfig });
       server = spawnManagedOpenCodeServer(serverCwd, port, READY_CHECK_TIMEOUT_MS, startup.signal, serverEnv);
       await server.ready;

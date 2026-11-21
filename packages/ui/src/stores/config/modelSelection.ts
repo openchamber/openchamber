@@ -4,7 +4,7 @@ import { hasProviderModel, resolveConfiguredDefaultVariant } from './selectionRe
 import { isUnchangedSelection, variantResetForModelChange, resolveVariantFromSelection } from './selectionResolution';
 import { modelVariantNames, nextThinkingVariant } from '@/lib/modelVariants';
 import { normalizeConfigPath, fromDirectoryKey } from './directories';
-import { readProjectDefaults, getProjectDefaultsForConfigDirectory } from './projectDefaults';
+import { readScopeDefaults, getProjectDefaultsForConfigDirectory } from './projectDefaults';
 import { rememberEffort } from '@/lib/modelEfforts';
 
 export const createModelSelection: ConfigSlice<
@@ -162,7 +162,7 @@ export const createModelSelection: ConfigSlice<
         const configDirectory = directory ? normalizeConfigPath(directory) : null;
         return resolveConfiguredDefaultVariant({
             ...(configDirectory
-                ? readProjectDefaults(configDirectory)
+                ? readScopeDefaults(configDirectory)
                 : getProjectDefaultsForConfigDirectory(fromDirectoryKey(state.activeDirectoryKey))),
             settingsDefaultModel: state.settingsDefaultModel,
             settingsDefaultVariant: state.settingsDefaultVariant,

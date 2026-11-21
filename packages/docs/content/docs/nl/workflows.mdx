@@ -29,9 +29,15 @@ Agents van een lopende workflow kunnen zelf geen workflow starten.
 
 ## Runs starten zonder goedkeuring
 
-Zet onder **Workflowtool** de optie **Runs starten zonder mijn goedkeuring** aan om een run die de agent start meteen te laten beginnen. De kaart toont hem als lopend, zonder knop **Workflow uitvoeren**, en u kunt hem nog steeds beëindigen met **Stoppen**. Dit is bedoeld voor werk dat u hebt afgesproken en daarna hebt losgelaten: u vraagt de agent bijvoorbeeld een paar modellen te proberen op een kleine pilot en het hele werk met het beste uit te voeren, en hij kan die run starten terwijl u weg bent.
+Onder **Workflowtool** bepaalt **Runs starten zonder mijn goedkeuring** of een run die de agent start op uw klik wacht:
 
-De agent stelt het plan en de modellen nog steeds in de chat voor voordat hij een run start. De instelling slaat alleen de klik over. De server leest haar bij elke run, dus met het vakje uitgevinkt wacht elke run weer op u. De limieten hieronder blijven gelijk.
+- **Nee**: elke run wacht tot u **Workflow uitvoeren** kiest
+- **Voor leads**: runs die een [lead](/nl/leads/) start beginnen meteen, elke andere sessie wacht nog steeds
+- **Altijd**: elke run begint meteen
+
+Een run die meteen begint, staat op zijn kaart als lopend, zonder knop **Workflow uitvoeren**, en u kunt hem nog steeds beëindigen met **Stoppen**. Dit is bedoeld voor werk dat u hebt afgesproken en daarna hebt losgelaten: u vraagt de agent bijvoorbeeld een paar modellen te proberen op een kleine pilot en het hele werk met het beste uit te voeren, en hij kan die run starten terwijl u weg bent.
+
+Een gewone sessie stelt het plan en de modellen nog steeds in de chat voor voordat ze een run start; de instelling slaat alleen de klik over. Een lead voert zijn werk zelfstandig uit, dus met **Voor leads** kan hij een run starten zonder eerst te vragen. De server leest de instelling bij elke run, dus zet u haar terug op **Nee**, dan wacht elke run weer op u. De limieten hieronder blijven gelijk.
 
 ## Modellen en kosten
 

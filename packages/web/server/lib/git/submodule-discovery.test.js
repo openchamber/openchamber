@@ -35,6 +35,35 @@ describe('submodule discovery', () => {
     expect(Object.isFrozen(result.modules[0])).toBe(true);
   });
 
+  it('skips .gitmodules entries whose path has no gitlink, as Git does', () => {
+    const result = parseSubmoduleManifest({
+      gitmodulesConfig: configOutput([
+        ['submodule.alpha.path', 'vendor/alpha'],
+        ['submodule.alpha.url', '../alpha.git'],
+        ['submodule.vendored.path', 'vendor/vendored'],
+        ['submodule.vendored.url', 'https://example.com/team/vendored.git'],
+        ['submodule.again.path', 'vendor/vendored'],
+        ['submodule.again.url', '../again.git'],
+        ['submodule.no-url.path', 'vendor/no-url'],
+        ['submodule.no-path.url', '../no-path.git'],
+        ['submodule.slash.path', 'vendor/slash/'],
+        ['submodule.slash.url', '../slash.git'],
+        ['submodule.backslash.path', 'vendor\\backslash'],
+        ['submodule.backslash.url', '../backslash.git'],
+        ['submodule.command.path', 'vendor/command'],
+        ['submodule.command.url', 'ext::sh -c bad'],
+        ['submodule.command.update', '!run-command'],
+        ['submodule.empty.path', 'vendor/empty'],
+        ['submodule.empty.url', ''],
+      ]),
+      gitlinks: gitlinkOutput([[SHA_A, 'vendor/alpha']]),
+    });
+
+    expect(result.modules).toEqual([
+      { name: 'alpha', path: 'vendor/alpha', url: '../alpha.git', update: 'checkout', gitlink: SHA_A },
+    ]);
+  });
+
   it.each([
     ['https://example.com/team/app.git', '../library.git', 'https://example.com/team/library.git'],
     ['https://example.com/a/b/app.git', '../../shared.git', 'https://example.com/a/shared.git'],
@@ -84,6 +113,10 @@ describe('submodule discovery', () => {
     ['unsafe protocol', [['submodule.a.path', 'a'], ['submodule.a.url', 'file:///tmp/a']], [[SHA_A, 'a']]],
     ['command update', [
       ['submodule.a.path', 'a'], ['submodule.a.url', '../a.git'], ['submodule.a.update', '!run-command'],
+    ], [[SHA_A, 'a']]],
+    ['empty URL', [['submodule.a.path', 'a'], ['submodule.a.url', '']], [[SHA_A, 'a']]],
+    ['empty update', [
+      ['submodule.a.path', 'a'], ['submodule.a.url', '../a.git'], ['submodule.a.update', ''],
     ], [[SHA_A, 'a']]],
   ])('rejects hostile manifest: %s', (_label, records, links) => {
     expect(() => parseSubmoduleManifest({

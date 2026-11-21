@@ -430,6 +430,29 @@ describe('openchamber session routes', () => {
         .resolves.toMatchObject({ body: { metadata: {} } });
     });
 
+    it('rejects a stale conditional metadata patch without losing a newer pin', async () => {
+      const { app } = createApp();
+      const old = { openchamber: { context_obligatory_messages: [{ id: 'old' }] } };
+      const newer = { openchamber: { context_obligatory_messages: [{ id: 'old' }, { id: 'new' }] } };
+      await request(app).post('/api/openchamber/sessions/ses_a/metadata').send({ patch: newer }).expect(200);
+
+      const stale = await request(app).post('/api/openchamber/sessions/ses_a/metadata/compare-and-set')
+        .send({ expected: old, patch: { openchamber: { context_obligatory_messages: [{ id: 'copy' }] } } }).expect(200);
+      expect(stale.body).toEqual({ metadata: newer, conflict: true });
+
+      const retried = await request(app).post('/api/openchamber/sessions/ses_a/metadata/compare-and-set')
+        .send({ expected: newer, patch: { openchamber: { context_obligatory_messages: [{ id: 'copy' }, { id: 'new' }] } } }).expect(200);
+      expect(retried.body).toEqual({ metadata: { openchamber: { context_obligatory_messages: [{ id: 'copy' }, { id: 'new' }] } }, conflict: false });
+    });
+
+    it('rejects a conditional metadata write without an expected value', async () => {
+      const { app } = createApp();
+      await request(app).post('/api/openchamber/sessions/ses_a/metadata/compare-and-set')
+        .send({ patch: { a: 1 } }).expect(400);
+      await expect(request(app).get('/api/openchamber/sessions/ses_a/metadata').expect(200))
+        .resolves.toMatchObject({ body: { metadata: {} } });
+    });
+
     it('answers a failed write with its message', async () => {
       const persistSessionMetadata = vi.fn(async () => { throw new Error('OpenCode is down'); });
       const { app } = createApp({ persistSessionMetadata });

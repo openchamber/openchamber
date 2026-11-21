@@ -52,7 +52,7 @@ let collection: Collection | null = null;
 
 const Probe = () => {
   directoryStore = useDirectoryStore(DIRECTORY, { bootstrap: false });
-  collection = useSessionProjectCollection({ knownDirectories: KNOWN_DIRECTORIES, isVSCode: false, isVisible: false });
+  collection = useSessionProjectCollection({ knownDirectories: KNOWN_DIRECTORIES, isVSCode: false, isVisible: false, searchActive: false, projectSortOrder: 'manual' });
   return null;
 };
 

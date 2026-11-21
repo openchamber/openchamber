@@ -104,11 +104,15 @@ describe('walkthrough routes', () => {
     releaseJob = undefined;
     lastArgs = undefined;
     const app = express();
+    app.use((_req, res, next) => {
+      res.setHeader('Connection', 'close');
+      next();
+    });
     app.use(express.json());
     getWalkthroughService = vi.fn(async () => service);
     validateReadContext = vi.fn(async (context) => ({ ...context, instance: 'github.com' }));
     registerWalkthroughRoutes(app, { getWalkthroughService, validateReadContext });
-    server = app.listen(0);
+    server = app.listen(0, '127.0.0.1');
     await new Promise((resolve) => server.once('listening', resolve));
     base = `http://127.0.0.1:${server.address().port}`;
   });

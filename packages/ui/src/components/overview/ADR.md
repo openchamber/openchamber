@@ -76,9 +76,7 @@ Signals rank by how much they can be trusted:
    completed one gives "issue closed"; if every one was not planned or
    canceled, "issue dropped", since nothing is left to do but the work was not
    done either.
-2. **Git facts.** Clean and pushed, from the worktree's git state (shared with
-   the merged-worktree cleanup in `lib/worktrees/mergedWorktreeCleanup.ts`).
-3. **Jev's hint** (`suggestDoneAt`), which session work already computes once
+2. **Jev's hint** (`suggestDoneAt`), which session work already computes once
    per turn. The page makes no Jev call of its own.
 
 Vetoes keep a session in work whatever the signal: the last turn failed, the
@@ -151,10 +149,10 @@ only while open; closed, it costs nothing.
 The page is behind `OPENCHAMBER_OVERVIEW_ENABLED` (server,
 `packages/web/server/lib/overview/feature-flag.js`), reported to the client as
 `overviewFeatureAvailable` in the settings payload. Unset, there is no sidebar
-button, no command palette item, no phone footer button, and `setOverviewOpen`
-refuses to open the page. It is absent rather than switched off, so the code can
-reach `main` and releases while the design is still being iterated. VS Code has
-no OpenChamber server, so it never has the page.
+button, no command palette item, no item in the phone drawer's More menu, and
+`setOverviewOpen` refuses to open the page. It is absent rather than switched
+off, so the code can reach `main` and releases while the design is still being
+iterated. VS Code has no OpenChamber server, so it never has the page.
 
 ## How the look was arrived at
 
