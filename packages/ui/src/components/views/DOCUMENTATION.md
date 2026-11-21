@@ -910,6 +910,13 @@ reports `exited`, so a tab whose process ended while the panel was closed goes
 away when it is shown. VS Code has neither tabs nor the setting and keeps the
 exited terminal.
 
+A tab started from a command in a reply (a `terminal` tab in command mode) is
+the exception: it never closes on its own, whatever the setting, since its
+output is the point of running it. When its server session is gone (a server
+restart, a close from another client), the tab stays exited with its command mode and output instead of
+going back to idle, which would start an interactive shell in it; a reload
+restores it exited too (`stores/DOCUMENTATION.md`).
+
 In the desktop app Cmd/Ctrl+W closes the shown terminal tab the same way,
 without asking, so a command still running in it ends. The key goes through
 `lib/closeTabTarget.ts`: Settings or a full page covering the chat closes

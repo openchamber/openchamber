@@ -3479,6 +3479,7 @@ export const dict = {
   'markdownRenderer.code.actions.copyTitle': 'העתק קוד',
   'markdownRenderer.code.actions.copiedTitle': 'הועתק',
   'markdownRenderer.code.actions.runTitle': 'הרצת הפקודה. הסוכן ימשיך מהפלט שלה',
+  'markdownRenderer.code.actions.runInTerminalTitle': 'הרצה במסוף',
   'markdownRenderer.code.actions.stopTitle': 'עצירת הפקודה',
   'markdownRenderer.code.run.startFailed': 'לא ניתן היה להפעיל את הפקודה',
   'markdownRenderer.code.run.running': 'פועלת',

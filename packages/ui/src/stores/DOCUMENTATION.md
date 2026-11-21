@@ -801,6 +801,8 @@ Composer draft edits remain immediate in memory and use a trailing durable-write
 
 `useTerminalStore` owns terminal tab arrangement per directory plus PTY scrollback.
 
+Tabs retain the server's interactive or command launch mode during adoption and attachment. A `terminal` tab in command mode (a reply command) keeps that mode when its session is cleared, persists it and hydrates exited with no session, so a reload never starts an interactive shell in it; its id equals its server session id, so reconciliation adopts the session back into it.
+
 Scrollback is deliberately **not** stored on the tab. `buffers` is a separate map keyed by
 directory and tab id, and `getBuffer()` returns a shared frozen empty buffer for tabs that
 have produced no output. PTY output arrives at streaming frequency, so keeping it inside

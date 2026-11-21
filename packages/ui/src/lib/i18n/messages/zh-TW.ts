@@ -3539,6 +3539,7 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.copyTitle': '複製程式碼',
   'markdownRenderer.code.actions.copiedTitle': '已複製',
   'markdownRenderer.code.actions.runTitle': '執行命令。代理會根據其輸出繼續',
+  'markdownRenderer.code.actions.runInTerminalTitle': '在終端機中執行',
   'markdownRenderer.code.actions.stopTitle': '停止命令',
   'markdownRenderer.code.run.startFailed': '無法啟動命令',
   'markdownRenderer.code.run.running': '執行中',

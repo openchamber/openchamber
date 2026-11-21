@@ -3576,6 +3576,7 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.copyTitle': '코드 복사',
   'markdownRenderer.code.actions.copiedTitle': '복사됨',
   'markdownRenderer.code.actions.runTitle': '명령을 실행합니다. 에이전트가 출력을 바탕으로 계속합니다',
+  'markdownRenderer.code.actions.runInTerminalTitle': '터미널에서 실행',
   'markdownRenderer.code.actions.stopTitle': '명령 중지',
   'markdownRenderer.code.run.startFailed': '명령을 시작할 수 없습니다',
   'markdownRenderer.code.run.running': '실행 중',

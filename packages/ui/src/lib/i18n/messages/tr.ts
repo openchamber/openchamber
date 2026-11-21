@@ -3380,6 +3380,7 @@ export const dict = {
   'markdownRenderer.code.actions.copyTitle': 'Kodu kopyala',
   'markdownRenderer.code.actions.copiedTitle': 'Kopyalandı',
   'markdownRenderer.code.actions.runTitle': 'Komutu çalıştır. Ajan çıktısından devam eder',
+  'markdownRenderer.code.actions.runInTerminalTitle': 'Terminalde çalıştır',
   'markdownRenderer.code.actions.stopTitle': 'Komutu durdur',
   'markdownRenderer.code.run.startFailed': 'Komut başlatılamadı',
   'markdownRenderer.code.run.running': 'Çalışıyor',

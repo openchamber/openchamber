@@ -3572,6 +3572,7 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.copyTitle': 'コードをコピー',
   'markdownRenderer.code.actions.copiedTitle': 'コピーしました',
   'markdownRenderer.code.actions.runTitle': 'コマンドを実行します。エージェントは出力をもとに続行します',
+  'markdownRenderer.code.actions.runInTerminalTitle': 'ターミナルで実行',
   'markdownRenderer.code.actions.stopTitle': 'コマンドを停止',
   'markdownRenderer.code.run.startFailed': 'コマンドを開始できませんでした',
   'markdownRenderer.code.run.running': '実行中',

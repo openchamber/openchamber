@@ -3532,6 +3532,7 @@ export const dict: Record<I18nKey, string> = {
   "markdownRenderer.code.actions.copyTitle": "Copiar código",
   "markdownRenderer.code.actions.copiedTitle": "Copiado",
   "markdownRenderer.code.actions.runTitle": "Ejecutar comando. El agente continuará a partir de su salida",
+  "markdownRenderer.code.actions.runInTerminalTitle": "Ejecutar en la terminal",
   "markdownRenderer.code.actions.stopTitle": "Detener comando",
   "markdownRenderer.code.run.startFailed": "No se pudo iniciar el comando",
   "markdownRenderer.code.run.running": "En ejecución",

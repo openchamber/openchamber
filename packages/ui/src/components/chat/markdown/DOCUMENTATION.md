@@ -153,6 +153,10 @@ A `bash`, `sh`, `shell` or `zsh` fence in a finished assistant reply has a run b
 - The block shows the run instead of the shell row. A run whose reply is outside the loaded history keeps its row (`dropReplyCommandRows`).
 - Run controls require a finished reply on a surface with controls because a streaming command could execute an incomplete source.
 
+The separate terminal action (`replyTerminal.ts`) starts a command-mode runtime terminal in the reply's directory. It never adds transcript messages or continues the agent. It is available on web, desktop, hosted mobile and Capacitor; VS Code has no integrated terminal and Mini Chat has no terminal panel, so neither shows it. A `bash`, `sh` or `zsh` fence runs in that shell, and the server refuses one it cannot find, which the action shows as a start error instead of running the text in the wrong shell; a `shell` fence uses the user's terminal shell. Control characters a fence can carry are stripped the way project actions strip them, because the text reaches the shell as an argument.
+
+The session is created before its tab is published, so the terminal view cannot auto-create an interactive shell for the new tab, and its id doubles as the tab id, so the server's listing adopts it into that same tab, whether it arrives before the create response or after a reload. A response without command mode comes from an older server that opened an interactive shell instead: the action closes it, drops any tab the listing already adopted for it, and shows the start error. The action opens the mobile workspace when mounted, otherwise the desktop context panel, and opens neither when the user switched to another conversation meanwhile: the mobile drawer shows the current conversation's terminal, not the one the command runs in. The tab never closes on its own (`components/views/DOCUMENTATION.md`, *Terminal tabs whose shell exits*), and interactive Restart is disabled because the server cannot restart command-mode sessions.
+
 ## Decisions
 
 ### Why a note in the transcript and not matching by command text

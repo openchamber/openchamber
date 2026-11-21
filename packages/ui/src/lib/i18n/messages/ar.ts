@@ -3480,6 +3480,7 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.copyTitle': 'نسخ الشيفرة',
   'markdownRenderer.code.actions.copiedTitle': 'تم النسخ',
   'markdownRenderer.code.actions.runTitle': 'تشغيل الأمر. سيتابع الوكيل من مخرجاته',
+  'markdownRenderer.code.actions.runInTerminalTitle': 'تشغيل في الطرفية',
   'markdownRenderer.code.actions.stopTitle': 'إيقاف الأمر',
   'markdownRenderer.code.run.startFailed': 'تعذر بدء الأمر',
   'markdownRenderer.code.run.running': 'قيد التشغيل',
