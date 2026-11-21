@@ -47,8 +47,8 @@ typing; panels keep the standard 140/100ms. Text-field lists
 list itself, since they are fixed-position. The fade stays on the glass element itself, since an ancestor
 with opacity below 1 is a backdrop root and the blur would go flat mid-fade.
 Exit needs `AnimatePresence` around the conditional popup, so each dock keys
-its panel there (BTW keys each stage, forms key the form id); switching panels
-cross-fades. The frame's clearance cleanup leaves the variable alone while
+its panel there (BTW keys each stage, forms key the draft's identity: runtime,
+directory, session and form id); switching panels cross-fades. The frame's clearance cleanup leaves the variable alone while
 another panel is still mounted, because the outgoing panel unmounts after the
 incoming one has written its own height.
 
@@ -68,7 +68,23 @@ header toggles it by hand at any time: opened while reading, it stays open;
 collapsed while reading, it opens again at the end like an automatic
 collapse; collapsed at the end, it stays collapsed. The BTW sheet keeps
 the inline `FormCard` for its child session's forms; both render a field
-through `FormFieldControl`.
+through `FormFieldControl`. A caller can choose a form's id, so another
+session or directory can hold a form with the same id. The sheet stays
+mounted when the chat moves to another parent session, so it keys each card on
+runtime, directory, session and form id (`formCardKey`), and its live cards keep their
+answer under the dock's draft key (`keepDraft`): a card keyed on the id alone
+would carry the first fork's answers into the second fork's form, and a card
+keyed on the full identity without a draft would lose its own answer when the
+chat comes back to it. The card has no steps, so when it saves it leaves the
+step a dock stored for the same form as it is. A draft stays until its form is
+answered or cancelled on that surface, or until the form leaves the fork the
+sheet shows (settled on another page) without staying on as a recovered
+question: OpenCode can reuse an expired form's id, and a new form with the same
+fields would open with the old answer. A form settled while the sheet shows
+another fork, or is closed, keeps its draft until OpenCode creates a form with
+that id again: `sync-event-dispatch.ts` drops every draft of a `form.created`
+whose id is not pending in its session, so the new request starts empty, while
+a fork whose form is still pending gets its answer back.
 
 With Settings → Chat → Composer → Questions set to "In the chat"
 (`questionsInChat` in `useUIStore`, a device-local key), `ChatContainer`
@@ -85,7 +101,10 @@ unmounting and a switch back to the dock. A draft the dock left is taken with
 its link steps acknowledged, since the card shows every link at once. A card
 in a retained session that is shown again first takes up the draft another
 surface saved meanwhile: a location-scoped form shows in every session of its
-directory. The choice applies only while the transcript is on screen and not
+directory. Each card's block is keyed and named on session and form id
+(`formWaitingBlockId`), since a parent and its child can recover questions that
+share an id and the timeline remembers revealed blocks by that name; the dock's
+line and a form's toast reveal the card by the same name. The choice applies only while the transcript is on screen and not
 in a chat pinned in the side panel (`resolveFormsInChat`); an empty or
 loading session, an expanded composer and a pinned chat show the dock as
 before.
@@ -115,11 +134,17 @@ it saves the shared draft when its own answers or its step change. Its draft
 key follows the form's id and session, not the form object, so a reconnect
 that hands it the same form again no longer saves over the card's answer or
 another dock's. A second dock whose step moves (Next or Back) still saves its
-own values over the shared draft. The panel is also keyed on the runtime:
-App and MobileApp remount on a runtime switch, VS Code and the desktop mini
-chat do not, and two runtimes can hold a form with the same id, session and directory, so a
-switch starts the panel over from the new runtime's draft instead of saving the
-old runtime's answers into it.
+own values over the shared draft. The panel is keyed on the whole draft
+identity (`dockKey`: runtime, directory, session and form id), because a form
+id alone does not name a form. Another session or directory can reuse an id,
+and a panel keyed on it stays mounted when the composer moves to that
+session: its answers and step carry over and Submit sends them to the second
+form. The runtime is in the key for the same reason: App and MobileApp remount
+on a runtime switch, VS Code and the desktop mini chat do not, and two
+runtimes can hold a form with the same id, session and directory, so a switch
+starts the panel over from the new runtime's draft instead of saving the old
+runtime's answers into it. The directory stays in the key, so a form on screen
+whose directory changes starts over as a different scope.
 The setting is device-local, not a
 synced preference: syncing it would need a server-side validator, and a phone
 and a desktop can reasonably want different answers. A chat pinned in the
@@ -175,7 +200,8 @@ shrinking after deletion.
 
 Recovered questions appear on both surfaces with a warning that Submit starts
 a new paid turn in the asking session. Dismissal is local; rejected sends keep
-the card and its answer draft. Eligibility belongs to `sync/recoverable-questions.ts`.
+the card and its answer draft. Eligibility belongs to `sync/recoverable-questions.ts`,
+which records each question by session and form id, not by form id alone.
 
 `formCardState.ts` decides what both surfaces show and send, mirroring
 OpenCode's `Form.validateAnswer`: fields are evaluated in declaration order,

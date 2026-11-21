@@ -22,6 +22,9 @@ type Call = { kind: 'reply' | 'cancel' | 'send'; sessionID: string; formID: stri
 
 let calls: Call[] = [];
 let pendingForms: FormRequest[] = [];
+// When set, the recovery view the chat derives its recovered questions from; `closeOnSend` makes a send record its outcome.
+let recoveredView: import('@/sync/recoverable-questions').RecoverableQuestionStoreView | null = null;
+let closeOnSend = false;
 // The memoized dock re-renders only when the store tells it the list changed.
 const pendingListeners = new Set<() => void>();
 const refreshPendingForms = (next: FormRequest[]) => {
@@ -38,7 +41,13 @@ mock.module('@/sync/session-actions', () => ({
   ...actualSessionActions,
   replyToForm: async (sessionID: string, formID: string, answer: FormAnswer) => { calls.push({ kind: 'reply', sessionID, formID, answer }); },
   cancelForm: async (sessionID: string, formID: string) => { calls.push({ kind: 'cancel', sessionID, formID }); },
-  sendRecoveredFormAnswer: async (question: RecoveredQuestion) => { calls.push({ kind: 'send', sessionID: question.sessionID, formID: question.form.id }); },
+  sendRecoveredFormAnswer: async (question: RecoveredQuestion) => {
+    calls.push({ kind: 'send', sessionID: question.sessionID, formID: question.form.id });
+    if (closeOnSend) {
+      await Promise.resolve();
+      recoverable.noteLocalFormReplied(question.sessionID, question.form.id);
+    }
+  },
 }));
 const recoverable = await import('@/sync/recoverable-questions');
 type RecoveredQuestion = import('@/sync/recoverable-questions').RecoveredQuestion;
@@ -53,7 +62,7 @@ const deferredView = {
 };
 const useDeferredQuestions = () => {
   const recovery = recoverable.useRecoverableQuestionsStore();
-  return React.useMemo(() => recoverable.deriveRecoveredQuestions(deferredView, recovery, new Set(['session-1'])), [recovery]);
+  return React.useMemo(() => recoverable.deriveRecoveredQuestions(recoveredView ?? deferredView, recovery, new Set(['session-1', 'session-child'])), [recovery]);
 };
 const actualSync = await import('@/sync/sync-context');
 mock.module('@/sync/sync-context', () => ({
@@ -150,6 +159,8 @@ describe('questions in the chat', () => {
   beforeEach(() => {
     calls = [];
     pendingForms = [question('form-1', 'Pick a color')];
+    recoveredView = null;
+    closeOnSend = false;
     resetFormDrafts();
     recoverable.resetRecoverableQuestions();
     dom = installDom();
@@ -181,13 +192,13 @@ describe('questions in the chat', () => {
     if (!pointer) throw new Error('Missing pointer');
     await click(pointer);
     expect(isWaitingPageRevealPending('session-1')).toBe(true);
-    expect(pendingWaitingPageID()).toBe('form-1');
+    expect(pendingWaitingPageID()).toBe('session-1/form-1');
 
     // "Open session" on the second question's toast names its own card.
     takeWaitingPageReveal('session-1');
     await act(async () => revealRequest('form-2'));
     expect(isWaitingPageRevealPending('session-1')).toBe(true);
-    expect(pendingWaitingPageID()).toBe('form-2');
+    expect(pendingWaitingPageID()).toBe('session-1/form-2');
   });
 
   test('a hidden dock shows no pointer either', async () => {
@@ -195,7 +206,7 @@ describe('questions in the chat', () => {
     expect(buttons(dom.container).length).toBe(0);
   });
 
-  test('the chat end holds one waiting block per pending form, named by its id', async () => {
+  test('the chat end holds one waiting block per pending form, named by its session and id', async () => {
     pendingForms = [question('form-1', 'Pick a color'), question('form-2', 'Pick another')];
     const announced: string[] = [];
     dom.container.addEventListener('openchamber:page-waiting', (event) => {
@@ -203,8 +214,8 @@ describe('questions in the chat', () => {
     });
     await render(<TranscriptForms sessionId="session-1" directory="/project" />);
     const blocks = [...dom.container.querySelectorAll<HTMLElement>('[data-waiting-page]')].map((block) => block.dataset.waitingPage);
-    expect(blocks).toEqual(['form-1', 'form-2']);
-    expect(announced).toEqual(['form-1', 'form-2']);
+    expect(blocks).toEqual(['session-1/form-1', 'session-1/form-2']);
+    expect(announced).toEqual(['session-1/form-1', 'session-1/form-2']);
     expect(dom.container.textContent?.includes('Pick another')).toBe(true);
 
     pendingForms = [];
@@ -421,6 +432,50 @@ describe('questions in the chat', () => {
     }
   });
 
+  // OpenCode accepts a caller-chosen form id in every session and directory, so two
+  // sessions can hold a form with the same id. The dock is one component for all
+  // sessions: the second form must not inherit the first one's answers and step.
+  test('a form with the same id in another session or directory starts empty and replies with its own answers', async () => {
+    const releaseNotes = (sessionID: string): FormRequest => ({ id: 'form-same', sessionID, title: 'Release notes', fields: [
+      { key: 'codename', type: 'string', title: 'Codename' },
+      { key: 'owner', type: 'string', title: 'Owner' },
+    ] });
+    const progress = (en['chat.formDock.progress']).replace('{current}', '1').replace('{total}', '2');
+    // The panel of the form switched away from may still be fading out above the shown one.
+    const shownDock = () => {
+      const panel = [...dom.container.querySelectorAll<HTMLElement>('[role="dialog"]')].at(-1);
+      if (!panel) throw new Error('Missing dock');
+      return panel;
+    };
+    for (const [first, second] of [
+      [{ sessionID: 'session-1', directory: '/project-a' }, { sessionID: 'session-2', directory: '/project-b' }],
+      [{ sessionID: 'session-1', directory: '/project-a' }, { sessionID: 'session-2', directory: '/project-a' }],
+      [{ sessionID: 'session-1', directory: '/project-a' }, { sessionID: 'session-1', directory: '/project-b' }],
+    ] as const) {
+      const label = `${first.sessionID}@${first.directory} then ${second.sessionID}@${second.directory}`;
+      calls = [];
+      resetFormDrafts();
+      await render(null);
+      pendingForms = [releaseNotes(first.sessionID)];
+      await render(<FormDock sessionId={first.sessionID} directory={first.directory} hidden={false} />);
+      await type(shownDock(), 'Aurora');
+      await click(button(shownDock(), en['chat.questionCard.next']));
+      await type(shownDock(), 'Ada');
+      expect([label, shownDock().textContent?.includes(en['chat.formCard.submit'])]).toEqual([label, true]);
+
+      await act(async () => refreshPendingForms([releaseNotes(second.sessionID)]));
+      await render(<FormDock sessionId={second.sessionID} directory={second.directory} hidden={false} />);
+      expect([label, shownDock().querySelector('textarea')?.value]).toEqual([label, '']);
+      expect([label, shownDock().textContent?.includes(progress)]).toEqual([label, true]);
+
+      await type(shownDock(), 'Borealis');
+      await click(button(shownDock(), en['chat.questionCard.next']));
+      await type(shownDock(), 'Bob');
+      await click(button(shownDock(), en['chat.formCard.submit']));
+      expect([label, calls]).toEqual([label, [{ kind: 'reply', sessionID: second.sessionID, formID: 'form-same', answer: { codename: 'Borealis', owner: 'Bob' } }]]);
+    }
+  });
+
   // A question deferred on send: dismissing its card closes it and its draft here, and sends nothing,
   // so the agent never gets an answer the user did not give.
   test('dismissing a deferred card in the dock or the chat closes it and sends nothing', async () => {
@@ -443,11 +498,79 @@ describe('questions in the chat', () => {
       await click(button(dom.container, dismiss));
       expect(calls).toEqual([]);
       expect(deferredNote()).toBeUndefined();
-      expect(recoverable.useRecoverableQuestionsStore.getState().outcomes.get('form-deferred')).toBe('dismissed');
+      expect(recoverable.useRecoverableQuestionsStore.getState().outcomes.get('session-1\u0000form-deferred')).toBe('dismissed');
       // The dock's panel fades out through its exit animation, so the closed list is checked, not the DOM.
       expect([surface, recoverable.deriveRecoveredQuestions(deferredView, recoverable.useRecoverableQuestionsStore.getState(), new Set(['session-1']))]).toEqual([surface, []]);
       await render(null);
     }
+  });
+
+  // A parent and its child can each hold a recovered question with one id (the server lets a caller reuse an id
+  // once the first form has expired). Answering the first must leave the second card, with its own answer.
+  test('two recovered questions with one id keep the second card after the first is answered', async () => {
+    const asked = (sessionID: string): FormRequest => ({
+      id: 'form-same', sessionID, title: `Question from ${sessionID}`, fields: [{ key: 'note', type: 'string', title: 'Note' }],
+      metadata: { kind: 'question', tool: { messageID: `msg-${sessionID}`, id: `tool-${sessionID}` } },
+    });
+    const interrupted = (sessionID: string) => ({
+      id: `tool-${sessionID}`, sessionID, messageID: `msg-${sessionID}`, callID: 'call', tool: 'question', type: 'tool' as const,
+      state: { status: 'error' as const, input: {}, error: 'Tool execution interrupted', errorType: 'aborted', time: { start: 1, end: 2 } },
+    });
+    closeOnSend = true;
+    pendingForms = [];
+    recoveredView = { form: {}, part: { 'msg-session-1': [interrupted('session-1')], 'msg-session-child': [interrupted('session-child')] } };
+    recoverable.noteQuestionFormSnapshot('/project', [asked('session-1')]);
+    recoverable.noteQuestionFormSnapshot('/project', [asked('session-child')]);
+    // The timeline remembers which waiting blocks it brought into view by name, so the two cards need two names.
+    const announced: string[] = [];
+    dom.container.addEventListener('openchamber:page-waiting', (event) => {
+      announced.push(event.target instanceof HTMLElement ? event.target.dataset.waitingPage ?? '' : '');
+    });
+    await render(<TranscriptForms sessionId="session-1" directory="/project" />);
+    const cards = () => [...dom.container.querySelectorAll<HTMLElement>('[data-waiting-page]')];
+    expect(cards().map((card) => card.dataset.waitingPage)).toEqual(['session-1/form-same', 'session-child/form-same']);
+    expect(announced).toEqual(['session-1/form-same', 'session-child/form-same']);
+    await type(cards()[0]!, 'first answer');
+    await type(cards()[1]!, 'second answer');
+    await click(button(cards()[0]!, en['chat.formCard.submit']));
+    expect(calls).toEqual([{ kind: 'send', sessionID: 'session-1', formID: 'form-same' }]);
+    expect(cards().length).toBe(1);
+    expect(cards()[0]?.textContent?.includes('Question from session-child')).toBe(true);
+    expect(cards()[0]?.querySelector('textarea')?.value).toBe('second answer');
+  });
+
+  // The card has no steps. A form on screen in the dock keeps its step when a card of the same form saves its answers.
+  test('a card saving the answers of a form the dock shows keeps the dock\'s step', async () => {
+    const form = { ...question('form-global', 'A directory question'), sessionID: 'global' };
+    pendingForms = [form];
+    const scope = formDraftScope(form, '/project');
+    await render(<FormDock sessionId="session-1" directory="/project" hidden={false} />);
+    await click(button(dom.container, 'Red'));
+    await click(button(dom.container, en['chat.questionCard.next']));
+    await type(dom.container, 'second answer');
+    expect(loadFormDraft(scope)?.step).toBe(1);
+    await render(<FormCard form={form} keepDraft directory="/project" />);
+    expect(loadFormDraft(scope)?.step).toBe(1);
+    expect(loadFormDraft(scope)?.values.note?.text).toBe('second answer');
+  });
+
+  // The step of a stored dock draft means nothing for a form id reused with other fields.
+  test('a card for a reused form id with other fields does not take the stored dock step', async () => {
+    pendingForms = [question('form-reuse', 'Old question')];
+    await render(<FormDock sessionId="session-1" directory="/project" hidden={false} />);
+    await click(button(dom.container, 'Red'));
+    await click(button(dom.container, en['chat.questionCard.next']));
+    await render(null);
+    const newForm: FormRequest = { ...question('form-reuse', 'New question'), fields: [
+      { key: 'newfirst', type: 'string', title: 'New first' },
+      { key: 'newsecond', type: 'string', title: 'New second' },
+    ] };
+    pendingForms = [newForm];
+    await render(<FormCard form={newForm} keepDraft directory="/project" />);
+    expect(loadFormDraft(formDraftScope(newForm, '/project'))?.step).toBe(0);
+    await render(null);
+    await render(<FormDock sessionId="session-1" directory="/project" hidden={false} />);
+    expect(dom.container.textContent).toContain('1 of 2');
   });
 
   test('a chat pinned in the side panel keeps the full dock', () => {
