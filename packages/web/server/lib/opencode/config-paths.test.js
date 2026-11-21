@@ -232,4 +232,72 @@ describe('OpenCode global config paths', () => {
     }
     fs.rmSync(root, { recursive: true, force: true });
   });
+
+  it('preserves the previous AGENTS.md and cleans up the temp file when replacement fails', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-agents-md-atomic-'));
+    process.env.XDG_CONFIG_HOME = path.join(root, 'xdg');
+    delete process.env.OPENCODE_CONFIG;
+
+    const [, , , , , , routes] = await loadOpenCodeModules();
+    const handlers = new Map();
+    const app = {
+      get(route, ...callbacks) { handlers.set(`GET ${route}`, callbacks.at(-1)); },
+      put(route, ...callbacks) { handlers.set(`PUT ${route}`, callbacks.at(-1)); },
+      post() {},
+      delete() {},
+      use() {},
+    };
+    routes.registerOpenCodeRoutes(app, {});
+
+    const agentsMdPath = path.join(process.env.XDG_CONFIG_HOME, 'opencode', 'AGENTS.md');
+    fs.mkdirSync(path.dirname(agentsMdPath), { recursive: true });
+    fs.writeFileSync(agentsMdPath, 'Old content');
+
+    const renameSpy = vi.spyOn(fs.promises, 'rename').mockRejectedValue(
+      Object.assign(new Error('rename failed'), { code: 'EIO' }),
+    );
+    try {
+      const response = { json: vi.fn(), status: vi.fn(() => response) };
+      await handlers.get('PUT /api/behavior/agents-md')({ body: { content: 'New content' } }, response);
+      expect(response.status).toHaveBeenLastCalledWith(500);
+      expect(fs.readFileSync(agentsMdPath, 'utf8')).toBe('Old content');
+      const leftovers = fs.readdirSync(path.dirname(agentsMdPath))
+        .filter((name) => name.startsWith('AGENTS.md.tmp-'));
+      expect(leftovers).toEqual([]);
+    } finally {
+      renameSpy.mockRestore();
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('replaces a symlinked AGENTS.md entry rather than following it', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-agents-md-symlink-'));
+    process.env.XDG_CONFIG_HOME = path.join(root, 'xdg');
+    delete process.env.OPENCODE_CONFIG;
+
+    const [, , , , , , routes] = await loadOpenCodeModules();
+    const handlers = new Map();
+    const app = {
+      get(route, ...callbacks) { handlers.set(`GET ${route}`, callbacks.at(-1)); },
+      put(route, ...callbacks) { handlers.set(`PUT ${route}`, callbacks.at(-1)); },
+      post() {},
+      delete() {},
+      use() {},
+    };
+    routes.registerOpenCodeRoutes(app, {});
+
+    const agentsMdPath = path.join(process.env.XDG_CONFIG_HOME, 'opencode', 'AGENTS.md');
+    const targetPath = path.join(root, 'target.md');
+    fs.mkdirSync(path.dirname(agentsMdPath), { recursive: true });
+    fs.writeFileSync(targetPath, 'target content');
+    fs.symlinkSync(targetPath, agentsMdPath);
+
+    const response = { json: vi.fn(), status: vi.fn(() => response) };
+    await handlers.get('PUT /api/behavior/agents-md')({ body: { content: 'New content' } }, response);
+
+    expect(fs.lstatSync(agentsMdPath).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(agentsMdPath, 'utf8')).toBe('New content');
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('target content');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 });

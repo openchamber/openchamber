@@ -6,6 +6,7 @@ import { readBoundedResponseJson, readBoundedResponseText } from '../shared/resp
 import { readBoundedFile } from '../shared/bounded-file-read.js';
 import fs from 'fs';
 import path from 'path';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 import {
   buildAppliedResponse,
 } from './config-mutation-response.js';
@@ -756,7 +757,19 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         await fs.promises.mkdir(parentDir, { recursive: true });
       }
 
-      await fs.promises.writeFile(AGENTS_MD_PATH, content, 'utf8');
+      // Atomic replacement: write to a temp sibling and rename over the
+      // destination, so readers never see a truncated/partial file and a
+      // failed write leaves the previous file intact. rename(2) replaces an
+      // existing destination entry (including a symlink) rather than
+      // following it.
+      const tmp = `${AGENTS_MD_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      try {
+        await fs.promises.writeFile(tmp, content, 'utf8');
+        await renameWithRetry((from, to) => fs.promises.rename(from, to), tmp, AGENTS_MD_PATH);
+      } catch (error) {
+        await fs.promises.unlink(tmp).catch(() => {});
+        throw error;
+      }
 
       return res.json(buildAppliedResponse(
         'AGENTS.md saved.',
