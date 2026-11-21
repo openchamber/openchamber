@@ -3,6 +3,7 @@ import type { QuotaProviderId } from '@/types';
 export interface QuotaProviderMeta {
   id: QuotaProviderId;
   name: string;
+  providers?: string[];
 }
 
 export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [

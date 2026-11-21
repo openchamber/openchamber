@@ -92,7 +92,7 @@ describe('isQuotaGuest and pickCredentials', () => {
 describe('an extension usage provider', () => {
   it('names itself after the guest and is configured when OpenCode holds at least one listed credential, always with an empty list', () => {
     const { provider } = harness();
-    expect(provider).toMatchObject({ providerId: 'ext-teapot-usage', providerName: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage' });
+    expect(provider).toMatchObject({ providerId: 'ext-teapot-usage', providerName: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage', providers: ['teapot', 'openrouter'] });
     expect(provider.isConfigured(AUTH)).toBe(true);
     expect(provider.isConfigured({ teapot: AUTH.teapot })).toBe(true);
     expect(provider.isConfigured({ anthropic: AUTH.anthropic })).toBe(false);
