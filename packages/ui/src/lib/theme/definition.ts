@@ -3,10 +3,6 @@ import type { Theme } from '../../types/theme';
 import { mixColor, onColor, readableText, withOpacity } from './color';
 import { resolveSyntaxTokens } from './syntax';
 
-// Theme values are written into a <style> element. A colour has to be a
-// colour, and a free-form value (fonts, transitions) must not close its
-// declaration or load anything, so an imported theme cannot add rules of its
-// own or make the app fetch from another server.
 const COLOR_PATTERN = /^(?:#[\da-f]{3,8}|[a-z]+|(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark)\([\w#.,%\s/+()-]*\))$/i;
 const LOADS_RESOURCE = /\b(?:url|image|image-set|cross-fade|element)\s*\(|@import/i;
 const text = z.string().trim().min(1);
@@ -41,7 +37,6 @@ const definition = z.object({
 
 export type ThemeDefinition = z.input<typeof definition>;
 
-/** One boundary for built-ins, custom files and development reloads. */
 function resolveTheme(source: z.output<typeof definition>): Theme {
   const { metadata, colors: c, config } = source;
   const neutral = metadata.variant === 'dark' ? '#ffffff' : '#000000';
@@ -97,7 +92,6 @@ export const themeSchema = definition.transform(resolveTheme);
 export const requireTheme = themeSchema.parse;
 export const themeListSchema = z.array(themeSchema.nullable().catch(null)).transform((themes) => themes.filter((theme): theme is Theme => theme !== null));
 
-/** Remove only semantic defaults, never equal colors belonging to unrelated roles. */
 export function compactTheme(value: ThemeDefinition): ThemeDefinition {
   const source = definition.parse(value);
   const c = source.colors;
@@ -123,7 +117,6 @@ export function compactTheme(value: ThemeDefinition): ThemeDefinition {
   c.status = prune(c.status, { ...defaults.colors.status }, ['error', 'warning', 'success', 'info']);
   c.syntax.base = prune(c.syntax.base, { background: c.surface.background, foreground: c.surface.foreground }, ['comment', 'keyword', 'string', 'number', 'function', 'variable', 'type', 'operator']);
   if (c.syntax.tokens) {
-    // Resolve without each override, so dependent roles remain correct after pruning.
     for (const key of Object.keys(c.syntax.tokens)) {
       const candidate = { ...c.syntax.tokens };
       delete candidate[key];

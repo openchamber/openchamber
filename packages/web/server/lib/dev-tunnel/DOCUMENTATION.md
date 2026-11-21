@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This module carries raw TCP bytes between a desktop client and a dev server
+This module carries raw TCP bytes between a desktop or native mobile client and a dev server
 running on the OpenChamber host, so a remote dev server can be opened in the
 browser panel without anything being rewritten.
 
@@ -14,10 +14,10 @@ and what made it fragile per framework.
 
 ## Boundaries
 
-- `runtime.js` is the host end: it accepts the WebSocket upgrade at
+- `runtime.ts` is the host end: it accepts the WebSocket upgrade at
   `/api/dev-tunnel`, authenticates it, opens a TCP socket to the requested
   local port, and pipes the two together.
-- `client.js` is the local end: it binds a loopback listener on the user's
+- `client.ts` is the local end: it binds a loopback listener on the user's
   machine and pipes each accepted connection through one WebSocket. It lives in
   this package because it needs a WebSocket client the package already depends
   on; the desktop shell drives it over IPC for directly reachable HTTP(S)
@@ -27,7 +27,11 @@ and what made it fragile per framework.
   renderer carries its bytes through the active E2EE relay. This keeps relay
   credentials and encryption in their existing renderer owner instead of
   duplicating them in Electron main.
-- Port discovery is not owned here. `runtime.js` is given the reachable set by
+- Capacitor mobile uses loopback listeners in `packages/mobile` (Android
+  ServerSocket and iOS NWListener). The shared renderer owns their authenticated
+  tunnel WebSockets through `packages/ui/src/lib/browser/mobileDevTunnel.ts`;
+  the native plugins receive only opaque bytes and have no relay credentials.
+- Port discovery is not owned here. `runtime.ts` is given the reachable set by
   the same dev-server discovery the user's own list is built from.
 - The browser panel decides when to tunnel; this module never chooses a target.
   `packages/ui/src/lib/browser/devTunnel.ts` owns that decision, including for
@@ -38,6 +42,13 @@ and what made it fragile per framework.
 
 ## Invariants
 
+- A connection failure, including a synchronous WebSocket constructor error,
+  closes only that connection. It cannot escape the connection handler and
+  terminate the process or an otherwise usable listener.
+- Socket reads pause while the other end drains. Pre-handshake bytes remain
+  bounded and ordered so the first HTTP request survives without buffering a
+  stalled request or a fast response without limit. Refusal logs omit URLs
+  because a URL can carry an authentication token.
 - The reachable set is exactly what dev-server discovery offers the user, never
   "any loopback port". Without that restriction an authenticated client could
   dial arbitrary local services on the host — databases, admin panels, the
@@ -62,6 +73,11 @@ and what made it fragile per framework.
   cannot tell apart from a dev server that is still starting.
 - Concurrency is capped per host, not per page, because one page load opens
   many sockets.
+- Native mobile forwards previews through an ephemeral `127.0.0.1` listener,
+  one per remote dev-server port. Each TCP connection uses one authenticated
+  tunnel WebSocket. The iframe keeps its own origin and can use HMR WebSockets.
+  Switching runtimes stops the phone listeners and their streams; hosted web
+  stays blocked from remote loopback addresses.
 - Desktop forwards previews through `openchamber-preview.localhost`, bypassing
   proxies for that exact hostname. Listeners still bind `127.0.0.1`, and only
   that API host keeps the bundled connection-limit exemption. Address bars and
@@ -84,3 +100,46 @@ and what made it fragile per framework.
   session of the space's own behind a proxy that reaches only its tunnel ports,
   is in `packages/electron/space-preview.mjs` and the "Preview" section of
   `packages/web/server/lib/spaces/DOCUMENTATION.md`.
+
+## TypeScript contracts
+
+Both implementations import `ws`. The shared package declaration connects its
+constructors, upgrade callbacks, socket events and raw-data types to
+`../shared/websocket-contracts.js`. The client constructor supplies
+`WebSocket<Buffer>`. The server selects `WebSocketServer<Buffer>` because it
+retains the default `nodebuffer` mode. Neither end changes frame mode after
+registering its message listener.
+
+`contracts.ts` owns tunnel options, listener state and public results. Discovery,
+authentication, origin checking and upgrade refusal reuse their owners' types.
+The runtime assigns its TCP socket synchronously in `dial(0)` before any socket
+event can read it. Teardown keeps optional destruction for that initialization
+boundary.
+
+### Why frames stay unmodified
+
+Both ends forward the bytes supplied by `ws` directly. Adding frame conversion
+or validation would change the existing implementation. The shared server
+contract carries a frame-type parameter through connection events, clients and
+upgrade callbacks. Its default remains the full `RawData` union, preserving
+existing consumers and other frame modes.
+
+### Why the client checks the URL scheme
+
+WHATWG URL protocol assignment cannot cross from a non-special app scheme to
+`ws`. Rejecting non-HTTP(S) base URLs before binding a listener preserves the
+existing error instead of deferring it to the first TCP connection.
+
+The runtime also imports Node's TCP API and the request-security helpers. Its
+external inputs are the HTTP upgrade URL and headers, authentication and discovery
+results, WebSocket frames, TCP bytes and socket errors. The client imports Node's
+TCP API and accepts the remote base URL, port, optional headers and space id from
+Electron main. Its defaults remain an empty header object, a null space id, a
+15-second handshake timeout and a 256-KiB pending-byte limit. Neither end reads
+files or environment variables directly.
+
+The client keeps the string-address check on `server.address()`, whose API can
+return a pipe name. The runtime keeps the string check on the request's origin
+header before trimming it. These checks validate runtime boundary values.
+Catch handlers read the optional message on any non-null thrown value, preserving
+logging for errors, plain objects and primitives.

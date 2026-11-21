@@ -82,10 +82,6 @@ export const registerMultiRunSession = (session: Session, directory: string): Se
   return sessionWithDirectory;
 };
 
-/**
- * Sends a lane its prompt. Each lane is a fresh session, so it is owed the
- * project's standing context exactly as a composer send would be.
- */
 export async function dispatchRunPrompt(input: {
   runtimeKey: string;
   assertCurrent: () => void;
@@ -105,8 +101,6 @@ export async function dispatchRunPrompt(input: {
   const text = await expandText(input.prompt).catch(() => input.prompt);
   input.assertCurrent();
   if (input.goal) {
-    // Before the prompt, as on an ordinary send: a lane that cannot get its
-    // goal stays unstarted instead of running as a plain session.
     await setSessionGoal(
       input.sessionId,
       input.directory,
@@ -131,8 +125,6 @@ export async function dispatchRunPrompt(input: {
       ready: knowledgeSync,
     });
   } catch (error) {
-    // With no turn the server never settles the goal, and an active goal
-    // keeps the lane working and holds auto-fusion for good.
     if (input.goal) await clearSessionGoal(input.sessionId, input.directory).catch(() => undefined);
     throw error;
   }
@@ -229,7 +221,6 @@ export const useMultiRunStore = create<MultiRunStore>()(
 
           const createdRuns: Array<{
             sessionId: string;
-            /** Where the run's session starts: the worktree root, or the project's folder inside it. */
             directory: string;
             providerID: string;
             modelID: string;
@@ -326,7 +317,6 @@ export const useMultiRunStore = create<MultiRunStore>()(
                   assertCurrent();
                 }
 
-                // A checkout that never populated is removed with its branch; the lane counts as failed.
                 const startDirectory = await resolveCreatedWorktreeStartDirectory(project, worktreeMetadata);
                 assertCurrent();
                 const session = await createRun(startDirectory);

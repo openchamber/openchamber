@@ -34,6 +34,38 @@ const liveSummaries = async (provider, { instance = 'github.com', accountId = ''
   return provider.resources.liveSummaries({ session, refs, issueRefs: [] });
 };
 
+describe('GitHub attachment reads', () => {
+  it('exposes the upload read the source-control route streams', () => {
+    expect(providerWith().resources.readUpload).toBeInstanceOf(Function);
+  });
+
+  it('reads with the bound account only for the preview repository, its network or a linked item', async () => {
+    const auth = vi.fn(async () => ({ token: 'secret-token' }));
+    const provider = createProvider({
+      modules: async () => ({ octokit: { getOctokitForAccountId: async () => boundAccount({ auth }) } }),
+      resolveGitHubRepoFromDirectory: async () => ({ repo: { owner: 'acme', repo: 'app' } }),
+      resolveRepoNetwork: async () => [{ owner: 'acme', repo: 'app', source: 'origin' }, { owner: 'up', repo: 'app', source: 'upstream' }],
+    });
+    const session = await provider.auth.resolveAccount({ instance: 'github.com', accountId: 'bound' });
+    const read = (owner, repo, linked) => provider.resources.readUpload({
+      session, context: { linked }, directory: '/repo', remote: 'origin', project: { owner, name: repo },
+      secret: Buffer.from(`https://github.com/${owner}/${repo}/blob/main/shot.png?raw=true`).toString('base64url'),
+      filename: 'shot.png', signal: new AbortController().signal,
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('', { status: 404 }));
+    try {
+      await expect(read('acme', 'private-b', false)).rejects.toThrow('outside the bound repository');
+      expect(auth).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect((await read('up', 'app', false)).status).toBe(404);
+      expect((await read('acme', 'private-b', true)).status).toBe(404);
+      expect(fetchSpy.mock.calls[0][0]).toBe('https://api.github.com/repos/up/app/contents/shot.png?ref=main');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+});
+
 describe('GitHub accounts behind a session', () => {
   it('resolves the exact account, refuses one that is gone, and falls back to the current one only when asked', async () => {
     const provider = providerWith({ octokitFor: async () => ({ current: true }) });

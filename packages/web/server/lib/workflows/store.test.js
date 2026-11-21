@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { lightenWorkflowRun, summarizeRun } from './runtime.js';
 import { createWorkflowRunStore } from './store.js';
 
 const directories = [];
@@ -101,5 +102,63 @@ describe('workflow run store durability', () => {
     fail = false;
     await store.save(original);
     expect((await reload().get(original.id)).args.value).toBe('unsaved working state');
+  });
+});
+
+describe('workflow run store memory', () => {
+  const longText = 'x'.repeat(5_000);
+  const settledRun = (id, overrides = {}) => ({
+    ...run(id),
+    state: 'completed',
+    script: longText,
+    endedAt: 2,
+    result: { answer: longText },
+    logs: Array.from({ length: 30 }, (_, index) => ({ at: index, message: `log ${index}` })),
+    agents: [
+      { key: 'a', label: 'A', phase: null, prompt: longText, state: 'completed', result: longText },
+      { key: 'b', label: 'B', phase: null, prompt: longText, state: 'completed', result: 'short' },
+      { key: 'c', label: 'C', phase: null, prompt: longText, state: 'failed', error: 'boom' },
+    ],
+    ...overrides,
+  });
+
+  const setupLight = async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'workflow-store-'));
+    directories.push(dataDir);
+    const create = () => createWorkflowRunStore({ fsPromises: fs, path, dataDir, lighten: lightenWorkflowRun });
+    return { store: create(), reload: create };
+  };
+
+  it('holds a settled run light, summarizes it the same, and reads the whole run on get', async () => {
+    const { store, reload } = await setupLight();
+    const full = settledRun('wf_settled1');
+    await store.save(full);
+    for (const current of [store, reload()]) {
+      const [listed] = await current.list();
+      expect(listed.script).toBe('');
+      expect(listed.agents[0].prompt).toBe('');
+      expect(summarizeRun(listed)).toEqual(summarizeRun(full));
+      const read = await current.get('wf_settled1');
+      expect(read.script).toBe(longText);
+      expect(read.agents[0].prompt).toBe(longText);
+      expect(read.result).toEqual({ answer: longText });
+    }
+  });
+
+  it('keeps a running run and one with an undelivered report whole', async () => {
+    const { store } = await setupLight();
+    await store.save(settledRun('wf_running1', { state: 'running', endedAt: undefined }));
+    await store.save(settledRun('wf_pending1', { report: { messageId: 'm', delivered: false, resume: false } }));
+    for (const listed of await store.list()) expect(listed.script).toBe(longText);
+  });
+
+  it('every caller of a settled run gets the same working object, concurrent first reads included', async () => {
+    const { store } = await setupLight();
+    await store.save(settledRun('wf_shared01'));
+    const [first, second] = await Promise.all([store.get('wf_shared01'), store.get('wf_shared01')]);
+    expect(first).toBe(second);
+    expect(await store.get('wf_shared01')).toBe(first);
+    first.state = 'running';
+    expect((await store.list()).find((item) => item.id === 'wf_shared01').state).toBe('running');
   });
 });

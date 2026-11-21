@@ -51,12 +51,6 @@ const WatchRow: React.FC<{ watch: PrWatch; urls: RepositoryUrlMatcher; onStop: (
   );
 };
 
-/**
- * The agent ended its turn to wait on its pull requests; the server wakes it
- * when one of them changes. The row says what it waits on and lets the user
- * stop a wait, after which that pull request no longer wakes the session.
- * Several collapse into a count that expands in place, as background commands do.
- */
 export const PullRequestWatchStrip = memo(({ sessionId }: { sessionId: string | null }) => {
   const { t } = useI18n();
   const urls = useRepositoryUrlMatcher();
@@ -73,7 +67,6 @@ export const PullRequestWatchStrip = memo(({ sessionId }: { sessionId: string | 
     });
   };
   const stopOne = (watch: PrWatch) => stop(watch.url);
-  // Pull and merge requests together read as changes.
   const terms = watches.map((watch) => changeRequestTermOfUrl(watch.url, urls));
   const countTerm = terms.every((term) => term === terms[0]) ? terms[0] : 'change';
   const row = (watch: PrWatch) => <WatchRow key={watch.url} watch={watch} urls={urls} onStop={stopOne} />;

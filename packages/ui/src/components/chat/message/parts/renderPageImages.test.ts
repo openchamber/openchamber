@@ -38,6 +38,24 @@ describe('renderPageImageSources', () => {
         const page = Array.from({ length: 19 }, (_, index) => `<img src="/tmp/${index}.png">`).join('');
         expect(renderPageImageSources(page)).toHaveLength(19);
     });
+
+    test('reads a quoted path that holds a quote other than the one around it, as a folder name can', () => {
+        const page = [
+            '<img src="C:/preview/chef\'s/icon.png">',
+            '<img src=\'C:/preview/chef"s/icon.png\'>',
+            '<script>const shot = `/tmp/it\'s.png`;</script>',
+        ].join('');
+        expect(renderPageImageSources(page)).toEqual([
+            "C:/preview/chef's/icon.png",
+            'C:/preview/chef"s/icon.png',
+            "/tmp/it's.png",
+        ]);
+    });
+
+    test('needs the closing quote of the string it opened, so prose before a path is not one', () => {
+        expect(renderPageImageSources('<p>Don\'t look at /tmp/a.png here</p>')).toEqual([]);
+        expect(renderPageImageSources('<img src="/tmp/unclosed.png')).toEqual([]);
+    });
 });
 
 describe('inlineRenderPageImages', () => {
@@ -48,6 +66,13 @@ describe('inlineRenderPageImages', () => {
         ]);
         const inlined = inlineRenderPageImages('<div style="background:url(/tmp/bg.webp)"></div><img src="/a/b.png"><img src="/x/a/b.png"><img src="/a/b.png">', images);
         expect(inlined).toBe('<div style="background:url(data:image/webp;base64,BG)"></div><img src="data:image/png;base64,AB"><img src="/x/a/b.png"><img src="data:image/png;base64,AB">');
+    });
+
+    test('keeps the quotes around a path that holds a quote of its own', () => {
+        const inlined = inlineRenderPageImages('<img src="C:/preview/chef\'s/icon.png">', new Map([
+            ["C:/preview/chef's/icon.png", 'data:image/png;base64,AA'],
+        ]));
+        expect(inlined).toBe('<img src="data:image/png;base64,AA">');
     });
 });
 

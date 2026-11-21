@@ -1,20 +1,22 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { beforeEach, describe, expect, test } from "bun:test"
+import { directoryEnvironment } from './test-support/directoryEnvironment'
+import { switchRuntimeEndpoint } from '@/lib/runtime-switch'
 
-let runtimeKey = "runtime-a"
-mock.module("@/lib/runtime-switch", () => ({ getRuntimeKey: () => runtimeKey }))
+directoryEnvironment()
+const activateRuntime = (runtimeKey: string) => switchRuntimeEndpoint({ apiBaseUrl: `https://${runtimeKey}.test`, runtimeKey })
 
 const { gitBaseBranchEntryKey, useGitBaseBranchStore } = await import("./useGitBaseBranchStore")
 
 describe("git base branch overrides", () => {
   beforeEach(() => {
-    runtimeKey = "runtime-a"
+    activateRuntime("runtime-a")
     useGitBaseBranchStore.setState({ overrides: {} })
   })
 
   test("keys the same repository per branch and runtime", () => {
     const featureA = gitBaseBranchEntryKey("/repo", "feature-a")
     const featureB = gitBaseBranchEntryKey("/repo", "feature-b")
-    runtimeKey = "runtime-b"
+    activateRuntime("runtime-b")
     const featureARemote = gitBaseBranchEntryKey("/repo", "feature-a")
 
     expect(new Set([featureA, featureB, featureARemote]).size).toBe(3)

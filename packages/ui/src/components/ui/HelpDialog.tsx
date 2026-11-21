@@ -29,7 +29,6 @@ type ShortcutItem = {
 
 type ShortcutSection = {
   categoryKey: I18nKey;
-  // Sections are split by hand so both columns end up about the same height.
   column: 'left' | 'right';
   items: ShortcutItem[];
 };
@@ -133,6 +132,12 @@ export const HelpDialog: React.FC = () => {
           id: 'new_chat_worktree',
           descriptionKey: "helpDialog.item.createNewWorktreeDraft",
           icon: "git-branch",
+          keys: '',
+        },
+        {
+          id: 'new_lead',
+          descriptionKey: "helpDialog.item.createNewLead",
+          icon: "lead",
           keys: '',
         },
         {
@@ -289,6 +294,11 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
+          id: 'toggle_reasoning_traces',
+          icon: 'brain-ai-3',
+          keys: '',
+        },
+        {
           id: 'toggle_services_menu',
           descriptionKey: 'helpDialog.item.toggleServicesMenu',
           icon: "stack",
@@ -368,9 +378,6 @@ export const HelpDialog: React.FC = () => {
             const descriptionKey = shortcut.descriptionKey
               ?? (action?.customizable ? action.settingsLabelKey : undefined);
             if (!descriptionKey || (action && !isShortcutAvailable(action))) return null;
-            // This dialog lists what the keyboard can do right now;
-            // an action without a binding belongs to the command
-            // palette and Settings, not here.
             if (shortcut.id && !getEffectiveShortcutCombo(shortcut.id, shortcutOverrides)) {
               return null;
             }
@@ -395,7 +402,6 @@ export const HelpDialog: React.FC = () => {
                     {t(descriptionKey)}
                   </span>
                 </div>
-                {/* The leader only guides the eye to the keys: well under the text. */}
                 <div aria-hidden className="min-w-4 flex-1 border-b border-dotted border-border opacity-35" />
                 <div className="flex shrink-0 items-center gap-1">
                   {(Array.isArray(displayKeys) ? displayKeys : [displayKeys]).map((keyCombo: string, i: number) => (
@@ -405,8 +411,6 @@ export const HelpDialog: React.FC = () => {
                           {t('helpDialog.keyCombiner.or')}
                         </span>
                       )}
-                      {/* A keycap is a tone step above the dialog, the same in both
-                          themes and in Settings > Shortcuts; no outline. */}
                       <kbd className="oc-tile-inset inline-flex items-center gap-1 rounded px-1.5 py-0.5 typography-meta text-foreground">
                         {keyCombo}
                       </kbd>
@@ -442,8 +446,6 @@ export const HelpDialog: React.FC = () => {
             {(['left', 'right'] as const).map((column) => (
               <div key={column} className="space-y-4">
                 {shortcuts.filter((section) => section.column === column).map(renderSection)}
-                {/* The right column is one row shorter, so the tips fill its
-                    tail instead of adding a full-width block below both. */}
                 {column === 'right' && (
                   <ul className="space-y-0.5 px-2 typography-meta text-muted-foreground">
                     <li>

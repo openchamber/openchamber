@@ -1,18 +1,3 @@
-/**
- * Structured context attached to an outgoing message.
- *
- * Every user-attached context item — an inline code comment, a terminal
- * selection, a browser annotation, a change request comment or failed check, a
- * linked issue or PR — is sent as its own synthetic text part. The part's
- * `text` is what the model reads; the part's `metadata[CONTEXT_METADATA_KEY]`
- * carries the same information structured, so the timeline can render the
- * context as a dedicated block after the message round-trips through the
- * OpenCode server (which persists part metadata verbatim).
- *
- * This module owns both directions: building the part at send time and
- * parsing the metadata back at render time. Keeping them together is what
- * guarantees they cannot drift apart.
- */
 
 import { z } from 'zod';
 import { sourceControlProviderIdSchema } from '@/lib/source-control/providers/descriptor';
@@ -37,8 +22,8 @@ export type CodeCommentContext = {
     side?: 'original' | 'modified';
     language: string;
     code: string;
+    changedCode?: string;
     text: string;
-    /** The diff a `diff` comment was written on; absent for uncommitted changes and older messages. */
     origin?: DiffCommentOrigin;
 };
 
@@ -54,7 +39,6 @@ type TerminalContextPayload = {
 type BrowserAnnotationContext = {
     kind: 'browser-annotation';
     pageUrl: string;
-    /** The full annotation prompt shown to the model. */
     prompt: string;
     text: string;
 };
@@ -64,7 +48,6 @@ type PrCommentContext = {
     label: string;
     body: string;
     text: string;
-    /** Absent on messages from before GitLab: those are GitHub. */
     provider?: SourceControlProvider;
 };
 
@@ -73,20 +56,17 @@ type PrCheckContext = {
     label: string;
     output: string;
     text: string;
-    /** Absent on messages from before GitLab: those are GitHub. */
     provider?: SourceControlProvider;
 };
 
 type RepositoryIssueContext = {
     kind: 'repository-issue';
-    /** Absent on messages from before GitLab: those are GitHub. */
     provider?: SourceControlProvider;
     number: number;
     title: string;
     url: string;
 };
 
-/** A repository discussion; only providers that keep discussions have one. */
 type RepositoryDiscussionContext = {
     kind: 'repository-discussion';
     provider: SourceControlProvider;
@@ -98,7 +78,6 @@ type RepositoryDiscussionContext = {
 type FileQuoteContext = {
     kind: 'file-quote';
     fileLabel: string;
-    /** Present when the fragment could be located in the file source. */
     startLine?: number;
     endLine?: number;
     quote: string;
@@ -107,9 +86,7 @@ type FileQuoteContext = {
 
 type ChatQuoteContext = {
     kind: 'chat-quote';
-    /** The message the quote came from, when known. */
     messageId?: string;
-    /** Where the quote sits in that message's rendered text, when captured. */
     anchor?: ChatQuoteAnchor;
     quote: string;
     text: string;
@@ -117,14 +94,13 @@ type ChatQuoteContext = {
 
 type ChangeRequestContext = {
     kind: 'change-request';
-    /** Absent on messages written before providers other than GitHub existed. */
     provider?: SourceControlProvider;
     number: number;
     title: string;
     url: string;
+    sourceLinks?: string[];
 };
 
-/** A tracker's work item. Messages from before trackers carry `linear-issue`, read as Linear's. */
 type TrackerItemContext = {
     kind: 'tracker-item';
     provider: string;
@@ -139,7 +115,6 @@ type GuestIssueContext = {
     id: string;
     title: string;
     url: string;
-    /** Opaque guest payload; stored for the round trip back to the guest, never rendered. */
     data?: JsonValue;
 };
 
@@ -152,11 +127,6 @@ type GuestPrContext = {
     data?: JsonValue;
 };
 
-/**
- * Another session the user mentioned; the model reads it with the openchamber
- * tool. `messageId` is set when the mention was a link to one of its messages
- * that had no text of its own, so the link still finds its chip.
- */
 type SessionContext = {
     kind: 'session';
     sessionId: string;
@@ -164,7 +134,6 @@ type SessionContext = {
     messageId?: string;
 };
 
-/** One message of another session, sent whole; `excerpt` is what its chip shows. */
 type SessionMessageContext = {
     kind: 'session-message';
     sessionId: string;
@@ -173,7 +142,16 @@ type SessionMessageContext = {
     excerpt: string;
 };
 
+type SharedPageContext = {
+    kind: 'shared-page';
+    receivedId: string | null;
+    host: string;
+    title: string;
+    opened: boolean;
+};
+
 export type ContextPartPayload =
+    | SharedPageContext
     | CodeCommentContext
     | TerminalContextPayload
     | BrowserAnnotationContext
@@ -203,54 +181,48 @@ export type ContextPartMetadata = {
     [OPENCODE_COMMENT_METADATA_KEY]?: OpenCodeCommentMetadata;
 };
 
-/**
- * One context item as it goes on the wire: a synthetic message whose `text` is
- * what the model reads and whose metadata carries the same information
- * structured, so the timeline can render it as a dedicated block.
- */
 export type ContextPart = {
     text: string;
     metadata: ContextPartMetadata;
 };
 
-/**
- * English for the model naming a change request where it lives ("GitLab merge
- * request"), from the provider's descriptor. A part written before parts named
- * their provider reads as a plain pull request.
- */
 function changeRequestNoun(provider: SourceControlProvider | undefined): string {
     if (!provider) return 'pull request';
     const { label, terminology } = readSourceControlProvider(provider);
     return `${label} ${terminology.promptNoun}`;
 }
 
-/** The model-facing name of a review comment's source. */
 export function changeRequestCommentSource(provider: SourceControlProvider | undefined): string {
     return `${changeRequestNoun(provider)} comment`;
 }
 
-/** The model-facing name of a failed check's source: a pipeline job or a check, by the provider's CI term. */
 export function changeRequestCheckSource(provider: SourceControlProvider | undefined): string {
     const ci = provider ? readSourceControlProvider(provider).terminology.ci : 'checks';
     return `${changeRequestNoun(provider)} ${ci === 'pipeline' ? 'pipeline job' : 'check'}`;
 }
 
-/**
- * The model-facing text for a context payload. The wording intentionally
- * matches what OpenChamber sent before parts carried metadata, so model
- * behavior does not change with the transport format.
- */
+// Selections read as the user's own words to the agent: a bare "Comment on <file>" header
+// read like a review comment from someone else, and models drafted replies to it.
+const userWords = (text: string | undefined, subject: string) => (
+    text ? `\n\nThe user wrote this to you about ${subject}:\n${text}` : ''
+);
+
 export function formatContextText(payload: ContextPartPayload): string {
     switch (payload.kind) {
         case 'code-comment': {
             const originNote = payload.origin ? ` ${describeDiffCommentOrigin(payload.origin)}` : '';
-            // A whole-file comment has no lines to quote: the model reads the file itself.
             if (payload.startLine === 0 && payload.endLine === 0) {
-                return `Comment on \`${payload.fileLabel}\` (the whole file)${originNote}:\n\n${payload.text}`;
+                return `The user wrote this to you about \`${payload.fileLabel}\` (the whole file)${originNote}:\n\n${payload.text}`;
             }
             const range = `lines ${payload.startLine}-${payload.endLine}`;
             const sideNote = payload.source === 'diff' && payload.side ? ` (${payload.side})` : '';
-            return `Comment on \`${payload.fileLabel}\` ${range}${sideNote}${originNote}:\n\`\`\`${payload.language}\n${payload.code}\n\`\`\`\n\n${payload.text}`;
+            const quoted = `The user selected \`${payload.fileLabel}\` ${range}${sideNote}${originNote}:\n\`\`\`${payload.language}\n${payload.code}\n\`\`\``;
+            const now = payload.changedCode === undefined
+                ? ''
+                : payload.changedCode
+                    ? `\n\nThe file changed after the user selected these lines, and the quoted code is no longer there. These lines now hold:\n\`\`\`${payload.language}\n${payload.changedCode}\n\`\`\``
+                    : '\n\nThe file changed after the user selected these lines, and the quoted code is no longer there.';
+            return `${quoted}${now}${userWords(payload.text, 'these lines')}`;
         }
         case 'terminal':
             return appendTerminalContexts('', [{
@@ -269,11 +241,11 @@ export function formatContextText(payload: ContextPartPayload): string {
                 ? ` lines ${payload.startLine}-${payload.endLine}`
                 : '';
             const quoted = payload.quote.split('\n').map((line) => `> ${line}`).join('\n');
-            return `Comment on this fragment of \`${payload.fileLabel}\`${location}:\n${quoted}${payload.text ? `\n\n${payload.text}` : ''}`;
+            return `The user selected this fragment of \`${payload.fileLabel}\`${location}:\n${quoted}${userWords(payload.text, 'it')}`;
         }
         case 'chat-quote': {
             const quoted = payload.quote.split('\n').map((line) => `> ${line}`).join('\n');
-            return `Comment on this fragment of an earlier message in this conversation:\n${quoted}${payload.text ? `\n\n${payload.text}` : ''}`;
+            return `The user selected this fragment of an earlier message in this conversation:\n${quoted}${userWords(payload.text, 'it')}`;
         }
         case 'pr-check':
             return `Attached failed ${changeRequestCheckSource(payload.provider)} (${payload.label}):\n\`\`\`\n${payload.output}\n\`\`\`${payload.text ? `\n\n${payload.text}` : ''}`;
@@ -285,17 +257,11 @@ export function formatContextText(payload: ContextPartPayload): string {
         case 'guest-pr':
         case 'session':
         case 'session-message':
-            // Linked items carry context text built when they were attached;
-            // there is no default text to derive here.
+        case 'shared-page':
             return '';
     }
 }
 
-/**
- * Build the synthetic part for one context payload. `text` overrides the
- * derived text; repository-issue/change-request payloads require it because their
- * model-facing context is fetched by the picker, not derived from metadata.
- */
 export function createContextPart(payload: ContextPartPayload, text?: string): ContextPart {
     const resolvedText = text ?? formatContextText(payload);
     const metadata: ContextPartMetadata = { [CONTEXT_METADATA_KEY]: payload };
@@ -306,7 +272,6 @@ export function createContextPart(payload: ContextPartPayload, text?: string): C
             preview: payload.code,
             origin: payload.source === 'diff' ? 'review' : 'file',
         };
-        // A whole-file comment has no selection to mirror.
         if (payload.startLine !== 0 || payload.endLine !== 0) {
             comment.selection = { startLine: payload.startLine, endLine: payload.endLine, startChar: 0, endChar: 0 };
         }
@@ -318,7 +283,6 @@ export function createContextPart(payload: ContextPartPayload, text?: string): C
     };
 }
 
-/** Map a composer context draft to its structured payload. */
 export function contextPayloadFromDraft(draft: InlineCommentDraft): ContextPartPayload {
     switch (draft.source) {
         case 'terminal':
@@ -368,6 +332,7 @@ export function contextPayloadFromDraft(draft: InlineCommentDraft): ContextPartP
                 code: draft.code,
                 text: draft.text,
             };
+            if (draft.changedCode !== undefined) payload.changedCode = draft.changedCode;
             if (draft.source === 'diff' && draft.side) payload.side = draft.side;
             if (draft.source === 'diff' && draft.origin) payload.origin = draft.origin;
             return payload;
@@ -375,11 +340,15 @@ export function contextPayloadFromDraft(draft: InlineCommentDraft): ContextPartP
     }
 }
 
-// ---------------------------------------------------------------------------
-// Read-back: parsing part metadata at the display boundary
-// ---------------------------------------------------------------------------
 
 const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
+    z.object({
+        kind: z.literal('shared-page'),
+        receivedId: z.string().min(1).nullable(),
+        host: z.string(),
+        title: z.string(),
+        opened: z.boolean(),
+    }),
     z.object({
         kind: z.literal('code-comment'),
         source: z.enum(['diff', 'file', 'plan']),
@@ -389,6 +358,7 @@ const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
         side: z.enum(['original', 'modified']).optional(),
         language: z.string(),
         code: z.string(),
+        changedCode: z.string().optional(),
         text: z.string(),
         origin: diffCommentOriginSchema.optional(),
     }),
@@ -455,6 +425,7 @@ const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
         number: z.number().int().positive(),
         title: z.string(),
         url: z.string(),
+        sourceLinks: z.array(z.string()).optional(),
     }),
     z.object({
         kind: z.literal('tracker-item'),
@@ -515,10 +486,6 @@ const contextPayloadSchema = z.union([
     }).transform(({ identifier, title, url }): TrackerItemContext => ({ kind: 'tracker-item', provider: 'linear', identifier, title, url })),
 ]);
 
-/**
- * Part metadata carrying a context payload, for parsing at a trust boundary
- * (a queued message coming back from the server, for instance).
- */
 const openCodeCommentSchema = z.object({
     path: z.string(),
     selection: z.object({
@@ -532,34 +499,17 @@ const openCodeCommentSchema = z.object({
     origin: z.enum(['file', 'review']).optional(),
 });
 
-/**
- * Part metadata carrying a context payload, for parsing at a trust boundary
- * (a queued message coming back from the server, for instance). The OpenCode
- * Desktop mirror rides along so a queued comment keeps it too.
- */
 export const contextPartMetadataSchema = z.object({
     [CONTEXT_METADATA_KEY]: contextPayloadSchema,
     [OPENCODE_COMMENT_METADATA_KEY]: openCodeCommentSchema.optional(),
 });
 
-/**
- * The subset of a record that context read-back inspects. Context now travels
- * as synthetic messages, which carry no `type`; the optional field keeps the
- * reader usable for anything else that carries the same metadata.
- */
 export type ContextCarrierPart = { type?: string; metadata?: Metadata };
 
-/**
- * Read the structured context payload from a message part, if it carries one.
- * The part comes from the server or an optimistic insert, so the payload is
- * schema-validated before it is trusted.
- */
 export function readContextPart(part: ContextCarrierPart): ContextPartPayload | null {
     if (part.type !== undefined && part.type !== 'text') return null;
     const contextValue = part.metadata?.[CONTEXT_METADATA_KEY];
     const commentValue = part.metadata?.[OPENCODE_COMMENT_METADATA_KEY];
-    // Most parts carry neither key; neither schema accepts undefined, and a
-    // failed safeParse allocates a ZodError, so skip parsing for them.
     if (contextValue === undefined && commentValue === undefined) return null;
 
     const parsed = contextPayloadSchema.safeParse(contextValue);
@@ -591,17 +541,10 @@ export function readContextPart(part: ContextCarrierPart): ContextPartPayload | 
     return null;
 }
 
-/** Whether a message carries any user-attached context part. */
 export function hasContextParts(parts: ContextCarrierPart[]): boolean {
     return parts.some((part) => readContextPart(part) !== null);
 }
 
-/**
- * The composer draft a context payload came from, so reverting or forking a
- * message can put its attached context back on the chips instead of dropping
- * it. Linked issues/PRs have no draft form — they are owned by their own
- * pickers — so they map to null.
- */
 export function draftFromContextPayload(
     payload: ContextPartPayload,
 ): Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'> | null {
@@ -616,6 +559,7 @@ export function draftFromContextPayload(
                 language: payload.language,
                 text: payload.text,
             };
+            if (payload.changedCode !== undefined) draft.changedCode = payload.changedCode;
             if (payload.side) draft.side = payload.side;
             if (payload.origin) draft.origin = payload.origin;
             return draft;
@@ -674,6 +618,7 @@ export function draftFromContextPayload(
         case 'guest-pr':
         case 'session':
         case 'session-message':
+        case 'shared-page':
             return null;
     }
 }

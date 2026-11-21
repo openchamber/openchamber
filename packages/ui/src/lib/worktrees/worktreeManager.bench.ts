@@ -1,18 +1,6 @@
-/**
- * Local benchmark for worktree store optimizations from PR #1992.
- *
- * Run with:
- *   bun run packages/ui/src/lib/worktrees/worktreeManager.bench.ts
- *
- * This file is intentionally not auto-run on import; it only executes
- * the benchmark suite when launched as a script via `bun run`.
- */
 
 import type { WorktreeMetadata } from '@/types/worktree';
 
-// ---------------------------------------------------------------------------
-// Fixture
-// ---------------------------------------------------------------------------
 
 const buildMap = (numProjects: number, worktreesPerProject: number): Map<string, WorktreeMetadata[]> => {
   const map = new Map<string, WorktreeMetadata[]>();
@@ -34,9 +22,6 @@ const buildMap = (numProjects: number, worktreesPerProject: number): Map<string,
   return map;
 };
 
-// ---------------------------------------------------------------------------
-// Path-only (old) vs path+branch (new)
-// ---------------------------------------------------------------------------
 
 const oldEqualPathOnly = <T extends { path: string }>(
   a: Map<string, T[]>,
@@ -53,9 +38,6 @@ const oldEqualPathOnly = <T extends { path: string }>(
   return true;
 };
 
-// ---------------------------------------------------------------------------
-// Timing helpers
-// ---------------------------------------------------------------------------
 
 interface BenchResult {
   iterations: number;
@@ -69,7 +51,6 @@ const measure = (
   warmupIterations: number,
   body: () => void,
 ): BenchResult => {
-  // Warmup: let V8 inline, populate ICs, run a few GC cycles implicitly.
   for (let i = 0; i < warmupIterations; i++) {
     body();
   }
@@ -83,9 +64,6 @@ const measure = (
   return { iterations, totalMs, nsPerOp, opsPerSec };
 };
 
-// ---------------------------------------------------------------------------
-// Formatting
-// ---------------------------------------------------------------------------
 
 const padLeft = (s: string, n: number): string => {
   if (s.length >= n) return s;
@@ -98,16 +76,10 @@ const formatOpsPerSec = (ops: number): string => {
   return Math.round(ops).toString();
 };
 
-// ---------------------------------------------------------------------------
-// Benchmark suite
-// ---------------------------------------------------------------------------
 
 async function runBenchmarks(): Promise<void> {
-  // Dynamic import so module-level side effects (subscriber registration)
-  // are paid once and excluded from every measured call.
   const { worktreeMapsEqual } = await import('./worktreeManager');
 
-  // ----- 1. worktreeMapsEqual throughput ---------------------------------
   console.log('=== worktreeMapsEqual throughput ===');
   console.log(`  ${padLeft('projects × worktrees', 22)}${padLeft('ns/op', 12)}${padLeft('ops/sec', 12)}`);
 
@@ -135,13 +107,11 @@ async function runBenchmarks(): Promise<void> {
     );
   }
 
-  // Early-exit case: same shape, first project differs.
   {
     const numProjects = 50;
     const worktreesPerProject = 20;
     const a = buildMap(numProjects, worktreesPerProject);
     const b = buildMap(numProjects, worktreesPerProject);
-    // Mutate the first project's first worktree path in b.
     const firstKey = a.keys().next().value as string;
     const bList = b.get(firstKey)!;
     bList[0] = { ...bList[0], path: '/home/user/projects/project-0/.worktrees/different-path' };
@@ -156,7 +126,6 @@ async function runBenchmarks(): Promise<void> {
     );
   }
 
-  // ----- 2. Old (path-only) vs new (path+branch) -------------------------
   console.log('\n=== path-only vs path+branch (10 × 50) ===');
   {
     const a = buildMap(10, 50);
@@ -180,23 +149,19 @@ async function runBenchmarks(): Promise<void> {
     console.log(`  ${padLeft('delta:', 18)}${padLeft(`${sign}${Math.round(delta)}`, 10)} ns/op (${sign}${deltaPct.toFixed(1)}%)`);
   }
 
-  // ----- 3. Subscriber stringify dedup -----------------------------------
   console.log('\n=== subscriber stringify (10 × 50) ===');
   {
     const map = buildMap(10, 50);
 
-    // Cold: 2 stringifies per pass (what the old preSerialized-aware code did).
     const twiceResult = measure(
       10_000,
       1_000,
       () => {
         const a = JSON.stringify([...map.entries()]);
         const b = JSON.stringify([...map.entries()]);
-        // Touch both to prevent dead-code elimination.
         if (a === b && a.length === 0) throw new Error('unreachable');
       },
     );
-    // Hot: stringify once, compare string to cached value.
     const onceResult = measure(
       10_000,
       1_000,
@@ -212,7 +177,6 @@ async function runBenchmarks(): Promise<void> {
     console.log(`  ${padLeft('saved:', 18)}${padLeft(Math.round(saved).toString(), 10)} ns/op (${savedPct.toFixed(1)}%)`);
   }
 
-  // ----- 4. Content-compare guard ----------------------------------------
   console.log('\n=== content-compare guard (10 × 50) ===');
   {
     const a = buildMap(10, 50);

@@ -30,11 +30,6 @@ type HeaderSessionActionsMenuItemsProps = {
   onDelete: () => void;
 };
 
-/**
- * The sidebar's session menu for a session the header shows (a tab, or the
- * title's menu), with the placement its sidebar row would have: the same
- * project, folders and Track / Done.
- */
 export function HeaderSessionActionsMenuItems({
   sessionId,
   open,
@@ -48,7 +43,6 @@ export function HeaderSessionActionsMenuItems({
   const { t } = useI18n();
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const session = useGlobalSessionsStore((state) => state.entityById.get(sessionId));
-  // A subsession under an archived parent comes back only with that parent.
   const restorable = useGlobalSessionsStore((state) => {
     const entry = state.entityById.get(sessionId);
     return !entry || isRestorableOnItsOwn(entry, state.entityById);

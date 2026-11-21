@@ -124,6 +124,16 @@ describe('source control provider descriptors', () => {
       // A server old enough for the fallback has no review draft routes.
       delete features.reviewDrafts;
       delete features.reviewDraftFileComments;
+      // Neither the text edits, which are newer than the fallback it mirrors.
+      delete features.issueEdit;
+      delete features.changeRequestEdit;
+      // Nor the search-box qualifiers, newer still.
+      delete features.advancedSearch;
+      // Nor the comment edit and delete routes.
+      delete features.commentEdit;
+      // GitHub served no uploads before this change.
+      delete features.absoluteProjectUploads;
+      if (descriptor.id === 'github') features.projectUploads = false;
       delete urls.discussion;
       return { ...descriptor, features, urls };
     };

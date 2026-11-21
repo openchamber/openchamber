@@ -1,11 +1,3 @@
-/**
- * Tells the user when a usage limit made the server switch something for them.
- *
- * The switch itself happens in the managed OpenCode (`lib/limit-failover` on
- * the server). An account switch changes the provider for every session, and
- * a model switch changes what the session's composer shows, so neither should
- * happen without a word.
- */
 
 import React from 'react';
 
@@ -21,7 +13,6 @@ export const useLimitFailoverNotices = (): void => {
   React.useEffect(() => subscribeOpenchamberEvents((event) => {
     if (event.type !== 'limit-failover') return;
     const { failover } = event;
-    // Read at event time: the catalog may have loaded since the hook mounted.
     const providers = useConfigStore.getState().providers;
     const provider = (id: string) => providers.find((candidate) => candidate.id === id);
     if (failover.kind === 'account') {

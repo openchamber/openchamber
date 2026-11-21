@@ -1,36 +1,23 @@
 import React from 'react';
 import { importWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
-/**
- * Loads a code-split component the first time `needed` becomes true and
- * returns it once its module has arrived; null until then.
- *
- * Use this instead of `React.lazy` + `Suspense` for surfaces the user opens on
- * demand. A lazy component suspends into its fallback, and React keeps content
- * that replaces a fallback hidden for at least 300 ms, so the first open waited
- * that long even when the chunk arrived in a few milliseconds. Loading the
- * module before rendering never shows a fallback, so nothing is held back.
- *
- * `load` must be a stable (module-level) function. `onFailure` runs when the
- * import fails; chunk-load failures also schedule the usual one-time reload.
- */
-export function useOnDemandComponent<Props extends object>(
+export function useOnDemandValue<T extends NonNullable<unknown>>(
   needed: boolean,
-  load: () => Promise<React.ComponentType<Props>>,
+  load: () => Promise<T>,
   onFailure: () => void,
-): React.ComponentType<Props> | null {
-  const [component, setComponent] = React.useState<React.ComponentType<Props> | null>(null);
+): T | null {
+  const [value, setValue] = React.useState<T | null>(null);
   const onFailureRef = React.useRef(onFailure);
   onFailureRef.current = onFailure;
 
   React.useEffect(() => {
-    if (!needed || component) {
+    if (!needed || value) {
       return;
     }
     let cancelled = false;
     importWithChunkRecovery(load).then(
       (loaded) => {
-        if (!cancelled) setComponent(() => loaded);
+        if (!cancelled) setValue(() => loaded);
       },
       (error) => {
         console.error('[on-demand] failed to load component', error);
@@ -40,7 +27,15 @@ export function useOnDemandComponent<Props extends object>(
     return () => {
       cancelled = true;
     };
-  }, [component, load, needed]);
+  }, [value, load, needed]);
 
-  return component;
+  return value;
+}
+
+export function useOnDemandComponent<Props extends object>(
+  needed: boolean,
+  load: () => Promise<React.ComponentType<Props>>,
+  onFailure: () => void,
+): React.ComponentType<Props> | null {
+  return useOnDemandValue(needed, load, onFailure);
 }

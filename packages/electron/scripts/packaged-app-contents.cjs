@@ -1,46 +1,39 @@
-// Checks what electron-builder put into app.asar against what the packaged
-// runtime needs. The `files` exclusions in package.json keep unused files out;
-// this check stops a pattern change from shipping the web build twice, or from
-// cutting something the server loads at startup.
 const fs = require('node:fs');
 const path = require('node:path');
 
 const WEB_PACKAGE = 'node_modules/@openchamber/web';
 
-// Packaged builds serve the UI from Resources/web-dist (OPENCHAMBER_DIST_DIR),
-// so the web package's own build output is dead weight inside the archive.
-const FORBIDDEN_DIRECTORIES = [`${WEB_PACKAGE}/dist`];
+const FORBIDDEN_DIRECTORIES = [`${WEB_PACKAGE}/dist`, `${WEB_PACKAGE}/server`, `${WEB_PACKAGE}/bin`];
 
-// The app's own files, outside node_modules. Anything else there means the
-// `files` patterns fell back to copying the whole package directory.
 const APP_FILES = [
   'dist-bundle/entry.mjs',
   'dist-bundle/main.mjs',
   'dist-bundle/early-startup.mjs',
   'preload.mjs',
-  // The browser panel session's preload, loaded from the app path.
   'browser-panel-preload.cjs',
   'package.json',
 ];
 
 const REQUIRED_FILES = [
   ...APP_FILES,
-  // server/index.js reads the version from the package manifest.
   `${WEB_PACKAGE}/package.json`,
-  `${WEB_PACKAGE}/server/index.js`,
+  `${WEB_PACKAGE}/build/server/index.js`,
+  `${WEB_PACKAGE}/build/server/index.js.map`,
+  `${WEB_PACKAGE}/build/bin/cli.js`,
+  `${WEB_PACKAGE}/build/server/built-in-extensions/registry.json`,
 ];
 
-// ripgrep ships in Resources/ripgrep for the target architecture
-// (prepare-ripgrep.mjs). The npm platform packages hold the build host's
-// binary, so they stay out of the archive.
 const RIPGREP_PLATFORM_PACKAGE = /(?:^|\/)node_modules\/@vscode\/ripgrep-[^/]+\//;
 const RIPGREP_BINARY = process.platform === 'win32' ? 'rg.exe' : 'rg';
 
-// Run by git and ssh as separate processes, so they must exist on disk.
 const REQUIRED_UNPACKED_FILES = [
-  `${WEB_PACKAGE}/server/lib/git/credential-helper.js`,
-  `${WEB_PACKAGE}/server/lib/git/ssh-wrapper.js`,
-  `${WEB_PACKAGE}/server/lib/git/repository-credential-helper.js`,
+  `${WEB_PACKAGE}/build/server/lib/git/credential-helper.js`,
+  `${WEB_PACKAGE}/build/server/lib/git/credential-helper-runtime.js`,
+  `${WEB_PACKAGE}/build/server/lib/git/ssh-wrapper.js`,
+  `${WEB_PACKAGE}/build/server/lib/git/ssh-wrapper-runtime.js`,
+  `${WEB_PACKAGE}/build/server/lib/git/repository-credential-helper.js`,
+  `${WEB_PACKAGE}/build/server/lib/git/repository-credential-helper-runtime.js`,
+  `${WEB_PACKAGE}/build/server/built-in-extensions/registry.json`,
 ];
 
 const requiredUnpackedFiles = ({ platform = process.platform, arch = process.arch } = {}) => (
@@ -49,11 +42,6 @@ const requiredUnpackedFiles = ({ platform = process.platform, arch = process.arc
     : REQUIRED_UNPACKED_FILES
 );
 
-/**
- * Lists the files recorded in an asar header.
- * Layout: a pickle holding the header size, then a pickle holding the header
- * JSON string (payload size at offset 8, string length at 12, string at 16).
- */
 const readAsarFiles = (asarPath) => {
   const descriptor = fs.openSync(asarPath, 'r');
   try {

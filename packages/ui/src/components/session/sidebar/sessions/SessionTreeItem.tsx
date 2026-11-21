@@ -24,9 +24,7 @@ type Context = {
   archivedBucket?: boolean;
   secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null; inSpace?: boolean } | null;
   renderContext?: SessionSidebarRenderContext;
-  /** Two lines under the project: a work of its own with Detailed rows on. */
   detailed?: boolean;
-  /** The session is listed higher up too; see `SessionNodeItemProps.repeat`. */
   repeat?: boolean;
   rowKey?: string;
   dragKey?: string;
@@ -44,7 +42,6 @@ type SessionTreeItemRenderProps = Context & Pick<SessionNodeItemProps,
   node: SessionNode;
   pinnedSessionIds: Set<string>;
   depth?: number;
-  /** A work of its own; on by default for a top row, never for what nests under it. */
   ownsWork?: boolean;
   renderExtras?: SessionNodeRenderExtras;
 };
@@ -67,8 +64,6 @@ export type SessionTreeItemProps = SessionTreeItemRenderProps & Pick<SessionNode
 
 const EMPTY_SUBTREE_CONTAINS_EDITING: Set<string> = new Set();
 
-// This is the recursive ownership boundary. Structural parents pass identity
-// and stable UI actions; the row itself remains the leaf subscriber for live UI state.
 function SessionTreeItemComponent({
   node,
   depth = 0,
@@ -114,10 +109,6 @@ function SessionTreeItemComponent({
   const toggleFolderCollapse = useSessionFoldersStore((state) => state.toggleFolderCollapse);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
-  // Keyed by the descendant ids themselves, not by node identity: the sidebar
-  // rebuilds a project's node tree whenever one of its session records
-  // changes, and a fresh array here would give every row in that project a
-  // new delete handler and force it to re-render.
   const descendantIdsKey = React.useMemo(
     () => collectParentIdDescendantIds(node).join('\n'),
     [node],
@@ -257,11 +248,6 @@ const isSameSessionForRow = (prev: SessionNode, next: SessionNode): boolean => (
   && prev.children.length === next.children.length
 );
 
-// The row list re-renders on every virtualizer frame while scrolling and on
-// every model rebuild. The scroller spreads a shared props bag onto each row
-// and builds a fresh `renderExtras` object per call, so a plain shallow
-// comparison would never match. Compare only what this wrapper and its row
-// actually read, by value where the model recreates objects.
 const areSessionTreeItemPropsEqual = (prev: SessionTreeItemProps, next: SessionTreeItemProps): boolean => {
   if (prev.node !== next.node && !isSameSessionForRow(prev.node, next.node)) return false;
   if ((prev.renderExtras?.nodeStructureKey ?? '') !== (next.renderExtras?.nodeStructureKey ?? '')) return false;

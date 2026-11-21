@@ -1,11 +1,7 @@
-import { bundledLanguagesInfo } from 'shiki/langs';
 import type { CodeHighlighterPlugin, HighlightOptions, HighlightResult, HighlightToken } from 'streamdown';
-import { MARKDOWN_SHIKI_THEME_DEFINITION } from './markdownShikiThemeDefinition';
-import { streamdownCodeWorker } from './streamdownCodeWorker';
+import { markdownCodeHighlighter } from './markdownCodeHighlighter';
 
-const languages = bundledLanguagesInfo.map((info) => info.id);
-const supportedLanguages = new Set(bundledLanguagesInfo.flatMap((info) => [info.id, ...(info.aliases ?? [])]));
-const themes: ReturnType<CodeHighlighterPlugin['getThemes']> = [MARKDOWN_SHIKI_THEME_DEFINITION, MARKDOWN_SHIKI_THEME_DEFINITION];
+const themes: ReturnType<CodeHighlighterPlugin['getThemes']> = [{ name: 'openchamber-md' }, { name: 'openchamber-md' }];
 function nativeLanguage(language: string): string {
   return language.trim().toLowerCase() || 'text';
 }
@@ -14,7 +10,6 @@ function plainCode(code: string): HighlightResult {
   return { tokens: code.split('\n').map((content) => [{ content }]) };
 }
 
-// Preserve the original renderer's line budgets for settled and open fences.
 function canHighlight(options: HighlightOptions, isVSCode: boolean): boolean {
   const maxLines = isVSCode ? 200 : options.isIncomplete ? 300 : 1200;
   let lines = 1;
@@ -31,7 +26,6 @@ export interface ConfirmedCodePath {
   path: string;
 }
 
-/** Split highlighted tokens at source offsets, preserving every style and byte. */
 function annotateCodePaths(result: HighlightResult, paths: readonly ConfirmedCodePath[]): HighlightResult {
   if (!paths.length) return result;
   let lineOffset = 0;
@@ -77,7 +71,6 @@ function annotateCodePaths(result: HighlightResult, paths: readonly ConfirmedCod
 }
 
 export interface MarkdownCodePlugin extends CodeHighlighterPlugin {
-  /** Synchronous result lookup; never starts worker or filesystem work. */
   cached: (input: HighlightOptions) => HighlightResult | null;
 }
 
@@ -87,7 +80,6 @@ export function createMarkdownCodePlugin(options: {
   purpose?: 'copy' | 'image';
   prepared?: ReadonlyMap<string, ReadonlyMap<string, HighlightResult>>;
 }): MarkdownCodePlugin {
-  // Scope path annotations to this renderer's runtime/directory-bound resolver.
   const annotated = new WeakMap<HighlightResult, HighlightResult>();
   const pendingPaths = new Map<string, Promise<ConfirmedCodePath[]>>();
   const cached = (input: HighlightOptions): HighlightResult | null => {
@@ -95,15 +87,15 @@ export function createMarkdownCodePlugin(options: {
     if (prepared) return prepared;
     if (options.purpose === 'copy' || !canHighlight(input, options.isVSCode)) return plainCode(input.code);
     const language = nativeLanguage(input.language);
-    const result = streamdownCodeWorker.cached(input.code, language, input.isIncomplete ?? false);
+    const result = markdownCodeHighlighter.cached(input.code, language, input.isIncomplete ?? false);
     return result ? annotated.get(result) ?? result : null;
   };
   return {
     name: 'shiki',
     type: 'code-highlighter',
-    getSupportedLanguages: () => languages,
+    getSupportedLanguages: () => [],
     getThemes: () => themes,
-    supportsLanguage: (language) => supportedLanguages.has(nativeLanguage(language)),
+    supportsLanguage: () => true,
     cached,
     highlight(input, callback) {
       const finish = (result: HighlightResult) => {
@@ -114,8 +106,6 @@ export function createMarkdownCodePlugin(options: {
           if (!pending) {
             pending = options.resolvePaths(input.code);
             pendingPaths.set(input.code, pending);
-            // Only coalesce pending work. Existing filesystem confirmation owns
-            // freshness; negative results must not live for this plugin's lifetime.
             void pending.finally(() => pendingPaths.delete(input.code)).catch(() => {});
           }
           void pending.then((paths) => {
@@ -131,7 +121,7 @@ export function createMarkdownCodePlugin(options: {
       const ready = cached(input);
       if (ready) return options.prepared?.get(input.language)?.has(input.code) ? ready : finish(ready);
       const language = nativeLanguage(input.language);
-      void streamdownCodeWorker.highlight(input.code, language, input.isIncomplete ?? false)
+      void markdownCodeHighlighter.highlight(input.code, language, input.isIncomplete ?? false)
         .then((result) => callback?.(finish(result ?? plainCode(input.code))));
       return null;
     },

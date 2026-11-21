@@ -32,6 +32,20 @@ describe('splitTextMedia', () => {
     ]);
   });
 
+  test('takes the innermost label when a bracket opens before it', () => {
+    expect(splitTextMedia('[see [docs](https://linear.app/docs)')).toEqual([
+      { kind: 'text', text: '[see ' },
+      { kind: 'link', href: 'https://linear.app/docs', label: 'docs' },
+    ]);
+  });
+
+  test('splits hostile unclosed markup in linear time', () => {
+    const started = performance.now();
+    splitTextMedia('['.repeat(200_000));
+    splitTextMedia('[a](http://x'.repeat(20_000));
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
   test('leaves a javascript URL as text', () => {
     expect(splitTextMedia('![x](javascript:alert(1))')).toEqual([
       { kind: 'text', text: '![x](javascript:alert(1))' },

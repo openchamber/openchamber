@@ -9,7 +9,6 @@ import { UsageProgressBar } from './UsageProgressBar';
 
 type Translate = ReturnType<typeof useI18n>['t'];
 
-/** Names shown in a budget's label before the rest are counted. */
 const SHOWN_MODEL_NAMES = 2;
 
 const formatUsd = (amount: number): string => (
@@ -20,7 +19,6 @@ const formatList = (items: string[]): string => (
   new Intl.ListFormat(getCurrentIntlLocale(), { type: 'conjunction' }).format(items)
 );
 
-/** What the budget counts, in the words the Console uses. */
 const budgetLabel = (budget: ConsoleBudget, t: Translate): string => {
   const each = budget.perModel;
   const price = budget.inputPriceAtLeast === null ? null : formatUsd(budget.inputPriceAtLeast);
@@ -104,11 +102,13 @@ const BudgetRow: React.FC<{ budget: ConsoleBudget; workspace: string | null }> =
   );
 };
 
-/** The Console budgets of the OpenCode Go sign-in, below its meters; ordered by what runs out first. */
 export const ConsoleBudgetsSection: React.FC<{ consoleBudgets: ConsoleBudgets }> = ({ consoleBudgets }) => {
   const { t } = useI18n();
   return (
-    <SettingsSection title={t('settings.usage.consoleBudgets.title')}>
+    <SettingsSection
+      title={t('settings.usage.consoleBudgets.title')}
+      description={consoleBudgets.workspace ? <bdi className="wrap-anywhere">{consoleBudgets.workspace}</bdi> : undefined}
+    >
       <div className="divide-y divide-[var(--surface-subtle)]">
         {consoleBudgets.budgets.map((budget) => (
           <BudgetRow key={budget.id} budget={budget} workspace={consoleBudgets.workspace} />

@@ -1,6 +1,7 @@
 import { afterEach, expect, mock, test } from 'bun:test';
+import type { ProviderResult } from '@/types';
 
-let responsePayload: unknown;
+let responsePayload: ProviderResult;
 mock.module('@/lib/runtime-fetch', () => ({ runtimeFetch: async () => Response.json(responsePayload) }));
 const { fetchQuota } = await import('./fetchQuota');
 
@@ -53,5 +54,32 @@ test('preserves semantic credits-used data through the quota response parser', a
   expect(result.usage?.windows.premium_interactions).toEqual(window);
   expect(result.planLabel).toBe('Copilot Business');
   expect(result.accountLabel).toBe('other@example.com');
+});
+
+test('preserves monthly spending totals and unknown category amounts through the parser', async () => {
+  const window = {
+    usedPercent: null,
+    remainingPercent: null,
+    windowSeconds: null,
+    resetAfterSeconds: null,
+    resetAt: null,
+    resetAtFormatted: null,
+    resetAfterFormatted: null,
+  };
+  responsePayload = {
+    providerId: 'openrouter', providerName: 'OpenRouter', ok: true, configured: true, fetchedAt: 1,
+    usage: {
+      windows: {
+        monthly_total: { ...window, value: { kind: 'spend', spent: 226.64374512, limit: null } },
+        monthly_credits: { ...window, value: { kind: 'spend', spent: 14.297788398, limit: null } },
+        monthly_byok: { ...window, value: { kind: 'spend', spent: null, limit: null } },
+      },
+    },
+  };
+
+  const result = await fetchQuota('openrouter');
+  expect(result.usage?.windows.monthly_total?.value).toEqual({ kind: 'spend', spent: 226.64374512, limit: null });
+  expect(result.usage?.windows.monthly_credits?.value).toEqual({ kind: 'spend', spent: 14.297788398, limit: null });
+  expect(result.usage?.windows.monthly_byok?.value).toEqual({ kind: 'spend', spent: null, limit: null });
 });
 

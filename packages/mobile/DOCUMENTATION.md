@@ -1,11 +1,86 @@
 # Mobile
 
-## Product non-goals
+## Build and device tooling
 
-- The in-app browser panel and agent browser control stay on desktop and web.
-  They are not coming to the phone app or the hosted mobile surface, so mobile
-  parity is no reason to shape a browser feature, and browser work needs no
-  mobile plan.
+### Ownership
+
+`scripts/` owns local native build, device launch and simulator-stream orchestration. The web package owns the web bundle; the native projects own the packaged app.
+
+### Invariants
+
+- The simulator build restores the original Podfile and reinstalls its pods in `finally` so device and TestFlight builds retain the barcode scanner, including after a build failure.
+
+### Why the simulator build omits the scanner and not the device build
+
+The scanner's ML Kit dependency lacks an arm64 simulator slice, and an x86_64-only app cannot install on arm64-only iOS 26+ simulators. Simulator QR scanning has no camera to use, and `mobileQrScan` reports scanning unsupported when the native plugin is absent, so omitting the pod preserves the available simulator functionality.
+
+### Why Capacitor copy and not sync during simulator builds
+
+The simulator build uses `cap copy ios` to update bundled web assets without regenerating pods before the temporary scanner exclusion.
+
+### Why the selected Xcode and not a fixed application path
+
+`with-mobile-env.mjs` respects `DEVELOPER_DIR`, then `xcode-select`, so beta and non-default Xcode installations keep their matching simulator runtimes. A fixed Xcode path can select an installation that cannot find the chosen simulator.
+
+### Why the simulator loop adds the package bin directory to PATH
+
+`ios-sim-dev.mjs` resolves the package-local `serve-sim` executable even when invoked outside `bun run`, where the package bin directory is absent from PATH.
+
+## Dev-server preview
+
+The workspace drawer's Browser tab (id `preview`) shows a dev server running on
+the OpenChamber host. It exists only in the native app: hosted mobile cannot
+reach the host's `localhost`, so there the tab is not offered, not in the strip
+and not in Settings (`lib/mobileWorkspaceTabs.ts`).
+
+- A loopback URL resolves to an app-owned TCP listener on `127.0.0.1`, one per
+  remote port. Each accepted connection is carried by the renderer over the
+  authenticated `/api/dev-tunnel` WebSocket, through the relay when the
+  connection is a relay one. A relay runtime counts as remote whatever base URL
+  it names: on the phone it is the shell's own `https://localhost`.
+- Native code moves opaque bytes only (Android `MobileDevTunnelPlugin`,
+  ServerSocket; iOS `MobileDevTunnel.swift`, NWListener). Nothing rewrites the
+  page or its headers, so absolute paths, cookies and HMR sockets keep the
+  preview's own origin. The server limits destinations to the discovery
+  allowlist.
+- Native reads wait for the renderer's credit, one read in flight per
+  connection. When the dev server closes a connection, the bytes already queued
+  for the native socket are written before it closes.
+- A runtime switch stops every listener and connection, also one still being
+  opened.
+- A listener that dies without a stop (iOS reclaims the listening sockets of a
+  suspended app) reports `stopped`; its port leaves the cache, and the next
+  navigation or Reload opens a new listener. Reload in the phone preview
+  resolves the address again for that reason, and so also retries a tunnel
+  that failed.
+- The page is opaque to the app, so its own navigations are invisible to the
+  toolbar. While a page shows, the preview keeps a guard entry on top of the
+  app's history (`pushPreviewFrameGuard`); the page's navigations land above
+  it in the WebView's history. Back, the toolbar's and Android's, asks the
+  WebView to go back: inside the page while it has history, and off the guard
+  once it has none, which takes the preview's own step to the previous address
+  or the server list. At the server list Android Back closes the drawer.
+- The page is for viewing: annotation and agent page control stay on desktop.
+- Only the app's own document reaches native plugins. WebKit exposes
+  Capacitor's `bridge` message handler to every frame, so the iOS shell
+  replaces it with one that drops messages from other frames
+  (`MainFrameBridgeHandler`, `AppDelegate.swift`); without it a previewed page
+  or an extension panel could call any plugin. Android's Capacitor accepts
+  main-frame messages only through a web message listener; on a WebView
+  without one it falls back to a JavaScript interface every frame can call.
+  There `isolatesFrames` answers false, the Browser tab shows no pages and
+  says to update the WebView, and the native listener refuses to start.
+- A chat switch while the preview holds its guard writes the route over it
+  (`pushRouteEntry`). Back then takes the preview's own step and skips the
+  page's history, because walking back under a route entry would make the app
+  apply the older route.
+
+### Why the WebView's history and not a count of the page's navigations
+
+A cross-origin frame reports full loads at most, never `pushState`, so a
+count misses every navigation of a single-page app and over-counts a reload.
+An over-count walks back into the app's own routes. The WebView's history
+holds every navigation, and the guard marks where the page's part of it starts.
 
 # Checking push handling without a device
 

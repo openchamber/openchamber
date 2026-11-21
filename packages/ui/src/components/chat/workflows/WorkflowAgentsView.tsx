@@ -26,10 +26,8 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type PhaseGroup = ReturnType<typeof groupWorkflowAgentsByPhase>[number];
 
-/** The model id without its provider, the part that tells two agents apart. */
 const shortModel = (model: string): string => model.slice(model.indexOf('/') + 1);
 
-/** A span of time, live while it has no end. Ticks only itself. */
 const Duration: React.FC<{ start: number | undefined; end: number | undefined; className?: string }> = ({ start, end, className }) => {
   const now = useDurationTickerNow(start !== undefined && end === undefined);
   if (start === undefined) return null;
@@ -46,7 +44,6 @@ const phaseSpan = (agents: WorkflowAgent[]): PhaseSpan => {
   return { start: Math.min(...starts), end: open ? undefined : Math.max(...ends, ...starts) };
 };
 
-/** One tile per phase: how many of its agents finished, for how long, and a bar of it. */
 const PhaseStrip: React.FC<{ run: WorkflowRun; groups: PhaseGroup[] }> = ({ run, groups }) => {
   const { t } = useI18n();
   const titled = groups.filter((group) => group.title !== null);
@@ -82,14 +79,12 @@ const PhaseStrip: React.FC<{ run: WorkflowRun; groups: PhaseGroup[] }> = ({ run,
   );
 };
 
-/** What opens under an agent's row: its prompt and full answer, read when opened. */
 const AgentDetails: React.FC<{ run: WorkflowRun; agent: WorkflowAgent; onOpenSession: (() => void) | null }> = ({ run, agent, onOpenSession }) => {
   const { t } = useI18n();
   const [detail, setDetail] = React.useState<WorkflowAgentDetail | null>(null);
   const [failed, setFailed] = React.useState(false);
   const [promptOpen, setPromptOpen] = React.useState(false);
 
-  // Read again when the agent's state moves on, so a finished answer replaces "no answer yet".
   React.useEffect(() => {
     let current = true;
     setFailed(false);
@@ -157,9 +152,7 @@ const AgentDetails: React.FC<{ run: WorkflowRun; agent: WorkflowAgent; onOpenSes
 const AgentRow: React.FC<{
   run: WorkflowRun;
   agent: WorkflowAgent;
-  /** Off when the phase header already names the one model all its agents ran on. */
   showModel: boolean;
-  /** Whether the run has any spend to show; columns without numbers are left out. */
   columns: SpendColumns;
   open: boolean;
   onToggle: () => void;
@@ -204,29 +197,21 @@ const AgentRow: React.FC<{
 
 type SpendColumns = { tokens: boolean; cost: boolean };
 
-/** Tokens and cost of some agents as one short line, or null when none was measured. */
 const spendText = (agents: readonly WorkflowAgent[], columns: SpendColumns): string | null => {
   const totals = workflowAgentsTotals(agents);
   if (totals.measured === 0) return null;
   const parts = [];
   if (columns.tokens) parts.push(formatTelemetryTokens(totals.tokens));
-  // Providers on a subscription report a cost of zero; that is no price to show.
   if (columns.cost && totals.cost > 0) parts.push(formatCost(totals.cost));
   return parts.length > 0 ? parts.join(' · ') : null;
 };
 
-/** The one model every agent of a phase ran on, named once in its header; null when they differ. */
 const phaseModel = (agents: WorkflowAgent[]): string | null => {
   const models = new Set(agents.map((agent) => agent.model ?? null));
   const [only] = models;
   return models.size === 1 && only ? shortModel(only) : null;
 };
 
-/**
- * The run's agents: a tile per phase, then each phase's agents with their
- * model, time and tokens. A finished phase folds while another one runs, so
- * the work in progress stays in view; a row opens to the agent's answer.
- */
 export const WorkflowAgentsView: React.FC<{ run: WorkflowRun; directory: string | null }> = ({ run, directory }) => {
   const { t } = useI18n();
   const groups = React.useMemo(() => groupWorkflowAgentsByPhase(run), [run]);
@@ -234,7 +219,6 @@ export const WorkflowAgentsView: React.FC<{ run: WorkflowRun; directory: string 
   const [openAgents, setOpenAgents] = React.useState<ReadonlySet<string>>(() => new Set());
   const [toggledPhases, setToggledPhases] = React.useState<ReadonlySet<string>>(() => new Set());
   const totals = workflowRunTotals(run);
-  // Runs without spend (sessions gone, a provider that reports no cost) get no empty columns.
   const columns: SpendColumns = { tokens: totals.measured > 0, cost: totals.cost > 0 };
   const done = run.agents.filter((agent) => agent.state === 'completed').length;
 

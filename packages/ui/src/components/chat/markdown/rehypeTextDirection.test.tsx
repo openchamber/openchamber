@@ -70,6 +70,11 @@ describe('rehypeTextDirection in the markdown pipeline', () => {
     expect(render('راجع https://github.com/openchamber/openchamber/pull/6590 الآن').querySelector('p')?.getAttribute('dir')).toBe('rtl');
   });
 
+  test('tables resolve independently by their prose, excluding code', () => {
+    const result = render('| React الاسم | القيمة |\n| --- | --- |\n| `longEnglishIdentifier` واحد | اثنان |\n\n| Name | Value |\n| --- | --- |\n| Hello | world |\n\n| 1 | 2 |\n| --- | --- |\n| 3 | 4 |');
+    expect(dirs(result, 'table')).toEqual(['rtl', 'ltr', null]);
+  });
+
   test('fenced code blocks and text without letters keep no direction', () => {
     const result = render('```ts\n// مرحبا\nconst a = 1;\n```\n\n42 — 7');
     expect(result.querySelector('pre')?.getAttribute('dir')).toBeNull();

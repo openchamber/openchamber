@@ -35,6 +35,7 @@ Nginx, Nginx Proxy Manager, Caddy, Cloudflare 또는 다른 리버스 프록시 
 - OpenChamber가 이미 응답을 압축한다면 프록시에서 gzip을 비활성화하세요.
 - 압축은 한 계층에서만 켜두세요.
 - `Host`, `X-Forwarded-For`, `X-Forwarded-Proto` 같은 일반 프록시 헤더를 전달하세요.
+- 프록시가 다른 컴퓨터나 다른 컨테이너에서 실행된다면 그 주소를 [`OPENCHAMBER_TRUSTED_PROXIES`](/ko/environment/#openchamber_trusted_proxies)에 추가하세요. 그렇지 않으면 그 뒤의 모든 사람이 실패한 로그인 시도 한도 하나를 함께 씁니다.
 - 사용자가 파일을 업로드한다면 본문 크기 제한을 늘리세요.
 
 ## 빠른 체크리스트

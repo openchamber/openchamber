@@ -15,14 +15,14 @@ const app = (providers) => {
 
 describe('quota routes with extension providers', () => {
   it('lists the extensions\' providers from memory, without the quota module or OpenCode', async () => {
-    attachExtensionQuotaProvider({ providerId: 'ext-teapot-usage', providerName: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage' });
+    attachExtensionQuotaProvider({ providerId: 'ext-teapot-usage', providerName: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage', providers: ['teapot'] });
     try {
       const server = express();
       const getQuotaProviders = vi.fn(async () => { throw new Error('OpenCode is not connected yet'); });
       registerQuotaRoutes(server, { getQuotaProviders });
       const response = await request(server).get('/api/quota/extensions');
       expect(response.status).toBe(200);
-      expect(response.body).toEqual({ extensions: [{ id: 'ext-teapot-usage', name: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage' }] });
+      expect(response.body).toEqual({ extensions: [{ id: 'ext-teapot-usage', name: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage', providers: ['teapot'] }] });
       expect(getQuotaProviders).not.toHaveBeenCalled();
     } finally {
       detachExtensionQuotaProvider('ext-teapot-usage');
@@ -42,6 +42,26 @@ describe('quota routes with extension providers', () => {
     })).get('/api/quota/codex');
     expect(plain.status).toBe(500);
     expect(plain.body).toEqual({ error: 'upstream said no' });
+  });
+});
+
+describe('managed credential dictionary boundary', () => {
+  it.each([
+    ['missing-provider', 404, 'UNSUPPORTED_PROVIDER', 'Unsupported credential provider'],
+    ['constructor', 404, 'UNSUPPORTED_PROVIDER', 'Unsupported credential provider'],
+    ['__proto__', 404, 'UNSUPPORTED_PROVIDER', 'Unsupported credential provider'],
+  ])('answers 404 for %s, which is not a credential provider', async (providerId, status, code, error) => {
+    const server = app({});
+    server.use((cause, _req, res, _next) => {
+      res.status(500).json({ code: cause.name, error: cause.message });
+    });
+
+    const response = await request(server)
+      .put(`/api/quota/credentials/${providerId}`)
+      .send({ usageToken: 'test-token' });
+
+    expect(response.status).toBe(status);
+    expect(response.body).toEqual({ code, error });
   });
 });
 

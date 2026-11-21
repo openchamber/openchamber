@@ -10,22 +10,19 @@ import { useSwitcherItems } from '@/components/session/sidebar/shell/useSwitcher
 import { useTabletLayout } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { refreshGlobalSessions, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { refreshGlobalSessionsWhenShown, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS } from '@/hooks/useGlobalSessionsPolling';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionMarkedUnread, useSessionUnread } from '@/sync/session-unread';
 import { useHasSessionTurnDuration } from '@/sync/session-turn-duration';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
 const RECENT_SESSIONS_LIMIT = 10;
-/** Matches the metadata popover's width so both header dropdowns read as a pair. */
 const TABLET_POPOVER_WIDTH = 380;
 
 const getSessionTitle = (session: Session, fallback: string): string =>
   session.title?.trim() || fallback;
 
-/** One switcher row: live status (busy spinner / attention dot), title,
-    "project · branch", compact time. Mirrors the desktop SessionSwitcherDropdown
-    indicator conventions; no subsession chevrons on mobile by design. */
 const SwitcherRow: React.FC<{
   session: Session;
   meta: string;
@@ -60,14 +57,11 @@ const SwitcherRow: React.FC<{
           <span className="block truncate typography-micro text-muted-foreground">{meta}</span>
         ) : null}
       </span>
-      {/* Activity sits on the right, before the time — no reserved left gutter. */}
       {isStreaming || showUnreadDot ? (
         <SessionActivityIndicator
           state={turnActivity ?? 'unread'}
         />
       ) : null}
-      {/* The elapsed turn takes the time slot while it matters, then hands it
-          back to the relative timestamp. */}
       {showActivityDuration ? (
         <SessionActivityDuration
           sessionId={session.id}
@@ -81,8 +75,6 @@ const SwitcherRow: React.FC<{
   );
 };
 
-/** Recent-sessions popover under the mobile header, opened by tapping the
-    session title. Same visual family as the metadata/usage overlay. */
 export const MobileSessionSwitcher: React.FC<{
   open: boolean;
   onClose: () => void;
@@ -92,16 +84,10 @@ export const MobileSessionSwitcher: React.FC<{
   const panelRef = React.useRef<HTMLDivElement>(null);
   const [shouldRender, setShouldRender] = React.useState(open);
   const [isExiting, setIsExiting] = React.useState(false);
-  // Tablet: a phone-width sheet stretched across the whole chat column looks
-  // broken — anchor a popover under the title instead. Mirror image of the
-  // metadata/usage popover, which anchors to the ring on the right.
   const { enabled: isTabletLayout } = useTabletLayout();
   const wrapperRef = React.useRef<HTMLDivElement>(null);
   const [anchorLeft, setAnchorLeft] = React.useState<number | null>(null);
 
-  // The shell has transformed ancestors, so the fixed wrapper's containing
-  // block is the chat column, NOT the viewport — anchor in the wrapper's own
-  // coordinate space (see SessionMetadataOverlay for the same reasoning).
   React.useLayoutEffect(() => {
     if (!open || !isTabletLayout || !shouldRender) return;
     const compute = () => {
@@ -118,8 +104,6 @@ export const MobileSessionSwitcher: React.FC<{
       ));
     };
     compute();
-    // Re-anchor if the chat column shifts while the popover is open (sidebar
-    // toggle/resize, orientation change) — the header buttons move with it.
     const wrapper = wrapperRef.current;
     if (typeof ResizeObserver === 'undefined' || !wrapper) return;
     const observer = new ResizeObserver(compute);
@@ -136,9 +120,7 @@ export const MobileSessionSwitcher: React.FC<{
 
   React.useEffect(() => {
     if (open) {
-      // Fresh authoritative snapshot on open — updated stamps re-sort recents
-      // (see raiseSessionOrderingBaselines) while the cached list shows first.
-      void refreshGlobalSessions();
+      void refreshGlobalSessionsWhenShown(GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS);
       setShouldRender(true);
       setIsExiting(false);
       return;

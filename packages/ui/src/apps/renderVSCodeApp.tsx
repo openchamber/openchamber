@@ -6,6 +6,7 @@ import '@/index.css';
 import '@/lib/debug';
 import { SessionAuthGate } from '@/components/auth/SessionAuthGate';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
+import { preloadMarkdownRenderer } from '@/components/chat/markdownRendererLoader';
 import { OpenCodeCompatibilityGate } from '@/components/update/OpenCodeCompatibilityGate';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import type { RuntimeAPIs } from '@/lib/api/types';
@@ -20,6 +21,8 @@ export function renderVSCodeApp(apis: RuntimeAPIs) {
   if (!rootElement) {
     throw new Error('Root element not found');
   }
+
+  preloadMarkdownRenderer();
 
   createRoot(rootElement).render(
     <StrictMode>

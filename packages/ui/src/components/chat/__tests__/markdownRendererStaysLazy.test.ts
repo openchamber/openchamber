@@ -1,8 +1,8 @@
 /**
  * Regression guard: the Markdown renderer stays out of the startup bundle.
  *
- * `MarkdownRendererImpl` brings Streamdown, KaTeX, Shiki and beautiful-mermaid
- * with ELK, about 3 MB of script. `markdownRendererLoader` imports it
+ * `MarkdownRendererImpl` brings Streamdown and KaTeX; beautiful-mermaid
+ * with ELK loads separately, with the first diagram. `markdownRendererLoader` imports it
  * dynamically so the first screen does not wait for it, but one static value
  * import from a module of the startup graph puts all of it back into that
  * graph, and the build only says so in a warning among dozens. Components
@@ -35,12 +35,18 @@ const staticValueImporters = (module: string): string[] => sourceFiles(srcRoot)
   .map((path) => relative(srcRoot, path).split(sep).join('/'));
 
 describe('the Markdown renderer stays out of the startup bundle', () => {
-  test('only the on-demand export path imports MarkdownRendererImpl statically', () => {
-    expect(staticValueImporters('MarkdownRendererImpl')).toEqual(['components/chat/markdown/renderMarkdownForExport.tsx']);
+  test('MarkdownRendererImpl is only loaded on demand', () => {
+    expect(staticValueImporters('MarkdownRendererImpl')).toEqual([]);
   });
 
   test('the export path itself is only imported on demand', () => {
     expect(staticValueImporters('renderMarkdownForExport')).toEqual([]);
+  });
+
+  // The renderer loads with the first message of every chat; the diagram
+  // renderer and ELK under it load with the first diagram (MarkdownMermaid).
+  test('beautiful-mermaid is only imported on demand', () => {
+    expect(staticValueImporters('beautiful-mermaid')).toEqual([]);
   });
 
   test('the matcher sees every static form and skips type-only imports', () => {

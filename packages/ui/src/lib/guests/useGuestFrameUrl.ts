@@ -4,13 +4,11 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import { FRAME_LOAD_TIMEOUT_MS, resolveGuestFrameUrl, type GuestFrameUrl } from './frame-url';
 
 type GuestFrameOptions = {
-  /** A read over the relay may be kept and shared by frames with one `instanceKey`. */
   reuseDocument?: boolean;
   guestId: string;
   entry: string | null;
   instanceKey: string;
   enabled: boolean;
-  /** Approved `contributes.origins`; relay documents carry them in their policy. Part of `instanceKey`. */
   origins: readonly string[];
 };
 
@@ -19,9 +17,7 @@ type FrameState =
   | { key: string; status: 'loading' | 'error' }
   | { key: string; status: 'ready'; source: GuestFrameUrl };
 
-/** Keep a loaded document alive; renew scoped auth only when it navigates again. */
 export const useGuestFrameUrl = ({ guestId, entry, instanceKey, enabled, origins, reuseDocument = false }: GuestFrameOptions) => {
-  // `instanceKey` changes with the list, so the effect re-runs; the ref only avoids an array dependency.
   const originsRef = React.useRef(origins);
   originsRef.current = origins;
   const [state, setState] = React.useState<FrameState | null>(null);

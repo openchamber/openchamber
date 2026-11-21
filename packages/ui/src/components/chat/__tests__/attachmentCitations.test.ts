@@ -1,22 +1,16 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 
 import {
     assignImageAttachmentFilenames,
     buildAttachmentCitationText,
-    buildImagePathCitationText,
     findAttachmentCitationRanges,
     findImagePathCitationNames,
+    findLocalFileLinks,
     imageSaveModeForModel,
     isGenericImageFilename,
     nextPastedContextFilename,
-    prepareImageToSave,
 } from '../attachmentCitations';
 
-let decodeHeic = async (): Promise<Blob> => new Blob(['jpeg-data'], { type: 'image/jpeg' });
-
-mock.module('heic2any', () => ({
-    default: async () => decodeHeic(),
-}));
 
 describe('attachment citations', () => {
     test('keeps meaningful image names', () => {
@@ -71,18 +65,6 @@ describe('attachment citations', () => {
         expect(nextPastedContextFilename(['PASTED-CONTEXT-2.TXT'])).toBe('pasted-context-1.txt');
     });
 
-    test('cites saved images by path as markdown links', () => {
-        expect(buildImagePathCitationText([
-            { filename: 'image-1.png', path: '/tmp/opencode/openchamber/ab12/image-1.png' },
-            { filename: 'shot.png', path: 'C:\\Users\\Jo Doe\\AppData\\Local\\Temp\\opencode\\openchamber\\ab12\\shot.png' },
-            { filename: 'x.png', path: '/tmp/a (1)/x.png' },
-        ])).toBe(
-            '[image-1.png](/tmp/opencode/openchamber/ab12/image-1.png) '
-            + '[shot.png](<C:/Users/Jo Doe/AppData/Local/Temp/opencode/openchamber/ab12/shot.png>) '
-            + '[x.png](</tmp/a (1)/x.png>)',
-        );
-    });
-
     test('finds the names of links already in the draft', () => {
         const draft = 'see [image-1.png](/tmp/x/image-1.png) and [image-2.png] and [shot.png](<C:/a b/shot.png>)';
         expect(findImagePathCitationNames(draft)).toEqual(['image-1.png', 'shot.png']);
@@ -110,22 +92,18 @@ describe('image save mode', () => {
     test('unknown model metadata counts as a model that takes the attachment', () => {
         expect(imageSaveModeForModel(true, undefined)).toBe('alongside');
     });
+});
 
-    test('saves a HEIC the decoder can read as the JPEG its attachment carries', async () => {
-        const saved = await prepareImageToSave(new File(['heic-data'], 'photo.heic', { type: 'image/heic' }));
-        expect(saved && { ...saved, bytes: new TextDecoder().decode(saved.bytes) })
-            .toEqual({ filename: 'photo.jpg', bytes: 'jpeg-data', linkOnly: false });
+describe('links to files on disk', () => {
+    test('finds links to local files, plain and in angle brackets', () => {
+        const text = 'see [a.png](/tmp/oc/a.png) [b.png](<C:/Temp dir/b.png>)';
+        expect(findLocalFileLinks(text).map(({ name, path }) => ({ name, path }))).toEqual([
+            { name: 'a.png', path: '/tmp/oc/a.png' },
+            { name: 'b.png', path: 'C:/Temp dir/b.png' },
+        ]);
     });
 
-    test('saves a HEIC the decoder cannot read unconverted, for its link only', async () => {
-        const original = decodeHeic;
-        decodeHeic = async () => { throw new Error('ERR_LIBHEIF format not supported'); };
-        try {
-            const saved = await prepareImageToSave(new File(['hdr-heic'], 'IMG_4015.heic', { type: 'image/heic' }));
-            expect(saved && { ...saved, bytes: new TextDecoder().decode(saved.bytes) })
-                .toEqual({ filename: 'IMG_4015.heic', bytes: 'hdr-heic', linkOnly: true });
-        } finally {
-            decodeHeic = original;
-        }
+    test('leaves links to the web alone', () => {
+        expect(findLocalFileLinks('[docs](https://example.com/a.png)')).toEqual([]);
     });
 });

@@ -1,7 +1,5 @@
 import { act } from 'react';
 import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test';
-import { plugin } from 'bun';
-import { pathToFileURL } from 'node:url';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
@@ -16,17 +14,6 @@ import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-sys
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { ChatColumnSessionContext } from '../chatColumnSession';
 import type { BtwPanelState } from './useBtwPanelState';
-
-// Bun does not implement Vite's worker asset-query imports.
-plugin({
-  name: 'btw-tool-completion-worker-url',
-  setup(build) {
-    build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, ({ path }) => ({
-      contents: `export default ${JSON.stringify(pathToFileURL(path.split('?')[0]).href)};`,
-      loader: 'js',
-    }));
-  },
-});
 
 const { default: ToolPart } = await import('../message/parts/ToolPart');
 

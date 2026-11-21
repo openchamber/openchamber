@@ -1,6 +1,3 @@
-// Titles for the chat tabs of the context panel, read across every live
-// directory: a chat tab may show a session from another project, so the
-// panel's own directory is not enough.
 
 type TitledSession = {
   id: string;
@@ -27,9 +24,6 @@ const getSessionUpdatedAt = (session: TitledSession): number => {
   return typeof updatedAt === 'number' && Number.isFinite(updatedAt) ? updatedAt : 0;
 };
 
-// A project's store also holds its worktrees' sessions, so one session can
-// appear in more than one store; the most recently updated copy wins, like
-// findLiveSession does for the session itself.
 export const buildSessionTitleMap = (states: Iterable<SessionSlice>, sessionIDs: readonly string[]): ReadonlyMap<string, string> => {
   if (sessionIDs.length === 0) return EMPTY_SESSION_TITLE_MAP;
   const wanted = new Set(sessionIDs);
@@ -50,7 +44,6 @@ export const buildSessionTitleMap = (states: Iterable<SessionSlice>, sessionIDs:
   return next.size === 0 ? EMPTY_SESSION_TITLE_MAP : next;
 };
 
-/** The session a chat tab shows, from its `session:<id>` dedupe key. */
 export const getSessionIDFromDedupeKey = (dedupeKey: string | undefined): string | null => {
   if (!dedupeKey || !dedupeKey.startsWith('session:')) {
     return null;

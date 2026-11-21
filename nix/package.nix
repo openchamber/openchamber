@@ -52,6 +52,7 @@ let
       !lib.elem name [
         "node_modules"
         "dist"
+        "build"
         ".tmp"
         ".turbo"
         ".vite"
@@ -133,8 +134,7 @@ let
         cp -a packages/web/node_modules "$appRoot/packages/web/node_modules"
       fi
       cp packages/web/package.json "$appRoot/packages/web/package.json"
-      cp -a packages/web/bin "$appRoot/packages/web/bin"
-      cp -a packages/web/server "$appRoot/packages/web/server"
+      cp -a packages/web/build "$appRoot/packages/web/build"
       cp -a packages/web/dist "$appRoot/packages/web/dist"
       cp packages/sdk/package.json "$appRoot/packages/sdk/package.json"
       cp -a packages/sdk/dist "$appRoot/packages/sdk/dist"
@@ -163,7 +163,7 @@ stdenv.mkDerivation {
     mkdir -p "$out/bin"
     makeWrapper "${bun}/bin/bun" "$out/bin/openchamber" \
       --run "cd ${openchamberCore}/lib/openchamber" \
-      --add-flags "packages/web/bin/cli.js" \
+      --add-flags "packages/web/build/bin/cli.js" \
       --prefix PATH : "${runtimePath}" \
       --set NODE_ENV production \
       --set LANG C.UTF-8

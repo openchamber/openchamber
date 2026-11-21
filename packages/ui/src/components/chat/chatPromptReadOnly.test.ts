@@ -3,6 +3,7 @@ import type { Session } from '@/lib/opencode/model';
 
 import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
 import { withReviewSessionMarker } from '@/lib/sessionReviewMetadata';
+import { metadataAfterTakeOver } from '@/lib/sessionOperatorChild';
 
 const session = (parentID?: string): Session => ({
     id: 'session',
@@ -24,9 +25,29 @@ describe('resolveChatPromptReadOnly', () => {
         expect(resolveChatPromptReadOnly(session('parent'), false, false)).toBe(true);
     });
 
+    test('keeps operator workers read-only until Take over, including when subagent prompting is enabled', () => {
+        const worker: Session = {
+            ...session(),
+            metadata: { openchamber: { kind: 'operator-child', parentID: 'parent' } },
+        };
+
+        expect(resolveChatPromptReadOnly(worker, false, false)).toBe(true);
+        expect(resolveChatPromptReadOnly(worker, true, false)).toBe(true);
+        expect(resolveChatPromptReadOnly({ ...worker, parentID: 'parent' }, true, false)).toBe(true);
+        expect(resolveChatPromptReadOnly({
+            ...worker,
+            metadata: metadataAfterTakeOver(worker.metadata ?? {}, 2),
+        }, false, false)).toBe(false);
+    });
+
     test('preserves the surface read-only state for root sessions', () => {
         expect(resolveChatPromptReadOnly(session(), true, true)).toBe(true);
         expect(resolveChatPromptReadOnly(session(), true, false)).toBe(false);
+    });
+
+    test('keeps a session read through its parent\'s folder read-only, whatever the subagent setting says', () => {
+        expect(resolveChatPromptReadOnly(session('parent'), true, false, false)).toBe(true);
+        expect(resolveChatPromptReadOnly(session(), false, false, false)).toBe(true);
     });
 
     test('treats a marked code review as an independent session even with a stale parent ID', () => {

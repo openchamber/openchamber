@@ -44,14 +44,6 @@ const parseGuestGenerateResponse = async (response: Response): Promise<GuestGene
   return { ok: true, result: parsed.data.result };
 };
 
-/**
- * One-off text generation for a guest through the server's Small Model,
- * which resolves and authenticates the model itself. The open project only
- * informs which OpenCode config decides the model; it never enters the prompt.
- * `composer` is the composer's provider, which the model stays on, and its
- * model, used when that provider has no small one; the host sets both, never
- * the guest.
- */
 export const guestGenerate = async (
   guestId: string,
   request: GenerateRequest,
@@ -59,8 +51,6 @@ export const guestGenerate = async (
   composer: { providerID: string | null; modelID: string | null },
 ): Promise<GuestGenerateProxyResult> => {
   try {
-    // A plain object, built inside the try: runtimeFetch percent-encodes a
-    // directory outside Latin-1, which `Headers.set` would throw on.
     const headers = {
       'Content-Type': 'application/json',
       ...(directory ? { 'x-opencode-directory': directory } : undefined),

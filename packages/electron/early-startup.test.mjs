@@ -10,7 +10,7 @@ mock.module('electron', () => ({
   protocol: {},
   screen: {},
 }));
-const { buildMainWindowOptions, buildRendererAdditionalArguments } = await import('./early-startup.mjs');
+const { buildMainWindowOptions, buildRendererAdditionalArguments, buildWindowChromeOptions } = await import('./early-startup.mjs');
 
 const originalPlatform = process.platform;
 const originalDataDir = process.env.OPENCHAMBER_DATA_DIR;
@@ -94,6 +94,11 @@ test.each([
   const options = mainWindowOptions();
   expect(options.frame).toBe(frame);
   expect(options.transparent).toBe(transparent);
+  const chrome = buildWindowChromeOptions();
+  expect(chrome.frame).toBe(frame);
+  expect(chrome.transparent).toBe(transparent);
+  expect(chrome.titleBarStyle).toBe(options.titleBarStyle);
+  expect(chrome.autoHideMenuBar).toBe(options.autoHideMenuBar);
   expect(buildRendererAdditionalArguments()).toContain(`--openchamber-native-frame=${frame ? '1' : '0'}`);
   expect(buildRendererAdditionalArguments()).toContain(`--openchamber-transparent-window=${transparent ? '1' : '0'}`);
 });

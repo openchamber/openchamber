@@ -4,17 +4,14 @@ import type { SheetDifference } from './workbook/workbookDiff';
 
 export type TableChunk = { rows: string[][] };
 
-/** `columnCount` is the widest row, for a file whose rows outrun its heading. */
-export type DataTableEnd = { columns: string[]; totalRows: number; columnCount?: number };
+export type DataTableEnd = { columns: string[]; totalRows: number; columnCount?: number; dataColumnCount?: number };
 
 export type SheetInfo = { name: string; protected: boolean };
 
-/** What a cell holds beyond the text the grid shows. */
 export type CellNote = { input?: string; formula?: string; href?: string };
 
 export type SheetChunk = TableChunk & { notes: Array<[string, CellNote]> };
 
-/** One sheet laid out for the grid; `notes` and `locked` are keyed as cells are, by file row and column. */
 export type SheetLayout = {
   header: string[];
   rowNumbers: number[];
@@ -28,7 +25,6 @@ export type SheetLayout = {
 
 export type CellPatch = { sheet: number; row: number; column: number; display: string; note: CellNote | null };
 
-/** `patches` is null when too much moved to send cell by cell. */
 export type BookChange = { bytes: Uint8Array<ArrayBuffer>; patches: CellPatch[] | null; unsupported: number };
 
 export type BookEdit =
@@ -38,7 +34,6 @@ export type BookEdit =
 
 export type BookOpened = { sheets: SheetInfo[]; unseen: string[]; unsupported: number };
 
-/** Every call a table or workbook viewer makes, with what it takes, streams and answers. */
 export type DocumentCalls = {
   ping: { args: null; chunk: never; result: true };
   'workbook.open': { args: { book: string; path: string; name: string; bytes: Uint8Array<ArrayBuffer> }; chunk: never; result: BookOpened | null };
@@ -54,7 +49,7 @@ export type DocumentCalls = {
   'sqlite.query': { args: { database: string; query: string; rowCap: number }; chunk: TableChunk; result: DataTableEnd };
   'sqlite.close': { args: { database: string }; chunk: never; result: null };
   'parquet.read': { args: { bytes: Uint8Array<ArrayBuffer>; rowCap: number }; chunk: TableChunk; result: DataTableEnd };
-  'delimited.read': { args: { bytes: Uint8Array<ArrayBuffer>; delimiter: ',' | '\t'; rowCap: number }; chunk: TableChunk; result: DataTableEnd };
+  'delimited.read': { args: { bytes: Uint8Array<ArrayBuffer>; path: string; rowCap: number }; chunk: TableChunk; result: DataTableEnd };
 };
 
 type Op = keyof DocumentCalls;

@@ -5,6 +5,7 @@ import { afterAll, afterEach, expect, test } from 'bun:test';
 import { useInputStore } from '@/sync/input-store';
 
 import { usePendingComposerText } from '../usePendingComposerText';
+import { createComposerText } from '../composerText';
 
 const browser = new Window({ url: 'http://localhost' });
 const values = { window: browser, document: browser.document, navigator: browser.navigator, IS_REACT_ACT_ENVIRONMENT: true };
@@ -13,11 +14,22 @@ for (const [key, value] of Object.entries(values)) Object.defineProperty(globalT
 const { createRoot } = await import('react-dom/client');
 const originalInput = useInputStore.getState();
 
+/** The composer's text the way ChatInput holds it: outside state, with a render per write. */
+function useProbeText(initial: string) {
+    const [text] = React.useState(() => createComposerText(initial));
+    const [, setRevision] = React.useState(0);
+    const setMessage = React.useCallback((next: string) => {
+        text.set(next);
+        setRevision((revision) => revision + 1);
+    }, [text]);
+    return { text, setMessage };
+}
+
 type Props = { hold: boolean; onSlashCommand: () => void; draft: { value: string } };
 const Composer: React.FC<Props> = ({ hold, onSlashCommand, draft }) => {
-    const [message, setMessage] = React.useState('DEMO-2');
-    draft.value = message;
-    usePendingComposerText({ target: null, setMessage, focus: () => {}, holdSlashCommand: hold, onSlashCommand });
+    const { text, setMessage } = useProbeText('DEMO-2');
+    draft.value = text.get();
+    usePendingComposerText({ target: null, text, setMessage, focus: () => {}, holdSlashCommand: hold, onSlashCommand });
     return null;
 };
 

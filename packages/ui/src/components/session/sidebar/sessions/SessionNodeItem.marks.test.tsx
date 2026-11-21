@@ -8,6 +8,7 @@ import { useGuestMarksStore } from '@/lib/guests/marks-store';
 import type { InstalledGuest } from '@/lib/guests/types';
 import { useGitStore } from '@/stores/useGitStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import type { SessionNodeItemProps } from './SessionNodeItem';
 
 const surfaces: Array<{ mode: string; directory: string | null }> = [];
@@ -130,6 +131,7 @@ let host: HTMLElement;
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 const originalProjects = useProjectsStore.getState();
 const originalGit = useGitStore.getState();
+const originalSessions = useGlobalSessionsStore.getState();
 
 const showMarks = (guests: InstalledGuest[], entries: GuestMarkEntry[]): void => {
   useGuestMarksStore.getState().setGuests(guests);
@@ -164,6 +166,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   useProjectsStore.setState(originalProjects, true);
   useGitStore.setState(originalGit, true);
+  useGlobalSessionsStore.setState(originalSessions, true);
   surfaces.length = 0;
   links.length = 0;
   selected.length = 0;
@@ -255,4 +258,16 @@ test('a row of an isolated space shows no marks', async () => {
   showMarks([guest('ci', 'CI Watch', 'panel/index.html')], [mark('ci', { sessionId: 'ses_row' }, 'Checks passed'), mark('ci', { directory }, 'Folder')]);
   await render(rowProps({}, directory));
   expect(drawn()).toEqual([]);
+});
+
+test('a row draws the record the session store holds now, not the one its structure was built from', async () => {
+  const props = rowProps();
+  const live = { ...props.node.session, title: 'Add the signup form', time: { created: 1, updated: 5, idle: 5 } };
+  useGlobalSessionsStore.setState({ entityById: new Map([[live.id, live]]) });
+  await render(props);
+  expect(host.textContent).toContain('Add the signup form');
+  expect(host.textContent).not.toContain('Add the login form');
+
+  await act(async () => useGlobalSessionsStore.setState({ entityById: new Map([[live.id, { ...live, title: 'Add the reset form' }]]) }));
+  expect(host.textContent).toContain('Add the reset form');
 });

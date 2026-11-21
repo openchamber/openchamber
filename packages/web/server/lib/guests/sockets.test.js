@@ -67,6 +67,19 @@ describe('resolveSocketBinding', () => {
 });
 
 describe('buildPublicSocketBindings', () => {
+  test('does not treat an inherited dictionary member as a socket override', async () => {
+    const binding = { id: 'constructor', candidatesByPlatform: { linux: ['/run/guest.sock'] } };
+    expect(await buildPublicSocketBindings([binding], {}, {
+      platform: 'linux',
+      access: async () => undefined,
+    })).toEqual([{
+      id: 'constructor',
+      candidates: ['/run/guest.sock'],
+      resolved: '/run/guest.sock',
+      override: null,
+    }]);
+  });
+
   test('exposes candidates, override, and resolved for the catalog', async () => {
     const [binding] = await buildPublicSocketBindings(
       [dockerBinding],

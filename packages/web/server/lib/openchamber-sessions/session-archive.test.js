@@ -4,7 +4,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createArchiveStore } from './archive-store.js';
-import { createSessionArchive } from './session-archive.js';
+import { createOpenCodeClient } from './opencode-client.js';
+import { createOpenCodeSessionArchive, createSessionArchive } from './session-archive.js';
 
 const tempDirs = [];
 
@@ -18,6 +19,7 @@ const makeStore = (entries) => {
 afterEach(() => {
   while (tempDirs.length > 0) fs.rmSync(tempDirs.pop(), { recursive: true, force: true });
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const tagged = (tag) => Object.assign(new Error(tag), { _tag: tag });
@@ -45,6 +47,24 @@ const fakeOpenCode = ({ failures = {}, archived = {} } = {}) => {
 };
 
 describe('session archive', () => {
+  it('keeps batch indices and calls for sparse id arrays', async () => {
+    const ids = new Array(3);
+    ids[0] = 'ses_a';
+    ids[2] = 'ses_c';
+    const openCode = fakeOpenCode();
+    const archive = createSessionArchive({ store: makeStore(), openCode });
+    await expect(archive.archive(ids, 1700)).resolves.toEqual({
+      archived: [{ id: 'ses_a', archivedAt: 1700 }, { id: 'ses_c', archivedAt: 1700 }],
+      failedIds: [],
+    });
+    expect(openCode.setArchived.mock.calls).toEqual([['ses_a', true], [undefined, true], ['ses_c', true]]);
+  });
+
+  it.each([NaN, Infinity, 900, '900', {}, null])('keeps the number-only archive predicate for %j', async (value) => {
+    const archive = createSessionArchive({ store: makeStore(), openCode: fakeOpenCode({ archived: { ses_a: value } }) });
+    await expect(archive.isArchived('ses_a')).resolves.toBe(typeof value === 'number');
+  });
+
   it('archives on OpenCode and stays quiet when the file had nothing to say', async () => {
     const store = makeStore();
     const announce = vi.fn();
@@ -126,5 +146,39 @@ describe('session archive', () => {
     await expect(archive.isArchived('ses_unknown')).resolves.toBe(false);
     await expect(archive.isArchived('ses_down')).resolves.toBe(false);
     expect(openCode.readArchivedAt).not.toHaveBeenCalledWith('ses_file');
+  });
+
+  it('tells archived, active and unknown apart for a caller that would wake the session', async () => {
+    const store = makeStore({ ses_file: 500, ses_restored: null });
+    const openCode = fakeOpenCode({ archived: { ses_upstream: 900, ses_active: null }, failures: { ses_down: 'Unavailable' } });
+    const archive = createSessionArchive({ store, openCode });
+    const { signal } = new AbortController();
+
+    await expect(archive.archiveState('ses_file')).resolves.toBe('archived');
+    await expect(archive.archiveState('ses_restored')).resolves.toBe('active');
+    await expect(archive.archiveState('ses_upstream', { signal })).resolves.toBe('archived');
+    await expect(archive.archiveState('ses_active')).resolves.toBe('active');
+    // OpenCode does not know it: nothing to wake, the delivery hears 404.
+    await expect(archive.archiveState('ses_unknown')).resolves.toBe('active');
+    await expect(archive.archiveState('ses_down')).resolves.toBe('unknown');
+    expect(openCode.readArchivedAt).toHaveBeenCalledWith('ses_upstream', { signal });
+  });
+
+  it('cancels a stalled OpenCode read through the caller\'s signal, and calls it unknown', async () => {
+    const entered = Promise.withResolvers();
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      entered.resolve(init.signal);
+      return new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true }));
+    }));
+    const archive = createSessionArchive({
+      store: makeStore(),
+      openCode: createOpenCodeSessionArchive({ clientFor: () => createOpenCodeClient({ baseUrl: 'http://opencode.test', headers: {} }) }),
+    });
+    const controller = new AbortController();
+    const state = archive.archiveState('ses_hanging', { signal: controller.signal });
+    const signal = await entered.promise;
+    controller.abort(new DOMException('Archive read timed out', 'TimeoutError'));
+    await expect(state).resolves.toBe('unknown');
+    expect(signal.aborted).toBe(true);
   });
 });

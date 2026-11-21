@@ -1,17 +1,14 @@
 import type { Lang } from '@pierre/highlights';
+import { LANGUAGE_RELATIVES } from '@/lib/shiki/languageRelatives';
 import { MARKDOWN_HIGHLIGHTS_THEME } from '@/lib/shiki/zedThemeFromAppTheme';
 
 type HighlightsModule = typeof import('@pierre/highlights');
 
-type HighlightsTarget = { highlights: HighlightsModule; lang: Lang };
+type HighlightsInput = { highlights: HighlightsModule; lang: Lang; code: string };
 
 let loading: Promise<HighlightsModule | null> | undefined;
 let loaded: HighlightsModule | null | undefined;
 
-/**
- * Start loading Highlights. The package compiles its WebAssembly at import
- * and needs SIMD, so a failed import means this runtime cannot run it at all.
- */
 export const loadHighlights = (): Promise<HighlightsModule | null> => {
   loading ??= import('@pierre/highlights').catch(() => null).then((module) => {
     loaded = module;
@@ -20,33 +17,38 @@ export const loadHighlights = (): Promise<HighlightsModule | null> => {
   return loading;
 };
 
-/** Whether the Highlights import has finished, successfully or not. */
-export const highlightsSettled = (): boolean => loaded !== undefined;
-
-/**
- * Whether code in `lang` goes through Highlights. ANSI stays on Shiki: its
- * Highlights tokens drop the escape sequences and merge the text around them,
- * so token text stops matching the source, and every consumer here positions
- * tokens by source offset (packed ranges, CodeMirror decorations).
- */
-export const isHighlightsLanguage = (highlights: HighlightsModule, lang: string): lang is Lang =>
-  lang !== 'ansi' && highlights.isSupportedLanguage(lang);
-
-/** Highlights for a language it has a lexer for, once loaded; null keeps Shiki. */
-export const highlightsNow = (lang: string): HighlightsTarget | null => {
-  if (!loaded || !isHighlightsLanguage(loaded, lang)) return null;
-  return { highlights: loaded, lang };
+export const highlightsLanguage = (highlights: HighlightsModule, lang: string): Lang => {
+  if (lang === 'ansi') return 'text';
+  if (highlights.isSupportedLanguage(lang)) return lang;
+  const relative = LANGUAGE_RELATIVES.get(lang);
+  return relative && highlights.isSupportedLanguage(relative) ? relative : 'text';
 };
 
-/** Like `highlightsNow`, waiting for the module first. */
-export const resolveHighlights = async (lang: string): Promise<HighlightsTarget | null> => {
-  await loadHighlights();
-  return highlightsNow(lang);
+const ESC = String.fromCharCode(27);
+const BEL = String.fromCharCode(7);
+const ANSI_ESCAPES = new RegExp(
+  `${ESC}(?:\\[[0-?]*[ -/]*[@-~]|\\][^${BEL}${ESC}]*(?:${BEL}|${ESC}\\\\)?|[@-Z\\\\^_])`,
+  'g',
+);
+
+export const stripAnsi = (code: string): string => code.replace(ANSI_ESCAPES, '');
+
+export const highlightsNow = (lang: string, code: string): HighlightsInput | null => {
+  if (!loaded) return null;
+  return { highlights: loaded, lang: highlightsLanguage(loaded, lang), code: lang === 'ansi' ? stripAnsi(code) : code };
 };
 
-type StyledToken = { content: string; color?: string; fontStyle?: number };
+const utf8 = new TextDecoder();
 
-// Shiki FontStyle bitmask, which Highlights tokens share.
+export const highlightsBlockHtml = ({ highlights, lang, code }: HighlightsInput): string =>
+  // external: https://www.npmjs.com/package/@pierre/highlights Returned HTML bytes occupy WebAssembly memory until the next call and must be decoded immediately.
+  utf8.decode(highlights.codeToHtml(code, { lang, theme: MARKDOWN_HIGHLIGHTS_THEME }));
+
+export const highlightsTokens = ({ highlights, lang, code }: HighlightsInput) =>
+  highlights.codeToTokens(code, { lang, theme: MARKDOWN_HIGHLIGHTS_THEME }).tokens;
+
+type StyledToken = ReturnType<typeof highlightsTokens>[number][number];
+
 const FONT_STYLE_ITALIC = 1;
 const FONT_STYLE_BOLD = 2;
 const FONT_STYLE_UNDERLINE = 4;
@@ -57,8 +59,7 @@ const escapeHtml = (value: string): string =>
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
-/** One token as an inline-styled span, for per-line HTML. */
-export const tokenSpan = (token: StyledToken): string => {
+const tokenSpan = (token: StyledToken): string => {
   const styles: string[] = [];
   if (token.color) styles.push(`color:${token.color}`);
   const fontStyle = token.fontStyle ?? 0;
@@ -69,17 +70,5 @@ export const tokenSpan = (token: StyledToken): string => {
   return `<span${style}>${escapeHtml(token.content)}</span>`;
 };
 
-const utf8 = new TextDecoder();
-
-/** Whole-block `<pre>` HTML colored through the markdown syntax variables. */
-export const highlightsBlockHtml = ({ highlights, lang }: HighlightsTarget, code: string): string =>
-  // The returned bytes live in WebAssembly memory until the next call.
-  utf8.decode(highlights.codeToHtml(code, { lang, theme: MARKDOWN_HIGHLIGHTS_THEME }));
-
-/** Per-line inner HTML colored through the markdown syntax variables. */
-export const highlightsLineHtml = ({ highlights, lang }: HighlightsTarget, code: string): string[] =>
-  highlights.codeToTokens(code, { lang, theme: MARKDOWN_HIGHLIGHTS_THEME }).tokens.map((line) => line.map(tokenSpan).join(''));
-
-/** Themed tokens colored through the markdown syntax variables. */
-export const highlightsTokens = ({ highlights, lang }: HighlightsTarget, code: string) =>
-  highlights.codeToTokens(code, { lang, theme: MARKDOWN_HIGHLIGHTS_THEME }).tokens;
+export const highlightsLineHtml = (input: HighlightsInput): string[] =>
+  highlightsTokens(input).map((line) => line.map(tokenSpan).join(''));

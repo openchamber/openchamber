@@ -3,14 +3,9 @@ import type { QuotaProviderId } from '@/types';
 export interface QuotaProviderMeta {
   id: QuotaProviderId;
   name: string;
+  providers?: string[];
 }
 
-/**
- * The built-in usage providers, in the order the Usage page lists them. The
- * providers installed extensions serve come after them, from the server
- * (`lib/quota/extensionProviders.ts`); `useQuotaProviders` in the quota store
- * merges the two.
- */
 export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'claude', name: 'Claude' },
   { id: 'cline-pass', name: 'ClinePass' },

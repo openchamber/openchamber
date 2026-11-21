@@ -1,14 +1,5 @@
 import type { AppRouteState } from './serializeRoute';
 
-/**
- * The mobile web shell keeps one history entry above the page while a layer is
- * open, so Back lands in the app and closes that layer. The entry repeats the
- * URL under it and only ever sits on top of the stack. A route written while it
- * is there goes under it: a guard buried between two routes would be an empty
- * Back press later. A replacement rewrites the guard's own URL: it corrects a
- * route to what that route resolves to, and the entry under the guard resolves
- * the same way when Back reaches it.
- */
 const BACK_GUARD_KEY = '__openchamberBackGuard';
 
 type BackGuardState = { [BACK_GUARD_KEY]?: boolean };
@@ -20,6 +11,19 @@ export function isBackGuardEntry(): boolean {
 
 export function pushBackGuard(): void {
   window.history.pushState({ [BACK_GUARD_KEY]: true }, '');
+}
+
+const PREVIEW_FRAME_KEY = '__openchamberPreviewFrame';
+
+type PreviewFrameState = { [PREVIEW_FRAME_KEY]?: string };
+
+export function pushPreviewFrameGuard(id: string): void {
+  window.history.pushState({ [BACK_GUARD_KEY]: true, [PREVIEW_FRAME_KEY]: id }, '');
+}
+
+export function isPreviewFrameGuard(id: string): boolean {
+  const state: PreviewFrameState | null = window.history.state;
+  return state?.[PREVIEW_FRAME_KEY] === id;
 }
 
 export function pushRouteEntry(state: { route?: AppRouteState }, url: string): void {

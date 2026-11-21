@@ -1,7 +1,3 @@
-/**
- * The board's scope pickers, drawn like the draft composer's project picker:
- * a quiet trigger with the project's icon and name, and a searchable list.
- */
 
 import * as React from 'react';
 import { Popover } from '@base-ui/react/popover';
@@ -40,7 +36,6 @@ import { repositoryLabel } from './boardRepository';
 
 const projectName = (project: ProjectEntry): string => project.label?.trim() || formatDirectoryName(project.path) || project.path;
 
-/** `toolbar`: the board's scope, beside the search. `inline`: a smaller one inside a sentence. */
 type PickerSize = 'toolbar' | 'inline';
 
 const TRIGGER_CLASS = {
@@ -54,7 +49,6 @@ export const SourceBoardProjectPicker: React.FC<{
     onSelect: (projectId: string) => void;
     ariaLabel: string;
     size: PickerSize;
-    /** The phone shell picks from a bottom sheet: a popup there cannot scroll far enough for a long list. */
     sheet?: boolean;
 }> = ({ projects, selected, onSelect, ariaLabel, size, sheet = false }) => {
     const { t } = useI18n();
@@ -176,25 +170,14 @@ export const SourceBoardProjectPicker: React.FC<{
     );
 };
 
-/** One entry of the repository picker: a repository's folder, or null for all of them. */
 type RepositoryEntry = { value: string; repository: string | null; label: string };
 
-/**
- * Which repository under the project's folder the board lists, or all of them
- * together, shown beside the project picker while the folder is not a
- * repository itself.
- */
 export const SourceBoardRepositoryPicker: React.FC<{
     repositories: readonly string[];
-    /** The listed repository's folder; null while the board lists all of them. */
     selected: string | null;
-    /** The project's folder the repository paths are shown relative to. */
     root: string;
-    /** Offers "All repositories" first; not where the runtime cannot list across repositories. */
     allAvailable: boolean;
-    /** A repository's folder, or null for all of them. */
     onSelect: (repository: string | null) => void;
-    /** The phone shell picks from a bottom sheet, like the project picker. */
     sheet?: boolean;
 }> = ({ repositories, selected, root, allAvailable, onSelect, sheet = false }) => {
     const { t } = useI18n();
@@ -219,7 +202,6 @@ export const SourceBoardRepositoryPicker: React.FC<{
         setOpen(false);
         setQuery('');
     };
-    // Not shrink-0 like the project picker: beside it, this is the one that truncates.
     const triggerClass = cn('min-w-0 w-fit justify-start gap-1 normal-case data-[popup-open]:bg-interactive-hover', TRIGGER_CLASS.toolbar);
     const triggerContent = (
         <span className="flex min-w-0 items-center gap-1.5">
@@ -307,12 +289,6 @@ export const SourceBoardRepositoryPicker: React.FC<{
 const ALL_CONTAINERS = '__all__';
 const NO_ACCOUNTS: readonly never[] = [];
 
-/**
- * Which container (a Linear team) a tracker's tab lists, and which account
- * (a Linear workspace) when the tracker connects several: accounts are few
- * and switched rarely, so they share the menu. The containers come from the
- * tracker's project mapping; a tracker without either shows no picker.
- */
 export const SourceBoardContainerPicker: React.FC<{
     provider: string;
     containers: readonly TrackerContainer[];

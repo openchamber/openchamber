@@ -14,13 +14,20 @@ let server: ServerState | null;
 const spies: Array<{ mockRestore: () => void }> = [];
 let disconnects = 0;
 let connects = 0;
+let reads = 0;
+let statusResponse: Promise<McpServerStatus[]> | null = null;
 
 beforeEach(() => {
   disconnects = 0;
   connects = 0;
+  reads = 0;
+  statusResponse = null;
   useMcpStore.getState().resetForRuntimeSwitch();
   spies.push(
-    spyOn(opencodeClient, 'listMcpServers').mockImplementation(async () => (server ? [{ name: 'lab', status: server }] : [])),
+    spyOn(opencodeClient, 'listMcpServers').mockImplementation(async () => {
+      reads += 1;
+      return statusResponse ?? (server ? [{ name: 'lab', status: server }] : []);
+    }),
     spyOn(opencodeClient, 'connectMcpServer').mockImplementation(async () => {
       connects += 1;
       server = { status: 'connected' };
@@ -80,6 +87,23 @@ describe('testConnection', () => {
     expect(disconnects).toBe(0);
     expect(after).toBe('connected');
   });
+});
+
+test('concurrent freshness requests share one status read and both receive its result', async () => {
+  let release: ((servers: McpServerStatus[]) => void) | undefined;
+  statusResponse = new Promise((resolve) => { release = resolve; });
+  const store = useMcpStore.getState();
+  const options = { directory: DIRECTORY, silent: true, maxAgeMs: 60_000 };
+  const first = store.ensureFresh(options);
+  const second = store.ensureFresh(options);
+
+  try {
+    expect(reads).toBe(1);
+  } finally {
+    release?.([{ name: 'lab', status: { status: 'connected' } }]);
+    await Promise.all([first, second]);
+  }
+  expect(store.getStatusForDirectory(DIRECTORY).lab?.status.status).toBe('connected');
 });
 
 describe('setEnabled', () => {

@@ -1,7 +1,5 @@
 import React, { act } from 'react';
 import { expect, test } from 'bun:test';
-import { plugin } from 'bun';
-import { pathToFileURL } from 'node:url';
 import { createRoot } from 'react-dom/client';
 import { OpenCode } from '@opencode/client';
 import { Window } from 'happy-dom';
@@ -12,17 +10,6 @@ import { I18nProvider } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
 import { onRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
-
-// Bun needs the asset URL that Vite normally supplies to the real renderer.
-plugin({
-  name: 'message-row-expand-worker-url',
-  setup(build) {
-    build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, ({ path }) => ({
-      contents: `export default ${JSON.stringify(pathToFileURL(path.split('?')[0]).href)};`,
-      loader: 'js',
-    }));
-  },
-});
 
 const { default: MessageBody } = await import('./MessageBody');
 

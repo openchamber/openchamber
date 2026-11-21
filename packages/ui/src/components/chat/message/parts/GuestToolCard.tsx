@@ -8,7 +8,6 @@ import { cn } from '@/lib/utils';
 
 import { ChatExternalLink } from './ChatExternalLink';
 
-// Written out in full: the stylesheet is built from the class names it finds in the source.
 const STATUS_TONE_CLASS = {
     neutral: 'oc-tile-inset text-muted-foreground',
     info: 'bg-[var(--status-info-background)] text-[var(--status-info-text)]',
@@ -17,8 +16,6 @@ const STATUS_TONE_CLASS = {
     error: 'bg-[var(--status-error-background)] text-[var(--status-error-text)]',
 } satisfies Record<GuestTone, string>;
 
-// Every text here is the tool's or the manifest's, in a language of its own:
-// it takes its own direction and keeps the interface's alignment.
 
 const StatusBadge: React.FC<{ status: NonNullable<GuestToolCardView['status']> }> = ({ status }) => (
     <span
@@ -79,7 +76,6 @@ const SingleCard: React.FC<{ card: GuestToolCardView }> = ({ card }) => {
 const ListRow: React.FC<{ row: GuestToolCardView; last: boolean }> = ({ row, last }) => {
     const field = row.fields[0];
     const fieldTitle = field ? `${field.label}: ${field.value}` : undefined;
-    // Without a title the first field is the row's text, at every width: its own column hides in a narrow chat.
     const fieldLeads = row.title === null && field !== undefined;
     return (
         <li className={cn('flex items-center gap-3 px-3 py-2', !last && 'border-b border-edge')}>
@@ -103,11 +99,6 @@ const ListRow: React.FC<{ row: GuestToolCardView; last: boolean }> = ({ row, las
     );
 };
 
-/**
- * The expanded body of a tool call an extension declared as a card: one card
- * for an object, a compact list for an array, one row per item. Everything
- * shown was resolved by `resolveGuestToolCard`; this only draws it.
- */
 export const GuestToolCard: React.FC<{ result: GuestToolCardResult }> = ({ result }) => {
     const { t } = useI18n();
     if (result.kind === 'card') return <SingleCard card={result.card} />;

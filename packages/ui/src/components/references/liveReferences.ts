@@ -1,14 +1,3 @@
-/**
- * Listed items kept current by the server's tracked items, the same live
- * state behind the sidebar's badges (`lib/trackedItems`).
- *
- * A list, and a PR status asked for it, is what the host said when it was
- * read; nothing reads it again while it stays on screen. The open items it
- * shows are followed instead: the server reads them on a cadence (30 s while
- * checks run), after an agent turn, after a change made through the app, and
- * pushes a state only when it moved. A followed state answered after the
- * list was read is laid over the listed item; an older one never is.
- */
 
 import * as React from 'react';
 
@@ -29,34 +18,19 @@ import { useTrackedRecords } from '@/stores/useTrackedItemsStore';
 
 import type { PageRead, ReadStamp } from './referenceCache';
 
-// The server answers a list from its own short-lived cache (up to 30 s old),
-// so a list counts as read that much before the client got it, unless the
-// read was forced after a change or a refresh, which the server answers anew.
 const SERVER_CACHE_MS = 30_000;
-// A list can page far; its first open items are followed, the rest keep what
-// their page said. The server reads GitHub PRs 25 to a query, one query after
-// another, and a slow tick delays the sidebar's updates too: two queries.
 const FOLLOW_LIMIT = 50;
 
-/** Whether a followed answer from `answeredAt` came after a snapshot read at `read`. */
 export const isNewerThanRead = (answeredAt: number, read: ReadStamp): boolean => (
     answeredAt > (read.forced ? read.at : read.at - SERVER_CACHE_MS)
 );
 
-/** When the page holding the item at `index` was read. */
 const pageReadOf = (pageReads: readonly PageRead[], index: number): ReadStamp | null => {
     let found: ReadStamp | null = null;
     for (const page of pageReads) if (page.start <= index) found = page.read;
     return found;
 };
 
-/**
- * The item the server follows for a listed issue or PR, read with the account
- * the list was read with; null for one that is no longer open. The address
- * names the repository the way the provider does (a GitLab project's full
- * path, subgroups included); an address no pattern of the context's provider
- * reads falls back to the listed repository.
- */
 function trackedThreadOf(
     reference: RepositoryReference,
     context: SourceControlReadContext | null,
@@ -84,7 +58,6 @@ type PullPatch = Partial<Pick<RepositoryChangeRequestReference, 'state' | 'draft
 type IssuePatch = Partial<Pick<RepositoryIssueReference, 'state' | 'title'>>;
 type DiscussionPatch = Partial<Pick<RepositoryDiscussionReference, 'state' | 'title' | 'answered'>>;
 
-/** What the followed state changes on a listed item; null when nothing. */
 function referencePatch(reference: RepositoryReference, record: TrackedItemState): PullPatch | IssuePatch | DiscussionPatch | null {
     if (reference.kind === 'pull' && record.type === 'pull' && record.state) {
         const { state, draft, title } = record.state;
@@ -109,12 +82,10 @@ function workItemPatch(item: TrackerItemSummary, record: TrackedItemState): Pick
     if (record.type !== 'work-item' || !record.state) return null;
     const { title, state } = record.state;
     if (title === item.title && state.name === item.state?.name && state.category === item.state?.category) return null;
-    // A state the tracker renamed keeps its id; a different state's id is not known here.
     const id = state.name === item.state?.name ? item.state?.id ?? null : null;
     return { title, state: { id, name: state.name, category: state.category } };
 }
 
-/** Lays newer followed states over `items`; the same array when none applies. */
 function overlay<T>(
     items: T[],
     records: ReadonlyArray<TrackedItemState | null>,
@@ -134,21 +105,14 @@ function overlay<T>(
     return next ?? items;
 }
 
-/** The first `FOLLOW_LIMIT` open items, in list order. */
 const followedOf = (tracked: ReadonlyArray<TrackedItem | null>): TrackedItem[] => (
     tracked.filter((item): item is TrackedItem => item !== null).slice(0, FOLLOW_LIMIT)
 );
 
-/** Listed items with their followed state, and what a surface on screen follows (`useTrackedItems`). */
 export type LiveItems<T> = { items: T[]; followed: TrackedItem[] };
 
-/** A followed PR's checks and mergeability, and when the server read them. */
 export type LivePullStatus = { status: ChangeRequestListStatus; fetchedAt: number };
 
-/**
- * Listed issues, PRs and discussions with their followed state. `contextOf` names the read
- * context an item came through; `pageReads` says when each page was read.
- */
 export function useLiveReferences<T extends RepositoryReference>(
     items: T[],
     contextOf: (item: T) => SourceControlReadContext | null,
@@ -162,7 +126,6 @@ export function useLiveReferences<T extends RepositoryReference>(
     return { items: live, followed };
 }
 
-/** The same for tracker work items: their state and title. */
 export function useLiveTrackerItems<T extends TrackerItemSummary>(items: T[], pageReads: readonly PageRead[]): LiveItems<T> {
     const tracked = React.useMemo(() => items.map(trackedWorkItemOf), [items]);
     const records = useTrackedRecords(tracked);
@@ -171,12 +134,6 @@ export function useLiveTrackerItems<T extends TrackerItemSummary>(items: T[], pa
     return { items: live, followed };
 }
 
-/**
- * The followed checks and mergeability of each open PR in `pulls`, by item
- * key, with when they were answered. For a provider without list statuses
- * (`features.listStatuses`, GitLab) this is the only source of a change
- * request's checks.
- */
 export function useLivePullStatuses(
     pulls: ReadonlyArray<{ reference: RepositoryReference; context: SourceControlReadContext | null }>,
 ): (reference: RepositoryReference, context: SourceControlReadContext | null) => LivePullStatus | null {

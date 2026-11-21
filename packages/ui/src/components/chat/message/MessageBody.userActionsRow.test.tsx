@@ -1,7 +1,5 @@
 import React from 'react';
 import { expect, test } from 'bun:test';
-import { plugin } from 'bun';
-import { pathToFileURL } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { OpenCode } from '@opencode/client';
 import type { Part } from '@/lib/opencode/model';
@@ -24,17 +22,6 @@ Object.assign(globalThis, {
   getComputedStyle: browser.getComputedStyle.bind(browser),
   requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
   cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser), IS_REACT_ACT_ENVIRONMENT: true,
-});
-
-// Bun needs the asset URL that Vite normally supplies to the real renderer.
-plugin({
-  name: 'message-user-actions-worker-url',
-  setup(build) {
-    build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, ({ path }) => ({
-      contents: `export default ${JSON.stringify(pathToFileURL(path.split('?')[0]).href)};`,
-      loader: 'js',
-    }));
-  },
 });
 
 const { default: MessageBody } = await import('./MessageBody');

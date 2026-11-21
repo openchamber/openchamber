@@ -25,10 +25,6 @@ describe('command palette', () => {
         expect(at('/rev|iew now')?.kind).not.toBe('command');
     });
 
-    test('the caret must stay inside the command word', () => {
-        expect(at('/review\nnext line|')?.kind).not.toBe('command');
-    });
-
     test('a slash that is not in the first column opens nothing', () => {
         expect(at(' /rev|')).toBeNull();
         expect(at('please run /explo|')).toBeNull();

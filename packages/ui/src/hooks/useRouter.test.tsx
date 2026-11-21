@@ -188,6 +188,42 @@ for (const source of ['initial route', 'PWA notification']) {
   });
 }
 
+test('Settings opened while the initial session link is still loading stays open', async () => {
+  window.history.replaceState({}, '', '/?session=fresh');
+  const snapshot = { activeSessions: [session('previous'), session('fresh')], archivedSessions: [] };
+  let resolveLoading!: (value: typeof snapshot) => void;
+  const loading = new Promise<typeof snapshot>((resolve) => { resolveLoading = resolve; });
+  const load = spyOn(useGlobalSessionsStore.getState(), 'loadSessions').mockImplementation(() => loading);
+  const detail = spyOn(opencodeClient, 'getSession').mockResolvedValue(session('fresh'));
+  useGlobalSessionsStore.setState({ hasLoaded: false, status: 'loading' });
+  try {
+    await act(async () => root.render(<Harness />));
+    expect(useSessionUIStore.getState().currentSessionId).toBe('fresh');
+    await act(async () => useUIStore.getState().setSettingsDialogOpen(true));
+    await act(async () => {
+      resolveLoading(snapshot);
+      await loading;
+    });
+    expect(useUIStore.getState().isSettingsDialogOpen).toBe(true);
+    expect(window.location.search).toContain('settings=');
+    await act(async () => useUIStore.getState().setSettingsDialogOpen(false));
+    expect(window.location.search).toBe('?session=fresh');
+  } finally {
+    resolveLoading(snapshot);
+    load.mockRestore();
+    detail.mockRestore();
+  }
+});
+
+test('Back from Settings to a chat link closes Settings', async () => {
+  window.history.replaceState({}, '', '/?session=previous');
+  window.history.pushState({}, '', '/?session=previous&settings=general');
+  await act(async () => root.render(<Harness />));
+  expect(useUIStore.getState().isSettingsDialogOpen).toBe(true);
+  await back();
+  expect(useUIStore.getState().isSettingsDialogOpen).toBe(false);
+});
+
 test('the VS Code notification command selects the parent, expands its panel and opens chat', async () => {
   let view: unknown;
   window.addEventListener('openchamber:navigate', (event) => { view = (event as CustomEvent).detail; });

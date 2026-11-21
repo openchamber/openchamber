@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Message, Part } from '@/lib/opencode/model';
-import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
+import { HighlightedCode } from '@/components/code/HighlightedCode';
 
 import { Icon } from "@/components/icon/Icon";
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -105,9 +105,6 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
   const reasoning = toNonNegativeNumber(breakdown.reasoning);
   const cacheRead = toNonNegativeNumber(breakdown.cache?.read);
   const cacheWrite = toNonNegativeNumber(breakdown.cache?.write);
-  // Multi-step turns accumulate the fields across API round-trips (every tool
-  // call re-reads the whole cached prompt), so summing them overstates the
-  // window. The server-reported total is the final round-trip's window.
   const reportedTotal = toNonNegativeNumber(breakdown.total);
 
   return {
@@ -178,7 +175,6 @@ const estimatePartChars = (part: Part, role: 'user' | 'assistant' | 'tool' | 'ot
       + estimateTextLength(partRecord.raw)
       + Math.round(estimateTextLength(partRecord.metadata) * 0.25)
       + Math.round(estimateTextLength(partRecord.state) * 0.1)
-      // A result left out of the page still counts, by the length the server reported.
       + Math.round((toolContentShellChars(part) ?? 0) * 0.1);
 
     return { user: 0, assistant: 0, tool: toolPayloadLength, other: 0 };
@@ -208,9 +204,6 @@ const deriveRoleBucket = (message: SessionMessage): 'user' | 'assistant' | 'tool
   return 'other';
 };
 
-// Keyed by the message record, which the sync layer replaces whenever the
-// message or its parts change: a streamed delta re-measures one message, and
-// records that leave the session are collected with the map entry.
 const messageCharsCache = new WeakMap<SessionMessage, ContextBuckets>();
 
 const messageChars = (message: SessionMessage): ContextBuckets => {
@@ -277,7 +270,6 @@ const resolveProviderAndModel = (
 };
 
 type TokenFigures = {
-  /** Every prompt token, cached or not; the cache cells beside it split it up. */
   prompt: number;
   output: number;
   reasoning: number;
@@ -286,7 +278,6 @@ type TokenFigures = {
   cacheHitPercent: number | null;
 };
 
-/** Six token figures under a title; `null` figures, not yet known, read as dashes. */
 const TokenFiguresCard: React.FC<{ title: string; figures: TokenFigures | null }> = ({ title, figures }) => {
   const { t } = useI18n();
   const items = [
@@ -328,9 +319,6 @@ type RawMessageRowProps = {
   onCopy: (messageId: string, value: string) => void;
 };
 
-// Memoized on the message record, which the sync layer keeps by reference
-// while the message is unchanged: a streamed delta re-renders only the row of
-// the message it touched, not one row per message of the session.
 const RawMessageRow = React.memo(function RawMessageRow({
   message,
   isExpanded,
@@ -348,8 +336,6 @@ const RawMessageRow = React.memo(function RawMessageRow({
   const tokens = isAssistant ? extractTokenBreakdown(message) : null;
   const userSnippet = isUser ? deriveUserSnippet(message.parts) : '';
   const previewTime = formatMessagePreviewTime(messageCreatedAt, timeFormatPreference);
-  // Keep token/time columns stable; the message label owns all
-  // remaining space and truncates before it can push metrics.
   const assistantLeft = partsLabel || '—';
   const assistantMiddle = tokens
     ? formatAssistantTokens(tokens.input, tokens.output, formatNumber)
@@ -415,7 +401,7 @@ const RawMessageRow = React.memo(function RawMessageRow({
                 <TooltipContent sideOffset={6}>{isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}</TooltipContent>
               </Tooltip>
             </div>
-            <WorkerHighlightedCode
+            <HighlightedCode
               language="json"
               code={jsonValue}
               style={{
@@ -497,26 +483,17 @@ export const ContextPanelContent: React.FC = () => {
     const assistantMessages = sessionMessages.filter((entry) => entry.info.role === 'assistant');
     const userMessages = sessionMessages.filter((entry) => entry.info.role === 'user');
 
-    // After a compaction the fill is unknown until a response reports tokens;
-    // the compaction record itself still supplies the last-turn breakdown.
     const contextFill = findLatestContextFill(sessionMessages.map((entry) => entry.info));
     const contextMessage = contextFill ? sessionMessages[contextFill.index] ?? null : null;
     const isCompacted = contextFill?.state === 'compacted';
 
     const tokenBreakdown = contextMessage ? extractTokenBreakdown(contextMessage) : EMPTY_BREAKDOWN;
 
-    // Cache hit rate for the last assistant message. `input` is the non-cached portion
-    // (total input - cache.read - cache.write per SDK's session.ts:getUsage),
-    // so hit rate = cache.read / (input + cache.read + cache.write).
     const cacheHitRate = computeCacheHitRate({
       input: tokenBreakdown.input,
       cache: { read: tokenBreakdown.cacheRead, write: tokenBreakdown.cacheWrite },
     });
 
-    // The session record carries the whole session's cost; the loaded
-    // messages are only its tail once a long chat was opened cold or cut back
-    // (`SessionMessageLoader.trimHistory`). A persisted snapshot strips the
-    // field, so the sum stands in until the live record arrives.
     const totalAssistantCost = Number.isFinite(currentSession?.cost)
       ? toNonNegativeNumber(currentSession?.cost)
       : assistantMessages.reduce((sum, message) => {
@@ -538,23 +515,11 @@ export const ContextPanelContent: React.FC = () => {
         ? Math.min(999, (tokenBreakdown.total / contextLimit) * 100)
         : 0;
 
-    // OpenCode v2 delivers instruction text as its own `system` message
-    // instead of hanging a `system` string off the first user message.
     const systemMessage = [...sessionMessages].reverse().find((entry) => entry.info.role === 'system');
     const systemPrompt = systemMessage?.info.role === 'system' ? systemMessage.info.text : '';
 
     const computedBreakdown = computeContextBreakdown(sessionMessages, systemPrompt);
 
-    // The bar sits under the readout, so it is measured against the same window
-    // the readout reports, not against its own estimate. `other` is then the
-    // real unattributed remainder — prompt, schemas, skills, estimation error —
-    // rather than a leftover clamped to zero.
-    //
-    // A completed compaction record can still carry the summarizing turn's
-    // tokens. The readout shows `—` for that state because the fill is unknown,
-    // so the bar must not denominate against the pre-compaction window either;
-    // zero sends it to the estimate, which is the same fallback the panel
-    // documents for an unknown window.
     const breakdown = composeContextBreakdown(computedBreakdown, { windowTokens: tokenBreakdown.total, compacted: isCompacted });
 
     const firstMessageTs = sessionMessages[0]?.info?.time?.created;
@@ -598,8 +563,6 @@ export const ContextPanelContent: React.FC = () => {
 
   return (
     <ScrollableOverlay outerClassName="h-full" className="bg-background">
-      {/* In the context panel the session title names the panel itself, in
-          place of the generic "Context" label. */}
       {inPanelHeader ? (
         <ContextPanelHeaderToolbar>
           <div className="flex min-w-0 flex-1 items-center ps-1.5 pe-1">
@@ -609,7 +572,6 @@ export const ContextPanelContent: React.FC = () => {
       ) : null}
       <div className="mx-auto w-full max-w-[52rem] px-5 py-6">
 
-        {/* ── Session header ── */}
         <div className="mb-6">
           {inPanelHeader ? null : (
             <h2 dir="auto" className="typography-ui-header font-semibold text-foreground truncate oc-ui-start-align">{viewModel.sessionTitle}</h2>
@@ -625,7 +587,6 @@ export const ContextPanelContent: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Context usage ── */}
         <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
           <div className="flex items-baseline justify-between">
             <span className="typography-micro text-muted-foreground">{t('contextSidebar.section.context')}</span>
@@ -652,7 +613,6 @@ export const ContextPanelContent: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Stat grid ── */}
         <div className="mb-5 grid grid-cols-2 gap-2">
           {([
             { label: t('contextSidebar.stats.messages'), value: formatNumber(viewModel.messagesCount) },
@@ -667,7 +627,6 @@ export const ContextPanelContent: React.FC = () => {
           ))}
         </div>
 
-        {/* ── Whole-session tokens, then the last turn's, in the same columns ── */}
         <TokenFiguresCard
           title={t('contextSidebar.section.sessionTotals')}
           figures={viewModel.sessionTotals}
@@ -681,7 +640,6 @@ export const ContextPanelContent: React.FC = () => {
           }}
         />
 
-        {/* ── Context breakdown ── */}
         <div className="mb-6">
           <div className="flex h-1 w-full overflow-hidden rounded-full bg-[var(--surface-subtle)]">
             {segments.map((segment) => {
@@ -712,7 +670,6 @@ export const ContextPanelContent: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Raw messages ── */}
         <div>
           <div className="typography-micro text-muted-foreground">{t('contextSidebar.section.rawMessages')}</div>
           <div className="mt-2.5 space-y-1">

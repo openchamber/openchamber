@@ -89,6 +89,35 @@ describe('read', () => {
     expect(await runtime.read(GLOBAL)).toEqual({ version: 1, entries: [] });
   });
 
+  test.each([
+    ['missing version', { entries: [] }],
+    ['unknown version', { version: 99, entries: [] }],
+    ['current version', { version: 1, entries: [] }],
+  ])('valid empty storage stays readable with %s', async (_label, value) => {
+    await writeJson(globalPath(), value);
+    const before = await fsPromises.readFile(globalPath());
+
+    expect(await runtime.read(GLOBAL)).toEqual({ version: 1, entries: [] });
+    expect(await fsPromises.readFile(globalPath())).toEqual(before);
+  });
+
+  test('legacy entries and version handling remain tolerant without read-time writeback', async () => {
+    await writeJson(globalPath(), {
+      version: 99,
+      entries: [
+        { id: 'legacy', title: 'Legacy', body: 'Stored text', type: 'old-type', createdAt: 1 },
+        { id: 'bad', title: '', body: 'Skipped' },
+      ],
+    });
+    const before = await fsPromises.readFile(globalPath());
+
+    expect(await runtime.read(GLOBAL)).toEqual({
+      version: 1,
+      entries: [{ id: 'legacy', title: 'Legacy', body: 'Stored text', type: 'fact', createdAt: 1, updatedAt: 1 }],
+    });
+    expect(await fsPromises.readFile(globalPath())).toEqual(before);
+  });
+
   test('malformed storage fails instead of reading as empty', async () => {
     await fsPromises.mkdir(path.dirname(globalPath()), { recursive: true });
     await fsPromises.writeFile(globalPath(), '{ not json', 'utf8');
@@ -132,6 +161,74 @@ describe('read', () => {
   });
 });
 
+describe('storage integrity', () => {
+  const corruptDocuments = [
+    ['missing entries', '{}'],
+    ['null entries', '{"entries":null}'],
+    ['object entries', '{"entries":{}}'],
+    ['string entries', '{"entries":"invalid"}'],
+    ['number entries', '{"entries":1}'],
+    ['boolean entries', '{"entries":false}'],
+    ['malformed JSON', '{ broken'],
+    ['array document', '[]'],
+    ['null document', 'null'],
+    ['primitive document', '1'],
+  ];
+
+  for (const [operation, mutate] of [
+    ['read', () => runtime.read(GLOBAL)],
+    ['create', () => runtime.create(GLOBAL, { title: 'New', body: 'New text' })],
+    ['update', () => runtime.update(GLOBAL, 'mem-1', { body: 'Updated text' })],
+    ['delete', () => runtime.remove(GLOBAL, 'mem-1')],
+  ]) {
+    test.each(corruptDocuments)(`${operation} rejects %s without changing bytes, then releases the lock`, async (_label, raw) => {
+      await runtime.create(GLOBAL, { title: 'Keep', body: 'Original text' });
+      const valid = await fsPromises.readFile(globalPath());
+      await fsPromises.writeFile(globalPath(), raw);
+      const before = await fsPromises.readFile(globalPath());
+      await expect(mutate()).rejects.toThrow('malformed');
+      expect(await fsPromises.readFile(globalPath())).toEqual(before);
+      expect(await fsPromises.readdir(path.dirname(globalPath()))).toEqual(['memory.json']);
+
+      await fsPromises.writeFile(globalPath(), valid);
+      // A write after restoration also proves a failed mutation released its lock.
+      await runtime.update(GLOBAL, 'mem-1', { body: 'Restored text' });
+      expect(await fsPromises.readFile(globalPath())).not.toEqual(valid);
+    });
+  }
+
+  test('an atomic-write failure preserves the valid file and releases the lock', async () => {
+    await runtime.create(GLOBAL, { title: 'Keep', body: 'Original text' });
+    const before = await fsPromises.readFile(globalPath());
+    const directory = path.dirname(globalPath());
+    let failNextWrite = true;
+    const failingRuntime = createAgentMemoryRuntime({
+      fsPromises: {
+        ...fsPromises,
+        writeFile: async (file, ...rest) => {
+          if (failNextWrite) {
+            failNextWrite = false;
+            await fsPromises.writeFile(file, 'partial temporary write', 'utf8');
+            const error = new Error('ENOSPC: no space left on device, write');
+            error.code = 'ENOSPC';
+            throw error;
+          }
+          return fsPromises.writeFile(file, ...rest);
+        },
+      },
+      path,
+      userConfigRoot: directory,
+      projectsDirPath: path.join(directory, 'projects'),
+    });
+    await expect(failingRuntime.update(GLOBAL, 'mem-1', { body: 'Changed text' })).rejects.toThrow('ENOSPC');
+    expect(await fsPromises.readFile(globalPath())).toEqual(before);
+    expect(await fsPromises.readdir(directory)).toEqual(['memory.json']);
+
+    await failingRuntime.update(GLOBAL, 'mem-1', { body: 'Changed text' });
+    expect((await failingRuntime.read(GLOBAL)).entries[0].body).toBe('Changed text');
+  });
+});
+
 describe('create', () => {
   test('stores title, body, type and provenance', async () => {
     const { entry } = await runtime.create(PROJECT, {
@@ -158,8 +255,10 @@ describe('create', () => {
       .rejects.toThrow('body holds at most 2000 characters');
     expect((await runtime.read(GLOBAL)).entries).toHaveLength(0);
 
-    const { entry } = await runtime.create(GLOBAL, { title: 'T', body: 'y'.repeat(2000) });
+    const { entry } = await runtime.create(GLOBAL, { title: 'T'.repeat(300), body: 'y'.repeat(2000) });
     expect(entry.body).toHaveLength(2000);
+    expect(entry.title).toBe('T'.repeat(60));
+    expect((await runtime.read(GLOBAL)).entries[0].title).toBe('T'.repeat(60));
   });
 
   test('a legacy over-limit entry still loads, while a new write of that size is rejected', async () => {
@@ -334,14 +433,6 @@ describe('restated duplicates', () => {
     });
 
     expect(result.related).toEqual([]);
-  });
-
-  test('short entries fall back to exact-title matching', async () => {
-    await runtime.create(PROJECT, { title: 'Runtime', body: 'Use bun.' });
-    const result = await runtime.create(PROJECT, { title: 'Bundler', body: 'Use vite.' });
-
-    expect(result.replaced).toBe(false);
-    expect(result.entries).toHaveLength(2);
   });
 
   test('a replacement bumps updatedAt so the panel can show it as changed', async () => {

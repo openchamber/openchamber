@@ -1,10 +1,4 @@
-/**
- * Linear through the legacy `/api/linear/*` routes, for a server that
- * predates `/api/tracker`. Such a server serves exactly Linear, in Linear's
- * own shapes; this maps them to the neutral tracker shapes the same way the
- * server's tracker adapter does (`server/lib/linear/tracker.js`). Keep
- * `BUILT_IN_LINEAR_TRACKER` identical to that module's descriptor.
- */
+
 import { z } from 'zod';
 import type {
   TrackerAPI,
@@ -50,7 +44,7 @@ export const BUILT_IN_LINEAR_TRACKER: TrackerDescriptor = {
 
 const PRIORITY_BY_VALUE: readonly TrackerPriority[] = ['none', 'urgent', 'high', 'medium', 'low'];
 
-// Neutral filter ids to Linear's list `status`; the rest are the same word.
+
 const LINEAR_STATUS_BY_STATE_FILTER = new Map([['in-progress', 'started'], ['done', 'completed']]);
 
 const text = z.string().trim().min(1);
@@ -162,7 +156,7 @@ const authStatusSchema = z.object({
 }).transform((status): TrackerAuthStatus => {
   if (!status.connected) return { connected: false };
   const accounts: TrackerAccount[] = [...status.workspaces];
-  // Servers from before multiple workspaces name only the organization.
+
   if (accounts.length === 0 && status.organization) {
     accounts.push({ id: status.organization.id, name: status.organization.name, user: status.user, current: true, authorizedAt: null });
   }
@@ -186,10 +180,10 @@ const legacyListQuery = (options: TrackerListOptions | undefined): string => {
   return query ? `?${query}` : '';
 };
 
-/** Every tracker call but `providers`, through the legacy Linear routes. */
+
 export const createLegacyLinearTrackerAPI = (fetch: TrackerFetch): Omit<TrackerAPI, 'providers'> => {
   const call = async <T>(provider: TrackerProviderId, path: string, request: TrackerRequest, schema: z.ZodType<T>, failure: string): Promise<T> => {
-    // An older server serves no other tracker.
+
     if (provider !== BUILT_IN_LINEAR_TRACKER.id) throw new Error(`Unknown tracker: ${provider}`);
     return requestJson(fetch, `/api/linear${path}`, request, schema, failure);
   };
@@ -220,7 +214,7 @@ export const createLegacyLinearTrackerAPI = (fetch: TrackerFetch): Omit<TrackerA
       'Failed to start Linear auth',
     ),
 
-    // An older server serves no extension tracker, so neither of its ways in exists there.
+
     authConnectToken: async () => ({ ok: false, code: 'UNSUPPORTED', message: null }),
     authSaveOAuthClient: async () => ({ ok: false, code: 'UNSUPPORTED', message: null }),
 

@@ -18,6 +18,14 @@ describe('mapLimited', () => {
     expect(results[1]).toBe(items[1]);
   });
 
+  it('passes undefined for holes in a sparse input', async () => {
+    const items = new Array(2);
+    items[1] = 'present';
+    const task = vi.fn((item) => item ?? 'missing');
+    expect(await mapLimited(items, 1, task)).toEqual(['missing', 'present']);
+    expect(task.mock.calls).toEqual([[undefined], ['present']]);
+  });
+
   it('fills available workers without exceeding the limit and keeps input order', async () => {
     const pending = Array.from({ length: 5 }, () => Promise.withResolvers());
     const nextStarted = Promise.withResolvers();

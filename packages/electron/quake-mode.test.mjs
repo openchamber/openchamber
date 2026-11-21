@@ -5,6 +5,7 @@ import {
   computeQuakeBounds,
   DEFAULT_QUAKE_MODE_HEIGHT_FRACTION,
   DEFAULT_QUAKE_MODE_SHORTCUT_COMBO,
+  getQuakeDisplayBounds,
   parseQuakeHeightFraction,
   QUAKE_MODE_UNASSIGNED,
   readQuakeModeSettings,
@@ -58,6 +59,23 @@ test('an unassigned shortcut never falls back to the default', () => {
 
   const disabled = readQuakeModeSettings({ desktopQuakeModeShortcut: QUAKE_MODE_UNASSIGNED });
   assert.equal(disabled.combo, null);
+});
+
+test('quake uses the cursor display work area and falls back to primary or bounds', () => {
+  const bounds = { x: 1280, y: 0, width: 1280, height: 800 };
+  const workArea = { x: 1280, y: 24, width: 1240, height: 728 };
+  const primary = { x: 0, y: 0, width: 1280, height: 752 };
+  const screen = {
+    getCursorScreenPoint: () => ({ x: 1400, y: 100 }),
+    getDisplayNearestPoint: () => ({ bounds, workArea }),
+    getPrimaryDisplay: () => ({ bounds, workArea: primary }),
+  };
+  assert.deepEqual(computeQuakeBounds(getQuakeDisplayBounds(screen), 1), workArea);
+  assert.deepEqual(computeQuakeBounds(getQuakeDisplayBounds(screen), 0.5), { ...workArea, height: 364 });
+  assert.deepEqual(getQuakeDisplayBounds({ ...screen, getDisplayNearestPoint: () => ({ bounds }) }), bounds);
+  assert.deepEqual(getQuakeDisplayBounds({ ...screen, getCursorScreenPoint: () => { throw new Error(); } }), primary);
+  assert.deepEqual(getQuakeDisplayBounds({ ...screen, getDisplayNearestPoint: () => null, getPrimaryDisplay: () => ({ bounds }) }), bounds);
+  assert.equal(getQuakeDisplayBounds({ ...screen, getCursorScreenPoint: () => { throw new Error(); }, getPrimaryDisplay: () => { throw new Error(); } }), null);
 });
 
 test('quake bounds attach to the top and span the display width', () => {

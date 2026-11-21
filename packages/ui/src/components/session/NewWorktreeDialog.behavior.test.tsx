@@ -1,5 +1,5 @@
 import React, { act } from 'react';
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, jest, mock, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
 // React detects input-event support when its DOM renderer is first imported.
@@ -143,6 +143,7 @@ mock.module('@/hooks/useRuntimeAPIs', () => ({
 mock.module('@/stores/useGitStore', () => ({
   ...actualGitStore,
   useGitBranches: () => ({ all: ['main'] }),
+  useGitBranchesFetchedAt: () => 1,
   useGitLoadingBranches: () => false,
   useGitStore: selectGitState,
 }));
@@ -598,6 +599,28 @@ describe('NewWorktreeDialog behavior', () => {
     } finally {
       await act(async () => root.unmount());
       dom.restore();
+    }
+  });
+
+  test('checks the names once after a field loses focus', async () => {
+    jest.useFakeTimers();
+    const dom = installDom();
+    const root = createRoot(dom.container);
+    validatedNames = [];
+    try {
+      await act(async () => root.render(<I18nProvider><NewWorktreeDialog open onOpenChange={() => undefined} /></I18nProvider>));
+      const branchInput = dom.container.querySelector<HTMLInputElement>('input[placeholder="feature/my-awesome-feature"]');
+      if (!branchInput) throw new Error('Missing branch field');
+      await act(async () => { branchInput.dispatchEvent(new Event('focusout', { bubbles: true })); });
+      // The check is debounced by 300 ms; let several of those windows pass and render.
+      for (let i = 0; i < 4; i += 1) {
+        await act(async () => { jest.advanceTimersByTime(350); });
+      }
+      expect(validatedNames).toEqual([{ branchName: 'draft-name', worktreeName: 'draft-name' }]);
+    } finally {
+      await act(async () => root.unmount());
+      dom.restore();
+      jest.useRealTimers();
     }
   });
 

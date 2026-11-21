@@ -5,33 +5,33 @@ import type { Message } from '@/lib/opencode/model';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { commitStagedRevert } from '@/sync/session-actions';
 import { useSessionMessagesSelector } from '@/sync/sync-context';
-import { UI_BLOCK_ANSWER_METADATA_KEY, uiBlockAnswerRecord, type UiBlockReplyAnswerData } from './answer';
+import { stableReplyInputId, UI_BLOCK_ANSWER_METADATA_KEY, uiBlockAnswerRecord, type UiBlockReplyAnswerData } from './answer';
 
 type ReplyBlock = { sessionId: string; directory: string; messageId: string; block: string };
 
-// One input id per block for this client's lifetime: a retry after a lost
-// response reuses it, and OpenCode refuses the repeat.
+// external: https://github.com/anomalyco/opencode Reusing the input ID after a lost response lets OpenCode admit the answer once.
+// The ID is kept in session storage so a retry after a reload reuses it too.
 const inputIds = new Map<string, string>();
-const inputIdFor = (target: ReplyBlock): string => {
-  const key = `${target.sessionId}\u0000${target.messageId}\u0000${target.block}`;
-  const known = inputIds.get(key);
-  if (known) return known;
-  const id = ascendingId('msg');
-  inputIds.set(key, id);
-  return id;
+const sessionStore = (): Storage | undefined => {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return undefined;
+  }
 };
+const inputIdFor = (runtimeKey: string, target: ReplyBlock): string => stableReplyInputId(
+  JSON.stringify([runtimeKey, target.directory, target.sessionId, target.messageId, target.block]),
+  sessionStore(),
+  inputIds,
+  () => ascendingId('msg'),
+);
 
-/**
- * Hands the agent the choices made in a block of its reply. They travel as
- * synthetic input that starts the agent's next turn, so the chat shows no
- * user message for them; the input's metadata records the answer for the block.
- */
 export async function sendUiBlockReplyAnswer(target: ReplyBlock, answer: UiBlockReplyAnswerData, text: string): Promise<void> {
   const runtimeKey = getRuntimeKey();
   await commitStagedRevert(target.sessionId, target.directory);
   await opencodeClient.resumeWithSyntheticInput({
     runtimeKey,
-    id: inputIdFor(target),
+    id: inputIdFor(runtimeKey, target),
     sessionId: target.sessionId,
     directory: target.directory,
     text,
@@ -52,7 +52,6 @@ const sameAnswer = (left: UiBlockReplyAnswerData | null, right: UiBlockReplyAnsw
   left === right || (left !== null && right !== null && JSON.stringify(left) === JSON.stringify(right))
 );
 
-/** The answer this block already gave, read back from the session; null until it has one. */
 export function useUiBlockReplyAnswer(target: ReplyBlock | null): UiBlockReplyAnswerData | null {
   const select = React.useCallback(
     (messages: Message[]) => (target ? findAnswer(messages, target) : null),

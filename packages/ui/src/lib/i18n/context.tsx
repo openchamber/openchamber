@@ -24,6 +24,9 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
     invokeDesktop('desktop_set_locale', { locale }).catch((error) => {
       console.warn('[i18n] failed to sync locale to desktop shell', error);
     });
+    invokeDesktop('desktop_set_tray_locale', { locale }).catch((error) => {
+      console.warn('[i18n] failed to sync locale to desktop tray', error);
+    });
   }, [locale]);
 
   const value = React.useMemo<I18nContextValue>(() => {
@@ -38,7 +41,6 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [dictionary, direction, locale, setLocale]);
 
-  // Base UI menus, popovers and sliders read the direction from this provider, not from the document.
   return (
     <I18nContext.Provider value={value}>
       <DirectionProvider direction={direction}>{children}</DirectionProvider>

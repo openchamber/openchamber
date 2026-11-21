@@ -1,35 +1,12 @@
-import React, { useMemo, useRef, useCallback, useEffect } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  areFilesEqual,
-  areOptionsEqual,
-  FileDiff as PierreFileDiff,
   parseDiffFromFile,
-  VirtualizedFileDiff,
-  Virtualizer,
-  type FileContents,
-  type FileDiffMetadata,
+  type FileDiff as PierreFileDiff,
   type FileDiffOptions,
-  type DiffLineAnnotation,
-  type SelectedLineRange,
-  type AnnotationSide,
-  type ExpansionDirections,
-  type OnDiffLineClickProps,
-  type OnDiffLineEnterLeaveProps,
-  type VirtualFileMetrics,
+  type Virtualizer,
 } from '@pierre/diffs';
-import type { WorkerPoolManager } from '@pierre/diffs/worker';
-import {
-  buildPierreLineAnnotations,
-  buildPierreSelectionAnnotation,
-  type PierreAnnotationData,
-  PierreDiffCommentOverlays,
-  type ReviewLineItem,
-  isWholeFileComment,
-  toPierreAnnotationId,
-  useInlineCommentController,
-} from '@/components/comments';
-import { useChangeRequestReviewContext } from '@/components/review/useChangeRequestReview';
+import { PierreDiffCommentOverlays } from '@/components/comments';
 
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -40,834 +17,33 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
-import { cn, isMacOS } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { hideWhitespaceChanges } from '@/lib/diff/hideWhitespaceChanges';
-import type { PatchHunkAnchor } from '@/lib/diff/patchFileDiff';
-import { getDiffLinesText } from '@/lib/diff/selectedDiffLines';
-import { findWordAtOffset } from '@/lib/diff/findWord';
-import type { DiffFindSide } from '@/lib/diff/diffFind';
-import { PIERRE_DIFF_TINT_CSS, PIERRE_SEPARATOR_CSS } from '@/lib/shiki/pierreDiffTint';
 import { DiffStickyScrollbar } from './DiffStickyScrollbar';
-import type { DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { useEditorCodeMetrics } from '@/lib/editorCodeMetrics';
+import { HIDE_COLUMN_SCROLLBAR_CSS, HUNK_ACTION_OVERLAY_CSS, WEBKIT_SCROLL_FIX_CSS } from './pierreDiff/css';
+import { useContextExpansion } from './pierreDiff/useContextExpansion';
+import { useAnnotationRenderer, useLineAnnotations } from './pierreDiff/useDiffAnnotations';
+import { useDiffComments } from './pierreDiff/useDiffComments';
+import { useDiffInstance } from './pierreDiff/useDiffInstance';
+import { useDiffScrollToLine } from './pierreDiff/useDiffScrollToLine';
+import { useDiffSwapAfterHighlight } from './pierreDiff/useDiffSwapAfterHighlight';
+import { useDiffThemeVars } from './pierreDiff/useDiffThemeVars';
+import { useFindHighlights, useShadowRootPass } from './pierreDiff/useFindHighlights';
+import { useHunkActionTargets } from './pierreDiff/useHunkActionTargets';
+import { useLineSelectionGestures } from './pierreDiff/useLineSelectionGestures';
+import { DEFAULT_DIFF_LINE_HEIGHT, type SharedVirtualizer } from './pierreDiff/sharedVirtualizer';
+import type { DiffAnnotation, PierreDiffViewerHandle, PierreDiffViewerProps } from './pierreDiff/types';
 
-/**
- * A click on a collapsed-context expander of a partial (patch-only) diff.
- * `before-hunk` comes from the separator above the hunk that starts at
- * `additionStart` in the new file; `after-last-hunk` from the row below the
- * last hunk. The owner loads the full file and the viewer replays the
- * expansion.
- */
-export type ContextExpansionRequest =
-  | { gap: 'before-hunk'; additionStart: number; direction: ExpansionDirections }
-  | { gap: 'after-last-hunk' };
-
-export interface DiffHunkActions {
-  anchors: readonly PatchHunkAnchor[];
-  /** `revealed`: the pointer is on the hunk; the actions also show on their own hover and keyboard focus. */
-  render: (index: number, revealed: boolean) => React.ReactNode;
-}
-
-type DiffAnnotation =
-  | PierreAnnotationData
-  | { type: 'hunk-action'; index: number }
-  | { type: 'trailing-expand' };
-const EMPTY_HUNK_ANCHORS: readonly PatchHunkAnchor[] = [];
-
-const HUNK_ACTION_OVERLAY_CSS = `
-  [data-gutter-buffer="annotation"] { min-height: 0; }
-  [data-code] { min-height: 2.5rem; align-content: start; }
-`;
-
-// The inline layout draws the columns' horizontal scrollbar outside the
-// shadow root, sticky to the panel (DiffStickyScrollbar).
-const HIDE_COLUMN_SCROLLBAR_CSS = `
-  [data-code] { scrollbar-width: none; }
-  [data-code]::-webkit-scrollbar { display: none; }
-`;
+export type {
+  ContextExpansionRequest,
+  DiffFindWordRequest,
+  DiffHunkActions,
+  PierreDiffViewerHandle,
+} from './pierreDiff/types';
 
 
-// Threshold (bytes) above which syntax highlighting is degraded for performance
 const LARGE_CONTENT_BYTES = 500_000;
-
-interface PierreDiffViewerProps {
-  original: string;
-  modified: string;
-  fileDiff?: FileDiffMetadata;
-  language: string;
-  fileName?: string;
-  /** The diff this is, for comments; absent for uncommitted changes. */
-  commentOrigin?: DiffCommentOrigin;
-  renderSideBySide: boolean;
-  wrapLines?: boolean;
-  layout?: 'fill' | 'inline';
-  enableComments?: boolean;
-  /**
-   * Shows lines that changed only by whitespace as unchanged. Hunk actions are
-   * dropped meanwhile: they act on the whole hunk, whitespace included.
-   */
-  hideWhitespace?: boolean;
-  hunkActions?: DiffHunkActions;
-  /**
-   * Present when the owner can replace a partial diff with full file contents.
-   * Partial diffs then show the same expand affordance as full ones; a click
-   * reports the gap instead of expanding, because the lines are not loaded.
-   */
-  onExpandContextRequest?: (request: ContextExpansionRequest) => void;
-  /** Expansion to replay once the diff is no longer partial. Applied once per object. */
-  pendingContextExpansion?: ContextExpansionRequest | null;
-  /** The owner is fetching the full file for `pendingContextExpansion`. */
-  contextLoading?: boolean;
-  /**
-   * A primary-modifier click on a word (Cmd on macOS, Ctrl elsewhere) reports
-   * that word so the owner can open find and jump to the next match.
-   */
-  onFindWordRequest?: (request: DiffFindWordRequest) => void;
-}
-
-/** A primary-modifier click on a word inside a diff line. */
-export interface DiffFindWordRequest {
-  /** The word under the pointer, expanded to its boundaries. */
-  word: string;
-  /** 1-based line number of the clicked row, on that row's side. */
-  lineNumber: number;
-  /** The clicked row's side: deletion and addition rows can share a line number. */
-  side: DiffFindSide;
-  /** 0-based offset of `word` inside that line's text — the same offset space as DiffFindMatch.spanStart. */
-  spanStart: number;
-}
-
-/**
- * Read-only handle for find-in-diff. Both members work on the live rendered
- * diff; `setFindHighlights` also re-applies itself after virtualized rebuilds.
- */
-export interface PierreDiffViewerHandle {
-  /**
-   * Bring this side's `lineNumber` into view. False while its row is not
-   * rendered yet (the diff is still loading, or a collapsed gap or a
-   * virtualized window is being moved to it): call again on a later frame.
-   */
-  scrollToLine(target: { lineNumber: number; side: DiffFindSide; align?: 'start' | 'center' }): boolean;
-  /** Paint matches on the rendered rows, distinguishing `currentIndex`; [] clears. */
-  setFindHighlights(
-    matches: ReadonlyArray<{ lineNumber: number; side: DiffFindSide; spanStart: number; spanLength: number }>,
-    currentIndex: number,
-  ): void;
-}
-
-const FIND_MARK_ATTR = 'data-oc-find-mark';
-const FIND_CURRENT_ATTR = 'data-oc-find-current';
-const FIND_STYLE_ATTR = 'data-oc-find-style';
-
-// Injected into the diff's shadow root, so it must not rely on Tailwind. The
-// theme's custom properties inherit through the shadow boundary; the tints
-// match the Markdown preview's find marks (MarkdownPreviewSearch).
-const FIND_MARK_CSS = `
-  mark[${FIND_MARK_ATTR}] { background-color: color-mix(in srgb, var(--status-warning) 30%, transparent); color: inherit; border-radius: 2px; }
-  mark[${FIND_CURRENT_ATTR}] { background-color: color-mix(in srgb, var(--status-warning) 60%, transparent); }
-`;
-
-/**
- * Base CSS injected into Pierre's Shadow DOM. Pins font-family/size to the
- * app tokens (so Files view and Diff view render at the same scale on mobile)
- * and enables touch-friendly line interactions. Re-exported so plain
- * <PierreFile> consumers (e.g. `MobileFilesSurface`) can inject the same.
- */
-const PIERRE_RUNTIME_BASE_CSS = `
-  :host {
-    font-family: var(--font-mono);
-    font-size: var(--text-code);
-  }
-
-  pre, [data-code] {
-    font-family: var(--font-mono);
-    font-size: var(--text-code);
-  }
-
-  /* Mobile touch selection support */
-  [data-line-number] {
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-    cursor: pointer;
-  }
-
-  /* Ensure interactive line numbers work on touch */
-  pre[data-interactive-line-numbers] [data-line-number] {
-    touch-action: manipulation;
-  }
-`;
-
-// CSS injected into Pierre's Shadow DOM for WebKit scroll optimization +
-// diff-specific separator height. Note: avoid will-change and contain:paint
-// as they break resize behavior.
-const WEBKIT_SCROLL_FIX_CSS = `
-  ${PIERRE_RUNTIME_BASE_CSS}
-  ${PIERRE_DIFF_TINT_CSS}
-
-  /* While a multi-line content drag is being mapped to a line selection the
-     row highlight is the feedback; the native blue text selection on top of
-     it reads as double-selection, so it is painted transparent for the drag's
-     duration only (single-line selections keep the normal look for copying). */
-  :host([data-oc-comment-drag]) {
-    user-select: none;
-    -webkit-user-select: none;
-  }
-
-  /* Gutter "+" comment utility: theme primary, and smaller than Pierre's
-     1lh default, which reads oversized next to our 13px line numbers. */
-  [data-utility-button] {
-    width: 16px;
-    height: 16px;
-    align-self: center;
-    margin-right: calc(-16px + 1ch);
-    border-radius: 5px;
-    background-color: var(--primary-base);
-    color: var(--primary-foreground);
-  }
-
-  :host {
-    --diffs-bg-separator-override: var(--surface-elevated);
-  }
-
-  /* Selected rows: Pierre mixes the selection colour in at 18-25%, and the
-     theme's selection is a soft neutral, so the selection barely showed on
-     dark themes. Half the selection colour stays readable while added and
-     deleted rows keep their tint. */
-  [data-line][data-selected-line],
-  [data-line-annotation][data-selected-line],
-  [data-no-newline][data-selected-line] {
-    --mix-selection-light: 62%;
-    --mix-selection-dark: 50%;
-  }
-
-  [data-gutter-buffer][data-selected-line],
-  [data-column-number][data-selected-line] {
-    --mix-selection-light: 55%;
-    --mix-selection-dark: 40%;
-  }
-
-  ${PIERRE_SEPARATOR_CSS}
-
-  /* Partial diffs get no expand buttons from Pierre (the lines are not
-     loaded). When the owner can load them on demand, the gutter separator
-     itself becomes the button and shows the same glyphs as the real one. */
-  :host([data-oc-expand-on-demand]) [data-diff-type="single"] [data-gutter] [data-separator-wrapper],
-  :host([data-oc-expand-on-demand]) [data-diff-type="split"] [data-deletions] [data-gutter] [data-separator-wrapper] {
-    cursor: pointer;
-
-    &::before {
-      content: '\\2195';
-      display: block;
-      flex-shrink: 0;
-    }
-
-    &:hover {
-      color: var(--diffs-fg);
-    }
-  }
-
-  :host([data-oc-expand-on-demand]) [data-diff-type="single"] [data-gutter] [data-separator-first] [data-separator-wrapper]::before,
-  :host([data-oc-expand-on-demand]) [data-diff-type="split"] [data-deletions] [data-gutter] [data-separator-first] [data-separator-wrapper]::before {
-    content: '\\2191';
-  }
-
-  /* Full file requested: the glyph becomes a spinner and the separators stop
-     taking clicks until the highlighted full diff replaces this one. */
-  :host([data-oc-expand-loading]) [data-diff-type="single"] [data-gutter] [data-separator-wrapper],
-  :host([data-oc-expand-loading]) [data-diff-type="split"] [data-deletions] [data-gutter] [data-separator-wrapper] {
-    cursor: default;
-    pointer-events: none;
-    opacity: 0.6;
-
-    &::before {
-      content: '';
-      width: 9px;
-      height: 9px;
-      margin-right: 3px;
-      border-radius: 50%;
-      border: 1.5px solid currentColor;
-      border-right-color: transparent;
-      animation: oc-expand-spin 0.8s linear infinite;
-    }
-  }
-
-  @keyframes oc-expand-spin {
-    to { transform: rotate(360deg); }
-  }
-  `;
-
-// Fast cache key - use length + samples instead of full hash
-function fnv1a32(input: string): string {
-  // Fast + stable across runtimes; good enough for cache keys.
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < input.length; i += 1) {
-    hash ^= input.charCodeAt(i);
-    // hash *= 16777619 (but keep 32-bit)
-    hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0;
-  }
-  return hash.toString(16);
-}
-
-function makeContentCacheKey(contents: string): string {
-  // Avoid hashing full file; sample head+tail.
-  const sample = contents.length > 400
-    ? `${contents.slice(0, 200)}${contents.slice(-200)}`
-    : contents;
-  return `${contents.length}:${fnv1a32(sample)}`;
-}
-
-const FULL_DIFF_SWAP_TIMEOUT_MS = 2000;
-
-/**
- * A partial diff replaced by the full diff of the same file (context loaded
- * on demand) would paint unhighlighted and light up when the worker answers,
- * so the file visibly flashes to plain text. Keep the old diff on screen while
- * the worker primes the new one, then swap; fall back to a plain swap when
- * no worker pool is available or priming takes too long.
- */
-const useDiffSwapAfterHighlight = (
-  incoming: FileDiffMetadata | undefined,
-  workerPool: WorkerPoolManager | undefined,
-): FileDiffMetadata | undefined => {
-  const [displayed, setDisplayed] = React.useState(incoming);
-  const displayedRef = useRef(incoming);
-
-  useEffect(() => {
-    if (incoming === displayedRef.current) return;
-    const previous = displayedRef.current;
-    const show = () => {
-      displayedRef.current = incoming;
-      setDisplayed(incoming);
-    };
-
-    const isContextReload = previous !== undefined && incoming !== undefined
-      && previous.isPartial && !incoming.isPartial && previous.name === incoming.name
-      && workerPool?.isWorkingPool() === true;
-    if (!isContextReload) {
-      show();
-      return;
-    }
-
-    incoming.cacheKey ??= [
-      'diff', incoming.name,
-      incoming.prevObjectId ?? makeContentCacheKey(incoming.deletionLines.join('\n')),
-      incoming.newObjectId ?? makeContentCacheKey(incoming.additionLines.join('\n')),
-    ].join(':');
-
-    // subscribeToStatChanges invokes the listener synchronously, so swap can
-    // run before the subscription and timer handles exist. The initializers
-    // keep prefer-const from demanding const: settle reads both handles while
-    // subscribeToStatChanges is still running, and const would throw there.
-    let settled = false;
-    let unsubscribe: (() => void) | undefined = undefined;
-    let timer: ReturnType<typeof setTimeout> | undefined = undefined;
-    const settle = () => {
-      if (settled) return;
-      settled = true;
-      unsubscribe?.();
-      clearTimeout(timer);
-    };
-    const swap = () => {
-      if (settled) return;
-      settle();
-      show();
-    };
-    const swapWhenHighlighted = () => {
-      if (workerPool.getDiffResultCache(incoming)) swap();
-    };
-    unsubscribe = workerPool.subscribeToStatChanges(swapWhenHighlighted);
-    if (settled) {
-      unsubscribe();
-      return;
-    }
-    timer = setTimeout(swap, FULL_DIFF_SWAP_TIMEOUT_MS);
-    workerPool.primeDiffHighlightCache(incoming);
-    swapWhenHighlighted();
-    return settle;
-  }, [incoming, workerPool]);
-
-  return displayed;
-};
-
-const extractSelectedCode = (
-  original: string,
-  modified: string,
-  fileDiff: FileDiffMetadata | undefined,
-  range: SelectedLineRange,
-): string => {
-  // Default to modified if side is ambiguous, as users mostly comment on new code
-  const isOriginal = range.side === 'deletions';
-  const from = Math.min(range.start, range.end);
-  const to = Math.max(range.start, range.end);
-  if (fileDiff) return getDiffLinesText(fileDiff, isOriginal ? 'deletions' : 'additions', from, to);
-
-  const lines = (isOriginal ? original : modified).split('\n');
-  const startLine = Math.max(1, from);
-  const endLine = Math.min(lines.length, to);
-  if (startLine > endLine) return '';
-  return lines.slice(startLine - 1, endLine).join('\n');
-};
-
-const isSameSelection = (left: SelectedLineRange | null, right: SelectedLineRange | null): boolean => {
-  if (left === right) return true;
-  if (!left || !right) return false;
-  return left.start === right.start && left.end === right.end && left.side === right.side;
-};
-
-const isScrollable = (value: string): boolean =>
-  value === 'auto' || value === 'scroll' || value === 'overlay';
-
-const findScrollParent = (node: HTMLElement | null): HTMLElement | null => {
-  let current = node?.parentElement ?? null;
-  while (current) {
-    const style = window.getComputedStyle(current);
-    if (isScrollable(style.overflowY)) return current;
-    current = current.parentElement;
-  }
-  return null;
-};
-
-const preserveScrollPosition = (wrapper: HTMLElement | null, container: HTMLElement | null): (() => void) => {
-  if (!wrapper || !container || typeof window === 'undefined') return () => {};
-
-  const scrollParent = findScrollParent(wrapper);
-  if (!scrollParent) return () => {};
-
-  const height = container.getBoundingClientRect().height;
-  if (!height) return () => {};
-
-  const top = wrapper.getBoundingClientRect().top - scrollParent.getBoundingClientRect().top;
-  const previousMinHeight = container.style.minHeight;
-  container.style.minHeight = `${Math.ceil(height)}px`;
-
-  let done = false;
-  return () => {
-    if (done) return;
-    done = true;
-    container.style.minHeight = previousMinHeight;
-
-    const nextTop = wrapper.getBoundingClientRect().top - scrollParent.getBoundingClientRect().top;
-    const delta = nextTop - top;
-    if (delta) {
-      scrollParent.scrollTop += delta;
-    }
-  };
-};
-
-/**
- * Maps a click inside a partial diff's separator to the hunk below it. Pierre
- * renders no expand buttons for partial diffs, so the separator carries no
- * hunk index; the first rendered line after it does, through `data-line-index`
- * (`unified,split`), which falls inside the hunk's own line range.
- */
-const resolveContextExpansionRequest = (
-  path: readonly EventTarget[],
-  fileDiff: FileDiffMetadata,
-): ContextExpansionRequest | null => {
-  const separator = path.find((node): node is HTMLElement =>
-    node instanceof HTMLElement && node.hasAttribute('data-separator'));
-  if (!separator) return null;
-
-  let next: Element | null = separator.nextElementSibling;
-  while (next && !next.hasAttribute('data-line-index')) next = next.nextElementSibling;
-  const [unifiedRaw, splitRaw] = next?.getAttribute('data-line-index')?.split(',') ?? [];
-  const unifiedIndex = Number.parseInt(unifiedRaw ?? '', 10);
-  const splitIndex = Number.parseInt(splitRaw ?? '', 10);
-  if (Number.isNaN(unifiedIndex) || Number.isNaN(splitIndex)) return null;
-
-  // Nothing is expanded in a partial diff, so any rendered line of hunk N
-  // sits inside N's own index range.
-  const hunk = fileDiff.hunks.find((candidate) =>
-    candidate.unifiedLineStart <= unifiedIndex
-    && unifiedIndex < candidate.unifiedLineStart + candidate.unifiedLineCount
-    && candidate.splitLineStart <= splitIndex
-    && splitIndex < candidate.splitLineStart + candidate.splitLineCount);
-  if (!hunk) return null;
-
-  return {
-    gap: 'before-hunk',
-    additionStart: hunk.additionStart,
-    direction: separator.hasAttribute('data-separator-first') ? 'down' : 'both',
-  };
-};
-
-// Context lines git and GitHub put around each change unless asked otherwise.
-const PATCH_CONTEXT_LINES = 3;
-
-/**
- * Pierre cannot size the gap after the last hunk of a patch-only diff, so it
- * draws no separator there. Git emits up to the requested context after the
- * last change; fewer context lines, or a no-newline marker, mean the hunk
- * reaches the end of the file. Otherwise more lines may follow, and the row
- * anchored to the hunk's last line offers to load them.
- */
-const getTrailingExpandAnnotation = (fileDiff: FileDiffMetadata): DiffLineAnnotation<DiffAnnotation> | null => {
-  if (fileDiff.type === 'new' || fileDiff.type === 'deleted') return null;
-  const hunk = fileDiff.hunks.at(-1);
-  const lastContent = hunk?.hunkContent.at(-1);
-  if (!hunk || lastContent?.type !== 'context' || lastContent.lines < PATCH_CONTEXT_LINES) return null;
-  if (hunk.noEOFCRAdditions || hunk.noEOFCRDeletions) return null;
-  // The last row is context, so it exists on both sides. Deletions places the
-  // row in the left column of a split diff, where Pierre's separators sit.
-  return { side: 'deletions', lineNumber: hunk.deletionStart + hunk.deletionCount - 1, metadata: { type: 'trailing-expand' } };
-};
-
-const waitForDiffReady = (
-  container: HTMLElement,
-  onReady: () => void,
-): (() => void) => {
-  if (typeof window === 'undefined') return () => {};
-
-  let frameId: number | null = null;
-  let observer: MutationObserver | null = null;
-  let cancelled = false;
-
-  const finish = () => {
-    if (cancelled) return;
-    observer?.disconnect();
-    observer = null;
-    frameId = window.requestAnimationFrame(() => {
-      frameId = window.requestAnimationFrame(() => {
-        if (!cancelled) onReady();
-      });
-    });
-  };
-
-  const getRoot = (): ShadowRoot | undefined => {
-    const host = container.querySelector('diffs-container');
-    return host?.shadowRoot ?? undefined;
-  };
-
-  const isReady = (root = getRoot()) => {
-    return Boolean(root?.querySelector('[data-line]'));
-  };
-
-  if (isReady()) {
-    finish();
-  } else if (typeof MutationObserver !== 'undefined') {
-    observer = new MutationObserver(() => {
-      const root = getRoot();
-      if (!root) return;
-      if (isReady(root)) {
-        finish();
-        return;
-      }
-      observer?.disconnect();
-      observer = new MutationObserver(() => {
-        if (isReady(root)) {
-          finish();
-        }
-      });
-      observer.observe(root, { childList: true, subtree: true });
-    });
-    observer.observe(container, { childList: true, subtree: true });
-  } else {
-    frameId = window.requestAnimationFrame(finish);
-  }
-
-  return () => {
-    cancelled = true;
-    observer?.disconnect();
-    if (frameId !== null) {
-      window.cancelAnimationFrame(frameId);
-    }
-  };
-};
-
-const getDiffShadowRoot = (container: HTMLElement | null): ShadowRoot | null => {
-  const host = container?.querySelector('diffs-container');
-  return host?.shadowRoot ?? null;
-};
-
-const clearFindHighlights = (root: ShadowRoot): void => {
-  const parents = new Set<Node>();
-  root.querySelectorAll(`mark[${FIND_MARK_ATTR}]`).forEach((mark) => {
-    const parent = mark.parentNode;
-    if (!parent) return;
-    mark.replaceWith(...Array.from(mark.childNodes));
-    parents.add(parent);
-  });
-  parents.forEach((parent) => parent.normalize());
-};
-
-const rowMatchesSide = (row: Element, side: DiffFindSide): boolean => {
-  const lineType = row.getAttribute('data-line-type');
-  if (lineType === 'deletion' || lineType === 'change-deletion') return side === 'deletions';
-  if (lineType === 'addition' || lineType === 'change-addition') return side === 'additions';
-  // A context row. Split view renders one in each column, numbered on that
-  // column's side, so a row only answers for its own column; the unified
-  // column numbers context rows on the additions side.
-  const column = row.closest('[data-deletions], [data-additions]');
-  if (!column) return side === 'additions';
-  return column.hasAttribute('data-deletions') ? side === 'deletions' : side === 'additions';
-};
-
-/** A line inside a hunk is always rendered; gaps and trailing context may not be. */
-const isWithinHunk = (fileDiff: FileDiffMetadata | undefined, lineNumber: number, side: DiffFindSide): boolean => {
-  if (!fileDiff) return false;
-  return fileDiff.hunks.some((hunk) => side === 'additions'
-    ? lineNumber >= hunk.additionStart && lineNumber < hunk.additionStart + hunk.additionCount
-    : lineNumber >= hunk.deletionStart && lineNumber < hunk.deletionStart + hunk.deletionCount);
-};
-
-/**
- * The library's renderability oracle is additions-only, so a deletions line in
- * a collapsed gap is translated to the additions line sharing its row region
- * (the old/new offset is constant across an unchanged gap). Returns undefined
- * when the line is not in a gap.
- */
-const deletionGapToAdditionLine = (hunks: FileDiffMetadata['hunks'], deletionLine: number): number | undefined => {
-  for (let index = 0; index <= hunks.length; index += 1) {
-    const next = hunks[index];
-    const prev = hunks[index - 1];
-    const gapStart = prev ? prev.deletionStart + prev.deletionCount : 1;
-    const gapEnd = next ? next.deletionStart : Number.POSITIVE_INFINITY;
-    if (deletionLine < gapStart || deletionLine >= gapEnd) continue;
-    const anchor = next ?? prev;
-    return anchor ? deletionLine + (anchor.additionStart - anchor.deletionStart) : undefined;
-  }
-  return undefined;
-};
-
-// A row's text nodes in order — the offset space `wrapRowSpan` and matches share.
-const rowTextNodes = (row: HTMLElement): Text[] => {
-  const nodes: Text[] = [];
-  const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
-  while (walker.nextNode()) {
-    const node = walker.currentNode;
-    if (node instanceof Text) nodes.push(node);
-  }
-  return nodes;
-};
-
-/**
- * Wrap an absolute [spanStart, spanStart + spanLength) range of a row's text in
- * marks: one per text node it covers, each inside that node's own syntax token,
- * so clearing (unwrap, then normalize) gives the row back its exact structure.
- * Wrapping across token boundaries would split the tokens, and the row would
- * collect fragments with every repaint.
- */
-const wrapRowSpan = (row: HTMLElement, spanStart: number, spanLength: number, current: boolean): void => {
-  const end = spanStart + spanLength;
-  let offset = 0;
-  for (const node of rowTextNodes(row)) {
-    const nodeStart = offset;
-    const length = node.nodeValue?.length ?? 0;
-    offset += length;
-    const from = Math.max(spanStart, nodeStart) - nodeStart;
-    const to = Math.min(end, nodeStart + length) - nodeStart;
-    if (to <= from) continue;
-    let segment = node;
-    if (from > 0) segment = segment.splitText(from);
-    if (to - from < segment.length) segment.splitText(to - from);
-    const mark = document.createElement('mark');
-    mark.setAttribute(FIND_MARK_ATTR, '');
-    if (current) mark.setAttribute(FIND_CURRENT_ATTR, '');
-    segment.replaceWith(mark);
-    mark.appendChild(segment);
-    if (offset >= end) break;
-  }
-};
-
-/**
- * The word under a primary-modifier click, read from the row's own text so its
- * `spanStart` matches `DiffFindMatch.spanStart`. Returns null when the caret
- * APIs are unavailable or the point does not land on this row's text.
- */
-const findWordAtPoint = (row: HTMLElement, clientX: number, clientY: number): { word: string; spanStart: number } | null => {
-  const root = row.getRootNode();
-  if (!(root instanceof ShadowRoot)) return null;
-  // SAFETY: Chromium exposes the caret APIs and getSelection on ShadowRoot
-  // (CSSOM View's DocumentOrShadowRoot mixin) but lib.dom declares the caret
-  // APIs only on Document and omits getSelection from ShadowRoot entirely.
-  const host = root as ShadowRoot & {
-    caretPositionFromPoint?: (x: number, y: number) => CaretPosition | null;
-    caretRangeFromPoint?: (x: number, y: number) => Range | null;
-    getSelection?: () => Selection | null;
-  };
-  const caret = host.caretPositionFromPoint?.(clientX, clientY);
-  const range = caret ? null : host.caretRangeFromPoint?.(clientX, clientY);
-  let node: Node | null = caret?.offsetNode ?? range?.startContainer ?? null;
-  let nodeOffset = caret?.offset ?? range?.startOffset ?? 0;
-  if (node === null) {
-    // Neither caret API is implemented on ShadowRoot in current Chromium; the
-    // collapsed caret the browser placed on mousedown is the same information.
-    const selection = host.getSelection?.();
-    if (!selection?.isCollapsed) return null;
-    node = selection.focusNode;
-    nodeOffset = selection.focusOffset;
-  }
-  if (!(node instanceof Text) || node.parentElement?.closest('[data-line]') !== row) return null;
-
-  const nodes = rowTextNodes(row);
-  const text = nodes.map((textNode) => textNode.nodeValue ?? '').join('');
-  let offset = 0;
-  for (const candidate of nodes) {
-    if (candidate === node) return findWordAtOffset(text, offset + nodeOffset);
-    offset += candidate.nodeValue?.length ?? 0;
-  }
-  return null;
-};
-
-const ensureFindStyle = (root: ShadowRoot): void => {
-  if (root.querySelector(`style[${FIND_STYLE_ATTR}]`)) return;
-  const style = document.createElement('style');
-  style.setAttribute(FIND_STYLE_ATTR, '');
-  style.textContent = FIND_MARK_CSS;
-  root.appendChild(style);
-};
-
-const applyFindHighlightsToContainer = (
-  container: HTMLElement | null,
-  matches: ReadonlyArray<{ lineNumber: number; side: DiffFindSide; spanStart: number; spanLength: number }>,
-  currentIndex: number,
-): void => {
-  const root = getDiffShadowRoot(container);
-  if (!root) return;
-  clearFindHighlights(root);
-  if (matches.length === 0) {
-    root.querySelector(`style[${FIND_STYLE_ATTR}]`)?.remove();
-    return;
-  }
-  ensureFindStyle(root);
-  // One pass over the rendered rows: a virtualized diff renders a window of a
-  // file whose matches can run into the thousands.
-  const rowsByLine = new Map<string, HTMLElement[]>();
-  for (const row of root.querySelectorAll('[data-line]')) {
-    const line = row.getAttribute('data-line');
-    if (line === null || !(row instanceof HTMLElement)) continue;
-    const rows = rowsByLine.get(line);
-    if (rows) rows.push(row);
-    else rowsByLine.set(line, [row]);
-  }
-  matches.forEach((match, index) => {
-    for (const row of rowsByLine.get(String(match.lineNumber)) ?? []) {
-      if (rowMatchesSide(row, match.side)) wrapRowSpan(row, match.spanStart, match.spanLength, index === currentIndex);
-    }
-  });
-};
-
-type SharedVirtualizer = {
-  virtualizer: Virtualizer;
-  root: Document | HTMLElement;
-  release: () => void;
-};
-
-type VirtualizerTarget = {
-  key: Document | HTMLElement;
-  root: Document | HTMLElement;
-  content: HTMLElement | undefined;
-};
-
-type VirtualizerEntry = {
-  virtualizer: Virtualizer;
-  refs: number;
-};
-
-const virtualizerCache = new WeakMap<Document | HTMLElement, VirtualizerEntry>();
-
-// Rows are 24px unless the code follows the Editor font size
-// (`useEditorCodeMetrics`); the CSS row height in index.css must match.
-const DEFAULT_DIFF_LINE_HEIGHT = 24;
-
-function diffVirtualMetrics(lineHeight: number): Partial<VirtualFileMetrics> {
-  return {
-    lineHeight,
-    hunkSeparatorHeight: 24,
-    spacing: 0,
-  };
-}
-
-function resolveVirtualizerTarget(container: HTMLElement): VirtualizerTarget {
-  const root = container.closest('[data-diff-virtual-root]');
-  if (root instanceof HTMLElement) {
-    const content = root.querySelector('[data-diff-virtual-content]');
-    return {
-      key: root,
-      root,
-      content: content instanceof HTMLElement ? content : undefined,
-    };
-  }
-
-  return {
-    key: document,
-    root: document,
-    content: undefined,
-  };
-}
-
-function acquireSharedVirtualizer(container: HTMLElement): SharedVirtualizer | null {
-  if (typeof document === 'undefined') return null;
-
-  const target = resolveVirtualizerTarget(container);
-  let entry = virtualizerCache.get(target.key);
-
-  if (!entry) {
-    const virtualizer = new Virtualizer();
-    virtualizer.setup(target.root, target.content);
-    entry = { virtualizer, refs: 0 };
-    virtualizerCache.set(target.key, entry);
-  }
-
-  entry.refs += 1;
-  let released = false;
-
-  return {
-    virtualizer: entry.virtualizer,
-    root: target.root,
-    release: () => {
-      if (released) return;
-      released = true;
-
-      const current = virtualizerCache.get(target.key);
-      if (!current) return;
-
-      current.refs -= 1;
-      if (current.refs > 0) return;
-
-      current.virtualizer.cleanUp();
-      virtualizerCache.delete(target.key);
-    },
-  };
-}
-
-const wakeVirtualizer = (
-  instance: PierreFileDiff<DiffAnnotation>,
-  sharedVirtualizer: SharedVirtualizer | null,
-  forceUpdate: () => void,
-): (() => void) => {
-  if (typeof window === 'undefined') return () => {};
-
-  const frameIds: number[] = [];
-  const run = () => {
-    try {
-      instance.rerender();
-    } catch {
-      // ignored
-    }
-
-    const root = sharedVirtualizer?.root;
-    if (root instanceof HTMLElement) {
-      root.dispatchEvent(new Event('scroll', { bubbles: false }));
-    } else {
-      document.dispatchEvent(new Event('scroll', { bubbles: false }));
-    }
-
-    window.dispatchEvent(new Event('resize'));
-    forceUpdate();
-  };
-
-  frameIds.push(window.requestAnimationFrame(run));
-  frameIds.push(window.requestAnimationFrame(() => {
-    frameIds.push(window.requestAnimationFrame(run));
-  }));
-
-  return () => {
-    for (const frameId of frameIds) {
-      window.cancelAnimationFrame(frameId);
-    }
-  };
-};
 
 export const PierreDiffViewer = React.forwardRef<PierreDiffViewerHandle, PierreDiffViewerProps>(
   function PierreDiffViewer({ hideWhitespace = false, ...props }, ref) {
@@ -933,481 +109,76 @@ const PierreDiffViewerBody: React.FC<
   const { isMobile } = useDeviceInfo();
   const editorCode = useEditorCodeMetrics();
   const diffLineHeight = editorCode?.lineHeight ?? DEFAULT_DIFF_LINE_HEIGHT;
-  const hunkAnchors = hunkActions?.anchors ?? EMPTY_HUNK_ANCHORS;
-  // The hunk under the pointer: its actions show while the user points at it.
-  const [hoveredHunk, setHoveredHunk] = React.useState<number | null>(null);
-  const handleHunkLineEnter = useCallback((props: OnDiffLineEnterLeaveProps) => {
-    const hunk = hunkAnchors.find(({ span }) => {
-      const [first, last] = span[props.annotationSide];
-      return props.lineNumber >= first && props.lineNumber <= last;
-    });
-    setHoveredHunk(hunk ? hunk.index : null);
-  }, [hunkAnchors]);
-  const handleHunkLineLeave = useCallback(() => setHoveredHunk(null), []);
-  const [hunkTargets, setHunkTargets] = React.useState<{
-    fileDiff: FileDiffMetadata | undefined;
-    anchors: readonly PatchHunkAnchor[];
-    targets: ReadonlyMap<number, HTMLElement>;
-  }>(() => ({ fileDiff: undefined, anchors: EMPTY_HUNK_ANCHORS, targets: new Map() }));
+  const {
+    hunkAnchors,
+    hoveredHunk,
+    hunkTargets,
+    handleHunkLineEnter,
+    handleHunkLineLeave,
+    captureHunkTargets,
+  } = useHunkActionTargets(hunkActions);
 
-  const diffCommentController = useInlineCommentController<SelectedLineRange>({
-    source: 'diff',
-    fileLabel: fileName || 'unknown',
-    origin: commentOrigin,
-    language,
-    getCodeForRange: (range) => extractSelectedCode(original, modified, incomingFileDiff, range),
-    toStoreRange: (range) => ({
-      startLine: range.start,
-      endLine: range.end,
-      side: range.side === 'deletions' ? 'original' : 'modified',
-    }),
-    fromDraftRange: (draft) => ({
-      start: draft.startLine,
-      end: draft.endLine,
-      side: draft.side === 'original' ? 'deletions' : 'additions',
-    }),
-  });
+  const diffRootRef = useRef<HTMLDivElement | null>(null);
+  const diffContainerRef = useRef<HTMLDivElement | null>(null);
+  const diffInstanceRef = useRef<PierreFileDiff<DiffAnnotation> | null>(null);
+  const sharedVirtualizerRef = useRef<SharedVirtualizer | null>(null);
+  const instanceVirtualizerRef = useRef<Virtualizer | null>(null);
 
   const {
-    drafts: diffDrafts,
     selection,
     setSelection,
     commentText,
     setCommentText,
     editingDraftId,
-    saveComment,
-    cancel,
     startEdit,
     deleteDraft,
-  } = diffCommentController;
-  // Whole-file comments have no lines to sit under; the file header shows them.
-  const fileDrafts = useMemo(() => diffDrafts.filter((draft) => !isWholeFileComment(draft)), [diffDrafts]);
+    fileDrafts,
+    review,
+    reviewItems,
+    reviewField,
+    excerptOf,
+    selectionRef,
+    editingDraftIdRef,
+    commentTextRef,
+    isApplyingSelectionRef,
+    lastAppliedSelectionRef,
+    handleSelectionChange,
+    handleCancelComment,
+    handleSaveComment,
+    paintSelection,
+    applySelection,
+  } = useDiffComments({
+    original,
+    modified,
+    incomingFileDiff,
+    fileName,
+    language,
+    commentOrigin,
+    enableComments,
+    isMobile,
+    diffInstanceRef,
+  });
 
-  // A change request's review: its cards on this file's lines, and the field's way into it.
-  const review = useChangeRequestReviewContext();
-  const reviewItems = useMemo<ReviewLineItem[]>(() => {
-    if (!review?.state || !fileName) return [];
-    const onLine = <T extends { path: string; line: number | null }>(entry: T): entry is T & { line: number } => (
-      entry.path === fileName && entry.line !== null
-    );
-    return [
-      ...review.state.threads.filter(onLine).map((thread): ReviewLineItem => ({
-        id: `thread-${thread.id}`, kind: 'thread', thread, lineNumber: thread.line, side: thread.side === 'old' ? 'deletions' : 'additions',
-      })),
-      ...(review.state.draft?.comments ?? []).filter(onLine).map((comment): ReviewLineItem => ({
-        id: `draft-${comment.id}`, kind: 'draft', comment, lineNumber: comment.line, side: comment.side === 'old' ? 'deletions' : 'additions',
-      })),
-    ];
-  }, [fileName, review?.state]);
-  const excerptOf = useCallback((item: ReviewLineItem) => {
-    if (item.side === 'deletions') return null;
-    const entry = item.kind === 'draft' ? item.comment : item.thread;
-    const start = entry.startLine ?? item.lineNumber;
-    return {
-      startLine: start,
-      lines: extractSelectedCode(original, modified, incomingFileDiff, { start, end: item.lineNumber, side: 'additions' }).split('\n'),
-    };
-  }, [incomingFileDiff, modified, original]);
-  const selectionSide = selection?.side;
-  // A selection across both sides has two sets of line numbers; a review comment takes one.
-  const selectionCrossesSides = Boolean(selection?.endSide && selection.endSide !== selection.side);
-  const reviewField = useMemo(() => {
-    if (!review || !fileName || selectionCrossesSides) return undefined;
-    return {
-      add: async (text: string, range?: SelectedLineRange) => {
-        const target = range ?? selectionRef.current;
-        if (!target) return false;
-        const start = Math.min(target.start, target.end);
-        const end = Math.max(target.start, target.end);
-        const added = await review.addComment({
-          path: fileName,
-          side: target.side === 'deletions' ? 'old' : 'new',
-          line: end,
-          startLine: start < end ? start : undefined,
-        }, text);
-        if (added) cancel();
-        return added;
-      },
-      // A suggestion replaces lines of the new side.
-      suggestionCode: selectionSide === 'deletions' ? undefined : () => {
-        const target = selectionRef.current;
-        return target ? extractSelectedCode(original, modified, incomingFileDiff, target) : '';
-      },
-    };
-  }, [cancel, fileName, incomingFileDiff, modified, original, review, selectionCrossesSides, selectionSide]);
+  const { commentHostsRef, typingFieldRef, holdTypingField, renderAnnotation } = useAnnotationRenderer({
+    diffContainerRef,
+    requestTrailingExpansionRef,
+    showLinesBelowLabel,
+  });
 
-  const selectionRef = useRef<SelectedLineRange | null>(null);
-  const editingDraftIdRef = useRef<string | null>(null);
-  const commentTextRef = useRef('');
-  // Use a ref to track if we're currently applying a selection programmatically
-  // to avoid loop with onLineSelected callback
-  const isApplyingSelectionRef = useRef(false);
-  const lastAppliedSelectionRef = useRef<SelectedLineRange | null>(null);
-  // True for the gesture that dragged across lines, so the click ending it
-  // does not read as a find-word request.
-  const dragSelectionRef = useRef(false);
-  const onFindWordRequestRef = useRef(onFindWordRequest);
-
-  useEffect(() => {
-    onFindWordRequestRef.current = onFindWordRequest;
-  }, [onFindWordRequest]);
-
-  useEffect(() => {
-    selectionRef.current = selection;
-  }, [selection]);
-
-  useEffect(() => {
-    editingDraftIdRef.current = editingDraftId;
-  }, [editingDraftId]);
-
-  useEffect(() => {
-    commentTextRef.current = commentText;
-  }, [commentText]);
-
-  const handleSelectionChange = useCallback((range: SelectedLineRange | null) => {
-    if (!enableComments) {
-      return;
-    }
-
-    // Ignore callbacks while we're programmatically applying selection
-    if (isApplyingSelectionRef.current) {
-      return;
-    }
-
-    const prevSelection = selectionRef.current;
-
-    if (!range && prevSelection && commentTextRef.current.trim()) {
-      return;
-    }
-
-    // Mobile tap-to-extend: if selection exists and new tap is on same side, extend range
-    if (isMobile && prevSelection && range && range.side === prevSelection.side) {
-      const start = Math.min(prevSelection.start, range.start);
-      const end = Math.max(prevSelection.end, range.end);
-      setSelection({ ...range, start, end });
-    } else {
-      setSelection(range);
-    }
-    // Pierre holds this selection too: closing the field has to clear it there,
-    // or the next click on the line would read as taking it back.
-    lastAppliedSelectionRef.current = range;
-
-    // Clear editing state when selection changes user-driven
-    if (range) {
-      if (!editingDraftIdRef.current) {
-        setCommentText('');
-      }
-    }
-  }, [enableComments, isMobile, setCommentText, setSelection]);
-
-  const handleCancelComment = useCallback(() => {
-    cancel();
-  }, [cancel]);
-
-  const commentHostsRef = useRef(new Map<string, HTMLDivElement>());
-  const typingFieldRef = useRef<HTMLTextAreaElement | null>(null);
-  const renderAnnotation = useCallback((annotation: DiffLineAnnotation<DiffAnnotation>) => {
-    const div = document.createElement('div');
-    div.style.position = 'relative';
-
-    if (annotation.metadata.type === 'hunk-action') {
-      div.dataset.hunkActionTarget = String(annotation.metadata.index);
-      div.style.height = '0px';
-      return div;
-    }
-
-    if (annotation.metadata.type === 'trailing-expand') {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.dataset.ocTrailingExpand = '';
-      button.textContent = showLinesBelowLabel;
-      button.addEventListener('click', (event) => {
-        // Keep the click away from Pierre's line selection.
-        event.stopPropagation();
-        requestTrailingExpansionRef.current();
-      });
-      div.append(button);
-      return div;
-    }
-
-    // Pierre rebuilds an annotation whenever its index shifts. Handing back the
-    // same node keeps the card portalled into it mounted and its height in the
-    // layout, so the rebuild neither unmounts a comment nor moves the diff.
-    const id = toPierreAnnotationId(annotation.metadata);
-    const existing = commentHostsRef.current.get(id);
-    if (existing) return existing;
-    div.dataset.annotationId = id;
-    div.dataset.annotationSide = annotation.side;
-    div.dataset.annotationLine = String(annotation.lineNumber);
-    commentHostsRef.current.set(id, div);
-    return div;
-  }, [showLinesBelowLabel]);
-
-  const captureHunkTargets = useCallback<NonNullable<FileDiffOptions<DiffAnnotation, undefined>['onPostRender']>>((node, instance, phase) => {
-    const targets = new Map<number, HTMLElement>();
-    if (phase !== 'unmount') {
-      const capsuleHeight = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) * 2;
-      const columns = new Map<HTMLElement, DOMRect>();
-      const placements: Array<{ target: HTMLElement; offset: number }> = [];
-      // Only mounted virtual rows have slots. Avoid creating React controls
-      // for off-screen hunks or measuring every line on a scroll event.
-      for (const slot of node.shadowRoot?.querySelectorAll('slot') ?? []) {
-        for (const wrapper of slot.assignedElements()) {
-          const target = wrapper.querySelector<HTMLElement>('[data-hunk-action-target]');
-          const index = Number(target?.dataset.hunkActionTarget);
-          if (!target || !Number.isInteger(index) || index < 0) continue;
-          targets.set(index, target);
-          const column = slot.closest<HTMLElement>('[data-code]');
-          if (!column) continue;
-          let bounds = columns.get(column);
-          if (!bounds) {
-            bounds = column.getBoundingClientRect();
-            // Wrapped split view lays the column out as `display: contents`,
-            // which has no box. Its content grid spans the same rows.
-            if (bounds.height === 0) bounds = slot.closest('[data-content]')?.getBoundingClientRect() ?? bounds;
-            columns.set(column, bounds);
-          }
-          const markerTop = target.getBoundingClientRect().top;
-          // Centred on the hunk's last changed line, the row the annotation
-          // follows; kept inside the code column, whose clipping would hide it.
-          const lastLine = slot.closest('[data-line-annotation]')?.previousElementSibling?.getBoundingClientRect();
-          const centre = lastLine && lastLine.height > 0 ? lastLine.top + lastLine.height / 2 : markerTop - capsuleHeight / 2;
-          const top = Math.max(bounds.top + 2, Math.min(centre - capsuleHeight / 2, bounds.bottom - capsuleHeight - 2));
-          placements.push({ target, offset: top - markerTop });
-        }
-      }
-      // Finish all geometry reads before writing offsets to avoid layout
-      // recalculation between neighboring hunks.
-      for (const { target, offset } of placements) {
-        const value = `${offset}px`;
-        if (target.style.getPropertyValue('--oc-hunk-action-offset') !== value) {
-          target.style.setProperty('--oc-hunk-action-offset', value);
-        }
-      }
-    }
-    const renderedDiff = instance.fileDiff;
-    setHunkTargets((previous) => {
-      if (previous.fileDiff === renderedDiff && previous.anchors === hunkAnchors
-          && previous.targets.size === targets.size
-          && [...targets].every(([index, target]) => previous.targets.get(index) === target)) return previous;
-      return { fileDiff: renderedDiff, anchors: hunkAnchors, targets };
-    });
-  }, [hunkAnchors]);
-
-  const handleSaveComment = useCallback((textToSave: string, rangeOverride?: SelectedLineRange) => {
-    return saveComment(textToSave, rangeOverride ?? selection ?? undefined);
-  }, [saveComment, selection]);
-
-
-  const applySelection = useCallback((range: SelectedLineRange) => {
-    setSelection(range);
-    const instance = diffInstanceRef.current;
-    if (!instance) return;
-    try {
-      isApplyingSelectionRef.current = true;
-      instance.setSelectedLines(range);
-      lastAppliedSelectionRef.current = range;
-    } catch {
-      // ignore
-    } finally {
-      isApplyingSelectionRef.current = false;
-    }
-  }, [setSelection]);
-
-  // Multi-line text selection over diff CONTENT highlights the same line
-  // range Pierre paints for number-column selection — without opening the
-  // comment editor. The "+" utility then targets the highlighted range.
-  const contentSelectionRef = useRef<SelectedLineRange | null>(null);
-  const contentSelectionClearTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (!enableComments) return;
-    const root = diffRootRef.current;
-    if (!root) return;
-
-    const getShadowRoot = (): ShadowRoot | null => {
-      const host = root.querySelector('diffs-container');
-      return host instanceof HTMLElement ? host.shadowRoot : null;
-    };
-
-    const setDragAttribute = (active: boolean) => {
-      const host = root.querySelector('diffs-container');
-      if (!(host instanceof HTMLElement)) return;
-      if (active) host.setAttribute('data-oc-comment-drag', '');
-      else host.removeAttribute('data-oc-comment-drag');
-    };
-
-    const lineFromPoint = (clientX: number, clientY: number): { line: number; side: AnnotationSide; numberColumn: boolean } | null => {
-      const shadowRoot = getShadowRoot();
-      const element = shadowRoot?.elementFromPoint(clientX, clientY) ?? document.elementFromPoint(clientX, clientY);
-      if (!(element instanceof Element)) return null;
-      const numberColumn = Boolean(element.closest('[data-column-number]'));
-      const row = element.closest('[data-line]');
-      if (!(row instanceof HTMLElement)) return null;
-      const line = Number.parseInt(row.getAttribute('data-line') ?? '', 10);
-      if (!Number.isFinite(line) || line <= 0) return null;
-      const side: AnnotationSide = row.getAttribute('data-line-type') === 'change-deletion'
-        || row.closest('[data-code][data-deletions]') != null
-        ? 'deletions'
-        : 'additions';
-      return { line, side, numberColumn };
-    };
-
-    let anchor: { line: number; side: AnnotationSide } | null = null;
-    let engaged = false;
-    let pointerId: number | null = null;
-
-    const highlight = (range: SelectedLineRange) => {
-      contentSelectionRef.current = range;
-      const instance = diffInstanceRef.current;
-      if (!instance) return;
-      try {
-        isApplyingSelectionRef.current = true;
-        instance.setSelectedLines(range);
-      } catch {
-        // ignore
-      } finally {
-        isApplyingSelectionRef.current = false;
-      }
-    };
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (event.button !== 0 || event.pointerType !== 'mouse') return;
-      dragSelectionRef.current = false;
-      const hit = lineFromPoint(event.clientX, event.clientY);
-      // Number-column drags belong to Pierre's own selection handling.
-      if (!hit || hit.numberColumn) {
-        anchor = null;
-        return;
-      }
-      anchor = { line: hit.line, side: hit.side };
-      engaged = false;
-      pointerId = event.pointerId;
-    };
-
-    const handlePointerMove = (event: PointerEvent) => {
-      if (anchor == null || event.pointerId !== pointerId) return;
-      const hit = lineFromPoint(event.clientX, event.clientY);
-      if (!hit) return;
-      if (!engaged) {
-        if (hit.line === anchor.line) return;
-        // The drag crossed into another line: from here it is a line
-        // selection, not a text selection. Drop the native selection and
-        // block new one from forming for the rest of the drag.
-        engaged = true;
-        dragSelectionRef.current = true;
-        setDragAttribute(true);
-        window.getSelection()?.removeAllRanges();
-        const shadowRoot = getShadowRoot();
-        if (shadowRoot && 'getSelection' in shadowRoot) {
-          // SAFETY: getSelection on ShadowRoot is a Chromium extension absent
-          // from lib.dom; the `in` check gates the call.
-          (shadowRoot as ShadowRoot & { getSelection: () => Selection | null }).getSelection()?.removeAllRanges();
-        }
-      }
-      highlight({
-        start: Math.min(anchor.line, hit.line),
-        end: Math.max(anchor.line, hit.line),
-        side: anchor.side,
-      });
-    };
-
-    const handlePointerUp = (event: PointerEvent) => {
-      if (anchor == null || event.pointerId !== pointerId) return;
-      const wasEngaged = engaged;
-      anchor = null;
-      engaged = false;
-      pointerId = null;
-      setDragAttribute(false);
-      if (!wasEngaged) return;
-      const range = contentSelectionRef.current;
-      contentSelectionRef.current = null;
-      if (!range) return;
-      // A half-written comment survives an accidental selection elsewhere.
-      if (selectionRef.current && commentTextRef.current.trim() && !editingDraftIdRef.current) return;
-      applySelection(range);
-      if (!editingDraftIdRef.current) {
-        setCommentText('');
-      }
-    };
-
-    root.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('pointermove', handlePointerMove, { passive: true });
-    document.addEventListener('pointerup', handlePointerUp);
-    return () => {
-      root.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('pointermove', handlePointerMove);
-      document.removeEventListener('pointerup', handlePointerUp);
-      setDragAttribute(false);
-    };
-  }, [applySelection, enableComments, setCommentText]);
-
-  // The gutter "+" utility: pressing it (or dragging from it) yields a line
-  // range; select it so the comment editor opens under the lines.
-  const handleGutterUtilityClick = useCallback((range: SelectedLineRange) => {
-    if (!enableComments) return;
-    // A content-drag highlight is the intended target when the pressed line
-    // falls inside it.
-    const highlighted = contentSelectionRef.current;
-    const withinHighlight = highlighted
-      && range.start >= highlighted.start
-      && range.end <= highlighted.end
-      && (range.side == null || range.side === highlighted.side);
-    if (contentSelectionClearTimerRef.current !== null) {
-      window.clearTimeout(contentSelectionClearTimerRef.current);
-      contentSelectionClearTimerRef.current = null;
-    }
-    contentSelectionRef.current = null;
-    applySelection(withinHighlight && highlighted ? highlighted : range);
-    if (!editingDraftIdRef.current) {
-      setCommentText('');
-    }
-  }, [applySelection, enableComments, setCommentText]);
-
-  // Clicking anywhere on a diff line (not only its number cell) toggles a
-  // single-line comment selection, matching the "+" utility's target.
-  const handleLineClick = useCallback((props: OnDiffLineClickProps) => {
-    const { event } = props;
-    const primaryModifier = isMacOS() ? event.metaKey : event.ctrlKey;
-    // Where find is wired, a primary-modifier click on a word is a find
-    // request, never a comment.
-    const requestFindWord = onFindWordRequestRef.current;
-    if (primaryModifier && requestFindWord) {
-      if (!event.shiftKey && !event.altKey && event.button === 0 && !props.numberColumn && !dragSelectionRef.current) {
-        const hit = findWordAtPoint(props.lineElement, event.clientX, event.clientY);
-        if (hit) requestFindWord({ word: hit.word, lineNumber: props.lineNumber, side: props.annotationSide, spanStart: hit.spanStart });
-      }
-      return;
-    }
-    if (!enableComments || props.numberColumn) return;
-    // Ignore when the user selected text on the way to this click (copying
-    // code must not pop the comment editor).
-    if (window.getSelection()?.toString().trim()) return;
-    const side: SelectedLineRange['side'] = props.annotationSide;
-    const range: SelectedLineRange = { start: props.lineNumber, end: props.lineNumber, side };
-    const current = selectionRef.current;
-    if (current && current.start === range.start && current.end === range.end && current.side === range.side) {
-      if (!commentTextRef.current.trim()) {
-        setSelection(null);
-        const instance = diffInstanceRef.current;
-        try {
-          isApplyingSelectionRef.current = true;
-          instance?.setSelectedLines(null);
-        } finally {
-          isApplyingSelectionRef.current = false;
-        }
-      }
-      return;
-    }
-    if (current && commentTextRef.current.trim() && !editingDraftIdRef.current) {
-      // A half-written comment survives an accidental click elsewhere.
-      return;
-    }
-    applySelection(range);
-    if (!editingDraftIdRef.current) {
-      setCommentText('');
-    }
-  }, [applySelection, enableComments, setCommentText, setSelection]);
+  const { handleGutterUtilityClick, handleLineClick } = useLineSelectionGestures({
+    enableComments,
+    onFindWordRequest,
+    diffRootRef,
+    diffContainerRef,
+    diffInstanceRef,
+    selectionRef,
+    commentTextRef,
+    editingDraftIdRef,
+    isApplyingSelectionRef,
+    setSelection,
+    setCommentText,
+    applySelection,
+  });
 
   const lightThemeName = ensurePierreThemeRegistered(lightTheme);
   const darkThemeName = ensurePierreThemeRegistered(darkTheme);
@@ -1424,201 +195,38 @@ const PierreDiffViewerBody: React.FC<
     return Math.max(original.length, modified.length) > LARGE_CONTENT_BYTES;
   }, [incomingFileDiff, modified.length, original.length]);
 
-  const diffRootRef = useRef<HTMLDivElement | null>(null);
-  const diffContainerRef = useRef<HTMLDivElement | null>(null);
-  const diffInstanceRef = useRef<PierreFileDiff<DiffAnnotation> | null>(null);
-  const sharedVirtualizerRef = useRef<SharedVirtualizer | null>(null);
-  const instanceVirtualizerRef = useRef<Virtualizer | null>(null);
-  const instanceWorkerPoolRef = useRef<unknown>(null);
-  const instanceVirtualHunkSeparatorsRef = useRef<FileDiffOptions<DiffAnnotation, undefined>['hunkSeparators'] | undefined>(undefined);
-  const instanceLineHeightRef = useRef<number | undefined>(undefined);
-  const instanceFileDiffRef = useRef<FileDiffMetadata | undefined>(undefined);
-  const instanceOldFileRef = useRef<FileContents | undefined>(undefined);
-  const instanceNewFileRef = useRef<FileContents | undefined>(undefined);
-
-  const findMatchesRef = useRef<ReadonlyArray<{ lineNumber: number; side: DiffFindSide; spanStart: number; spanLength: number }>>([]);
-  const findCurrentIndexRef = useRef(-1);
-
-  // The shadow-root observer below, and its pass, shared so highlight surgery
-  // can keep its own mutations out of the observer.
-  const shadowObserverRef = useRef<MutationObserver | null>(null);
-  const scheduleShadowPassRef = useRef<(() => void) | null>(null);
-  const applyFindHighlights = useCallback(() => {
-    const observer = shadowObserverRef.current;
-    // Records queued before the surgery are the library's and keep their pass.
-    const pending = observer?.takeRecords() ?? [];
-    applyFindHighlightsToContainer(diffContainerRef.current, findMatchesRef.current, findCurrentIndexRef.current);
-    // The surgery's own records are dropped: its text splits and merges look
-    // like the library's, and a pass for them would re-apply the highlights
-    // and re-render the viewer for nothing.
-    observer?.takeRecords();
-    if (pending.length > 0) scheduleShadowPassRef.current?.();
-  }, []);
-
-  const setFindHighlights = useCallback((
-    matches: ReadonlyArray<{ lineNumber: number; side: DiffFindSide; spanStart: number; spanLength: number }>,
-    currentIndex: number,
-  ) => {
-    findMatchesRef.current = matches;
-    findCurrentIndexRef.current = currentIndex;
-    applyFindHighlights();
-  }, [applyFindHighlights]);
+  const { findMatchesRef, shadowObserverRef, scheduleShadowPassRef, applyFindHighlights, setFindHighlights } = useFindHighlights(diffContainerRef);
 
   const [, forceUpdate] = React.useReducer((x) => x + 1, 0);
   const workerPool = useWorkerPool(isLargeContent ? 'unified' : (renderSideBySide ? 'split' : 'unified'));
   const fileDiff = useDiffSwapAfterHighlight(incomingFileDiff, workerPool);
 
-  const scrollToLine = useCallback((target: { lineNumber: number; side: DiffFindSide; align?: 'start' | 'center' }): boolean => {
-    const instance = diffInstanceRef.current;
-    const { lineNumber, side, align = 'start' } = target;
-    if (!instance || lineNumber < 1) return false;
-
-    // `isLineRenderable` wraps the library's additions-only oracle, so a
-    // deletions gap line is translated to its additions counterpart first.
-    const oracleLine = side === 'additions'
-      ? lineNumber
-      : deletionGapToAdditionLine(fileDiff?.hunks ?? [], lineNumber);
-
-    const isRenderable = (): boolean => {
-      if (isWithinHunk(fileDiff, lineNumber, side)) return true;
-      // A partial diff has no file contents, so collapsed gaps never hydrate.
-      if (fileDiff?.isPartial) return false;
-      return oracleLine !== undefined && instance.isLineRenderable(oracleLine);
-    };
-
-    // The rendered row is the authority on where the line is: it is centered
-    // directly. A virtualized diff may not have rendered it yet, so the
-    // virtualizer is first moved to the line's estimated position (its cached
-    // geometry can be stale right after the file expanded), and the next
-    // attempt centers the row it renders there.
-    const scrollNow = (): boolean => {
-      const root = getDiffShadowRoot(diffContainerRef.current);
-      for (const row of root?.querySelectorAll(`[data-line="${lineNumber}"]`) ?? []) {
-        if (!(row instanceof HTMLElement) || !rowMatchesSide(row, side)) continue;
-        // The active mark when it is painted: aligning the whole row would
-        // also scroll a wide line sideways, under the line numbers.
-        const target = row.querySelector(`mark[${FIND_CURRENT_ATTR}]`) ?? row;
-        target.scrollIntoView({ block: align === 'center' ? 'center' : 'start', inline: 'nearest' });
-        return true;
-      }
-      if (!(instance instanceof VirtualizedFileDiff)) return false;
-      const position = instance.getLinePosition(lineNumber, side);
-      const virtualizer = instanceVirtualizerRef.current ?? sharedVirtualizerRef.current?.virtualizer ?? null;
-      if (!position || !virtualizer) return false;
-      const scrollRoot = virtualizer.getRoot();
-      const viewportHeight = scrollRoot instanceof Document ? globalThis.innerHeight : (scrollRoot?.getBoundingClientRect().height ?? 0);
-      const base = (instance.top ?? 0) + position.top;
-      // Re-read the scroll height the virtualizer clamps against: it predates
-      // a file that just expanded.
-      virtualizer.markDOMDirty();
-      virtualizer.scrollTo({ top: base - Math.max(0, (viewportHeight - position.height) / 2), behavior: 'auto' });
-      return false;
-    };
-
-    if (isRenderable()) return scrollNow();
-    // A collapsed gap is not rendered until expanded; revealLine is
-    // additions-indexed and only works for a full diff. Either way the line is
-    // not on screen yet, so the caller tries again on a later frame.
-    if (!fileDiff?.isPartial && oracleLine !== undefined) instance.revealLine(oracleLine);
-    return false;
-  }, [fileDiff]);
+  const scrollToLine = useDiffScrollToLine({
+    fileDiff,
+    diffInstanceRef,
+    diffContainerRef,
+    instanceVirtualizerRef,
+    sharedVirtualizerRef,
+  });
 
   React.useImperativeHandle(handleRef, () => ({ scrollToLine, setFindHighlights }), [scrollToLine, setFindHighlights]);
-  // Partial diff + an owner that can load the file: the separators become
-  // expand buttons (see the on-demand CSS) and report the gap on click.
   const expandOnDemand = Boolean(onExpandContextRequest) && fileDiff?.isPartial === true;
-  // Loading covers the owner's fetch and the highlight-first swap above.
   const expandLoading = expandOnDemand && (contextLoading || incomingFileDiff !== fileDiff);
 
   const lightResolvedTheme = useMemo(() => getResolvedShikiTheme(lightTheme), [lightTheme]);
   const darkResolvedTheme = useMemo(() => getResolvedShikiTheme(darkTheme), [darkTheme]);
 
-  // Fast-path: update base diff theme vars immediately.
-  // Without this, already-mounted diffs can keep old bg/bars until async highlight completes.
-  React.useLayoutEffect(() => {
-    const root = diffRootRef.current;
-    if (!root) return;
+  useDiffThemeVars(diffRootRef, isDark, lightResolvedTheme, darkResolvedTheme, diffThemeKey);
 
-    const container = root.querySelector('diffs-container') as HTMLElement | null;
-    if (!container) return;
-
-    const currentResolved = isDark ? darkResolvedTheme : lightResolvedTheme;
-
-    const getColor = (
-      resolved: typeof currentResolved,
-      key: string,
-    ): string | undefined => {
-      const colors = resolved.colors as Record<string, string> | undefined;
-      return colors?.[key];
-    };
-
-    const lightAdd = getColor(lightResolvedTheme, 'terminal.ansiGreen');
-    const lightDel = getColor(lightResolvedTheme, 'terminal.ansiRed');
-    const lightMod = getColor(lightResolvedTheme, 'terminal.ansiBlue');
-
-    const darkAdd = getColor(darkResolvedTheme, 'terminal.ansiGreen');
-    const darkDel = getColor(darkResolvedTheme, 'terminal.ansiRed');
-    const darkMod = getColor(darkResolvedTheme, 'terminal.ansiBlue');
-
-    // Apply on host; vars inherit into shadow root.
-    container.style.setProperty('--shiki-light', lightResolvedTheme.fg);
-    container.style.setProperty('--shiki-light-bg', lightResolvedTheme.bg);
-    if (lightAdd) container.style.setProperty('--shiki-light-addition-color', lightAdd);
-    if (lightDel) container.style.setProperty('--shiki-light-deletion-color', lightDel);
-    if (lightMod) container.style.setProperty('--shiki-light-modified-color', lightMod);
-
-    container.style.setProperty('--shiki-dark', darkResolvedTheme.fg);
-    container.style.setProperty('--shiki-dark-bg', darkResolvedTheme.bg);
-    if (darkAdd) container.style.setProperty('--shiki-dark-addition-color', darkAdd);
-    if (darkDel) container.style.setProperty('--shiki-dark-deletion-color', darkDel);
-    if (darkMod) container.style.setProperty('--shiki-dark-modified-color', darkMod);
-
-    container.style.setProperty('--diffs-bg', currentResolved.bg);
-    container.style.setProperty('--diffs-fg', currentResolved.fg);
-
-    const currentAdd = isDark ? darkAdd : lightAdd;
-    const currentDel = isDark ? darkDel : lightDel;
-    const currentMod = isDark ? darkMod : lightMod;
-    if (currentAdd) container.style.setProperty('--diffs-addition-color-override', currentAdd);
-    if (currentDel) container.style.setProperty('--diffs-deletion-color-override', currentDel);
-    if (currentMod) container.style.setProperty('--diffs-modified-color-override', currentMod);
-
-    // Pierre also inlines theme styles on <pre> inside shadow root.
-    // Patch it too so already-expanded diffs switch instantly.
-    const pre = container.shadowRoot?.querySelector('pre') as HTMLPreElement | null;
-    if (pre) {
-      pre.style.setProperty('--shiki-light', lightResolvedTheme.fg);
-      pre.style.setProperty('--shiki-light-bg', lightResolvedTheme.bg);
-      if (lightAdd) pre.style.setProperty('--shiki-light-addition-color', lightAdd);
-      if (lightDel) pre.style.setProperty('--shiki-light-deletion-color', lightDel);
-      if (lightMod) pre.style.setProperty('--shiki-light-modified-color', lightMod);
-
-      pre.style.setProperty('--shiki-dark', darkResolvedTheme.fg);
-      pre.style.setProperty('--shiki-dark-bg', darkResolvedTheme.bg);
-      if (darkAdd) pre.style.setProperty('--shiki-dark-addition-color', darkAdd);
-      if (darkDel) pre.style.setProperty('--shiki-dark-deletion-color', darkDel);
-      if (darkMod) pre.style.setProperty('--shiki-dark-modified-color', darkMod);
-
-      pre.style.setProperty('--diffs-bg', currentResolved.bg);
-      pre.style.setProperty('--diffs-fg', currentResolved.fg);
-      if (currentAdd) pre.style.setProperty('--diffs-addition-color-override', currentAdd);
-      if (currentDel) pre.style.setProperty('--diffs-deletion-color-override', currentDel);
-      if (currentMod) pre.style.setProperty('--diffs-modified-color-override', currentMod);
-    }
-  }, [darkResolvedTheme, diffThemeKey, isDark, lightResolvedTheme]);
-
-
-  // Rows exist only once the library has rendered them, so find marks set
-  // before that (a viewer registered while its diff was still loading) are
-  // painted here, and again after every re-render that replaced the rows.
   const hasHunkAnchors = hunkAnchors.length > 0;
   const handlePostRender = useCallback<NonNullable<FileDiffOptions<DiffAnnotation, undefined>['onPostRender']>>((node, instance, phase) => {
     if (hasHunkAnchors) captureHunkTargets(node, instance, phase);
     if (phase !== 'unmount' && findMatchesRef.current.length > 0) applyFindHighlights();
+    if (phase === 'unmount') return;
     const typing = typingFieldRef.current;
     typingFieldRef.current = null;
-    if (typing?.isConnected && document.activeElement !== typing) typing.focus({ preventScroll: true });
-  }, [applyFindHighlights, captureHunkTargets, hasHunkAnchors]);
+    if (typing?.isConnected && document.activeElement === document.body) typing.focus({ preventScroll: true });
+  }, [applyFindHighlights, captureHunkTargets, findMatchesRef, hasHunkAnchors, typingFieldRef]);
 
   const options = useMemo<FileDiffOptions<DiffAnnotation, undefined>>(() => ({
     theme: {
@@ -1630,9 +238,7 @@ const PierreDiffViewerBody: React.FC<
     diffStyle: renderSideBySide ? 'split' : 'unified',
     diffIndicators: 'none',
     hunkSeparators: 'line-info-basic',
-    // Perf: disable intra-line diff (word-level) globally.
     lineDiffType: 'none',
-    // Perf: degrade tokenization/highlighting for large files (>500KB)
     maxLineDiffLength: isLargeContent ? 0 : 1000,
     maxLineLengthForHighlighting: isLargeContent ? 1 : 1000,
     tokenizeMaxLineLength: isLargeContent ? 1 : 1000,
@@ -1656,382 +262,65 @@ const PierreDiffViewerBody: React.FC<
     onPostRender: handlePostRender,
   }), [handlePostRender, hunkAnchors.length, darkThemeName, enableComments, expandOnDemand, isDark, isLargeContent, layout, lightThemeName, renderSideBySide, wrapLines, handleSelectionChange, handleGutterUtilityClick, handleLineClick, handleHunkLineEnter, handleHunkLineLeave, onFindWordRequest, renderAnnotation]);
 
+  const { lineAnnotations, lineAnnotationsRef } = useLineAnnotations({
+    enableComments,
+    fileDrafts,
+    editingDraftId,
+    reviewItems,
+    hunkAnchors,
+    expandOnDemand,
+    fileDiff,
+    selection,
+    commentHostsRef,
+  });
 
-  const lineAnnotations = useMemo<DiffLineAnnotation<DiffAnnotation>[]>(() => {
-    const annotations: DiffLineAnnotation<DiffAnnotation>[] = enableComments ? buildPierreLineAnnotations({
-      drafts: fileDrafts,
-      editingDraftId,
-      reviewItems,
-    }) : [];
-    for (const anchor of hunkAnchors) {
-      annotations.push({ side: anchor.side, lineNumber: anchor.lineNumber, metadata: { type: 'hunk-action', index: anchor.index } });
-    }
-    const trailingExpand = expandOnDemand && fileDiff ? getTrailingExpandAnnotation(fileDiff) : null;
-    if (trailingExpand) annotations.push(trailingExpand);
-    const selectionAnnotation = enableComments ? buildPierreSelectionAnnotation(selection, editingDraftId) : null;
-    if (selectionAnnotation) annotations.push(selectionAnnotation);
-    return annotations;
-  }, [editingDraftId, enableComments, expandOnDemand, fileDiff, fileDrafts, hunkAnchors, reviewItems, selection]);
+  useDiffInstance({
+    diffRootRef,
+    diffContainerRef,
+    diffInstanceRef,
+    sharedVirtualizerRef,
+    instanceVirtualizerRef,
+    workerPool,
+    fileDiff,
+    fileName,
+    language,
+    original,
+    modified,
+    options,
+    diffThemeKey,
+    diffLineHeight,
+    holdTypingField,
+    lineAnnotations,
+    lineAnnotationsRef,
+    selection,
+    selectionRef,
+    isApplyingSelectionRef,
+    lastAppliedSelectionRef,
+    paintSelection,
+    forceUpdate,
+  });
 
-  const lineAnnotationsRef = useRef(lineAnnotations);
+  useShadowRootPass({
+    diffContainerRef,
+    forceUpdate,
+    applyFindHighlights,
+    findMatchesRef,
+    shadowObserverRef,
+    scheduleShadowPassRef,
+    diffThemeKey,
+    fileName,
+  });
 
-  useEffect(() => {
-    lineAnnotationsRef.current = lineAnnotations;
-    const current = new Set(lineAnnotations.flatMap(({ metadata }) => (
-      metadata.type === 'hunk-action' || metadata.type === 'trailing-expand' ? [] : [toPierreAnnotationId(metadata)]
-    )));
-    for (const id of commentHostsRef.current.keys()) {
-      if (!current.has(id)) commentHostsRef.current.delete(id);
-    }
-  }, [lineAnnotations]);
-
-  useEffect(() => {
-    const container = diffContainerRef.current;
-    return () => {
-      diffInstanceRef.current?.cleanUp();
-      diffInstanceRef.current = null;
-      sharedVirtualizerRef.current?.release();
-      sharedVirtualizerRef.current = null;
-      instanceVirtualizerRef.current = null;
-      instanceWorkerPoolRef.current = null;
-      instanceVirtualHunkSeparatorsRef.current = undefined;
-      instanceLineHeightRef.current = undefined;
-      instanceFileDiffRef.current = undefined;
-      instanceOldFileRef.current = undefined;
-      instanceNewFileRef.current = undefined;
-      if (container) {
-        container.innerHTML = '';
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const container = diffContainerRef.current;
-    const wrapper = diffRootRef.current;
-    if (!container) return;
-    if (!workerPool) return;
-
-    const preserveDone = preserveScrollPosition(wrapper, container);
-    let sharedVirtualizer = sharedVirtualizerRef.current;
-    if (!sharedVirtualizer) {
-      sharedVirtualizer = acquireSharedVirtualizer(container);
-      sharedVirtualizerRef.current = sharedVirtualizer;
-    }
-    sharedVirtualizerRef.current = sharedVirtualizer;
-    const virtualizer = sharedVirtualizer?.virtualizer ?? null;
-
-    const oldFile: FileContents | undefined = fileDiff ? undefined : {
-      name: fileName || '',
-      contents: original,
-      lang: language as FileContents['lang'],
-      cacheKey: `old:${diffThemeKey}:${fileName}:${makeContentCacheKey(original)}`,
-    };
-    const newFile: FileContents | undefined = fileDiff ? undefined : {
-      name: fileName || '',
-      contents: modified,
-      lang: language as FileContents['lang'],
-      cacheKey: `new:${diffThemeKey}:${fileName}:${makeContentCacheKey(modified)}`,
-    };
-
-    const targetChanged = fileDiff
-      ? instanceFileDiffRef.current !== fileDiff
-      : instanceFileDiffRef.current !== undefined
-        || !oldFile
-        || !newFile
-        || !instanceOldFileRef.current
-        || !instanceNewFileRef.current
-        || !areFilesEqual(instanceOldFileRef.current, oldFile)
-        || !areFilesEqual(instanceNewFileRef.current, newFile);
-
-    const currentInstance = diffInstanceRef.current;
-    const shouldReset = Boolean(
-      currentInstance
-      && (
-        instanceVirtualizerRef.current !== virtualizer
-        || instanceWorkerPoolRef.current !== workerPool
-        || (virtualizer && (instanceVirtualHunkSeparatorsRef.current !== options.hunkSeparators || targetChanged))
-      )
-    );
-
-    if (shouldReset) {
-      currentInstance?.cleanUp();
-      diffInstanceRef.current = null;
-      container.innerHTML = '';
-    }
-
-    let instance = diffInstanceRef.current;
-    // The Editor font size changed under a mounted diff. The CSS rows follow
-    // on their own; the virtualizer gets the new row height through
-    // setMetrics, keeping the host and what is attached to it.
-    const lineHeightChanged = Boolean(instance) && instanceLineHeightRef.current !== diffLineHeight;
-    const forceRender = !shouldReset && currentInstance
-      ? !areOptionsEqual(currentInstance.options, options) || lineHeightChanged
-      : false;
-    if (!instance) {
-      instance = sharedVirtualizer
-        ? new VirtualizedFileDiff<DiffAnnotation>(
-            options,
-            sharedVirtualizer.virtualizer,
-            diffVirtualMetrics(diffLineHeight),
-            workerPool,
-          )
-        : new PierreFileDiff(options, workerPool);
-      diffInstanceRef.current = instance;
-      lastAppliedSelectionRef.current = null;
-    } else {
-      instance.setOptions(options);
-      const current: unknown = instance;
-      if (lineHeightChanged && current instanceof VirtualizedFileDiff) {
-        current.setMetrics(diffVirtualMetrics(diffLineHeight));
-      }
-    }
-
-    instanceVirtualizerRef.current = virtualizer;
-    instanceWorkerPoolRef.current = workerPool;
-    instanceVirtualHunkSeparatorsRef.current = virtualizer ? options.hunkSeparators : undefined;
-    instanceLineHeightRef.current = diffLineHeight;
-    instanceFileDiffRef.current = fileDiff;
-    instanceOldFileRef.current = oldFile;
-    instanceNewFileRef.current = newFile;
-
-    if (fileDiff) {
-      instance.render({
-        fileDiff,
-        forceRender,
-        lineAnnotations: lineAnnotationsRef.current,
-        containerWrapper: container,
-      });
-    } else {
-      if (!oldFile || !newFile) return;
-
-      instance.render({
-        oldFile,
-        newFile,
-        forceRender,
-        lineAnnotations: lineAnnotationsRef.current,
-        containerWrapper: container,
-      });
-    }
-
-    const cancelReady = waitForDiffReady(container, () => {
-      preserveDone();
-      wakeVirtualizer(instance, sharedVirtualizer, forceUpdate);
-    });
-
-    return () => {
-      cancelReady();
-      preserveDone();
-    };
-  }, [diffLineHeight, diffThemeKey, fileDiff, fileName, language, modified, options, original, workerPool]);
-
-  useEffect(() => {
-    const instance = diffInstanceRef.current;
-    if (!instance) return;
-
-    try {
-      instance.setLineAnnotations(lineAnnotations);
-    } catch (error) {
-      console.error('Failed to apply diff line annotations', error);
-      try {
-        instance.setLineAnnotations([]);
-      } catch {
-        // ignored
-      }
-    }
-
-    requestAnimationFrame(() => {
-      if (diffInstanceRef.current !== instance) return;
-      // A rebuilt annotation moves its node, and moving a focused field drops
-      // its focus. The virtualized diff renders later, so the post-render
-      // callback gives it back, and only to a field that had it.
-      const focused = document.activeElement;
-      typingFieldRef.current = focused instanceof HTMLTextAreaElement && diffContainerRef.current?.contains(focused) ? focused : null;
-      try {
-        instance.rerender();
-      } catch (err) {
-        void err;
-      }
-      forceUpdate();
-    });
-  }, [lineAnnotations]);
-
-  useEffect(() => {
-    const instance = diffInstanceRef.current;
-    if (!instance) return;
-
-    // Only push selection to the diff when clearing.
-    // User-driven selections already originate from the diff itself.
-    if (selection !== null) {
-      return;
-    }
-
-    // Guard against feedback loops and redundant updates
-    const lastApplied = lastAppliedSelectionRef.current;
-    if (isSameSelection(selection, lastApplied)) {
-      return;
-    }
-
-    try {
-      isApplyingSelectionRef.current = true;
-      instance.setSelectedLines(selection);
-      lastAppliedSelectionRef.current = selection;
-    } catch {
-      // ignore
-    } finally {
-      isApplyingSelectionRef.current = false;
-    }
-  }, [selection]);
-
-  useEffect(() => {
-    if (!enableComments) return;
-    const container = diffContainerRef.current;
-    if (!container) return;
-
-    const handleNumberPointerDown = (event: PointerEvent) => {
-      if (event.shiftKey || (event.pointerType === 'mouse' && event.button !== 0)) return;
-      const current = selectionRef.current;
-      if (!current || current.start !== current.end || !current.side
-          || (current.endSide && current.endSide !== current.side)
-          || commentTextRef.current.trim()) return;
-
-      // The capture listener sees the original number cell across the shadow
-      // boundary, before Pierre handles pointerdown on its pre element.
-      const numberCell = event.composedPath().find((node): node is HTMLElement =>
-        node instanceof HTMLElement && node.hasAttribute('data-column-number'));
-      if (!numberCell || Number(numberCell.dataset.columnNumber) !== current.start) return;
-      const side: AnnotationSide = numberCell.dataset.lineType === 'change-deletion'
-        || numberCell.closest('[data-code][data-deletions]') != null
-        ? 'deletions'
-        : 'additions';
-      if (side === current.side) return;
-
-      // Pierre toggles a single line by number alone. Clear that selection so
-      // this gesture can select the same number on the other side normally.
-      try {
-        isApplyingSelectionRef.current = true;
-        diffInstanceRef.current?.setSelectedLines(null);
-      } finally {
-        isApplyingSelectionRef.current = false;
-      }
-    };
-
-    container.addEventListener('pointerdown', handleNumberPointerDown, true);
-    return () => container.removeEventListener('pointerdown', handleNumberPointerDown, true);
-  }, [enableComments]);
-
-  // MutationObserver to trigger re-renders when annotation DOM nodes are added/removed
-  useEffect(() => {
-    const container = diffContainerRef.current;
-    if (!container) return;
-
-    let observer: MutationObserver | null = null;
-    let rafId: number | null = null;
-
-    const setupObserver = () => {
-      const diffsContainer = container.querySelector('diffs-container');
-      if (!(diffsContainer instanceof HTMLElement)) return;
-
-      const shadowRoot = diffsContainer.shadowRoot;
-
-      // A rebuild of the rows drops their find marks, so the pass paints them
-      // again. The surgery takes its own records (applyFindHighlights), so this
-      // never fires for it.
-      const schedulePass = () => {
-        if (rafId) cancelAnimationFrame(rafId);
-        rafId = requestAnimationFrame(() => {
-          rafId = null;
-          forceUpdate();
-          if (findMatchesRef.current.length > 0) applyFindHighlights();
-        });
-      };
-      observer = new MutationObserver(schedulePass);
-      shadowObserverRef.current = observer;
-      scheduleShadowPassRef.current = schedulePass;
-
-      observer.observe(diffsContainer, { childList: true, subtree: true });
-      if (shadowRoot) {
-        observer.observe(shadowRoot, { childList: true, subtree: true });
-      }
-    };
-
-    const timeoutId = setTimeout(setupObserver, 100);
-
-    return () => {
-      clearTimeout(timeoutId);
-      if (rafId) cancelAnimationFrame(rafId);
-      observer?.disconnect();
-      if (shadowObserverRef.current === observer) {
-        shadowObserverRef.current = null;
-        scheduleShadowPassRef.current = null;
-      }
-    };
-  }, [applyFindHighlights, diffThemeKey, fileName]);
-
-  useEffect(() => {
-    requestTrailingExpansionRef.current = () => {
-      if (expandLoading) return;
-      onExpandContextRequest?.({ gap: 'after-last-hunk' });
-    };
-  }, [expandLoading, onExpandContextRequest]);
-
-  useEffect(() => {
-    const container = diffContainerRef.current;
-    if (!container) return;
-    return waitForDiffReady(container, () => {
-      const host = container.querySelector('diffs-container');
-      if (!(host instanceof HTMLElement)) return;
-      host.toggleAttribute('data-oc-expand-on-demand', expandOnDemand);
-      host.toggleAttribute('data-oc-expand-loading', expandLoading);
-    });
-  }, [expandLoading, expandOnDemand, fileDiff]);
-
-  useEffect(() => {
-    const container = diffContainerRef.current;
-    if (!container || !expandOnDemand || expandLoading || !fileDiff || !onExpandContextRequest) return;
-
-    const onClick = (event: MouseEvent) => {
-      if (event.button !== 0) return;
-      const request = resolveContextExpansionRequest(event.composedPath(), fileDiff);
-      if (!request) return;
-      event.preventDefault();
-      event.stopPropagation();
-      onExpandContextRequest(request);
-    };
-
-    container.addEventListener('click', onClick);
-    return () => container.removeEventListener('click', onClick);
-  }, [expandLoading, expandOnDemand, fileDiff, onExpandContextRequest]);
-
-  // Replay the expansion the user asked for on the partial diff once the full
-  // diff is rendered. Hunks may merge differently after the reload, so the
-  // gap is located through the hunk that now contains the requested line.
-  const appliedContextExpansionRef = useRef<ContextExpansionRequest | null>(null);
-  useEffect(() => {
-    if (!pendingContextExpansion || !fileDiff || fileDiff.isPartial) return;
-    if (appliedContextExpansionRef.current === pendingContextExpansion) return;
-    const container = diffContainerRef.current;
-    if (!container) return;
-
-    return waitForDiffReady(container, () => {
-      const instance = diffInstanceRef.current;
-      if (!instance || instance.fileDiff !== fileDiff) return;
-      if (appliedContextExpansionRef.current === pendingContextExpansion) return;
-      appliedContextExpansionRef.current = pendingContextExpansion;
-      if (pendingContextExpansion.gap === 'after-last-hunk') {
-        // Pierre keys the region after the last hunk by the hunk count and
-        // grows it from its start, which is the 'up' direction.
-        instance.expandHunk(fileDiff.hunks.length, 'up');
-        return;
-      }
-      const hunkIndex = fileDiff.hunks.findIndex((hunk) =>
-        hunk.additionStart <= pendingContextExpansion.additionStart
-        && pendingContextExpansion.additionStart < hunk.additionStart + Math.max(hunk.additionCount, 1));
-      if (hunkIndex < 0) return;
-      instance.expandHunk(hunkIndex, pendingContextExpansion.direction);
-    });
-  }, [fileDiff, pendingContextExpansion]);
+  useContextExpansion({
+    diffContainerRef,
+    diffInstanceRef,
+    requestTrailingExpansionRef,
+    fileDiff,
+    expandOnDemand,
+    expandLoading,
+    onExpandContextRequest,
+    pendingContextExpansion,
+  });
 
   if (typeof window === 'undefined') {
     return null;
@@ -2064,8 +353,6 @@ const PierreDiffViewerBody: React.FC<
     />
   ) : null;
 
-  // A new action snapshot must never land in annotation nodes belonging to
-  // the previously rendered diff, even for one frame before Pierre updates.
   const hunkActionPortals = hunkActions && fileDiff && hunkTargets.fileDiff === fileDiff && hunkTargets.anchors === hunkAnchors
     ? [...hunkTargets.targets].map(([index, target]) => createPortal(hunkActions.render(index, hoveredHunk === index), target, `hunk-${index}`))
     : null;
@@ -2091,7 +378,6 @@ const PierreDiffViewerBody: React.FC<
     );
   }
 
-  // Fallback for 'inline' layout
   return (
     <div className={cn("relative", "w-full")}>
       <div ref={diffRootRef} className="pierre-diff-wrapper w-full overflow-x-auto overflow-y-visible relative" style={editorCode?.style}>

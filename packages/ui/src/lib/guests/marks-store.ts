@@ -16,16 +16,11 @@ const NO_PLACES: readonly GuestMarkPlace[] = [];
 
 type GuestMarksState = GuestMarkIndex & {
   runtimeKey: string;
-  /** What the server last listed, less the marks of extensions that lost the right to show any. A failed read keeps it. */
   entries: readonly GuestMarkEntry[];
-  /** The catalog and the known folders the lists were joined with. */
   guests: readonly InstalledGuest[];
   places: readonly GuestMarkPlace[];
-  /** A read's answer for `runtimeKey`. */
   replaceEntries: (entries: readonly GuestMarkEntry[], runtimeKey: string) => void;
-  /** The catalog changed: an extension that may no longer show marks loses the ones held here. */
   setGuests: (guests: readonly InstalledGuest[]) => void;
-  /** The known projects or worktrees changed. */
   setPlaces: (places: readonly GuestMarkPlace[]) => void;
   resetForRuntimeSwitch: (runtimeKey: string) => void;
 };
@@ -37,11 +32,6 @@ const shown = (entries: readonly GuestMarkEntry[], guests: readonly InstalledGue
   return kept.length === 0 ? NO_ENTRIES : kept;
 };
 
-/**
- * The marks extensions put on sidebar rows, joined with the catalog and the
- * folders this client knows. Rows read one list per key; a list whose content
- * did not change keeps its identity through every update.
- */
 export const useGuestMarksStore = create<GuestMarksState>((set, get) => {
   const rejoin = (next: { entries?: readonly GuestMarkEntry[]; guests?: readonly InstalledGuest[]; places?: readonly GuestMarkPlace[] }): void => {
     const current = get();

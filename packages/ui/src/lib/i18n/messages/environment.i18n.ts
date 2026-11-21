@@ -35,6 +35,8 @@ export const environmentI18n = {
     'settings.projects.environment.status.spawn': 'The command couldn\'t start.',
     'settings.projects.environment.status.outputTooLarge': 'Last run printed too much and was stopped. Nothing from it is applied.',
     'settings.projects.environment.status.failed': 'Last run failed. Nothing from it is applied.',
+    'settings.environment.secrets.label': 'Saved secrets',
+    'settings.environment.secrets.info': 'Saved from an agent\'s secret card. Only the commands you confirm on that card get them.',
   },
   de: {
     'settings.environment.user.title': 'Umgebungsvariablen',
@@ -71,6 +73,8 @@ export const environmentI18n = {
     'settings.projects.environment.status.spawn': 'Der Befehl konnte nicht gestartet werden.',
     'settings.projects.environment.status.outputTooLarge': 'Der letzte Lauf hat zu viel ausgegeben und wurde abgebrochen. Nichts davon wird angewendet.',
     'settings.projects.environment.status.failed': 'Der letzte Lauf ist fehlgeschlagen. Nichts davon wird angewendet.',
+    'settings.environment.secrets.label': 'Gespeicherte Geheimnisse',
+    'settings.environment.secrets.info': 'Auf der Geheimnis-Karte eines Agenten gespeichert. Nur Befehle, die du auf dieser Karte bestätigst, erhalten sie.',
   },
   fr: {
     'settings.environment.user.title': 'Variables d’environnement',
@@ -107,6 +111,8 @@ export const environmentI18n = {
     'settings.projects.environment.status.spawn': 'La commande n’a pas pu démarrer.',
     'settings.projects.environment.status.outputTooLarge': 'La dernière exécution a affiché trop de texte et a été arrêtée. Rien n’en est appliqué.',
     'settings.projects.environment.status.failed': 'La dernière exécution a échoué. Rien n’en est appliqué.',
+    'settings.environment.secrets.label': 'Secrets enregistrés',
+    'settings.environment.secrets.info': 'Enregistrés depuis la carte de secrets d\'un agent. Seules les commandes que vous confirmez sur cette carte les reçoivent.',
   },
   nl: {
     'settings.environment.user.title': 'Omgevingsvariabelen',
@@ -143,6 +149,8 @@ export const environmentI18n = {
     'settings.projects.environment.status.spawn': 'Het commando kon niet starten.',
     'settings.projects.environment.status.outputTooLarge': 'De laatste run drukte te veel af en is gestopt. Er wordt niets van toegepast.',
     'settings.projects.environment.status.failed': 'De laatste run is mislukt. Er wordt niets van toegepast.',
+    'settings.environment.secrets.label': 'Opgeslagen geheimen',
+    'settings.environment.secrets.info': 'Opgeslagen vanaf de geheimenkaart van een agent. Alleen opdrachten die je op die kaart bevestigt, krijgen ze.',
   },
   es: {
     'settings.environment.user.title': 'Variables de entorno',
@@ -179,6 +187,8 @@ export const environmentI18n = {
     'settings.projects.environment.status.spawn': 'El comando no pudo iniciarse.',
     'settings.projects.environment.status.outputTooLarge': 'La última ejecución imprimió demasiado y se detuvo. No se aplica nada de ella.',
     'settings.projects.environment.status.failed': 'La última ejecución falló. No se aplica nada de ella.',
+    'settings.environment.secrets.label': 'Secretos guardados',
+    'settings.environment.secrets.info': 'Guardados desde la tarjeta de secretos de un agente. Solo los reciben los comandos que confirmas en esa tarjeta.',
   },
   ja: {
     'settings.environment.user.title': '環境変数',
@@ -215,6 +225,8 @@ export const environmentI18n = {
     'settings.projects.environment.status.spawn': 'コマンドを開始できませんでした。',
     'settings.projects.environment.status.outputTooLarge': '前回の実行は出力が多すぎたため停止されました。その結果は何も適用されていません。',
     'settings.projects.environment.status.failed': '前回の実行は失敗しました。その結果は何も適用されていません。',
+    'settings.environment.secrets.label': '保存したシークレット',
+    'settings.environment.secrets.info': 'エージェントのシークレットカードから保存したものです。そのカードで確認したコマンドだけが受け取ります。',
   },
   'pt-BR': {
     'settings.environment.user.title': 'Variáveis de ambiente',
@@ -251,6 +263,8 @@ export const environmentI18n = {
     'settings.projects.environment.status.spawn': 'O comando não conseguiu iniciar.',
     'settings.projects.environment.status.outputTooLarge': 'A última execução imprimiu demais e foi interrompida. Nada dela é aplicado.',
     'settings.projects.environment.status.failed': 'A última execução falhou. Nada dela é aplicado.',
+    'settings.environment.secrets.label': 'Segredos salvos',
+    'settings.environment.secrets.info': 'Salvos pelo cartão de segredos de um agente. Só os comandos que você confirma nesse cartão os recebem.',
   },
   uk: {
     'settings.environment.user.title': 'Змінні середовища',
@@ -287,6 +301,8 @@ export const environmentI18n = {
     'settings.projects.environment.status.spawn': 'Команду не вдалося запустити.',
     'settings.projects.environment.status.outputTooLarge': 'Останній запуск вивів забагато й був зупинений. Нічого з нього не застосовано.',
     'settings.projects.environment.status.failed': 'Останній запуск не вдався. Нічого з нього не застосовано.',
+    'settings.environment.secrets.label': 'Збережені секрети',
+    'settings.environment.secrets.info': 'Збережено з картки секретів агента. Їх отримують лише команди, які ви підтверджуєте на цій картці.',
   },
   ko: {
     'settings.environment.user.title': '환경 변수',
@@ -323,6 +339,8 @@ export const environmentI18n = {
     'settings.projects.environment.status.spawn': '명령을 시작하지 못했습니다.',
     'settings.projects.environment.status.outputTooLarge': '마지막 실행의 출력이 너무 많아 중지되었습니다. 결과는 적용되지 않았습니다.',
     'settings.projects.environment.status.failed': '마지막 실행이 실패했습니다. 결과는 적용되지 않았습니다.',
+    'settings.environment.secrets.label': '저장된 비밀',
+    'settings.environment.secrets.info': '에이전트의 비밀 카드에서 저장한 값입니다. 그 카드에서 확인한 명령만 받습니다.',
   },
   pl: {
     'settings.environment.user.title': 'Zmienne środowiskowe',
@@ -359,6 +377,8 @@ export const environmentI18n = {
     'settings.projects.environment.status.spawn': 'Nie udało się uruchomić polecenia.',
     'settings.projects.environment.status.outputTooLarge': 'Ostatnie uruchomienie wypisało za dużo i zostało przerwane. Nic z niego nie zostało zastosowane.',
     'settings.projects.environment.status.failed': 'Ostatnie uruchomienie się nie powiodło. Nic z niego nie zostało zastosowane.',
+    'settings.environment.secrets.label': 'Zapisane sekrety',
+    'settings.environment.secrets.info': 'Zapisane z karty sekretów agenta. Dostają je tylko polecenia potwierdzone na tej karcie.',
   },
   'zh-CN': {
     'settings.environment.user.title': '环境变量',
@@ -395,6 +415,8 @@ export const environmentI18n = {
     'settings.projects.environment.status.spawn': '命令无法启动。',
     'settings.projects.environment.status.outputTooLarge': '上次运行输出过多，已被中止。其结果未被应用。',
     'settings.projects.environment.status.failed': '上次运行失败。其结果未被应用。',
+    'settings.environment.secrets.label': '已保存的密钥',
+    'settings.environment.secrets.info': '从智能体的密钥卡片保存。只有你在该卡片上确认的命令会收到它们。',
   },
   'zh-TW': {
     'settings.environment.user.title': '環境變數',
@@ -431,6 +453,8 @@ export const environmentI18n = {
     'settings.projects.environment.status.spawn': '指令無法啟動。',
     'settings.projects.environment.status.outputTooLarge': '上次執行輸出過多，已被中止。其結果未被套用。',
     'settings.projects.environment.status.failed': '上次執行失敗。其結果未被套用。',
+    'settings.environment.secrets.label': '已儲存的密鑰',
+    'settings.environment.secrets.info': '從代理的密鑰卡片儲存。只有你在該卡片上確認的指令會收到它們。',
   },
   tr: {
     'settings.environment.user.title': 'Ortam değişkenleri',
@@ -467,6 +491,8 @@ export const environmentI18n = {
     'settings.projects.environment.status.spawn': 'Komut başlatılamadı.',
     'settings.projects.environment.status.outputTooLarge': 'Son çalıştırma çok fazla çıktı verdi ve durduruldu. Ondan hiçbir şey uygulanmadı.',
     'settings.projects.environment.status.failed': 'Son çalıştırma başarısız oldu. Ondan hiçbir şey uygulanmadı.',
+    'settings.environment.secrets.label': 'Kayıtlı gizli değerler',
+    'settings.environment.secrets.info': 'Bir ajanın gizli değer kartından kaydedildi. Yalnızca o kartta onayladığın komutlar bunları alır.',
   },
   ar: {
     'settings.environment.user.title': 'متغيرات البيئة',
@@ -503,6 +529,8 @@ export const environmentI18n = {
     'settings.projects.environment.status.spawn': 'تعذّر بدء الأمر.',
     'settings.projects.environment.status.outputTooLarge': 'طبع آخر تشغيل مخرجات كثيرة جدًا فأُوقف. لم يُطبَّق شيء منه.',
     'settings.projects.environment.status.failed': 'فشل آخر تشغيل. لم يُطبَّق شيء منه.',
+    'settings.environment.secrets.label': 'الأسرار المحفوظة',
+    'settings.environment.secrets.info': 'حُفظت من بطاقة الأسرار لدى أحد الوكلاء. لا تصل إلا إلى الأوامر التي تؤكدها على تلك البطاقة.',
   },
   he: {
     'settings.environment.user.title': 'משתני סביבה',
@@ -539,5 +567,7 @@ export const environmentI18n = {
     'settings.projects.environment.status.spawn': 'לא ניתן היה להפעיל את הפקודה.',
     'settings.projects.environment.status.outputTooLarge': 'ההרצה האחרונה הדפיסה יותר מדי ונעצרה. דבר ממנה לא הוחל.',
     'settings.projects.environment.status.failed': 'ההרצה האחרונה נכשלה. דבר ממנה לא הוחל.',
+    'settings.environment.secrets.label': 'סודות שמורים',
+    'settings.environment.secrets.info': 'נשמרו מכרטיס הסודות של סוכן. רק פקודות שמאשרים בכרטיס הזה מקבלות אותם.',
   },
 } as const;

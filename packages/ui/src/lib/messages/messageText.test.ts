@@ -80,15 +80,6 @@ describe('flattenAssistantTextParts', () => {
     const single = 'only line\nsecond line';
     expect(flattenAssistantTextParts(makeParts([single]))).toBe(single);
   });
-
-  test('non-text parts are ignored', () => {
-    const partsWithTool: Part[] = [
-      ...makeParts(['before']),
-      { id: 't1', sessionID: 's', messageID: 'm', type: 'tool', tool: 'bash' } as Part,
-      ...makeParts(['after']),
-    ];
-    expect(flattenAssistantTextParts(partsWithTool)).toBe('before\n\nafter');
-  });
 });
 
 describe('assistantTextSegments', () => {

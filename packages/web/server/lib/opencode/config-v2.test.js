@@ -376,6 +376,17 @@ describe('provider entity', () => {
       disabled: true,
     });
   });
+
+  it('loads MIME-typed modalities as their categories', () => {
+    expect(toProviderEntity({
+      models: {
+        m: { modalities: { input: ['text', 'image/jpeg', 'image/png'], output: ['text'] } },
+      },
+    }).models.m.capabilities).toEqual({ tools: true, input: ['text', 'image'], output: ['text'] });
+    expect(toProviderEntity({
+      models: { m: { capabilities: { input: ['embedding'], output: [] } } },
+    }).models.m.capabilities).toEqual({ input: ['embedding'], output: [] });
+  });
 });
 
 describe('plugin entity', () => {
@@ -604,23 +615,30 @@ describe('session warming', () => {
 describe('compaction settings', () => {
   it('sets and clears the buffer, kept tokens and background compaction, keeping other keys', () => {
     const config = { model: 'openai/gpt-5', compaction: { auto: false }, experimental: { todo: true } };
-    expect(writeCompactionSettings(config, { buffer: 64_000, keepTokens: 30_000, background: true })).toBe(true);
+    expect(writeCompactionSettings(config, { buffer: 64_000, keepTokens: 30_000, background: false })).toBe(true);
     expect(config).toEqual({
       model: 'openai/gpt-5',
-      compaction: { auto: false, buffer: 64_000, keep: { tokens: 30_000 } },
-      experimental: { todo: true, background_compaction: true },
+      compaction: { auto: false, background: false, buffer: 64_000, keep: { tokens: 30_000 } },
+      experimental: { todo: true, background_compaction: false },
     });
     expect(writeCompactionSettings(config, { buffer: 64_000 })).toBe(false);
     expect(writeCompactionSettings(config, { auto: true })).toBe(true);
     expect(config.compaction.auto).toBe(true);
     expect(writeCompactionSettings(config, { auto: false })).toBe(true);
 
-    expect(writeCompactionSettings(config, { buffer: null, keepTokens: null, background: false })).toBe(true);
+    expect(writeCompactionSettings(config, { buffer: null, keepTokens: null, background: true })).toBe(true);
     expect(config).toEqual({
       model: 'openai/gpt-5',
-      compaction: { auto: false },
-      experimental: { todo: true, background_compaction: false },
+      compaction: { auto: false, background: true },
+      experimental: { todo: true, background_compaction: true },
     });
+  });
+
+  it('writes background compaction where both older and newer OpenCode read it', () => {
+    const config = { compaction: { background: true }, experimental: { background_compaction: true } };
+    expect(writeCompactionSettings(config, { background: true })).toBe(false);
+    expect(writeCompactionSettings(config, { background: false })).toBe(true);
+    expect(config).toEqual({ compaction: { background: false }, experimental: { background_compaction: false } });
   });
 
   it('removes sections it leaves empty and leaves omitted fields alone', () => {

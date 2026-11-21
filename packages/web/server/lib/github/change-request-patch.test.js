@@ -122,6 +122,15 @@ describe('readGitHubChangeRequestPatch', () => {
     expect(resolveGitHubRepoFromDirectory).toHaveBeenCalled();
   });
 
+  it('retains the optional session lookup', async () => {
+    getOctokitForAccountId.mockResolvedValue(null);
+    await expect(readGitHubChangeRequestPatch(
+      { directory: '/repo', remote: 'origin', number: 7 },
+      { getOctokitForAccountId, resolveGitHubRepoFromDirectory },
+    )).rejects.toMatchObject({ statusCode: 401, code: 'github-not-connected' });
+    expect(getOctokitForAccountId).toHaveBeenCalledWith(undefined, expect.any(Object));
+  });
+
   it('reconciles only an exact-account 401', async () => {
     getOctokitForAccountId.mockImplementation(async (_accountId, options) => {
       await options.onUnauthorized({ provider: 'github', instance: 'github.com', accountId: session.accountId }, false);
@@ -226,5 +235,41 @@ describe('readGitHubChangeRequestFile', () => {
     });
     await expect(read({ owner: 'o', repo: 'r' }, { path: 'a.ts', status: 'M' })).rejects.toMatchObject({ code: 'file-too-large', statusCode: 413 });
   });
-});
 
+  it.each([null, {}, 42])('retains the raw-file assertion for %j', async (content) => {
+    const originalRequest = request.getMockImplementation();
+    request.mockImplementation((route, params) => route === 'GET /repos/{owner}/{repo}/contents/{path}'
+      ? { data: content } : originalRequest(route, params));
+    await expect(read(null, { path: 'a.ts', status: 'A' })).rejects.toMatchObject({
+      code: 'ERR_ASSERTION',
+      message: expect.stringContaining('GitHub returned invalid file contents'),
+      actual: typeof content,
+      expected: 'string',
+      operator: 'strictEqual',
+    });
+  });
+
+  it('forwards the binary contents SHA to the blob request', async () => {
+    const originalRequest = request.getMockImplementation();
+    request.mockImplementation((route, params) => {
+      if (route === 'GET /repos/{owner}/{repo}/contents/{path}') return { data: { sha: 'blob-sha' } };
+      if (route === 'GET /repos/{owner}/{repo}/git/blobs/{file_sha}') return { data: { encoding: 'base64', content: 'aGVsbG8=' } };
+      return originalRequest(route, params);
+    });
+    await expect(read(null, { path: 'a.pdf', status: 'A', binary: true })).resolves.toEqual({
+      original: '', modified: 'data:application/octet-stream;base64,aGVsbG8=',
+    });
+    expect(request).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/git/blobs/{file_sha}', {
+      owner: 'o', repo: 'r', file_sha: 'blob-sha',
+    });
+  });
+
+  it('keeps the original reference after validating its string representation', async () => {
+    const head = { toString: () => HEAD };
+    request.mockImplementationOnce(async () => ({ data: { head: { sha: head }, base: { sha: BASE_TIP } } }));
+    await expect(read(null, { path: 'a.ts', status: 'A' })).resolves.toEqual({
+      original: '', modified: `a.ts@${HEAD}`,
+    });
+    expect(request.mock.calls.find(([route]) => route.includes('/contents/'))[1].ref).toBe(head);
+  });
+});

@@ -18,12 +18,6 @@ import { normalizePath } from '@/lib/pathNormalization';
 
 export type CommandScope = 'user' | 'project';
 
-/**
- * The command entity as OpenChamber persists it, i.e. the OpenCode 2 shape the
- * config routes read and write. `template` is the markdown body of a `.md`
- * command; `model` is the joined `provider/model#variant` string; `subagent`
- * runs the command in a child session instead of the current one.
- */
 export interface CommandConfig {
   name: string;
   description?: string;
@@ -37,18 +31,13 @@ export interface CommandConfig {
 
 export interface Command extends CommandConfig {
   isBuiltIn?: boolean;
-  /** The file OpenChamber would rewrite on the next save. */
   path?: string | null;
-  /** The file still uses v1 spellings; the next save rewrites it in v2. */
   legacy?: boolean;
-  /** OpenChamber confirmed no command file or config entry: OpenCode or a plugin defines it. */
   fromOpenCode?: boolean;
 }
 
-// Built-in commands provided by OpenCode (not defined in user config directories)
 const BUILTIN_COMMAND_NAMES = new Set(['init', 'review']);
 
-/** What `GET /api/config/commands/:name/config` answers. */
 interface CommandEntityEnvelope {
   source: 'md' | 'json' | 'none';
   scope: CommandScope | null;
@@ -57,13 +46,52 @@ interface CommandEntityEnvelope {
   config: Omit<CommandConfig, 'name' | 'scope' | 'source'>;
 }
 
+const withCommandEntry = <T extends { name: string; description?: string }>(cmd: T, data: CommandEntityEnvelope | undefined) => {
+  if (!data) return cmd;
+  const scope = data.scope === 'project' || data.scope === 'user' ? data.scope : undefined;
+  return {
+    ...cmd,
+    ...data.config,
+    name: cmd.name,
+    description: data.config?.description ?? cmd.description,
+    scope,
+    path: data.path,
+    legacy: data.legacy === true,
+    ...(data.source === 'none' ? { fromOpenCode: true } : {}),
+  };
+};
+
+const readCommandEntries = async (
+  names: string[],
+  directory: string | null | undefined,
+  signal: AbortSignal,
+): Promise<Map<string, CommandEntityEnvelope> | null> => {
+  const query = new URLSearchParams();
+  if (directory) query.set('directory', directory);
+  for (const name of names) query.append('name', name);
+  try {
+    const response = await runtimeFetch(`/api/config/command-configs?${query.toString()}`, {
+      signal,
+      headers: {
+        'Cache-Control': 'no-cache',
+        ...(directory ? { 'x-opencode-directory': directory } : {}),
+      },
+    });
+    if (!response.ok) return null;
+    // SAFETY: `/api/config/command-configs` is OpenChamber's own route; each
+    // entry is what `/api/config/commands/:name/config` answers.
+    const data = await response.json() as { commands?: Array<{ name: string; entry: CommandEntityEnvelope }> };
+    if (!Array.isArray(data.commands)) return null;
+    return new Map(data.commands.map((command) => [command.name, command.entry]));
+  } catch {
+    return null;
+  }
+};
+
 export const isCommandBuiltIn = (command: Command): boolean => {
   return BUILTIN_COMMAND_NAMES.has(command.name);
 };
 
-// OpenCode's own `/goal` (2.2.1+) duplicates Goal Mode, so the composer does
-// not offer it. A user's own `goal` command, or one whose metadata read
-// failed, stays.
 const HIDDEN_OPENCODE_COMMAND_NAMES = new Set(['goal']);
 
 export const isCommandOfferedInComposer = (command: Command): boolean => {
@@ -75,7 +103,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const COMMANDS_LOAD_CACHE_TTL_MS = 5000;
 const DEFAULT_COMMANDS_CACHE_KEY = '__default__';
 const commandsLastLoadedAt = new Map<string, number>();
-const commandsLoadInFlight = new Map<string, Promise<boolean>>();
+const commandsLoadInFlight = new Map<string, { promise: Promise<boolean>; invalidated: boolean }>();
 let commandsGeneration = 0;
 const commandReadControllers = new Set<AbortController>();
 
@@ -102,7 +130,10 @@ const getCommandsCacheKey = (directory: string | null): string => {
 };
 
 export const invalidateCommandsLoadCache = (directory: string | null = getRequestDirectory()) => {
-  commandsLastLoadedAt.delete(getCommandsCacheKey(directory));
+  const cacheKey = getCommandsCacheKey(directory);
+  commandsLastLoadedAt.delete(cacheKey);
+  const inFlight = commandsLoadInFlight.get(cacheKey);
+  if (inFlight) inFlight.invalidated = true;
 };
 
 const buildCommandsSignature = (commands: Command[]): string => {
@@ -173,11 +204,6 @@ const removeCommandLocal = (
   });
 };
 
-/**
- * Directory a call operates on. Settings can browse another project without
- * moving the app, so every entry point takes one; omitting it means the project
- * the app is currently on.
- */
 const resolveDirectory = (directory?: string | null): string | null => {
   if (directory !== undefined) {
     const trimmed = directory?.trim();
@@ -191,12 +217,10 @@ const getRequestDirectory = (): string | null => {
     const projectsStore = useProjectsStore.getState();
     const activeProject = projectsStore.getActiveProject?.();
     
-    // 1. Primary: Active project path from store
     if (activeProject?.path?.trim()) {
       return activeProject.path.trim();
     }
 
-    // 2. Fallback: current OpenCode directory (session / runtime)
     const clientDir = opencodeClient.getDirectory();
     if (clientDir?.trim()) {
       return clientDir.trim();
@@ -221,9 +245,7 @@ interface CommandDraft {
 interface CommandsStore {
 
   selectedCommandName: string | null;
-  /** Commands of the project the app is on. Chat and autocompletes read this one. */
   commands: Command[];
-  /** Every directory loaded so far, including the ambient one. */
   commandsByDirectory: Record<string, Command[]>;
   isLoading: boolean;
   commandDraft: CommandDraft | null;
@@ -246,10 +268,6 @@ declare global {
 
 const EMPTY_COMMANDS: Command[] = [];
 
-/**
- * Commands of one project. Returns a stored array so components can select it
- * directly; an omitted directory means the project the app is on.
- */
 export const selectCommandsForDirectory = (
   state: Pick<CommandsStore, 'commandsByDirectory'>,
   directory?: string | null,
@@ -267,7 +285,6 @@ type ComposerCommandDirectory =
   | { status: 'pending' }
   | { status: 'resolved'; directory: string | null | undefined };
 
-/** A draft uses its start folder; pending discovery must never request the root. */
 export const resolveCommandDirectory = (
   directory: string | null | undefined,
   draft: CommandDirectorySource | null,
@@ -330,14 +347,14 @@ export const useCommandsStore = create<CommandsStore>()(
 
           const inFlight = commandsLoadInFlight.get(cacheKey);
           if (inFlight) {
-            return inFlight;
+            return inFlight.promise;
           }
 
           const generation = commandsGeneration;
+          const entry = { promise: Promise.resolve(false), invalidated: false };
+          const isCurrent = () => generation === commandsGeneration && !entry.invalidated;
           const request = (async () => {
             set({ isLoading: true });
-            // Only this directory can supply the comparison baseline. The mirror
-            // may still describe the project we just left.
             const previousCommands = get().commandsByDirectory[cacheKey];
             const previousSignature = buildCommandsSignature(previousCommands ?? EMPTY_COMMANDS);
             let lastError: unknown = null;
@@ -346,51 +363,41 @@ export const useCommandsStore = create<CommandsStore>()(
               try {
                 const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-                // Ensure the list is scoped to the same directory we use for config source detection.
-                // v2 keeps skills in their own catalog, so every command here is a real command file.
                 const commands = await readCommandMetadata(generation, (signal) => opencodeClient.listCommands(directory, signal));
-                if (generation !== commandsGeneration) return false;
+                if (!isCurrent()) return false;
 
-                const commandsWithScope = await Promise.all(
-                  commands.map((cmd) => readCommandMetadata(generation, async (signal) => {
-                    if (generation !== commandsGeneration) return cmd;
-                    try {
-                      // The v2 `CommandInfo` OpenCode lists carries only a name
-                      // and description, so the editable fields come from the
-                      // command's own stored entry.
-                      const response = await runtimeFetch(`/api/config/commands/${encodeURIComponent(cmd.name)}/config${queryParams}`, {
-                        signal,
-                        headers: {
-                          'Cache-Control': 'no-cache',
-                          ...(directory ? { 'x-opencode-directory': directory } : {}),
+                const entries = commands.length > 0
+                  ? await readCommandMetadata(generation, (signal) => readCommandEntries(commands.map((cmd) => cmd.name), directory, signal))
+                  : new Map<string, CommandEntityEnvelope>();
+                if (!isCurrent()) return false;
+                const commandsWithScope = entries
+                  ? commands.map((cmd) => withCommandEntry(cmd, entries.get(cmd.name)))
+                  : await Promise.all(
+                    commands.map((cmd) => readCommandMetadata(generation, async (signal) => {
+                      if (!isCurrent()) return cmd;
+                      try {
+                        const response = await runtimeFetch(`/api/config/commands/${encodeURIComponent(cmd.name)}/config${queryParams}`, {
+                          signal,
+                          headers: {
+                            'Cache-Control': 'no-cache',
+                            ...(directory ? { 'x-opencode-directory': directory } : {}),
+                          }
+                        });
+
+                        if (response.ok) {
+                          // SAFETY: `/api/config/commands/:name/config` is
+                          // OpenChamber's own route; it normalizes the entry
+                          // through `config-v2.js` before answering.
+                          return withCommandEntry(cmd, await response.json() as CommandEntityEnvelope);
                         }
-                      });
-
-                      if (response.ok) {
-                        // SAFETY: `/api/config/commands/:name/config` is
-                        // OpenChamber's own route; it normalizes the entry
-                        // through `config-v2.js` before answering.
-                        const data = await response.json() as CommandEntityEnvelope;
-                        const scope = data.scope === 'project' || data.scope === 'user' ? data.scope : undefined;
-                        return {
-                          ...cmd,
-                          ...data.config,
-                          name: cmd.name,
-                          description: data.config?.description ?? cmd.description,
-                          scope,
-                          path: data.path,
-                          legacy: data.legacy === true,
-                          ...(data.source === 'none' ? { fromOpenCode: true } : {}),
-                        };
+                      } catch (err) {
+                        if (!isCurrent()) return cmd;
+                        console.warn(`[CommandsStore] Failed to fetch config for command ${cmd.name}:`, err);
                       }
-                    } catch (err) {
-                      if (generation !== commandsGeneration) return cmd;
-                      console.warn(`[CommandsStore] Failed to fetch config for command ${cmd.name}:`, err);
-                    }
-                    return cmd;
-                  }))
-                );
-                if (generation !== commandsGeneration) return false;
+                      return cmd;
+                    }))
+                  );
+                if (!isCurrent()) return false;
 
                 const nextSignature = buildCommandsSignature(commandsWithScope);
                 const nextCommands = previousCommands !== undefined && previousSignature === nextSignature
@@ -406,29 +413,30 @@ export const useCommandsStore = create<CommandsStore>()(
                   }
                   return next;
                 });
-                commandsLastLoadedAt.set(cacheKey, Date.now());
+                if (nextCommands.length > 0) commandsLastLoadedAt.set(cacheKey, Date.now());
+                else commandsLastLoadedAt.delete(cacheKey);
                 return true;
               } catch (error) {
-                if (generation !== commandsGeneration) return false;
+                if (!isCurrent()) return false;
                 lastError = error;
                 const waitMs = 200 * (attempt + 1);
                 await new Promise((resolve) => setTimeout(resolve, waitMs));
               }
             }
 
-            if (generation !== commandsGeneration) return false;
+            if (!isCurrent()) return false;
             console.error("Failed to load commands:", lastError);
-            // Keep the current directory cache, including edits made during the load.
             set({ isLoading: false });
             return false;
           })();
 
-          commandsLoadInFlight.set(cacheKey, request);
-          try {
-            return await request;
-          } finally {
-            if (commandsLoadInFlight.get(cacheKey) === request) commandsLoadInFlight.delete(cacheKey);
-          }
+          entry.promise = request.finally(() => {
+            if (commandsLoadInFlight.get(cacheKey) === entry) commandsLoadInFlight.delete(cacheKey);
+          }).then((loaded) => (
+            generation === commandsGeneration && entry.invalidated ? get().loadCommands(directory) : loaded
+          ));
+          commandsLoadInFlight.set(cacheKey, entry);
+          return entry.promise;
         },
 
         createCommand: async (config: CommandConfig, requestedDirectory?: string | null) => {
@@ -560,7 +568,6 @@ export const useCommandsStore = create<CommandsStore>()(
         deleteCommand: async (name: string, requestedDirectory?: string | null) => {
           const generation = commandsGeneration;
           try {
-            // Use active project root for project-level command support
             const directory = resolveDirectory(requestedDirectory);
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 

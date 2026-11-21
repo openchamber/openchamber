@@ -75,7 +75,8 @@ async function createPageFitFixture() {
     url: server.resolvedUrls.local[0], fixture,
     async close() {
       await server.close();
-      rmSync(fixture, { recursive: true, force: true });
+      // Chrome's helpers can still be writing into the profile inside the fixture as the main process exits.
+      rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     },
   };
 }

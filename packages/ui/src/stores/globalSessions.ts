@@ -22,10 +22,19 @@ export const filterManagedChatsForRuntime = (sessions: Session[], vscode: boolea
         : sessions
 );
 
-/** A session is archived when it carries a timestamp. */
 const isArchivedSession = (session: GlobalSessionRecord): boolean => Boolean(session.time?.archived);
 
-/** Split a session list into active and archived buckets. */
+export const addUnlistedLiveSessions = (active: Session[], archived: readonly Session[], live?: readonly Session[]): Session[] => {
+  if (!live || live.length === 0) return active;
+  const listed = new Set([...active, ...archived].map((session) => session.id));
+  const unlisted = live.filter((session) => {
+    if (listed.has(session.id)) return false;
+    listed.add(session.id);
+    return true;
+  });
+  return unlisted.length > 0 ? [...active, ...unlisted] : active;
+};
+
 export const splitGlobalSessionsByArchived = <T extends GlobalSessionRecord>(
     sessions: T[],
 ): { active: T[]; archived: T[] } => {
@@ -38,27 +47,16 @@ export const splitGlobalSessionsByArchived = <T extends GlobalSessionRecord>(
     return { active, archived };
 };
 
-/** One page request. Injected so callers and tests can supply their own transport. */
 export type SessionPageLister = (options: SessionListOptions) => Promise<SessionPage>;
 
-/**
- * Walks every page of a session list and returns the records.
- *
- * v2 lists sessions newest-first and pages by an opaque cursor. Callers take
- * the whole list and split it with `splitGlobalSessionsByArchived`: OpenCode's
- * archived filter cannot see sessions the server's archive file marks.
- */
 export async function listGlobalSessionPages(
     listPage: SessionPageLister,
     options: {
         directory?: string;
-        /** Only the direct children of this session. */
         parentID?: string;
         pageSize: number;
         onPage?: (sessions: GlobalSessionRecord[]) => void;
-        /** Stop after accepting this page, while retaining every record it returned. */
         stopAfterPage?: (sessions: GlobalSessionRecord[]) => boolean;
-        /** The first page's isolated-space marks: `null` when the page carried none. */
         onSpaces?: (spaces: SpaceMark[] | null) => void;
     },
 ): Promise<GlobalSessionRecord[]> {
@@ -116,8 +114,6 @@ export async function listGlobalSessionPages(
 
         const next = page.cursor.next;
         if (!next) break;
-        // A stalled or cycling page is incomplete. Returning it as a complete
-        // list would let callers remove sessions and overwrite recovery caches.
         if (seenCursors.has(next) || accepted.length === 0) {
             throw new Error("Session pagination did not advance; retaining the previous snapshot");
         }

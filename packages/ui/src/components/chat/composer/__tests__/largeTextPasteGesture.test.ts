@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, jest, test } from 'bun:test';
 import { EditorState } from '@codemirror/state';
 import { LargeTextPasteGesture } from '../largeTextPaste';
 import { replaceWithCaret } from '../editor/documentEdits';
@@ -174,8 +174,17 @@ describe('large text double-paste gesture with real CodeMirror edits', () => {
         }
     });
 
-    test('candidate expires and releases the clipboard after 1000ms', async () => {
-        const h = setup(); h.key(); h.paste(performance.now());
-        await new Promise((resolve) => setTimeout(resolve, 1010)); h.key(); expect(h.paste(performance.now())).toBeNull();
+    test('candidate expires and releases the clipboard after 1000ms', () => {
+        jest.useFakeTimers();
+        try {
+            const h = setup(); h.key(); h.paste(100);
+            jest.advanceTimersByTime(1000);
+            // Keep the supplied event timestamp inside the conversion window:
+            // only the expiry callback can have released this candidate.
+            h.key(); expect(h.paste(200)).toBeNull();
+        } finally {
+            for (const gesture of gestures.splice(0)) gesture.invalidate();
+            jest.useRealTimers();
+        }
     });
 });

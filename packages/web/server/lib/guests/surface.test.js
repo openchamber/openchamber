@@ -26,6 +26,7 @@ const createFakeService = () => {
   const calls = [];
   const frames = [];
   const waiters = [];
+  const frameRequests = [];
   let failWith = null;
   /** Test hook: a promise the input handler awaits before answering. */
   let inputGate = null;
@@ -38,6 +39,9 @@ const createFakeService = () => {
   let inputStatus = 204;
   const openServiceRequest = async ({ path, method, body, query, headers, signal }) => {
     calls.push({ path, method, body: body ? JSON.parse(body) : undefined, query, headers });
+    if (path === SURFACE_FRAME_PATH) {
+      for (const request of frameRequests.filter((request) => request.after === query.after)) request.resolve();
+    }
     if (failWith) throw failWith;
     if (path === SURFACE_INPUT_PATH && inputGate) {
       const gate = inputGate;
@@ -54,7 +58,6 @@ const createFakeService = () => {
           const wake = () => resolve();
           waiters.push(wake);
           signal?.addEventListener('abort', () => resolve(), { once: true });
-          setTimeout(resolve, 300);
         });
         frame = nextFrameAfter(after);
       }
@@ -87,6 +90,11 @@ const createFakeService = () => {
     calls,
     completed,
     pushFrame,
+    frameRequestedAfter: (seq) => {
+      const after = String(seq);
+      if (calls.some((call) => call.path === SURFACE_FRAME_PATH && call.query.after === after)) return Promise.resolve();
+      return new Promise((resolve) => frameRequests.push({ after, resolve }));
+    },
     gateNextInput: (promise) => { inputGate = promise; },
     answerInputWith: (status) => { inputStatus = status; },
     fail: (error) => { failWith = error; for (const wake of waiters.splice(0)) wake(); },
@@ -113,12 +121,25 @@ const openViewer = (port, guestId = 'sim') => new Promise((resolve, reject) => {
   });
   const next = () => (inbox.length ? Promise.resolve(inbox.shift()) : new Promise((r) => waiting.push(r)));
   const send = (message) => ws.send(JSON.stringify(message));
-  ws.on('open', () => resolve({ ws, next, send, closed: new Promise((r) => ws.on('close', r)) }));
+  // The pong follows the server's message handlers for all preceding frames.
+  const received = () => new Promise((resolve) => { ws.once('pong', resolve); ws.ping(); });
+  ws.on('open', () => resolve({ ws, next, send, received, closed: new Promise((r) => ws.on('close', r)) }));
   ws.on('error', reject);
   ws.on('unexpected-response', (_req, res) => reject(new Error(`upgrade ${res.statusCode}`)));
 });
 
-const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+const drainViewer = async (runtime, viewer) => {
+  await viewer.received();
+  await runtime.sessionOf('sim').queue;
+};
+
+const closeViewer = async (runtime, viewer, id = 'viewer-1') => {
+  const session = runtime.sessionOf('sim');
+  const closed = new Promise((resolve) => session.viewers.get(id).ws.once('close', resolve));
+  viewer.ws.close();
+  await Promise.all([viewer.closed, closed]);
+  return session;
+};
 
 const cleanups = [];
 afterEach(async () => {
@@ -180,7 +201,7 @@ describe('guest surface runtime', () => {
   });
 
   test('delivers frames one at a time per viewer and skips to the newest after an ack', async () => {
-    const { port, service, holds } = await createHarness();
+    const { port, service, holds, runtime } = await createHarness();
     const viewer = await openViewer(port);
     expect(await viewer.next()).toEqual({ type: 'hello', viewerId: 'viewer-1' });
     expect(await viewer.next()).toEqual({ type: 'control', controller: 'none', mine: false });
@@ -193,16 +214,15 @@ describe('guest surface runtime', () => {
 
     // Two more frames arrive before the viewer acknowledges: it gets only the newest.
     service.pushFrame({ seq: 2, bytes: Buffer.from('frame-2') });
-    await settle();
+    await service.frameRequestedAfter(2);
     service.pushFrame({ seq: 3, bytes: Buffer.from('frame-3') });
-    await settle();
+    await service.frameRequestedAfter(3);
     viewer.send({ type: 'ack', seq: 1 });
     expect(await viewer.next()).toMatchObject({ type: 'frame', seq: 3 });
     expect((await viewer.next()).binary.toString()).toBe('frame-3');
 
-    viewer.ws.close();
-    await viewer.closed;
-    await settle();
+    const session = await closeViewer(runtime, viewer);
+    await session.queue;
     expect(holds[0].released).toBe(true);
     expect(service.callsTo(SURFACE_FRAME_PATH)[0].query).toEqual({ after: '0', wait: '25000' });
   });
@@ -216,20 +236,20 @@ describe('guest surface runtime', () => {
     const click = { type: 'pointer', action: 'down', x: 10, y: 20, button: 0, buttons: 1, modifiers: { alt: false, ctrl: false, meta: false, shift: false } };
     viewer.send({ type: 'input', events: [click] });
     expect(await viewer.next()).toEqual({ type: 'control', controller: 'user', mine: true });
-    await settle();
+    await drainViewer(runtime, viewer);
     expect(runtime.userControls('sim')).toBe(true);
     expect(service.callsTo(SURFACE_INPUT_PATH)[0].body).toEqual({ events: [click] });
     expect(service.callsTo(SURFACE_CONTROL_PATH).map((call) => call.body)).toEqual([{ controller: 'user', viewer: 'viewer-1' }]);
 
     viewer.send({ type: 'release' });
     expect(await viewer.next()).toEqual({ type: 'control', controller: 'none', mine: false });
-    await settle();
+    await drainViewer(runtime, viewer);
     expect(runtime.userControls('sim')).toBe(false);
     expect(service.callsTo(SURFACE_CONTROL_PATH).map((call) => call.body)).toEqual([{ controller: 'user', viewer: 'viewer-1' }, { controller: 'none' }]);
   });
 
   test('a second viewer cannot take control from the first and is told who has it', async () => {
-    const { port, service } = await createHarness();
+    const { port, service, runtime } = await createHarness();
     const first = await openViewer(port);
     await first.next(); await first.next();
     const second = await openViewer(port);
@@ -242,7 +262,7 @@ describe('guest surface runtime', () => {
 
     second.send({ type: 'input', events: [key] });
     expect(await second.next()).toEqual({ type: 'control', controller: 'user', mine: false });
-    await settle();
+    await drainViewer(runtime, second);
     expect(service.callsTo(SURFACE_INPUT_PATH)).toHaveLength(1);
 
     // The holder disconnecting releases control for everyone.
@@ -267,7 +287,7 @@ describe('guest surface runtime', () => {
     const text = { type: 'text', text: 'hello' };
     viewer.send({ type: 'input', events: [text] });
     expect(await viewer.next()).toEqual({ type: 'control', controller: 'user', mine: true });
-    await settle();
+    await drainViewer(runtime, viewer);
     expect(service.callsTo(SURFACE_INPUT_PATH)[0].body).toEqual({ events: [text] });
   });
 
@@ -305,32 +325,32 @@ describe('guest surface runtime', () => {
     await viewer.next(); await viewer.next();
     const modifiers = { alt: false, ctrl: false, meta: false, shift: false };
     viewer.send({ type: 'input', events: [{ type: 'pointer', action: 'move', x: 5, y: 5, button: -1, buttons: 0, modifiers }] });
-    await settle();
+    await drainViewer(runtime, viewer);
     expect(runtime.userControls('sim')).toBe(false);
     expect(service.callsTo(SURFACE_INPUT_PATH)).toHaveLength(0);
 
     runtime.noteAgentActivity('sim');
     expect(await viewer.next()).toMatchObject({ type: 'control', controller: 'agent' });
     viewer.send({ type: 'input', events: [{ type: 'pointer', action: 'move', x: 6, y: 6, button: -1, buttons: 0, modifiers }] });
-    await settle();
+    await drainViewer(runtime, viewer);
     expect(runtime.userControls('sim')).toBe(false);
 
     viewer.send({ type: 'input', events: [{ type: 'pointer', action: 'down', x: 6, y: 6, button: 0, buttons: 1, modifiers }] });
     expect(await viewer.next()).toEqual({ type: 'control', controller: 'user', mine: true });
     // Now moves flow, as the holder's.
     viewer.send({ type: 'input', events: [{ type: 'pointer', action: 'move', x: 7, y: 7, button: -1, buttons: 0, modifiers }] });
-    await settle();
+    await drainViewer(runtime, viewer);
     expect(service.callsTo(SURFACE_INPUT_PATH)).toHaveLength(2);
   });
 
   test('a key event reaches the service with the keyCode the viewer browser reported', async () => {
-    const { port, service } = await createHarness();
+    const { port, service, runtime } = await createHarness();
     const viewer = await openViewer(port);
     await viewer.next(); await viewer.next();
     const key = { type: 'key', action: 'down', key: '.', code: 'Period', keyCode: 190, modifiers: { alt: false, ctrl: false, meta: false, shift: false } };
     viewer.send({ type: 'input', events: [key] });
     await viewer.next(); // control
-    await settle();
+    await drainViewer(runtime, viewer);
     expect(service.callsTo(SURFACE_INPUT_PATH)[0].body).toEqual({ events: [key] });
   });
 
@@ -345,7 +365,7 @@ describe('guest surface runtime', () => {
     await viewer.next(); // control
     viewer.send({ type: 'input', events: [{ type: 'key', action: 'down', key: 'b', code: 'KeyB', modifiers }] });
     viewer.send({ type: 'clipboard-read', id: 'c1' });
-    await settle();
+    await viewer.received();
     expect(service.completed).toHaveLength(0);
     expect(service.callsTo(SURFACE_CLIPBOARD_PATH)).toHaveLength(0);
     open();
@@ -360,29 +380,31 @@ describe('guest surface runtime', () => {
     const modifiers = { alt: false, ctrl: false, meta: false, shift: false };
     viewer.send({ type: 'input', events: [{ type: 'key', action: 'down', key: 'a', code: 'KeyA', modifiers }] });
     expect(await viewer.next()).toMatchObject({ type: 'control', controller: 'user', mine: true });
-    await settle();
+    await drainViewer(runtime, viewer);
     const callsBefore = service.calls.length;
+    const session = runtime.sessionOf('sim');
+    const serverClosed = new Promise((resolve) => session.viewers.get('viewer-1').ws.once('close', resolve));
 
     // Approval withdrawn: the guest routes end the session; the socket closes after.
     runtime.endForGuest('sim');
     expect(await viewer.next()).toEqual({ type: 'ended', reason: 'extension-unavailable' });
     await viewer.closed;
-    await settle();
+    await serverClosed;
+    await session.queue;
     expect(service.calls.length).toBe(callsBefore);
     expect(holds[0].released).toBe(true);
   });
 
   test('the last viewer leaving while holding control tells the service it let go', async () => {
-    const { port, service } = await createHarness();
+    const { port, service, runtime } = await createHarness();
     const viewer = await openViewer(port);
     await viewer.next(); await viewer.next();
     const modifiers = { alt: false, ctrl: false, meta: false, shift: false };
     viewer.send({ type: 'input', events: [{ type: 'key', action: 'down', key: 'a', code: 'KeyA', modifiers }] });
     await viewer.next();
-    await settle();
-    viewer.ws.close();
-    await viewer.closed;
-    await settle();
+    await drainViewer(runtime, viewer);
+    const session = await closeViewer(runtime, viewer);
+    await session.queue;
     expect(service.callsTo(SURFACE_CONTROL_PATH).map((call) => call.body)).toEqual([{ controller: 'user', viewer: 'viewer-1' }, { controller: 'none' }]);
   });
 
@@ -400,8 +422,7 @@ describe('guest surface runtime', () => {
     expect(await viewer.next()).toEqual({ type: 'control', controller: 'none', mine: false });
     expect(runtime.userControls('sim')).toBe(false);
     open();
-    await settle();
-    await settle();
+    await drainViewer(runtime, viewer);
     expect(runtime.userControls('sim')).toBe(false);
     // B was typed before the release and still belonged to the holder: it is
     // not re-taken, and it is not delivered under nobody's control either.
@@ -421,15 +442,14 @@ describe('guest surface runtime', () => {
     await first.next();
     expect(await second.next()).toEqual({ type: 'control', controller: 'user', mine: false });
     first.send({ type: 'input', events: [{ type: 'key', action: 'down', key: 'b', code: 'KeyB', modifiers }] });
-    first.ws.close();
+    const session = await closeViewer(runtime, first);
     expect(await second.next()).toEqual({ type: 'control', controller: 'none', mine: false });
     open();
-    await settle();
-    await settle();
+    await session.queue;
     expect(runtime.userControls('sim')).toBe(false);
     second.send({ type: 'input', events: [{ type: 'key', action: 'down', key: 'c', code: 'KeyC', modifiers }] });
     expect(await second.next()).toEqual({ type: 'control', controller: 'user', mine: true });
-    await settle();
+    await drainViewer(runtime, second);
     expect(service.completed.map((event) => event.key)).toEqual(['a', 'c']);
   });
 
@@ -442,17 +462,14 @@ describe('guest surface runtime', () => {
     service.gateNextInput(new Promise((resolve) => { open = resolve; }));
     viewer.send({ type: 'input', events: [{ type: 'key', action: 'down', key: 'a', code: 'KeyA', modifiers }] });
     await viewer.next();
-    await settle();
-    viewer.ws.close();
-    await viewer.closed;
-    await settle();
+    await viewer.received();
+    const session = await closeViewer(runtime, viewer);
     // The session is still registered: its final "none" waits behind the slow input.
     expect(runtime.sessionOf('sim')).not.toBeNull();
     const callsBefore = service.calls.length;
     runtime.endForGuest('sim');
     open();
-    await settle();
-    await settle();
+    await session.queue;
     expect(service.calls.length).toBe(callsBefore);
     expect(runtime.sessionOf('sim')).toBeNull();
     expect(holds[0].released).toBe(true);
@@ -509,7 +526,7 @@ describe('guest surface runtime', () => {
 
     // Nothing drawn yet: frame 0.
     viewer.send({ type: 'input', events: [click] });
-    await settle();
+    await drainViewer(runtime, viewer);
     expect(service.callsTo(SURFACE_INPUT_PATH)[0].headers).toEqual({ 'x-surface-viewer': 'viewer-1', 'x-surface-frame-seq': '0' });
     expect(service.callsTo(SURFACE_CONTROL_PATH).at(-1).body).toEqual({ controller: 'user', viewer: 'viewer-1' });
     await viewer.next(); // control: mine
@@ -521,7 +538,7 @@ describe('guest surface runtime', () => {
     viewer.send({ type: 'input', events: [click] });
     viewer.send({ type: 'ack', seq: 7 });
     viewer.send({ type: 'input', events: [click] });
-    await settle();
+    await drainViewer(runtime, viewer);
     const stamped = service.callsTo(SURFACE_INPUT_PATH).map((call) => call.headers['x-surface-frame-seq']);
     expect(stamped).toEqual(['0', '0', '7']);
 
@@ -530,7 +547,7 @@ describe('guest surface runtime', () => {
     expect(runtime.viewerHeaders('other', 'viewer-1')).toBeNull();
 
     viewer.send({ type: 'release' });
-    await settle();
+    await drainViewer(runtime, viewer);
     expect(runtime.viewerHeaders('sim', 'viewer-1')['x-surface-viewer-controls']).toBe('0');
   });
 

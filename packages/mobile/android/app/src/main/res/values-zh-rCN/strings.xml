@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="tile_new_session">新建会话</string>
+    <string name="tile_new_session_description">新建 OpenChamber 会话</string>
+    <string name="sealed_push_channel_name">智能体更新</string>
+    <string name="widget_usage_label">用量</string>
+    <string name="widget_sessions_label">会话</string>
+    <string name="widget_usage_description">已连接提供商的用量配额</string>
+    <string name="widget_sessions_description">最近会话和新建聊天快捷方式</string>
+    <string name="widget_open_to_sync">打开 OpenChamber 以同步</string>
+    <string name="widget_refresh">刷新</string>
+    <string name="widget_new_session">新建会话</string>
+</resources>

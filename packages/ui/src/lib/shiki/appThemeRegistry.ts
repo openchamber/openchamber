@@ -39,7 +39,6 @@ function withStableStringId<T extends object>(value: T, id: string): T {
 
 const MAX_RESOLVED_THEME_CACHE_ENTRIES = 40;
 const resolvedThemeCache = new Map<string, ShikiThemeRegistrationResolvedLike>();
-// Keyed by the cached TextMate theme, so both formats share its lifetime.
 const zedThemeCache = new WeakMap<ShikiThemeRegistrationResolvedLike, ZedTheme>();
 const registeredPierreThemeNames = new Set<string>();
 const renderNames = new WeakMap<Theme, string>();
@@ -55,13 +54,7 @@ const digest = (text: string): string => {
   return (hash >>> 0).toString(36);
 };
 
-/**
- * The name a theme is highlighted and registered under: its ID plus a digest
- * of its colours. @pierre/diffs ignores a second registration of a name, and
- * the highlighter workers and diff caches key on the name, so a custom theme
- * edited on disk keeps the same ID but must render under a new name.
- */
-export const getThemeRenderName = (theme: Theme): string => {
+const getThemeRenderName = (theme: Theme): string => {
   let name = renderNames.get(theme);
   if (!name) {
     name = `${theme.metadata.id}@${digest(getThemeContentSignature(theme))}`;
@@ -119,7 +112,6 @@ export const getResolvedShikiTheme = (theme: Theme): ShikiThemeRegistrationResol
   return resolved;
 };
 
-/** The app theme for both highlighters: Shiki reads `textmate`, Highlights `zed`. */
 export const getCodeTokenTheme = (theme: Theme) => {
   const textmate = getResolvedShikiTheme(theme);
   let zed = zedThemeCache.get(textmate);
@@ -130,15 +122,12 @@ export const getCodeTokenTheme = (theme: Theme) => {
   return { textmate, zed };
 };
 
-/** Registers the theme with @pierre/diffs once per content and returns the name to render it with. */
 export const ensurePierreThemeRegistered = (theme: Theme): string => {
   const name = getThemeRenderName(theme);
   if (registeredPierreThemeNames.has(name)) {
     return name;
   }
 
-  // One registration serves both highlighter backends: Shiki reads the
-  // TextMate theme, Highlights the Zed one, and the diff chrome reads `colors`.
   const { textmate, zed } = getCodeTokenTheme(theme);
   const diffsTheme: DiffsTheme = {
     name,

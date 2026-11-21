@@ -41,6 +41,7 @@ mock.module('@/stores/permissionStore', () => ({
 }));
 mock.module('@/stores/useConfigStore', () => ({
   markConfigCatalogStale: () => undefined,
+  invalidateConfigCatalogsForReload: () => undefined,
   selectCatalogLoadedForDirectory: () => false,
   selectConfigAgentsForDirectory: () => [],
   invalidateConfigAgentsLoad: () => undefined,
@@ -59,8 +60,10 @@ const { getSessionMaterializationStatus } = await import('@/sync/materialization
 import type { State } from '@/sync/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const chatContainerSource = readFileSync(join(__dirname, '..', 'ChatContainer.tsx'), 'utf-8');
-const syncContextSource = readFileSync(join(__dirname, '..', '..', '..', 'sync', 'sync-context.tsx'), 'utf-8');
+const readSource = (...segments: string[]) => readFileSync(join(__dirname, '..', ...segments), 'utf-8');
+const sessionPlaceholderSource = readSource('column', 'sessionPlaceholder.tsx');
+const composerSlotSource = readSource('column', 'ComposerSlot.tsx');
+const syncContextSource = readSource('..', '..', 'sync', 'session-message-records.ts');
 
 const SESSION_ID = 'ses_subagent_2903';
 const DIRECTORY = '/repo';
@@ -252,13 +255,13 @@ describe('issue #2903 busy subagent status-line-only', () => {
     // before it and must not render one of its own. The empty state itself no
     // longer lives here: the draft surface owns it since the draft transition
     // animation landed.
-    expect(chatContainerSource).toContain('if (sessionMessages.length === 0 && !sessionIsWorking)');
-    expect(chatContainerSource).toContain('<StatusRowContainer />');
+    expect(sessionPlaceholderSource).toContain('if (messageCount === 0 && !sessionIsWorking)');
+    expect(composerSlotSource).toContain('<StatusRowContainer />');
 
-    const emptyIdleGuard = 'if (sessionMessages.length === 0 && !sessionIsWorking)';
-    const emptyIdleReturn = chatContainerSource.indexOf(emptyIdleGuard);
+    const emptyIdleGuard = 'if (messageCount === 0 && !sessionIsWorking)';
+    const emptyIdleReturn = sessionPlaceholderSource.indexOf(emptyIdleGuard);
     expect(emptyIdleReturn).toBeGreaterThan(-1);
-    const emptyIdleBlock = chatContainerSource.slice(
+    const emptyIdleBlock = sessionPlaceholderSource.slice(
       emptyIdleReturn,
       emptyIdleReturn + 1600,
     );

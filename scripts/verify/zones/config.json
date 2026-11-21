@@ -1,0 +1,262 @@
+{
+  "zone": "config",
+  "name": "Model and agent selection",
+  "sources": ["packages/ui/src/stores/useConfigStore.ts", "packages/ui/src/stores/config/"],
+  "features": [
+    {
+      "id": "defaults",
+      "name": "The model and agent a new session starts with",
+      "what": "A new session starts on the default model and agent: the ones chosen in Settings, or else OpenCode's configured model and Build. A new chat outside a project starts on the Chats defaults first. A default model the providers no longer offer is skipped.",
+      "reach": "Open the app on a new session's draft; the composer footer names the model and the agent. Settings > Sessions > New sessions sets the defaults, and Settings > Sessions > Chats sets the ones for chats.",
+      "proof": "The composer footer names the default model and agent, and the first prompt's answer names them in its footer.",
+      "scenarios": [
+        {
+          "id": "opencode-config",
+          "kind": "path",
+          "title": "Without defaults in Settings, a draft starts on OpenCode's configured model and Build, and its first prompt goes there",
+          "steps": [
+            {"do": "settings", "values": {"defaultModel": ""}},
+            {"do": "open"},
+            {"do": "see", "on": "composer.model", "text": "Fixture stream, seeding speed"},
+            {"do": "see", "on": "composer.control", "text": "Build", "exact": true},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Removed lines in the diff viewer are almost unreadable in dark mode. What contrast do we have now?"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.answer", "text": "a contrast of 3.1:1"},
+            {"do": "see", "on": "chat.footer", "text": "Fixture stream, seeding speed"},
+            {"do": "see", "on": "chat.footer", "text": "build"}
+          ]
+        },
+        {
+          "id": "settings-model",
+          "kind": "path",
+          "title": "The default model from Settings starts a draft and answers its first prompt",
+          "steps": [
+            {"do": "settings", "values": {"defaultModel": "perf/code-20000cps"}},
+            {"do": "open"},
+            {"do": "see", "on": "composer.model", "text": "Fixture code, seeding speed"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Removed lines in the diff viewer are almost unreadable in dark mode. What contrast do we have now?"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.answer", "text": "a contrast of 3.1:1"},
+            {"do": "see", "on": "chat.footer", "text": "Fixture code, seeding speed"}
+          ]
+        },
+        {
+          "id": "settings-agent",
+          "kind": "path",
+          "title": "The default agent from Settings starts a draft on Plan, and Plan answers its first prompt",
+          "steps": [
+            {"do": "settings", "values": {"defaultAgent": "plan"}},
+            {"do": "open"},
+            {"do": "see", "on": "composer.control", "text": "Plan", "exact": true},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Removed lines in the diff viewer are almost unreadable in dark mode. What contrast do we have now?"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.answer", "text": "a contrast of 3.1:1"},
+            {"do": "see", "on": "chat.footer", "text": "plan"}
+          ]
+        },
+        {
+          "id": "missing-model",
+          "kind": "break",
+          "title": "A default model the providers no longer offer falls back to OpenCode's configured model",
+          "steps": [
+            {"do": "settings", "values": {"defaultModel": "perf/retired-model"}},
+            {"do": "open"},
+            {"do": "see", "on": "composer.model", "text": "Fixture stream, seeding speed"},
+            {"do": "steady", "on": "composer.model", "text": "Fixture stream, seeding speed", "count": 1, "ms": 1500}
+          ]
+        },
+        {
+          "id": "settings-page",
+          "kind": "path",
+          "title": "Default agent picked in Settings leaves the agent picked in the open session alone and starts the next new session on it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Config default agent"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "press", "key": "Tab"},
+            {"do": "see", "on": "composer.control", "text": "Plan", "exact": true},
+            {"do": "press", "key": "Tab", "mods": ["shift"]},
+            {"do": "see", "on": "composer.control", "text": "Build", "exact": true},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "default agent"},
+            {"do": "click", "on": "settings.searchResult", "text": "Default agent"},
+            {"do": "click", "on": "settings.menu", "item": "sessions.default-agent"},
+            {"do": "click", "on": "menu.item", "text": "Plan", "exact": true},
+            {"do": "see", "on": "settings.menu", "item": "sessions.default-agent", "text": "plan"},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "settings.search"},
+            {"do": "see", "on": "composer.control", "text": "Build", "exact": true},
+            {"do": "click", "on": "sidebar.newSession"},
+            {"do": "see", "on": "composer.control", "text": "Plan", "exact": true}
+          ]
+        },
+        {
+          "id": "chats-model",
+          "kind": "path",
+          "title": "The Chats model from Settings starts a new chat and answers its first prompt, ahead of the New sessions model",
+          "steps": [
+            {"do": "settings", "values": {"defaultModel": "perf/unicode-20000cps", "chatsDefaultModel": "perf/code-20000cps"}},
+            {"do": "session.create", "as": "s", "title": "Chats default host"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.newSession"},
+            {"do": "see", "on": "composer.projectPicker", "text": "Choose project"},
+            {"do": "see", "on": "composer.model", "text": "Fixture code, seeding speed"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Removed lines in the diff viewer are almost unreadable in dark mode. What contrast do we have now?"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.answer", "text": "a contrast of 3.1:1"},
+            {"do": "see", "on": "chat.footer", "text": "Fixture code, seeding speed"}
+          ]
+        },
+        {
+          "id": "chats-agent",
+          "kind": "path",
+          "title": "A Chats agent with no model set anywhere starts a new chat on Plan over the New sessions Build",
+          "steps": [
+            {"do": "settings", "values": {"defaultModel": "", "defaultAgent": "build", "chatsDefaultAgent": "plan"}},
+            {"do": "session.create", "as": "s", "title": "Chats agent host"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.newSession"},
+            {"do": "see", "on": "composer.projectPicker", "text": "Choose project"},
+            {"do": "see", "on": "composer.control", "text": "Plan", "exact": true},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Removed lines in the diff viewer are almost unreadable in dark mode. What contrast do we have now?"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.footer", "text": "plan"}
+          ]
+        },
+        {
+          "id": "chats-missing-model",
+          "kind": "break",
+          "title": "A Chats model the providers no longer offer falls back to the New sessions model and stays there",
+          "steps": [
+            {"do": "settings", "values": {"defaultModel": "perf/code-20000cps", "chatsDefaultModel": "perf/retired-model"}},
+            {"do": "session.create", "as": "s", "title": "Chats missing host"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.newSession"},
+            {"do": "see", "on": "composer.model", "text": "Fixture code, seeding speed"},
+            {"do": "steady", "on": "composer.model", "text": "Fixture code, seeding speed", "count": 1, "ms": 1500}
+          ]
+        },
+        {
+          "id": "chats-settings-page",
+          "kind": "path",
+          "title": "The Chats agent picked in Settings leaves the open session alone and starts the next new chat on it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chats settings host"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "agent for chats"},
+            {"do": "click", "on": "settings.searchResult", "text": "Default agent for chats"},
+            {"do": "click", "on": "settings.menu", "item": "sessions.chats-default-agent"},
+            {"do": "click", "on": "menu.item", "text": "Plan", "exact": true},
+            {"do": "see", "on": "settings.menu", "item": "sessions.chats-default-agent", "text": "plan"},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "settings.search"},
+            {"do": "see", "on": "composer.control", "text": "Build", "exact": true},
+            {"do": "click", "on": "sidebar.newSession"},
+            {"do": "see", "on": "composer.projectPicker", "text": "Choose project"},
+            {"do": "see", "on": "composer.control", "text": "Plan", "exact": true}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pick",
+      "name": "A model picked in the chat",
+      "what": "A model picked in the composer's picker stays when Tab switches the agent, belongs to the session it was picked in, and does not leak into a new session.",
+      "reach": "Pick a model in the composer footer, then press Tab, or open New session.",
+      "proof": "After Tab the footer still names the picked model and the answer comes from it on the new agent; a new session's draft names the default model, and the first session still names its pick.",
+      "scenarios": [
+        {
+          "id": "agent-switch",
+          "kind": "path",
+          "title": "A picked model stays when Tab switches to Plan, and Plan answers on it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Config pick and agent"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "code, seeding"},
+            {"do": "click", "on": "picker.option", "text": "Fixture code, seeding speed"},
+            {"do": "see", "on": "composer.model", "text": "Fixture code, seeding speed"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "press", "key": "Tab"},
+            {"do": "see", "on": "composer.control", "text": "Plan", "exact": true},
+            {"do": "see", "on": "composer.model", "text": "Fixture code, seeding speed"},
+            {"do": "type", "text": "Removed lines in the diff viewer are almost unreadable in dark mode. What contrast do we have now?"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.answer", "text": "a contrast of 3.1:1"},
+            {"do": "see", "on": "chat.footer", "text": "Fixture code, seeding speed"},
+            {"do": "see", "on": "chat.footer", "text": "plan"}
+          ]
+        },
+        {
+          "id": "new-session",
+          "kind": "path",
+          "title": "After a pick in one session, New session starts on the default model and the first session keeps its pick",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Config pick A"},
+            {"do": "session.send", "session": "a", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "code, seeding"},
+            {"do": "click", "on": "picker.option", "text": "Fixture code, seeding speed"},
+            {"do": "see", "on": "composer.model", "text": "Fixture code, seeding speed"},
+            {"do": "click", "on": "sidebar.newSession"},
+            {"do": "see", "on": "composer.model", "text": "Fixture stream, seeding speed"},
+            {"do": "click", "on": "sidebar.row", "session": "a"},
+            {"do": "url", "contains": "{a}"},
+            {"do": "see", "on": "composer.model", "text": "Fixture code, seeding speed"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "voice",
+      "name": "Voice settings",
+      "what": "Settings > Voice choices hold in this browser: with the message read-aloud button on, an answer's More actions offer Read aloud, also after a reload.",
+      "reach": "Settings > Voice > Playback: the message read-aloud checkbox; then More actions under an answer.",
+      "proof": "Read aloud is missing from More actions before, present after the box is checked, and still present after a reload.",
+      "scenarios": [
+        {
+          "id": "read-aloud",
+          "kind": "path",
+          "title": "Turning on the read-aloud button adds Read aloud under answers, and it stays on after a reload",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Config read aloud"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "chat.footerMore"},
+            {"do": "see", "on": "menu.item", "text": "Copy link"},
+            {"do": "see", "on": "menu.item", "text": "Read aloud", "count": 0},
+            {"do": "press", "key": "Escape"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "read aloud"},
+            {"do": "click", "on": "settings.searchResult", "text": "Playback"},
+            {"do": "click", "on": "settings.checkboxOff", "item": "voice.playback", "index": 0},
+            {"do": "see", "on": "settings.checkboxOn", "item": "voice.playback"},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "settings.search"},
+            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "chat.footerMore"},
+            {"do": "see", "on": "menu.item", "text": "Read aloud"},
+            {"do": "press", "key": "Escape"},
+            {"do": "reload"},
+            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "chat.footerMore"},
+            {"do": "see", "on": "menu.item", "text": "Read aloud"}
+          ]
+        }
+      ]
+    }
+  ]
+}

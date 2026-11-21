@@ -13,7 +13,6 @@ import { readComposerAttachmentTarget } from '@/hooks/useComposerAddress';
 import type { ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 
 const clipboardImages = (data: DataTransfer): File[] => {
-  // The same image often arrives both as a file and as a file item.
   const images = new Map<string, File>();
   const collect = (file: File | null) => {
     if (file?.type.startsWith('image/')) images.set(`${file.name}-${file.size}`, file);
@@ -25,33 +24,17 @@ const clipboardImages = (data: DataTransfer): File[] => {
   return Array.from(images.values());
 };
 
-/** Where a paste's citations go: replace `[from, to)` of the comment with `insertion`. */
 interface CommentImageInsertion {
   from: number;
   to: number;
   insertion: string;
 }
 
-/**
- * Images pasted into a comment. The comment text gets a `[image-1.png]`
- * citation, the same one the composer writes for a pasted image; the image
- * itself joins the composer's attachments only when the comment is attached,
- * so a cancelled comment leaves nothing behind, and an image whose citation
- * was deleted from the text is dropped.
- */
 export const useCommentImagePaste = () => {
   const { t } = useI18n();
   const pendingRef = React.useRef(new Map<string, File>());
-  // Live set of the pending names, read by the comment editor so a citation
-  // renders as a chip the moment it is inserted.
   const pendingFilenamesRef = React.useRef(new Set<string>());
 
-  /**
-   * Takes the images out of a paste into a comment whose text is `value` with
-   * `selection` selected, and returns where their citations go, or null when
-   * the paste carries no image and belongs to the field. The caller cancels
-   * the paste and applies the insertion.
-   */
   const takePastedImages = React.useCallback((
     clipboardData: DataTransfer,
     value: string,
@@ -69,7 +52,6 @@ export const useCommentImagePaste = () => {
       pendingFilenamesRef.current.add(filename);
     });
 
-    // Text that came along with the images stays, as in the composer.
     const insertion = withInlineInsertionBoundaries(
       buildImagePasteInsertion(clipboardData.getData('text'), buildAttachmentCitationText(filenames)),
       value.slice(0, selection.start),
@@ -78,7 +60,6 @@ export const useCommentImagePaste = () => {
     return { from: selection.start, to: selection.end, insertion };
   }, []);
 
-  /** Attaches the pasted images still cited in the final comment text. */
   const attachCitedImages = React.useCallback(async (commentText: string, target: ChatDraftIdentity | null = readComposerAttachmentTarget()): Promise<void> => {
     const cited = Array.from(pendingRef.current)
       .filter(([filename]) => commentText.includes(buildAttachmentCitationText([filename])))
@@ -98,10 +79,21 @@ export const useCommentImagePaste = () => {
     pendingFilenamesRef.current.clear();
   }, []);
 
+  const snapshotPastedImages = React.useCallback((): ReadonlyMap<string, File> => new Map(pendingRef.current), []);
+
+  const adoptPastedImages = React.useCallback((images: ReadonlyMap<string, File>) => {
+    for (const [filename, file] of images) {
+      pendingRef.current.set(filename, file);
+      pendingFilenamesRef.current.add(filename);
+    }
+  }, []);
+
   return {
     takePastedImages,
     attachCitedImages,
     discardPastedImages,
+    snapshotPastedImages,
+    adoptPastedImages,
     pendingFilenames: pendingFilenamesRef.current,
   };
 };

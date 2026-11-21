@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { Window } from 'happy-dom';
 import { z } from 'zod';
@@ -54,7 +54,7 @@ for (const [name, value] of Object.entries({
 }
 
 type Context = Awaited<ReturnType<typeof fetchProjectContext>>;
-const emptyContext = (): Context => ({ notes: [], todos: [], plans: [], sharedPlansDir: null });
+const emptyContext = (): Context => ({ notes: [], todos: [], plans: [], sharedPlansDir: null, notesTodosStore: 'local' });
 const peerNote: ProjectNote = {
   id: 'peer-note', body: 'Peer note', source: 'manual', pinned: false, createdAt: 1, updatedAt: 1,
 };
@@ -87,7 +87,8 @@ globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: Request
     }
     if (init?.method === 'PATCH') {
       noteWrites.push(String(init.body));
-      const saved = { ...peerNote, body: 'Local autosave draft', updatedAt: 2 };
+      const { body } = z.object({ body: z.string() }).parse(JSON.parse(String(init.body)));
+      const saved = { ...peerNote, body: body.trim(), updatedAt: 2 };
       serverContext = { ...serverContext, notes: [saved] };
       return Response.json({ note: saved });
     }
@@ -98,11 +99,6 @@ globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: Request
   return Response.json({ error: 'Unavailable in this fixture' }, { status: 503 });
 }, originalFetch);
 
-// An open note renders Markdown, whose highlighter is a Vite worker URL.
-const { plugin } = await import('bun');
-plugin({ name: 'knowledge-note-worker-url', setup(build) {
-  build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, () => ({ contents: 'export default "http://localhost/worker.js";', loader: 'js' }));
-} });
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
@@ -299,6 +295,35 @@ test('peer refreshes do not postpone the local note autosave', async () => {
     await announce();
   }
   expect(noteWrites).toEqual([JSON.stringify({ body: 'Local autosave draft' })]);
+});
+
+test('note autosave keeps whitespace in the editor and accepts later peer changes', async () => {
+  serverContext = { ...serverContext, notes: [peerNote] };
+  await mount();
+  const editor = await openNoteEditor();
+  // Run the autosave callback explicitly so the test does not depend on timer timing.
+  const originalTimeout = browser.setTimeout.bind(browser);
+  let save: () => void = () => { throw new Error('Autosave was not scheduled'); };
+  const timeout = spyOn(browser, 'setTimeout').mockImplementation((callback, delay, ...args) => {
+    if (delay !== 400) return originalTimeout(callback, delay, ...args);
+    save = () => callback(...args);
+    const handle = originalTimeout(() => undefined, 0);
+    browser.clearTimeout(handle);
+    return handle;
+  });
+  try {
+    await editor.type('  Local draft \n');
+    expect(noteWrites).toEqual([]);
+    await act(async () => save());
+  } finally {
+    timeout.mockRestore();
+  }
+  expect(noteWrites).toEqual([JSON.stringify({ body: 'Local draft' })]);
+  expect(editor.text()).toBe('  Local draft \n');
+
+  serverContext = { ...serverContext, notes: [{ ...peerNote, body: 'Peer replacement', updatedAt: 3 }] };
+  await announce();
+  expect(editor.text()).toBe('Peer replacement');
 });
 
 test('hidden panels stop refreshing and re-read when they become visible again', async () => {

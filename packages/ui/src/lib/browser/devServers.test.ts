@@ -70,6 +70,22 @@ describe('dev server candidates', () => {
     });
     expect(merged[0]?.directory).toBe('/work/site');
   });
+
+  test('keeps the process name for discovered and announced servers', () => {
+    const candidates = mergeDevServerCandidates({
+      announced: ['http://localhost:4323/app'],
+      discovered: [
+        { port: 3000, url: 'http://localhost:3000/', command: 'bun' },
+        { port: 4323, url: 'http://localhost:4323/', command: 'node' },
+        { port: 5000, url: 'http://localhost:5000/', command: '' },
+      ],
+    });
+    const placed = placeDevServerCandidates({ candidates, folders: [], directory: '/work' });
+    expect(placed.find((entry) => entry.port === 4323)?.command).toBe('node');
+    expect(placed.find((entry) => entry.port === 3000)?.command).toBe('bun');
+    expect(placed.find((entry) => entry.port === 5000)?.command).toBe('');
+    expect(mergeDevServerCandidates({ announced: ['http://localhost:4323'], discovered: null })[0]?.command).toBeUndefined();
+  });
 });
 
 describe('placing dev servers', () => {

@@ -5,9 +5,7 @@ export type DiffFindSide = 'additions' | 'deletions';
 export interface DiffFindMatch {
   filePath: string;
   side: DiffFindSide;
-  /** 1-based line number on that side, matching the library's own numbering. */
   lineNumber: number;
-  /** 0-based offset and length of the match inside the line text. */
   spanStart: number;
   spanLength: number;
 }
@@ -16,14 +14,8 @@ const REGEXP_SPECIALS = /[.*+?^${}()|[\]\\]/g;
 
 const escapeRegExp = (value: string): string => value.replace(REGEXP_SPECIALS, '\\$&');
 
-/** Strip a trailing CR/LF so offsets index the line text the diff renders. */
 const lineText = (line: string): string => line.replace(/\r?\n$/, '');
 
-/**
- * Every occurrence of `query` in `text`, left to right. Matches never overlap,
- * and offsets are always into the original `text` (case folding only affects
- * the search, not the returned spans).
- */
 const findSpans = (
   text: string,
   query: string,
@@ -53,18 +45,6 @@ const pushLineMatches = (
   }
 };
 
-/**
- * All matches of `query` across the rendered rows of a single file diff, in
- * reading order: hunks first, then lines, and within a change block deletions
- * before additions. `query` is matched verbatim — callers decide whether to
- * trim.
- *
- * Rows are layout-aware. Inline (unified) renders one row per context line,
- * carrying the additions line number, so a context match is emitted once with
- * `side: 'additions'`. Side-by-side renders a context line twice, once per
- * side, so both sides are emitted. Change-block rows are independent in either
- * layout and always keep their own side.
- */
 export const findMatchesInFileDiff = (
   fileDiff: FileDiffMetadata,
   filePath: string,
@@ -83,8 +63,6 @@ export const findMatchesInFileDiff = (
     for (const content of hunk.hunkContent) {
       if (content.type === 'context') {
         for (let offset = 0; offset < content.lines; offset += 1) {
-          // Inline renders the context row with the additions line number only;
-          // the deletions side has no row to point at.
           if (!inline) {
             pushLineMatches(matches, filePath, 'deletions', deletionLine + offset, fileDiff.deletionLines[content.deletionLineIndex + offset], query, caseSensitive);
           }

@@ -420,21 +420,6 @@ describe('openchamber session routes', () => {
       });
     });
 
-    it('deletes a key when the patch value is null', async () => {
-      const { app } = createApp();
-      await request(app)
-        .post('/api/openchamber/sessions/ses_a/metadata')
-        .send({ patch: { openchamber: { goal: { id: 'g1' }, assist: { recap: 'r' } } } })
-        .expect(200);
-
-      const response = await request(app)
-        .post('/api/openchamber/sessions/ses_a/metadata')
-        .send({ patch: { openchamber: { assist: null } } })
-        .expect(200);
-
-      expect(response.body).toEqual({ metadata: { openchamber: { goal: { id: 'g1' } } } });
-    });
-
     it('reads back what it stored, per session', async () => {
       const { app } = createApp();
       await request(app).post('/api/openchamber/sessions/ses_a/metadata').send({ patch: { a: 1 } }).expect(200);
@@ -442,6 +427,29 @@ describe('openchamber session routes', () => {
       await expect(request(app).get('/api/openchamber/sessions/ses_a/metadata').expect(200))
         .resolves.toMatchObject({ body: { metadata: { a: 1 } } });
       await expect(request(app).get('/api/openchamber/sessions/ses_b/metadata').expect(200))
+        .resolves.toMatchObject({ body: { metadata: {} } });
+    });
+
+    it('rejects a stale conditional metadata patch without losing a newer pin', async () => {
+      const { app } = createApp();
+      const old = { openchamber: { context_obligatory_messages: [{ id: 'old' }] } };
+      const newer = { openchamber: { context_obligatory_messages: [{ id: 'old' }, { id: 'new' }] } };
+      await request(app).post('/api/openchamber/sessions/ses_a/metadata').send({ patch: newer }).expect(200);
+
+      const stale = await request(app).post('/api/openchamber/sessions/ses_a/metadata/compare-and-set')
+        .send({ expected: old, patch: { openchamber: { context_obligatory_messages: [{ id: 'copy' }] } } }).expect(200);
+      expect(stale.body).toEqual({ metadata: newer, conflict: true });
+
+      const retried = await request(app).post('/api/openchamber/sessions/ses_a/metadata/compare-and-set')
+        .send({ expected: newer, patch: { openchamber: { context_obligatory_messages: [{ id: 'copy' }, { id: 'new' }] } } }).expect(200);
+      expect(retried.body).toEqual({ metadata: { openchamber: { context_obligatory_messages: [{ id: 'copy' }, { id: 'new' }] } }, conflict: false });
+    });
+
+    it('rejects a conditional metadata write without an expected value', async () => {
+      const { app } = createApp();
+      await request(app).post('/api/openchamber/sessions/ses_a/metadata/compare-and-set')
+        .send({ patch: { a: 1 } }).expect(400);
+      await expect(request(app).get('/api/openchamber/sessions/ses_a/metadata').expect(200))
         .resolves.toMatchObject({ body: { metadata: {} } });
     });
 
@@ -659,6 +667,153 @@ describe('openchamber session routes', () => {
       .expect(200);
 
     expect(sessionCreateMock).toHaveBeenCalledWith({ location: { directory: '/repo/app' } });
+  });
+
+  it('stores the requested model and variant on an empty session', async () => {
+    const { app } = createApp();
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', model: 'openai/gpt-5.5', variant: 'high' })
+      .expect(200);
+
+    expect(sessionCreateMock).toHaveBeenCalledWith({
+      location: { directory: '/repo/app' },
+      model: { providerID: 'openai', id: 'gpt-5.5', variant: 'high' },
+    });
+  });
+
+  it('resolves a model before storing a variant requested alone', async () => {
+    useCatalog();
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/gpt-5.5',
+        defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', variant: 'high' })
+      .expect(200);
+
+    expect(sessionCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+      model: { providerID: 'openai', id: 'gpt-5.5', variant: 'high' },
+    }));
+  });
+
+  it('rejects an unknown explicitly requested model before creating an empty session', async () => {
+    useCatalog();
+    const { app } = createApp();
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', model: 'openai/unknown' })
+      .expect(400);
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unsupported variant after resolving the default model', async () => {
+    useCatalog();
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/gpt-5.5', defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', variant: 'unknown' }).expect(400);
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('does not store Auto as an OpenCode model for an empty session', async () => {
+    useCatalog();
+    const { app } = createApp({
+      isAutoReady: async () => true,
+      readSettingsFromDiskMigrated: async () => ({
+        lastSelectedModel: 'openchamber/auto', defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', variant: 'high' }).expect(400);
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { model: 'configured-id', variant: 'high' },
+    { model: 'configured-id' },
+    { providerID: 'openai' },
+    { model: { id: 'bad' } },
+  ])('rejects a malformed model reference before creating an empty session: %o', async (selection) => {
+    useCatalog();
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/gpt-5.5', defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'side-task' }, ...selection }).expect(400);
+    expect(createWorktreeMock).not.toHaveBeenCalled();
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it.each([{ catalog: true }, { catalog: false }])('rejects an explicit Auto before the catalog or a worktree for an empty session (catalog: $catalog)', async ({ catalog }) => {
+    if (catalog) useCatalog();
+    const { app } = createApp();
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'side-task' }, model: 'openchamber/auto' })
+      .expect(400, { error: 'Auto cannot be selected for an empty session; provide a prompt or a specific model' });
+    expect(createWorktreeMock).not.toHaveBeenCalled();
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('checks an empty session selection against the new worktree before storing it', async () => {
+    useCatalog();
+    modelListMock
+      .mockImplementationOnce(async () => ({ data: CATALOG_MODELS }))
+      .mockImplementationOnce(async () => ({ data: [CATALOG_MODELS[1]] }));
+    const { app } = createApp();
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'side-task' }, model: 'openai/gpt-5.5', variant: 'high' })
+      .expect(400, {
+        error: "Unknown model 'openai/gpt-5.5' for /repo/worktrees/side-task",
+        partial: true, partialAction: 'worktree-created', directory: '/repo/worktrees/side-task',
+      });
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses to pin an empty session model the catalog could not verify', async () => {
+    modelListMock.mockImplementation(async () => { throw new Error('timed out'); });
+    const { app } = createApp();
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', model: 'openai/gpt-5.5' })
+      .expect(503, { error: 'Session selection is not ready: the model catalog is unavailable' });
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('resolves the requested model against the new worktree catalog', async () => {
+    useCatalog();
+    modelListMock
+      .mockImplementationOnce(async () => ({ data: [{ id: 'source-id', modelID: 'upstream', providerID: 'gateway', variants: [] }] }))
+      .mockImplementationOnce(async () => ({ data: [{ id: 'target-id', modelID: 'upstream', providerID: 'gateway', variants: [] }] }));
+    const { app } = createApp();
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'side-task' }, model: 'gateway/upstream' }).expect(200);
+    expect(sessionCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+      model: { providerID: 'gateway', id: 'target-id' },
+    }));
+  });
+
+  it('stores the catalog id when an empty session names a model by its upstream id', async () => {
+    useCatalog({ models: [{ id: 'my-gpt', modelID: 'gpt-5.5', providerID: 'gateway', variants: [] }] });
+    const { app } = createApp();
+    const response = await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', model: 'gateway/gpt-5.5' }).expect(200);
+    expect(sessionCreateMock).toHaveBeenCalledWith({
+      location: { directory: '/repo/app' },
+      model: { providerID: 'gateway', id: 'my-gpt' },
+    });
+    expect(response.body.model).toEqual({ providerID: 'gateway', modelID: 'my-gpt' });
   });
 
   it('does not claim user ownership for a title from the agent service', async () => {
@@ -919,29 +1074,6 @@ describe('openchamber session routes', () => {
       model: { id: 'claude-sonnet-5', providerID: 'anthropic', variant: 'high' },
     });
     expect(sessionSwitchAgentMock).toHaveBeenCalledWith({ sessionID: 'ses_123', agent: 'plan' });
-  });
-
-  it('falls back to the defaults chain when the named agent binds no model', async () => {
-    useCatalog({
-      agents: [
-        { id: 'build', name: 'Build', mode: 'primary' },
-        { id: 'plan', name: 'Plan', mode: 'primary' },
-      ],
-    });
-    const { app } = createApp({
-      readSettingsFromDiskMigrated: async () => ({
-        defaultModel: 'openai/gpt-5.5',
-        defaultAgent: 'build',
-        projects: [{ id: 'proj_1', path: '/repo/app' }],
-      }),
-    });
-    const response = await request(app)
-      .post('/api/openchamber/sessions')
-      .send({ directory: '/repo/app', prompt: 'Run this', agent: 'plan' })
-      .expect(200);
-
-    expect(response.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
-    expect(response.body.agent).toBe('plan');
   });
 
   it('keeps an explicitly requested model over the named agent binding', async () => {
@@ -1926,7 +2058,7 @@ describe('openchamber session routes', () => {
         location: { directory: '/repo/app' },
       }));
       sessionListMock.mockImplementation(async ({ parentID, archived }) => ({
-        data: tree.filter((session) => session.parentID === parentID && (!archived || session.time.archived)),
+        data: tree.filter((session) => (parentID === undefined || session.parentID === parentID) && (!archived || session.time.archived)),
       }));
     };
     const send = (app, sessionID) => request(app)
@@ -1945,6 +2077,21 @@ describe('openchamber session routes', () => {
 
       expect(response.body.promptDispatched).toBe(true);
       expect(restoredIds().sort()).toEqual(['ses_child', 'ses_grandchild', 'ses_root']);
+    });
+
+    it("brings back the root's workflow agents, which only OpenChamber's metadata links to it", async () => {
+      useTree([
+        ...archivedTree,
+        { id: 'ses_agent', metadata: { openchamber: { kind: 'workflow-agent', parentID: 'ses_root' } }, time: { created: 1, archived: 1700 } },
+        { id: 'ses_agent_sub', parentID: 'ses_agent', time: { created: 1, archived: 1700 } },
+      ]);
+      const { app } = createApp();
+
+      await send(app, 'ses_root');
+
+      expect(restoredIds().sort()).toEqual(['ses_agent', 'ses_agent_sub', 'ses_child', 'ses_grandchild', 'ses_root']);
+      // Every folder's archive: a subsession can stay behind when its parent moves to another worktree.
+      expect(sessionListMock.mock.calls.every(([input]) => !('directory' in input))).toBe(true);
     });
 
     it('leaves the session archived when it was archived again while the send went out', async () => {

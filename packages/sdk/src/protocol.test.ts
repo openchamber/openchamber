@@ -174,6 +174,25 @@ describe('parseHostMessage', () => {
     expect(older.payload.device).toBeUndefined();
   });
 
+  test('passes context and token totals to guests on ready and session updates', () => {
+    const session = { id: 'ses-1', title: 'Hello', busy: false,
+      context: { tokens: 12_000, limit: 200_000 },
+      tokens: { prompt: 120_000, output: 5_000, reasoning: 800, cacheRead: 90_000, cacheWrite: 10_000, cacheHitPercent: 75 },
+    };
+    const ready = parseHostMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1,
+      type: 'ready', payload: { ...readyPayload, session } });
+    const push = parseHostMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1,
+      type: 'session', payload: { session } });
+    expect(ready?.type === 'ready' ? ready.payload.session : null).toEqual(session);
+    expect(push?.type === 'session' ? push.payload.session : null).toEqual(session);
+    const unknown = { ...session, context: null, tokens: null };
+    expect(parseHostMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1,
+      type: 'session', payload: { session: unknown } })).toMatchObject({ payload: { session: unknown } });
+    const invalid = { ...session, tokens: { ...session.tokens, prompt: -1 } };
+    expect(hostMessageSchema.safeParse({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1,
+      type: 'session', payload: { session: invalid } }).success).toBe(false);
+  });
+
   test('accepts a null directory', () => {
     const message = parseHostMessage({
       channel: OPENCHAMBER_SDK_CHANNEL,
@@ -947,6 +966,14 @@ describe('actions, commands, and badge wire shapes', () => {
     }
   });
 
+  test('accepts open-walkthrough with a bounded base and drops the rest', () => {
+    expect(parseGuestMessage({ ...envelope, type: 'open-walkthrough', id: 'w-1', payload: { base: ' main ' } })).toMatchObject({ payload: { base: 'main' } });
+    for (const base of ['', '   ', 'x'.repeat(256)]) {
+      expect(parseGuestMessage({ ...envelope, type: 'open-walkthrough', id: 'w-1', payload: { base } })).toBeNull();
+    }
+    expect(parseGuestMessage({ ...envelope, type: 'open-walkthrough', id: 'w-1', payload: {} })).toBeNull();
+  });
+
   test('accepts resize heights in range and drops the rest', () => {
     expect(parseGuestMessage({ ...envelope, type: 'resize', id: 'h-1', payload: { height: 180 } })).toMatchObject({ payload: { height: 180 } });
     expect(parseGuestMessage({ ...envelope, type: 'resize', id: 'h-1', payload: { height: -1 } })).toBeNull();
@@ -1012,5 +1039,24 @@ describe('the link item', () => {
     expect(push({ kind: 'link', identifier: '' })).toBeNull();
     expect(push({ kind: 'link', identifier: 'DEMO-12', title: 'x' })).toBeNull();
     expect(push({ kind: 'link', identifier: 'D'.repeat(129) })).toBeNull();
+  });
+});
+
+describe('microphone wire', () => {
+  const envelope = { channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION } as const;
+
+  test('the host takes an open at a real audio rate and a close', () => {
+    expect(parseGuestMessage({ ...envelope, type: 'microphone-open', id: 'oc-1', payload: { sampleRate: 48_000 } })).not.toBeNull();
+    expect(parseGuestMessage({ ...envelope, type: 'microphone-close', id: 'oc-2' })).not.toBeNull();
+    expect(parseGuestMessage({ ...envelope, type: 'microphone-open', id: 'oc-3', payload: { sampleRate: 100 } })).toBeNull();
+    expect(parseGuestMessage({ ...envelope, type: 'microphone-open', id: 'oc-4', payload: { sampleRate: 44_100.5 } })).toBeNull();
+  });
+
+  test('audio is a bounded Float32Array and an end names its reason', () => {
+    const audio = { ...envelope, type: 'microphone-audio', payload: { samples: new Float32Array(1024) } } as const;
+    expect(parseHostMessage(audio)).not.toBeNull();
+    expect(parseHostMessage({ ...audio, payload: { samples: new Float32Array(16_385) } })).toBeNull();
+    expect(readHostMessage(audio)).toEqual(audio);
+    expect(parseHostMessage({ ...envelope, type: 'microphone-ended', payload: { reason: 'device-lost' } })).not.toBeNull();
   });
 });

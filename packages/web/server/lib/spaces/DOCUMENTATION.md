@@ -59,6 +59,7 @@ Creating, finding, stopping, starting, and removing isolated spaces on a place, 
 - `dispatcher.js`: `createSpaceDispatcher({ transport })`. The thin layer in front of the host's routes that forwards a request addressed to a space, and the first of the two guards. See "Dispatcher".
 - `host.js`: `createSpacesHost({ dataDir, dockerPath, sshDockerHost, gitPath, hostEnvironment, listProjectDirectories })`. What `server/index.js` builds when the switch is on: the owner id, the Docker place and, when the settings name a machine, the Docker over SSH place, the registry, the manager that routes by record, the dispatcher, the gatekeeper channel, code in and code out on one host git, the records and the journey, with the hooks the rest of the server takes from it. Every channel to a space goes through the manager, so each reaches the space's own place.
 - `login-keeper.js`: `createLoginKeeper({ readLogin, renewLogin, exchange, holders, say })` and `createLoginExchange({ fetch, userAgent })`. Keeps the host's browser login fresh for the running spaces that hold it, and says it to their gatekeepers again when it changed. See "Grants".
+- `host-catalog.js`: `createHostCatalog({ readCatalog, readStoredKey })`. The providers of the host's OpenCode catalog as a space can be given them by key: `read(providerId, directory)` one with the window it makes, `list(directory)` all of them for the dialogs, `readStoredKey(integration)` the key Settings keeps. See "Grants".
 - `host-providers.js`: `createHostProviders({ readLayers, readStoredKey, hostEnvironment })`. The providers the user defined in the host's OpenCode configuration, "custom" in Settings, as a space can be given them: `read(providerId, directory)` one with its key, `list(directory)` all of them without. Also `windowUpstreamOf`, which sends "this machine" in a base URL to the Docker host, and `headerOfPackage`. See "Grants".
 - `journey.js`: `createSpaceJourney({ manager, place, gatekeeper, codeIn, codeOut, records, serverInside, restartOpenCodeInside, listProjectDirectories, announce, onSpacesChanged })`. The journey of a space as the host drives it, written once on top of those: create in the background with progress, list with state and what is broken, start with the network said again, stop, the two restarts of the repair, remove with the refs and the record, stop all for the switch, the journal, the apply preview and the apply. See "The journey".
 - `routes.js`: `registerSpaceRoutes(app, { getJourney, getPlaces, readSwitch, setSwitch })`, the HTTP of the journey under `/api/openchamber/spaces`, which translates and nothing else; and `createSwitchController({ getHost, setHost, buildHost, startHost, persist })`, the switch as `index.js` runs it, one change at a time.
@@ -76,6 +77,196 @@ Creating, finding, stopping, starting, and removing isolated spaces on a place, 
 - `run-command.js`: the only file that starts a process. Since 4a also `openCommandStream`, a command's stdin and stdout as one duplex stream that an `http.Agent` uses as a socket: the transport of `connect`.
 - `errors.js`: `SpaceError` with a `code`.
 - Test support, never imported by product code: `places/contract-suite.js`, `places/escape-suite.js`, `places/memory-place.js`, `places/fake-docker.js`, `places/docker-live-support.js`, and since 3a `code-in-bait.js`, the bait repository and the host state that code in must leave alone. Since 3b `code-in-bait.js` also holds the stand-in for a space in a local folder that the unit tests of both directions use, and knows what code out may change in the user's repository.
+
+## Invariants
+
+- The corridor reserves a tunnel slot before DNS resolution begins. Otherwise concurrent lookups can all pass the cap before any connection takes a slot.
+- A quarantine-size watcher never rejects while the fetch runs beside it. Its caller awaits it only after the fetch ends, so a watcher failure would become an unhandled rejection. The size check after the fetch still enforces the transfer cap.
+- Auto-review updates truncate long error text and still reach the browsers. Dropping the update can leave a completed run displayed as running.
+- Curl requests keep `--disable` first, bypass environment proxies and suppress
+  `Expect: 100-continue`. Bodies use `data-raw`, so a leading `@` stays literal.
+- Label text rejects C0 controls, DEL, NEL and Unicode line separators. Other
+  C1 characters remain accepted. Task-title sanitization removes all C0 and C1
+  controls.
+
+### Type boundaries
+
+Code-in, label, route, server-channel, tools and WebSocket implementations use
+TypeScript and retain `.js` import specifiers. Already converted implementations
+keep their existing owner contracts. Code-in history promises carry only the
+three existing completion statuses and are present before entering the run map.
+Upgrade auth accepts raw Node requests and a null HTTP response. Forwarded
+handshake headers retain the dispatcher's outgoing-header type.
+
+Label fields and tools versions remain unchecked after coercing regular
+expressions. Optional error reads box primitive values; required nullish reads
+retain the JavaScript TypeError. Test-only bait helpers remain outside product
+imports. Git's `--initial-branch` requires Git 2.28 inside the space
+([git-init](https://git-scm.com/docs/git-init/2.28.0)); the bundled image satisfies
+that floor. Server close frames stay unmasked
+([RFC 6455 section 5.1](https://www.rfc-editor.org/rfc/rfc6455#section-5.1)).
+
+The catalog reader returns the provider and model schemas' inferred data.
+Their optional fields may explicitly contain `undefined`, because failed field
+parses use `.catch(undefined)`. A window is derived only after URL and header
+checks; reading a catalog entry alone does not establish that it has a window.
+
+Provider configuration and login renewal share the auth and provider entity
+contracts owned by `opencode`. Chat exports retain the export schema's inferred
+type, including unchecked message fields kept by `passthrough`. Archive imports
+add only the archive-owned time, location and deny permissions. A null login
+still fails on its first `methodID` read after the old credential rows are removed.
+
+Archive files are parsed as unchecked data. `archivedChatOf` copies fields
+without validating them, so its imported fields remain `unknown`; only the
+archive-owned directory, archive timestamp and deny permissions have checked
+types. Its property reader preserves primitive boxing, inherited fields,
+getter receivers and failure on required nullish reads. Entries loaded at
+startup follow the archive schema. Newly written names remain unchecked because
+Docker's labels can supply non-string names before the next startup read.
+
+Config layers contain checked objects with unchecked field values. Provider
+settings remain unchecked until the key schema or URL parser consumes them.
+URL parsing preserves JavaScript's string-hint coercion, including a refusal
+when coercion throws. The keeper's renewal map contains its promise before a
+read, and its per-space fingerprint map exists before a fingerprint is stored.
+
+`opencode/config-v2.js` constructs custom provider entities through
+`Object.fromEntries` without a typed per-field contract. In particular, provider
+settings pass through as an arbitrary configuration object. Callers must not
+declare its unchecked `baseURL`, `apiKey` or model settings to be validated
+strings.
+
+`places/docker-engine.js` checks that inspect output is JSON, then passes its
+entries and labels through without a shape check. Label parsing checks the
+marker, role and coercible id and owner, but passes the other fields through.
+Its result cannot promise that every field is a string. The place registry
+checks method presence and keeps the original place object; it establishes no
+contract for those methods' results.
+
+The manager declares the place operations it calls, including a string start
+configuration and progress callbacks that receive a step. Docker's check result
+narrows through its existing `available` test; its JavaScript return inference
+alone does not retain the success discriminant.
+
+The tools manifest reader validates versions with a coercing regular expression.
+That check alone does not prove the original JSON value was a string. A tools
+source is accepted by factory identity in a `WeakSet`, rather than by its shape.
+
+Code transfer uses the host Git runner's command and option contracts. Temporary
+Git sessions preserve the callback's result type, including an intentional
+`undefined` result. Error properties remain unchecked; accessing a property of
+`null` or `undefined` still fails, and extending error details uses object spread
+so own keys such as `__proto__` remain data. A null place is supported for
+host-only apply calls and still fails when a transfer first asks for `execArgv`.
+
+Code out keeps git side fields optional where a split listing has not checked
+them. Its required-entry accessor covers dense loop positions and maps populated
+earlier in the same call. A missing object-size answer retains the native
+`TypeError` for reading `size`. The external argument-array check stays in
+`buildExtUrl`; its type does not replace the runtime refusal.
+
+Record reads return a discriminated result whose successful record is inferred
+from the schema. Invalid grants, setup state and task titles retain their
+independent recovery paths. The task-title sanitizer accepts unchecked input
+and returns an empty title when its string parse fails.
+
+Environment-key reads stay unchecked until the model-grant string test. A name
+such as `constructor` can select an inherited object member, both for an initial
+grant and when a space starts again. The journey keeps both string tests.
+Creation-error lookup also keeps the object's inherited-property behavior.
+
+The manager preserves unchecked failure codes when wrapping a place error.
+`SpaceError` carries that code's inferred type rather than promising a string
+for a value the manager did not validate. Error-property access preserves
+inherited fields and the existing optional access on nullish failures.
+Required error-property reads still fail on nullish values.
+
+The command runner shares `CommandOptions` and `CommandResult` with host Git.
+Its output events carry buffers because these private child pipes never set an
+encoding. The tail window contains a first chunk while trimming and tracks the
+byte count for each of its two buffers. Required-entry accessors preserve those
+invariants under indexed-access checking. Node's general spawn declaration makes
+stdin nullable when stderr is a file descriptor; the runner always requests a
+stdin pipe and requires it before writing. Error fields remain unchecked, and
+required reads still fail for nullish errors. Both process-tree kill paths keep
+the integer-greater-than-one pid check.
+
+Dispatcher directory headers retain Node's string-or-array input type. URI
+decoding and percent-escape matching coerce arrays as before; an undecoded array
+still fails with the original `trim` TypeError. Empty header arrays are ignored.
+The directory-to-id accessor runs only after the space-directory check, so its
+normalized directory is non-null and its split always has a first element.
+Listed ids remain unchecked values in the dispatcher's set: a coercible label
+may pass label parsing without being a string, and set membership must not
+coerce it to match a request's string id.
+
+The HTTP agent's connection callback receives either an error alone or a null
+error and a duplex stream. Node's declaration requires the stream even on
+failure. The dispatcher installs its override with `Object.assign` and a named
+callback union that describes the actual Node invocation. HTTP client response
+events always carry a numeric status; Node's shared `IncomingMessage` type also
+covers server-side requests, where that property is absent.
+
+Setup output removes C0, C1 and bidi characters.
+Unicode categories express the control range without a lint suppression;
+tab, newline and carriage return remain outside that removal range. Escape
+and bell delimiters still consume complete terminal sequences.
+
+Space event payloads retain the SSE parser's JSON contract. Queue items stay
+unchecked after the queue schema's array check. Event source callbacks and the
+session index share their owning contracts; session records remain unchecked
+after the JavaScript proxy sanitizer. The index reads only their id field and
+does not claim that the sanitizer validates every retained field.
+
+### Why space streams accept Node web streams
+
+The space transport uses `Readable.toWeb` on an HTTP client response. Node's
+web-stream declarations differ from the DOM declarations on completed reads,
+but the upstream reader consumes both through `getReader`, `read` and `cancel`.
+Its response contract accepts both stream types. HTTP client responses have a
+numeric status code; the dispatcher's response type distinguishes them from
+server-side requests covered by Node's general `IncomingMessage` declaration.
+
+### Why hardening trusts Docker's inspect shapes
+
+`hardening.ts` reads `docker inspect` through the wire shapes of
+`places/docker-wire.ts`: Docker CLI output is a documented format of a program
+we run, so its fields are typed and not validated, see "Why Docker CLI output
+is typed and not validated" in `places/DOCUMENTATION.md`. Each checker keeps
+its fallbacks for fields that may be absent, and verification still fails
+closed on whatever the inspect output says.
+
+Space ids reach `spaceProjectPath` in `host.ts` from Docker labels, which are
+strings, or from record file names, which match the id pattern; both are
+checked against that pattern before a path is built. Nothing a container
+controls reaches it.
+
+### Why the host copies journey announcements as JSON
+
+The journey announces progress with a failure whose `code`, `message` and
+`details` are unknown values, and the event hub takes only JSON values,
+because it serializes every payload for the UI streams and its subscribers
+read fields of it. The host passes the hub a JSON copy of the announcement.
+Clients receive the same bytes as before; a payload that cannot be serialized
+now fails at the announcement instead of at the hub's first serialization.
+Typing the journey's failures as JSON would need a check of every error
+detail, which belongs to the journey and buys nothing the copy does not.
+
+### Why control ranges use Unicode categories
+
+Transfer arguments reject ASCII controls only, while Windows names reject
+characters 1 through 31 as well as the reserved punctuation. Unicode category
+checks exclude the C1 range explicitly, preserving these ranges under the server
+lint rules. The global path-redaction expression retains the Unicode flag.
+`code-transfer.test.js` checks every UTF-16 code unit for transfer arguments and
+the Windows control range separately.
+
+The Git version floor comes from
+[git-fetch 2.29](https://git-scm.com/docs/git-fetch/2.29.0), and argument escaping
+follows [git-remote-ext](https://git-scm.com/docs/git-remote-ext). Windows name
+rules follow [Microsoft's naming rules](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)
+and [Git for Windows](https://github.com/git-for-windows/git/blob/main/compat/mingw.c).
 
 ## Place contract
 
@@ -452,6 +643,8 @@ A ring buffer of 500 records in memory. One record per attempt: the time, which 
 
 The decisions are `allow`, `failed:<error code>` for a host that was allowed and could not be reached, `deny:not-a-name`, `deny:not-on-allowlist`, `deny:port`, `deny:always-refused`, `deny:blocked-address`, `deny:unresolved:<reason>`, `deny:too-many-tunnels`, `deny:too-many-connections`, `deny:malformed`, `deny:unreadable-request` for a request the HTTP parser threw out, and `deny:not-connect` for the corridor, and `allow`, `failed:<error code>`, `deny:no-grant`, `deny:path-walks-out`, `deny:own-listener`, `deny:always-refused`, `deny:unresolved:<reason>`, `deny:too-many-connections` and `deny:unreadable-request` for the window.
 
+A connection the client resets, `ECONNRESET` or `EPIPE`, reaches the servers' `clientError` too, with no request refused: OpenCode's client resets idle keep-alive connections to the window between turns. Journalled as `deny:unreadable-request`, it showed the user a blocked attempt with no name, so it is not journalled. A reset refuses nothing, so leaving it out hides nothing; a request the parser throws out is still noted.
+
 ### Lifecycle
 
 - `create` makes both networks, the volumes, the ownership one-shot, then the gatekeeper: create, connect the outer network, verify, start, write the program, wait for the corridor. Only then does it make the space container. The space's proxy therefore works from its first moment, and the gatekeeper is the first container on the inner network, which is why it holds `.1` there.
@@ -600,8 +793,9 @@ All under `/api/openchamber/spaces`, a namespace of the host's beside `/api/open
 | `POST /<id>/setup` | Since 5d-4: `{ commands }`. Runs the project's setup commands again in a running space; answers the listed entry once the run began. See "Setup commands". |
 | `GET /<id>/setup` | Since 5d-4: `{ setup, output }`, the setup as the list carries it and the end of the failed command's output, or null. |
 | `GET /idle-stop`, `PUT /idle-stop` | Since 5d-3: the idle stop setting, `{ enabled, hours }`, kept in the host's settings and told to every running space. See "Idle stop". |
-| `POST /<id>/grants` | Since 5b: `{ kind: 'model', provider, upstream, secret: { kind: 'typed', value } \| { kind: 'env', name } }` or `{ kind: 'domain', upstream }`; since 7a `{ kind: 'login', provider }`. Answers `{ grant }`, the grant as the list carries it, with its window URL and never a value. See "Grants". |
+| `POST /<id>/grants` | Since 5b: `{ kind: 'model', provider, upstream, secret: { kind: 'typed', value } \| { kind: 'env', name } \| { kind: 'stored' } }`, `upstream` only for a provider the journey knows by name, or `{ kind: 'domain', upstream }`; since 7a `{ kind: 'login', provider }`. Answers `{ grant }`, the grant as the list carries it, with its window URL and never a value. See "Grants". |
 | `GET /logins` | Since 7c: `{ logins: [{ provider, method, expires, state }] }`, the host's own browser logins a space can be given, `state` one of `usable`, `expired` and `unsupported`, never a token; a host whose OpenCode cannot be asked fails rather than answering none. See "Grants". |
+| `GET /catalog-providers?directory=<project>` | `{ providers: [{ id, name, supported, storedKey }] }`, the providers of the host's OpenCode catalog for that project as a space can be given them by key, and whether the host stores a key for each, never a key. See "Grants". |
 | `GET /custom-providers?directory=<project>` | `{ providers: [{ id, name, package, baseURL, loopback, models, hasKey, supported }] }`, the providers the user defined in the host's OpenCode configuration for that project, as a space can be given them, never a key; a catalog provider overridden there is left to its own row. See "Grants". |
 | `POST /<id>/network/domains` | Since 5d: `{ domain }`. Adds a name to a running space's allowlist, live, then to the record, so every later start says it again. Answers `{ network }`. See "Grants". |
 | `GET /<id>/journal` | The gatekeeper's journal, `{ records, dropped, since }`; 409 `space_not_running` for a stopped space, because the journal is gone with it. |
@@ -613,6 +807,8 @@ A failure is one JSON answer, `{ code, message, details }`, with the status `rou
 ### Create
 
 The create dialog fills the allowlist with the package registries the project's root files name, `registry.npmjs.org` for a node project, `pypi.org` and `files.pythonhosted.org` for a python one (`lib/spaces/registry-domains.ts` in the UI), because the setup commands install dependencies and an empty list refuses every download; the user removes what they do not want, and the host takes the list as any other (the maintainer's call of 2026-10-15). After "Create" the composer moves off a model whose provider the space was not given, to one it was, so the first message is not refused. The draft stays on the project's folder until its message is sent, while its branch chip names the space; its panels (Files, Git and its changes, Browser, Terminal), the Git count on the rail, the header and the project actions follow the chip. Until the space runs, each panel says the space is being prepared and reads nothing of this computer, the header shows no branch and no space buttons, and the project actions are hidden; then all of them show and run in the space (`draftSpaceTarget` and `panelContentDirectory` in the UI's `lib/spaces/space-creation-requests.ts`). The panels' tabs stay with the project's folder, as the draft does, so a file opened from the space's tree opens in the panel on screen; a tab opened on this computer's files before shows nothing there. The web files API sends a request for a path under `/spaces/<id>` to that space, naming `/spaces/<id>`, whichever folder the app has open.
+
+A draft that starts targeting a running space, from the picker, the sidebar's new chat or a reload, moves the composer the same way when the space would refuse its model: to the model last used of a provider the space holds (`useComposerFollowsSpace` in the UI, decided once per directory, after the space's list entry and the catalog have both arrived, so a model the user picks afterwards stays and the send check says why it is refused). Such a draft shows no "uncommitted changes" warning: a space is one work its sessions share, changes and all, and has no other worktree to send a session to. The space's Git panel offers no push, pull, fetch, publish or "Commit & sync": the copy inside has no remote, and its work leaves through "Apply changes" (`useGitPanelInSpace`). A space on this computer whose Docker does not answer says so, "Docker isn't running on this computer", with Settings as the way on, where the place offers its start; the machine wording is for the Docker over SSH place.
 
 `POST /` answers as soon as the space has an id, and the rest runs in the background, because a first create pulls the image, fills the tools volume and pushes the code, which can take minutes. The steps, each announced on the host's hub as `openchamber:space-progress` with `{ spaceId, step, failure, timestamp }` in `properties`, the way `openchamber:space-stream` is announced: `checking_place`, the place's `check()`, refused with the place's own code when it is unavailable and with `place_cannot_restrict_network` when an allowlist was asked of an engine without host isolation; `creating`, the manager's create, which is the image, the tools volume, both networks, the gatekeeper and the space container, verified, with `downloading_image` and `preparing_tools` inside it while the place does those slow parts now and `creating` again after them; `setting_network`, the record written and the mode and allowlist said to the gatekeeper, which allowed nothing until then; `bringing_code`, the snapshot and the transfer of code in, with the space path and the base kept in the record; `giving_access`, only when the request carried grants: each given as the grant route gives it, so the first message finds it, and one that fails is listed on the entry as `accessFailures: [{ provider, code, message }]` until a grant for the provider succeeds or the space goes, the space working either way (the maintainer's call of 2026-10-15: the access no longer waits on the window that asked, whose reload lost it); `ready`. The history goes after `ready`, in the background, and its outcome is kept in the record as `history`: `sent`, `already_complete`, `host_shallow` or `failed`, `pending` until then. A start of a space whose history is still `pending` sends it again.
 
@@ -673,7 +869,7 @@ agent calls overwrite conversations named in clients without ownership markers.
 
 ### The record
 
-The labels stay the source of truth about which spaces exist. What the host adds is one file per space under `<data dir>/spaces/records/<id>.json`, mode 0600, written through a temporary name: `{ version, network: { mode, domains }, repository, spacePath, base, history, grants, setup }`. It exists so that a gatekeeper that starts with an empty memory is told the network the user chose, and so that the history and the result find the repository and the space path that code in used, which differ from the project directory when the project is a subfolder of its repository. A record the host cannot read is reported as unreadable, never as a fresh one, and is not written over: `start` then leaves the network closed and answers `networkRestored: false`, and the list carries `network: null`, which a screen shows as unknown and never as open. No secret is in a record; that is decision 5. Since 5b `grants` holds each grant without its value: `{ kind: 'model', id, provider, upstream, header, source }` with `source` `{ kind: 'typed' }` or `{ kind: 'env', name }`, or `{ kind: 'domain', id, upstream }`. The schema is strict, so a value under any name is refused rather than written, and a record from before 5b reads back with no grants.
+The labels stay the source of truth about which spaces exist. What the host adds is one file per space under `<data dir>/spaces/records/<id>.json`, mode 0600, written through a temporary name: `{ version, network: { mode, domains }, repository, spacePath, base, history, grants, setup }`. It exists so that a gatekeeper that starts with an empty memory is told the network the user chose, and so that the history and the result find the repository and the space path that code in used, which differ from the project directory when the project is a subfolder of its repository. A record the host cannot read is reported as unreadable, never as a fresh one, and is not written over: `start` then leaves the network closed and answers `networkRestored: false`, and the list carries `network: null`, which a screen shows as unknown and never as open. No secret is in a record; that is decision 5. Since 5b `grants` holds each grant without its value: `{ kind: 'model', id, provider, upstream, header, source }` with `source` `{ kind: 'typed' }`, `{ kind: 'env', name }` or, since the grants of catalog providers, `{ kind: 'stored', integration }`, or `{ kind: 'domain', id, upstream }`. The schema is strict, so a value under any name is refused rather than written, and a record from before 5b reads back with no grants.
 
 ### Repair
 
@@ -687,7 +883,7 @@ Journey step 8 and decision 10; built in 5d-2. The row of a space says what is w
 
 ### Apply dialog
 
-Decisions 7 and 8, journey step 6; built in 5e-1, UI only on top of the two routes above. The maintainer's calls of 2026-09-29: "Apply changes…" is the first item of the space's menu and of the phone's sheet, and a button in the space's git panel (in the desktop session header until 2026-10-26, a corner nobody looked at for it); the branch is chosen by default, named after the space; "Delete the space afterwards" is on, and off by default when a session of the space is working as the dialog opens, which the dialog says; a refusal that closes the way of uncommitted changes (`changes_do_not_apply`, `changes_route_closed`, `changes_blocked_by_link`, `changes_undecided`, `changes_partly_applied`) turns the dialog to the branch and leaves the next press to the user; the other refusals keep the choice. The user is told once, at the refusal, so the cases whose next step differs keep a sentence of their own: part of the last apply thrown away, with the files still there, which stand in the way of merging the branch; a file git ignores that was there before; a file a filter such as Git LFS keeps; and a read-back that ran out of time, which a preview's `newPathsUndecided` also announces under the choice. A stopped space whose gatekeeper is gone offers no apply, because it never starts again. The dialog shows the counts of the preview, never a file list, and the paths of `nestedRepositories` and `unmerged`; the diff is the space's own git panel. The delete confirmation offers "Apply first". Discard is the delete, with no action of its own. Paths from the space are shown as text only.
+Decisions 7 and 8, journey step 6; built in 5e-1, UI only on top of the two routes above. The maintainer's calls of 2026-09-29: "Apply changes…" is the first item of the space's menu and of the phone's sheet, and a button in the space's git panel (in the desktop session header until 2026-10-26, a corner nobody looked at for it); the branch is chosen by default, named after the space; "Delete the space afterwards" is on, and off by default when a session of the space is working as the dialog opens, which the dialog says; a refusal that closes the way of uncommitted changes (`changes_do_not_apply`, `changes_route_closed`, `changes_blocked_by_link`, `changes_undecided`, `changes_partly_applied`) turns the dialog to the branch and leaves the next press to the user; the other refusals keep the choice. The user is told once, at the refusal, so the cases whose next step differs keep a sentence of their own: part of the last apply thrown away, with the files still there, which stand in the way of merging the branch; a file git ignores that was there before; a file a filter such as Git LFS keeps; and a read-back that ran out of time, which a preview's `newPathsUndecided` also announces under the choice. A stopped space whose gatekeeper is gone offers no apply, because it never starts again. The dialog shows the counts of the preview, never a file list, and the paths of `nestedRepositories` and `unmerged`; the diff is the space's own git panel. The branch name field stays in place, disabled, while uncommitted changes are chosen, so "Delete the space afterwards" never moves under the pointer between the two clicks. The delete confirmation offers "Apply first". Discard is the delete, with no action of its own. Paths from the space are shown as text only.
 
 ### Chat archive
 
@@ -738,7 +934,7 @@ Decision 11; built in 5d-3. `idle-stop.js` holds both sides.
 - **What the host sees.** The place's list carries `stoppedIdle`, an exited space whose exit code is 75, and `gatekeeperRunning`. A server stopped by `docker stop` exits 143. The journey's list passes `stoppedIdle` on, and the space's row says it stopped after sitting idle, with Start.
 - **The gatekeeper.** Nothing inside can stop it, so an idle stop leaves it running. The journey's list stops a gatekeeper it finds running beside an exited space, and leaves it when another action holds the space; a start that comes meanwhile waits for that stop instead of being refused as busy. Turning the switch off stops it too. A key typed into it goes with it, as after a stop by hand. The maintainer's call of 2026-09-28: a self-stopping gatekeeper is more machinery than 24 MiB for a while is worth.
 - **Not a boundary.** The agent can change the file, keep a session busy, or exit with 75 itself. That keeps its space running or changes a line of text; it restricts nothing.
-- In the UI, a space stream that drops while the list says the space runs makes the client read the list again, at the host's reconnect pace, so an idle stop shows as stopped and not as "not answering". While the list says a space is stopped the client sends it nothing: the sync watchdog and the browser panel's dev-server look skip its directories, and a message sent to it stays in the composer with "Start", instead of the dispatcher's 503 as a toast. A stream that comes back on such a space makes the client read the list again, so a start from another window reaches every window.
+- In the UI, a space stream that drops while the list says the space runs makes the client read the list again, at the host's reconnect pace, so an idle stop shows as stopped and not as "not answering". While the list says a space is stopped the client sends it nothing: the sync watchdog and the browser panel's dev-server look skip its directories, and a message sent to it stays in the composer with "Start", instead of the dispatcher's 503 as a toast. A stream that comes back on such a space makes the client read the list again, so a start from another window reaches every window. A removal is announced on the hub as `openchamber:space-progress` with the step `removed`, whatever the space's state and whether its stream ever connected, and every client reads the list again, and the session list too when a space it marked is no longer listed: a delete from another window left the space in the sidebar for minutes before.
 
 ### Default permission mode
 
@@ -768,7 +964,8 @@ Decisions 4, 5 and 13, and "Words" in the design above. Stage 5b takes two kinds
 - A model grant names the provider as the host's catalog does, `anthropic`, `openai` and so on, and its id is the provider id, so a second grant for the same provider replaces the first: that is how a key is changed, and a grant is never taken back. The upstream is the provider's API. The create dialog takes it from each provider's own SDK default, listed in the UI's `lib/spaces/model-access.ts` and matching what the bundled OpenCode uses, and never from the host's catalog: a catalog entry can be a browser login that points somewhere else. The header is decided here by provider, `x-api-key` for Anthropic, `x-goog-api-key` for Google, a bearer token for the rest. The key comes typed once, or as the name of an environment variable of the host's, read from the host's own environment now; OpenChamber remembers the name and never the value, and a variable that is not set is refused with `secret_source_missing`.
 - An opened domain gets a random id, `open-<12 hex>`, and its window URL, `http://gatekeeper:8080/model/<id>`, which the answer carries so a screen can show it. Nothing inside is configured for it in this stage.
 - The key goes to the gatekeeper first, then the grant without its value goes to the record, and for a model grant OpenCode inside is told: `space-opencode.js` writes the whole configuration file `/spaces/<id>/.opencode/opencode.json`, in the work volume beside the project's copy, from the record's model grants, each provider with `options.baseURL` at its window URL and a placeholder `apiKey`, so OpenCode's own auth plugins stay out of the way and the window throws the placeholder away. That place, and not the home directory's `opencode.json`, because OpenCode reads the `.opencode/opencode.json` of every folder above the project over the project's own `opencode.json`, which travels in with the code; the layers from weakest to strongest, measured on 2.0.27 and read in 2.0.28, are the user's file, the `OPENCODE_CONFIG` file, the project's `opencode.json`, the `.opencode` folders from the root down to the project's own, and `OPENCODE_CONFIG_CONTENT`. A project that defines a provider in its own `opencode.json` therefore gets the host's entry at the window all the same, see the custom grant below. The folder starts with a dot, which no project folder name can, and lies outside the project's repository, so it never comes out with the code; OpenCode writes nothing into it, measured. That file cooperates and enforces nothing: the agent can change it, and the gatekeeper is what keeps the key out. The catalog a space offers is the host's, so the model chosen in the composer works inside unchanged; that was the second decision of 2026-09-26. A grant the gatekeeper refused is not remembered. A grant goes to a running space only, `space_not_running` otherwise, and to one whose record can be read, `space_record_unreadable` otherwise, because a grant that cannot be remembered would be gone at the next start without a word. The configuration is the whole file, so anything the agent wrote into it is gone at the next model grant or start; a project's own `opencode.json` is not touched. The same write removes `$HOME/.config/opencode/opencode.json`, where the host wrote the configuration before: a space made then still holds it, and OpenCode merges a provider's settings across layers field by field, so a stale entry there would put a key grant's placeholder into a later login's settings. The host always wrote that file whole, so its removal takes nothing a grant would not have overwritten.
-- The providers a model grant takes are the ones whose header this module knows: `anthropic` and `google` with their own headers, and `openai`, `openrouter`, `groq`, `mistral`, `deepseek` and `xai` with a bearer token. Any other is refused with `provider_not_supported` rather than accepted and failing every turn with a 401 upstream; Azure, Bedrock and Vertex read their key another way or sign requests. The grant dialog decides how the list grows.
+- The providers a model grant takes are the ones whose header this module knows: `anthropic` and `google` with their own headers, and `openai`, `openrouter`, `groq`, `mistral`, `deepseek` and `xai` with a bearer token, each with the API the dialog names; and since the maintainer's ask of 2026-11-16 ("I can add only one of my providers") any other provider of the host's catalog, `host-catalog.js`. For those the host reads its OpenCode's catalog for the project, `GET /api/provider` and `GET /api/model`, and decides the window from it: the header from the bundled package each model names (`@opencode/ai/providers/<root>`, bearer for the OpenAI-shaped ones, `x-api-key` for Anthropic's, `x-goog-api-key` for Google's), and the upstream as the longest https path every address of the provider and its models lies under, so one window serves them all. A provider whose models read keys from different headers is refused, except the gateways measured to take one bearer key on every route, OpenCode Go; OpenCode's own provider stays refused, as the composer rule says. The configuration inside then names the provider in OpenCode 2's spelling with its base URL and every model's own address under the window, the path kept, because a model's own address wins over the provider's (OpenCode Go's Anthropic models have one). The catalog's provider headers, OpenCode's organization header among them, go to the gatekeeper beside the key, as a custom provider's do. Any provider the window cannot serve is refused with `provider_not_supported` rather than accepted and failing every turn with a 401 upstream; Azure, Bedrock and Vertex read their key another way or sign requests. A catalog the host cannot read answers `host_catalog_unreadable`.
+- A model grant's key can also be the one the host's OpenCode stores for the provider's integration, Settings → Providers, `{ kind: 'stored' }` in the request: the record keeps `{ kind: 'stored', integration }` and no value, and the key is read from the host's OpenCode again at every grant and start, like a variable's, so a key changed in Settings reaches the space at its next start. A provider without a stored key answers `stored_key_missing`. `GET /catalog-providers?directory=<project>` lists the catalog for the dialogs: `{ providers: [{ id, name, supported, storedKey }] }`, never a key, and a catalog that cannot be read fails rather than answering none.
 - A login grant, since 7a, `{ kind: 'login', provider }`, is the host's own browser login for a provider, `openai` and since 7d `github-copilot`, given the way decision 13 says since 2026-10-09: the token lives in the gatekeeper and never in the space. The host reads the login its OpenCode has selected, `getStoredLogin` in `opencode/auth.js`, with the method it was made by; `space-opencode.js` knows where OpenCode sends that method's requests, `https://api.openai.com/v1` for "Sign in with ChatGPT", `https://chatgpt.com/backend-api/codex` for the two legacy Codex logins, and for Copilot's `device` login what its plugin's `copilotBaseURL` picks, the address GitHub told it at login (`metadata.apiEndpoint`), else the enterprise address, else `https://api.githubcopilot.com`; the window grant carries the access token there as a bearer, under the grant id of the provider, so a login and a key for the same provider replace each other. The record keeps the provider and the method and nothing else: at every start, and when the host starts and finds a gatekeeper that forgot, the login is read from the host's OpenCode again, and a host that is signed out, signed in by another method since, or whose token has already ended leaves the grant in `needsAccess` until the user grants once more. Inside, `POST /api/credential` on OpenCode, through the server inside, writes one row per provider under the id `cred_openchamber_space_<provider>`: the same method, and of the metadata what that method needs, for the ChatGPT logins only the account id, client id and scopes, which name the account and never a secret, and for Copilot only `apiEndpoint` set to the window's URL, because the plugin sends its model list and every turn to that address and reads no `baseURL` from the configuration, measured on 2.0.25, so a Copilot login writes no provider entry there; the enterprise address stays on the host. A space made before 7d holds its one row under the id every provider shared, `cred_openchamber_space`; a removal takes that id out as well, because OpenCode activates the newest remaining row of an integration when the active one goes, and a legacy row left behind would come back as the login. Placeholder tokens that expire in 2100, so OpenCode inside never refreshes and sends the headers that upstream wants with a bearer the window throws away. OpenCode takes the row at once, measured on 2.0.25, so a grant to a running space needs no restart; a row the agent put under that id is replaced like the host's own. The row lives in the home volume and survives a stop; a start repairs it in the background, once the server inside answers: from the record and the host's login as they are then, so a grant that came in the meantime is not undone, it writes the row again for a login grant the host can say and takes it out otherwise, which repairs a write or a removal that failed at the grant. The repair waits for an action under way, and a grant that arrives while the repair writes waits for that write, a few hundred milliseconds, so a user who grants right after a start is never told the space is busy; a grant still under way after ten seconds keeps its own row and the repair is skipped. The provider configuration points `baseURL` at the window with `transport: "http"`, because the legacy mode opens a WebSocket by default and the window carries none. A key that replaces a login takes the row out before the key goes to the gatekeeper. Refused: `login_not_found` when the host has no browser login for the provider, `login_not_supported` for a method this module does not know, `login_expired` for a token that has already ended and could not be renewed. Copilot's GitHub token has no end: the plugin stores `expires: 0` and has no refresh, so `loginEndOf` answers null for it, it is never expired, `GET /logins` says `expires: null`, and the dialogs warn that the login does not expire and that deleting the space is how it is taken back; it lives until the user revokes it on GitHub, which stops the host's own OpenCode too. The live grants test proves the token absent from everything the space can read, the database among it, and present at the stand-in upstream in OpenCode's own request.
 - The grant dialogs offer the login, since 7c, when the host has one to give: `GET /logins` says, for each provider of `LOGIN_PROVIDERS` in `space-opencode.js`, the method of the host's login, when it ends and whether it is `usable` now, has `expired` and could not be renewed, or is `unsupported`, a method the window does not know. It reads the login through the keeper like a grant does, so a login about to end is renewed by the read. The UI shows the choice "Use my ChatGPT login" in the OpenAI row of both dialogs only for a `usable` login, and nothing when there is none, and uses the same answer to say why a login grant needs the user again: run out, signed out, or to be given once more. A failed read of the route leaves the dialogs without the choice and without a word about the login; it never reads as "signed out".
 - The host keeps that token fresh, since 7b, `login-keeper.js`. OpenCode on the host refreshes a browser login only when the user prompts it within five minutes of the token's end, so a space left alone would stop after an hour. While a running space holds a login grant, the keeper looks at the host's login once a minute, through `knownSpaces` and the records, and says it to the gatekeeper of every such space again whenever its `expires` changed, whoever changed it, with the journey's `sayLogin`, the same window grant replaced in place; a space with an action under way is left to it and gets the login on the next look, while a gatekeeper that refused is not asked again for the same token, since a start says the login again. Ten minutes before the end, or past it, the keeper renews the login itself: `renewStoredLogin` in `opencode/auth.js` hands the refresh token to `createLoginExchange`, which asks the issuer what OpenCode's own plugins ask at v2.0.25, `https://auth.openai.com/api/accounts/oauth/token` with the login's own client id for "Sign in with ChatGPT" and `https://auth.openai.com/oauth/token` with OpenAI's app client for the two legacy Codex logins, then writes the new login into the host's OpenCode as a new active row through `POST /api/credential` and removes the old row after it, so no request of the host's finds the provider without a login in between; the row is read again before the write, and one that changed meanwhile, the host's own refresh, wins and the exchanged tokens are dropped. The refresh token passes through that one call and is kept nowhere. A login whose token has no end, Copilot's, is answered as it is and never renewed; the keeper tells a login apart by a hash of its token, not by `expires`, so a Copilot login the user made again on GitHub still reaches the gatekeeper on the next look. The journey reads the host's login through the keeper, so a grant and a start renew a login about to end before saying it, and `login_expired` and "needs access" are left for a login the issuer refused to renew, after the user signed out or revoked it. A renewal that fails is logged and the login is answered as it is: one that still has time stays said, so a turn under way inside is not cut short, and one that has ended is refused by the journey as before. An issuer that refused, a 4xx after a sign-out or a revocation, is not asked again for that login once a minute, only for a changed one, after the user signed in again; the network, a timeout, an issuer that is down or a write that failed are tried again on the next look. Not measured against the real issuer: the stage's manual check with a real OpenAI login is what proves the request shape; the live grants test moves the host's login the way OpenCode or the keeper would and proves the window carries the new token and the space never sees it. Known: a removal of the old row that fails after the new one is active leaves a second, inactive row in the host's OpenCode, with a refresh token the issuer may already have retired.
@@ -788,6 +985,7 @@ Decisions 4, 5 and 13, and "Words" in the design above. Stage 5b takes two kinds
 - A run of the setup commands is one process's memory: a host that restarts in the middle lists it as interrupted, while the command inside may still go on to its end or its hour. A second run started then may run beside it.
 - Whether OpenCode inside takes a provider granted after the instance of the space's project started, without a restart, is what the live file of 5b measures; see the pull request of 5b for the outcome. The restart action of the repair stage is the lever if it does not.
 - A custom grant, `{ kind: 'custom', provider }`, is a provider the user defined in the host's OpenCode configuration, "custom" in Settings → Providers: a self-hosted gateway or a model server on the user's own machine or network, which the catalog does not know, with the models the user listed for it. The maintainer's call of 2026-10-14, for openchamber/openchamber#4846: the provider is defined once, in Settings, and the dialogs offer it from there under its own name, with no key to type, so the record names only the provider, `{ kind: 'custom', id, provider }`, and everything else is read from the host again at every grant and every start, like a login's token. `host-providers.js` reads the winning layer of the project's configuration, custom over project over the user's files, in either spelling, and takes only an entry that names its SDK in `package`; the key is resolved as OpenCode resolves it for the host, measured on 2.0.26: the credential OpenCode stores for the provider, then the first set variable the entry's `env` names, then a literal `apiKey` in its settings, and a provider with none is given with no key, so the window forwards the request as the space made it, less its credential headers. The header is the SDK's, `authorization` for `@ai-sdk/openai-compatible` and `@ai-sdk/openai`, `x-api-key` for `@ai-sdk/anthropic`; any other SDK is refused with `provider_not_supported`, a provider the configuration no longer defines with `provider_not_found`, and a provider's own headers, the ones its entry in Settings sets on every request, go to the gatekeeper with the key and stay there: the window sets them beside the credential, over whatever the space sent under their names, so the space can neither read nor override them, and the record and the configuration inside name none of them. "This machine" in the base URL, `localhost`, `127.0.0.1`, `::1` or `0.0.0.0`, names the gatekeeper itself from inside, so `windowUpstreamOf` sends it to `host.docker.internal`, the Docker host, which the gatekeeper is created with (see "The gatekeeper container"); measured on 2026-10-14 on Colima: a container reached Ollama on the user's Mac, listening on the Mac's loopback only, through that name with no change to Ollama. On a Docker over SSH place the Docker host is that machine, so a loopback address there names the machine's own services and never the user's computer; the dialogs say so under such a provider when the space runs on a machine, and a provider on the user's computer is reached from there by its network address, with the server listening on it. Inside, the configuration carries the entry as the host's does, in OpenCode 2's own spelling under `providers`: the name, the SDK, the models, and `settings.baseURL` at the window with the placeholder key; the catalog providers keep the spelling measured on 2.0.25 under `provider`, and OpenCode reads both in one file. A definition the host cannot read at a start leaves that grant in `needsAccess` and its entry out of the configuration; a provider edited in Settings reaches the space at its next start, or at "Grant again" in the dialog. The UI reads `GET /custom-providers` for every project its spaces belong to when the journey list arrives, so the composer's rule on a model the space has no access to knows the user's own providers; a project not read yet refuses nothing. A custom provider defined in the project's own `opencode.json` travels into the space with the code, with its real address, which nothing inside can reach; the host's entry beside the project wins over that copy, see the model grant above, so the turn goes through the window. Measured on 2026-10-14 before the entry moved there: written in the home directory it lost, OpenCode inside connected to `localhost` from within the container, the turn retried without end, the journal stayed empty and the Access dialog said "Has access". A provider defined in the project's own `.opencode/opencode.json` would still win over that file, since the project's own folder is the strongest file layer, so a custom provider given at creation also goes to OpenCode at its start: the space container carries its window address and the placeholder key in `OPENCODE_CONFIG_CONTENT`, which OpenCode 2.0.32 reads after every file, measured with a project whose `.opencode/opencode.json` names Ollama at `localhost`: the provider's address inside was the window with the variable and `localhost` without it. The container keeps the variable for good, so it carries nothing else: the SDK, the name and the models stay in the file, and a provider edited in Settings still arrives at the next start. A provider deleted in Settings stays in the variable with no SDK and no models; OpenCode 2.0.32 lists it with no model and works on, measured, and the window refuses it, since no grant names it. OpenCode reads that variable at its start and not again, and a plain start reuses the container, so a custom provider granted after the creation is in the file only. Known limit: a custom provider the project's own `.opencode/opencode.json` also defines works in a space only when it was given in the create dialog; granted later, OpenCode inside connects to the project's address and fails as above. Not yet: a key the user types for a custom provider, which Settings holds. The live grants test grants a custom provider of the project's own configuration with a key and a header of its own and proves both at the stand-in, as hashes, and absent from the record, the containers' metadata, the configuration inside and everything the space can read.
+- Custom grants also accept the bundled OpenCode Chat Completions, Responses and Anthropic adapters supported by the provider form. Their package names stay bare. Their credential headers match the AI SDK counterparts above, with `x-api-key` for both `anthropic` and `anthropic-compatible`. One window sets one header, so a provider with a model whose own package reads its key from another header than the provider's is refused with `provider_not_supported`, and the dialogs list it as unsupported. Other adapters remain unsupported; credential resolution and containment are unchanged.
 - A grant for a catalog provider the host's catalog does not know is written inside all the same; OpenCode inside then has no `npm` package for it and the turn fails with a provider error. The grant dialog offers the host's catalog, so this is a request nothing in the app makes.
 
 ### Preview
@@ -1187,6 +1385,11 @@ The manager verifies again after `create` and removes a space that reports viola
 ## Process rules
 
 `run-command.js` spawns the executable directly with an argv array, `shell: false`, and `windowsHide: true`. No `cmd.exe`, no shell strings. Every call has a timeout that kills the child, and an output cap. The Docker place receives the runner as a dependency, so tests pass a fake and never mock a module.
+
+libuv's [Windows process implementation](https://github.com/libuv/libuv/blob/v1.x/src/win/process.c)
+uses silent breakaway, leaving subprocesses outside Node's job object.
+[Node's detached option](https://nodejs.org/api/child_process.html#optionsdetached)
+gives a Windows child its own console, so tree-kill children detach only on POSIX.
 
 A timeout kills the `docker` CLI only. A command started with `exec` keeps running inside the space or the gatekeeper.
 
