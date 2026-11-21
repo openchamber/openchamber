@@ -25,6 +25,7 @@ import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
 import { useBrowserProviderSync } from '@/hooks/useBrowserProviderSync';
+import { useSettingsFileSync } from '@/hooks/useSettingsFileSync';
 import { useSourceControlProviderSync } from '@/hooks/useSourceControlProviderSync';
 import { useTrackerProviderSync } from '@/hooks/useTrackerProviderSync';
 import { useQuotaProviderSync } from '@/hooks/useQuotaProviderSync';
@@ -653,8 +654,6 @@ function App({ apis }: AppProps) {
     window.dispatchEvent(new Event('openchamber:app-ready'));
   }, [isInitialized, isSwitchingDirectory]);
 
-  // useEventStream replaced by SyncProvider + SyncBridge
-
   // Session attention now handled by notification-store via SSE events (session.idle/session.error)
 
   usePushVisibilityBeacon();
@@ -664,6 +663,7 @@ function App({ apis }: AppProps) {
   // Project notes sent every message with no memory index at all.
   useAgentMemorySync(currentDirectory || null);
   useBrowserProviderSync();
+  useSettingsFileSync();
   useSourceControlProviderSync(apis.sourceControl);
   useTrackerProviderSync(apis.trackers);
   useQuotaProviderSync();

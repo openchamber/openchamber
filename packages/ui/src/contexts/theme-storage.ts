@@ -1,4 +1,4 @@
-import type { ThemeMode } from '@/types/theme';
+import type { Theme, ThemeMode } from '@/types/theme';
 import type { DesktopSettings } from '@/lib/desktop';
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID, getThemeById } from '@/lib/theme/themes';
 import { isTransientRuntimeKey } from '@/lib/runtime-switch';
@@ -144,27 +144,33 @@ export const adoptThemePreferencesForRuntime = (
 
 type SettingsSyncThemePayload = Pick<
   DesktopSettings,
-  'useSystemTheme' | 'themeVariant' | 'lightThemeId' | 'darkThemeId'
+  'useSystemTheme' | 'themeVariant' | 'themeId' | 'lightThemeId' | 'darkThemeId'
 >;
 
 export const resolveThemePreferencesFromSettingsSync = (
   detail: { adoptTheme: boolean; settings: SettingsSyncThemePayload } | null,
   current: StoredThemePreferences,
+  context: { selectedTheme?: Theme; activeVariant?: 'light' | 'dark' } = {},
 ): StoredThemePreferences | null => {
   if (!detail?.adoptTheme) {
     return null;
   }
 
   const settings = detail.settings;
+  const selectedTheme = context.selectedTheme ?? getThemeById(settings.themeId ?? '');
   let themeMode = current.themeMode;
   if (settings.useSystemTheme === true) {
     themeMode = 'system';
-  } else if (settings.useSystemTheme === false && (settings.themeVariant === 'dark' || settings.themeVariant === 'light')) {
-    themeMode = settings.themeVariant;
+  } else if (settings.useSystemTheme === false) {
+    themeMode = selectedTheme?.metadata.variant ?? settings.themeVariant ?? context.activeVariant ?? current.themeMode;
   }
 
-  const lightThemeId = settings.lightThemeId?.trim() || current.lightThemeId;
-  const darkThemeId = settings.darkThemeId?.trim() || current.darkThemeId;
+  let lightThemeId = settings.lightThemeId?.trim() || current.lightThemeId;
+  let darkThemeId = settings.darkThemeId?.trim() || current.darkThemeId;
+  if (settings.useSystemTheme === false && selectedTheme) {
+    if (selectedTheme.metadata.variant === 'light') lightThemeId = selectedTheme.metadata.id;
+    else darkThemeId = selectedTheme.metadata.id;
+  }
 
   if (themeMode === current.themeMode && lightThemeId === current.lightThemeId && darkThemeId === current.darkThemeId) {
     return null;

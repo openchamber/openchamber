@@ -84,19 +84,18 @@ const browserProviderResetSchema = z.object({
 type BrowserProviderResetEvent = { type: 'browser-provider-reset' } & z.infer<typeof browserProviderResetSchema>;
 
 type SourceControlProvidersChangedEvent = { type: 'source-control-providers-changed' };
-
 type TrackerProvidersChangedEvent = { type: 'tracker-providers-changed' };
-
 type QuotaProvidersChangedEvent = { type: 'quota-providers-changed' };
 type QuotaCredentialsChangedEvent = { type: 'quota-credentials-changed' };
-
 type GuestsChangedEvent = { type: 'guests-changed' };
-
 type GuestMarksChangedEvent = { type: 'guest-marks-changed' };
-
 type GuestServiceEvent = { type: 'guest-service-event'; guestId: string; topic: string; data: JsonValue };
-
 type ThemesChangedEvent = { type: 'themes-changed' };
+const settingsChangedSchema = z.object({
+  source: z.enum(['settings', 'preferences']),
+  changedKeys: z.array(z.string().min(1).max(128)).min(1),
+});
+type SettingsChangedEvent = { type: 'settings-changed' } & z.infer<typeof settingsChangedSchema>;
 
 const limitFailoverSchema = z.discriminatedUnion('kind', [
   z.object({
@@ -206,6 +205,7 @@ const notificationPropertiesSchema = z.object({
 });
 
 type OpenChamberEvent =
+  | SettingsChangedEvent
   | { type: 'terminal-sessions-changed' }
   | { type: 'notification'; payload: z.infer<typeof notificationPropertiesSchema> }
   | { type: 'event-stream-ready'; connectionId: string | null }

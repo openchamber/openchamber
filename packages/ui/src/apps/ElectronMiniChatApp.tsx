@@ -13,6 +13,7 @@ import { OpenCodeTrustDialog } from '@/components/projects/OpenCodeTrustDialog';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useRoutingSync } from '@/hooks/useRoutingSync';
+import { useSettingsFileSync } from '@/hooks/useSettingsFileSync';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { opencodeClient } from '@/lib/opencode/client';
 import { openSession } from '@/lib/router/openSessionFromRoute';
@@ -317,6 +318,7 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   usePushVisibilityBeacon({ enabled: true });
   useWindowTitle();
   useRoutingSync();
+  useSettingsFileSync();
   useRootScrollLock();
   useRecentSessions();
 

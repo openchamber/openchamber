@@ -36,6 +36,7 @@ import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { useRoutingSync } from '@/hooks/useRoutingSync';
 import { useSourceControlProviderSync } from '@/hooks/useSourceControlProviderSync';
+import { useSettingsFileSync } from '@/hooks/useSettingsFileSync';
 import { useTrackerProviderSync } from '@/hooks/useTrackerProviderSync';
 import { useQuotaProviderSync } from '@/hooks/useQuotaProviderSync';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
@@ -1173,7 +1174,6 @@ function MobileAppContent({ apis }: MobileAppProps) {
     }, isNativeMobileApp ? 4000 : 8000);
     return () => window.clearTimeout(timeout);
   }, [isConnected, isNativeMobileApp, connectionEpoch, runtimeEndpointEpoch]);
-
   useAppFontEffects();
   usePushVisibilityBeacon({ enabled: true });
   useUpdatePolling();
@@ -1181,6 +1181,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
   useRoutingSync();
   useEnterprisePolicySync();
   useSourceControlProviderSync(apis.sourceControl);
+  useSettingsFileSync();
   useTrackerProviderSync(apis.trackers);
   useQuotaProviderSync();
   useGuestCatalogSync();
@@ -1193,7 +1194,6 @@ function MobileAppContent({ apis }: MobileAppProps) {
   useNativeWidgetSync({ enabled: isNativeMobileApp && isConnected && isInitialized });
   useDeepLinkSource({ ready: isNativeMobileApp && isConnected && isInitialized, switchToServer: switchToSavedInstance });
   const fontsReady = useFontsReady();
-
   const isReconnecting = !isConnected && connectionPhase === 'reconnecting';
 
   if (!fontsReady) {
