@@ -1087,6 +1087,19 @@ describe('connectHost resolve and badge', () => {
     await sent;
   });
 
+  test('openWalkthrough posts a trimmed base and refuses an empty or oversized one locally', async () => {
+    const parent = createFrame();
+    const guest = createFrame();
+    guest.parent = parent.parent;
+    const host = connectHost({ target: guest, acceptSource: () => true });
+    const sent = host.openWalkthrough({ base: ' origin/main ' }).catch(() => undefined);
+    await expect(host.openWalkthrough({ base: '  ' })).rejects.toMatchObject({ code: 'HOST_REJECTED' });
+    await expect(host.openWalkthrough({ base: 'x'.repeat(256) })).rejects.toMatchObject({ code: 'HOST_REJECTED' });
+    expect(parent.posted.filter((message) => message.type === 'open-walkthrough').map((message) => (message.type === 'open-walkthrough' ? message.payload.base : ''))).toEqual(['origin/main']);
+    host.dispose();
+    await sent;
+  });
+
   test('setHeight sends whole pixels within the wire range', async () => {
     const parent = createFrame();
     const guest = createFrame();

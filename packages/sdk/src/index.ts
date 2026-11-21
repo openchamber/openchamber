@@ -401,12 +401,12 @@ export {
   isGuestPopoverRequest,
 } from './popover.ts';
 export type { GuestPopoverAnchor, GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest, GuestPopoverSide } from './popover.ts';
+export { GUEST_COMMIT_SHA, GUEST_WALKTHROUGH_BASE_MAX, isGuestCommitSha } from './navigation.ts';
+export type { OpenCommitRequest, OpenWalkthroughRequest } from './navigation.ts';
 export {
   clampAttachRequest,
   clampBadgeCount,
   clampFrameHeight,
-  isGuestCommitSha,
-  GUEST_COMMIT_SHA,
   clampPromptRequest,
   clampStartSessionRequest,
   guestFileScope,
@@ -449,11 +449,11 @@ export type {
   GuestBadgeMessage,
   GuestResizeMessage,
   GuestOpenCommitMessage,
+  GuestOpenWalkthroughMessage,
   GuestStatusControlsMessage,
   GuestPopoverAnchorMessage,
   GuestPopoverCloseMessage,
   GuestPopoverOpenMessage,
-  OpenCommitRequest,
   ResizeRequest,
   GuestItem,
   GuestItemRole,
