@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { Metadata, Session } from '@/lib/opencode/model';
-import { getLeadDigest, withDismissedSuggestion } from './sessionLead';
+import { getLeadDigest, leadReplySchema, leadReplyText, withDismissedSuggestions } from './sessionLead';
 
 type Digest = { needsYou: string[]; now: string[]; news: string[]; suggestions: string[]; updatedAt: number };
 
@@ -25,7 +25,24 @@ describe('lead digest', () => {
 
   test('records a dismissal once, keeps the digest, and leaves a session that is no lead alone', () => {
     const digest = { needsYou: [], now: ['x'], news: [], suggestions: ['Drop v1'], updatedAt: 5 };
-    expect(withDismissedSuggestion(lead(digest, ['Drop v1']), 'drop v1')).toEqual(lead(digest, ['drop v1']));
-    expect(withDismissedSuggestion({ openchamber: {} }, 'x')).toEqual({ openchamber: {} });
+    expect(withDismissedSuggestions(lead(digest, ['Drop v1', 'Old']), ['drop v1', 'Speed up CI'])).toEqual(lead(digest, ['Old', 'drop v1', 'Speed up CI']));
+    expect(withDismissedSuggestions({ openchamber: {} }, ['x'])).toEqual({ openchamber: {} });
+  });
+});
+
+describe('lead reply', () => {
+  test('reads a single answer sent before replies were batched', () => {
+    expect(leadReplySchema.parse({ question: 'Which license?', answer: 'MIT' })).toEqual({ answers: [{ question: 'Which license?', answer: 'MIT' }], suggestions: [] });
+  });
+
+  test('tells the lead accepted suggestions join its queue behind the work in progress, and leaves out empty sections', () => {
+    const text = leadReplyText({ answers: [], suggestions: [{ item: 'Speed up CI', accepted: true }, { item: 'Drop v1', accepted: false }] });
+    expect(text).not.toContain('Answers to your questions');
+    expect(text).toContain('join your queue');
+    expect(text).toContain('keep the work in progress going first.\n- Speed up CI');
+    expect(text).toContain('do not offer them again.\n- Drop v1');
+    expect(leadReplyText({ answers: [{ question: 'Which license?', answer: 'MIT' }], suggestions: [] })).toBe(
+      'The user replied to your digest.\n\nAnswers to your questions:\n- Question: Which license?\n  Answer: MIT',
+    );
   });
 });

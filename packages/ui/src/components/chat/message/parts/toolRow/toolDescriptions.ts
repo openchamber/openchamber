@@ -74,7 +74,7 @@ export const describeOpenChamberRow = (
         if (run.notSaved) return `${verb} · ${translate('chat.toolPart.openchamber.secretRun.notSaved', { names: run.notSaved.join(', ') })}`;
         return summary.detail ? `${verb} · ${summary.detail.slice(0, 120)}` : verb;
     }
-    const key = openChamberVerbKey(envelope?.action);
+    const key = openChamberVerbKey(envelope, input);
     if (!summary || !key || envelope?.ok !== true) return null;
     const verb = translate(key);
     return summary.detail ? `${verb} \u00b7 ${summary.detail.slice(0, 120)}` : verb;

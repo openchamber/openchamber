@@ -79,9 +79,13 @@ describe('lead actions', () => {
 
   it('keeps the brief in its file, within the limit', async () => {
     const { actions, briefs } = await setup();
-    expect(await actions.execute('lead.brief', {}, 'ses_lead')).toMatchObject({ brief: '', empty: true });
-    expect(await actions.execute('lead.brief', { brief: '  # Goal\n\nShip it  ' }, 'ses_lead')).toMatchObject({ saved: true, length: 15 });
-    expect(await briefs.read('ses_lead')).toBe('# Goal\n\nShip it\n');
+    const missing = await actions.execute('lead.brief', {}, 'ses_lead');
+    expect(missing).toMatchObject({ brief: '', empty: true });
+    expect(missing).not.toHaveProperty('file');
+    const saved = await actions.execute('lead.brief', { brief: '  # Goal\n\nShip it  ' }, 'ses_lead');
+    expect(saved).toMatchObject({ saved: true, length: 15 });
+    expect(await fs.readFile(saved.file, 'utf8')).toBe('# Goal\n\nShip it\n');
+    expect(await actions.execute('lead.brief', {}, 'ses_lead')).toMatchObject({ file: saved.file });
     await expect(actions.execute('lead.brief', { brief: 'x'.repeat(12_001) }, 'ses_lead')).rejects.toMatchObject({ status: 400 });
     expect(await briefs.read('ses_lead')).toBe('# Goal\n\nShip it\n');
   });
@@ -198,7 +202,7 @@ describe('sleep compaction', () => {
     expect(requests).toContainEqual({ route: '/api/session/ses_lead/compact', method: 'POST' });
 
     const summary = await runtime.sleepSummary('ses_lead');
-    expect(summary).toContain('session.messages');
+    expect(summary).toContain('session.messages for sessionId ses_lead');
     expect(summary).toContain('Keep it? Yes');
     expect(summary).toContain('Migrate git (ses_child): busy');
     expect(await runtime.sleepSummary('ses_lead')).toBeNull();

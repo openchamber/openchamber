@@ -341,6 +341,20 @@ export const workflowResultSchema = z.union([
 export const workflowStoppedSchema = z.object({ runId: z.string(), state: z.string(), reused: z.number().optional().catch(undefined) });
 export const workflowSavedSchema = z.object({ name: z.string(), path: z.string() });
 
+export const leadBriefReadSchema = z.object({ brief: z.string(), limit: z.number(), empty: z.boolean().catch(false), file: text });
+export const leadBriefSavedSchema = z.object({ saved: z.literal(true), length: z.number(), limit: z.number(), file: text });
+
+export const leadDigestSavedSchema = z.object({
+  saved: z.literal(true),
+  digest: z.object({
+    needsYou: z.array(z.object({ question: z.string(), options: z.array(z.string()).catch([]), recommended: text })),
+    now: z.array(z.string()),
+    news: z.array(z.string()),
+    suggestions: z.array(z.string()),
+  }).refine((digest) => digest.needsYou.length + digest.now.length + digest.news.length + digest.suggestions.length > 0),
+  droppedFromSuggestions: z.array(z.string()).catch([]),
+});
+
 const VIEW_SCHEMAS: ReadonlyMap<string, z.ZodType> = new Map<string, z.ZodType>([
   ['session.link', linkedSchema],
   ['session.unlink', unlinkedSchema],
@@ -398,6 +412,8 @@ const VIEW_SCHEMAS: ReadonlyMap<string, z.ZodType> = new Map<string, z.ZodType>(
   ['workflow.stop', workflowStoppedSchema],
   ['workflow.resume', workflowStoppedSchema],
   ['workflow.save', workflowSavedSchema],
+  ['lead.brief', z.union([leadBriefSavedSchema, leadBriefReadSchema])],
+  ['lead.digest', leadDigestSavedSchema],
 ]);
 
 export const hasOpenChamberView = (envelope: OpenChamberEnvelope): boolean => {
@@ -530,11 +546,34 @@ export const OPENCHAMBER_ACTION_VERB_KEYS = {
   'workflow.resume': 'chat.toolPart.openchamber.action.workflowResume',
   'workflow.save': 'chat.toolPart.openchamber.action.workflowSave',
   'workflow.list': 'chat.toolPart.openchamber.action.workflowList',
+  'lead.digest': 'chat.toolPart.openchamber.action.leadDigest',
 } as const;
 
 const VERB_KEYS = new Map(Object.entries(OPENCHAMBER_ACTION_VERB_KEYS));
 
-export const openChamberVerbKey = (action: string | undefined) => (action ? VERB_KEYS.get(action) : undefined);
+export const openChamberVerbKey = (envelope: { action: string; data?: unknown } | null | undefined, input: ToolInput | undefined) => {
+  if (envelope?.action === 'lead.brief') return leadBriefVerbKey(envelope.data, input);
+  return envelope ? VERB_KEYS.get(envelope.action) : undefined;
+};
+
+export const isLeadToolAction = (action: string) => action === 'lead.brief' || action === 'lead.digest';
+
+const briefEditSchema = z.object({ find: z.string(), replace: z.string() });
+const briefEditsSchema = z.union([z.array(briefEditSchema), jsonText.pipe(z.array(briefEditSchema))]).optional().catch(undefined);
+const leadBriefFields = z.object({ brief: text, edits: briefEditsSchema });
+const leadBriefCallSchema = leadBriefFields.extend({ parameters: leadBriefFields.optional().catch(undefined) }).catch({});
+
+export const readLeadBriefCall = (input: ToolInput | undefined) => {
+  const parsed = leadBriefCallSchema.parse(input ?? {});
+  return { brief: parsed.parameters?.brief ?? parsed.brief, edits: parsed.parameters?.edits ?? parsed.edits ?? [] };
+};
+
+const leadBriefVerbKey = (data: unknown, input: ToolInput | undefined) => {
+  if (leadBriefSavedSchema.safeParse(data).success) return 'chat.toolPart.openchamber.action.leadBriefSave';
+  if (leadBriefReadSchema.safeParse(data).success) return 'chat.toolPart.openchamber.action.leadBriefRead';
+  const call = readLeadBriefCall(input);
+  return call.brief || call.edits.length > 0 ? 'chat.toolPart.openchamber.action.leadBriefSave' : 'chat.toolPart.openchamber.action.leadBrief';
+};
 
 const callFields = z.object({
   projectId: text,

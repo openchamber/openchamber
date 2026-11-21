@@ -5,7 +5,7 @@ import { ascendingId } from "@/lib/opencode/ids"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { runtimeFetch } from "@/lib/runtime-fetch"
 import type { Session } from "@/lib/opencode/model"
-import { LEAD_ANSWER_METADATA_KEY, withDismissedSuggestion, withSessionLead } from "@/lib/sessionLead"
+import { LEAD_ANSWER_METADATA_KEY, leadReplyText, withDismissedSuggestions, withSessionLead, type LeadReply } from "@/lib/sessionLead"
 import { syncSessionKnowledge } from "@/lib/sessionKnowledgeApi"
 import { commitStagedRevert, patchSessionMetadata } from "./session-actions"
 import { useSessionUIStore } from "./session-ui-store"
@@ -35,7 +35,7 @@ export function openOrToggleLeadDraft(options?: { directoryOverride?: string | n
   openNewSessionDraft({ ...options, lead: true })
 }
 
-export async function answerLeadQuestion(sessionId: string, directory: string, question: string, answer: string): Promise<void> {
+export async function sendLeadReply(sessionId: string, directory: string, reply: LeadReply): Promise<void> {
   const runtimeKey = getRuntimeKey()
   await commitStagedRevert(sessionId, directory)
   await opencodeClient.resumeWithSyntheticInput({
@@ -43,17 +43,17 @@ export async function answerLeadQuestion(sessionId: string, directory: string, q
     id: ascendingId("msg"),
     sessionId,
     directory,
-    text: `The user answered a question from your digest.\n\nQuestion: ${question}\nAnswer: ${answer}`,
-    metadata: { [LEAD_ANSWER_METADATA_KEY]: { question, answer } },
+    text: leadReplyText(reply),
+    metadata: { [LEAD_ANSWER_METADATA_KEY]: reply },
   })
 }
 
 const dismissals = new Map<string, Promise<unknown>>()
 
-export function dismissLeadSuggestion(sessionId: string, directory: string, item: string): Promise<void> {
+export function dismissLeadSuggestions(sessionId: string, directory: string, items: readonly string[]): Promise<void> {
   const runtimeKey = getRuntimeKey()
   const run = (dismissals.get(sessionId) ?? Promise.resolve())
-    .then(() => patchSessionMetadata(sessionId, directory, (metadata) => withDismissedSuggestion(metadata, item), runtimeKey))
+    .then(() => patchSessionMetadata(sessionId, directory, (metadata) => withDismissedSuggestions(metadata, items), runtimeKey))
     .then(() => undefined)
   const settled = run.catch(() => undefined)
   dismissals.set(sessionId, settled)

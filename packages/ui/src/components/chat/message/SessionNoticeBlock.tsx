@@ -146,11 +146,35 @@ const PageAnswerNoticeRow: React.FC<{ notice: PageAnswerNotice; blockId: string 
     );
 };
 
-const LeadNoticeRow: React.FC<{ notice: LeadNotice }> = ({ notice }) => {
+const LeadHandoverNoticeRow: React.FC<{ title: string }> = ({ title }) => {
     const { t } = useI18n();
-    return notice.kind === 'lead-answer'
-        ? <PlainNoticeLine icon="survey" title={t('chat.sessionNotice.leadAnswer', { question: notice.question, answer: notice.answer })} />
-        : <PlainNoticeLine icon="lead-flag" title={t('chat.sessionNotice.leadHandover', { title: notice.title })} />;
+    return <PlainNoticeLine icon="lead-flag" title={t('chat.sessionNotice.leadHandover', { title })} />;
+};
+
+const LeadReplyNoticeRow: React.FC<{ notice: Extract<LeadNotice, { kind: 'lead-answer' }>; blockId: string }> = ({ notice, blockId }) => {
+    const { t } = useI18n();
+    const [single] = notice.answers;
+    if (single && notice.answers.length === 1 && notice.suggestions.length === 0) {
+        return <PlainNoticeLine icon="survey" title={t('chat.sessionNotice.leadAnswer', { question: single.question, answer: single.answer })} />;
+    }
+    const details = [
+        ...notice.answers.map(({ question, answer }) => `- ${question}\n  **${answer}**`),
+        ...notice.suggestions.map(({ item, accepted }) => `- ${item}\n  **${t(accepted ? 'chat.leadDigest.accepted' : 'chat.leadDigest.declined')}**`),
+    ].join('\n');
+    return (
+        <ReasoningTimelineBlock
+            text={details}
+            blockId={blockId}
+            presentation={{
+                icon: 'survey',
+                title: t('chat.sessionNotice.leadReply'),
+                expandLabel: t('chat.sessionNotice.showDetails'),
+                collapseLabel: t('chat.sessionNotice.hideDetails'),
+                markdownVariant: 'assistant',
+                maxHeightClassName: 'max-h-[60vh]',
+            }}
+        />
+    );
 };
 
 const FoldedNotice: React.FC<{ notice: FoldedSessionNotice; blockId: string }> = ({ notice, blockId }) => {
@@ -178,6 +202,7 @@ export const SessionNoticeBlock: React.FC<{ notice: SessionNotice; blockId: stri
     if (notice.kind === 'pull-request') return <PullRequestNoticeRow notice={notice} />;
     if (notice.kind === 'extension-wait') return <ExtensionWaitNoticeRow notice={notice} blockId={blockId} />;
     if (notice.kind === 'page-answer') return <PageAnswerNoticeRow notice={notice} blockId={blockId} />;
-    if (notice.kind === 'lead-answer' || notice.kind === 'lead-handover') return <LeadNoticeRow notice={notice} />;
+    if (notice.kind === 'lead-answer') return <LeadReplyNoticeRow notice={notice} blockId={blockId} />;
+    if (notice.kind === 'lead-handover') return <LeadHandoverNoticeRow title={notice.title} />;
     return <FoldedNotice notice={notice} blockId={blockId} />;
 };

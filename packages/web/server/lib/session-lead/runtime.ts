@@ -53,11 +53,11 @@ const revertSchema = z.object({ revert: z.unknown().optional() });
 
 const formatList = (items: readonly string[]) => items.map((item) => `- ${item}`).join('\n');
 
-export const sleepSummaryText = ({ digest, children }: { digest: LeadDigest | undefined; children: LeadChild[] | null }) => {
+export const sleepSummaryText = ({ sessionId, digest, children }: { sessionId: string; digest: LeadDigest | undefined; children: LeadChild[] | null }) => {
   const sections = [
     'This lead slept past its prompt cache, so OpenChamber replaced the conversation before this point with this note instead of a model-written summary.'
-      + ' The brief and the lead rules are still in your context. The full earlier conversation is one call away: session.messages for this session'
-      + ' (tools.openchamber inside execute) with all: true. Read it when something below is not enough to go on.',
+      + ` The brief and the lead rules are still in your context, and the earlier conversation stays readable with session.messages for sessionId ${sessionId}`
+      + ' as the lead rules describe. Read it when something below is not enough to go on.',
   ];
   if (digest) {
     if (digest.needsYou.length > 0) {
@@ -201,7 +201,7 @@ export const createSessionLeadRuntime = ({
     pending.delete(sessionId);
     if (!entry || now() - entry.at > PENDING_TTL_MS) return null;
     const children = await listChildren(sessionId).catch(() => null);
-    return sleepSummaryText({ digest: entry.digest, children });
+    return sleepSummaryText({ sessionId, digest: entry.digest, children });
   };
 
   const stop = () => {

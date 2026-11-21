@@ -28,10 +28,12 @@ describe("readSessionNotice: shown", () => {
   test("an answer from a lead's digest and a hand-over read from their metadata, with or without a description", () => {
     expect(readSessionNotice(synthetic(undefined, { openchamberLeadAnswer: { question: "Which license?", answer: "MIT" } }, "answer text"))).toEqual({
       kind: "lead-answer",
-      question: "Which license?",
-      answer: "MIT",
+      answers: [{ question: "Which license?", answer: "MIT" }],
+      suggestions: [],
       text: "answer text",
     })
+    const reply = { answers: [], suggestions: [{ item: "Speed up CI", accepted: true }] }
+    expect(readSessionNotice(synthetic(undefined, { openchamberLeadAnswer: reply }, "reply text"))).toEqual({ kind: "lead-answer", ...reply, text: "reply text" })
     expect(readSessionNotice(synthetic("Handed over: README intro", { source: "openchamber-lead-handover", sessionID: "ses_2", title: "README intro" }))).toEqual({
       kind: "lead-handover",
       title: "README intro",
