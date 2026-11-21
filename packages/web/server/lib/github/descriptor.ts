@@ -55,7 +55,7 @@ export const githubDescriptor = Object.freeze({
     reviewers: true,
     reviewThreads: Object.freeze({ start: false, reply: true, resolve: true }),
     reviewDrafts: Object.freeze({ fileComments: true }),
-    uploads: false,
+    uploads: true,
     stacks: true,
     changeRequestPatch: true,
     liveSummaries: true,
@@ -117,7 +117,7 @@ export const githubDescriptor = Object.freeze({
     }),
     features: Object.freeze({
       referenceSearch: true, referenceDetail: true, listStatuses: true, referencesAcross: true,
-      startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: true,
+      startThread: false, authorCanReview: false, projectUploads: true, absoluteProjectUploads: true, issueCloseReason: true,
       issueEdit: true, changeRequestEdit: true, commentEdit: true,
       advancedSearch: true,
       reviewDrafts: true, reviewDraftFileComments: true,

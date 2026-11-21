@@ -345,7 +345,8 @@ describe('ui auth client credential seam', () => {
       headers: { accept: 'image/png' },
     });
     expect(await auth.ensureSessionToken(uploadOf('gitlab'), null)).toBe('client:device-1');
-    expect(await auth.ensureSessionToken(uploadOf('github'), null)).toBe(null);
+    expect(await auth.ensureSessionToken(uploadOf('github'), null)).toBe('client:device-1');
+    expect(await auth.ensureSessionToken(uploadOf('gitea'), null)).toBe(null);
     expect(await auth.ensureSessionToken({
       method: 'GET',
       path: '/api/spaces/a1b2c3d4e5f6/session',

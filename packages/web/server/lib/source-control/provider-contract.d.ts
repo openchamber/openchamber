@@ -78,7 +78,7 @@ export interface ProviderDescriptor {
     urls: { changeRequest: readonly string[]; issue: readonly string[]; discussion?: readonly string[]; commit?: readonly string[]; user?: readonly string[]; resolve?: string };
     features: {
       referenceSearch: boolean; referenceDetail: boolean; listStatuses: boolean; referencesAcross: boolean;
-      startThread: boolean; authorCanReview: boolean; projectUploads: boolean; issueCloseReason: boolean;
+      startThread: boolean; authorCanReview: boolean; projectUploads: boolean; absoluteProjectUploads?: boolean; issueCloseReason: boolean;
       reviewDrafts?: boolean; reviewDraftFileComments?: boolean;
       changeRequestTemplates: readonly string[];
       branchHeads?: boolean;
