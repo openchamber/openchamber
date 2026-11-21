@@ -2175,6 +2175,7 @@ export const dict = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': 'סגור כרטיסייה',
   'terminalView.tabs.newTabTitle': 'כרטיסייה חדשה',
+  'terminalView.tabs.sheetTitle': 'מסופים',
   'terminalView.tabs.menu.rename': 'שנה שם',
   'terminalView.tabs.renameDialog.title': 'שינוי שם המסוף',
   'terminalView.tabs.renameDialog.placeholder': 'שם המסוף',

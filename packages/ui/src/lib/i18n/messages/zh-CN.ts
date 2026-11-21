@@ -2243,6 +2243,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.quickKeys.enterAria': 'Enter 键',
   'terminalView.tabs.closeTabTitle': '关闭标签页',
   'terminalView.tabs.newTabTitle': '新建标签页',
+  'terminalView.tabs.sheetTitle': '终端',
   'terminalView.tabs.menu.rename': '重命名',
   'terminalView.tabs.renameDialog.title': '重命名终端',
   'terminalView.tabs.renameDialog.placeholder': '终端名称',

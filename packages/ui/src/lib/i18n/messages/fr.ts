@@ -2022,6 +2022,7 @@ export const dict = {
   'terminalView.quickKeys.enterAria': 'Entrée',
   'terminalView.tabs.closeTabTitle': 'Fermer l\'onglet',
   'terminalView.tabs.newTabTitle': 'Nouvel onglet',
+  'terminalView.tabs.sheetTitle': 'Terminaux',
   'terminalView.tabs.menu.rename': 'Renommer',
   'terminalView.tabs.renameDialog.title': 'Renommer le terminal',
   'terminalView.tabs.renameDialog.placeholder': 'Nom du terminal',

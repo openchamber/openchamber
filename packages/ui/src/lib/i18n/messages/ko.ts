@@ -2277,6 +2277,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': '탭 닫기',
   'terminalView.tabs.newTabTitle': '새 탭',
+  'terminalView.tabs.sheetTitle': '터미널',
   'terminalView.tabs.menu.rename': '이름 바꾸기',
   'terminalView.tabs.renameDialog.title': '터미널 이름 바꾸기',
   'terminalView.tabs.renameDialog.placeholder': '터미널 이름',

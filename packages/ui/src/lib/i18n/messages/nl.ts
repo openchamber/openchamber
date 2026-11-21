@@ -2277,6 +2277,7 @@ export const dict = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': 'Tabblad sluiten',
   'terminalView.tabs.newTabTitle': 'Nieuw tabblad',
+  'terminalView.tabs.sheetTitle': 'Terminals',
   'terminalView.tabs.menu.rename': 'Hernoemen',
   'terminalView.tabs.renameDialog.title': 'Terminal hernoemen',
   'terminalView.tabs.renameDialog.placeholder': 'Terminalnaam',

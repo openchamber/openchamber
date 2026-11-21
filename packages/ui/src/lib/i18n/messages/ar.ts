@@ -2176,6 +2176,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': 'إغلاق علامة التبويب',
   'terminalView.tabs.newTabTitle': 'علامة تبويب جديدة',
+  'terminalView.tabs.sheetTitle': 'الطرفيات',
   'terminalView.tabs.menu.rename': 'إعادة تسمية',
   'terminalView.tabs.renameDialog.title': 'إعادة تسمية الطرفية',
   'terminalView.tabs.renameDialog.placeholder': 'اسم الطرفية',

@@ -2145,6 +2145,7 @@ export const dict = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': 'Sekmeyi kapat',
   'terminalView.tabs.newTabTitle': 'Yeni sekme',
+  'terminalView.tabs.sheetTitle': 'Terminaller',
   'terminalView.tabs.menu.rename': 'Yeniden adlandır',
   'terminalView.tabs.renameDialog.title': 'Terminali yeniden adlandır',
   'terminalView.tabs.renameDialog.placeholder': 'Terminal adı',

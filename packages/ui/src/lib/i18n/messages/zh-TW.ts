@@ -2254,6 +2254,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.quickKeys.enterAria': 'Enter 鍵',
   'terminalView.tabs.closeTabTitle': '關閉分頁',
   'terminalView.tabs.newTabTitle': '新增分頁',
+  'terminalView.tabs.sheetTitle': '終端',
   'terminalView.tabs.menu.rename': '重新命名',
   'terminalView.tabs.renameDialog.title': '重新命名終端機',
   'terminalView.tabs.renameDialog.placeholder': '終端機名稱',

@@ -2010,6 +2010,7 @@ export const dict = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': 'Registerkarte schließen',
   'terminalView.tabs.newTabTitle': 'Neue Registerkarte',
+  'terminalView.tabs.sheetTitle': 'Terminals',
   'terminalView.tabs.menu.rename': 'Umbenennen',
   'terminalView.tabs.renameDialog.title': 'Terminal umbenennen',
   'terminalView.tabs.renameDialog.placeholder': 'Terminalname',

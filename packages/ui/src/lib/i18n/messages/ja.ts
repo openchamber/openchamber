@@ -2273,6 +2273,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': 'タブを閉じる',
   'terminalView.tabs.newTabTitle': '新しいタブ',
+  'terminalView.tabs.sheetTitle': 'ターミナル',
   'terminalView.tabs.menu.rename': '名前を変更',
   'terminalView.tabs.renameDialog.title': 'ターミナル名を変更',
   'terminalView.tabs.renameDialog.placeholder': 'ターミナル名',

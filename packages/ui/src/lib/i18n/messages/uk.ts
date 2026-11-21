@@ -2245,6 +2245,7 @@ export const dict: Record<I18nKey, string> = {
   "terminalView.quickKeys.enterAria": "Enter",
   "terminalView.tabs.closeTabTitle": "Закрити вкладку",
   "terminalView.tabs.newTabTitle": "Нова вкладка",
+  "terminalView.tabs.sheetTitle": "Термінали",
   "terminalView.tabs.menu.rename": "Перейменувати",
   "terminalView.tabs.renameDialog.title": "Перейменувати термінал",
   "terminalView.tabs.renameDialog.placeholder": "Назва термінала",

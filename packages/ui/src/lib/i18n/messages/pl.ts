@@ -3503,6 +3503,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.stream.processExitedWithSignal': ' (signal {signal})',
   'terminalView.tabs.closeTabTitle': 'Close tab',
   'terminalView.tabs.newTabTitle': 'Nowa karta',
+  'terminalView.tabs.sheetTitle': 'Terminale',
   'terminalView.tabs.menu.rename': 'Zmień nazwę',
   'terminalView.tabs.renameDialog.title': 'Zmień nazwę terminala',
   'terminalView.tabs.renameDialog.placeholder': 'Nazwa terminala',
