@@ -11,7 +11,7 @@ The logo has four drawings, each for a kind of place:
 | App icon, an Icon Composer document (`packages/electron/resources/icons/AppIcon.icon`) | macOS Dock and Finder, the iOS app. Its layers carry the six macOS appearances: Default, Dark, Clear and Tinted, light and dark |
 | Icon without a tile: the open shell with a dark grey inside, white edges, black outline | Windows, Linux, the VS Code Marketplace; on a black square for phone home screens, PWA and Android |
 | In-app logo: the open shell in one colour | Every splash, About, sign-in, empty states, README |
-| Glyph: cube outline and two roof rings, one colour | macOS menu bar, favicon, VS Code activity bar and title buttons, model picker sprite, Android notification and themed icon, iOS Control Center |
+| Glyph: cube outline and two roof rings, one colour | macOS menu bar, favicon, VS Code activity bar and title buttons, model picker sprite, Android notification, Quick Settings tile and themed icon, iOS Control Center |
 
 OpenChamber Canary, the nightly build, has its own icons in `packages/electron/resources/icons-canary`, drawn by `canary.mjs`: the release cube on a blue tile with a yellow canary at its side. Its Icon Composer document `AppIcon.icon` is the master and is edited in Icon Composer; the Windows and Linux icon (the release icon without a tile, its cube flat in blue, with the rendered document's bird in front in a black outline), the `.ico` (blue pixel cubes below 32 px, each with a round pixel chick kept as text in `raster.mjs`), the menu bar templates (the glyph with the canary redrawn per pixel, kept as text in `canary.mjs`, standing over its lower right corner with a thin clear gap around it, in every state) and `Assets.car`/`icon.icns` come from it.
 
