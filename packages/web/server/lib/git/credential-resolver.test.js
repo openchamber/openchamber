@@ -35,9 +35,14 @@ describe('Git credential resolver', () => {
       expect(() => createHttpsCredentialReference({ ...account, providerUserId: `${account.instance}#alice`, ...patch })).toThrow();
     }
   });
-  it('derives the git-lfs repository-path alias only from /info/lfs endpoints', () => {
+  it('derives the git-lfs repository-path aliases, with and without .git, only from /info/lfs endpoints', () => {
     expect(gitLfsCredentialEndpointAliases({ protocol: 'https', host: 'github.com', port: 443, path: 'owner/repo.git/info/lfs' }))
-      .toEqual([{ protocol: 'https', host: 'github.com', port: 443, path: 'owner/repo.git' }]);
+      .toEqual([
+        { protocol: 'https', host: 'github.com', port: 443, path: 'owner/repo.git' },
+        { protocol: 'https', host: 'github.com', port: 443, path: 'owner/repo' },
+      ]);
+    expect(gitLfsCredentialEndpointAliases({ protocol: 'https', host: 'lfs.example.com', port: 443, path: 'storage/info/lfs' }))
+      .toEqual([{ protocol: 'https', host: 'lfs.example.com', port: 443, path: 'storage' }]);
     expect(gitLfsCredentialEndpointAliases({ protocol: 'https', host: 'lfs.example.com', port: 443, path: 'storage' })).toEqual([]);
     expect(gitLfsCredentialEndpointAliases({ protocol: 'https', host: 'lfs.example.com', port: 443, path: '/info/lfs' })).toEqual([]);
   });
