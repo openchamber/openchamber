@@ -32,7 +32,7 @@ export const TurnRow = React.memo(({
     });
     const isActivityExpanded = turnExpansion.get(turn.turnId) === true;
     const hasLaterAssistant = entry.hasLaterAssistant === true;
-    const foldContexts = useTurnFoldContexts(turn, hasLaterAssistant, isActivityExpanded, row.finalMessageId);
+    const foldContexts = useTurnFoldContexts(turn, hasLaterAssistant, isActivityExpanded, row.finalMessageId, row.keepText);
     const handleToggleActivity = React.useCallback(() => {
         onToggleTurnActivity(turn.turnId);
     }, [onToggleTurnActivity, turn.turnId]);
@@ -45,10 +45,10 @@ export const TurnRow = React.memo(({
     if (row.kind === 'turn-fold') {
         content = (
             <TurnFold turn={turn} hasLaterAssistant={hasLaterAssistant} expanded={isActivityExpanded}
-                finalMessageId={row.finalMessageId} onToggle={handleToggleActivity} renderMessage={renderMessage} />
+                finalMessageId={row.finalMessageId} keepText={row.keepText} onToggle={handleToggleActivity} renderMessage={renderMessage} />
         );
     } else if (row.kind === 'turn-pages') {
-        content = <TurnPagesRow turn={turn} />;
+        content = <TurnPagesRow turn={turn} keepText={row.keepText} />;
     } else {
         const message = turn.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
         if (message) {

@@ -2468,6 +2468,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.messageTransport.sse.description': 'Utilisez les événements envoyés par le serveur pour la diffusion de messages.',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.label': 'Réduite',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.description': 'Garder l\'activité réduite par défaut.',
+  'settings.openchamber.visual.option.activityRenderMode.text.label': 'Avec texte',
   'settings.openchamber.visual.option.activityRenderMode.summary.label': 'Développée',
   'settings.openchamber.visual.option.activityRenderMode.summary.description': 'Développer l’activité par défaut.',
   'settings.openchamber.visual.option.timeFormat.auto.label': 'Auto',

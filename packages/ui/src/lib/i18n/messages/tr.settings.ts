@@ -2468,6 +2468,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.messageTransport.sse.description': 'Mesaj akışı için Server-Sent Events kullan.',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.label': 'Daraltılmış',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.description': 'Activity\'yi varsayılan olarak daraltılmış tut.',
+  'settings.openchamber.visual.option.activityRenderMode.text.label': 'Metinle',
   'settings.openchamber.visual.option.activityRenderMode.summary.label': 'Genişletilmiş',
   'settings.openchamber.visual.option.activityRenderMode.summary.description': 'Activity\'yi varsayılan olarak genişlet.',
   'settings.openchamber.visual.option.timeFormat.auto.label': 'Otomatik',

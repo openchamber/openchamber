@@ -50,6 +50,20 @@ height estimates.
   text containing a UI block remain visible in chronological order; the final
   answer's text remains the answer. An `openui-lang literal` fence stays a code
   sample.
+- With text (`activityRenderMode: 'text'`) keeps every visible text before
+  the final answer in view the same way, in the order it was written: below the
+  latest rows while the turn runs, between the Activity header and the answer
+  once it settles, with the answer divider after it. Opening the fold returns
+  each text to the step that wrote it, so an open fold reads as the steps ran.
+  The latest-rows window counts only rows it draws; a part shown below the
+  window takes no slot in it.
+  Kept text never splits the steps around it the way a page does, so a turn
+  that stops without an answer leaves no tool row outside its closed fold.
+- Text shown outside the message that wrote it, kept text and text holding a
+  UI block alike, carries that message's id and a quote root of its own. A
+  selection in it is quoted and commented as that message's text, also while
+  it is drawn inside the answer's body, and the comment resolves again when
+  the text returns to its step.
 - Answered forms normally fold like completed steps, but a form after retained
   text keeps its answered-summary line so the question still separates that
   passage from the reply. Settled secret cards have no such summary and fold.
@@ -107,6 +121,16 @@ terminal notices for unmatched messages.
 A top-level patch describes the whole call, so adding its counts to per-file
 numbers double-counts edits. Its counts belong to a single file only when the
 call touches one file; multi-file calls retain unknown per-file numbers.
+
+### Why With text hoists the text and not folds the tools in groups
+
+Readers opened Activity to look for what the agent wrote between its steps.
+Keeping that text in view reuses the path shown pages already take through a
+fold, so the turn keeps one Activity header, one expansion state and the row
+shapes navigation, holds and size estimates rely on. A fold per run of tools
+between two texts would show which steps each text followed, but Collapsed
+deliberately has no tool subgroups, and it needs a second row model for the
+same turn. The order is one click away in the open fold.
 
 ### Why Activity yields while the reader acts on it, and not the other way round
 

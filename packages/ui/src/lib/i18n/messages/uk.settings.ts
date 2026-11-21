@@ -2581,6 +2581,7 @@ export const settingsDict = {
   "settings.openchamber.visual.option.messageTransport.sse.description": "Використовувати server-sent events для потокового передавання повідомлень.",
   "settings.openchamber.visual.option.activityRenderMode.collapsed.label": "Згорнуто",
   "settings.openchamber.visual.option.activityRenderMode.collapsed.description": "Зберігати активність згорнутою за умовчанням.",
+  "settings.openchamber.visual.option.activityRenderMode.text.label": "З текстом",
   "settings.openchamber.visual.option.activityRenderMode.summary.label": "Розгорнуто",
   "settings.openchamber.visual.option.activityRenderMode.summary.description": "Розгортати активність за замовчуванням.",
   "settings.openchamber.visual.option.timeFormat.auto.label": "Авто",
