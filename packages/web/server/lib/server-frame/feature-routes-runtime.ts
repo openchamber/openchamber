@@ -1026,7 +1026,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
         fs.realpath(target, (error, resolved) => (error ? reject(error) : resolve(resolved)));
       }),
     });
-    registerEnvironmentRoutes(app, { store: environmentStore, runtime: environmentRuntime, listProjects: listConfiguredProjects });
+    registerEnvironmentRoutes(app, { store: environmentStore, runtime: environmentRuntime, listProjects: listConfiguredProjects, readClaudeConfigDir: () => environmentRuntime.forClaudeQuota().CLAUDE_CONFIG_DIR, onClaudeConfigChanged: () => announceChange('openchamber:quota-credentials-changed') });
   };
 
   return {

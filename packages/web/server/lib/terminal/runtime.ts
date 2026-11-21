@@ -751,18 +751,10 @@ export function createTerminalRuntime({
       }
     };
     const checkOrigin = () => {
-      try {
-        const result = isRequestOriginAllowed(req);
-        if (!(result instanceof Promise)) {
-          if (result) accept();
-          else rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
-          return;
-        }
-        void result.then((allowed) => {
-          if (allowed) accept();
-          else rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
-        }).catch((error) => { logUpgradeFailure({ error }); rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); });
-      } catch (error) { logUpgradeFailure({ error }); rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); }
+      void isRequestOriginAllowed(req).then((allowed) => {
+        if (allowed) accept();
+        else rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
+      }).catch((error) => { logUpgradeFailure({ error }); rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); });
     };
     if (isOpaqueOriginRequest(req)) { rejectWebSocketUpgrade(socket, 403, 'Invalid origin'); return; }
     if (!uiAuthController?.enabled) {

@@ -1,9 +1,12 @@
 import { Fragment, useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
+import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -14,7 +17,9 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Spinner } from '@/components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
-import { type Locale, useI18n } from '@/lib/i18n';
+import { saveFile } from '@/components/chat/message/parts/saveFile';
+import { type I18nKey, type Locale, useI18n } from '@/lib/i18n';
+import { type WalkthroughExportFormat, walkthroughExportFile } from '@/lib/walkthrough/export';
 import type { WalkthroughView } from '@/lib/walkthrough/model';
 import { cn } from '@/lib/utils';
 import type { WalkthroughReview } from './useWalkthroughReview';
@@ -335,6 +340,61 @@ export const WalkthroughEmptyState = ({ review, size = 'default' }: { review: Wa
   );
 };
 
+const EXPORT_CHOICES = [
+  { format: 'markdown', icon: 'file-text', labelKey: 'walkthrough.export.markdown' },
+  { format: 'html', icon: 'file-code', labelKey: 'walkthrough.export.html' },
+] as const satisfies ReadonlyArray<{ format: WalkthroughExportFormat; icon: IconName; labelKey: I18nKey }>;
+
+type ExportableReview = Pick<WalkthroughReview, 'view' | 'blocked' | 'showStages'> & {
+  entry: Pick<WalkthroughReview['entry'], 'result'>;
+};
+
+const useWalkthroughExport = (review: ExportableReview) => {
+  const { t } = useI18n();
+  const result = review.view && !review.blocked && !review.showStages ? review.entry.result : null;
+  if (!result) return null;
+  return async (format: WalkthroughExportFormat) => {
+    try {
+      const file = walkthroughExportFile(result, format, t);
+      if (!file) return;
+      await saveFile(file);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      toast.error(t('walkthrough.export.failed'));
+    }
+  };
+};
+
+export const WalkthroughExportMenu = ({ review, className }: { review: ExportableReview; className?: string }) => {
+  const { t } = useI18n();
+  const exportWalkthrough = useWalkthroughExport(review);
+  if (!exportWalkthrough) return null;
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className={cn('inline-flex shrink-0', className)}>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="ghost" size="sm" aria-label={t('walkthrough.export.menuAria')}>
+                <Icon name="download" className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>{t('walkthrough.export.menuAria')}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end">
+        {EXPORT_CHOICES.map((choice) => (
+          <DropdownMenuItem key={choice.format} className="flex items-center gap-2" onClick={() => { void exportWalkthrough(choice.format); }}>
+            <Icon name={choice.icon} className="size-4" />
+            <span className="typography-ui-label text-foreground">{t(choice.labelKey)}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
 export const WalkthroughOptions = ({
   review,
   hasView,
@@ -349,6 +409,7 @@ export const WalkthroughOptions = ({
   onActed?: () => void;
 }) => {
   const { t } = useI18n();
+  const exportWalkthrough = useWalkthroughExport(review);
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
@@ -375,6 +436,22 @@ export const WalkthroughOptions = ({
           {t('contextPanel.mode.diff')}
         </Button>
       )}
+      {exportWalkthrough && EXPORT_CHOICES.map((choice) => (
+        <Button
+          key={choice.format}
+          type="button"
+          variant="ghost"
+          size={size === 'mobile' ? 'default' : 'sm'}
+          className="w-full"
+          onClick={() => {
+            onActed?.();
+            void exportWalkthrough(choice.format);
+          }}
+        >
+          <Icon name={choice.icon} className="size-4" />
+          {t(choice.labelKey)}
+        </Button>
+      ))}
       <Button
         type="button"
         variant="ghost"

@@ -187,6 +187,12 @@
         "key": "ctrl+,",
         "mac": "cmd+,",
         "when": "openchamber.settingsShortcutTarget == settings && !inQuickOpen"
+      },
+      {
+        "command": "openchamber.addLineComment",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
+        "when": "editorTextFocus"
       }
     ],
     "menus": {
@@ -224,6 +230,12 @@
       "editor/context": [
         {
           "submenu": "openchamber.submenu",
+          "group": "navigation"
+        }
+      ],
+      "editor/lineNumber/context": [
+        {
+          "command": "openchamber.addLineComment",
           "group": "navigation"
         }
       ],
@@ -291,6 +303,20 @@
           "default": "",
           "scope": "machine-overridable",
           "description": "%configuration.opencodeBinary.description%"
+        },
+        "openchamber.lineCommentPlacement": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "chat"
+          ],
+          "enumDescriptions": [
+            "%configuration.lineCommentPlacement.editor%",
+            "%configuration.lineCommentPlacement.chat%"
+          ],
+          "default": "editor",
+          "scope": "window",
+          "description": "%configuration.lineCommentPlacement.description%"
         }
       }
     }

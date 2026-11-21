@@ -12,7 +12,7 @@ const temporaryQuotaDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'openc
 process.env.OPENCHAMBER_DATA_DIR = temporaryQuotaDataDirectory;
 // Credentials come from the running OpenCode; serve a fixed list so the
 // providers treat themselves as configured and go straight to fetch.
-const key = (integrationID: string): CredentialEntry => ({ id: `cred_${integrationID}`, integrationID, label: 'default', active: true, value: { type: 'key', key: 'test-token' } });
+const key = (integrationID: string, label = 'default'): CredentialEntry => ({ id: `cred_${integrationID}`, integrationID, label, active: true, value: { type: 'key', key: 'test-token' } });
 const oauth = (integrationID: string, metadata?: { enterpriseUrl?: string }): CredentialEntry => ({
   id: `cred_${integrationID}`,
   integrationID,
@@ -211,6 +211,18 @@ describe('OpenCode Go quota provider (VS Code parity)', () => {
       assert.equal(result.ok, true);
       assert.equal(new Headers(request?.headers).get('Authorization'), 'Bearer test-token');
       assert.equal(result.usage!.windows['5h']!.usedPercent, 25);
+      // The label the credential carries in OpenCode names the account the meters belong to.
+      assert.equal(result.accountLabel, 'default');
+    });
+
+    test("names the account from the credential's label", async () => {
+      configureOpenCodeCredentials({ list: async () => [key('opencode-go', 'outlook')] });
+      stubFetchReturning(async () => mockResponse({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } }));
+
+      const result = await fetchQuotaForProvider('opencode-go');
+
+      assert.equal(result.ok, true);
+      assert.equal(result.accountLabel, 'outlook');
     });
 
     test('reports an absent subscription on a 403', async () => {
@@ -328,6 +340,8 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
     assert.equal(result.usage!.windows.monthly!.usedPercent, 50);
     assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$12.34');
     assert.equal(result.usage!.windows.credits_balance!.usedPercent, null);
+    // The label the credential carries in OpenCode names the account the meters belong to.
+    assert.equal(result.accountLabel, 'default');
   });
 
   test('accepts a wrk_ workspace id from the Console sign-in', async () => {
@@ -1865,6 +1879,134 @@ describe('Claude quota provider (VS Code parity)', () => {
     } finally {
       configureOpenCodeCredentials({ list: async () => baseCredentialList() });
     }
+  });
+});
+
+// Settles only when the request's deadline fires. Node 18 (VS Code 1.85) rejects with a generic
+// AbortError rather than the signal's TimeoutError reason, so the stubs do the same.
+const untilAborted = (signal?: AbortSignal | null) => new Promise<never>((_resolve, reject) => {
+  signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+});
+
+// Headers arrive, then the body never does.
+const stalledBody = (status: number, signal?: AbortSignal | null) => ({
+  ok: status === 200,
+  status,
+  headers: new Headers(),
+  json: () => untilAborted(signal),
+});
+
+describe('Claude and Codex usage requests (VS Code parity)', () => {
+  const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+  const requestedTimeouts: number[] = [];
+
+  beforeEach(() => {
+    requestedTimeouts.length = 0;
+    AbortSignal.timeout = (milliseconds: number) => {
+      requestedTimeouts.push(milliseconds);
+      return realTimeout(5);
+    };
+    // A usage endpoint that never answers: the request settles only when its signal aborts.
+    stubFetchReturning((_url, init) => new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) return;
+      signal.addEventListener('abort', () => reject(signal.reason));
+    }));
+  });
+
+  afterEach(() => {
+    AbortSignal.timeout = realTimeout;
+    configureOpenCodeCredentials({ list: async () => baseCredentialList() });
+  });
+
+  for (const providerId of ['claude', 'codex']) {
+    test(`gives up on a ${providerId} usage request that is never answered`, async () => {
+      // A Claude credential of its own, so an earlier test's rate-limit cooldown does not answer instead.
+      configureOpenCodeCredentials({
+        list: async () => [
+          ...baseCredentialList().filter((entry) => entry.integrationID !== 'anthropic'),
+          { ...oauth('anthropic'), value: { type: 'oauth', methodID: 'test', access: 'timeout-token', refresh: 'timeout-refresh', expires: 0 } },
+        ],
+      });
+
+      const result = await fetchQuotaForProvider(providerId);
+
+      assert.deepEqual(requestedTimeouts, [15_000]);
+      assert.equal(result.ok, false);
+      assert.equal(result.error, 'Request timed out');
+    });
+
+    test(`reports a ${providerId} body that stalls after headers as a timeout on Node 18`, async () => {
+      configureOpenCodeCredentials({
+        list: async () => [
+          ...baseCredentialList().filter((entry) => entry.integrationID !== 'anthropic'),
+          { ...oauth('anthropic'), value: { type: 'oauth', methodID: 'test', access: 'stall-token', refresh: 'stall-refresh', expires: 0 } },
+        ],
+      });
+      stubFetchReturning(async (_url, init) => stalledBody(200, init?.signal));
+
+      const result = await fetchQuotaForProvider(providerId);
+
+      assert.equal(result.ok, false);
+      assert.equal(result.error, 'Request timed out');
+    });
+  }
+
+  describe('Codex sign-in refused by access enforcement', () => {
+    const REFUSED = { error: { type: 'rejected_by_access_enforcement', code: 'no_matching_rule' } };
+    let codexHome: string;
+
+    beforeEach(() => {
+      codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-'));
+      process.env.CODEX_HOME = codexHome;
+      fs.writeFileSync(
+        path.join(codexHome, 'auth.json'),
+        JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'cli-token', refresh_token: 'cli-refresh', account_id: 'acct_cli' } }),
+      );
+    });
+
+    afterEach(() => {
+      delete process.env.CODEX_HOME;
+      fs.rmSync(codexHome, { recursive: true, force: true });
+    });
+
+    test('reports a 401 whose body never arrives as a timeout, not an expired session', async () => {
+      stubFetchReturning(async (_url, init) => stalledBody(401, init?.signal));
+
+      const result = await fetchQuotaForProvider('codex');
+
+      assert.equal(result.error, 'Request timed out');
+    });
+
+    for (const [when, stall] of [
+      ['before headers', (signal?: AbortSignal | null) => untilAborted(signal)],
+      ['after headers', (signal?: AbortSignal | null) => Promise.resolve(stalledBody(200, signal))],
+    ] as const) {
+      test(`reports a CLI request that stalls ${when} as a timeout`, async () => {
+        stubFetchReturning(async (_url, init) => new Headers(init?.headers).get('authorization') === 'Bearer cli-token'
+          ? stall(init?.signal)
+          : Response.json(REFUSED, { status: 401 }));
+
+        const result = await fetchQuotaForProvider('codex');
+
+        assert.equal(result.error, 'Request timed out');
+      });
+    }
+
+    test('keeps the usage-page guidance when the CLI account ID is not a valid header', async () => {
+      fs.writeFileSync(
+        path.join(codexHome, 'auth.json'),
+        JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'cli-token', refresh_token: 'cli-refresh', account_id: 'acct\nbad' } }),
+      );
+      stubFetchReturning(async (_url, init) => {
+        const headers = new Headers(init?.headers);
+        return Response.json(REFUSED, { status: headers.get('authorization') === 'Bearer cli-token' ? 403 : 401 });
+      });
+
+      const result = await fetchQuotaForProvider('codex');
+
+      assert.match(result.error ?? '', /chatgpt\.com\/settings\/usage/);
+    });
   });
 });
 

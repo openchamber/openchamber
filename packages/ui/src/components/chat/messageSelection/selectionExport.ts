@@ -18,9 +18,9 @@ export const pickSelectedUnits = (records: ChatMessageEntry[], keys: ReadonlySet
 
 type ImageRenderOptions = { syntaxStyle: string | null; width: number; theme: Theme | undefined };
 
-const renderMarkdown = async (text: string, options: ImageRenderOptions): Promise<HTMLElement> => {
+const renderMarkdown = async (text: string, options: ImageRenderOptions, prompt = false): Promise<HTMLElement> => {
     const { renderMarkdownForExport } = await import('../markdown/renderMarkdownForExport');
-    return renderMarkdownForExport(text, { ...options, purpose: 'image' });
+    return renderMarkdownForExport(text, { ...options, purpose: 'image', prompt });
 };
 
 const answerModelLabel = (unit: SelectableAnswer): string | null => {
@@ -38,7 +38,7 @@ const promptElement = async (text: string, options: ImageRenderOptions): Promise
     bubble.style.borderRadius = 'var(--radius-xl)';
     bubble.style.borderBottomRightRadius = 'var(--radius-sm)';
     if (useUIStore.getState().userMessageRenderingMode === 'markdown') {
-        bubble.appendChild(await renderMarkdown(text, options));
+        bubble.appendChild(await renderMarkdown(text, options, true));
     } else {
         bubble.classList.add('whitespace-pre-wrap', '[unicode-bidi:plaintext]', 'text-start');
         bubble.textContent = text;

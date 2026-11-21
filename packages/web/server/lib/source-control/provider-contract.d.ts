@@ -77,10 +77,10 @@ export interface ProviderDescriptor {
     instances: { multiple: boolean; allowLoopbackHttp: boolean; allowPort: boolean; reserved: readonly string[]; placeholder: string };
     cliTransport: boolean;
     token?: { scopes: readonly string[]; createPath?: string };
-    urls: { changeRequest: readonly string[]; issue: readonly string[]; discussion?: readonly string[]; commit?: readonly string[]; user?: readonly string[] };
+    urls: { changeRequest: readonly string[]; issue: readonly string[]; discussion?: readonly string[]; commit?: readonly string[]; user?: readonly string[]; resolve?: string };
     features: {
       referenceSearch: boolean; referenceDetail: boolean; listStatuses: boolean; referencesAcross: boolean;
-      startThread: boolean; authorCanReview: boolean; projectUploads: boolean; issueCloseReason: boolean;
+      startThread: boolean; authorCanReview: boolean; projectUploads: boolean; absoluteProjectUploads?: boolean; issueCloseReason: boolean;
       reviewDrafts?: boolean; reviewDraftFileComments?: boolean;
       changeRequestTemplates: readonly string[];
       branchHeads?: boolean;
@@ -137,7 +137,7 @@ export interface PublicProviderDescriptor {
     token?: { scopes: string[]; createPath?: string };
   };
   settings: { fields: Array<{ id: string; kind: SettingsFieldKind; secret: boolean }> };
-  urls: { changeRequest: string[]; issue: string[]; discussion?: string[]; commit?: string[]; user?: string[] };
+  urls: { changeRequest: string[]; issue: string[]; discussion?: string[]; commit?: string[]; user?: string[]; resolve?: string };
   features: ProviderDescriptor['presentation']['features'] & {
     changeRequestPatch: boolean;
     reviewModel?: ReviewModel;

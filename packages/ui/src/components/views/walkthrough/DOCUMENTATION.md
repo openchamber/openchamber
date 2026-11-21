@@ -45,6 +45,12 @@ published pull request snapshots, comment origins and shared diff search.
 - Search parses patches only while needed by an open find bar. Layout changes
   rebuild matching, and a match in the uncovered tail opens it before scrolling
   because its viewers remain unmounted while collapsed.
+- Export is available only while the panel shows the walkthrough: not behind a
+  blocker or the generation stages, even when the store still holds a result. The header's download
+  menu folds into More at narrow widths, and the phone offers the same choices
+  in its options sheet. The chat's `saveFile` hands the file to the runtime's
+  download or share path. Dismissal stays silent; save errors show a toast and
+  there is no success toast, since a download cannot report completion.
 
 ## Decisions
 

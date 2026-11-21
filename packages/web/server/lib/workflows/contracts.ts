@@ -12,6 +12,7 @@ interface WorkflowAgentSessions {
   start: (input: {
     directory: string;
     parentSessionId: string;
+    forkFromSessionId?: string | null;
     title: string;
     agent?: string | undefined;
     model?: string | undefined;
@@ -27,6 +28,7 @@ interface WorkflowAgentSessions {
     usage: NonNullable<WorkflowAgent['usage']>;
   } | null>;
   createSession: (input: { directory: string; title: string }) => Promise<string>;
+  sessionGone: (input: { directory: string; sessionId: string; signal: AbortSignal }) => Promise<boolean>;
 }
 
 export type WorkflowText = Pick<string, 'length' | 'slice'>;
@@ -36,13 +38,15 @@ export interface WorkflowSchema {
 }
 
 interface AgentOptionsInput {
+  id?: unknown;
+  forkFrom?: unknown;
   label?: unknown;
   agent?: unknown;
   model?: unknown;
   schema?: unknown;
 }
 
-export type AgentOptions = Pick<WorkflowAgent, 'agent' | 'model'> & { label?: string; schema?: WorkflowSchema };
+export type AgentOptions = Pick<WorkflowAgent, 'agent' | 'model'> & { id?: string; forkFrom?: string; label?: string; schema?: WorkflowSchema };
 export type RunInput = { runId?: unknown };
 
 export interface WorkflowInput extends RunInput {
@@ -74,6 +78,7 @@ export interface Execution {
   completed: Map<string, WorkflowAgent>;
   consumed: Set<string>;
   occurrences: Map<string, number>;
+  named: Map<string, string | null>;
   stopReason: string | null;
   sandbox: ReturnType<typeof runWorkflowSandbox> | null;
 }

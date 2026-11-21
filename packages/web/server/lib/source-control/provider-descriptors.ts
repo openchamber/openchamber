@@ -126,6 +126,7 @@ export function publicProviderDescriptor(descriptor: ProviderDescriptor, order: 
       },
     },
   };
+  if (presentation.urls.resolve) published.urls.resolve = presentation.urls.resolve;
   if (legacyFlow) published.instances.legacyFlow = { instance: legacyFlow.instance, kind: legacyFlow.kind };
   if (cli?.tool) published.auth.cliName = cli.tool;
   if (cli?.kind === 'service') published.auth.login = { kind: cli.kind, hint: cli.hint };

@@ -99,6 +99,34 @@ test('keeps independent declarations and different same-name or nested targets',
   expect(JSON.parse(container.querySelector('textarea')?.value ?? '{}')).toEqual({ owner: 'project' });
 });
 
+test('a linked package and its real directory keep separate cards', async () => {
+  await act(async () => usePluginsStore.setState({
+    entries: [],
+    files: [
+      { id: 'real', kind: 'package', scope: 'project', fileName: 'real-package', absolutePath: '/project/.opencode/plugins/real-package', resolvedPath: '/project/.opencode/plugins/real-package' },
+      { id: 'alias', kind: 'package', scope: 'project', fileName: 'alias-package', absolutePath: '/project/.opencode/plugin/alias-package', resolvedPath: '/project/.opencode/plugins/real-package' },
+    ],
+    selectedId: null, draft: null, registryInfo: {},
+  }));
+  expect(container.querySelectorAll('[title="real-package"]')).toHaveLength(1);
+  expect(container.querySelectorAll('[title="alias-package"]')).toHaveLength(1);
+});
+
+test('a declaration of the real directory leaves the linked alias its own card', async () => {
+  await act(async () => usePluginsStore.setState({
+    entries: [
+      { id: 'declared', kind: 'config', scope: 'project', parsedKind: 'path', spec: './plugins/real-package', sourcePath: '/project/.opencode/opencode.json', resolvedPath: '/project/.opencode/plugins/real-package', policyResource: 'plugin:/project/.opencode/plugins/real-package' },
+    ],
+    files: [
+      { id: 'real', kind: 'package', scope: 'project', fileName: 'real-package', absolutePath: '/project/.opencode/plugins/real-package', resolvedPath: '/project/.opencode/plugins/real-package', policyResource: 'plugin:/project/.opencode/plugins/real-package' },
+      { id: 'alias', kind: 'package', scope: 'project', fileName: 'alias-package', absolutePath: '/project/.opencode/plugin/alias-package', resolvedPath: '/project/.opencode/plugins/real-package', policyResource: 'plugin:/project/.opencode/plugin/alias-package' },
+    ],
+    selectedId: null, draft: null, registryInfo: {},
+  }));
+  expect(container.querySelectorAll('[title="real-package"]')).toHaveLength(1);
+  expect(container.querySelectorAll('[title="alias-package"]')).toHaveLength(1);
+});
+
 test('a declared local file keeps its editor and file delete action', async () => {
   const deleted: unknown[] = [];
   await act(async () => {

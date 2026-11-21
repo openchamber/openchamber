@@ -44,15 +44,20 @@ import {
   type HeaderFieldErrors,
   type ModelFieldErrors,
 } from './custom-provider-form';
+import { CanonicalProviderPicker } from './CanonicalProviderPicker';
 import { CustomProviderModelDiscovery } from './CustomProviderModelDiscovery';
+import type { ConnectableProvider } from './connectableProviders';
 import { CustomProviderModelRow, type ModelCapabilityList, type ModelTextField } from './CustomProviderModelRow';
 
 const hasClientCertificate = (form: CustomProviderFormState | undefined): boolean => (
   Boolean(form?.tls && (form.tls.cert.trim() || form.tls.key.trim() || form.tls.passphrase.trim()))
 );
 
+export type CatalogProviders = ConnectableProvider[] | 'loading' | 'failed';
+
 type CustomProviderFormProps = {
   existingProviderIDs: ReadonlySet<string>;
+  catalogProviders: CatalogProviders;
   disabledProviders?: readonly string[];
   busy?: boolean;
   mode?: 'create' | 'edit';
@@ -66,6 +71,7 @@ type CustomProviderFormProps = {
 
 export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
   existingProviderIDs,
+  catalogProviders,
   disabledProviders = [],
   busy = false,
   mode = 'create',
@@ -123,6 +129,20 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
     setCertificateOpen(hasClientCertificate(initialValues));
     setDiscoveredModels(null);
   }, [initialValues, isEdit]);
+
+  const inheritedCanonical = form.inheritedCanonical;
+  const editedProviderID = form.providerID.trim();
+  const canonicalOptions = React.useMemo(() => {
+    const listed = Array.isArray(catalogProviders) ? catalogProviders.filter((provider) => provider.id !== editedProviderID) : [];
+    const saved = form.canonical;
+    return saved && !listed.some((provider) => provider.id === saved) ? [{ id: saved, name: saved }, ...listed] : listed;
+  }, [catalogProviders, editedProviderID, form.canonical]);
+  const canonicalNote = inheritedCanonical
+    ? t('settings.providers.page.custom.field.canonical.inherited', {
+      provider: (Array.isArray(catalogProviders) && catalogProviders.find((provider) => provider.id === inheritedCanonical.provider)?.name) || inheritedCanonical.provider,
+      path: inheritedCanonical.path,
+    })
+    : catalogProviders === 'failed' ? t('settings.providers.page.custom.field.canonical.unavailable') : undefined;
 
   const setField = (key: keyof Pick<CustomProviderFormState, 'providerID' | 'name' | 'baseURL' | 'apiKey'>, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -219,7 +239,8 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
         if (rowIndex !== index) return model;
         const values = model[target];
         const next = values.includes(capability) ? values.filter((value) => value !== capability) : [...values, capability];
-        return { ...model, [target]: next, capabilitiesKnown: true, metadataSource: 'manual' };
+        const field = target === 'inputCapabilities' ? 'input' : 'output';
+        return { ...model, [target]: next, capabilitiesKnown: { ...model.capabilitiesKnown, [field]: true }, metadataSource: 'manual' };
       }),
     }));
   };
@@ -434,6 +455,24 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
         title={t('settings.providers.page.custom.models.title')}
         contentClassName={SETTINGS_FIELDS_STACK_CLASS}
       >
+        <SettingsStackedField
+          label={t('settings.providers.page.custom.field.canonical.label')}
+          info={t('settings.providers.page.custom.field.canonical.info')}
+          description={canonicalNote}
+          descriptionPlacement="after"
+        >
+          <CanonicalProviderPicker
+            value={form.canonical ?? ''}
+            providers={canonicalOptions}
+            loading={catalogProviders === 'loading'}
+            disabled={busy}
+            onSelect={(value) => setForm((prev) => ({
+              ...prev,
+              canonical: value || (prev.canonical === null ? null : ''),
+            }))}
+          />
+        </SettingsStackedField>
+
         <div className={`${SETTINGS_CONTROL_CLUSTER_CLASS} space-y-2`}>
           <div className="flex items-center gap-1.5">
             <Button
@@ -474,7 +513,7 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
               onToggleCapability={(target, capability) => toggleCapability(index, target, capability)}
               onToolsChange={(tools) => setForm((previous) => ({
                 ...previous,
-                models: previous.models.map((entry, rowIndex) => rowIndex === index ? { ...entry, tools, capabilitiesKnown: true, metadataSource: 'manual' } : entry),
+                models: previous.models.map((entry, rowIndex) => rowIndex === index ? { ...entry, tools, capabilitiesKnown: { ...entry.capabilitiesKnown, tools: true }, metadataSource: 'manual' } : entry),
               }))}
               onImageGenerationChange={(imageGeneration) => setForm((previous) => ({
                 ...previous,

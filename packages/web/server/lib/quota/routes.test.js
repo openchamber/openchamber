@@ -15,14 +15,14 @@ const app = (providers) => {
 
 describe('quota routes with extension providers', () => {
   it('lists the extensions\' providers from memory, without the quota module or OpenCode', async () => {
-    attachExtensionQuotaProvider({ providerId: 'ext-teapot-usage', providerName: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage' });
+    attachExtensionQuotaProvider({ providerId: 'ext-teapot-usage', providerName: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage', providers: ['teapot'] });
     try {
       const server = express();
       const getQuotaProviders = vi.fn(async () => { throw new Error('OpenCode is not connected yet'); });
       registerQuotaRoutes(server, { getQuotaProviders });
       const response = await request(server).get('/api/quota/extensions');
       expect(response.status).toBe(200);
-      expect(response.body).toEqual({ extensions: [{ id: 'ext-teapot-usage', name: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage' }] });
+      expect(response.body).toEqual({ extensions: [{ id: 'ext-teapot-usage', name: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage', providers: ['teapot'] }] });
       expect(getQuotaProviders).not.toHaveBeenCalled();
     } finally {
       detachExtensionQuotaProvider('ext-teapot-usage');

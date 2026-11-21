@@ -376,6 +376,17 @@ describe('provider entity', () => {
       disabled: true,
     });
   });
+
+  it('loads MIME-typed modalities as their categories', () => {
+    expect(toProviderEntity({
+      models: {
+        m: { modalities: { input: ['text', 'image/jpeg', 'image/png'], output: ['text'] } },
+      },
+    }).models.m.capabilities).toEqual({ tools: true, input: ['text', 'image'], output: ['text'] });
+    expect(toProviderEntity({
+      models: { m: { capabilities: { input: ['embedding'], output: [] } } },
+    }).models.m.capabilities).toEqual({ input: ['embedding'], output: [] });
+  });
 });
 
 describe('plugin entity', () => {

@@ -27,8 +27,7 @@ HTTP and WebSocket consumers. `../ui-auth` owns credentials and session cookies;
   LAN address is invisible inside a container. An invalid value is ignored.
 - Bind helpers receive strings already resolved by server startup or the CLI.
   HTTP headers and the stored `publicOrigin` retain string validation at use.
-- Origin decisions return either a boolean immediately or a promise when
-  reading settings. Upgrade consumers must support both forms.
+- Origin decisions always return a promise, including the packaged-origin and same-host fast paths, and `RequestOriginChecker` says so. A consumer awaits the decision; reading the return value directly would treat a pending lookup as allowed, which is the regression the contract exists to prevent; the `openchamber/origin-check-awaited` lint rule rejects an unawaited check in a condition. Malformed headers reject the promise instead of throwing.
 - Forwarded-host and host arrays use their first entry. Empty arrays still fail
   instead of becoming an absent header. Malformed cookie escapes return their
   raw value.

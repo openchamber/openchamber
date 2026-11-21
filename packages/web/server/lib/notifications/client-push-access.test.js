@@ -73,7 +73,7 @@ describe('client push access', () => {
       }),
       PUSH_SUBSCRIPTIONS_FILE_PATH: path.join(dir, 'push-subscriptions.json'),
       readSettingsFromDiskMigrated: async () => ({}),
-      writeSettingsToDisk: async () => {},
+      updateSettingsFromDisk: async (mutate) => mutate({}),
       getInvalidSessionKeys,
     });
     access = createClientPushAccess({

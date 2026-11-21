@@ -17,6 +17,7 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { collectLocalFileDiagnostics, collectSshBufferDiagnostics } from '@openchamber/web/server/lib/diagnostics/local-files.js';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { persistMainWindowState } from './window-state.mjs';
+import { createWindowGeometryState } from './window-geometry-state.mjs';
 import { attachWindowEvents, isNativeWindowVisible } from './window-events.mjs';
 import { createTrayController, createTrayLocaleRouter } from './tray.mjs';
 import { buildDockMenuTemplate, buildUnreadJumpList, isJumpListSessionId } from './dock-menu.mjs';
@@ -324,8 +325,6 @@ const state = {
   quakeNormalBounds: null,
   quakeNormalMaximized: false,
   focusedWindowIds: new Set(),
-  windowGeometryRevisions: new Map(),
-  windowGeometryTimers: new Map(),
   miniChatWindowsBySession: new Map(),
   sshStatuses: new Map(),
   sshLogs: new Map(),
@@ -809,33 +808,9 @@ const writeWindowState = async (browserWindow) => {
   });
 };
 
+const windowGeometryState = createWindowGeometryState({ persist: writeWindowState });
 const debounceWindowStatePersist = (browserWindow, immediate = false) => {
-  if (!browserWindow || browserWindow.isDestroyed()) return;
-  const key = String(browserWindow.id);
-  const revision = (state.windowGeometryRevisions.get(key) || 0) + 1;
-  state.windowGeometryRevisions.set(key, revision);
-
-  const existingTimer = state.windowGeometryTimers.get(key);
-  if (existingTimer) {
-    clearTimeout(existingTimer);
-    state.windowGeometryTimers.delete(key);
-  }
-
-  const persist = async () => {
-    if (state.windowGeometryRevisions.get(key) !== revision) return;
-    state.windowGeometryTimers.delete(key);
-    await writeWindowState(browserWindow);
-  };
-
-  if (immediate) {
-    void persist();
-    return;
-  }
-
-  const timer = setTimeout(() => {
-    void persist();
-  }, 300);
-  state.windowGeometryTimers.set(key, timer);
+  windowGeometryState.schedule(browserWindow, immediate);
 };
 
 const buildHealthUrl = (url) => {
@@ -2501,6 +2476,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
     debounceWindowStatePersist(browserWindow, true);
   });
   browserWindow.on('closed', () => {
+    windowGeometryState.cancel(browserWindow);
     state.focusedWindowIds.delete(browserWindow.id);
     if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
       mainWindowTrayActionsReady = false;

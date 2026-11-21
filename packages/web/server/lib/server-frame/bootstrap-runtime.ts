@@ -93,7 +93,7 @@ export const createBootstrapRuntime = (dependencies: BootstrapDependencies) => {
       ensureGlobalWatcherStarted,
       getOrCreateVapidKeys,
       getUiSessionTokenFromRequest,
-      writeSettingsToDisk,
+      updateSettingsFromDisk,
       addOrUpdatePushSubscription,
       removePushSubscription,
       addOrUpdateApnsToken,
@@ -165,7 +165,7 @@ export const createBootstrapRuntime = (dependencies: BootstrapDependencies) => {
     });
     notificationEmitRoutes.registerPluginRoute();
 
-    registerAuthAndAccessRoutes(app, {
+    const { requireApiAuth } = registerAuthAndAccessRoutes(app, {
       express,
       tunnelAuthController,
       uiAuthController,
@@ -182,7 +182,7 @@ export const createBootstrapRuntime = (dependencies: BootstrapDependencies) => {
       normalizeTunnelSessionTtlMs,
     });
 
-    notificationEmitRoutes.registerApiRoute();
+    notificationEmitRoutes.registerApiRoute(requireApiAuth);
 
     registerTtsRoutes(app, { sayTTSCapability });
 
@@ -192,8 +192,7 @@ export const createBootstrapRuntime = (dependencies: BootstrapDependencies) => {
       ensureGlobalWatcherStarted,
       getOrCreateVapidKeys,
       getUiSessionTokenFromRequest,
-      readSettingsFromDiskMigrated,
-      writeSettingsToDisk,
+      updateSettingsFromDisk,
       addOrUpdatePushSubscription,
       removePushSubscription,
       addOrUpdateApnsToken,

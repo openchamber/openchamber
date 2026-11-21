@@ -465,8 +465,8 @@ describe("lifecycle", () => {
     expect(state.seen.size).toBe(100)
     expect(state.outcomes.size).toBe(100)
     expect(state.dispositions.size).toBe(100)
-    expect(state.seen.has("frm_0")).toBe(false)
-    expect(state.outcomes.has("frm_0")).toBe(false)
+    expect(state.seen.has("ses_ask\u0000frm_0")).toBe(false)
+    expect(state.outcomes.has("ses_ask\u0000frm_0")).toBe(false)
     expect(state.dispositions.has("msg_0\u0000tool_0")).toBe(false)
 
     applyRecoverableQuestionEvents("/repo", [{ type: "session.deleted", properties: { sessionID: "ses_ask" } }])
@@ -497,7 +497,7 @@ describe("lifecycle", () => {
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toHaveLength(1)
     noteLocalFormCancelled("ses_ask", "frm_1")
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toEqual([])
-    expect(useRecoverableQuestionsStore.getState().outcomes.get("frm_1")).toBe("dismissed")
+    expect(useRecoverableQuestionsStore.getState().outcomes.get("ses_ask\u0000frm_1")).toBe("dismissed")
   })
 
   test("a session deletion drops its questions", () => {
@@ -543,20 +543,20 @@ describe("answer submissions", () => {
       sends += 1
       noteLocalFormReplied("ses_ask", "frm_1")
     }
-    await submitRecoveredAnswer("frm_1", send)
-    await submitRecoveredAnswer("frm_1", send)
+    await submitRecoveredAnswer("ses_ask", "frm_1", send)
+    await submitRecoveredAnswer("ses_ask", "frm_1", send)
     expect(sends).toBe(1)
   })
 
   test("an old runtime's completion cannot release a new runtime's lock", async () => {
     let releaseOld = () => {}
     let releaseNew = () => {}
-    const old = submitRecoveredAnswer("frm_1", () => new Promise<void>((resolve) => { releaseOld = resolve }))
+    const old = submitRecoveredAnswer("ses_ask", "frm_1", () => new Promise<void>((resolve) => { releaseOld = resolve }))
     resetRecoverableQuestions()
-    const current = submitRecoveredAnswer("frm_1", () => new Promise<void>((resolve) => { releaseNew = resolve }))
+    const current = submitRecoveredAnswer("ses_ask", "frm_1", () => new Promise<void>((resolve) => { releaseNew = resolve }))
     releaseOld()
     await old
-    expect(useRecoverableQuestionsStore.getState().submissions.get("frm_1")).toBe(current)
+    expect(useRecoverableQuestionsStore.getState().submissions.get("ses_ask\u0000frm_1")).toBe(current)
     releaseNew()
     await current
     expect(useRecoverableQuestionsStore.getState().submissions.size).toBe(0)
@@ -572,14 +572,14 @@ describe("answer submissions", () => {
       sends += 1
       await gate
     }
-    const first = submitRecoveredAnswer("frm_1", send)
-    const second = submitRecoveredAnswer("frm_1", send)
+    const first = submitRecoveredAnswer("ses_ask", "frm_1", send)
+    const second = submitRecoveredAnswer("ses_ask", "frm_1", send)
     expect(sends).toBe(1)
     release()
     await Promise.all([first, second])
     expect(sends).toBe(1)
     // The lock is released afterwards: a later retry can send again.
-    await submitRecoveredAnswer("frm_1", async () => {
+    await submitRecoveredAnswer("ses_ask", "frm_1", async () => {
       sends += 1
     })
     expect(sends).toBe(2)
@@ -587,11 +587,11 @@ describe("answer submissions", () => {
 
   test("a rejected send keeps the question recoverable", async () => {
     applyRecoverableQuestionEvents("/repo", [formCreated(questionForm("frm_1"))])
-    await expect(submitRecoveredAnswer("frm_1", async () => {
+    await expect(submitRecoveredAnswer("ses_ask", "frm_1", async () => {
       throw new Error("send failed")
     })).rejects.toThrow("send failed")
     // No tombstone: the card and its draft stay for a retry.
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_1")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("ses_ask\u0000frm_1")).toBe(false)
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toHaveLength(1)
   })
 })
@@ -746,9 +746,9 @@ describe("a question deferred on send (#5391)", () => {
     // Evicted: the loaded window no longer holds the answer.
     noteDeferredAnswersLoaded({})
     expect(cards()).toBe(0)
-    expect(useRecoverableQuestionsStore.getState().outcomes.get("frm_1")).toBe("answered")
+    expect(useRecoverableQuestionsStore.getState().outcomes.get("ses_ask\u0000frm_1")).toBe("answered")
     let sends = 0
-    await submitRecoveredAnswer("frm_1", async () => { sends += 1 })
+    await submitRecoveredAnswer("ses_ask", "frm_1", async () => { sends += 1 })
     expect(sends).toBe(0)
   })
 
@@ -758,6 +758,54 @@ describe("a question deferred on send (#5391)", () => {
     noteLocalFormReplied("ses_other", "frm_1")
     noteLocalFormCancelled("ses_other", "frm_1")
     expect(deriveRecoveredQuestions(viewWith(deferredPart()), recoveryView(), allSessions)).toHaveLength(1)
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_1")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("ses_ask\u0000frm_1")).toBe(false)
+  })
+})
+
+describe("the same form id in two sessions", () => {
+  const askIn = (sessionID: string): FormRequest => ({
+    ...questionForm("frm_same", sessionID),
+    metadata: { kind: "question", tool: { messageID: `msg_${sessionID}`, id: `tool_${sessionID}` } },
+  })
+  const deadAsk = (sessionID: string): ToolPart => ({ ...turnDeathPart(), id: `tool_${sessionID}`, sessionID, messageID: `msg_${sessionID}` })
+  const bothDead: RecoverableQuestionStoreView = { form: {}, part: { msg_ses_a: [deadAsk("ses_a")], msg_ses_b: [deadAsk("ses_b")] } }
+  const both = new Set(["ses_a", "ses_b"])
+  const recoveredSessions = () => deriveRecoveredQuestions(bothDead, recoveryView(), both).map((entry) => [entry.sessionID, entry.directory])
+
+  beforeEach(() => {
+    noteQuestionFormSnapshot("/repo-a", [askIn("ses_a")])
+    noteQuestionFormSnapshot("/repo-b", [askIn("ses_b")])
+  })
+
+  test("each session keeps its own recovered question", () => {
+    expect(recoveredSessions()).toEqual([["ses_a", "/repo-a"], ["ses_b", "/repo-b"]])
+  })
+
+  test("answering, dismissing or deleting one leaves the other", () => {
+    noteLocalFormReplied("ses_a", "frm_same")
+    expect(recoveredSessions()).toEqual([["ses_b", "/repo-b"]])
+    resetRecoverableQuestions()
+    noteQuestionFormSnapshot("/repo-a", [askIn("ses_a")])
+    noteQuestionFormSnapshot("/repo-b", [askIn("ses_b")])
+    noteLocalFormCancelled("ses_b", "frm_same")
+    expect(recoveredSessions()).toEqual([["ses_a", "/repo-a"]])
+    resetRecoverableQuestions()
+    noteQuestionFormSnapshot("/repo-a", [askIn("ses_a")])
+    noteQuestionFormSnapshot("/repo-b", [askIn("ses_b")])
+    applyRecoverableQuestionEvents("/repo-a", [{ type: "session.deleted", properties: { sessionID: "ses_a" } }])
+    expect(recoveredSessions()).toEqual([["ses_b", "/repo-b"]])
+  })
+
+  test("a send for one does not stand in for the other", async () => {
+    let sends = 0
+    const send = async () => {
+      sends += 1
+    }
+    await Promise.all([submitRecoveredAnswer("ses_a", "frm_same", send), submitRecoveredAnswer("ses_b", "frm_same", send)])
+    expect(sends).toBe(2)
+    noteLocalFormReplied("ses_a", "frm_same")
+    await submitRecoveredAnswer("ses_a", "frm_same", send)
+    await submitRecoveredAnswer("ses_b", "frm_same", send)
+    expect(sends).toBe(3)
   })
 })

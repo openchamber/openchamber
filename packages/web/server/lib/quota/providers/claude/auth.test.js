@@ -21,7 +21,7 @@ vi.mock('fs', () => {
 
 vi.mock('../../../opencode/auth.js', () => ({ readOpenCodeCredentials: async () => openCodeAuth() }));
 
-import { findClaudeCredential, loadClaudeCredential } from './auth.js';
+import { configureClaudeCredentialEnvironment, findClaudeCredential, loadClaudeCredential, readClaudeCredentialContext } from './auth.js';
 
 const claudeCodeBlob = (accessToken) => JSON.stringify({
   mcpOAuth: { 'linear|abc': { accessToken: 'unrelated-mcp-token' } },
@@ -48,13 +48,13 @@ beforeEach(() => {
   execFileSync.mockReset();
   execFileSync.mockImplementation(() => { throw new Error('no keychain entry'); });
   openCodeAuth.mockReturnValue({});
-  delete process.env.CLAUDE_CONFIG_DIR;
-  delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  vi.stubEnv('CLAUDE_CONFIG_DIR', undefined);
+  vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', undefined);
 });
 
 afterEach(() => {
-  delete process.env.CLAUDE_CONFIG_DIR;
-  delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  vi.unstubAllEnvs();
+  configureClaudeCredentialEnvironment(() => process.env);
 });
 
 const findLocal = () => findClaudeCredential(openCodeAuth());
@@ -87,6 +87,58 @@ describe('Claude credential discovery', () => {
     files.set(path.join(path.resolve('/tmp/claude-home'), '.credentials.json'), claudeCodeBlob('custom-dir-token'));
 
     expect(withPlatform('linux', findLocal).accessToken).toBe('custom-dir-token');
+  });
+
+  it('reads the custom home Keychain service, using the exact override string', () => {
+    // Verified with Claude Code 2.1.325: the trailing slash is part of the hash.
+    process.env.CLAUDE_CONFIG_DIR = '/custom/claude';
+    execFileSync.mockReturnValue(claudeCodeBlob('selected-token'));
+    expect(withPlatform('darwin', findLocal).accessToken).toBe('selected-token');
+    expect(execFileSync.mock.calls[0][1]).toEqual(['find-generic-password', '-s', 'Claude Code-credentials-7427f042', '-w']);
+
+    process.env.CLAUDE_CONFIG_DIR += '/';
+    withPlatform('darwin', findLocal);
+    expect(execFileSync.mock.calls[1][1][2]).toBe('Claude Code-credentials-801f8946');
+  });
+
+  it('uses the injected home live for both discovery paths and sanitizes reader failures', async () => {
+    let configDir = '/first';
+    configureClaudeCredentialEnvironment(() => ({ CLAUDE_CONFIG_DIR: configDir }));
+    files.set('/first/.credentials.json', claudeCodeBlob('first-token'));
+    files.set('/second/.credentials.json', claudeCodeBlob('second-token'));
+    expect(withPlatform('linux', findLocal).accessToken).toBe('first-token');
+    configDir = '/second';
+    expect((await loadClaudeCredential()).accessToken).toBe('second-token');
+    configureClaudeCredentialEnvironment(() => { throw new Error('private value'); });
+    expect(readClaudeCredentialContext()).toEqual({ configDir: null, error: 'Cannot read Claude usage environment settings.' });
+    expect(findLocal()).toBeNull();
+    expect(await loadClaudeCredential()).toBeNull();
+  });
+
+  it('uses the selected home file after an unreadable or malformed Keychain entry', () => {
+    process.env.CLAUDE_CONFIG_DIR = '/custom/claude';
+    files.set('/custom/claude/.credentials.json', claudeCodeBlob('selected-file'));
+    expect(withPlatform('darwin', findLocal).accessToken).toBe('selected-file');
+    execFileSync.mockReturnValue('{"mcpOAuth":{}}');
+    expect(withPlatform('darwin', findLocal).accessToken).toBe('selected-file');
+    files.clear();
+    expect(withPlatform('darwin', findLocal)).toBeNull();
+  });
+
+  it('never substitutes another account when an explicit home has no credential', async () => {
+    process.env.CLAUDE_CONFIG_DIR = '/missing/claude-home';
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'other-env-token';
+    openCodeAuth.mockReturnValue({ anthropic: { access: 'other-opencode-token' } });
+    execFileSync.mockImplementation((_command, args) => {
+      if (args[2] === 'Claude Code-credentials') return claudeCodeBlob('default-token');
+      throw new Error('missing selected entry');
+    });
+
+    expect(withPlatform('darwin', findLocal)).toBeNull();
+    openCodeAuth.mockClear();
+    expect(await loadClaudeCredential()).toBeNull();
+    expect(openCodeAuth).not.toHaveBeenCalled();
+    expect(execFileSync.mock.calls.every(([, args]) => args[2] !== 'Claude Code-credentials')).toBe(true);
   });
 
   it('falls back to the OpenCode auth entry when Claude Code is not signed in', () => {

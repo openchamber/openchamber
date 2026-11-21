@@ -47,8 +47,8 @@ typing; panels keep the standard 140/100ms. Text-field lists
 list itself, since they are fixed-position. The fade stays on the glass element itself, since an ancestor
 with opacity below 1 is a backdrop root and the blur would go flat mid-fade.
 Exit needs `AnimatePresence` around the conditional popup, so each dock keys
-its panel there (BTW keys each stage, forms key the form id); switching panels
-cross-fades. The frame's clearance cleanup leaves the variable alone while
+its panel there (BTW keys each stage, forms key the draft's identity: runtime,
+directory, session and form id); switching panels cross-fades. The frame's clearance cleanup leaves the variable alone while
 another panel is still mounted, because the outgoing panel unmounts after the
 incoming one has written its own height.
 
@@ -68,7 +68,23 @@ header toggles it by hand at any time: opened while reading, it stays open;
 collapsed while reading, it opens again at the end like an automatic
 collapse; collapsed at the end, it stays collapsed. The BTW sheet keeps
 the inline `FormCard` for its child session's forms; both render a field
-through `FormFieldControl`.
+through `FormFieldControl`. A caller can choose a form's id, so another
+session or directory can hold a form with the same id. The sheet stays
+mounted when the chat moves to another parent session, so it keys each card on
+runtime, directory, session and form id (`formCardKey`), and its live cards keep their
+answer under the dock's draft key (`keepDraft`): a card keyed on the id alone
+would carry the first fork's answers into the second fork's form, and a card
+keyed on the full identity without a draft would lose its own answer when the
+chat comes back to it. The card has no steps, so when it saves it leaves the
+step a dock stored for the same form as it is. A draft stays until its form is
+answered or cancelled on that surface, or until the form leaves the fork the
+sheet shows (settled on another page) without staying on as a recovered
+question: OpenCode can reuse an expired form's id, and a new form with the same
+fields would open with the old answer. A form settled while the sheet shows
+another fork, or is closed, keeps its draft until OpenCode creates a form with
+that id again: `sync-event-dispatch.ts` drops every draft of a `form.created`
+whose id is not pending in its session, so the new request starts empty, while
+a fork whose form is still pending gets its answer back.
 
 With Settings → Chat → Composer → Questions set to "In the chat"
 (`questionsInChat` in `useUIStore`, a device-local key), `ChatContainer`
@@ -85,7 +101,10 @@ unmounting and a switch back to the dock. A draft the dock left is taken with
 its link steps acknowledged, since the card shows every link at once. A card
 in a retained session that is shown again first takes up the draft another
 surface saved meanwhile: a location-scoped form shows in every session of its
-directory. The choice applies only while the transcript is on screen and not
+directory. Each card's block is keyed and named on session and form id
+(`formWaitingBlockId`), since a parent and its child can recover questions that
+share an id and the timeline remembers revealed blocks by that name; the dock's
+line and a form's toast reveal the card by the same name. The choice applies only while the transcript is on screen and not
 in a chat pinned in the side panel (`resolveFormsInChat`); an empty or
 loading session, an expanded composer and a pinned chat show the dock as
 before.
@@ -115,11 +134,17 @@ it saves the shared draft when its own answers or its step change. Its draft
 key follows the form's id and session, not the form object, so a reconnect
 that hands it the same form again no longer saves over the card's answer or
 another dock's. A second dock whose step moves (Next or Back) still saves its
-own values over the shared draft. The panel is also keyed on the runtime:
-App and MobileApp remount on a runtime switch, VS Code and the desktop mini
-chat do not, and two runtimes can hold a form with the same id, session and directory, so a
-switch starts the panel over from the new runtime's draft instead of saving the
-old runtime's answers into it.
+own values over the shared draft. The panel is keyed on the whole draft
+identity (`dockKey`: runtime, directory, session and form id), because a form
+id alone does not name a form. Another session or directory can reuse an id,
+and a panel keyed on it stays mounted when the composer moves to that
+session: its answers and step carry over and Submit sends them to the second
+form. The runtime is in the key for the same reason: App and MobileApp remount
+on a runtime switch, VS Code and the desktop mini chat do not, and two
+runtimes can hold a form with the same id, session and directory, so a switch
+starts the panel over from the new runtime's draft instead of saving the old
+runtime's answers into it. The directory stays in the key, so a form on screen
+whose directory changes starts over as a different scope.
 The setting is device-local, not a
 synced preference: syncing it would need a server-side validator, and a phone
 and a desktop can reasonably want different answers. A chat pinned in the
@@ -175,7 +200,8 @@ shrinking after deletion.
 
 Recovered questions appear on both surfaces with a warning that Submit starts
 a new paid turn in the asking session. Dismissal is local; rejected sends keep
-the card and its answer draft. Eligibility belongs to `sync/recoverable-questions.ts`.
+the card and its answer draft. Eligibility belongs to `sync/recoverable-questions.ts`,
+which records each question by session and form id, not by form id alone.
 
 `formCardState.ts` decides what both surfaces show and send, mirroring
 OpenCode's `Form.validateAnswer`: fields are evaluated in declaration order,
@@ -642,6 +668,15 @@ card read the page and element text out of the prompt
 (`lib/browser/annotationPrompt.ts`); an annotation saved before keeps its
 comment in the prompt and shows it all the same, and editing it moves it out.
 
+### Why a composing draft is typed in its row, not a floating field
+
+The float above the composer — a glass pill with the attach button, Enter to
+save — was the chips design's field for a draft, and it left with the chips. A
+glass surface inside the composer's own glass box stacks two blurs, and a field
+that floats over the box needs the portal and the height cap the rows removed.
+A composing draft opens where every other draft is read and edited, its row, and
+the row's head states the file and line it anchors to.
+
 ## Invariants
 
 - Drag payload reads are guarded individually because a host can reject
@@ -717,6 +752,28 @@ comment in the prompt and shows it all the same, and editing it moves it out.
 - Context-row editing saves once after focus leaves the entire row. Its own
   controls retain focus, and a remount that returns focus inside the row cannot
   save it prematurely. Completion guards reject a later unmount blur.
+- A composing draft's row is the open one while `composing` is set, and only an
+  active surface opens it: a chat that is not on screen cannot take the keyboard.
+  The row's head names the file and line a field with no text cannot.
+- A composing draft owns its text: every keystroke reaches the store, so a
+  reload, session switch or surface swap loses nothing. When the store refuses a
+  write at its size bound, the field keeps the typed text, the storage-limit
+  toast says why, and finishing waits until that text is saved.
+- Finishing a composing draft clears `composing` and closes the row; Escape
+  removes the draft, and one finished with no text goes with its field. Every
+  other draft survives an empty edit.
+- A composing row is never folded behind "+N more" (`foldContextRows`); it takes
+  the last visible slot so its field stays mounted. When its row opens, the
+  field is scrolled into view once: the field focuses with `preventScroll`, and
+  a long quote can push it below the capped context list. Later scrolling is
+  the user's.
+- Arriving with a composing draft switches the layout to the chat, including out
+  of a run overview. The reveal belongs to the arrival, so the user can reopen a
+  run overview while the field is open, and a reload that restores an unfinished
+  composing draft leaves the view where it was. Arrival is counted per draft id
+  (`takeArrivedComposingDraft`), not by whether any draft is composing: a
+  restored unfinished composition stays composing, and the next comment filed
+  must still bring the chat forward.
 - Collapsed context text before a chip keeps its width until its cap; fractional
   shrinking would ellipsize a word that fits. Space runs at chip boundaries remain
   explicit so truncation cannot collapse them.
@@ -897,7 +954,10 @@ Office documents (docx, pptx, xlsx, odt, odp, ods) that arrive through
 Code's picker) follow the profile setting `documentAttachBehavior` (`ask` /
 `save` / `convert`, default `ask`). The other files of the same batch attach at
 once as before. `convert` sends the documents down the ordinary attachment
-path, where the store extracts their text (`sync/DOCUMENTATION.md`). `save`
+path, where the store extracts their text (`sync/DOCUMENTATION.md`). On the
+desktop a document the store cannot convert (over 10 MB, or unreadable) still
+attaches as its path note, and an info toast says the agent gets the path
+instead of text: refusing it would leave the agent nothing. `save`
 (shown as "Attach as is") writes the original bytes with
 `opencodeClient.writeOpenCodeTempFiles`, as a saved image is written, and
 links each as `[name](absolute path)`, with `<` and `>` in the name replaced by
@@ -1063,6 +1123,31 @@ DOM-only tests cannot verify these.
 `editor/` wraps CodeMirror. The document is a plain string: `getValue()` is
 exactly what gets sent, so nothing downstream serializes a rich document model
 back into a prompt.
+
+### Why word gestures share a script-aware boundary
+
+CodeMirror groups adjacent alphabetic characters into one word, so it treats
+`检查openchamber的配置` as a single run. The composer keeps CodeMirror's
+grouping and whitespace transitions and adds one stop: a word run never crosses
+between Han and Latin (`editor/wordBoundaries.ts`). Digits, underscores, kana and
+every other script are neutral and stay with the run around them, so `設定を確認`
+or `إصدار٢` group exactly as CodeMirror groups them. Neutral characters between
+Han and Latin go with the run on their left (`API2|中`, `中2|API`), so gestures
+from either direction stop at the same offset. A double-click drag compares the
+hit side as well as the offset, because one offset at that boundary is the edge
+of two words. A broader per-script split
+was rejected because it changed grouping in text with no Han/Latin boundary.
+Double-click selection, word movement and selection extension, and word
+deletion use the same rule.
+Single and triple clicks still use CodeMirror's selection rules.
+Chat and comment composers opt in when creating their editor. The source
+control preview reuses the editor for Markdown with CodeMirror's word rules.
+
+Word shortcuts use Ctrl, or Alt on macOS, plus CodeMirror's macOS Ctrl+Alt+H
+word delete. Left and right follow
+`textDirectionAt` to preserve visual direction. Word deletion keeps a single
+adjacent space with the word, joins lines only from the line edge, and deletes
+atomic chips whole.
 
 Attachment citations (`[name.png]`) and finished skill tokens (`$name` followed
 by whitespace) render in the editor as atomic replace widgets shaped like the
@@ -1622,8 +1707,15 @@ picker uses, and then draws as a chip where it stands: its number and title.
 - Only a paste that lands in the text reads a link, afresh each time, as the
   picker does; a large paste that goes as a file reads none. A link
   typed by hand stays text: typing passes through `/issues/1` on the way to
-  `/issues/12`, and a read per keystroke would attach the wrong item. A link
-  this composer has read before draws as its chip again wherever it reappears
+  `/issues/12`, and a read per keystroke would attach the wrong item. This
+  holds for an extension's review-portal address too (`urls.resolve`): only a
+  paste asks the extension to convert it, and only a change request comes
+  back as a chip, which opens that change request rather than the portal
+  address. A pasted link read again that now finds no item, or another one,
+  loses its earlier result, including the item a restored queued message
+  attached to it (unless another link in the text still names that item); a
+  failed read keeps it.
+  A link this composer has read before draws as its chip again wherever it reappears
   (typed or restored), with that read.
 - An item attached any other way (the issue, PR and tracker pickers, an
   extension's `attach`, a handed-over or restored item, a shared page) is its
@@ -1638,6 +1730,13 @@ picker uses, and then draws as a chip where it stands: its number and title.
   in Markdown mode through `MarkdownLink`, by the link's `href`). A link names
   an item whatever page of it opens (`isSameRepositoryItemLink`, the tracker's
   identifier), so a picker item whose link the user also typed draws there too.
+  A change request can also carry optional `sourceLinks` in its existing context
+  metadata. These original portal addresses take precedence over template
+  matching, so every address draws inline while the MR context stays deduplicated.
+  Sending and restoring a queued message preserve this association without
+  rewriting the user's text or adding source links to the model's context text.
+  History display makes no resolver request; older messages without the field
+  keep native-template matching.
   An item drawn inline leaves the message's preview strip; one the text does
   not link (messages sent before items were links in the text), or links only
   inside code, stays there. Both chips open the item in the Tracker
@@ -1647,6 +1746,12 @@ picker uses, and then draws as a chip where it stands: its number and title.
   network is read again as a linked item, as the Tracker does. Discussions stay
   text. A change request goes without its diff, the picker's default.
 - `/btw` and VS Code read no links, as they take no picker chips.
+
+### Why portal MR links stay with their context
+
+The canonical MR address cannot recover the portal addresses that named it.
+An optional source-link list on the existing MR context keeps that association
+through send and reload, without another resolver, cache or persisted store.
 
 ### Why every item is a chip in the text
 

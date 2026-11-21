@@ -27,7 +27,10 @@ mock.module('@/stores/useConfigStore', () => ({
     useConfigStore: Object.assign((select: (value: typeof state) => unknown) => select(state), { getState: () => state }),
 }));
 mock.module('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: false }) }));
-mock.module('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+mock.module('@/lib/i18n', () => ({
+    useI18n: () => ({ t: (key: string) => key }),
+    isRightToLeft: () => false,
+}));
 mock.module('@/hooks/useLocalTTS', () => ({ useLocalTTS: () => ({}) }));
 mock.module('@/lib/voice/browserVoiceService', () => ({ browserVoiceService: { waitForVoices: async () => [] } }));
 mock.module('@/stores/useSmallModelStore', () => ({ useSmallModelStore: () => ({}), selectSmallModelAvailability: () => false }));
@@ -62,7 +65,7 @@ mock.module('@capacitor/core', () => ({
         },
     }),
 }));
-mock.module('@/lib/platform', () => ({ getClientPlatform: () => 'android' }));
+mock.module('@/lib/platform', () => ({ getClientPlatform: () => 'android', isCapacitorApp: () => true }));
 
 const deferred = <T,>() => {
     let resolve!: (value: T) => void;

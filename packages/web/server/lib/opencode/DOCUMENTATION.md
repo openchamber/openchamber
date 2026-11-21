@@ -260,6 +260,27 @@ in that user's sessions. On the fallback path the same rules are merged into
 - `packages/web/server/lib/ui-auth/ui-auth.js`: UI session authentication runtime (outside OpenCode module).
 - `packages/web/server/lib/ui-auth/ui-passkeys.js`: UI passkey storage and WebAuthn registration/authentication helpers (outside OpenCode module).
 
+### Why unrecognized model modalities are kept
+
+Model discovery (`model-discovery.ts`), provider config projection
+(`config-v2.ts`) and the custom-provider validator (`providers.ts`) use
+`model-modalities.ts` to map MIME types to the categories the form edits:
+`text`, `image`, `audio`, `video`, and `pdf`. A MIME type maps by its top-level
+type, with `application/pdf` mapping to `pdf`. Entries keep their first-seen
+order without repeats.
+
+An entry that names no category, such as `application/json`, stays as written,
+the way OpenCode's own catalog keeps it, and an explicit empty list stays empty.
+Modern capability blocks leave missing fields unset for OpenCode to resolve.
+Dropping or defaulting either kind of reported list would
+change the capabilities a provider declared on an unrelated edit, or show an
+all-unknown list as Text and Image support. A save accepts such an entry only
+when the stored model already lists it in that field, so the form round-trips
+what it cannot edit and a request cannot add a new one. The form uses only
+editable categories in newly discovered or inherited lists. The save merges
+`tools`, `input`, and `output` individually, keeping stored values for any
+omitted fields. An unrecognized entry is written back exactly as stored.
+
 ### Why worktree discovery has a separate config reader
 
 Worktree placement must include ancestor configs above the repository and every checkout-local config. The Settings reader keeps its existing editable layers and write targets; broadening that reader would change unrelated configuration editing. The worktree reader shares `getFolderConfigPaths` with the other ancestor-aware readers and is used directly by both runtimes.
@@ -304,7 +325,9 @@ exists in OpenCode's store.
 - `readOpenCodeCredentials()`: each integration's active credential, keyed by
   integration id (the provider id for providers), in the legacy `auth.json`
   entry shape (`{ type: 'api', key }` /
-  `{ type: 'oauth', methodID, access, refresh, expires, accountId?, enterpriseUrl?, server?, orgID? }`).
+  `{ type: 'oauth', methodID, access, refresh, expires, accountId?, enterpriseUrl?, server?, orgID? }`),
+  plus the row's display `label` when OpenCode has one. OpenCode Go quota
+  results use it as `accountLabel`.
   The method ID identifies the login method for consumers that need to distinguish plugin credentials.
   The OAuth projection keeps only `server` and `orgID` from OpenCode Console
   credential metadata, so quota providers can identify a Console sign-in
@@ -374,10 +397,10 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
   avoiding that needs an upstream import route that takes explicit ids.
 
 ## Public exports (providers.js)
-- `getProviderSources(providerId, workingDirectory)`: Resolves which OpenCode config layers define a provider. The user layer is both global files: when `opencode.jsonc` sits beside `opencode.json`, OpenCode loads both and the `.jsonc` wins, so `user.path` is the file that holds the provider (the `.jsonc` when the entry lives there, else the primary file). `upsertProviderConfig` and `removeProviderConfig` with scope `user` edit that same file, so a provider defined only in `opencode.jsonc` gets Edit in Settings and is changed in place; a new provider still goes to the primary file. Saving such a provider also takes it off `disabled_providers` in the primary file, where `setProviderDisabled` records it.
+- `getProviderSources(providerId, workingDirectory)`: Resolves which OpenCode config layers define a provider. The user layer is both global files: when `opencode.jsonc` sits beside `opencode.json`, OpenCode loads both and the `.jsonc` wins, so `user.path` is the file that holds the provider (the `.jsonc` when the entry lives there, else the primary file). `upsertProviderConfig` and `removeProviderConfig` with scope `user` edit that same file, so a provider defined only in `opencode.jsonc` gets Edit in Settings and is changed in place; a new provider still goes to the primary file. Saving such a provider also takes it off `disabled_providers` in the primary file, where `setProviderDisabled` records it. `inheritedCanonical` is the `canonical` a layer under the one holding the entry sets, with that file's path (`readInheritedProviderCanonical`): OpenCode folds provider layers and has no way to unset `canonical` from a higher one, so the edit form says which provider still applies with None there. The VS Code bridge sends the same field.
 - `listProviderConfigs(workingDirectory)`: Every provider a config layer defines, projected into the canonical v2 `ProviderEntity` shape, with `legacy` marking entries still stored under the v1 `provider` key.
-- `upsertProviderConfig(providerId, config, workingDirectory, scope?, options?)`: Validates and writes a custom provider block into the user/project/custom config layer. The payload may use the v2 spelling (`package`, `settings.baseURL`, `headers`) or the v1 spelling (`npm`, `options.baseURL`); what lands on disk is always a v2 `providers` entry with `settings.baseURL`. AI SDK package names carry `aisdk:`; bundled `@opencode/ai/*` provider and model packages stay bare. The adapter may be OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages. Existing provider, option, and retained-model fields not managed by the form are preserved, as far as the v2 projection (`toProviderEntity`) carries them; it carries a model's `type`, so a model marked `image` by hand stays an image model after a form save. A model `type` in the payload (the form's image generation checkbox sends `image` or `chat`, and a loaded type such as `decision` as it was) is written without checking its value: OpenCode's set of types is open-ended. Omitted models, headers, and env credentials remain explicit removals. A model's `variants` (reasoning levels) are replaced when the payload carries the array, cleared when it carries an empty one, and kept when the key is absent. Updating an entry still stored under the legacy `provider` key rewrites it under `providers` in the same file, dropping the fields v2 accepts but ignores; unrelated legacy siblings are untouched. Does not store API keys. Requires `config.env` or `options.hasStoredAuth`. OpenCode 2 keeps credentials in its own store, so `PUT /api/provider` sets `hasStoredAuth` from the request's `hasCredential` (the form is about to store a key, or the edited provider keeps its credential) as well as a credential OpenCode already stores for the provider. The key itself goes through `integration.connect.key` after this write, because OpenCode registers a custom provider's key method only once the provider is in config. Edit flows must pass the provider's effective existing layer (`custom` > `project` > `user`) so updates do not create a global user override.
-- `validateCustomProviderConfig(providerId, config, options?)`: Structural validation for custom provider payloads (id format, the three supported AI SDK adapters and their bundled OpenCode Chat Completions, Responses and Anthropic counterparts, http(s) base URL, models, credentials via `env` or `hasStoredAuth`). Accepts both spellings and returns the normalized v2 value. An `aisdk:`-prefixed bundled package is refused.
+- `upsertProviderConfig(providerId, config, workingDirectory, scope?, options?)`: Validates and writes a custom provider block into the user/project/custom config layer. The payload may use the v2 spelling (`package`, `settings.baseURL`, `headers`) or the v1 spelling (`npm`, `options.baseURL`); what lands on disk is always a v2 `providers` entry with `settings.baseURL`. AI SDK package names carry `aisdk:`; bundled `@opencode/ai/*` provider and model packages stay bare. The adapter may be OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages. Existing provider, option, and retained-model fields not managed by the form are preserved, as far as the v2 projection (`toProviderEntity`) carries them; it carries a model's `type`, so a model marked `image` by hand stays an image model after a form save. A model `type` in the payload (the form's image generation checkbox sends `image` or `chat`, and a loaded type such as `decision` as it was) is written without checking its value: OpenCode's set of types is open-ended. Omitted models, headers, and env credentials remain explicit removals. A model's `variants` (reasoning levels) are replaced when the payload carries the array, cleared when it carries an empty one, and kept when the key is absent. The provider's `canonical` (the catalog provider OpenCode copies model defaults from) follows the client certificate's rule: a string replaces it, null removes it, absent keeps it, so a form that never read the stored entry cannot erase it; anything other than a provider ID without spaces is refused. Updating an entry still stored under the legacy `provider` key rewrites it under `providers` in the same file, dropping the fields v2 accepts but ignores; unrelated legacy siblings are untouched. Does not store API keys. Requires `config.env` or `options.hasStoredAuth`. OpenCode 2 keeps credentials in its own store, so `PUT /api/provider` sets `hasStoredAuth` from the request's `hasCredential` (the form is about to store a key, or the edited provider keeps its credential) as well as a credential OpenCode already stores for the provider. The key itself goes through `integration.connect.key` after this write, because OpenCode registers a custom provider's key method only once the provider is in config. Edit flows must pass the provider's effective existing layer (`custom` > `project` > `user`) so updates do not create a global user override.
+- `validateCustomProviderConfig(providerId, config, options?)`: Structural validation for custom provider payloads (id format, the three supported AI SDK adapters and their bundled OpenCode Chat Completions, Responses and Anthropic counterparts, http(s) base URL, models, credentials via `env` or `hasStoredAuth`). Accepts both spellings and returns the normalized v2 value. A model's `capabilities` keep only the fields the payload sets (`tools`, `input`, `output`), and `toProviderEntity` reads a stored block the same way: OpenCode fills a missing field from the canonical provider's model, so a default written in its place would replace what the model inherits. An `aisdk:`-prefixed bundled package is refused. With `options.layers`, a newly chosen `canonical` whose config entry in any layer sets `settings`, `headers` or `body` is refused (`canonicalSourceConnectionError`): OpenCode copies those into the provider before its own values, so a gateway's TLS certificate or auth header would reach this provider's endpoint. A canonical the provider already names in some layer stays accepted.
 - `mergeCustomProviderConfig(existingValue, normalizedConfig)`: The merge `upsertProviderConfig` writes: the stored entry, read through the v2 projection, under the validated form payload. Unmanaged provider and model fields stay; an empty `variants` list removes the levels; omitted headers and env are removals. `settings.tls` is the client certificate a gateway with mutual TLS asks for (OpenCode 2.3.0+): `cert` and `key` both or neither, usually `{file:path}` references that are stored, never read, here, and an optional `passphrase` kept byte for byte. `tls: null` removes it and an absent `tls` keeps it, because the edit form leaves it out while the stored entry is unknown (its read pending or failed), and a save then must not drop a certificate written by hand. The VS Code extension's `upsertProviderConfig` calls this function and `validateCustomProviderConfig` directly, so a change here changes what both runtimes write; run the extension's `opencodeConfig.providers.test.ts` too.
 - `removeProviderConfig(providerId, workingDirectory, scope?)`: Removes a provider block from the selected config layer.
 
@@ -781,7 +804,13 @@ directory up to the worktree root, so a definition in a parent directory of a
 monorepo package counts; a nested id (`team/reviewer`) maps onto the path.
 Only files in the v2 `plugins/` directory are editable through the plugins
 page; a package directory or a v1 `plugin/` file is listed as a package that
-OpenCode loads and OpenChamber does not touch.
+OpenCode loads and OpenChamber does not touch. A symlink is listed as the file
+or package it points at, the way OpenCode loads it. Broken links are skipped.
+A file already in a plugin directory is listed, read, saved, deleted and
+switched under its exact on-disk name, mixed case included
+(`isExistingPluginFileName` in `plugin-paths.ts`), because OpenCode loads any
+`.js` or `.ts` name there. Only a new file has to match the lowercase naming
+rule.
 
 The plugins page lists entries from every config file OpenCode takes plugins
 from: both global files (`opencode.json` and `opencode.jsonc`),

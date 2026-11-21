@@ -160,7 +160,7 @@ describe('custom provider config persistence (VS Code parity)', () => {
       modelID: 'm',
       name: 'M',
       limit: { context: 200_000, output: 32_000 },
-      capabilities: { tools: true, input: ['text', 'image'], output: ['text'] },
+      capabilities: { input: ['text', 'image'] },
       variants: [{ id: 'low' }, { id: 'high' }],
     });
 
@@ -321,6 +321,31 @@ describe('custom provider config persistence (VS Code parity)', () => {
       settings: { baseURL: 'https://proxy.example.com/v1' },
       models: { 'gpt-5': { modelID: 'gpt-5', name: 'GPT-5', compatibility } },
     });
+  });
+
+  test('the canonical provider a form chooses is written and cleared by null', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    const save = (canonical: string | null) => upsertProviderConfig('cc', {
+      name: 'Command Code',
+      canonical,
+      env: ['CC_KEY'],
+      settings: { baseURL: 'https://cc.example.com/v1' },
+      models: { 'anthropic/claude-sonnet-4.5': { name: 'Sonnet' } },
+    }, projectDir, 'project');
+
+    save('openrouter');
+    assert.equal(readJson(configPath).providers.cc.canonical, 'openrouter');
+    save(null);
+    assert.equal('canonical' in readJson(configPath).providers.cc, false);
+
+    // `cc` has its own base URL, so OpenCode would copy it into a provider that names `cc` as its source.
+    assert.throws(() => upsertProviderConfig('other', {
+      name: 'Other',
+      canonical: 'cc',
+      env: ['OTHER_KEY'],
+      settings: { baseURL: 'https://other.example.com/v1' },
+      models: { fast: { name: 'Fast' } },
+    }, projectDir, 'project'), /Provider "cc" sets its own connection settings/);
   });
 
   test('a form save keeps the type of a hand-marked image model', () => {

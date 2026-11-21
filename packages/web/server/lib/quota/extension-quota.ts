@@ -52,7 +52,13 @@ export const isQuotaGuest = (guest: GuestRecord | null | undefined): guest is Qu
 };
 
 export const pickCredentials = (auth: LegacyAuthFile, providerIds: string[]) => Object.fromEntries(
-  providerIds.filter((providerId) => Object.hasOwn(auth, providerId) && auth[providerId]).map((providerId) => [providerId, auth[providerId]]),
+  providerIds.flatMap((providerId) => {
+    if (!Object.hasOwn(auth, providerId)) return [];
+    const credential = auth[providerId];
+    if (!credential) return [];
+    const { label: _label, ...entry } = credential;
+    return [[providerId, entry] as const];
+  }),
 );
 
 const toWindow = (wire: WireWindow) => {
@@ -163,6 +169,7 @@ export function createExtensionQuotaProvider({
     providerName,
     icon: guest.icon,
     guestId: guest.id,
+    providers: [...providerIds],
     isConfigured: (auth: LegacyAuthFile) => providerIds.length === 0 || Object.keys(pickCredentials(auth, providerIds)).length > 0,
     fetchQuota,
   });

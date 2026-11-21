@@ -121,7 +121,8 @@ export const buildTrayMenuTemplate = (snapshot, { onAction, statusIcons, locale 
     const usageSubmenu = [];
     usageGroups.forEach((group, index) => {
       if (index > 0) usageSubmenu.push({ type: 'separator' });
-      usageSubmenu.push({ label: group.provider, enabled: false });
+      const account = typeof group.account === 'string' && group.account ? ` · ${truncate(group.account, 40)}` : '';
+      usageSubmenu.push({ label: `${group.provider}${account}`, enabled: false });
       if (group.status) {
         usageSubmenu.push({ label: `    ${truncate(group.status, 40)}`, enabled: false });
       }
@@ -171,6 +172,6 @@ export const trayMenuKey = (snapshot, locale = 'en') => {
     s: sessions.map((s) => `${s.id}|${s.title}|${s.status}|${s.unseen}|${s.hasError}|${s.subtitle}|${s.directory}`),
     a: approvals.map((a) => `${a.id}|${a.kind}|${a.sessionId}|${a.sessionTitle}|${a.label}|${a.directory}|${a.canSave ? 1 : 0}`),
     u: usage.mode || '',
-    g: groups.map((g) => `${g.provider}|${g.status}|${(Array.isArray(g.rows) ? g.rows : []).map((r) => `${r.label}|${r.value}`).join(',')}`),
+    g: groups.map((g) => `${g.provider}|${g.account ?? ''}|${g.status}|${(Array.isArray(g.rows) ? g.rows : []).map((r) => `${r.label}|${r.value}`).join(',')}`),
   });
 };

@@ -109,6 +109,7 @@ export default defineConfig({
       files: ["packages/web/server/**/*.ts", "packages/web/bin/**/*.ts"],
       rules: {
         "openchamber/server-js-specifiers": "error",
+        "openchamber/origin-check-awaited": "error",
         "typescript/no-non-null-assertion": "error",
         "typescript/ban-ts-comment": ["error", {
           "ts-ignore": "allow-with-description",

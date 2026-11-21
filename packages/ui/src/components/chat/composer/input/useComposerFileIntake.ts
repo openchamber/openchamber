@@ -261,9 +261,15 @@ export function useComposerFileIntake({
                 : renameFileForAttachmentCitation(otherFiles[index], otherNames[index]);
             try {
                 let landedName = file.name;
-                if (await addAttachedFile(file, undefined, ([landed]) => { if (landed) landedName = landed.filename; })) {
+                let landedAsPath = false;
+                if (await addAttachedFile(file, undefined, ([landed]) => {
+                    if (!landed) return;
+                    landedName = landed.filename;
+                    landedAsPath = Boolean(landed.agentPath);
+                })) {
                     attached = true;
                     attachedOtherNames.push(landedName);
+                    if (landedAsPath && isDocumentAttachmentFilename(file.name)) toast.info(t('chat.fileAttachment.toast.documentAttachedAsPath', { name: file.name }));
                 }
             } catch (error) {
                 console.error('File attach failed', error);

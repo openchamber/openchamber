@@ -4,7 +4,7 @@ import { referenceLinkChip as presentReferenceLinkChip } from '@/lib/messages/re
 import type { RepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import type { TrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
 
-import { composerReferenceKey, type ComposerReference } from './composerReferences';
+import { composerReferenceKey, withReferenceSourceLinks, type ComposerReference } from './composerReferences';
 
 const WEB_LINK = /https?:\/\/[^\s<>()"'`]+/gi;
 
@@ -23,6 +23,8 @@ export const findWebLinks = (text: string): WebLinkRange[] => {
 const referenceLinkTarget = (link: string, urls: RepositoryUrlMatcher, trackerUrls: TrackerUrlMatcher): ReferenceLinkTarget | null => {
     const tracked = trackerUrls(link);
     if (tracked) return { source: 'tracker', provider: tracked.provider, identifier: tracked.identifier };
+    const resolver = urls.resolverFor?.(link);
+    if (resolver) return { source: 'repository-url', ...resolver };
     const item = urls.match(link);
     if (!item || item.kind === 'discussion') return null;
     return { source: 'repository', provider: item.provider, instance: item.instance, owner: item.owner, repo: item.repo, kind: item.kind, number: item.number };
@@ -47,7 +49,9 @@ export const referenceLinksInText = (text: string, read: ReadonlyMap<string, Com
     const references = new Map<string, ComposerReference>();
     for (const { link } of findWebLinks(text)) {
         const reference = read.get(link);
-        if (reference && !references.has(composerReferenceKey(reference))) references.set(composerReferenceKey(reference), reference);
+        if (!reference) continue;
+        const key = composerReferenceKey(reference);
+        references.set(key, withReferenceSourceLinks(references.get(key) ?? reference, [link]));
     }
     return [...references.values()];
 };
@@ -57,7 +61,14 @@ export const withReferencesFromText = (
     fromText: readonly ComposerReference[],
 ): ComposerReference[] => {
     const chipKeys = new Set(chips.map(composerReferenceKey));
-    return [...chips, ...fromText.filter((reference) => !chipKeys.has(composerReferenceKey(reference)))];
+    const textByKey = new Map(fromText.map((reference) => [composerReferenceKey(reference), reference]));
+    return [
+        ...chips.map((reference) => {
+            const linked = textByKey.get(composerReferenceKey(reference));
+            return linked ? withReferenceSourceLinks(reference, referenceTextLinks(linked)) : reference;
+        }),
+        ...fromText.filter((reference) => !chipKeys.has(composerReferenceKey(reference))),
+    ];
 };
 
 export const referenceLinkChip = (reference: ComposerReference, urls: RepositoryUrlMatcher) => {
@@ -66,7 +77,9 @@ export const referenceLinkChip = (reference: ComposerReference, urls: Repository
         return { label: title, title, iconHref: '#oc-pages' };
     }
     const { label, title, icon } = presentReferenceLinkChip(reference, urls.descriptorOf);
-    return { label, title, iconHref: `#oc-${icon}` };
+    return reference.kind === 'change-request'
+        ? { label, title, iconHref: `#oc-${icon}`, openUrl: reference.url }
+        : { label, title, iconHref: `#oc-${icon}` };
 };
 
 export const referenceTextLink = (reference: ComposerReference): string => {
@@ -74,15 +87,39 @@ export const referenceTextLink = (reference: ComposerReference): string => {
     return reference.link ?? `https://${reference.host}/p/${reference.receivedId ?? reference.shareKey.slice(reference.shareKey.lastIndexOf('/') + 1)}`;
 };
 
+export const referenceTextLinks = (reference: ComposerReference): string[] => [
+    referenceTextLink(reference),
+    ...(reference.kind === 'change-request' ? reference.sourceLinks ?? [] : []),
+];
+
+export const withoutReferenceSourceLinks = (
+    references: readonly ComposerReference[],
+    links: ReadonlySet<string>,
+    text: string,
+): readonly ComposerReference[] => {
+    let changed = false;
+    const next = references.flatMap((reference) => {
+        if (reference.kind !== 'change-request' || !reference.sourceLinks?.some((link) => links.has(link))) return [reference];
+        changed = true;
+        const sourceLinks = reference.sourceLinks.filter((link) => !links.has(link));
+        const updated: ComposerReference = { ...reference, sourceLinks };
+        if (sourceLinks.length === 0) delete updated.sourceLinks;
+        return referencesLinkedIn(text, [updated]).length > 0 ? [updated] : [];
+    });
+    return changed ? next : references;
+};
+
 export const referencesLinkedIn = (text: string, references: readonly ComposerReference[]): ComposerReference[] => {
     if (references.length === 0) return [];
     const links = new Set(findWebLinks(text).map(({ link }) => link));
-    return references.filter((reference) => links.has(referenceTextLink(reference)));
+    return references.filter((reference) => referenceTextLinks(reference).some((link) => links.has(link)));
 };
 
 export const withMissingReferenceLinks = (text: string, references: readonly ComposerReference[]): string => {
     const links = new Set(findWebLinks(text).map(({ link }) => link));
-    const missing = Array.from(new Set(references.map(referenceTextLink).filter((link) => !links.has(link))));
+    const missing = Array.from(new Set(references
+        .filter((reference) => !referenceTextLinks(reference).some((link) => links.has(link)))
+        .map(referenceTextLink)));
     if (missing.length === 0) return text;
     const head = text.replace(/\s+$/, '');
     return head ? `${head} ${missing.join(' ')}` : missing.join(' ');

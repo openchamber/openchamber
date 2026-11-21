@@ -17,6 +17,8 @@ import { useI18nStore } from '@/lib/i18n';
 import { dict as germanDictionary } from '@/lib/i18n/messages/de';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
+import { useQuotaStore } from '@/stores/useQuotaStore';
+import type { ProviderResult } from '@/types/quota';
 import { applyBackgroundShellEvents } from '@/sync/background-shells';
 import { replaceGlobalSessionStatusById, setSessionParentResolver } from '@/sync/global-session-status';
 import {
@@ -387,6 +389,73 @@ describe('tray approvals carry whether a permission can be remembered', () => {
     await readHostBlockingRequestsSnapshot(async () => ({ sessions: {}, pending: {}, serverTime: Date.now() }), () => '/repo');
     await flush();
     expect(canSaveById()).toEqual({});
+  });
+});
+
+describe('tray usage names the account its meters belong to', () => {
+  let dom: Window;
+  let root: Root;
+  const previousQuota = useQuotaStore.getState();
+  const groups: Array<Array<{ provider: string; account: string | null }>> = [];
+  const invoke = async (command: string, args?: { usage?: { groups: Array<{ provider: string; account: string | null }> } }) => {
+    if (command === 'desktop_tray_update') groups.push(args?.usage?.groups ?? []);
+    return null;
+  };
+  const listen = async () => () => {};
+  const goResult = (accountLabel: string): ProviderResult => ({
+    providerId: 'opencode-go', providerName: 'OpenCode Go', ok: true, configured: true, accountLabel, fetchedAt: 1,
+    usage: { windows: { '5h': {
+      usedPercent: 25, remainingPercent: 75, windowSeconds: 18_000, resetAfterSeconds: null,
+      resetAt: null, resetAtFormatted: null, resetAfterFormatted: null,
+    } } },
+  });
+
+  beforeEach(() => {
+    dom = new Window({ url: 'http://localhost/' });
+    jest.useFakeTimers();
+    Object.assign(dom, {
+      __OPENCHAMBER_PLATFORM__: 'darwin',
+      __OPENCHAMBER_ELECTRON__: { runtime: 'electron', trayEnabled: true },
+      __OPENCHAMBER_DESKTOP__: { invoke, listen },
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout,
+      setInterval: globalThis.setInterval,
+      clearInterval: globalThis.clearInterval,
+    });
+    Object.assign(globalThis, {
+      window: dom, document: dom.document, navigator: dom.navigator,
+      IS_REACT_ACT_ENVIRONMENT: true,
+    });
+    // Already loaded for this runtime, so mounting the tray starts no quota read.
+    useQuotaStore.setState({ loadedRuntimeKey: getRuntimeKey(), dropdownProviderIds: ['opencode-go'], results: [] });
+    groups.length = 0;
+    root = createRoot(document.createElement('div'));
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    useQuotaStore.setState(previousQuota, true);
+    jest.useRealTimers();
+    await dom.happyDOM.close();
+  });
+
+  test('a switch between accounts with equal meters still reaches the tray', async () => {
+    await act(async () => root.render(<Harness />));
+    useQuotaStore.setState({ results: [goResult('outlook')] });
+    await flush();
+    expect(groups.at(-1)).toMatchObject([{ provider: 'OpenCode Go', account: 'outlook' }]);
+
+    useQuotaStore.setState({ results: [goResult('solar tool')] });
+    await flush();
+    expect(groups.at(-1)).toMatchObject([{ provider: 'OpenCode Go', account: 'solar tool' }]);
+  });
+
+  test('a Codex sign-in email stays out of the tray heading', async () => {
+    useQuotaStore.setState({ dropdownProviderIds: ['codex'] });
+    await act(async () => root.render(<Harness />));
+    useQuotaStore.setState({ results: [{ ...goResult('cli@example.com'), providerId: 'codex', providerName: 'Codex' }] });
+    await flush();
+    expect(groups.at(-1)).toMatchObject([{ provider: 'Codex', account: null }]);
   });
 });
 

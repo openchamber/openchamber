@@ -5,12 +5,13 @@ import nodePath from 'node:path';
 import { Readable } from 'node:stream';
 import { z } from 'zod';
 import { getModelsMetadata } from './models-metadata.js';
+import { toModelModalities } from './model-modalities.js';
 import type { IncomingMessage, ClientRequest } from 'node:http';
 import type { JsonValue } from '../shared/json-values.js';
 import type {} from './dependency-contracts.js';
 
 export type DiscoveredModelLimit = { context?: number; output?: number };
-export type DiscoveredModelCapabilities = { tools: boolean; input: string[]; output: string[] };
+export type DiscoveredModelCapabilities = { tools?: boolean; input?: string[]; output?: string[] };
 export type DiscoveredModelMetadata = {
   providerID: string;
   modelID: string;
@@ -164,7 +165,11 @@ const buildLimit = (context: number | undefined, output: number | undefined) => 
 
 const buildCapabilities = (input: string[] | undefined, output: string[] | undefined, tools: boolean | undefined) => {
   if (!input && !output && tools === undefined) return undefined;
-  return { tools: tools ?? true, input: input ?? ['text'], output: output ?? ['text'] };
+  const capabilities: DiscoveredModelCapabilities = {};
+  withOptional(capabilities, 'tools', tools);
+  withOptional(capabilities, 'input', input === undefined ? undefined : toModelModalities(input));
+  withOptional(capabilities, 'output', output === undefined ? undefined : toModelModalities(output));
+  return capabilities;
 };
 
 const withOptional = <Target, Key extends keyof Target>(target: Target, key: Key, value: Target[Key]) => {

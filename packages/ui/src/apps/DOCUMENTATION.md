@@ -44,6 +44,7 @@
 - The connection heartbeat in the live connection's card on Instances (`MobileConnectionHeartbeat`) asks `/health` through `runtimeFetch` every 4 s, only while it is mounted and the app is in the foreground. On Capacitor the foreground comes from the native app state, since the WebView's page visibility is unreliable there. Going to the background or unmounting clears the pending ping, aborts the one in flight and stops its clock subscription. A ping with no answer within 5 s shows as "No answer", never as the last latency. Its trace steps on the shared clock's beat, four frames a second, like a spinner.
 - Keep screen awake (`mobileKeepScreenAwake`, device-local) keeps the display on in the native app always, or while the open session or a subagent below it is active in the global status store (`useKeepScreenAwake`). "While working" also needs `isConnected`, because the store keeps a lost server's last busy state; a dead server therefore releases the screen, and a reconnect holds it again only while the turn still runs. A permission request keeps the turn running, so it keeps the screen on. Android holds a screen wake lock, which the system drops when the app leaves the screen, so the hook asks again on each return. iOS turns off the idle timer through the app-local `KeepAwake` plugin, and every mount writes the current choice so a reloaded page clears what the last one set. The setting renders, and the hook acts, only where `canKeepScreenAwake` holds: the iOS app, or the Android app on a WebView that exposes `navigator.wakeLock`. The hosted mobile page never keeps the screen on.
 - Notification commands and initial session tabs in VS Code use the shared session opener, so a `/btw` fork opens its parent and expands the panel mounted in the shared composer. Notification commands also reveal the chat view.
+- The expanded VS Code layout uses the shared `useUIStore` sidebar state (`isSidebarOpen`, `sidebarWidth`). Only the drag preview is local.
 - A sessions-sheet row is never a scroll container of its own: it clips with `oc-row-clip`, and the two-line row's 54 px box ends flush with the 32 px chevron at `top: 22`, so a drag that starts on a row scrolls the list.
 
 ### Boot, runtime changes and mini chat
@@ -139,6 +140,10 @@ The secure store and localStorage cannot commit together. A new reference lets a
 ### Why navigation carries intent and not the source's stores
 
 Each webview owns its own stores. A small parsed request preserves the originating Settings directory, page links, provider-connect action, new-snippet action and selected skill without transferring chat state or overwriting the tab's independently edited settings.
+
+### Why the VS Code sessions sidebar shares the app's sidebar state
+
+The existing store remembers the open state and width across reloads. The VS Code resize hook previews changes locally and saves on release so pointer moves do not write to storage. VS Code allows resizing from 196px to 520px to fit its smaller webview. A drag whose handle leaves the DOM (the sidebar hidden or the layout collapsed mid-drag) or loses pointer capture ends there and saves its last preview width. The desktop layout still clamps its displayed width to at least 264px to fit the toolbar.
 
 ### Why mobile web holds one back guard and not one history entry per layer
 

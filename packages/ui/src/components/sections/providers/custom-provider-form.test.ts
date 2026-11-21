@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildIntegrationKeyRequest,
   createEmptyCustomProviderForm,
+  modelDiscoveryResponseSchema,
   modelRowFromDiscovery,
   buildProviderUpsertRequest,
   storeKeyAfterConfigWrite,
@@ -35,11 +36,12 @@ const baseForm = (overrides: Partial<CustomProviderFormState> = {}): CustomProvi
     inputCapabilities: ['text'],
     outputCapabilities: ['text'],
     tools: true,
-    capabilitiesKnown: false,
+    capabilitiesKnown: { tools: false, input: false, output: false },
     variants: '',
   }],
   headers: [{ row: 'h0', key: '', value: '' }],
   tls: null,
+  canonical: null,
   ...overrides,
 });
 
@@ -52,7 +54,7 @@ const baseModel = (overrides: Partial<CustomProviderFormState['models'][number]>
   inputCapabilities: ['text'],
   outputCapabilities: ['text'],
   tools: true,
-  capabilitiesKnown: false,
+  capabilitiesKnown: { tools: false, input: false, output: false },
   variants: '',
   ...overrides,
 });
@@ -64,7 +66,7 @@ const MODEL_ROW_DEFAULTS = {
   inputCapabilities: ['text'],
   outputCapabilities: ['text'],
   tools: true,
-  capabilitiesKnown: false,
+  capabilitiesKnown: { tools: false, input: false, output: false },
 };
 
 describe('client certificate', () => {
@@ -109,6 +111,28 @@ describe('client certificate', () => {
     expect(providerToEditFormState(live, null).tls).toBeNull();
     const stored = { settings: { baseURL: 'https://gw.example/v1', tls: { cert: '{file:/etc/client.pem}', key: '{file:/etc/client.key}', passphrase: '{env:P}' } } };
     expect(providerToEditFormState(live, stored).tls).toEqual({ cert: '/etc/client.pem', key: '/etc/client.key', passphrase: '{env:P}' });
+  });
+});
+
+describe('canonical provider', () => {
+  const canonicalOf = (canonical: CustomProviderFormState['canonical']) => validateCustomProvider({
+    form: baseForm({ canonical }), t, existingProviderIDs: new Set(),
+  }).result?.config;
+
+  test('a chosen provider is saved, none clears the stored one, and an unread one is left alone', () => {
+    expect(canonicalOf('openrouter')?.canonical).toBe('openrouter');
+    expect(canonicalOf('')?.canonical).toBeNull();
+    expect(canonicalOf(null)).not.toHaveProperty('canonical');
+  });
+
+  test('editing starts from the stored choice, and from none when the entry has none', () => {
+    const live = { id: 'cc', name: 'Command Code', canonical: 'anthropic', settings: { baseURL: 'https://cc.example/v1' } };
+    const stored = storedProviderEntrySchema.parse({ canonical: 'openrouter', settings: { baseURL: 'https://cc.example/v1' } });
+    expect(providerToEditFormState(live, stored).canonical).toBe('openrouter');
+    expect(providerToEditFormState(live, { settings: { baseURL: 'https://cc.example/v1' } }).canonical).toBe('');
+    // A stored entry that could not be read keeps whatever choice it holds.
+    expect(providerToEditFormState(live, null).canonical).toBeNull();
+    expect(createEmptyCustomProviderForm().canonical).toBe('');
   });
 });
 
@@ -161,7 +185,7 @@ describe('validateCustomProvider', () => {
           inputCapabilities: ['text', 'image'],
           outputCapabilities: ['text'],
           tools: false,
-          capabilitiesKnown: true,
+          capabilitiesKnown: { tools: true, input: true, output: true },
         })],
       }),
       t,
@@ -226,6 +250,43 @@ describe('validateCustomProvider', () => {
     expect(row.inputCapabilities).toEqual(['text', 'image']);
     expect(row.tools).toBe(false);
     expect(row.metadataSource).toBe('provider-api');
+  });
+
+  test('a discovered model keeps only the categories the form saves', () => {
+    const row = modelRowFromDiscovery({
+      id: 'gw',
+      name: 'gw',
+      capabilities: { tools: true, input: ['text', 'image', 'application/json'], output: ['embedding'] },
+    });
+    expect(row.inputCapabilities).toEqual(['text', 'image']);
+    // All unrecognized stays an empty list, not Text support.
+    expect(row.outputCapabilities).toEqual([]);
+  });
+
+  test('a discovered model that reports only tool calls leaves its inputs and outputs unset', () => {
+    const row = modelRowFromDiscovery(modelDiscoveryResponseSchema.parse({
+      models: [{ id: 'sonnet', name: 'sonnet', capabilities: { tools: false } }],
+    }).models[0]);
+    expect(row.tools).toBe(false);
+    expect(row.capabilitiesKnown).toEqual({ tools: true, input: false, output: false });
+  });
+
+  test('a discovered model fills each unreported capability from its catalog match', () => {
+    const metadata = {
+      providerID: 'openrouter',
+      modelID: 'sonnet',
+      capabilities: { tools: true, input: ['text', 'image', 'pdf'], output: [] },
+    };
+    const model = { id: 'sonnet', name: 'Sonnet', metadata, capabilities: { tools: false } };
+    const row = modelRowFromDiscovery(model);
+    expect(row.tools).toBe(false);
+    expect(row.inputCapabilities).toEqual(['text', 'image', 'pdf']);
+    expect(row.outputCapabilities).toEqual([]);
+    expect(row.capabilitiesKnown).toEqual({ tools: true, input: true, output: true });
+
+    const withExplicitEmpty = modelRowFromDiscovery({ ...model, capabilities: { input: [] } });
+    expect(withExplicitEmpty.inputCapabilities).toEqual([]);
+    expect(withExplicitEmpty.tools).toBe(true);
   });
 
   test('a discovered model nothing describes gets text in and out with tool calls', () => {
@@ -720,6 +781,49 @@ describe('edit form from the stored config entry', () => {
     const config = editAndSave(providerToEditFormState(live, stored));
     expect(config?.models.vision?.limit).toEqual({ context: 200000, output: 8192 });
     expect(config?.models.vision?.capabilities).toEqual({ tools: true, input: ['text', 'image'], output: ['text'] });
+  });
+
+  test('a model that overrides only tools leaves its inputs and outputs to the canonical provider', () => {
+    const stored = storedProviderEntrySchema.parse({
+      name: 'Campus LLM',
+      canonical: 'openrouter',
+      settings: { baseURL: 'https://llm.example.edu/v1' },
+      models: { sonnet: { name: 'Sonnet', capabilities: { tools: false } } },
+    });
+    const config = editAndSave(providerToEditFormState(live, stored));
+    expect(config?.models.sonnet?.capabilities).toEqual({ tools: false });
+  });
+
+  test('an inherited input list shows what OpenCode resolved, so turning one modality off keeps the others', () => {
+    const inheriting = {
+      id: 'campus-llm',
+      name: 'Campus LLM',
+      settings: { baseURL: 'https://llm.example.edu/v1' },
+      models: [{ id: 'sonnet', modelID: 'sonnet', name: 'Sonnet', capabilities: { tools: true, input: ['text', 'image', 'pdf', 'application/json'], output: ['text'] } }],
+    };
+    const stored = storedProviderEntrySchema.parse({
+      canonical: 'openrouter',
+      settings: { baseURL: 'https://llm.example.edu/v1' },
+      models: { sonnet: { name: 'Sonnet' } },
+    });
+    const form = providerToEditFormState(inheriting, stored);
+    const untouched = editAndSave(form)?.models.sonnet;
+    expect(untouched?.name).toBe('Sonnet');
+    expect(untouched).not.toHaveProperty('capabilities');
+
+    const withoutImage = {
+      ...form.models[0],
+      inputCapabilities: form.models[0].inputCapabilities.filter((value) => value !== 'image'),
+      capabilitiesKnown: { ...form.models[0].capabilitiesKnown, input: true },
+    };
+    expect(editAndSave({ ...form, models: [withoutImage] })?.models.sonnet?.capabilities).toEqual({ input: ['text', 'pdf'] });
+
+    const withStoredInput = providerToEditFormState(inheriting, {
+      ...stored,
+      models: { sonnet: { name: 'Sonnet', capabilities: { input: ['text', '  application/json  '] } } },
+    });
+    expect(editAndSave(withStoredInput)?.models.sonnet?.capabilities).toEqual({ input: ['text', '  application/json  '] });
+    expect(editAndSave(providerToEditFormState(inheriting, null))?.models.sonnet?.capabilities?.input).toEqual(['text', 'image', 'pdf']);
   });
 
   test('a saved model type loads and saves as it is, image or any other', () => {

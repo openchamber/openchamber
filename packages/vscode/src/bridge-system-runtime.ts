@@ -3,7 +3,8 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
-import { getProviderSources, getStoredProviderConfig, readConfig, upsertProviderConfig } from './opencodeConfig';
+import { getProviderSources, getStoredProviderConfig, readConfig, readConfigLayers, upsertProviderConfig } from './opencodeConfig';
+import { readInheritedProviderCanonical } from '../../web/server/lib/opencode/inherited-canonical.js';
 import { getProviderAuth } from './opencodeAuth';
 import { OpenCode } from '@opencode/client';
 import { asSessionId, asSessionIdList, asSessionMetadata, asTimestamp, parseJson, type JsonValue, type SessionArchiveOnOpenCode, type SessionMetadataOnOpenCode, type SessionStateStore } from './openchamberSessionState';
@@ -450,7 +451,8 @@ export async function handleSystemBridgeMessage(
         const sources = getProviderSources(providerId, workingDirectory);
         sources.auth.exists = Boolean(await getProviderAuth(providerId));
         const config = getStoredProviderConfig(providerId, workingDirectory);
-        return { id, type, success: true, data: { providerId, sources, config } };
+        const inheritedCanonical = readInheritedProviderCanonical(readConfigLayers(workingDirectory), providerId);
+        return { id, type, success: true, data: { providerId, sources, config, inheritedCanonical } };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };

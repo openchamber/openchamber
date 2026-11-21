@@ -31,6 +31,7 @@ import { parseMarkdownBlocksWithMath } from './markdown/mathBlocks';
 import { remarkEmojiShortcodes } from './markdown/remarkEmojiShortcodes';
 import { remarkRepositoryReferences } from './markdown/remarkRepositoryReferences';
 import { fenceUiBlocks } from './uiBlocks/taggedBlocks';
+import { useProgramCheck } from './uiBlocks/useUiBlockComponent';
 import type { EmojiShortcodes } from '@/lib/emoji/shortcodes';
 import type { RepositoryLinkContext } from '@/lib/source-control/repositoryLinks';
 import { guestLinksVersion, type GuestLinkRule } from '@/lib/guests/links';
@@ -57,7 +58,7 @@ import { MarkdownSvg } from './markdown/MarkdownSvg';
 import { MarkdownUiBlock } from './markdown/MarkdownUiBlock';
 import { MarkdownBlockquote } from './markdown/MarkdownBlockquote';
 import { createMarkdownCodePlugin } from './markdown/streamdownCode';
-import { confirmCodePaths, confirmMarkdownFile, resolveMarkdownFile } from './markdown/markdownFileReferences';
+import { confirmCodePaths, confirmMarkdownFile, releaseFileReferenceTabStop, resolveMarkdownFile } from './markdown/markdownFileReferences';
 import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
 import { splitFrontmatter } from './markdown/frontmatter';
 import { MarkdownWindow, MarkdownWindowContext } from './markdown/markdownWindow';
@@ -518,6 +519,7 @@ export function MarkdownContent({
         className,
       )}
       style={syntaxVars}
+      onPointerDown={releaseFileReferenceTabStop}
     >
       <MarkdownPresentationContext.Provider value={presentation}>
         <BlockArrivalContext.Provider value={arrival}>
@@ -554,6 +556,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
   if (renderMode.identity !== identity) {
     setRenderMode({ identity, mode: initialMode });
   }
+  useProgramCheck(variant === 'assistant' ? content : '');
   const body = (
     <MarkdownContent
       key={identity}

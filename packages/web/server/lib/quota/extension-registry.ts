@@ -7,6 +7,7 @@ export interface ExtensionQuotaProvider {
   readonly providerName: string;
   readonly icon: string;
   readonly guestId: string;
+  readonly providers: readonly string[];
   readonly isConfigured: (auth: LegacyAuthFile) => boolean;
   readonly fetchQuota: () => Promise<QuotaResult<string | null>>;
 }
@@ -22,8 +23,8 @@ export const attachExtensionQuotaProvider = (provider: ExtensionQuotaProvider) =
 
 export const detachExtensionQuotaProvider = (providerId: string | null) => attached.delete(providerId);
 
-export const listExtensionQuotaProviders = () => [...attached.values()].map(({ providerId, providerName, icon, guestId }) => ({
-  id: providerId, name: providerName, icon, guestId,
+export const listExtensionQuotaProviders = () => [...attached.values()].map(({ providerId, providerName, icon, guestId, providers }) => ({
+  id: providerId, name: providerName, icon, guestId, providers: Array.isArray(providers) ? [...providers] : [],
 }));
 
 export const extensionQuotaProvider = (providerId: string | null) => attached.get(providerId) ?? null;

@@ -376,3 +376,34 @@ describe('change request context reviews', () => {
     ]);
   });
 });
+
+describe('resolveChangeRequestSource classification', () => {
+  const headSha = 'a'.repeat(40);
+  const resolveSource = (headRepo) => createGitHubResources({
+    load: async () => ({ rateLimit: { isGitHubRateLimited: () => false } }),
+    accountOf: () => ({
+      octokit: { rest: { pulls: { get: async () => ({ data: {
+        ...openPull, user: { id: 1, login: 'contributor' }, head: { ref: 'feature', sha: headSha, repo: {
+          name: headRepo.name, owner: { login: headRepo.owner },
+          html_url: `https://git.example.com/${headRepo.owner}/${headRepo.name}`,
+          clone_url: `https://git.example.com/${headRepo.owner}/${headRepo.name}.git`,
+        } },
+      } }) } } },
+    }),
+    resolveRepo: async () => ({ repo: { owner: 'acme', repo: 'app', host: 'git.example.com' } }),
+    resolveNetwork: async () => [{ owner: 'acme', repo: 'app', source: 'origin' }],
+  }).resolveChangeRequestSource({
+    session: { ...session, instance: 'git.example.com' },
+    context: { directory: '/repo', primaryRemote: 'origin' },
+    project: { id: 'acme/app', owner: 'acme', name: 'app' },
+    number: 42, expectedHeadSha: headSha, requestedRemoteName: 'origin',
+  });
+
+  test('a head GitHub spells differently from the remote is the same repository', async () => {
+    expect(await resolveSource({ owner: 'Acme', name: 'App' })).toMatchObject({ classification: 'same-repository' });
+  });
+
+  test('a head in another repository is a contributor fork', async () => {
+    expect(await resolveSource({ owner: 'someone', name: 'app' })).toMatchObject({ classification: 'contributor-fork' });
+  });
+});

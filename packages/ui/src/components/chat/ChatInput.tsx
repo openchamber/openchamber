@@ -169,7 +169,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         mobileShell, preferences, sessionScope, inlineContext, draftHistory,
     });
     const rows = useComposerRows({
-        draftText, editorState, i18n, preferences, mobileShell, inlineContext, referenceActions,
+        props, draftText, editorState, i18n, preferences, mobileShell, inlineContext, referenceActions,
         sendAvailability, sessionScope, queueState, draftTarget, selection, queueActions: sending,
         sessionLifecycle, editorActions, referencePicker,
     });

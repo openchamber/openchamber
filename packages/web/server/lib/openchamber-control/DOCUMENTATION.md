@@ -63,6 +63,11 @@ constructor retains its existing `Object.assign` behavior.
   empty or null on update to clear the stored branch. Anything else is a 400
   before upsert, because the CLI HTTP route forwards raw JSON and a wrong type
   would turn isolation off or erase the branch.
+  A `name` over 80 characters or a `prompt` over 20,000 characters after
+  trimming is a 400 from either action that names the limit. The CLI exits
+  non-zero with that message. The refused request applies none of its fields.
+  The preceding scheduler sync on `schedule.update` can still write task
+  state and reconcile changes made to loop files.
 - `session-listing.js` owns `session.list` and `session.archive`. `mine`
   lists only the sessions the calling session created with `ownWork`
   (`metadata.openchamber.kind === 'operator-child'` with its id as
@@ -576,7 +581,15 @@ constructor retains its existing `Object.assign` behavior.
   caller can retry that directory without a `worktree` parameter.
   The CLI prints the retained directory and a retry command preserving the
   prompt and selection options without creating another worktree.
-  An empty-session create without a prompt keeps its existing selection behavior.
+  An empty-session create stores any requested model and variant on the
+  OpenCode session, so a later send can reuse them. A variant without a model
+  resolves the model first; a create with no selection leaves defaults unset.
+  The stored model is the catalog id of the session directory's checkout, so a
+  model named by its upstream id, or one a new worktree does not offer, never
+  lands as an unusable selection; when the catalog cannot be read, the create
+  fails as not ready instead of pinning an unverified model. A malformed model reference is rejected, and
+  Auto needs a prompt to select a model; both are refused for an empty session
+  before any worktree is created.
 - Usage errors name the missing or conflicting input so CLI and agent-tool
   callers can correct an invalid request without an upfront usage manual.
 - Explicit `projectId` or `directory` scope takes precedence over the managed

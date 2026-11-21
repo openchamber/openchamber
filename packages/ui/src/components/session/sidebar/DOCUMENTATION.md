@@ -739,7 +739,18 @@ the same Mark all as read.
   collapse and is saved in local storage (`oc.sessions.activityCollapse`). The
   display menu's Collapse all / Expand all set every project and the zones
   (`SIDEBAR_ACTIVITY_KEYS`: Pages, Chats, Pinned, In work and the list by time)
-  together. Session folders keep their own collapse state. Zone and project
+  together. Session folders keep their own collapse state. Project collapse is
+  the instance's (`projects[].sidebarCollapsed`), mirrored into one local key
+  (`oc.sessions.projectCollapse`) per browser origin. After an instance switch
+  that key still names the previous instance's projects, so the first project
+  list the new instance sends replaces it. A fold, Collapse all or Expand all
+  made before that list arrives is replayed over it and only then saved, so a
+  stale list never reaches the instance's settings. Those pending choices are
+  kept per runtime (`oc.sessions.projectCollapse.pending:<runtime key>`), so a
+  reload before the list arrives still replays them. A fold goes into the
+  project store and to the settings writer at once (`updateDesktopSettings`),
+  which debounces it and flushes it with keepalive before the page unloads; a
+  project edit right after it (a reorder) writes the new flags. Zone and project
   headers are sticky. The projects sit under a "Projects"
   caption (a `caption` row, `projectsCaption`) styled as a zone's label, so
   every section has a caption and a project is an item of its list: its label

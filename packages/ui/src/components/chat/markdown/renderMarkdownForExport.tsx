@@ -9,14 +9,15 @@ import { I18nProvider } from '@/lib/i18n';
 import { normalizeMarkdownCopyContent } from './selectionMarkdown';
 import { loadMarkdownRendererModule } from '../markdownRendererLoader';
 import { useUiBlockComponent } from '../uiBlocks/useUiBlockComponent';
-import { fenceUiBlocks } from '../uiBlocks/taggedBlocks';
+import { fenceUiBlocks, loadProgramCheck, needsProgramCheck } from '../uiBlocks/taggedBlocks';
 
-export async function renderMarkdownForExport(text: string, options: { purpose: 'copy' | 'image'; syntaxStyle?: string | null; width?: number; theme?: Theme }): Promise<HTMLElement> {
+export async function renderMarkdownForExport(text: string, options: { purpose: 'copy' | 'image'; syntaxStyle?: string | null; width?: number; theme?: Theme; prompt?: boolean }): Promise<HTMLElement> {
   const { MarkdownContent } = await loadMarkdownRendererModule();
   if (/mermaid/i.test(text)) await loadMermaidRenderers().catch(() => null);
-  const image = options.purpose === 'image';
-  const contentText = image ? fenceUiBlocks(text) : text;
-  const uiBlocks = image && contentText.includes('openui-lang')
+  const blocks = options.purpose === 'image' && !options.prompt;
+  if (blocks && needsProgramCheck(text)) await loadProgramCheck().catch(() => null);
+  const contentText = blocks ? fenceUiBlocks(text) : text;
+  const uiBlocks = blocks && contentText.includes('openui-lang')
     ? await useUiBlockComponent.load().then(() => true, () => false)
     : false;
   const host = document.createElement('div');

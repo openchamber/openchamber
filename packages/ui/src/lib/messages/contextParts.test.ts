@@ -209,6 +209,10 @@ describe('round-trip through part metadata', () => {
         for (const provider of ['github', 'gitlab', 'acme']) {
             const payload: ContextPartPayload = { kind: 'change-request', provider, number: 4, title: 'Fix', url: 'https://x/pull/4' };
             expect(readContextPart(asPart(payload, 'context'))).toEqual(payload);
+            const sourced = { ...payload, sourceLinks: ['https://portal.example.test/change/300'] };
+            const part = asPart(sourced, 'context');
+            expect(readContextPart(JSON.parse(JSON.stringify(part)))).toEqual(sourced);
+            expect(part.text).toBe('context');
             const check: ContextPartPayload = { kind: 'pr-check', provider, label: 'build', output: 'boom', text: '' };
             expect(readContextPart(asPart(check))).toEqual(check);
         }

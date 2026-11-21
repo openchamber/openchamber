@@ -1,5 +1,6 @@
 import { hasErrorMessage, isJsonObject, isString } from './inputs.js';
-import type { JsonValue, PushSettings, SseWriter } from './contracts.js';
+import type { JsonValue, SseWriter } from './contracts.js';
+import type { UpdateSettingsFromDisk } from '../settings/settings-write-queue.js';
 import type { createPushRuntime } from './push-runtime.js';
 import type { createSessionRuntime } from '../opencode/session-runtime.js';
 import type { IncomingHttpHeaders } from 'node:http';
@@ -33,8 +34,7 @@ interface NotificationRouteDependencies extends Pick<PushRuntime,
   uiAuthController?: { ensureSessionToken?: (req: NotificationRequest, res: NotificationResponse) => string | null | Promise<string | null> };
   ensureGlobalWatcherStarted?: () => Promise<void>;
   getUiSessionTokenFromRequest: (req: NotificationRequest) => string | null;
-  readSettingsFromDiskMigrated: () => Promise<PushSettings>;
-  writeSettingsToDisk: (settings: PushSettings) => Promise<void>;
+  updateSettingsFromDisk: UpdateSettingsFromDisk;
   addOrUpdateApnsToken?: (token: string, deviceToken: string, userAgent: string | undefined, platform: string, environment: string, pushKey: JsonValue | undefined) => Promise<void>;
   removeApnsToken?: (token: string, deviceToken: string) => Promise<void>;
   clearPendingPushBadge?: () => void;
@@ -84,8 +84,7 @@ export const registerNotificationRoutes = (app: {
     ensureGlobalWatcherStarted,
     getOrCreateVapidKeys,
     getUiSessionTokenFromRequest,
-    readSettingsFromDiskMigrated,
-    writeSettingsToDisk,
+    updateSettingsFromDisk,
     addOrUpdatePushSubscription,
     removePushSubscription,
     addOrUpdateApnsToken,
@@ -119,9 +118,15 @@ export const registerNotificationRoutes = (app: {
 
   const rememberPublicOrigin = async (origin: string) => {
     try {
-      const settings = await readSettingsFromDiskMigrated();
-      if (!isString(settings?.publicOrigin) || settings.publicOrigin.trim().length === 0) {
-        await writeSettingsToDisk({ ...settings, publicOrigin: origin });
+      let stored = false;
+      await updateSettingsFromDisk((settings) => {
+        if (isString(settings.publicOrigin) && settings.publicOrigin.trim().length > 0) {
+          return settings;
+        }
+        stored = true;
+        return { ...settings, publicOrigin: origin };
+      });
+      if (stored) {
         setPushInitialized(false);
       }
     } catch {

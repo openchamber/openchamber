@@ -10,7 +10,7 @@ import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders, type WorkspaceFolderCandidate } from './workspaceResolver';
-import { SIDEBAR_SURFACE_ID } from './InlineCommentThreads';
+import { SIDEBAR_SURFACE_ID, type LineCommentMessage } from './InlineCommentThreads';
 
 type ActiveEditorFilePayload = {
   filePath: string;
@@ -265,9 +265,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public addLineComment(payload: { draftId?: string; filePath: string; relativePath: string; source: 'diff' | 'file'; side?: 'original' | 'modified'; startLine: number; endLine: number; code: string; language: string; comment: string }) {
+  public addLineComment(payload: LineCommentMessage) {
     if (!this._view) return;
-    this._view.show(true);
+    this._view.show(!payload.openInComposer);
     this._view.webview.postMessage({
       type: 'command',
       command: 'addLineComment',

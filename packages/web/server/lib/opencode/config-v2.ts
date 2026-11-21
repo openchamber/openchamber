@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { isBoolean, isRecord, isString } from '../shared/guards.js';
 import type { JsonValue } from '../shared/json-values.js';
 import type { OpenCodeConfigLayer } from './config-files.js';
+import { toModelModalities } from './model-modalities.js';
 import type {
   AgentEntity, AgentMode, AgentRequest, CommandEntity, ConfigField, DefinedFields,
   EffectivePermissionRule, JsonPluginEntity, McpEntity, McpOAuth, McpProtocol, McpTimeout,
@@ -486,19 +487,20 @@ export function toModelVariants<Value>(value: Value): ModelVariant[] | undefined
 function toModelCapabilities(source: { modalities?: unknown; capabilities?: unknown; tool_call?: unknown }): ModelCapabilities | undefined {
   const modalities = isRecord(source.modalities) ? source.modalities : {};
   if (isRecord(source.capabilities)) {
-    return pickDefined({
-      tools: isBoolean(source.capabilities.tools) ? source.capabilities.tools : true,
-      input: Array.isArray(source.capabilities.input) ? source.capabilities.input.map(String) : ['text', 'image'],
-      output: Array.isArray(source.capabilities.output) ? source.capabilities.output.map(String) : ['text'],
+    const capabilities = pickDefined({
+      tools: isBoolean(source.capabilities.tools) ? source.capabilities.tools : undefined,
+      input: isList(source.capabilities.input) ? toModelModalities(source.capabilities.input) : undefined,
+      output: isList(source.capabilities.output) ? toModelModalities(source.capabilities.output) : undefined,
     });
+    return Object.keys(capabilities).length ? capabilities : undefined;
   }
   if (!isBoolean(source.tool_call) && !Array.isArray(modalities.input) && !Array.isArray(modalities.output)) {
     return undefined;
   }
   return {
     tools: isBoolean(source.tool_call) ? source.tool_call : true,
-    input: Array.isArray(modalities.input) ? modalities.input.map(String) : ['text', 'image'],
-    output: Array.isArray(modalities.output) ? modalities.output.map(String) : ['text'],
+    input: isList(modalities.input) ? toModelModalities(modalities.input) : ['text', 'image'],
+    output: isList(modalities.output) ? toModelModalities(modalities.output) : ['text'],
   };
 }
 

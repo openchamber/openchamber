@@ -105,7 +105,10 @@ const BudgetRow: React.FC<{ budget: ConsoleBudget; workspace: string | null }> =
 export const ConsoleBudgetsSection: React.FC<{ consoleBudgets: ConsoleBudgets }> = ({ consoleBudgets }) => {
   const { t } = useI18n();
   return (
-    <SettingsSection title={t('settings.usage.consoleBudgets.title')}>
+    <SettingsSection
+      title={t('settings.usage.consoleBudgets.title')}
+      description={consoleBudgets.workspace ? <bdi className="wrap-anywhere">{consoleBudgets.workspace}</bdi> : undefined}
+    >
       <div className="divide-y divide-[var(--surface-subtle)]">
         {consoleBudgets.budgets.map((budget) => (
           <BudgetRow key={budget.id} budget={budget} workspace={consoleBudgets.workspace} />

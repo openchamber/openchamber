@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { NotificationPayload } from './contracts.js';
 import type { Application, ExpressFactory, Request, RequestHandler } from '../shared/http-contracts.js';
 
-const NOTIFICATION_EMIT_PATH = '/api/notifications/emit';
+export const NOTIFICATION_EMIT_PATH = '/api/notifications/emit';
 
 const RATE_WINDOW_MS = 10_000;
 const RATE_MAX_PER_WINDOW = 10;
@@ -108,8 +108,11 @@ export const registerNotificationEmitRoutes = (app: Pick<Application, 'post'>, d
         isAgentToolRequestAuthorized(req) ? respond(req, res, next) : next()
       ));
     },
-    registerApiRoute: () => {
-      app.post(NOTIFICATION_EMIT_PATH, jsonBody, respond);
+    registerApiRoute: (apiAuth: RequestHandler) => {
+      if (!apiAuth) {
+        throw new TypeError('registerApiRoute needs the API auth middleware');
+      }
+      app.post(NOTIFICATION_EMIT_PATH, jsonBody, apiAuth, respond);
     },
   };
 };
