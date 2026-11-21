@@ -23,7 +23,7 @@
             {"do": "see", "on": "chat.tool", "text": "Search Files", "exact": true},
             {"do": "see", "on": "chat.tool", "text": "Edit File", "count": 2, "exact": true},
             {"do": "see", "on": "chat.toolRow", "text": "+9"},
-            {"do": "see", "on": "chat.tool", "text": "Shell Command", "exact": true},
+            {"do": "see", "on": "chat.tool", "text": "Shell", "exact": true},
             {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
             {"do": "see", "on": "chat.fileLink", "ref": "src/api/retry.ts"}
           ]
@@ -285,14 +285,14 @@
         {
           "id": "shell-output",
           "kind": "path",
-          "title": "Opening a Shell Command row shows what the command printed, and Copy output copies it",
+          "title": "Opening a Shell row shows what the command printed, and Copy output copies it",
           "steps": [
             {"do": "session.create", "as": "s", "title": "Tools shell output"},
             {"do": "session.send", "session": "s", "prompt": "Print the verify banner in the shell."},
             {"do": "open", "session": "s"},
-            {"do": "see", "on": "chat.toolRow", "text": "Shell Command"},
+            {"do": "see", "on": "chat.toolRow", "text": "Shell"},
             {"do": "see", "on": "chat.message", "text": "verify-banner-42", "count": 0, "timeout": 1},
-            {"do": "click", "on": "chat.toolRow", "text": "Shell Command"},
+            {"do": "click", "on": "chat.toolRow", "text": "Shell"},
             {"do": "see", "on": "chat.message", "text": "verify-banner-42"},
             {"do": "see", "on": "chat.message", "text": "verify-second-56"},
             {"do": "clipboard", "set": "clipboard before the copy"},
@@ -308,7 +308,7 @@
             {"do": "session.create", "as": "s", "title": "Tools keyboard"},
             {"do": "session.send", "session": "s", "prompt": "Print the verify banner in the shell."},
             {"do": "open", "session": "s"},
-            {"do": "click", "on": "chat.toolRow", "text": "Shell Command"},
+            {"do": "click", "on": "chat.toolRow", "text": "Shell"},
             {"do": "see", "on": "chat.message", "text": "verify-banner-42"},
             {"do": "press", "key": "Enter"},
             {"do": "gone", "on": "chat.message", "text": "verify-banner-42"},
@@ -591,7 +591,7 @@
             {"do": "open", "session": "s"},
             {"do": "session.send", "session": "s", "prompt": "Run the long verify watcher in the shell.", "wait": false},
             {"do": "see", "on": "chat.toolStop"},
-            {"do": "click", "on": "chat.toolRow", "text": "Shell Command"},
+            {"do": "click", "on": "chat.toolRow", "text": "Shell"},
             {"do": "see", "on": "chat.message", "text": "verify-watcher-12"},
             {"do": "click", "on": "chat.toolStop"},
             {"do": "see", "on": "chat.toolRow", "text": "stopped"},
@@ -608,7 +608,7 @@
             {"do": "session.send", "session": "s", "prompt": "Run the verify watcher in the background."},
             {"do": "open", "session": "s"},
             {"do": "see", "on": "chat.toolRow", "text": "in background"},
-            {"do": "click", "on": "chat.toolRow", "text": "Shell Command"},
+            {"do": "click", "on": "chat.toolRow", "text": "Shell"},
             {"do": "see", "on": "chat.message", "text": "verify-background-25"},
             {"do": "click", "on": "chat.toolStop"},
             {"do": "see", "on": "chat.toolRow", "text": "stopped"},
@@ -1408,7 +1408,7 @@
             {"do": "see", "on": "chat.tool", "text": "Read File", "exact": true, "count": 0, "timeout": 1},
             {"do": "click", "on": "chat.fold", "text": "Activity"},
             {"do": "see", "on": "chat.tool", "text": "Read File", "exact": true},
-            {"do": "see", "on": "chat.tool", "text": "Shell Command", "exact": true},
+            {"do": "see", "on": "chat.tool", "text": "Shell", "exact": true},
             {"do": "click", "on": "chat.fold", "text": "Activity"},
             {"do": "gone", "on": "chat.tool", "text": "Read File", "exact": true}
           ]
@@ -1578,23 +1578,23 @@
       "id": "notices",
       "name": "Rows that are not a turn",
       "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/TimelineNotice.tsx", "packages/ui/src/components/chat/message/parts/ToolPart.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ShellToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolPartContent.tsx", "packages/ui/src/lib/messages/assistantError.ts", "packages/ui/src/components/chat/message/body/AssistantMessageBody.tsx"],
-      "what": "A !command the user runs shows as a Shell Command row with its output; a provider that keeps failing shows its retry error in the transcript.",
+      "what": "A !command the user runs shows as a Shell row with its output; a provider that keeps failing shows its retry error in the transcript.",
       "reach": "Type ! and a command in the composer and press Enter; send a prompt to a provider that is down.",
-      "proof": "The Shell Command row opens to the command's output; the transcript shows ECONNREFUSED while the session retries.",
+      "proof": "The Shell row opens to the command's output; the transcript shows ECONNREFUSED while the session retries.",
       "scenarios": [
         {
           "id": "shell",
           "kind": "path",
-          "title": "A !command shows as a Shell Command row that opens to its output",
+          "title": "A !command shows as a Shell row that opens to its output",
           "steps": [
             {"do": "session.create", "as": "s", "title": "Chat shell command"},
             {"do": "open", "session": "s"},
             {"do": "click", "on": "composer.editor"},
             {"do": "type", "shell": true, "command": {"output": "verify-42\n"}},
             {"do": "press", "key": "Enter"},
-            {"do": "see", "on": "chat.anyToolRow", "text": "Shell Command"},
+            {"do": "see", "on": "chat.anyToolRow", "text": "Shell"},
             {"do": "see", "on": "chat.scroller", "text": "verify-42", "count": 0, "timeout": 1},
-            {"do": "click", "on": "chat.anyToolRow", "text": "Shell Command"},
+            {"do": "click", "on": "chat.anyToolRow", "text": "Shell"},
             {"do": "see", "on": "chat.scroller", "text": "verify-42"}
           ]
         },
