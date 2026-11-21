@@ -15,6 +15,7 @@ const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const OAUTH_BETA_HEADER = 'oauth-2025-04-20';
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;
 const MAX_COOLDOWN_MS = 60 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 15_000;
 const SESSION_EXPIRED_ERROR = 'Claude session expired. Open Claude Code to sign in again.';
 const USAGE_DENIED_ERROR = 'Anthropic does not let this Claude token read usage. A token from `claude setup-token` cannot; a Claude Code sign-in (`/login`) can.';
 
@@ -86,9 +87,11 @@ const fetchQuotaUncoalesced = async () => {
       headers: {
         Authorization: `Bearer ${credential.accessToken}`,
         'anthropic-beta': OAUTH_BETA_HEADER
-      }
+      },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     });
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') return failure('Request timed out');
     return failure(error instanceof Error ? error.message : 'Request failed');
   }
 
@@ -113,7 +116,8 @@ const fetchQuotaUncoalesced = async () => {
   let payload: unknown;
   try {
     payload = await response.json();
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') return failure('Request timed out');
     return failure('Unexpected response from Anthropic');
   }
 

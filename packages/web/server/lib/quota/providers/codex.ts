@@ -58,6 +58,7 @@ export const providerName = 'Codex';
 const aliases = ['openai', 'codex', 'chatgpt'];
 
 const USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
+const REQUEST_TIMEOUT_MS = 15_000;
 
 export const isConfigured = (auth: LegacyAuthFile) => {
   const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
@@ -71,10 +72,11 @@ const requestUsage = ({ accessToken, accountId }: UsageCredential) => {
   };
   if (accountId) headers['ChatGPT-Account-Id'] = `${accountId}`;
   return fetch(USAGE_URL, {
-  method: 'GET',
-  redirect: 'error',
-  headers
-});
+    method: 'GET',
+    redirect: 'error',
+    headers,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+  });
 };
 
 const usageWindowsOf = (payload: CodexFields | null) => {
@@ -146,10 +148,17 @@ const usageResult = (payload: CodexFields | null, accountLabel: string | null = 
 
 const failure = (error: string, configured = true) => buildResult({ providerId, providerName, ok: false, configured, error });
 
+const isTimeout = (error: unknown): error is DOMException => error instanceof DOMException && error.name === 'TimeoutError';
+
+const unlessTimedOut = (error: Error) => {
+  if (isTimeout(error)) throw error;
+  return null;
+};
+
 const usageFromCodexCli = async () => {
   const login = readCodexCliLogin();
   if (!login) return null;
-  const response = await requestUsage(login).catch(() => null);
+  const response = await requestUsage(login).catch(unlessTimedOut);
   if (!response?.ok) return null;
   const payload = asFields(await response.json());
   return usageResult(payload, asNonEmptyString(payload?.email) ?? signInEmailOf(login.accessToken));
@@ -168,13 +177,14 @@ export const fetchQuota = async () => {
     if (response.ok) return usageResult(asFields(await response.json()));
     if (response.status !== 401) return failure(`API error: ${response.status}`);
 
-    const body = asFields(await response.json().catch(() => null));
+    const body = asFields(await response.json().catch(unlessTimedOut));
     if (asNonEmptyString(asFields(body?.error)?.type) !== 'rejected_by_access_enforcement') {
       return failure('Session expired — please re-authenticate with OpenAI');
     }
     return await usageFromCodexCli()
       ?? failure('OpenAI shows usage for Sign in with ChatGPT only at chatgpt.com/settings/usage. The legacy Codex sign-ins show it here.');
   } catch (error) {
+    if (isTimeout(error)) return failure('Request timed out');
     return failure(error instanceof Error ? error.message : 'Request failed');
   }
 };
