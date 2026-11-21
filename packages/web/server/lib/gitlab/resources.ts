@@ -8,6 +8,7 @@ import { resolveGitLabProjectsFromDirectory } from './repo.js';
 import { gitPatchForDiff } from './diff-patch.js';
 import { systemReferences, withIssueReferences, withReferences } from './references.js';
 import { isPlainObject as isPlain, isPresent, isString } from './validation.js';
+import { gitlabItemFlags, gitlabItemWrites, gitlabPeople } from './item-writes.js';
 import type { SourceControlMutationTarget, SourceControlProjectRef } from '@openchamber/sdk';
 import type { ProviderReadContext } from '../source-control/provider-contract.js';
 import type { reviewCommentPosition } from '../source-control/review-position.js';
@@ -737,7 +738,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     return { target, projectId: target.project.id, number: payload.number };
   };
 
-  return {
+  return { ...gitlabItemWrites({ client, showProject, requireIssue, requireMutationResponse, requireMutationMergeRequest, mutationTargetInvalid }),
     async resolveCreateMutation(context: Context, expected: Expected, options: { remote?: Remote; headRemote?: Remote } = {}) {
       if (options.remote !== undefined && options.remote !== context.primaryRemote) {
         throw Object.assign(new Error('GitLab mutation remote does not match the bound primary remote'), {
@@ -1354,6 +1355,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         files,
         diff: files.map((file) => file.patch).filter(Boolean).join('\n'),
         ci,
+        ...gitlabItemFlags({}, target.raw, raw),
       };
       const withStack = chain === undefined ? context : { ...context, stack: chain };
       if (!options.includeTimeline) return withStack;
@@ -1368,10 +1370,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
           return mapped ? [mapped] : [];
         }).reverse(),
         commitsComplete: !commitPage?.hasMore,
-        reviewers: asArray(record(raw).reviewers).flatMap((user) => {
-          const mapped = mapGitLabUser(obj(user), identity);
-          return mapped ? [mapped] : [];
-        }),
+        ...gitlabPeople(raw, identity, mapGitLabUser),
         verdicts: asArray(notes).flatMap((note) => {
           const mapped = mapGitLabVerdictNote(obj(note), identity, record(raw).web_url);
           return mapped ? [mapped] : [];
@@ -1406,7 +1405,8 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       const issue = canonicalReads
         ? requireIssue(raw, target.project)
         : requireMapped(mapGitLabIssue(obj(raw), identity, target.project), 'GitLab returned an invalid issue');
-      return includeReferences ? withIssueReferences(client, target.project, issue, number, String(obj(raw)?.web_url ?? '')) : issue;
+      const flagged = gitlabItemFlags(issue, target.raw, raw);
+      return includeReferences ? withIssueReferences(client, target.project, flagged, number, String(obj(raw)?.web_url ?? '')) : flagged;
     },
 
     async changeRequestPatch(directory: string, number: number, options: ReadOptions = {}) {

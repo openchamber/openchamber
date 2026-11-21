@@ -23,6 +23,7 @@ import { ReferenceMarkdownRewriteContext, useProjectUploadRewrite } from './proj
 import { ReferenceMarkdownEditor } from './ReferenceMarkdownEditor';
 import { ReferenceLinksContext, useReferenceLinks } from './referenceLinks';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import type { SourceControlReadContext } from '@/lib/source-control/types';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
 import { isSettledTrackerState, trackerStateGlyph } from '@/lib/trackers/stateLook';
@@ -35,6 +36,9 @@ import { ChecksGlyph, DiscussionCategory, ReferenceLabelChips } from './Referenc
 import { PullStackRows } from './PullStackRows';
 import { useReferenceImagePreview } from './useReferenceImagePreview';
 import { useCopyReferenceLink } from './useCopyReferenceLink';
+import { MetaRow, ReferenceAssigneesRow, ReferenceBase, LoadError } from './ReferenceMetaEditors';
+import { ReferenceConversationActions } from './ReferenceConversationActions';
+import { useReferenceWriteState } from './useReferenceWriteState';
 import {
     repositoryStateLook,
     labelColor,
@@ -82,13 +86,6 @@ const PreviewFrame: React.FC<{ pinned: boolean; header: React.ReactNode; meta: R
         </div>
     );
 };
-
-const MetaRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-    <>
-        <dt className={cn('typography-meta', REFERENCE_META_TEXT)}>{label}</dt>
-        <dd className="min-w-0 typography-meta text-muted-foreground">{children}</dd>
-    </>
-);
 
 export const StatePill: React.FC<{
     icon: React.ComponentProps<typeof Icon>['name'];
@@ -312,11 +309,6 @@ const mapDetail = <T, R>(state: CachedValue<T>, map: (value: T) => R): CachedVal
     state.status === 'ready' ? { status: 'ready', value: map(state.value) } : state
 );
 
-const LoadError: React.FC<{ error: string }> = ({ error }) => {
-    const { t } = useI18n();
-    return <span className="text-[var(--status-error-text)]">{t('references.picker.error.load', { error })}</span>;
-};
-
 const PullDetailRows: React.FC<{
     detail: CachedValue<RepositoryReferenceDetail>;
     checks: CachedValue<CISummary | null>;
@@ -426,6 +418,7 @@ const RepositoryPreview: React.FC<{
     reply?: React.ReactNode;
     labelsControl?: React.ReactNode;
     reviewersControl?: React.ReactNode;
+    assigneesControl?: React.ReactNode;
     onOpenChecks?: () => void;
     commentAttachments?: CommentAttachments;
     stateMenu?: React.ReactNode;
@@ -435,7 +428,9 @@ const RepositoryPreview: React.FC<{
     revisionChoice?: RevisionChoice;
     onSaveText?: (input: { title: string; body: string }) => Promise<void>;
     commentActions?: ScopedCommentActions;
-}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
+    onWriteRefresh?: () => Promise<void>;
+    conversationWriteContext?: SourceControlReadContext | null;
+}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, assigneesControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, onWriteRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions, conversationWriteContext }) => {
     const { t } = useI18n();
     const [refreshing, setRefreshing] = React.useState(false);
     const { broken: authorBroken, onError } = useAvatarImage(reference.author?.avatarUrl);
@@ -485,6 +480,7 @@ const RepositoryPreview: React.FC<{
     const descriptor = useSourceControlProvider(reference.provider);
     const look = repositoryStateLook(reference, pullStatus.status === 'ready' ? pullStatus.value : null);
     const labels = reference.labels.map((label) => ({ name: label.name, color: labelColor(label.color) }));
+    const { assignees, writeRefresh, conversation, canChangeBase } = useReferenceWriteState({ reference, detail, descriptor, context: conversationWriteContext, onWriteRefresh, onRefresh });
     const updated = relative(reference.updatedAt);
     const body = reference.body.trim() ? reference.body : '';
     const stack = reference.kind === 'pull' && detail.status === 'ready' ? detail.value.pull?.stack ?? null : null;
@@ -492,8 +488,7 @@ const RepositoryPreview: React.FC<{
     const stackPosition = stack ? stack.layers.findIndex((layer) => layer.number === reference.number) + 1 : 0;
 
     const draftKey = referenceTextDraftKey(reference);
-    const currentDraftKey = React.useRef(draftKey);
-    currentDraftKey.current = draftKey;
+    const currentDraftKey = React.useRef(draftKey); currentDraftKey.current = draftKey;
     const [openEditor, setOpenEditor] = React.useState<{ key: string; title: string; body: string } | null>(null);
     const editing = openEditor?.key === draftKey ? openEditor : null;
     const [savingKeys, setSavingKeys] = React.useState<ReadonlySet<string>>(() => new Set());
@@ -650,7 +645,8 @@ const RepositoryPreview: React.FC<{
                                 </button>
                             </ButtonTooltip>
                         ) : null}
-                        <CopyReferenceLinkButton url={reference.url} className={refresh || showEdit ? undefined : 'ms-auto'} />
+                        {conversationWriteContext ? <ReferenceConversationActions reference={reference} context={conversationWriteContext} state={conversation} onRefresh={onRefresh} className={cn('shrink-0', showEdit || refresh ? undefined : 'ms-auto')} /> : null}
+                        <CopyReferenceLinkButton url={reference.url} className={refresh || showEdit || conversation.showLock || conversation.showSubscription ? undefined : 'ms-auto'} />
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <a
@@ -739,15 +735,7 @@ const RepositoryPreview: React.FC<{
                     {reference.kind === 'pull' ? (
                         <>
                             <MetaRow label={t('references.picker.preview.branch')}>
-                                {descriptor.features.branchHeads ? (
-                                    <span className="inline-flex max-w-full items-center gap-1 font-mono">
-                                        <span className="truncate">{reference.head}</span>
-                                        <Icon name="arrow-right" className="size-3 shrink-0 text-muted-foreground" />
-                                        <span className="truncate">{reference.base}</span>
-                                    </span>
-                                ) : (
-                                    <span className="block truncate font-mono">{reference.base}</span>
-                                )}
+                                <ReferenceBase pull={reference} branchHeads={descriptor.features.branchHeads} canChange={canChangeBase} context={conversationWriteContext} onChanged={async () => { await writeRefresh?.(); }} />
                             </MetaRow>
                             <PullDetailRows
                                 detail={detail}
@@ -760,6 +748,9 @@ const RepositoryPreview: React.FC<{
                     ) : null}
                     {reviewersControl && reference.kind === 'pull' ? (
                         <MetaRow label={t('references.picker.preview.reviewers')}>{reviewersControl}</MetaRow>
+                    ) : null}
+                    {reference.kind === 'issue' && (assigneesControl || assignees.length > 0) ? (
+                        <ReferenceAssigneesRow control={assigneesControl} assignees={assignees} />
                     ) : null}
                     {labelsControl ? (
                         <MetaRow label={t('references.picker.preview.labels')}>{labelsControl}</MetaRow>
@@ -1031,6 +1022,7 @@ export const ReferencePreview: React.FC<{
     reply?: React.ReactNode;
     labelsControl?: React.ReactNode;
     reviewersControl?: React.ReactNode;
+    assigneesControl?: React.ReactNode;
     onOpenChecks?: () => void;
     commentAttachments?: CommentAttachments;
     stateMenu?: React.ReactNode;
@@ -1041,7 +1033,9 @@ export const ReferencePreview: React.FC<{
     onOpenStackLayer?: (layer: PullRequestStackLayer) => void;
     revisionChoice?: RevisionChoice;
     onSaveText?: (input: { title: string; body: string }) => Promise<void>;
-}> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
+    onWriteRefresh?: () => Promise<void>;
+    conversationWriteContext?: SourceControlReadContext | null;
+}> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, assigneesControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, onWriteRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions, conversationWriteContext }) => {
     const { t } = useI18n();
     const reference = item?.source === 'repository' ? item.reference : null;
     const rewriteMarkdown = useProjectUploadRewrite(directory, reference);
@@ -1078,10 +1072,13 @@ export const ReferencePreview: React.FC<{
                     reply={reply}
                     labelsControl={labelsControl}
                     reviewersControl={reviewersControl}
+                    assigneesControl={assigneesControl}
                     onOpenChecks={onOpenChecks}
                     commentAttachments={commentAttachments}
                     stateMenu={stateMenu}
                     onRefresh={onRefresh}
+                    onWriteRefresh={onWriteRefresh}
+                    conversationWriteContext={conversationWriteContext}
                     threadActions={threadActions}
                     onOpenStackLayer={onOpenStackLayer}
                     revisionChoice={revisionChoice}

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import http from 'node:http';
-import type { GiteaPerson, GiteaReview, ReviewerStatesApi } from './reviewer-states.ts';
+import type { GiteaReview, ReviewerStatesApi } from './reviewer-states.ts';
 import type { DiffApi } from './diff.ts';
 import type { ReferenceEvent, ReferencesApi } from './references.ts';
 import {
@@ -12,7 +12,6 @@ import {
   type SourceControlJson,
   type SourceControlJsonObject,
   type SourceControlMutationResolution,
-  type SourceControlMutationResult,
   type SourceControlMutationTarget,
   type SourceControlOutboundMethod,
   type SourceControlOutboundResponse,
@@ -23,9 +22,11 @@ import {
   type SourceControlProviderMethod,
   type SourceControlProviderRequest,
   type SourceControlProviderResult,
-  type SourceControlProviderSession,
-  type SourceControlReconcileData,
 } from '@openchamber/sdk';
+import type {
+  Call, GiteaBranch, GiteaBranchRef, GiteaChangedFile, GiteaComment, GiteaIssue, GiteaPull, GiteaRepo, GiteaSubscriptionCheck, GiteaUser, GiteaVersion, ProviderTarget,
+} from './types.ts';
+import type { MutationDeps, Mutations } from './mutations.ts';
 
 const reviewerStatesPath = `./reviewer-states${'.js'}`;
 const { readReviews, withReviewerStates }: ReviewerStatesApi = await import(reviewerStatesPath);
@@ -46,29 +47,6 @@ const PAGE_SIZE = 20;
 const SCAN_SIZE = 50;
 const STATUS_SCAN_PAGES = 5;
 
-type GiteaUser = { id: number; login: string; full_name?: string; email?: string; avatar_url?: string };
-type GiteaRepo = {
-  id: number; name: string; owner: { login: string }; html_url: string; clone_url?: string; default_branch?: string;
-  fork?: boolean; parent?: GiteaRepo | null;
-};
-type GiteaBranchRef = { ref: string; sha: string; repo_id?: number; repo?: GiteaRepo };
-type GiteaIssue = {
-  number: number; title: string; body?: string; state: 'open' | 'closed'; html_url: string; user?: GiteaUser;
-  created_at?: string; updated_at?: string; pull_request?: object | null;
-};
-type GiteaPull = GiteaIssue & {
-  draft?: boolean; merged?: boolean; mergeable?: boolean; head: GiteaBranchRef; base: GiteaBranchRef;
-  merge_base?: string;
-  requested_reviewers?: GiteaPerson[];
-};
-type GiteaChangedFile = { filename: string; status?: string; additions?: number; deletions?: number; changes?: number };
-type GiteaComment = {
-  id: number; body: string; html_url?: string; user?: GiteaUser; created_at?: string; updated_at?: string;
-  issue_url?: string; pull_request_url?: string;
-};
-type GiteaBranch = { name: string };
-type GiteaVersion = { version: string };
-
 class CallError extends Error {
   readonly status: number;
   readonly code: string | undefined;
@@ -78,8 +56,6 @@ class CallError extends Error {
     this.code = code;
   }
 }
-
-type Call = { session: SourceControlProviderSession; identity: { provider: string; instance: string } };
 
 const forgeFailure = (response: SourceControlOutboundResponse): CallError => {
   let message = `The forge answered ${response.status}`;
@@ -162,12 +138,12 @@ type User = Identity & { id: string; username: string; name?: string; avatarUrl?
 type Dated = { createdAt?: string; updatedAt?: string };
 type Issue = Identity & Dated & {
   id: string; number: number; project: Project; title: string; body?: string; url: string;
-  state: 'open' | 'closed'; author: User | null; labels: [];
+  state: 'open' | 'closed'; author: User | null; assignees?: User[]; labels: []; locked?: boolean; subscribed?: boolean;
 };
 type ChangeRequest = Identity & Dated & {
   id: string; number: number; project: Project; title: string; body?: string; url: string;
   state: 'open' | 'closed' | 'merged'; draft: boolean; base: string; head: string; headSha: string;
-  author: User | null; labels: []; mergeable?: boolean; mergeableState?: 'clean' | 'dirty';
+  author: User | null; labels: []; mergeable?: boolean; mergeableState?: 'clean' | 'dirty'; locked?: boolean;
 };
 type Comment = Identity & Dated & {
   id: string; url: string; body: string; author: User | null;
@@ -234,6 +210,7 @@ const mapPull = (call: Call, raw: GiteaPull, project: Project): ChangeRequest =>
     labels: [],
   };
   if (raw.body !== undefined) request.body = raw.body;
+  if (raw.locked !== undefined) request.locked = raw.locked;
   stamp(request, raw);
   if (request.state === 'open' && raw.mergeable !== undefined) {
     request.mergeable = raw.mergeable;
@@ -254,7 +231,9 @@ const mapIssue = (call: Call, raw: GiteaIssue, project: Project): Issue => {
     author: mapUser(call, raw.user),
     labels: [],
   };
+  if (raw.assignees?.length) issue.assignees = raw.assignees.flatMap((person) => mapUser(call, person) ?? []);
   if (raw.body !== undefined) issue.body = raw.body;
+  if (raw.locked !== undefined) issue.locked = raw.locked;
   stamp(issue, raw);
   return issue;
 };
@@ -419,7 +398,7 @@ const handlers = {
   changeRequestContext: async (call, input) => {
     const { project } = await resolveRepo(call, text(input, 'directory'), text(input, 'remote'), selectorOf(input, 'project'));
     const number = integer(input, 'number'), repo = repoPath(project), includeDiff = input.includeDiff === true;
-    const [raw, { data: comments }, diff, changed, reviews, references] = await Promise.all([
+    const [raw, { data: comments }, diff, changed, reviews, references, check] = await Promise.all([
       readPull(call, project, number),
       api<GiteaComment[]>(call, 'GET', `${repo}/issues/${number}/comments`),
       includeDiff ? apiText(call, `${repo}/pulls/${number}.diff`) : Promise.resolve(''),
@@ -427,6 +406,7 @@ const handlers = {
       input.includeTimeline === true ? readReviews(SCAN_SIZE, (page, limit) =>
         api<GiteaReview[]>(call, 'GET', `${repo}/pulls/${number}/reviews`, { query: { page: String(page), limit: String(limit) } })) : Promise.resolve(null),
       readItemReferences(call, input, repo, number),
+      api<GiteaSubscriptionCheck>(call, 'GET', `${repo}/issues/${number}/subscriptions/check`).catch(() => null),
     ]);
     const pull = mapPull(call, raw, project), patches = splitUnifiedDiff(diff);
     const files = changed.map((file) => {
@@ -434,6 +414,7 @@ const handlers = {
       if (patch) mapped.patch = patch;
       return mapped;
     });
+    const subscribed = check?.data.subscribed;
     const context = withReviewerStates({
       identity: call.identity,
       project,
@@ -443,6 +424,7 @@ const handlers = {
       files,
       diff,
       ci: null,
+      ...(subscribed === true || subscribed === false ? { subscribed } : undefined),
     }, reviews, raw.requested_reviewers ?? []);
     return withReferences(context, references);
   },
@@ -459,12 +441,17 @@ const handlers = {
 
   getIssue: async (call, input) => {
     const { project } = await resolveRepo(call, text(input, 'directory'), text(input, 'remote'), selectorOf(input, 'project'));
-    const [{ data }, references] = await Promise.all([
-      api<GiteaIssue>(call, 'GET', `${repoPath(project)}/issues/${integer(input, 'number')}`),
-      readItemReferences(call, input, repoPath(project), integer(input, 'number')),
+    const number = integer(input, 'number');
+    const [{ data }, references, check] = await Promise.all([
+      api<GiteaIssue>(call, 'GET', `${repoPath(project)}/issues/${number}`),
+      readItemReferences(call, input, repoPath(project), number),
+      api<GiteaSubscriptionCheck>(call, 'GET', `${repoPath(project)}/issues/${number}/subscriptions/check`).catch(() => null),
     ]);
     if (data.pull_request) throw new CallError(`#${data.number} is a pull request`, 404);
-    return withReferences(mapIssue(call, data, project), references);
+    const issue = mapIssue(call, data, project);
+    const subscribed = check?.data.subscribed;
+    if (subscribed === true || subscribed === false) issue.subscribed = subscribed;
+    return withReferences(issue, references);
   },
 
   issueComments: async (call, input) => {
@@ -488,8 +475,9 @@ const handlers = {
     return data.map((branch) => branch.name);
   },
 
+  // Off in the manifest's capabilities, so OpenChamber never routes it here.
   listLabels: unsupported,
-  listReviewerCandidates: unsupported,
+  listReviewerCandidates: (call, input) => reviewerCandidates(call, input),
 
   readChangeRequestPatch: async (call, input) => {
     const project = await changeRequestRepo(call, input);
@@ -582,8 +570,6 @@ const handlers = {
   'mutation.reconcile': async (call, input) => reconcile(call, input),
 } satisfies Record<SourceControlProviderMethod, Handler>;
 
-type ProviderTarget = { repoId: number; owner: string; name: string; number?: number; sourceRepoId?: number; sourceOwner?: string };
-
 const TARGET_KEYS = ['number', 'head', 'base', 'headSha'] as const;
 
 const mutationTarget = (
@@ -665,140 +651,12 @@ const resolveTarget = async (call: Call, input: Input): Promise<SourceControlJso
   });
 };
 
-type Resolved = { providerTarget: ProviderTarget; target: Input };
+const mutationsPath = `./mutations${'.js'}`;
+const { createMutations }: { createMutations: (deps: MutationDeps) => Mutations } = await import(mutationsPath);
 
-const readResolved = (input: Input): Resolved => {
-  const resolved = objectOf(input, 'resolved');
-  const providerTarget = objectOf(resolved, 'providerTarget');
-  return {
-    providerTarget: {
-      repoId: integer(providerTarget, 'repoId'),
-      owner: text(providerTarget, 'owner'),
-      name: text(providerTarget, 'name'),
-      number: integer(providerTarget, 'number') || undefined,
-      sourceRepoId: integer(providerTarget, 'sourceRepoId') || undefined,
-      sourceOwner: text(providerTarget, 'sourceOwner') || undefined,
-    },
-    target: objectOf(resolved, 'target'),
-  };
-};
-
-const itemCommentPath = async (call: Call, providerTarget: ProviderTarget, commentId: string): Promise<string> => {
-  const path = `${repoPath(providerTarget)}/issues/comments/${seg(commentId)}`;
-  const { data } = await api<GiteaComment>(call, 'GET', path);
-  const href = (data.issue_url || data.pull_request_url || '').toLowerCase();
-  const item = `${call.identity.instance.replace(/\/+$/, '')}/${providerTarget.owner}/${providerTarget.name}`.toLowerCase();
-  const match = href.startsWith(`${item}/`) ? /^\/(?:issues|pulls)\/(\d+)\/?$/.exec(href.slice(item.length)) : null;
-  if (!match || Number(match[1]) !== providerTarget.number) {
-    throw new CallError('The comment is not on this item', 409, 'SOURCE_CONTROL_MUTATION_TARGET_INVALID');
-  }
-  return path;
-};
-
-const perform = async (call: Call, input: Input): Promise<SourceControlMutationResult> => {
-  const kind = text(input, 'kind');
-  const normalized = objectOf(input, 'input');
-  const { providerTarget, target } = readResolved(input);
-  const repo = repoPath(providerTarget);
-  switch (kind) {
-    case 'change-request-create': {
-      const sourceRepoId = providerTarget.sourceRepoId ?? providerTarget.repoId;
-      const fork = sourceRepoId !== providerTarget.repoId;
-      const head = text(target, 'head');
-      const payload: SourceControlJsonObject = {
-        head: fork ? `${providerTarget.sourceOwner}:${head}` : head, base: text(target, 'base'), title: text(normalized, 'title'),
-      };
-      const body = text(normalized, 'body');
-      if (body) payload.body = body;
-      const { data } = await api<GiteaPull>(call, 'POST', `${repo}/pulls`, { body: payload });
-      if (branchRepoId(data.base) !== providerTarget.repoId || branchRepoId(data.head) !== sourceRepoId) {
-        throw new CallError('The forge opened the pull request somewhere other than asked', 502);
-      }
-      return { number: data.number };
-    }
-    case 'change-request-update': {
-      const payload: SourceControlJsonObject = { title: text(normalized, 'title') };
-      if (Object.hasOwn(normalized, 'body')) payload.body = text(normalized, 'body');
-      await api(call, 'PATCH', `${repo}/pulls/${providerTarget.number}`, { body: payload });
-      return {};
-    }
-    case 'issue-update': {
-      const payload: SourceControlJsonObject = { title: text(normalized, 'title') };
-      if (Object.hasOwn(normalized, 'body')) payload.body = text(normalized, 'body');
-      await api(call, 'PATCH', `${repo}/issues/${providerTarget.number}`, { body: payload });
-      return {};
-    }
-    case 'change-request-merge': {
-      const payload: SourceControlJsonObject = { Do: text(normalized, 'method') || 'merge' };
-      const headSha = text(target, 'headSha');
-      if (headSha) payload.head_commit_id = headSha;
-      await api(call, 'POST', `${repo}/pulls/${providerTarget.number}/merge`, { body: payload });
-      const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
-      return { merged: pull.merged === true };
-    }
-    case 'change-request-comment':
-    case 'issue-comment':
-      await api(call, 'POST', `${repo}/issues/${providerTarget.number}/comments`, { body: { body: text(normalized, 'body') } });
-      return {};
-    case 'change-request-comment-update':
-    case 'issue-comment-update':
-      await api(call, 'PATCH', await itemCommentPath(call, providerTarget, text(normalized, 'commentId')), { body: { body: text(normalized, 'body') } });
-      return {};
-    case 'change-request-comment-delete':
-    case 'issue-comment-delete':
-      await api(call, 'DELETE', await itemCommentPath(call, providerTarget, text(normalized, 'commentId')));
-      return {};
-    case 'change-request-state':
-    case 'issue-state': {
-      const state = text(normalized, 'state');
-      const { data } = await api<GiteaIssue>(call, 'PATCH', `${repo}/issues/${providerTarget.number}`, { body: { state } });
-      if (data.state !== state) throw new CallError('The forge did not change the state', 502);
-      return { state };
-    }
-    default:
-      throw new CallError(`${kind} is not something this Git host offers`, 501, 'UNSUPPORTED');
-  }
-};
-
-const NOT_APPLIED: SourceControlReconcileData = { state: 'failed', result: { failureStatus: 409, failureCode: 'SOURCE_CONTROL_MUTATION_NOT_APPLIED' } };
-
-const reconcile = async (call: Call, input: Input): Promise<SourceControlReconcileData> => {
-  const kind = text(input, 'kind');
-  const normalized = objectOf(input, 'input');
-  const { providerTarget, target } = readResolved(input);
-  const repo = repoPath(providerTarget);
-  switch (kind) {
-    case 'change-request-create': {
-      const sourceRepoId = providerTarget.sourceRepoId ?? providerTarget.repoId;
-      const { data } = await api<GiteaPull[]>(call, 'GET', `${repo}/pulls`, { query: { state: 'all', sort: 'recentupdate', limit: String(SCAN_SIZE) } });
-      const matches = data.filter((pull) => pull.head.ref === text(target, 'head') && pull.base.ref === text(target, 'base')
-        && branchRepoId(pull.head) === sourceRepoId && branchRepoId(pull.base) === providerTarget.repoId);
-      return matches.length === 1 ? { state: 'succeeded', result: { number: matches[0].number } } : { state: 'outcome-unknown' };
-    }
-    case 'change-request-update': {
-      const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
-      const landed = pull.title === text(normalized, 'title') && (!Object.hasOwn(normalized, 'body') || (pull.body ?? '') === text(normalized, 'body'));
-      return landed ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
-    }
-    case 'issue-update': {
-      const { data } = await api<GiteaIssue>(call, 'GET', `${repo}/issues/${providerTarget.number}`);
-      const landed = data.title === text(normalized, 'title')
-        && (!Object.hasOwn(normalized, 'body') || (data.body ?? '') === text(normalized, 'body'));
-      return landed ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
-    }
-    case 'change-request-merge': {
-      const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
-      return pull.merged ? { state: 'succeeded', result: { merged: true } } : NOT_APPLIED;
-    }
-    case 'change-request-state':
-    case 'issue-state': {
-      const { data } = await api<GiteaIssue>(call, 'GET', `${repo}/issues/${providerTarget.number}`);
-      return data.state === text(normalized, 'state') ? { state: 'succeeded', result: { state: data.state } } : NOT_APPLIED;
-    }
-    default:
-      return { state: 'outcome-unknown' };
-  }
-};
+const { perform, reconcile, listReviewerCandidates: reviewerCandidates } = createMutations({
+  api, CallError, repoPath, seg, text, integer, objectOf, readPull, branchRepoId, scanSize: SCAN_SIZE, fileScanPages: FILE_SCAN_PAGES,
+});
 
 const failureOf = (error: Error): SourceControlProviderError => {
   const message = error.message.slice(0, SOURCE_CONTROL_PROVIDER_ERROR_MESSAGE_MAX) || 'Unexpected failure';

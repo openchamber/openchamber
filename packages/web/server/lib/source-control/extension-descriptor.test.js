@@ -79,6 +79,14 @@ describe('extension source-control descriptors', () => {
     });
   });
 
+  it('publishes subscription only when the manifest declares it, and never lock', () => {
+    expect(build().presentation.features).toMatchObject({ lock: false, subscription: false });
+    const declared = build({
+      presentation: { ...contribution().presentation, features: { authorCanReview: true, issueCloseReason: false, subscription: true } },
+    });
+    expect(declared.presentation.features).toMatchObject({ lock: false, subscription: true });
+  });
+
   it('fixes what the host owns whatever the extension declares', () => {
     const descriptor = build();
     expect(descriptor.authMethods).toEqual({ device: false, pat: true, cli: false });
@@ -282,6 +290,18 @@ describe('extension source-control descriptors', () => {
     expect(published.features).not.toHaveProperty('createByPush');
     expect(published.features).not.toHaveProperty('branchHeads');
     expect(published.settings.fields).toContainEqual({ id: 'username', kind: 'username', secret: false });
+  });
+
+  it('publishes no write the host could not dispatch', () => {
+    const declared = build({
+      presentation: {
+        ...contribution().presentation,
+        features: { authorCanReview: true, issueCloseReason: true, issueEdit: true, baseChange: true, updateBranch: true, rebase: true },
+      },
+    });
+    const published = publicProviderDescriptor(declared, 3, declared.extension);
+    // The manifest has no close-reason key; rebase is dispatched by the standard table when declared.
+    expect(published.features).toMatchObject({ issueCloseReason: false, rebase: true, issueEdit: true, baseChange: true, updateBranch: true });
   });
 
   it('publishes the text edits an extension declares, and none it does not', () => {

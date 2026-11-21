@@ -34,6 +34,8 @@ declare module '@gitbeaker/rest' {
     readonly Issues: {
       all(options?: Options): Reply;
       show(number: number, options?: Options): Reply;
+      subscribe(projectId: ProjectId, number: number): Reply;
+      unsubscribe(projectId: ProjectId, number: number): Reply;
       edit(projectId: ProjectId, number: number, options: Options): Reply;
     };
     readonly IssueNotes: Notes;
@@ -48,6 +50,9 @@ declare module '@gitbeaker/rest' {
       create(projectId: ProjectId, head: string, base: string, title: string, options?: Options): Reply;
       edit(projectId: ProjectId, number: number, options: Options): Reply;
       merge(projectId: ProjectId, number: number, options?: Options): Reply;
+      subscribe(projectId: ProjectId, number: number): Reply;
+      unsubscribe(projectId: ProjectId, number: number): Reply;
+      rebase(projectId: ProjectId, number: number): Reply;
     };
     readonly MergeRequestApprovals: { approve(projectId: ProjectId, number: number, options?: Options): Reply };
     readonly MergeRequestDiscussions: {

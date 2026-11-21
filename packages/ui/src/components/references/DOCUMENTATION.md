@@ -46,12 +46,13 @@ React checks the store version again after subscribing. This catches an answer t
 | File | Owns |
 | --- | --- |
 | `useReferenceBrowser.ts` | The state both the picker and the board read: repository tab and filter, the provider's descriptor and term, search, highlight, the previewed item and its details, arrow and Ctrl+N/P keys. |
-| `ReferenceBrowser.tsx` | The parts both lay out: tabs (repository source only, the change-request tab named by the provider's term), search filling the row with the one filter menu (32 px, like the tabs) whose panel also holds, for issues and change requests, the labels checklist, the list with its loading, failure, empty and not-connected states. |
+| `ReferenceBrowser.tsx` | The parts both lay out: tabs (repository source only, the change-request tab named by the provider's term), search filling the row with the one filter menu (32 px, like the tabs) whose panel also holds, for issues and change requests, the labels checklist, the list with its loading, failure, empty and not-connected states. Where the checklist is shown the panel itself does not scroll: the checklist is the panel's one scroll area, so a wheel over the labels moves the list rather than the menu. |
 | `useRepositoryLabelReader.ts` | Reading the filter's label choices, while its panel is open: the project the folder's repository is bound as, or the path its primary remote names for one nobody bound. |
 | `labelWrites.ts` | Label sets the app wrote, held over the lists for two minutes so a lagging search index cannot bring the old set back. |
 | `ReferencePickerDialog.tsx` | The picker around them: checked items, the diff switch, Enter/Shift+Enter, confirm. Desktop shows the list and a preview side by side; mobile opens the preview in place of the list. |
 | `usePreviewReturnScroll.ts` | The phone's in-place preview: keeps the list's scroll position while an item takes its place in the sheet's one scroll area, and starts each preview at its top. |
-| `ReferencePickerRow.tsx`, `ReferencePreview.tsx` | What a row and the preview show. State colours are the theme's PR tokens through the sidebar's rule (`lib/source-control/prVisualState.ts`). |
+| `ReferencePickerRow.tsx`, `ReferencePreview.tsx`, `ReferenceMetaEditors.tsx` | What a row and the preview show; the meta editors hold the assignee and base rows. State colours are the theme's PR tokens through the sidebar's rule (`lib/source-control/prVisualState.ts`). |
+| `useReferenceWriteState.ts` | The preview's write state: the assignees it shows, the refresh after a write, the conversation's lock and follow actions, and whether the base branch may change. |
 | `useReferenceImagePreview.tsx` | Opening the preview's pictures in the chat's image viewer. |
 | `referenceSources.ts` | Which read context and which read a list or preview comes from (by the provider's features), which cache, and its key. |
 | `listBackedReferences.ts` | Pages, lookups and previews of a provider without a reference search, from the neutral list reads. |
@@ -567,6 +568,16 @@ preview's footer holds actions instead of what the agent gets.
   set is sent once, when the popup closes, so several clicks are one change;
   a PR's author is not offered as its reviewer unless the provider has
   `features.authorCanReview` (GitLab).
+- Assignees (`SourceBoardAssignees`, the same picker): an issue's row names its
+  current assignees and offers the pencil once the project answered who can be
+  assigned and the detail does not say `writeAccess: false`. That read uses
+  `role: 'assignee'`, so an owner-only repository still
+  offers its owner; reviewers keep the default role. An empty candidate list
+  still opens the picker with its empty message, a failed
+  candidate read keeps the pencil and shows the failure there, and a host that
+  does not support the read (`SOURCE_CONTROL_CAPABILITY_UNSUPPORTED`) leaves the
+  row read-only.
+- Lock and Follow (`ReferenceConversationActions.tsx`, every repository item): the header carries a lock toggle and a bell beside the refresh button. The lock shows only where the detail names `locked`, the descriptor publishes `features.lock`, the instance capability read (when it answered) does not say false, the detail's `writeAccess` is not false, the item is not linked, and the surface passes `conversationWriteContext`; its label switches between lock and unlock from the state the detail read again reports. The instance capability read refines it: only the Gitea family implements `/repo/capabilities`, and a host without it answers `501`, which reads as unknown, so its descriptor's answer stands; the server caches the answer once per instance. Follow shows on the same terms but ignores `writeAccess` (any account may follow) and reads `viewerSubscribed`; it is additionally withheld only when the credential's scopes are known (`/repo/scopes`) and lack `notifications`, which GitHub's subscribe needs. Scopes that cannot be read (`null`, or 501 from every other host) leave Follow in place. Both writes return a receipt, then the preview reads the item again.
 - Reply (`SourceBoardReply`, every repository item): below the activity a
   comment box; on an open PR also Approve and Request changes (needs text),
   for the head commit the preview shows. The box is keyed by the item, so a

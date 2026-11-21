@@ -62,7 +62,7 @@ import { SourceBoardTrackerStatus } from './SourceBoardTrackerStatus';
 import { SourceBoardReply } from './SourceBoardReply';
 import { SourceBoardAcrossNote } from './SourceBoardAcrossNote';
 import { SourceBoardChecksDialog } from './SourceBoardChecksDialog';
-import { SourceBoardLabels, SourceBoardReviewers } from './SourceBoardMetaEditors';
+import { SourceBoardAssignees, SourceBoardLabels, SourceBoardReviewers } from './SourceBoardMetaEditors';
 import { SourceBoardContainerPicker, SourceBoardProjectPicker, SourceBoardRepositoryPicker } from './SourceBoardPickers';
 import { choiceForFocus, resolveBoardTab, shouldRememberAll, useBoardRepository, useLinkRepository } from './boardRepository';
 import { isSameRepositoryItemLink } from './openTrackerItem';
@@ -519,19 +519,20 @@ const SourceBoardBody: React.FC<{
         </span>
     ) : null;
 
-    const latestPull = previewItem?.source === 'repository' && browser.repositoryLatestDetail.status === 'ready'
-        ? browser.repositoryLatestDetail.value.pull
-        : null;
-    const previewPullStatus = previewItem?.source === 'repository' && previewItem.reference.kind === 'pull'
-        ? readyValue(browser.pullStatusOf(previewItem.reference, previewItem.directory))
-        : null;
+    const latestPull = previewItem?.source === 'repository' && browser.repositoryLatestDetail.status === 'ready' ? browser.repositoryLatestDetail.value.pull : null;
+    const previewPullStatus = previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' ? readyValue(browser.pullStatusOf(previewItem.reference, previewItem.directory)) : null;
+    const { refreshRepositoryDetail, list: { retry: retryList } } = browser;
+    const refreshRepositoryItem = React.useCallback(
+        () => Promise.all([refreshRepositoryDetail(), retryList()]).then(() => undefined),
+        [refreshRepositoryDetail, retryList],
+    );
     const actions = previewItem ? (
         <SourceBoardActions
             item={previewItem}
             project={actionProject}
             context={readContext}
             onStartWorktree={(target, selection) => setWorktreeRequest({ project: target, selection })}
-            onChanged={browser.list.retry}
+            onChanged={refreshRepositoryItem}
             startIn={startIn}
             onLeave={onLeave}
             worktreeAvailable={!readsNestedRepository && !previewLinked}
@@ -540,6 +541,7 @@ const SourceBoardBody: React.FC<{
             submitRequirements={latestPull?.submitRequirements}
             submitRequirementsUnreadable={previewItem?.source === 'repository' && browser.repositoryLatestDetail.status === 'error'}
             mergeable={previewPullStatus?.mergeable ?? null}
+            writeAccess={previewItem?.source === 'repository' && browser.repositoryDetail.status === 'ready' ? browser.repositoryDetail.value.writeAccess : undefined}
         />
     ) : null;
 
@@ -562,11 +564,6 @@ const SourceBoardBody: React.FC<{
         ? browser.repositoryDetail.value.discussion
         : undefined;
 
-    const { refreshRepositoryDetail, list: { retry: retryList } } = browser;
-    const refreshRepositoryItem = React.useCallback(
-        () => Promise.all([refreshRepositoryDetail(), retryList()]).then(() => undefined),
-        [refreshRepositoryDetail, retryList],
-    );
     const writableReference = previewItem?.source === 'repository' && context ? { context, reference: previewItem.reference } : null;
     const saveText = writableReference ? async (input: { title: string; body: string }) => {
         await updateRepositoryItemText(sourceControl, writableReference.context, writableReference.reference, input);
@@ -654,9 +651,8 @@ const SourceBoardBody: React.FC<{
             onOpenStackLayer={openStackLayer}
             revisionChoice={latestPull?.revisions ? { revisions: latestPull.revisions, selected: browser.previewRevision, onSelect: browser.selectPreviewRevision } : undefined}
             onOpenChecks={previewPull && readContext ? () => setChecksOpenFor(previewKey) : undefined}
-            onRefresh={previewItem?.source === 'repository' && readContext ? refreshFromHost : undefined}
-            onSaveText={saveText}
-            threadActions={threadActions}
+            onRefresh={previewItem?.source === 'repository' && readContext ? refreshFromHost : undefined} onWriteRefresh={previewItem?.source === 'repository' && readContext ? refreshRepositoryItem : undefined} conversationWriteContext={context ?? undefined}
+            onSaveText={saveText} threadActions={threadActions}
             commentActions={commentActions}
             stateMenu={previewItem?.source === 'repository' && previewItem.reference.state !== 'merged' && context
                 && (previewItem.reference.kind !== 'discussion' || canChangeDiscussionState(previewItem.reference, previewDiscussion)) ? (
@@ -674,6 +670,7 @@ const SourceBoardBody: React.FC<{
                     onChanged={refreshRepositoryItem}
                 />
             ) : undefined}
+            assigneesControl={previewItem?.source === 'repository' && previewItem.reference.kind === 'issue' && previewItem.reference.linked !== true && context ? <SourceBoardAssignees key={referencePickerItemKey(previewItem)} issue={previewItem.reference} detail={browser.repositoryDetail} writeAccess={browser.repositoryDetail.status === 'ready' ? browser.repositoryDetail.value.writeAccess : undefined} context={context} onChanged={refreshRepositoryItem} /> : undefined}
             reviewersControl={previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' && context ? (
                 <span className="inline-flex flex-wrap items-center gap-2">
                     <SourceBoardReviewers

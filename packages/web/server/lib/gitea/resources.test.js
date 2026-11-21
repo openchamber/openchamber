@@ -775,6 +775,79 @@ describe('Gitea label filtering', () => {
   });
 });
 
+describe('Gitea picker candidates', () => {
+  it('reads assignable people for the assignee role when the repository lists no collaborators', async () => {
+    const { service, calls } = setup({
+      'GET /repos/alice/app/collaborators': [],
+      'GET /repos/alice/app/assignees': [{ id: 1, login: 'alice' }],
+    });
+
+    await expect(service.listReviewerCandidates('/repo', upstream, 'origin')).resolves.toEqual([]);
+    await expect(service.listReviewerCandidates('/repo', upstream, 'origin', { role: 'reviewer' })).resolves.toEqual([]);
+    await expect(service.listReviewerCandidates('/repo', upstream, 'origin', { role: 'assignee' }))
+      .resolves.toEqual([{ id: '1', login: 'alice' }]);
+    expect(calls.filter((call) => call.url.pathname === '/api/v1/repos/alice/app/assignees')).toHaveLength(1);
+  });
+
+  it('assigns a person the repository lists as assignable but not as a collaborator', async () => {
+    const { service, calls } = setup({
+      'GET /repos/alice/app/issues/1': { ...fixtures.issue, number: 1, assignees: [] },
+      'PATCH /repos/alice/app/issues/1': { ...fixtures.issue, number: 1, assignees: [{ id: 1, login: 'alice' }] },
+      'GET /repos/alice/app/collaborators': [],
+      'GET /repos/alice/app/assignees': [{ id: 1, login: 'alice' }],
+    });
+
+    await expect(service.setIssueAssignees({ providerTarget, assignees: ['1'] })).resolves.toEqual({});
+    expect(calls.find((call) => call.method === 'PATCH').body).toEqual({ assignees: ['alice'] });
+  });
+});
+
+describe('Gitea conversation subscription', () => {
+  const target = { repoId: 1, owner: 'alice', name: 'app', number: 3 };
+
+  it('follows and unfollows as the acting account, and reconciles from the check', async () => {
+    const { service, calls } = setup({
+      'PUT /repos/alice/app/issues/3/subscriptions/alice': new Response(null, { status: 200 }),
+      'DELETE /repos/alice/app/issues/3/subscriptions/alice': new Response(null, { status: 200 }),
+      'GET /repos/alice/app/issues/3/subscriptions/check': { subscribed: true },
+    });
+
+    await expect(service.setSubscription({ providerTarget: target, subscribed: true })).resolves.toEqual({});
+    await expect(service.setSubscription({ providerTarget: target, subscribed: false })).resolves.toEqual({});
+    expect(calls.filter((call) => call.method !== 'GET').map((call) => `${call.method} ${call.url.pathname}`)).toEqual([
+      'PUT /api/v1/repos/alice/app/issues/3/subscriptions/alice',
+      'DELETE /api/v1/repos/alice/app/issues/3/subscriptions/alice',
+    ]);
+    await expect(service.reconcileSubscription(target, true)).resolves.toEqual({ state: 'succeeded', result: {} });
+    await expect(service.reconcileSubscription(target, false)).resolves.toEqual({ state: 'outcome-unknown' });
+  });
+
+  it('leaves the answer unknown when the check cannot be read', async () => {
+    const { service } = setup({});
+
+    await expect(service.reconcileSubscription(target, true)).resolves.toEqual({ state: 'outcome-unknown' });
+  });
+
+  it('locks and unlocks through the issue endpoint and reconciles from is_locked', async () => {
+    const { service, calls } = setup({
+      'PUT /repos/alice/app/issues/3/lock': new Response(null, { status: 204 }),
+      'DELETE /repos/alice/app/issues/3/lock': new Response(null, { status: 204 }),
+      'GET /repos/alice/app/issues/3': { number: 3, title: 'Bug', html_url: `${ORIGIN}/alice/app/issues/3`, state: 'open', is_locked: true },
+    });
+
+    await expect(service.setConversationLock({ providerTarget: target, locked: true })).resolves.toEqual({});
+    await expect(service.setConversationLock({ providerTarget: target, locked: false })).resolves.toEqual({});
+
+    const writes = calls.filter((call) => call.method !== 'GET');
+    expect(writes.map((call) => `${call.method} ${call.url.pathname}`)).toEqual([
+      'PUT /api/v1/repos/alice/app/issues/3/lock',
+      'DELETE /api/v1/repos/alice/app/issues/3/lock',
+    ]);
+    expect(writes[0].body).toEqual({ lock: true });
+    await expect(service.reconcileLockMutation(target, true)).resolves.toEqual({ state: 'succeeded', result: {} });
+    await expect(service.reconcileLockMutation(target, false)).resolves.toEqual({ state: 'outcome-unknown' });
+  });
+});
 
 describe('Gitea cross-references', () => {
   const timelineEntry = (overrides = {}) => ({

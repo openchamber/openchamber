@@ -84,14 +84,17 @@ import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { isSafeRepositoryEndpoint, parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
 import { isExtensionProviderId, isProviderUserId } from '../../server/lib/source-control/provider-id.js';
+import { writeFlags } from './source-control-write-flags';
 import type { SourceControlProviderDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor';
 import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references';
+import { createBranchWrites } from './source-control-branch-writes';
+import { createConversationWrites, readCredentialScopes, readRepoCapabilities } from './source-control-conversation-writes';
 import { isHttpUrl, parseSourceReferenceLinks } from './source-reference-link';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS, fetchSourceControlProviders, providerPath } from './source-control-providers';
 import { parseReviewerStates } from './review-state';
 import { isBooleanValue, isNonEmptyString, isNumberValue, isPositiveSafeInteger, isStringValue, type BoundaryScalar } from './boundary-guards';
 
-interface ErrorResponse {
+export interface ErrorResponse {
   error?: string;
   code?: string;
 
@@ -174,7 +177,7 @@ interface UpdateBody extends MutationBody<SourceControlExistingMutationTarget> {
   body?: string;
 }
 
-interface MutationReceiptDTO extends ErrorResponse {
+export interface MutationReceiptDTO extends ErrorResponse {
   status: string;
   actor: { provider: string; instance: string; providerAccountId: string };
   target: {
@@ -191,7 +194,7 @@ interface MutationReceiptDTO extends ErrorResponse {
   result: MutationResultDTO;
 }
 
-interface MutationResultDTO {
+export interface MutationResultDTO {
   merged?: boolean;
   message?: string;
   outcome?: string;
@@ -221,7 +224,7 @@ type PostBody =
   | (MutationBody<SourceControlExistingMutationTarget> & { body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; resolved: boolean })
-  | (MutationBody<SourceControlExistingMutationTarget> & { state: SetStateInput['state'] })
+  | (MutationBody<SourceControlExistingMutationTarget> & { state: SetStateInput['state']; reason?: NonNullable<SetStateInput['reason']> })
   | (MutationBody<SourceControlExistingMutationTarget> & { labels: string[] })
   | (MutationBody<SourceControlExistingMutationTarget> & { reviewers: string[] })
   | (MutationBody<SourceControlExistingMutationTarget> & { body: string; replyTo?: string })
@@ -291,7 +294,7 @@ const normalizeHostInstance = (identity: SourceControlIdentity): SourceControlId
   return { provider: identity.provider, instance: host };
 };
 
-const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdentity => {
+export const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdentity => {
   const normalized = (providerInstances.get(identity.provider)?.format ?? 'origin') === 'host'
     ? normalizeHostInstance(identity)
     : normalizeOriginInstance(identity);
@@ -392,7 +395,7 @@ export const configureWebAuxiliaryBinding = async (
   return { status: 'configured', binding: parseRepositoryBinding(payload) };
 };
 
-const request = async <TResult extends ErrorResponse | null>(
+export const request = async <TResult extends ErrorResponse | null>(
   fetch: SourceControlFetch,
   identity: SourceControlIdentity,
   path: string,
@@ -419,7 +422,7 @@ const request = async <TResult extends ErrorResponse | null>(
   return payload;
 };
 
-const boundReadQuery = (context: SourceControlReadContext): URLSearchParams => {
+export const boundReadQuery = (context: SourceControlReadContext): URLSearchParams => {
   const query = new URLSearchParams({
     directory: context.directory,
     repositoryId: context.repositoryId,
@@ -440,7 +443,7 @@ const parseIncompleteProjectIds = (ids: PageResult<never>['incompleteProjectIds'
   return [...ids];
 };
 
-const post = <TResult extends ErrorResponse>(
+export const post = <TResult extends ErrorResponse>(
   fetch: SourceControlFetch,
   identity: SourceControlIdentity,
   path: string,
@@ -462,17 +465,17 @@ const hasExactKeys = (value: ExactKeyValue, keys: readonly string[]): boolean =>
   return actual.length === keys.length && actual.every((key) => keys.includes(key));
 };
 
-function mutationBody(
+export function mutationBody(
   payload: SourceControlMutationContext<SourceControlCreateMutationTarget>,
   identity: SourceControlIdentity,
   operation: 'create',
 ): MutationBody<SourceControlCreateMutationTarget>;
-function mutationBody(
+export function mutationBody(
   payload: SourceControlMutationContext<SourceControlExistingMutationTarget>,
   identity: SourceControlIdentity,
   operation: 'existing',
 ): MutationBody<SourceControlExistingMutationTarget>;
-function mutationBody(
+export function mutationBody(
   payload: SourceControlMutationContext,
   identity: SourceControlIdentity,
   operation: 'create' | 'existing',
@@ -539,7 +542,7 @@ const mutationTargetMatches = (
   && (context.target.base === undefined || target.base === context.target.base)
   && (context.target.headSha === undefined || target.headSha === context.target.headSha);
 
-const parseMutationReceipt = <TResult>(
+export const parseMutationReceipt = <TResult>(
   payload: MutationReceiptDTO,
   context: SourceControlMutationContext,
   identity: SourceControlIdentity,
@@ -587,7 +590,7 @@ const parseMutationReceipt = <TResult>(
   };
 };
 
-const parseEmptyMutationResult = (result: MutationResultDTO): SourceControlEmptyMutationResult => {
+export const parseEmptyMutationResult = (result: MutationResultDTO): SourceControlEmptyMutationResult => {
   if (!hasExactKeys(result, [])) throw new Error('Source control response contained an invalid mutation result');
   return {};
 };
@@ -632,15 +635,13 @@ interface RepositoryChoicesDTO extends ErrorResponse {
 
 
 const readRepositoryChoices = async (
-  fetch: SourceControlFetch,
-  context: SourceControlReadContext,
-  project: RepositorySelector,
-  path: string,
+  fetch: SourceControlFetch, context: SourceControlReadContext, project: RepositorySelector,
+  path: string, role?: 'assignee' | 'reviewer',
 ): Promise<NonNullable<RepositoryChoicesDTO['items']>> => {
   const identity = normalizeIdentity(context);
   const query = boundReadQuery(context);
-  query.set('owner', project.owner);
-  query.set('repo', project.repo);
+  query.set('owner', project.owner); query.set('repo', project.repo);
+  if (role) query.set('role', role);
   const payload = await request<RepositoryChoicesDTO>(fetch, identity, path, {}, query);
   if (payload.connected !== true) throw new Error(`${providerLabel(identity)} is not connected`);
   if (!Array.isArray(payload.items)) throw new Error('Source control response contained an invalid list');
@@ -893,6 +894,7 @@ const parseSourceIssue = (issue: Issue, identity: SourceControlIdentity): Issue 
   if (issue.author !== undefined) result.author = issue.author ? parseSourceUser(issue.author, identity) : null;
   if (issue.assignees !== undefined) result.assignees = issue.assignees.map((user) => parseSourceUser(user, identity));
   if (issue.labels !== undefined) result.labels = issue.labels.map((label) => ({ name: label.name, color: label.color }));
+  Object.assign(result, writeFlags(issue, 'issue '));
   if (issue.createdAt) result.createdAt = issue.createdAt;
   if (issue.updatedAt) result.updatedAt = issue.updatedAt;
   const references = parseSourceReferenceLinks(issue.references);
@@ -1537,19 +1539,16 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
     },
     changeRequestSetState: async (payload: SetStateInput) => {
-      const identity = normalizeIdentity(payload);
-      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/state', {
-        ...mutationBody(payload, identity, 'existing'), state: payload.state,
-      });
+      const identity = normalizeIdentity(payload); const fields: Pick<SetStateInput, 'state' | 'reason'> = { state: payload.state }; if (payload.reason !== undefined) fields.reason = payload.reason;
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/state', { ...mutationBody(payload, identity, 'existing'), ...fields });
       return parseMutationReceipt(result, payload, identity, parseStateMutationResult);
     },
     issueSetState: async (payload: SetStateInput) => {
-      const identity = normalizeIdentity(payload);
-      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/state', {
-        ...mutationBody(payload, identity, 'existing'), state: payload.state,
-      });
+      const identity = normalizeIdentity(payload); const fields: Pick<SetStateInput, 'state' | 'reason'> = { state: payload.state }; if (payload.reason !== undefined) fields.reason = payload.reason;
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/state', { ...mutationBody(payload, identity, 'existing'), ...fields });
       return parseMutationReceipt(result, payload, identity, parseStateMutationResult);
     },
+    ...createBranchWrites(fetch), ...createConversationWrites(fetch), credentialScopes: (context) => readCredentialScopes(fetch, context), repoCapabilities: (context) => readRepoCapabilities(fetch, context),
     changeRequestSetLabels: async (payload: SetLabelsInput) => {
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/labels', {
@@ -1578,7 +1577,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       await request<ErrorResponse>(fetch, identity, '/read-cache/refresh', { method: 'POST' }, query);
     },
     referenceLabels: async (context, project) => parseLabelChoices(await readRepositoryChoices(fetch, context, project, '/references/labels')),
-    referenceReviewers: async (context, project) => parseReviewerChoices(await readRepositoryChoices(fetch, context, project, '/references/reviewers')),
+    referenceReviewers: async (context, project, role) => parseReviewerChoices(await readRepositoryChoices(fetch, context, project, '/references/reviewers', role)),
     issueComment: async (payload: CommentInput) => {
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/comment', {
@@ -1677,6 +1676,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         const stack = parseOptionalStack(payload.stack);
         if (stack) result.stack = stack;
       }
+      Object.assign(result, writeFlags(payload));
       const reviewerStates = payload.reviewerStates === undefined ? undefined : parseReviewerStates(payload.reviewerStates, normalized, parseSourceUser);
       if (reviewerStates) result.reviewerStates = reviewerStates;
       if (payload.voteLabels !== undefined) {

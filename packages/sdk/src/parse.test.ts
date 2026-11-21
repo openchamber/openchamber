@@ -1506,7 +1506,7 @@ describe('contributes.sourceControl', () => {
       ci: false, comments: false, commentEdit: false, reviews: false, state: false, labels: false, reviewers: false,
       changeRequestPatch: false, liveSummaries: true,
     });
-    expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false });
+    expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false, baseChange: false, updateBranch: false, rebase: false, subscription: false });
     expect(parsed && toPublicSourceControl(parsed)).toEqual({ label: 'Teahouse', defaultInstances: ['https://tea.example.com'], custom: true });
   });
 
@@ -1571,7 +1571,7 @@ describe('contributes.sourceControl', () => {
     expect(parsed?.terminology.changeRequest).toBe('change');
     expect(parsed?.capabilities).toMatchObject({ merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true });
     expect(parsed?.token).toMatchObject({ scheme: 'basic', username: true });
-    expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false, submitRequirements: true });
+    expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false, baseChange: false, updateBranch: false, rebase: false, subscription: false, submitRequirements: true });
     expect(withSourceControl({ capabilities: { ...sourceControl.capabilities, reviewModel: 'stars' } })).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withSourceControl({ terminology: { changeRequest: 'patch', ci: 'checks' } })).toMatchObject({ ok: false, code: 'invalid-service' });
   });
@@ -1586,6 +1586,25 @@ describe('contributes.sourceControl', () => {
       .toMatchObject({ issueEdit: true, changeRequestEdit: true });
     expect(withSourceControl({ presentation: { ...sourceControl.presentation, features: { issueEdit: 'yes' } } }))
       .toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
+  test('a host declares baseChange and updateBranch, and a non-boolean reads as off', () => {
+    const declared = withSourceControl({
+      presentation: { ...sourceControl.presentation, features: { baseChange: true, updateBranch: true } },
+    });
+    expect(declared.ok).toBe(true);
+    if (declared.ok) {
+      expect(declared.manifest.contributes.sourceControl?.presentation.features)
+        .toMatchObject({ baseChange: true, updateBranch: true });
+    }
+    const degraded = withSourceControl({
+      presentation: { ...sourceControl.presentation, features: { baseChange: 'yes', updateBranch: 1 } },
+    });
+    expect(degraded.ok).toBe(true);
+    if (degraded.ok) {
+      expect(degraded.manifest.contributes.sourceControl?.presentation.features)
+        .toMatchObject({ baseChange: false, updateBranch: false });
+    }
   });
 
   test('submit is the only merge method when present', () => {

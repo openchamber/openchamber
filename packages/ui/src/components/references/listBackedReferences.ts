@@ -245,11 +245,21 @@ export const fetchListBackedReferenceDetail = async (
         const [issue, notes] = await Promise.all([
             crossReferences
                 ? reads.issueGet(context, reference.number, project, { includeReferences: true }).catch(() => null)
-                : null,
+                : reads.issueGet(context, reference.number, project),
             reads.issueComments(context, reference.number, project),
         ]);
         const comments = notes.map(toComment).sort(byCreation);
-        const detail: RepositoryReferenceDetail = { number: reference.number, comments: comments.slice(-50), commentTotal: comments.length, pull: null };
+        const assignees = (issue?.assignees ?? []).map((person) => ({ id: person.id, login: person.username, avatarUrl: person.avatarUrl }));
+        const detail: RepositoryReferenceDetail = {
+            number: reference.number,
+            comments: comments.slice(-50),
+            commentTotal: comments.length,
+            pull: null,
+        };
+        if (assignees.length > 0) detail.assignees = assignees;
+        if (issue && issue.writeAccess !== undefined) detail.writeAccess = issue.writeAccess;
+        if (issue && issue.locked !== undefined) detail.locked = issue.locked;
+        if (issue && issue.subscribed !== undefined) detail.viewerSubscribed = issue.subscribed;
         if (issue?.references && issue.references.length > 0) detail.references = issue.references;
         return detail;
     }
@@ -267,6 +277,9 @@ export const fetchListBackedReferenceDetail = async (
         commentTotal: changeRequestContext.issueComments.length,
         pull: pullDetail(changeRequestContext),
     };
+    if (changeRequestContext.writeAccess !== undefined) detail.writeAccess = changeRequestContext.writeAccess;
+    if (changeRequestContext.locked !== undefined) detail.locked = changeRequestContext.locked;
+    if (changeRequestContext.subscribed !== undefined) detail.viewerSubscribed = changeRequestContext.subscribed;
     if (crossReferences && changeRequestContext.references && changeRequestContext.references.length > 0) detail.references = changeRequestContext.references;
     return detail;
 };

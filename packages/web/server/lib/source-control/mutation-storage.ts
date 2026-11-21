@@ -104,6 +104,11 @@ export const SOURCE_CONTROL_MUTATION_KINDS = Object.freeze([
   'issue-state',
   'change-request-labels',
   'issue-labels',
+  'issue-assignees',
+  'issue-lock',
+  'change-request-lock',
+  'issue-subscription',
+  'change-request-subscription',
   'change-request-reviewers',
   'change-request-thread-reply',
   'change-request-thread-resolve',
@@ -115,6 +120,9 @@ export const SOURCE_CONTROL_MUTATION_KINDS = Object.freeze([
   'discussion-answer',
   'discussion-labels',
   'discussion-update',
+  'change-request-base',
+  'change-request-update-branch',
+  'change-request-rebase',
 ]);
 const KINDS = new Set(SOURCE_CONTROL_MUTATION_KINDS);
 const STATES = ['running', 'succeeded', 'failed', 'outcome-unknown'];

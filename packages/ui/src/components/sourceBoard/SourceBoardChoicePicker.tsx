@@ -32,11 +32,12 @@ export const SourceBoardChoicePicker: React.FC<{
     searchPlaceholder: string;
     emptyText: string;
     selected: readonly string[];
-    selectedChoices: readonly BoardChoice[];
+    selectedChoices?: readonly BoardChoice[];
     loadChoices: () => Promise<BoardChoice[]>;
     onCommit: (ids: string[]) => void;
     busy: boolean;
-}> = ({ ariaLabel, searchPlaceholder, emptyText, selected, selectedChoices, loadChoices, onCommit, busy }) => {
+    single?: boolean;
+}> = ({ ariaLabel, searchPlaceholder, emptyText, selected, selectedChoices = [], loadChoices, onCommit, busy, single = false }) => {
     const { t } = useI18n();
     const [open, setOpen] = React.useState(false);
     const [query, setQuery] = React.useState('');
@@ -48,9 +49,11 @@ export const SourceBoardChoicePicker: React.FC<{
     const items = React.useMemo(() => {
         if (choices.status !== 'ready') return [];
         const listed = new Set(choices.items.map((choice) => choice.id));
-        const all = [...selectedChoices.filter((choice) => !listed.has(choice.id)), ...choices.items];
+        const all = single
+            ? choices.items
+            : [...selectedChoices.filter((choice) => !listed.has(choice.id)), ...choices.items];
         return query ? rankByQuery(all, query, (choice) => [choice.label]) : all;
-    }, [choices, query, selectedChoices]);
+    }, [choices, query, selectedChoices, single]);
     const effectiveActive = activeId && items.some((choice) => choice.id === activeId) ? activeId : items[0]?.id ?? null;
 
     const openChange = (next: boolean) => {
@@ -75,6 +78,17 @@ export const SourceBoardChoicePicker: React.FC<{
         else next.add(id);
         return next;
     });
+
+    const pick = (id: string) => {
+        if (!single) {
+            toggle(id);
+            return;
+        }
+        setOpen(false);
+        setQuery('');
+        setActiveId(null);
+        onCommit([id]);
+    };
 
     return (
         <Popover.Root open={open} onOpenChange={openChange} onOpenChangeComplete={(next) => { if (next) searchRef.current?.focus(); }}>
@@ -132,12 +146,12 @@ export const SourceBoardChoicePicker: React.FC<{
                                 ) : items.length === 0 ? (
                                     <div role="status" className="px-3 py-6 text-center typography-ui-label text-muted-foreground">{emptyText}</div>
                                 ) : items.map((choice) => {
-                                    const checked = picked.has(choice.id);
+                                    const checked = single ? selected.includes(choice.id) : picked.has(choice.id);
                                     return (
                                         <CommandItem
                                             key={choice.id}
                                             value={choice.id}
-                                            onSelect={() => toggle(choice.id)}
+                                            onSelect={() => pick(choice.id)}
                                             aria-current={checked ? true : undefined}
                                             className="max-w-full"
                                         >

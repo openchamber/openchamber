@@ -1,16 +1,15 @@
 import type { WorktreeMetadata } from '@/types/worktree';
+import type { SourceControlWrites } from './source-control-writes';
+import type { RepositoryReferenceDetail } from './repository-reference-detail';
 import type { DesktopSettings } from '@/lib/settings/registry';
 import type { GitIdentityProfile, GitIdentitySummary } from './git-identity';
 import type { GitPathUnavailableReason } from './git-path-diff';
 import type { PushAPI } from './push';
-import type { RepositoryReferenceCommit, RepositoryReferenceReviewer, RepositoryReferenceReviewerState } from './repositoryReferenceTypes';
+import type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
 export type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
 import type {
   ChangeRequest,
   ChangeRequestContext,
-  ChangeRequestRevision,
-  ChangeRequestSubmitRequirement,
-  ChangeRequestVoteLabel,
   CISummary,
   Label,
   ChangeRequestStatus,
@@ -19,7 +18,6 @@ import type {
   IssueComment,
   MergeChangeRequestInput,
   PageResult,
-  PullRequestStack,
   ProjectUpstream,
   ReadyChangeRequestInput,
   DraftChangeRequestInput,
@@ -73,7 +71,7 @@ import type {
 import type { SourceControlProviderDescriptor } from '../source-control/providers/descriptor';
 import type { TrackerAPI } from '../trackers/types';
 
-export type * from '../source-control/types';
+export type * from '../source-control/types'; export type { SetAssigneesInput } from '../source-control/mutation-writes';
 export type * from '../trackers/types';
 export type {
   GitIdentityProfile,
@@ -1573,30 +1571,7 @@ export type RepositoryReferenceThread = {
   replies: RepositoryReferenceComment[];
 };
 
-export type RepositoryReferenceDetail = {
-  number: number;
-  body?: string;
-  viewerCanUpdate?: boolean;
-  comments: RepositoryReferenceComment[];
-  commentTotal: number;
-  pull: {
-    reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
-    reviewers: RepositoryReferenceReviewer[];
-    reviewerStates?: RepositoryReferenceReviewerState[];
-    additions: number;
-    deletions: number;
-    changedFiles: number;
-    checks?: CISummary | null;
-    commits: RepositoryReferenceCommit[];
-    commitTotal: number | null;
-    stack?: PullRequestStack | null;
-    voteLabels?: ChangeRequestVoteLabel[];
-    submitRequirements?: ChangeRequestSubmitRequirement[];
-    revisions?: ChangeRequestRevision[];
-  } | null;
-  references?: ChangeRequestContext['references'];
-  discussion?: { canComment: boolean; canClose: boolean; canReopen: boolean };
-};
+export type { RepositoryReferenceDetail } from './repository-reference-detail';
 
 export type RepositoryReferenceDetailResult =
   | { connected: false }
@@ -1660,7 +1635,7 @@ export class SourceControlInstanceAliasError extends Error {
   }
 }
 
-export interface SourceControlAPI {
+export interface SourceControlAPI extends SourceControlWrites {
   providers(): Promise<SourceControlProviderDescriptor[]>;
   repositoryContext(directory: string): Promise<SourceControlRepositoryContext>;
   repositoryBinding(directory: string): Promise<SourceControlBindingRead>;
@@ -1718,7 +1693,7 @@ export interface SourceControlAPI {
   changeRequestSetReviewers(payload: SetReviewersInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   refreshProviderReads(identity: SourceControlIdentity, scope: ProviderReadsRefreshScope): Promise<void>;
   referenceLabels(context: SourceControlReadContext, project: RepositorySelector): Promise<Label[]>;
-  referenceReviewers(context: SourceControlReadContext, project: RepositorySelector): Promise<RepositoryReferenceReviewer[]>;
+  referenceReviewers(context: SourceControlReadContext, project: RepositorySelector, role?: 'assignee' | 'reviewer'): Promise<RepositoryReferenceReviewer[]>;
   changeRequestsList(
     context: SourceControlReadContext,
     options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople; labels?: string[] },
@@ -1751,7 +1726,7 @@ export interface SourceControlAPI {
     number: number,
     project?: { owner: string; name: string },
   ): Promise<IssueComment[]>;
-  projectUpstream(context: SourceControlReadContext): Promise<ProjectUpstream>;
+  projectUpstream(context: SourceControlReadContext): Promise<ProjectUpstream>; credentialScopes(context: SourceControlReadContext): Promise<string[] | null>; repoCapabilities(context: SourceControlReadContext): Promise<{ lock: boolean | null }>;
   projectBranches(context: SourceControlReadContext, owner: string, project: string): Promise<string[]>;
 
   references(context: SourceControlReadContext, query: RepositoryReferenceQuery): Promise<RepositoryReferencePage>;

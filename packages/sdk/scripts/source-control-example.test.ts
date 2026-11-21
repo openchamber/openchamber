@@ -161,6 +161,28 @@ describe('source-control provider example', () => {
     expect(await call('listLabels', { ...read(), project: { owner: 'mona', name: 'teapot' } })).toMatchObject({ ok: false, error: { status: 501 } });
   });
 
+  test('reviewer candidates read collaborators or assignees by role', async () => {
+    const project = { owner: 'mona', name: 'teapot' };
+    const octo = { id: '8', login: 'octo', avatarUrl: 'https://avatars.example.com/octo.png' };
+    expect(await data('listReviewerCandidates', { ...read(), project, role: 'reviewer' }))
+      .toEqual([{ id: '7', login: 'mona' }, octo]);
+    expect(await data('listReviewerCandidates', { ...read(), project, role: 'assignee' }))
+      .toEqual([{ id: '7', login: 'mona' }]);
+    expect(await data('listReviewerCandidates', { ...read(), project }))
+      .toEqual([{ id: '7', login: 'mona' }, octo]);
+  });
+
+  test('an issue carries its assignees, and reports none as no key', async () => {
+    expect(field(await data('getIssue', { ...read(), number: 1 }), 'assignees'))
+      .toMatchObject([{ id: '8', username: 'octo' }]);
+    const patch = (assignees: string[]) => fetch(`${forge.origin}/api/v1/repos/mona/teapot/issues/1`, {
+      method: 'PATCH', headers: { authorization: 'token good' }, body: JSON.stringify({ assignees }),
+    });
+    await patch([]);
+    expect(Object.hasOwn(await data('getIssue', { ...read(), number: 1 }), 'assignees')).toBe(false);
+    await patch([FAKE_FORGE_FORK.owner]);
+  });
+
   test('the timeline references the host asked for, mapped and deduped', async () => {
     const detail = await data('getIssue', { ...read(), number: 1, includeReferences: true });
     expect(field(detail, 'references')).toEqual([{
@@ -297,6 +319,20 @@ describe('source-control provider example', () => {
     expect(stale).toMatchObject({ ok: false, error: { status: 409, code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH' } });
   });
 
+  test('follows and unfollows an issue and a pull request, and reconciles from the check', async () => {
+    const resolve = await data('mutation.resolveTarget', { context: mutationContext({ number: 1 }), kind: 'issue-subscription', input: { subscribed: true } });
+    const follow = {
+      route: '/issues/subscription', kind: 'issue-subscription', input: { subscribed: true },
+      resolved: { providerTarget: field(resolve, 'providerTarget'), target: field(resolve, 'target') },
+    };
+    expect(await data('mutation.perform', follow)).toEqual({});
+    expect(await data('mutation.reconcile', follow)).toEqual({ state: 'succeeded', result: {} });
+
+    const unfollow = { ...follow, route: '/pr/subscription', kind: 'change-request-subscription', input: { subscribed: false } };
+    expect(await data('mutation.perform', unfollow)).toEqual({});
+    expect(await data('mutation.reconcile', unfollow)).toEqual({ state: 'succeeded', result: {} });
+  });
+
   test('a pull request context names each reviewer\'s state, and leaves the field out when there is none', async () => {
     const context = await data('changeRequestContext', {
       ...read(), number: 2, includeDiff: false, includeCIDetails: false, includeTimeline: true,
@@ -386,6 +422,45 @@ describe('source-control provider example', () => {
     });
     expect(field(context, 'changeRequest', 'title')).toBe('Docs, revised');
     expect(field(context, 'changeRequest', 'body')).toBe('More docs');
+  });
+
+  test('assigns people, changes a base and updates a branch, reconciling each from the forge', async () => {
+    const before = forge.writes.length;
+    const step = async (kind: string, route: string, input: SourceControlJsonObject, context: SourceControlJsonObject) => {
+      const resolved = await data('mutation.resolveTarget', { context: mutationContext(context), kind, input });
+      return { route, kind, input, resolved: { providerTarget: field(resolved, 'providerTarget'), target: field(resolved, 'target') } };
+    };
+    const forgeJson = async (path: string) => (await fetch(`${forge.origin}/api/v1${path}`, { headers: { authorization: 'token good' } })).json();
+
+    // An assignee arrives as the id the picker read; Gitea takes the login.
+    const assignees = await step('issue-assignees', '/issues/assignees', { names: ['7'] }, { number: 1 });
+    expect(await call('mutation.reconcile', assignees)).toMatchObject({ ok: true, data: { state: 'outcome-unknown' } });
+    expect(await data('mutation.perform', assignees)).toEqual({});
+    expect(forge.writes.length).toBe(before + 1);
+    expect(await data('mutation.reconcile', assignees)).toEqual({ state: 'succeeded', result: {} });
+    expect((await forgeJson('/repos/mona/teapot/issues/1')).assignees).toMatchObject([{ login: 'mona' }]);
+
+    // An id nobody in the repository can take is refused before anything is written.
+    const unknown = await step('issue-assignees', '/issues/assignees', { names: ['9'] }, { number: 1 });
+    expect(await call('mutation.perform', unknown)).toMatchObject({ ok: false, error: { status: 422 } });
+    expect(forge.writes.length).toBe(before + 1);
+
+    // The base changes, and a read-back names it.
+    const base = await step('change-request-base', '/pr/base', { base: 'feature' }, { number: 3 });
+    expect(await data('mutation.perform', base)).toEqual({});
+    expect(forge.writes.length).toBe(before + 2);
+    expect(await data('mutation.reconcile', base)).toEqual({ state: 'succeeded', result: {} });
+    expect(field(await data('changeRequestContext', { ...read(), number: 3, includeDiff: false, includeCIDetails: false, includeTimeline: false }), 'changeRequest', 'base')).toBe('feature');
+
+    // The branch update refuses a head that moved since the user looked, then lands on the one they saw.
+    const update = await step('change-request-update-branch', '/pr/update-branch', { expectedHeadSha: 'd'.repeat(40) }, { number: 3 });
+    const stale = { ...update, input: { expectedHeadSha: 'c'.repeat(40) } };
+    expect(await call('mutation.perform', stale)).toMatchObject({ ok: false, error: { status: 409, code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID' } });
+    expect(forge.writes.length).toBe(before + 2);
+    expect(await call('mutation.reconcile', update)).toMatchObject({ ok: true, data: { state: 'outcome-unknown' } });
+    expect(await data('mutation.perform', update)).toEqual({});
+    expect(forge.writes.length).toBe(before + 3);
+    expect(await data('mutation.reconcile', update)).toEqual({ state: 'succeeded', result: {} });
   });
 
   test('opens a pull request from a fork remote as owner:branch, and refuses a remote outside the network', async () => {

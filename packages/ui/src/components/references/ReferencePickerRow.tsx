@@ -38,8 +38,7 @@ const rowAvatarUrl = (url: string): string => {
     }
 };
 
-const RowPerson: React.FC<{ name: string; avatarUrl: string | null | undefined }> = ({ name, avatarUrl }) => {
-    const { broken, onError } = useAvatarImage(avatarUrl);
+export const RowPerson: React.FC<{ name: string; avatarUrl: string | null | undefined }> = ({ name, avatarUrl }) => {    const { broken, onError } = useAvatarImage(avatarUrl);
     return (
         <span className="inline-flex min-w-0 items-center gap-1">
             {avatarUrl && !broken ? (

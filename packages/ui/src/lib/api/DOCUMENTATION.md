@@ -2,7 +2,7 @@
 
 ## Ownership
 
-`types.ts` owns the wire and in-process contract every runtime surface implements: `RuntimeAPIs` plus the Git, files, terminal, settings, notifications, source-control, tracking, push, client-auth and skills types. Web, desktop, the VS Code extension and the Capacitor shells supply these operations; the shared UI in `packages/ui` consumes them and never talks to a server directly. Behaviour behind a member belongs to the runtime that implements it: the server routes, the VS Code bridge, the Electron main process. Git identity profiles live in `git-identity.ts`, filesystem error classification in `files-errors.ts`, and the reasons a Git path has no diff in `git-path-diff.ts`. Source-control and tracker item shapes are re-exported from their own modules rather than redefined here.
+`types.ts` owns the wire and in-process contract every runtime surface implements: `RuntimeAPIs` plus the Git, files, terminal, settings, notifications, source-control, tracking, push, client-auth and skills types. Web, desktop, the VS Code extension and the Capacitor shells supply these operations; the shared UI in `packages/ui` consumes them and never talks to a server directly. Behaviour behind a member belongs to the runtime that implements it: the server routes, the VS Code bridge, the Electron main process. Git identity profiles live in `git-identity.ts`, filesystem error classification in `files-errors.ts`, and the reasons a Git path has no diff in `git-path-diff.ts`. The reference preview's detail DTO lives in `repository-reference-detail.ts`. Source-control and tracker item shapes are re-exported from their own modules rather than redefined here.
 
 ## Invariants
 

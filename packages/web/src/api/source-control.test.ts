@@ -17,6 +17,7 @@ import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { buildManagedAccountOptions } from '@openchamber/ui/lib/source-control/identity';
 import { githubLikeDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor.fixture';
 import { configureWebTransportBinding, createWebSourceControlAPI, removeWebTransportBinding } from './source-control';
+import { fetchRepositoryReferenceDetail } from './repository-references';
 
 const runtimeFetchMock = vi.fn(async (_input?: string, _init?: RuntimeFetchOptions): Promise<Response> => Response.json({}));
 const identity: SourceControlIdentity = { provider: 'github', instance: 'https://GitHub.com/' };
@@ -1157,6 +1158,97 @@ describe('createWebSourceControlAPI', () => {
     }));
   });
 
+  it('locks and subscribes an issue and a pull request on their own routes', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json(mutationReceipt()))
+      .mockResolvedValueOnce(Response.json(mutationReceipt()))
+      .mockResolvedValueOnce(Response.json(mutationReceipt()))
+      .mockResolvedValueOnce(Response.json(mutationReceipt()));
+
+    await expect(api.issueSetLock({ ...mutationContext, locked: true })).resolves.toEqual(mutationReceipt());
+    await expect(api.changeRequestSetLock({ ...mutationContext, locked: false })).resolves.toEqual(mutationReceipt());
+    await expect(api.issueSetSubscription({ ...mutationContext, subscribed: true })).resolves.toEqual(mutationReceipt());
+    await expect(api.changeRequestSetSubscription({ ...mutationContext, subscribed: false })).resolves.toEqual(mutationReceipt());
+
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/issues/lock', expect.objectContaining({
+      body: expect.stringContaining('"locked":true'),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(2, '/api/source-control/github/pr/lock', expect.objectContaining({
+      body: expect.stringContaining('"locked":false'),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(3, '/api/source-control/github/issues/subscription', expect.objectContaining({
+      body: expect.stringContaining('"subscribed":true'),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(4, '/api/source-control/github/pr/subscription', expect.objectContaining({
+      body: expect.stringContaining('"subscribed":false'),
+    }));
+  });
+
+  it('reads the credential scopes, and answers null where the host does not report them', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json({ scopes: ['repo', 'notifications'] }))
+      .mockResolvedValueOnce(Response.json({ scopes: null }))
+      .mockResolvedValueOnce(Response.json({ scopes: [7] }));
+
+    await expect(api.credentialScopes(readContext)).resolves.toEqual(['repo', 'notifications']);
+    await expect(api.credentialScopes(readContext)).resolves.toBeNull();
+    await expect(api.credentialScopes(readContext)).rejects.toThrow('invalid credential scopes');
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/repo/scopes', expect.objectContaining({
+      query: new URLSearchParams({
+        instance: 'github.com', directory: '/workspace/a b', repositoryId: 'repo_one', accountId: 'github.com#7',
+        bindingRevision: '4', primaryRemote: 'upstream',
+      }),
+      headers: { Accept: 'application/json' },
+    }));
+  });
+
+  it('reads the instance lock capability, and refuses an answer that is not a boolean or null', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json({ lock: true }))
+      .mockResolvedValueOnce(Response.json({ lock: null }))
+      .mockResolvedValueOnce(Response.json({ lock: 'yes' }));
+
+    await expect(api.repoCapabilities(readContext)).resolves.toEqual({ lock: true });
+    await expect(api.repoCapabilities(readContext)).resolves.toEqual({ lock: null });
+    await expect(api.repoCapabilities(readContext)).rejects.toThrow('invalid capabilities');
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/repo/capabilities', expect.objectContaining({
+      query: new URLSearchParams({
+        instance: 'github.com', directory: '/workspace/a b', repositoryId: 'repo_one', accountId: 'github.com#7',
+        bindingRevision: '4', primaryRemote: 'upstream',
+      }),
+    }));
+  });
+
+  it('carries the conversation flags a host reports, and refuses ones that are not booleans', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const issue = {
+      provider: 'github', instance: 'github.com', id: 'openchamber/openchamber#17', number: 17,
+      project: { provider: 'github', instance: 'github.com', id: 'openchamber/openchamber', owner: 'openchamber', name: 'openchamber', url: 'https://github.com/openchamber/openchamber' },
+      title: 'Migrate source control', url: 'https://github.com/openchamber/openchamber/issues/17', state: 'open',
+      locked: true, subscribed: false,
+    };
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json(issue))
+      .mockResolvedValueOnce(Response.json({ ...issue, locked: 'yes' }))
+      .mockResolvedValueOnce(Response.json({ ...issue, subscribed: 'no' }));
+
+    await expect(api.issueGet(readContext, 17)).resolves.toMatchObject({ locked: true, subscribed: false });
+    await expect(api.issueGet(readContext, 17)).rejects.toThrow('invalid issue lock');
+    await expect(api.issueGet(readContext, 17)).rejects.toThrow('invalid issue subscription');
+  });
+
+  it('keeps locked and viewerSubscribed in a reference detail instead of stripping them', async () => {
+    const result = await fetchRepositoryReferenceDetail(
+      async () => Response.json({ connected: true, detail: { number: 1, comments: [], commentTotal: 0, pull: null, locked: true, viewerSubscribed: false } }),
+      readContext,
+      { owner: 'openchamber', repo: 'openchamber', number: 1 },
+    );
+    expect(result).toMatchObject({ connected: true, detail: { locked: true, viewerSubscribed: false } });
+  });
+
   it("posts comments and reviews to their routes and reads whether a review's text posted", async () => {
     const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
     runtimeFetchMock
@@ -1216,6 +1308,7 @@ describe('createWebSourceControlAPI', () => {
       .mockResolvedValueOnce(Response.json(mutationReceipt()))
       .mockResolvedValueOnce(Response.json({ connected: true, items: [{ name: 'bug', color: 'd73a4a' }, { name: 'docs' }] }))
       .mockResolvedValueOnce(Response.json({ connected: true, items: [{ id: 'octo', login: 'octo', avatarUrl: 'https://avatars/octo' }] }))
+      .mockResolvedValueOnce(Response.json({ connected: true, items: [{ id: '1', login: 'owner' }] }))
       .mockResolvedValueOnce(Response.json({ connected: false }))
       .mockResolvedValueOnce(Response.json({ connected: true, items: [{ id: 'octo', login: 'octo', avatarUrl: 'javascript:alert(1)' }] }));
     const project = { owner: 'openchamber', repo: 'openchamber' };
@@ -1225,6 +1318,7 @@ describe('createWebSourceControlAPI', () => {
     await api.changeRequestSetReviewers({ ...mutationContext, reviewers: ['octo'] });
     await expect(api.referenceLabels(readContext, project)).resolves.toEqual([{ name: 'bug', color: 'd73a4a' }, { name: 'docs' }]);
     await expect(api.referenceReviewers(readContext, project)).resolves.toEqual([{ id: 'octo', login: 'octo', avatarUrl: 'https://avatars/octo' }]);
+    await expect(api.referenceReviewers(readContext, project, 'assignee')).resolves.toEqual([{ id: '1', login: 'owner' }]);
     await expect(api.referenceLabels(readContext, project)).rejects.toThrow('not connected');
     await expect(api.referenceReviewers(readContext, project)).rejects.toThrow('invalid user');
 
@@ -1234,6 +1328,8 @@ describe('createWebSourceControlAPI', () => {
     expect(runtimeFetchMock).toHaveBeenNthCalledWith(4, '/api/source-control/github/references/labels', expect.objectContaining({
       query: expect.objectContaining({ toString: expect.any(Function) }),
     }));
+    expect(String(runtimeFetchMock.mock.calls[4][1]?.query)).not.toContain('role=');
+    expect(String(runtimeFetchMock.mock.calls[5][1]?.query)).toContain('role=assignee');
   });
 
   it('keeps credential authority separate from provider actor metadata', async () => {

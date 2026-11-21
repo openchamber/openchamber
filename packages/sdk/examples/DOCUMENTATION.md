@@ -137,3 +137,11 @@ OpenChamber gives a service none of the host's environment. `TEAPOT_USAGE_URL` i
 ### Why the fake forge writes one hunk per modified file and mirrors Gitea's comment addresses
 
 The fake forge only modifies files, so each changed file is the whole file in one hunk, which is enough for the service's per-file split. Gitea answers a pull request comment with `pull_request_url` and an empty `issue_url`, and an issue comment the other way round; the fake copies that so `itemCommentPath` is exercised against the same field the real forge sends.
+
+### Why a comment's address is read before it is written, and why a fork's head is `owner:branch`
+
+Gitea numbers comments per repository, so an id the board sends could name a comment on another issue; `itemCommentPath` reads the comment and refuses one whose `issue_url` or `pull_request_url` is not the resolved item. A pull request from a fork names its head branch `owner:branch`, and a bare name would be read as the target's own branch, so `change-request-create` sends the qualified name. A merge sends `head_commit_id` so the forge refuses once the branch moved past the head the user saw.
+
+### Why a restart's answer is `outcome-unknown` unless the forge shows the write
+
+`mutations.ts` `reconcile` reports `succeeded` or `failed` only from a read that proves the change, such as the pull request carrying the new title; a comment leaves nothing that tells a lost write from one never sent, so the default answer stays `outcome-unknown` for the user to look at. The people read for an assignee write stops at the page scan limit and fails rather than answering a part of the list, because a login missing from a partial list would look like someone the project cannot assign.

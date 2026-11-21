@@ -14,7 +14,7 @@ import {
 import { IDLE_PULL_STATUS } from '@/components/references/useReferenceBrowser';
 import { SourceBoardActions, SourceBoardPullLinks, SourceBoardStateMenuItems } from '@/components/sourceBoard/SourceBoardActions';
 import { SourceBoardChecksDialog } from '@/components/sourceBoard/SourceBoardChecksDialog';
-import { SourceBoardLabels, SourceBoardReviewers } from '@/components/sourceBoard/SourceBoardMetaEditors';
+import { SourceBoardAssignees, SourceBoardLabels, SourceBoardReviewers } from '@/components/sourceBoard/SourceBoardMetaEditors';
 import { SourceBoardReply } from '@/components/sourceBoard/SourceBoardReply';
 import { SourceBoardTrackerStatus } from '@/components/sourceBoard/SourceBoardTrackerStatus';
 import { isSameRepositoryItemLink, settleTrackerItemRequest, trackerTargetOfUrl, useShowTrackerItem, wasTrackerItemRequested } from '@/components/sourceBoard/openTrackerItem';
@@ -221,19 +221,24 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                 includeDiff={false}
                 onIncludeDiffChange={() => undefined}
                 now={now}
-                footer={<SourceBoardActions item={item} project={null} context={context} onStartWorktree={() => undefined} onChanged={() => void refreshItem()} worktreeAvailable={false} stack={stack} />}
+                // Starting work happens on the board and in New Worktree; here the item is read and acted on.
+                footer={<SourceBoardActions item={item} project={null} context={context} onStartWorktree={() => undefined} onChanged={() => void refreshItem()} worktreeAvailable={false} stack={stack} writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined} />}
                 onOpenStackLayer={(layer) => { showTrackerItem(layer.url, directory); }}
                 onOpenChecks={pull && context ? () => setChecksOpen(true) : undefined}
                 onRefresh={context ? refreshFromHost : undefined}
                 onSaveText={saveText}
                 threadActions={threadActions}
                 commentActions={commentActions}
+                conversationWriteContext={writeContext ?? undefined}
                 stateMenu={reference.state !== 'merged' && writeContext
                     && (reference.kind !== 'discussion' || canChangeDiscussionState(reference, detail.status === 'ready' ? detail.value.discussion : undefined)) ? (
                     <SourceBoardStateMenuItems item={item} context={writeContext} onChanged={() => void refreshItem()} />
                 ) : undefined}
                 commentAttachments={{ onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }}
                 labelsControl={writeContext ? <SourceBoardLabels reference={reference} context={writeContext} onChanged={refreshItem} /> : undefined}
+                assigneesControl={reference.kind === 'issue' && reference.linked !== true && writeContext ? (
+                    <SourceBoardAssignees issue={reference} detail={detail} writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined} context={writeContext} onChanged={refreshItem} />
+                ) : undefined}
                 reviewersControl={pull && writeContext ? (
                     <SourceBoardReviewers pull={pull} detail={detail} context={writeContext} onChanged={refreshItem} />
                 ) : undefined}

@@ -102,6 +102,9 @@ const descriptorSchema = z.object({
     absoluteProjectUploads: z.boolean().default(false),
     issueCloseReason: z.boolean().default(false),
     issueEdit: z.boolean().default(false),
+    baseChange: z.boolean().default(false),
+    updateBranch: z.boolean().default(false),
+    rebase: z.boolean().default(false),
     changeRequestEdit: z.boolean().default(false),
     changeRequestTemplates: z.array(z.string().min(1).max(256)).max(8).default([]),
     changeRequestPatch: z.boolean().default(true),
@@ -113,6 +116,8 @@ const descriptorSchema = z.object({
     discussions: z.boolean().default(false).catch(false),
     advancedSearch: z.boolean().default(false).catch(false),
     commentEdit: z.boolean().default(false).catch(false),
+    lock: z.boolean().default(false).catch(false),
+    subscription: z.boolean().default(false).catch(false),
   }),
   extension: z.object({
     guestId: z.string().min(1).max(128),
@@ -164,9 +169,9 @@ export const unknownProviderDescriptor = (id: string): SourceControlProviderDesc
     features: {
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, absoluteProjectUploads: false, issueCloseReason: false,
-      issueEdit: false, changeRequestEdit: false,
+      issueEdit: false, changeRequestEdit: false, baseChange: false, updateBranch: false, rebase: false,
       changeRequestTemplates: [], changeRequestPatch: false, reviewModel: 'verdict', revisions: false,
-      submitRequirements: false, createByPush: false, branchHeads: true, discussions: false, advancedSearch: false, commentEdit: false,
+      submitRequirements: false, createByPush: false, branchHeads: true, discussions: false, advancedSearch: false, commentEdit: false, lock: false, subscription: false,
     },
   };
   unknownDescriptors.set(id, descriptor);

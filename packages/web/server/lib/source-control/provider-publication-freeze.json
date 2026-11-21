@@ -105,8 +105,13 @@
         "discussions": true,
         "issueEdit": true,
         "changeRequestEdit": true,
+        "baseChange": true,
+        "updateBranch": true,
+        "rebase": true,
         "advancedSearch": true,
-        "commentEdit": true
+        "commentEdit": true,
+        "lock": true,
+        "subscription": true
       }
     },
     {
@@ -201,7 +206,11 @@
         "changeRequestPatch": true,
         "issueEdit": true,
         "changeRequestEdit": true,
-        "commentEdit": true
+        "baseChange": true,
+        "rebase": true,
+        "commentEdit": true,
+        "lock": true,
+        "subscription": true
       }
     },
     {
@@ -301,7 +310,11 @@
         "changeRequestPatch": true,
         "issueEdit": true,
         "changeRequestEdit": true,
-        "commentEdit": true
+        "baseChange": true,
+        "updateBranch": true,
+        "commentEdit": true,
+        "lock": true,
+        "subscription": true
       }
     }
   ],
@@ -465,7 +478,9 @@
         "reviewModel": "votes",
         "revisions": true,
         "createByPush": true,
-        "commentEdit": false
+        "commentEdit": false,
+        "lock": false,
+        "subscription": false
       }
     },
     "capabilities": {

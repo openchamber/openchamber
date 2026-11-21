@@ -2,12 +2,13 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import type { SourceControlJson } from '@openchamber/sdk';
 import { checkContextSchema, isGraphqlRateLimitError, parseSummaryRefs, summarizeCheckContexts, toDiscussionState } from './pr-summaries.js';
+import { DETAIL_COMMENT_LIMIT, DETAIL_QUERY, DETAIL_THREAD_COMMENT_LIMIT } from './detail-query.js';
 import { toReviewerStates, toReviewers } from './reviewer-states.js';
 import { referencesField } from './references.js';
 import { fetchPullStack } from './pull-stack.js';
 import { graphqlAliasesSchema, hasProperty, retainedEntry, referenceDirectory, livePage, referenceNodeAt } from './contracts.js';
 import { parseReferenceLookup, repoKey } from './reference-links.js';
-import type { Octokit, PullRequestQuery, GitHubEnvelope, SummaryRef, AcrossContext, ReferenceRepo, Reference, DetailLineComment, DetailEntry, StatusDictionary, SearchInput, AcrossGroup, AcrossPosition, CommentPermissions, EditableText, ReferenceDetail, LookupVariables, AcrossPage, AcrossSearchInput } from './contracts.js';
+import type { Octokit, PullRequestQuery, GitHubEnvelope, SummaryRef, AcrossContext, ReferenceRepo, Reference, DetailLineComment, DetailEntry, StatusDictionary, SearchInput, AcrossGroup, AcrossPosition, CommentPermissions, EditableText, ReferenceAssignee, ReferenceDetail, LookupVariables, AcrossPage, AcrossSearchInput } from './contracts.js';
 
 const REFERENCE_PAGE_SIZE = 30;
 const ACROSS_REPO_CHUNK_SIZE = 40;
@@ -113,73 +114,6 @@ fragment DiscussionReference on Discussion {
 }
 `;
 
-const DETAIL_COMMENT_LIMIT = 50;
-const DETAIL_COMMIT_LIMIT = 50;
-const DETAIL_THREAD_LIMIT = 50;
-const DETAIL_THREAD_COMMENT_LIMIT = 50;
-
-const DETAIL_QUERY = `
-query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
-  repository(owner: $owner, name: $repo) {
-    issueOrPullRequest(number: $number) {
-      __typename
-      ... on Issue {
-        number
-        body
-        viewerCanUpdate
-        comments(last: ${DETAIL_COMMENT_LIMIT}) { totalCount nodes { ...DetailComment } }
-      }
-      ... on PullRequest {
-        number
-        body
-        viewerCanUpdate
-        state
-        reviewDecision
-        headCommit: commits(last: 1) {
-          nodes {
-            commit {
-              statusCheckRollup {
-                contexts(first: 100) {
-                  nodes {
-                    __typename
-                    ... on CheckRun { databaseId name status conclusion startedAt checkSuite { app { databaseId } } }
-                    ... on StatusContext { context state }
-                  }
-                }
-              }
-            }
-          }
-        }
-        reviewRequests(first: 30) { nodes { requestedReviewer { __typename ... on User { login avatarUrl } } } }
-        additions
-        deletions
-        changedFiles
-        comments(last: ${DETAIL_COMMENT_LIMIT}) { totalCount nodes { ...DetailComment } }
-        commits(last: ${DETAIL_COMMIT_LIMIT}) {
-          totalCount
-          nodes { commit { oid messageHeadline committedDate url author { name user { login avatarUrl } } } }
-        }
-        reviews(last: 30) {
-          nodes { author { login avatarUrl } body state createdAt url }
-        }
-        reviewThreads(last: ${DETAIL_THREAD_LIMIT}) {
-          nodes {
-            id
-            isResolved
-            viewerCanResolve
-            viewerCanUnresolve
-            viewerCanReply
-            comments(first: ${DETAIL_THREAD_COMMENT_LIMIT}) {
-              nodes { author { login avatarUrl } body createdAt url path line originalLine startLine originalStartLine diffHunk }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-fragment DetailComment on IssueComment { databaseId author { login avatarUrl } body createdAt url viewerCanUpdate viewerCanDelete }
-`;
 
 const DISCUSSION_DETAIL_QUERY = `
 query DiscussionDetail($owner: String!, $repo: String!, $number: Int!) {
@@ -330,12 +264,18 @@ const discussionDetailSchema = z.object({
 
 const detailSchema = z.object({
   repository: z.object({
+    viewerPermission: z.string().optional(),
     issueOrPullRequest: z.discriminatedUnion('__typename', [
       z.object({
         __typename: z.literal('Issue'),
         number: z.number().int(),
         body: z.string().optional(),
         viewerCanUpdate: z.boolean().optional(),
+        locked: z.boolean().optional(),
+        viewerSubscription: z.string().optional(),
+        assignees: z.object({
+          nodes: z.array(z.object({ login: z.string(), avatarUrl: z.string().nullable().optional() })),
+        }).optional(),
         comments: z.object({ totalCount: z.number().int(), nodes: z.array(detailCommentSchema) }),
       }),
       z.object({
@@ -343,6 +283,8 @@ const detailSchema = z.object({
         number: z.number().int(),
         body: z.string().optional(),
         viewerCanUpdate: z.boolean().optional(),
+        locked: z.boolean().optional(),
+        viewerSubscription: z.string().optional(),
         state: z.enum(['OPEN', 'CLOSED', 'MERGED']),
         reviewDecision: z.enum(['APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED']).nullable(),
         headCommit: z.object({
@@ -506,6 +448,9 @@ const REVIEW_STATES: StatusDictionary = { APPROVED: 'approved', CHANGES_REQUESTE
 
 const toAuthor = (author: z.infer<typeof userSchema> | undefined) => (author ? { login: author.login, avatarUrl: author.avatarUrl ?? undefined } : null);
 
+const WRITE_PERMISSIONS = new Set(['ADMIN', 'MAINTAIN', 'WRITE']);
+const writeAccessOf = (permission: string | undefined) => (permission === undefined ? undefined : WRITE_PERMISSIONS.has(permission));
+
 const commentPermissions = (comment: Pick<z.infer<typeof detailCommentSchema>, 'viewerCanUpdate' | 'viewerCanDelete'>) => {
   const permissions: CommentPermissions = {};
   if (comment.viewerCanUpdate !== undefined) permissions.canUpdate = comment.viewerCanUpdate;
@@ -520,6 +465,17 @@ const editableText = (item: { body?: string | undefined; viewerCanUpdate?: boole
   if (item.body !== undefined) text.body = item.body;
   if (item.viewerCanUpdate !== undefined) text.viewerCanUpdate = item.viewerCanUpdate;
   return text;
+};
+
+type ConversationFlags = { locked?: boolean; viewerSubscribed?: boolean };
+
+const conversationFlags = (item: {
+  locked?: boolean | undefined; viewerSubscription?: string | undefined;
+}): ConversationFlags => {
+  const flags: ConversationFlags = {};
+  if (item.locked !== undefined) flags.locked = item.locked;
+  if (item.viewerSubscription !== undefined) flags.viewerSubscribed = item.viewerSubscription === 'SUBSCRIBED';
+  return flags;
 };
 
 export async function fetchReferenceDetail({ octokit, owner, repo, number, includeReferences = false }: PullRequestQuery & { includeReferences?: boolean }) {
@@ -546,7 +502,17 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number, inclu
     return entry;
   });
   if (item.__typename === 'Issue') {
-    return { number: item.number, ...editableText(item), comments, commentTotal: item.comments.totalCount, pull: null, ...references };
+    const detail: ReferenceDetail = { number: item.number, ...editableText(item), ...conversationFlags(item), comments, commentTotal: item.comments.totalCount, pull: null, ...references };
+    const writeAccess = writeAccessOf(parsed.repository?.viewerPermission);
+    if (writeAccess !== undefined) detail.writeAccess = writeAccess;
+    if (item.assignees !== undefined) {
+      detail.assignees = item.assignees.nodes.map((assignee) => {
+        const mapped: ReferenceAssignee = { id: assignee.login, login: assignee.login };
+        if (assignee.avatarUrl) mapped.avatarUrl = assignee.avatarUrl;
+        return mapped;
+      });
+    }
+    return detail;
   }
   for (const review of item.reviews.nodes) {
     const state = REVIEW_STATES[review.state] ?? null;
@@ -586,6 +552,7 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number, inclu
   const detail: ReferenceDetail = {
     number: item.number,
     ...editableText(item),
+    ...conversationFlags(item),
     comments,
     commentTotal: item.comments.totalCount,
     pull: {
@@ -609,7 +576,9 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number, inclu
       commitTotal: item.commits.totalCount,
     },
   };
-  if (stack !== undefined) detail.pull.stack = stack;
+  if (stack !== undefined && detail.pull) detail.pull.stack = stack;
+  const writeAccess = writeAccessOf(parsed.repository?.viewerPermission);
+  if (writeAccess !== undefined) detail.writeAccess = writeAccess;
   return { ...detail, ...references };
 }
 

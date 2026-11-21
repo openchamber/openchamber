@@ -8,7 +8,10 @@ import { verifyGitLabToken } from './verify.js';
 import { isString } from './validation.js';
 import { gitlabDescriptor } from './descriptor.js';
 import { digestMutationInput } from '../source-control/mutation-executor.js';
+import { changeRequestBaseEntry, changeRequestRebaseEntry, issueAssigneesEntry } from './change-request-writes.js';
+import { conversationEntries } from './conversation-writes.js';
 import { ownedOriginInstance } from '../source-control/origin-instance.js';
+import { accountView, cliAccountView } from './account-views.js';
 import type { SourceControlJson, SourceControlJsonObject, SourceControlMutationTarget } from '@openchamber/sdk';
 import type { AccountEvents, AccountIdentity, ProviderDescriptor, ProviderMutationContext, ProviderReadContext, ProviderSession } from '../source-control/provider-contract.js';
 import type { AuthCredential, createSourceControlAuthStore } from '../source-control/auth-storage.js';
@@ -72,6 +75,13 @@ type Inputs = {
   '/pr/labels': WithNames;
   '/issues/labels': WithNames;
   '/pr/reviewers': WithNames;
+  '/issues/assignees': WithNames;
+  '/pr/base': Normalized & { base: string };
+  '/pr/rebase': Normalized;
+  '/issues/lock': Normalized & { locked: boolean };
+  '/pr/lock': Normalized & { locked: boolean };
+  '/issues/subscription': Normalized & { subscribed: boolean };
+  '/pr/subscription': Normalized & { subscribed: boolean };
 };
 type Route = keyof Inputs;
 type Resolutions = { [K in Route]: K extends '/pr/create' ? CreateResolution : ExistingResolution };
@@ -84,7 +94,8 @@ type MutationEntry<I extends Normalized, R> = {
 };
 type Mutations = { [K in Route]: MutationEntry<Inputs[K], Resolutions[K]> };
 type DraftRoute = keyof ReturnType<typeof reviewDraftEntries>;
-type ExtraRoute = DraftRoute | '/pr/state' | '/issues/state' | '/pr/labels' | '/issues/labels' | '/pr/reviewers';
+type ExtraRoute = DraftRoute | '/pr/state' | '/issues/state' | '/pr/labels' | '/issues/labels' | '/pr/reviewers' | '/issues/assignees'
+  | '/pr/base' | '/pr/rebase' | '/issues/lock' | '/pr/lock' | '/issues/subscription' | '/pr/subscription';
 type NumberedTarget = SourceControlMutationTarget & { number: number };
 type NumberedContext = Omit<ProviderMutationContext, 'target'> & { target: ProviderMutationContext['target'] & { number: number } };
 type ResolveInput = { session: ProviderSession } & (
@@ -112,32 +123,6 @@ const includes = <T extends SourceControlJson>(items: readonly T[], value: Sourc
 const validNames = (value: SourceControlJson | undefined, limit: number): value is string[] =>
   !(!Array.isArray(value) || value.length > limit || value.some((entry) => !isString(entry) || !entry.trim() || entry.length > 256));
 
-const accountView = (origin: string, account: AuthCredential, current: boolean, accounts: AuthCredential[]) => ({
-  id: account.id,
-  credentialId: account.id,
-  credentialRevision: account.credentialRevision,
-  providerUserId: account.providerUserId,
-  providerUserStatus: accounts.some((candidate) => (
-    candidate.providerUserId === account.providerUserId && candidate.status === 'valid'
-  )) ? 'available' : 'unavailable',
-  user: { ...account.user, provider: 'gitlab', instance: origin },
-  scope: account.scope,
-  current,
-  source: account.source,
-  status: account.status === 'invalid' ? 'invalid' : 'valid',
-});
-
-const cliAccountView = (origin: string, user: GitLabUser, current: boolean) => ({
-  id: `${origin}#cli:${user.id}`,
-  credentialId: `${origin}#cli:${user.id}`,
-  credentialRevision: 1,
-  providerUserId: `${origin}#${user.id}`,
-  providerUserStatus: 'available',
-  user: { ...user, provider: 'gitlab', instance: origin },
-  current,
-  source: 'cli',
-  status: 'valid',
-});
 
 const responseError = (status: number, body: { error: string; status?: string }) => Object.assign(new Error(body.error), { sourceControlResponse: { status, body } });
 
@@ -496,6 +481,10 @@ function mutationTable(descriptor: ProviderDescriptor): Mutations {
     '/pr/labels': setNames('change-request-labels', 'labels'),
     '/issues/labels': setNames('issue-labels', 'labels'),
     '/pr/reviewers': setNames('change-request-reviewers', 'reviewers'),
+    '/issues/assignees': issueAssigneesEntry(nameList, descriptor.limits.reviewersMax, descriptor.limits.reviewerId, invalidMutationContext),
+    '/pr/base': changeRequestBaseEntry(requestText, invalidMutationContext),
+    '/pr/rebase': changeRequestRebaseEntry(invalidMutationContext),
+    ...conversationEntries(invalidMutationContext),
   };
 }
 

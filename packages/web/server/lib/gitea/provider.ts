@@ -1,5 +1,6 @@
 import { createPatAccountAuth } from '../source-control/pat-account-auth.js';
 import { createStandardMutations } from '../source-control/standard-mutations.js';
+import { withGiteaLock } from './lock-writes.js';
 import { classifyGiteaFailure, createGiteaClient } from './client.js';
 import { giteaDescriptor } from './descriptor.js';
 import { createGtCli } from './gt-cli.js';
@@ -58,6 +59,10 @@ type Title = StandardMutationInput & { title: string };
 type CommentId = StandardMutationInput & { commentId: string };
 type Names = StandardMutationInput & { names: string[] };
 type State = StandardMutationInput & { state: string };
+type Locked = StandardMutationInput & { locked: boolean };
+type Subscribed = StandardMutationInput & { subscribed: boolean };
+type WithBase = StandardMutationInput & { base: string };
+type WithExpectedHead = StandardMutationInput & { expectedHeadSha: string };
 type Steps = {
   '/pr/create': { input: Title & { draft: boolean }; resolved: Create & { target: SourceControlMutationTarget & { head: string; base: string } } };
   '/pr/update': ExistingStep<Title>;
@@ -81,6 +86,13 @@ type Steps = {
   '/pr/labels': ExistingStep<Names>;
   '/issues/labels': ExistingStep<Names>;
   '/pr/reviewers': ExistingStep<Names>;
+  '/issues/assignees': ExistingStep<Names>;
+  '/issues/lock': ExistingStep<Locked>;
+  '/pr/lock': ExistingStep<Locked>;
+  '/issues/subscription': ExistingStep<Subscribed>;
+  '/pr/subscription': ExistingStep<Subscribed>;
+  '/pr/base': ExistingStep<WithBase>;
+  '/pr/update-branch': ExistingStep<WithExpectedHead>;
 };
 type Route = keyof Steps;
 type MutationCall<K extends Route> = { session: ProviderSession; route: K; kind: string } & Steps[K];
@@ -183,6 +195,14 @@ function mutationOperations(): Operations {
       perform: (service, normalized, resolved) => service.setLabels(call(resolved, { labels: normalized.names })),
       reconcile: (service, resolved, normalized) => service.reconcileSetMutation(resolved.providerTarget, kind, normalized.names),
   });
+  const setConversationLock = (kind: string): Operation<ExistingStep<Locked>> => ({
+      perform: (service, normalized, resolved) => service.setConversationLock(call(resolved, { kind, locked: normalized.locked })),
+      reconcile: (service, resolved, normalized) => service.reconcileLockMutation(resolved.providerTarget, normalized.locked),
+  });
+  const setSubscription = (): Operation<ExistingStep<Subscribed>> => ({
+      perform: (service, normalized, resolved) => service.setSubscription(call(resolved, { subscribed: normalized.subscribed })),
+      reconcile: (service, resolved, normalized) => service.reconcileSubscription(resolved.providerTarget, normalized.subscribed),
+  });
   return {
     ...operations,
     '/pr/comment': comment(),
@@ -202,6 +222,22 @@ function mutationOperations(): Operations {
     '/pr/reviewers': {
       perform: (service, normalized, resolved) => service.setReviewers(call(resolved, { reviewers: normalized.names })),
       reconcile: (service, resolved, normalized) => service.reconcileSetMutation(resolved.providerTarget, 'change-request-reviewers', normalized.names),
+    },
+    '/issues/assignees': {
+      perform: (service, normalized, resolved) => service.setIssueAssignees(call(resolved, { assignees: normalized.names })),
+      reconcile: (service, resolved, normalized) => service.reconcileIssueAssignees(resolved.providerTarget, normalized.names),
+    },
+    '/issues/lock': setConversationLock('issue-lock'),
+    '/pr/lock': setConversationLock('change-request-lock'),
+    '/issues/subscription': setSubscription(),
+    '/pr/subscription': setSubscription(),
+    '/pr/base': {
+      perform: (service, normalized, resolved) => service.setChangeRequestBase(call(resolved, { base: normalized.base })),
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestBase(resolved.providerTarget, normalized.base),
+    },
+    '/pr/update-branch': {
+      perform: (service, normalized, resolved) => service.updateChangeRequestBranch(call(resolved, { expectedHeadSha: normalized.expectedHeadSha })),
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestBranch(resolved.providerTarget, normalized.expectedHeadSha),
     },
   };
 }
@@ -277,7 +313,7 @@ export function createGiteaFamilyProvider(build: GiteaFamilyProviderOptions) {
     return service;
   };
 
-  const standardMutations = createStandardMutations(descriptor);
+  const standardMutations = withGiteaLock(createStandardMutations(descriptor));
   const operations = mutationOperations();
 
   const projectSelector = (sourceRepo: PatchRead['sourceRepo']) => (sourceRepo ? { owner: sourceRepo.owner, name: sourceRepo.repo } : undefined);
@@ -301,9 +337,10 @@ export function createGiteaFamilyProvider(build: GiteaFamilyProviderOptions) {
       getIssue: ({ session, context, directory, number, project, remote, includeReferences }: NumberedRead & LinkedRead & { includeReferences?: boolean }) => serviceFor(session).getIssue(directory, number, project, remote, { linked: context?.linked, includeReferences: Boolean(includeReferences) }),
       issueComments: ({ session, context, directory, number, project, remote }: NumberedRead & LinkedRead) => serviceFor(session).issueComments(directory, number, project, remote, { linked: context?.linked }),
       projectUpstream: ({ session, directory, remote }: ReadInput) => serviceFor(session).projectUpstream(directory, remote),
+      repoCapabilities: ({ session }: { session: ProviderSession }) => serviceFor(session).repoCapabilities(),
       projectBranches: ({ session, directory, project, remote }: ReadInput & Pick<NumberedRead, 'project'>) => serviceFor(session).projectBranches(directory, project, remote),
       listLabels: ({ session, directory, project, remote }: ReadInput & Pick<NumberedRead, 'project'>) => serviceFor(session).listLabels(directory, project, remote),
-      listReviewerCandidates: ({ session, directory, project, remote }: ReadInput & Pick<NumberedRead, 'project'>) => serviceFor(session).listReviewerCandidates(directory, project, remote),
+      listReviewerCandidates: ({ session, directory, project, remote, role }: ReadInput & Pick<NumberedRead, 'project'> & { role?: 'assignee' | 'reviewer' }) => serviceFor(session).listReviewerCandidates(directory, project, remote, role ? { role } : {}),
       readChangeRequestPatch: ({ session, directory, number, sourceRepo, remote, linked }: PatchRead) => serviceFor(session)
         .changeRequestPatch(directory, number, { project: projectSelector(sourceRepo), remote, linked }),
       readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, binary, linked }: PatchRead & Pick<Parameters<Service['changeRequestFileContents']>[2], 'path' | 'previousPath' | 'status' | 'binary'>) => serviceFor(session)

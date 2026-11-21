@@ -14,7 +14,7 @@ type ProvidersFetch = (input: string, init?: RuntimeFetchOptions) => Promise<Res
 
 const BUILT_IN_FEATURES_OFF = {
   referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
-  startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
+  startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: false, baseChange: false,
   changeRequestTemplates: [], changeRequestPatch: false,
 } satisfies PublishedSourceControlProviderDescriptor['features'];
 
@@ -50,7 +50,8 @@ export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly PublishedSourceControlP
     },
     features: {
       ...BUILT_IN_FEATURES_OFF,
-      referenceSearch: true, referenceDetail: true, listStatuses: true, referencesAcross: true, issueCloseReason: true,
+      referenceSearch: true, referenceDetail: true, listStatuses: true, referencesAcross: true, issueCloseReason: true, baseChange: true, updateBranch: true, rebase: true,
+      lock: true, subscription: true,
       changeRequestPatch: true,
     },
   },
@@ -85,7 +86,8 @@ export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly PublishedSourceControlP
     },
     features: {
       ...BUILT_IN_FEATURES_OFF,
-      startThread: true, authorCanReview: true, projectUploads: true, changeRequestPatch: true,
+      startThread: true, authorCanReview: true, projectUploads: true, changeRequestPatch: true, baseChange: true, rebase: true,
+      lock: true, subscription: true,
       changeRequestTemplates: ['.gitlab/merge_request_templates/Default.md'],
     },
   },

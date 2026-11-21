@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils';
 import type { ChangeRequestSubmitRequirement, DiscussionCloseReason, DraftChangeRequestInput, SetStateInput, SourceControlCapabilities } from '@/lib/source-control/types';
 import { useChangeRequestDiffServing, useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
+import { branchActionPayload, branchActionsFor } from './branchAction';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
@@ -109,13 +110,14 @@ export const SourceBoardActions: React.FC<{
     submitRequirements?: ChangeRequestSubmitRequirement[];
     submitRequirementsUnreadable?: boolean;
     mergeable?: boolean | null;
-}> = ({ item, project, context: readContext, onStartWorktree, onChanged, startIn, onLeave, worktreeAvailable, stack = null, onStartOnTop, submitRequirements, submitRequirementsUnreadable = false, mergeable = null }) => {
+    writeAccess?: boolean;
+}> = ({ item, project, context: readContext, onStartWorktree, onChanged, startIn, onLeave, worktreeAvailable, stack = null, onStartOnTop, submitRequirements, submitRequirementsUnreadable = false, mergeable = null, writeAccess }) => {
     const context = readContext?.linked ? null : readContext;
     const { t } = useI18n();
     const { sourceControl, trackers } = useRuntimeAPIs();
     const confirmation = useConfirmDialog();
     const { triggerFireworks } = useFireworksCelebration();
-    const [busy, setBusy] = React.useState<'merge' | null>(null);
+    const [busy, setBusy] = React.useState<'merge' | 'branch' | null>(null);
 
     const pull: RepositoryChangeRequestReference | null = item.source === 'repository' && item.reference.kind === 'pull' ? item.reference : null;
     const descriptor = useSourceControlProvider(pull?.provider);
@@ -248,6 +250,26 @@ export const SourceBoardActions: React.FC<{
         }
     };
 
+    const changeBranch = async (action: 'update' | 'rebase') => {
+        if (!openPull || !context) return;
+        const label = referenceNumberLabel(openPull, descriptor);
+        setBusy('branch');
+        try {
+            const payload = { ...context, idempotencyKey: newMutationKey(), ...branchActionPayload(openPull) };
+            if (action === 'update') await sourceControl.changeRequestUpdateBranch(payload);
+            else await sourceControl.changeRequestRebase(payload);
+            toast.success(t(action === 'update' ? 'sourceBoard.actions.branchUpdated' : 'sourceBoard.actions.rebased', { reference: label }));
+        } catch (error) {
+            toast.error(
+                t(action === 'update' ? 'sourceBoard.actions.branchUpdateFailed' : 'sourceBoard.actions.rebaseFailed', { reference: label }),
+                { description: error instanceof Error ? error.message : String(error) },
+            );
+        } finally {
+            setBusy(null);
+            onChanged();
+        }
+    };
+
     const cancelMerge = async () => {
         if (!openPull || !context) return;
         setBusy('merge');
@@ -261,6 +283,8 @@ export const SourceBoardActions: React.FC<{
             toast.error(t('sourceBoard.toast.mergeCancelFailed', { reference }), { description: error instanceof Error ? error.message : String(error) });
         } finally { setBusy(null); onChanged(); }
     };
+
+    const branchActions = context ? branchActionsFor(openPull, descriptor.features, { writeAccess, waitingMerge: Boolean(waitingMerge) }) : [];
 
     const maintenance = (
         <>
@@ -309,6 +333,19 @@ export const SourceBoardActions: React.FC<{
                     ) : null}
                 </div>
             ) : null}
+            {branchActions.map((branchAction) => {
+                const branchLabel = t(branchAction === 'update' ? 'sourceBoard.actions.updateBranch' : 'sourceBoard.actions.rebase');
+                return (
+                    <ActionButton
+                        key={branchAction}
+                        icon={branchAction === 'update' ? 'arrow-up-double' : 'git-merge'}
+                        label={branchLabel}
+                        tooltip={branchLabel}
+                        onClick={() => void changeBranch(branchAction)}
+                        busy={busy === 'branch'}
+                    />
+                );
+            })}
             {openPull && !openPull.draft && unmet.length > 0 ? (
                 <span
                     className="min-w-0 max-w-[16rem] truncate typography-meta text-muted-foreground"
@@ -331,7 +368,7 @@ export const SourceBoardActions: React.FC<{
 
     return (
         <div className="flex min-h-8 flex-wrap items-center gap-2">
-            <div className="me-auto flex min-w-0 items-center gap-2">
+            <div className="me-auto flex min-w-0 flex-wrap items-center gap-2">
                 {startIn}
                 {maintenance}
             </div>
@@ -590,7 +627,7 @@ const ItemStateMenuItems: React.FC<{
         return t(nextState === 'closed' ? `sourceBoard.actions.closePull.${term}` : `sourceBoard.actions.reopenPull.${term}`);
     })();
 
-    const changeState = async () => {
+    const changeState = async (reason?: SetStateInput['reason']) => {
         if (!repositoryItem || !nextState) return;
         const label = referenceNumberLabel(repositoryItem, descriptor);
         try {
@@ -600,6 +637,7 @@ const ItemStateMenuItems: React.FC<{
                 target: { project: { owner: repositoryItem.sourceRepo.owner, name: repositoryItem.sourceRepo.repo }, number: repositoryItem.number },
                 state: nextState,
             };
+            if (reason !== undefined) payload.reason = reason;
             if (repositoryItem.kind === 'pull') await sourceControl.changeRequestSetState(payload);
             else await sourceControl.issueSetState(payload);
             forgetLabelWrite(repositoryItem);
@@ -633,6 +671,8 @@ const ItemStateMenuItems: React.FC<{
         }
     };
 
+    const asksCloseReason = repositoryItem?.kind === 'issue' && nextState === 'closed' && descriptor.features.issueCloseReason;
+
     if (!repositoryItem) return null;
     return (
         <>
@@ -648,7 +688,19 @@ const ItemStateMenuItems: React.FC<{
                     {t('sourceBoard.actions.convertToDraft')}
                 </DropdownMenuItem>
             ) : null}
-            {nextState ? (
+            {asksCloseReason ? (
+                <>
+                    <DropdownMenuItem onSelect={() => void changeState('completed')}>
+                        <Icon name='checkbox-circle' className='size-4 shrink-0' />
+                        {t('sourceBoard.actions.closeIssueCompleted')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => void changeState('not_planned')}>
+                        <Icon name='close-circle' className='size-4 shrink-0' />
+                        {t('sourceBoard.actions.closeIssueNotPlanned')}
+                    </DropdownMenuItem>
+                </>
+            ) : null}
+            {nextState && !asksCloseReason ? (
                 <DropdownMenuItem onSelect={() => void changeState()}>
                     <Icon name={nextState === 'open' ? 'arrow-go-back' : repositoryItem.kind === 'pull' ? 'git-close-pull-request' : 'checkbox-circle'} className="size-4 shrink-0" />
                     {stateLabel}

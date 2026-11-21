@@ -187,9 +187,14 @@ describe('list-backed references', () => {
     const pulls = await fetchListBackedReferencePage(reads(), context, provider, 'pull', DEFAULT_REPOSITORY_FILTER, '', null);
     if (issues.kind !== 'page' || !issues.items[0] || pulls.kind !== 'page' || !pulls.items[0]) throw new Error('expected pages');
     let issueReads = 0;
+    let askedIssueReferences: boolean | undefined;
     let askedReferences: boolean | undefined;
     const quiet = reads({
-      issueGet: async () => { issueReads += 1; return issue; },
+      issueGet: async (_context, _number, _project, options) => {
+        issueReads += 1;
+        askedIssueReferences = options?.includeReferences;
+        return issue;
+      },
       changeRequestContext: async (_context, _number, options) => {
         askedReferences = options?.includeReferences;
         // A provider may send mentions nobody asked for.
@@ -201,7 +206,10 @@ describe('list-backed references', () => {
     });
     await fetchListBackedReferenceDetail(quiet, context, issues.items[0]);
     const pullDetail = await fetchListBackedReferenceDetail(quiet, context, pulls.items[0]);
-    expect(issueReads).toBe(0);
+    // The preview still reads the issue for its assignees and conversation
+    // flags; it never asks that read for mentions.
+    expect(issueReads).toBe(1);
+    expect(askedIssueReferences).toBeUndefined();
     expect(askedReferences).toBeUndefined();
     expect(pullDetail).not.toHaveProperty('references');
     await fetchListBackedReferenceDetail(quiet, context, pulls.items[0], { crossReferences: true });

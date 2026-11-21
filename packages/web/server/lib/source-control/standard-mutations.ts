@@ -18,6 +18,11 @@ export interface StandardMutationInput {
   commentId?: string;
   state?: string;
   names?: string[];
+  locked?: boolean;
+  base?: string;
+  expectedHeadSha?: string;
+  assignees?: string[];
+  subscribed?: boolean;
   position?: ReturnType<typeof import('./review-position.js').reviewCommentPosition>;
   digest?: Record<string, SourceControlJson | undefined>;
 }
@@ -158,6 +163,26 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
         return { digest: {} };
       },
     },
+    '/pr/base': {
+      kind: 'change-request-base',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const base = requestText(input.base);
+        if (!base || base.length > TITLE_MAX) throw invalidMutationContext(`base is required and must fit ${TITLE_MAX} characters`);
+        return { base, digest: { base } };
+      },
+    },
+    '/pr/update-branch': {
+      kind: 'change-request-update-branch',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const expectedHeadSha = requestText(input.expectedHeadSha);
+        if (!/^[0-9a-f]{40}$/.test(expectedHeadSha)) {
+          throw invalidMutationContext('expectedHeadSha is required and must be a 40-character lowercase hex SHA');
+        }
+        return { expectedHeadSha, digest: { expectedHeadSha } };
+      },
+    },
     '/pr/review': {
       kind: 'change-request-review',
       normalize: (input, context) => {
@@ -172,6 +197,19 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
     },
     ...reviewDraftEntries({ commentText, fail: (message) => { throw invalidMutationContext(message); } }),
   };
+  if (descriptor.presentation.features.rebase === true) {
+    entries['/pr/rebase'] = {
+      kind: 'change-request-rebase',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const expectedHeadSha = requestText(input.expectedHeadSha);
+        if (!/^[0-9a-f]{40}$/.test(expectedHeadSha)) {
+          throw invalidMutationContext('expectedHeadSha is required and must be a 40-character lowercase hex SHA');
+        }
+        return { expectedHeadSha, digest: { expectedHeadSha } };
+      },
+    };
+  }
   for (const [route, kind] of [['/pr/comment', 'change-request-comment'], ['/issues/comment', 'issue-comment']] satisfies [string, string][]) {
     entries[route] = {
       kind,
@@ -247,6 +285,28 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
           throw invalidMutationContext('reviewers are invalid');
         }
         return { names, digest: { [field]: names } };
+      },
+    };
+  }
+
+  entries['/issues/assignees'] = {
+    kind: 'issue-assignees',
+    normalize: (input, context) => {
+      requireNumber(context);
+      const names = nameList(input.assignees, descriptor.limits.reviewersMax);
+      return { names, digest: { assignees: names } };
+    },
+  };
+
+  if (descriptor.presentation.features.subscription === true) for (const [route, kind] of [['/issues/subscription', 'issue-subscription'], ['/pr/subscription', 'change-request-subscription']] satisfies [string, string][]) {
+    entries[route] = {
+      kind,
+      normalize: (input, context) => {
+        requireNumber(context);
+        if (input.subscribed !== true && input.subscribed !== false) {
+          throw invalidMutationContext('subscribed must be true or false');
+        }
+        return { subscribed: input.subscribed, digest: { subscribed: input.subscribed } };
       },
     };
   }

@@ -9,6 +9,7 @@ import { readBranchTip } from './change-id.js';
 import { createChangeRequestStatusCache } from './status-cache.js';
 import { allowsTopLevelProjects } from './project-path.js';
 import { isProviderUserId, isProviderUsername } from './provider-id.js';
+import { MUTATION_ROUTES } from './mutation-routes.js';
 import { assertMutationContextObject } from './binding-input.js';
 import type { SourceControlJson } from '@openchamber/sdk';
 import type { Query, QueryValue, Request, RequestHandler, Response, Router } from '../shared/http-contracts.js';
@@ -264,41 +265,6 @@ const unsupportedCapability = (res: Response) => res.status(501).json({
 
 const enabled = (capabilities: ProviderDescriptor['capabilities'], capability: string) => capability.split('.')
   .reduce<unknown>((value, key) => (hasCapabilityKey(value) ? value[key] : undefined), capabilities);
-
-const MUTATION_ROUTES = [
-  ['/pr/create', 'changeRequests'],
-  ['/pr/update', 'changeRequests'],
-  ['/pr/merge', 'merge'],
-  ['/pr/ready', 'draftChangeRequests'],
-  ['/pr/draft', 'draftConversion'],
-  ['/pr/comment', 'comments'],
-  ['/pr/thread/start', 'reviewThreads.start'],
-  ['/pr/thread/reply', 'reviewThreads.reply'],
-  ['/pr/thread/resolve', 'reviewThreads.resolve'],
-  ['/issues/comment', 'comments'],
-  ['/issues/update', 'issues'],
-  ['/pr/comment/update', 'commentEdit'],
-  ['/pr/comment/delete', 'commentEdit'],
-  ['/issues/comment/update', 'commentEdit'],
-  ['/issues/comment/delete', 'commentEdit'],
-  ['/pr/state', 'state'],
-  ['/issues/state', 'state'],
-  ['/pr/labels', 'labels'],
-  ['/issues/labels', 'labels'],
-  ['/pr/reviewers', 'reviewers'],
-  ['/pr/review', 'reviews'],
-  ['/pr/review/comment', 'reviewDrafts'],
-  ['/pr/review/comment/update', 'reviewDrafts'],
-  ['/pr/review/comment/delete', 'reviewDrafts'],
-  ['/pr/review/discard', 'reviewDrafts'],
-  ['/discussions/comment', 'discussions'],
-  ['/discussions/comment/update', 'commentEdit'],
-  ['/discussions/comment/delete', 'commentEdit'],
-  ['/discussions/state', 'discussions'],
-  ['/discussions/answer', 'discussions'],
-  ['/discussions/labels', 'discussions'],
-  ['/discussions/update', 'discussions'],
-] as const;
 
 export function registerProviderRoutes(app: Router, {
   providers,
@@ -856,9 +822,13 @@ export function registerProviderRoutes(app: Router, {
         const session = await sessionFor(impl, instance, trustedContext.accountId);
         const project = optionalProject(req);
         if (!project) return res.status(400).json({ error: 'a complete project selector is required' });
-        return res.json({ connected: true, items: await read({ session, directory, project, context: trustedContext, remote: trustedContext.primaryRemote }) });
+        const role = capability === 'reviewers' ? requestText(req.query?.role) : '';
+        const params = { session, directory, project, context: trustedContext, remote: trustedContext.primaryRemote };
+        const items = await read(role === 'assignee' || role === 'reviewer' ? { ...params, role } : params);
+        return res.json({ connected: true, items });
       }, {
-        validate: (req) => (!namesProject(req) ? 'a complete project selector is required' : null),
+        validate: (req) => (!namesProject(req) ? 'a complete project selector is required'
+          : capability === 'reviewers' && !['', 'assignee', 'reviewer'].includes(requestText(req.query?.role)) ? 'role must be assignee or reviewer' : null),
       });
     }
 
@@ -1055,9 +1025,14 @@ export function registerProviderRoutes(app: Router, {
     }
 
     boundRead('projects', '/repo/upstream', async ({ res, impl, instance, directory, trustedContext }) => {
-      const session = await sessionFor(impl, instance, trustedContext.accountId);
-      return res.json(await impl.resources.projectUpstream({ session, directory, context: trustedContext, remote: trustedContext.primaryRemote }));
+      return res.json(await impl.resources.projectUpstream({ session: await sessionFor(impl, instance, trustedContext.accountId), directory, context: trustedContext, remote: trustedContext.primaryRemote }));
     });
+    for (const [suffix, resource] of [['/repo/scopes', 'credentialScopes'], ['/repo/capabilities', 'repoCapabilities']] as const) {
+      boundRead('projects', suffix, async ({ res, impl, instance, directory, trustedContext }) => {
+        if (!(impl.resources?.[resource] instanceof Function)) return unsupportedCapability(res);
+        const value = await impl.resources[resource]({ session: await sessionFor(impl, instance, trustedContext.accountId), directory, context: trustedContext, remote: trustedContext.primaryRemote }); return res.json(resource === 'credentialScopes' ? { scopes: Array.isArray(value) ? value : null } : value);
+      });
+    }
 
     boundRead('projects', '/repo/branches', async ({ req, res, impl, instance, directory, trustedContext }) => {
       const session = await sessionFor(impl, instance, trustedContext.accountId);

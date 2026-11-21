@@ -51,7 +51,7 @@ Lists need totals, while individual runs, steps, and annotations are read for th
 
 ### Why commit picker selections on close and not after each click
 
-The host receives one replacement set for a group of label or reviewer choices. This keeps several clicks within a single edit.
+The host receives one replacement set for a group of label or reviewer choices. This keeps several clicks within a single edit. A single choice (a change request's base branch) is committed as it is picked and closes the popup, since there is no set to review.
 
 ### Why use phone bottom sheets and not scope popups
 

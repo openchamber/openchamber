@@ -406,9 +406,9 @@ const sourceControlSchema = z.object({
     features: z.object({
       authorCanReview: z.boolean().default(false),
       issueCloseReason: z.boolean().default(false),
-      issueEdit: z.boolean().optional(),
-      changeRequestEdit: z.boolean().optional(),
-      submitRequirements: z.boolean().optional(),
+      issueEdit: z.boolean().optional(), changeRequestEdit: z.boolean().optional(),
+      baseChange: z.boolean().default(false).catch(false), updateBranch: z.boolean().default(false).catch(false),
+      subscription: z.boolean().default(false).catch(false), rebase: z.boolean().default(false).catch(false), submitRequirements: z.boolean().optional(),
     }).strict(),
     changeRequestTemplates: z.array(z.string().trim().max(256).refine(isRepositoryFilePath, {
       message: 'must be a file path inside the repository, like .gitea/pull_request_template.md, with no "." or ".." segment',

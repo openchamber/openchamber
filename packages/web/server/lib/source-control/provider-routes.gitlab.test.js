@@ -150,6 +150,9 @@ function canonicalMutationOptions(overrides = {}) {
     setIssueState: vi.fn(async (payload) => ({ state: payload.state })),
     updateIssue: vi.fn(async () => ({})),
     reconcileState: vi.fn(async (_target, _kind, state) => ({ state: 'succeeded', result: { state } })),
+    setConversationLock: vi.fn(async () => ({})),
+    setConversationSubscription: vi.fn(async () => ({})),
+    reconcileConversation: vi.fn(async (_target, _kind, _value) => ({ state: 'succeeded', result: {} })),
     setLabels: vi.fn(async () => ({})),
     setReviewers: vi.fn(async () => ({})),
     startThread: vi.fn(async () => ({})),
@@ -190,6 +193,10 @@ function canonicalMutationOptions(overrides = {}) {
     setIssueState: calls.setIssueState,
     updateIssue: calls.updateIssue,
     reconcileStateMutation: calls.reconcileState,
+    setConversationLock: calls.setConversationLock,
+    setConversationSubscription: calls.setConversationSubscription,
+    reconcileLockMutation: calls.reconcileConversation,
+    reconcileSubscriptionMutation: calls.reconcileConversation,
     setLabels: calls.setLabels,
     setReviewers: calls.setReviewers,
     reconcileSetMutation: vi.fn(async () => ({ state: 'outcome-unknown' })),
@@ -619,6 +626,32 @@ describe('GitLab routes', () => {
     expect(setup.calls.setPullState).toHaveBeenCalledWith(expect.objectContaining({ state: 'closed', providerTarget: { projectId: '2', number: 5 } }));
     expect(setup.calls.setIssueState).toHaveBeenCalledOnce();
     expect(setup.calls.reconcileState).toHaveBeenCalledWith({ projectId: '2', number: 3 }, 'issue-state', 'open');
+  });
+
+  it('locks and follows an issue and a merge request through the canonical executor', async () => {
+    const mutationStore = makeMutationStore();
+    const setup = canonicalMutationOptions({ mutationExecutor: createMutationExecutor({ store: mutationStore }) });
+    const app = appWith(setup.options);
+    const target = { project: { owner: 'team', name: 'repo' }, number: 3 };
+    const lock = mutationBody({ idempotencyKey: 'lock-one', target });
+    const follow = mutationBody({ idempotencyKey: 'follow-one', target });
+
+    const locked = await request(app).post('/api/source-control/gitlab/issues/lock').send({ ...lock, locked: true }).expect(200);
+    await request(app).post('/api/source-control/gitlab/pr/lock')
+      .send({ ...lock, idempotencyKey: 'lock-two', target: { ...target, number: 5 }, locked: false }).expect(200);
+    const followed = await request(app).post('/api/source-control/gitlab/issues/subscription').send({ ...follow, subscribed: true }).expect(200);
+    await request(app).post('/api/source-control/gitlab/pr/subscription')
+      .send({ ...follow, idempotencyKey: 'follow-two', target: { ...target, number: 5 }, subscribed: false }).expect(200);
+
+    expect(locked.body.result).toEqual({});
+    expect(followed.body.result).toEqual({});
+    expect(setup.calls.setConversationLock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'issue-lock', locked: true, providerTarget: { projectId: '2', number: 3 } }));
+    expect(setup.calls.setConversationLock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'change-request-lock', locked: false, providerTarget: { projectId: '2', number: 5 } }));
+    expect(setup.calls.setConversationSubscription).toHaveBeenCalledWith(expect.objectContaining({ kind: 'issue-subscription', subscribed: true, providerTarget: { projectId: '2', number: 3 } }));
+    expect(setup.calls.setConversationSubscription).toHaveBeenCalledWith(expect.objectContaining({ kind: 'change-request-subscription', subscribed: false, providerTarget: { projectId: '2', number: 5 } }));
+    const kinds = [...mutationStore.records.values()].map((entry) => entry.kind);
+    expect(kinds).toEqual(expect.arrayContaining(['issue-lock', 'change-request-lock', 'issue-subscription', 'change-request-subscription']));
+    await request(app).post('/api/source-control/gitlab/issues/lock').send({ ...lock, idempotencyKey: 'lock-three', locked: 'yes' }).expect(400);
   });
 
   it('edits an issue title and body through the canonical executor', async () => {

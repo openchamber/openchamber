@@ -770,6 +770,7 @@ export interface SetReviewersInput extends SourceControlMutationContext<SourceCo
 
 export interface SetStateInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   state: 'open' | 'closed';
+  reason?: 'completed' | 'not_planned';
 }
 
 export type DiscussionCloseReason = 'resolved' | 'outdated' | 'duplicate';
