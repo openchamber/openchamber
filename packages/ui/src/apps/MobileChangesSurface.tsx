@@ -99,6 +99,7 @@ import { PublishDialog } from '@/components/views/git/PublishDialog';
 import { settleGitFileReverts } from './mobileChangesOperations';
 import { commitAndSwitchBranch } from './mobileDirtySwitch';
 import { useCommitCelebration } from '@/components/views/git/useCommitCelebration';
+import { LIST_ROUTE, useMobileChangesNavigation, type MobileChangesInitialDiff } from '@/hooks/useMobileChangesNavigation';
 import { useGitCleanLine } from '@/components/views/git/useGitCleanLine';
 import { normalizePath } from '@/lib/pathNormalization';
 import { commitRequestRepository, commitRequestShown, type MobileChangesCommitRequest } from './mobileChangesCommitRequest';
@@ -110,18 +111,6 @@ import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS, MOBILE_HEADER_TITLE_CL
 type SyncAction = 'fetch' | 'pull' | 'sync' | 'publish' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
 
-type ChangesMode = 'working' | 'turn' | 'branch' | 'commit' | 'pr';
-type ChangesRoute =
-  | { type: 'list' }
-  | { type: 'diff'; path: string; staged: boolean }
-  | { type: 'turn'; path: string }
-  | { type: 'comparison'; path: string; sourceKey: string }
-  | { type: 'walkthrough' };
-interface ChangesNavigation {
-  ownerKey: string;
-  mode: ChangesMode;
-  route: ChangesRoute;
-}
 interface MobileDiffData {
   original: string;
   modified: string;
@@ -135,7 +124,6 @@ type ComparisonDiff =
   | { status: 'error'; message: string };
 const LOADING_COMPARISON_DIFF: ComparisonDiff = { status: 'loading' };
 const FULL_CONTEXT_DIFF_LINES = 1_000_000;
-const LIST_ROUTE: ChangesRoute = { type: 'list' };
 
 const REVERT_PATHS_CONCURRENCY = 2;
 
@@ -152,15 +140,6 @@ const isUnstagedStatusFile = (file: GitStatus['files'][number]): boolean => {
 
 const diffCacheKey = (path: string, staged: boolean): string => staged ? `${path}\u0000staged` : path;
 
-type TurnFileRequest = {
-  file: string;
-  sessionId: string | null;
-  step: 'turn' | 'changes';
-  picked: boolean;
-  statusReadFor: string | null;
-};
-
-const takenTurnRequests = new WeakSet<object>();
 const switchedCommitRequests = new WeakSet<object>();
 const takenCommitRequests = new WeakSet<object>();
 
@@ -170,7 +149,7 @@ const closestRepoFile = (file: string, directory: string, listed: readonly (stri
 
 type MobileChangesSurfaceProps = {
   onClose?: () => void;
-  initialDiff?: { path: string; staged: boolean; scope?: 'turn' } | null;
+  initialDiff?: MobileChangesInitialDiff | null;
   initialCommit?: MobileChangesCommitRequest | null;
   visible?: boolean;
   onNavigatedToChat?: () => void;
@@ -261,57 +240,16 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
 
   const runtimeKey = useGitStore((state) => state.runtimeKey);
   const ownerKey = JSON.stringify([runtimeKey, currentDirectory]);
-  const ownerKeyRef = React.useRef(ownerKey);
-  ownerKeyRef.current = ownerKey;
-  const [navigation, setNavigation] = React.useState<ChangesNavigation>(() => {
-    if (initialDiff?.scope === 'turn') {
-      return { ownerKey, mode: takenTurnRequests.has(initialDiff) ? 'working' : 'turn', route: LIST_ROUTE };
-    }
-    return {
-      ownerKey,
-      mode: 'working',
-      route: initialDiff?.path ? { type: 'diff', path: initialDiff.path, staged: initialDiff.staged } : LIST_ROUTE,
-    };
-  });
-  const [turnFileRequest, setTurnFileRequest] = React.useState<TurnFileRequest | null>(null);
-  const modeOnNewOwner: ChangesMode = turnFileRequest?.step === 'turn' ? 'turn' : 'working';
-  const mode = navigation.ownerKey === ownerKey ? navigation.mode : modeOnNewOwner;
-  const route = navigation.ownerKey === ownerKey ? navigation.route : LIST_ROUTE;
-  const [modeMenuOpen, setModeMenuOpen] = React.useState(false);
-  const changeMode = React.useCallback((nextMode: ChangesMode) => {
-    setNavigation({ ownerKey, mode: nextMode, route: LIST_ROUTE });
-    setModeMenuOpen(false);
-  }, [ownerKey]);
-  const setRoute = React.useCallback((nextRoute: ChangesRoute) => {
-    setNavigation((current) => ({ ownerKey, mode: current.ownerKey === ownerKey ? current.mode : 'working', route: nextRoute }));
-  }, [ownerKey]);
+  const {
+    navigation, setNavigation, turnFileRequest, setTurnFileRequest, mode, route,
+    modeMenuOpen, setModeMenuOpen, changeMode, setRoute, turnFileStatusReadRef,
+  } = useMobileChangesNavigation({ ownerKey, initialDiff, visible });
 
-  React.useEffect(() => {
-    setNavigation((current) => current.ownerKey === ownerKey ? current : { ownerKey, mode: modeOnNewOwner, route: LIST_ROUTE });
-    setModeMenuOpen(false);
-  }, [modeOnNewOwner, ownerKey]);
-  React.useEffect(() => { if (!visible) setModeMenuOpen(false); }, [visible]);
-
-  const turnFileStatusReadRef = React.useRef<string | null>(null);
-
-  React.useEffect(() => {
-    if (!initialDiff?.path) return;
-    if (initialDiff.scope === 'turn') {
-      if (takenTurnRequests.has(initialDiff)) return;
-      takenTurnRequests.add(initialDiff);
-      turnFileStatusReadRef.current = null;
-      setTurnFileRequest({ file: initialDiff.path, sessionId: useSessionUIStore.getState().currentSessionId, step: 'turn', picked: false, statusReadFor: null });
-      setNavigation({ ownerKey: ownerKeyRef.current, mode: 'turn', route: LIST_ROUTE });
-      return;
-    }
-    setTurnFileRequest(null);
-    setNavigation({ ownerKey: ownerKeyRef.current, mode: 'working', route: { type: 'diff', path: initialDiff.path, staged: initialDiff.staged } });
-  }, [initialDiff]);
   React.useEffect(() => {
     if (!initialCommit || takenCommitRequests.has(initialCommit) || !commitRequestShown(currentDirectory, initialCommit)) return;
     takenCommitRequests.add(initialCommit);
     setTurnFileRequest(null);
-    setNavigation({ ownerKey: ownerKeyRef.current, mode: 'commit', route: LIST_ROUTE });
+    setNavigation({ ownerKey, mode: 'commit', route: LIST_ROUTE });
   }, [currentDirectory, initialCommit]);
   const [syncAction, setSyncAction] = React.useState<SyncAction>(null);
   const [commitAction, setCommitAction] = React.useState<CommitAction>(null);
@@ -391,13 +329,16 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     usePullRequestSelectionStore.getState().settleDiffRequest(rootDirectory, requestedPr);
   }, [requestedPr, rootDirectory, selectedPr, status]);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const selectedTurn = mode === 'turn' && navigation.ownerKey === ownerKey ? navigation : null;
+  const turnSessionId = selectedTurn?.turnSessionId ?? currentSessionId;
+  const turnDirectory = normalizePath(selectedTurn?.turnDirectory ?? null) ?? rootDirectory;
   const {
     diffs: lastTurnDiffs,
     loaded: hasTurnData,
     settled: turnDiffSettled,
     error: turnDiffError,
     retry: retryTurnDiff,
-  } = useLastTurnDiff(currentSessionId, rootDirectory || undefined, { enabled: visible && mode === 'turn', live: true });
+  } = useLastTurnDiff(turnSessionId, turnDirectory || undefined, { enabled: visible && mode === 'turn', live: true, from: selectedTurn?.turnId });
   const [reviewDialogOpen, setReviewDialogOpen] = React.useState(false);
   const closeReviewDialog = React.useCallback(() => {
     setReviewDialogOpen(false);
@@ -543,17 +484,20 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
 
   React.useEffect(() => {
     if (!turnFileRequest || !visible) return;
-    if (turnFileRequest.sessionId !== currentSessionId || route.type !== 'list' || mode !== (turnFileRequest.step === 'turn' ? 'turn' : 'working')) {
+    if (turnFileRequest.panelSessionId !== currentSessionId
+      || (turnFileRequest.step === 'turn' && turnFileRequest.sessionId !== turnSessionId)
+      || route.type !== 'list' || mode !== (turnFileRequest.step === 'turn' ? 'turn' : 'working')) {
       setTurnFileRequest(null);
       return;
     }
-    const file = toAbsoluteFilePath(rootDirectory, turnFileRequest.file);
+    const file = toAbsoluteFilePath(turnFileRequest.directory || rootDirectory, turnFileRequest.file);
     if (turnFileRequest.step === 'turn') {
       if (!turnDiffSettled) return;
-      const inTurn = closestRepoFile(file, rootDirectory, lastTurnDiffs.map((diff) => diff.file));
+      const inTurn = closestRepoFile(file, turnDirectory, lastTurnDiffs.map((diff) => diff.file));
       if (inTurn) {
         setTurnFileRequest(null);
-        setNavigation({ ownerKey, mode: 'turn', route: { type: 'turn', path: inTurn } });
+        setNavigation({ ownerKey, mode: 'turn', route: { type: 'turn', path: inTurn },
+          turnId: turnFileRequest.turnId, turnSessionId: turnFileRequest.sessionId, turnDirectory: turnFileRequest.directory });
         return;
       }
       setTurnFileRequest({ ...turnFileRequest, step: 'changes' });
@@ -592,7 +536,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
       mode: 'working',
       route: { type: 'diff', path: entry.path, staged: isStagedStatusFile(entry) && !isUnstagedStatusFile(entry) },
     });
-  }, [changeEntries, currentDirectory, currentSessionId, fetchStatus, git, lastTurnDiffs, mode, ownerKey, repository.repositoriesKnown, repositoryOptions, rootDirectory, rootIsGitRepo, route.type, selectNestedRepo, turnDiffSettled, turnFileRequest, visible]);
+  }, [changeEntries, currentDirectory, currentSessionId, turnDirectory, turnSessionId, fetchStatus, git, lastTurnDiffs, mode, ownerKey, repository.repositoriesKnown, repositoryOptions, rootDirectory, rootIsGitRepo, route.type, selectNestedRepo, turnDiffSettled, turnFileRequest, visible]);
 
   const walkthroughTarget = React.useMemo<WalkthroughTarget | null>(() => {
     if (mode === 'working') return changeEntries.length > 0 ? { source: { kind: 'working-tree', scope: 'all' } } : null;
@@ -1117,6 +1061,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
       selectedRepository={gitDirectory ?? null}
       onSelectRepository={(repository) => {
         if (!rootDirectory) return;
+        setTurnFileRequest(null);
         usePullRequestSelectionStore.getState().clearChangesRepository(rootDirectory);
         selectNestedRepo(rootDirectory, repository);
       }}
@@ -1199,7 +1144,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     return (
       <MobileDiffDetail
         path={route.path}
-        subtitle={t('diffView.scope.lastTurn')}
+        subtitle={navigation.turnId ? t('chat.changedFiles.title') : t('diffView.scope.lastTurn')}
         diff={turnDiffData.get(route.path) ?? null}
         fileExists={turnFiles.some((file) => file.path === route.path)}
         onBack={() => setRoute(LIST_ROUTE)}
@@ -1207,7 +1152,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     );
   }
 
-  const modeLabel = mode === 'pr' ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', prChangeRequestTerm)) : mode === 'branch' ? t('diffView.scope.branch') : mode === 'commit' ? t('commitComparison.mode') : mode === 'turn' ? t('diffView.scope.lastTurn') : t('mobile.nav.changes');
+  const modeLabel = mode === 'pr' ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', prChangeRequestTerm)) : mode === 'branch' ? t('diffView.scope.branch') : mode === 'commit' ? t('commitComparison.mode') : mode === 'turn' ? (navigation.turnId ? t('chat.changedFiles.title') : t('diffView.scope.lastTurn')) : t('mobile.nav.changes');
   const sourceLabel = mode === 'branch' && branchComparison.base
     ? branchRefLabel(branchComparison.base)
     : mode === 'commit' ? selectedCommitHash?.slice(0, 8) : mode === 'pr' && selectedPr ? `#${selectedPr.number}` : null;
@@ -1295,7 +1240,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         <Button variant="outline" size="lg" onClick={retryTurnDiff}>{t('diffView.actions.retry')}</Button>
       </div>;
     }
-    if ((!hasTurnData || turnFileRequest) && currentSessionId) return <MobileChangesState loading message={t('diffView.state.loadingChanges')} />;
+    if ((!hasTurnData || turnFileRequest) && turnSessionId) return <MobileChangesState loading message={t('diffView.state.loadingChanges')} />;
     if (turnFiles.length === 0) return <MobileChangesState message={t('diffView.state.noLastTurnChanges')} />;
     return <MobileComparisonFileList files={turnFiles} memoryKey={listKey} memoryReady={listReady} onSelect={(path) => setRoute({ type: 'turn', path })} />;
   };
@@ -1323,10 +1268,13 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
-            <DropdownMenuRadioGroup value={mode} onValueChange={(value) => {
+            <DropdownMenuRadioGroup value={mode === 'turn' && navigation.turnId ? 'historical-turn' : mode} onValueChange={(value) => {
               if (value === 'working' || value === 'turn' || value === 'branch' || value === 'commit' || value === 'pr') changeMode(value);
             }}>
               <DropdownMenuRadioItem value="working" className="min-h-8 items-center">{t('mobile.nav.changes')}</DropdownMenuRadioItem>
+              {mode === 'turn' && navigation.turnId && (
+                <DropdownMenuRadioItem value="historical-turn" className="min-h-8 items-center">{t('chat.changedFiles.title')}</DropdownMenuRadioItem>
+              )}
               <DropdownMenuRadioItem value="turn" className="min-h-8 items-center">{t('diffView.scope.lastTurn')}</DropdownMenuRadioItem>
               {showBranchOption && <DropdownMenuRadioItem value="branch" className="min-h-8 items-center">{t('diffView.scope.branch')}</DropdownMenuRadioItem>}
               <DropdownMenuRadioItem value="commit" className="min-h-8 items-center">{t('commitComparison.mode')}</DropdownMenuRadioItem>

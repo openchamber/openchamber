@@ -618,9 +618,11 @@ A percentage max-height inside auto-height wrappers let the inner viewport grow 
 
 ## Last turn scope
 
-`useLastTurnDiff` reads the last turn's per-file diff from OpenCode
+`useLastTurnDiff` reads a turn's per-file diff from OpenCode
 (`GET /api/session/:id/diff`), which compares the turn's first and last step
-snapshots. The answer moves when a step is added, when the newest step finishes
+snapshots. It reads the newest turn by default; a historical selection passes
+that turn's user-message ID as `from`. The newest turn's answer moves when a
+step is added, when the newest step finishes
 (its end snapshot is recorded then) and when the session goes idle, so those
 three key the refetch. The desktop Diff view reads it in every scope while
 shown, so the scope picker's Last turn count is current before the user picks
@@ -629,37 +631,51 @@ scope a running turn is not read, and its count shows as unknown until the
 turn ends. A failed read keeps its own error and retry, and another session's
 turn never shows while this one's loads.
 
-A changed-file chip under a reply opens Last turn, but the chip comes from the
-turn's tool calls and the scope from its snapshots, so they can disagree:
-snapshots are off, the project folder is no git repository (a repository nested
-in it still gets the edits), or a step took no snapshot. Each click therefore
-asks once (`pendingTurnDiffFile`, dropped when another session is on screen)
-whether the file is in the turn's diff. Until the list answers the session's
-current state the view shows loading; a failed read keeps its error and retry.
-A file that is there is expanded and scrolled to, on every click, since the
-chip's absolute path only matches the relative list through this request.
-A file that is not there opens Changed instead, in the repository holding the
-file, read afresh, expanded. Only a file inside a project that is not a
-repository, once discovery found no repository in the project holding it,
-opens in the editor instead (`files/openChangedFileWithoutRepository.ts`):
-there is no working-tree diff for it. Unknown or failed discovery, a file
-outside the project and a repository-owned file the list misses (a staged-only
-entry) keep the Changed path. The open checks the file with a stat first,
-since the optional read answers a deleted file with an empty success: a
-deleted file shows the not-found toast, an empty one opens. The read belongs to
-the click that started it, from the click through discovery to the read: a
-newer chip click, leaving the session or the runtime (even to return) drops it
-without a tab, focus change or toast.
-A repository the picker drops
-again ends the attempt on the repository left on screen. Picking Last turn by
-hand asks nothing and stays there, empty or not. The phone's Changes surface
-(`apps/MobileChangesSurface.tsx`) answers the same way when a repository holds
-the file and opens its own diff screen, since it has no expanded list to
-scroll; when no repository holds it, the phone stays on the Changes list. VS
-Code has no Diff view panel: the chip reads the turn's diff once and opens the
-file's patch in the editor's own diff (`editor.openDiff` with `patch`; a file
-the turn deleted shows its old content against an empty side). A file the list
-does not hold opens as it is, and a failed read shows an error toast.
+A changed-file chip under a completed reply opens that reply's turn diff,
+scoped to its session and directory. Under the newest reply that is Last turn
+itself; an older reply's chip opens a selection of its own, labelled with the
+chip row's title (Changed files) and its own count, while Last turn in the
+picker keeps the latest turn's count. The chip comes from the turn's tool calls
+and the diff from its snapshots, so they can disagree: snapshots are off, the
+project folder is no git repository (a nested repository still gets the edits),
+or a step took no snapshot. Each click asks once (`pendingTurnDiffFile`)
+whether the file is in the selected turn's diff. The request carries the
+originating session even when another session is on screen (a pinned chat), and
+the selection persists after the request is consumed. The originating session
+only reads the turn; the panel's own session at the click owns the request and
+the selection it leaves, so a panel that moves to another session drops both,
+and the fallback to Changed below keeps going after the scope leaves the turn.
+Picking a scope drops a pending chip request as well as the selection, on
+desktop and mobile; so does picking a repository in mobile Changes. OpenCode
+reads a turn's range only from a user message, so an older reply whose display
+group a notice opened (a compaction, a wake) keeps static chips. Until the list answers the
+selected turn's state the view shows loading; a failed read keeps its error
+and retry. A listed file is expanded and scrolled to on every click, since
+the chip's absolute path only matches the relative list through this request.
+
+A file missing from the turn diff opens Changed in the repository holding it,
+read afresh and expanded. Only a file inside a project that is not a repository,
+once discovery finds no repository in the project holding it, opens in the
+editor instead (`files/openChangedFileWithoutRepository.ts`): there is no
+working-tree diff for it. Unknown or failed discovery, a file outside the
+project and a repository-owned file the list misses (a staged-only entry) keep
+the Changed path. The open checks the file with a stat first, since the
+optional read answers a deleted file with an empty success: a deleted file
+shows the not-found toast, an empty one opens. The read belongs to the click
+that started it, from the click through discovery to the read: a newer chip
+click, leaving the session or the runtime (even to return) drops it without
+a tab, focus change or toast. A repository the picker drops again ends the
+attempt on the repository left on screen.
+
+Picking Last turn by hand clears the historical selection and shows the newest
+turn, empty or not. The phone's Changes surface (`apps/MobileChangesSurface.tsx`)
+opens the selected turn's file diff when a repository holds it; when no
+repository holds the file, the phone stays on the Changes list. VS Code has no
+Diff view panel: the chip reads its turn's diff once with full context and
+opens the file in the editor's own diff (`editor.openDiff` with `patch` and
+`snapshot`), both sides built from that patch, so later edits or a later
+deletion on disk never change what an older chip shows. A file the list does
+not hold opens as it is, and a failed read shows an error toast.
 
 ### Why the click is a one-shot request and not derived from the tab
 

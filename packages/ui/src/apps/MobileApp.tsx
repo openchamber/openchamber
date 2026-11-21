@@ -87,6 +87,7 @@ import { OverviewPage } from '@/components/overview/OverviewView';
 import { ScheduledTasksView, type ScheduledTasksLeaveReason } from '@/components/session/ScheduledTasksDialog';
 import { MobileWorkspaceDrawer } from './MobileWorkspaceDrawer';
 import type { MobileChangesCommitRequest } from './mobileChangesCommitRequest';
+import type { MobileChangesInitialDiff } from '@/hooks/useMobileChangesNavigation';
 import { connectMobileWorkspaceOpener, shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
 import { GuestHosts } from '@/components/layout/GuestHosts';
 import { useGuestPages, usePhoneGuestPanelModes } from '@/hooks/useGuestSurfaces';
@@ -186,11 +187,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const [openReceivedPage, setOpenReceivedPage] = React.useState<{ receivedId: string; title: string } | null>(null);
 
   const [settingsInitialMobileStage, setSettingsInitialMobileStage] = React.useState<'nav' | 'page-content'>('nav');
-  const [changesRequest, setChangesRequest] = React.useState<
-    | { diff: { path: string; staged: boolean; scope?: 'turn' } }
-    | { commit: MobileChangesCommitRequest }
-    | null
-  >(null);
+  const [changesRequest, setChangesRequest] = React.useState<{ diff: MobileChangesInitialDiff } | { commit: MobileChangesCommitRequest } | null>(null);
   const pendingChangesDiff = changesRequest && 'diff' in changesRequest ? changesRequest.diff : null;
   const pendingChangesCommit = changesRequest && 'commit' in changesRequest ? changesRequest.commit : null;
   const extensionTabs = usePhoneGuestPanelModes();
@@ -311,7 +308,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     setOpenPlan({ id: event.planId, title: event.title, projectRef });
   }), []);
 
-  const openChangesSurface = React.useCallback((diff: { path: string; staged: boolean; scope?: 'turn' } | null = null) => {
+  const openChangesSurface = React.useCallback((diff: MobileChangesInitialDiff | null = null) => {
     setChangesRequest(diff ? { diff } : null);
     setWorkspaceTab('changes');
     setWorkspaceOpen(true);
@@ -393,8 +390,8 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
 
   const mobileActions = React.useMemo<MobileAppActions>(
     () => ({
-      openChanges: ({ diffPath, staged, scope } = {}) => {
-        openChangesSurface(diffPath ? { path: diffPath, staged: staged === true, scope } : null);
+      openChanges: ({ diffPath, staged, scope, turnId, sessionId, directory } = {}) => {
+        openChangesSurface(diffPath ? { path: diffPath, staged: staged === true, scope, turnId, sessionId, directory } : null);
       },
       openFiles: () => openFilesSurface(),
       openSourceBoard: () => openSurface('board'),

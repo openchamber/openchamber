@@ -37,7 +37,7 @@ describe('openTurnFileDiffInEditor', () => {
             file: '/workspace/project/src/notes.txt',
             turnDiff: [{ file: 'src/other.txt', patch: 'other' }, { file: 'src/notes.txt', patch }],
         });
-        expect(calls).toEqual([['openDiff', '', '/workspace/project/src/notes.txt', undefined, { line: 1, patch }]]);
+        expect(calls).toEqual([['openDiff', '', '/workspace/project/src/notes.txt', undefined, { line: 1, patch, snapshot: true }]]);
     });
 
     test('finds a relative chip path in the turn diff', async () => {
@@ -48,7 +48,7 @@ describe('openTurnFileDiffInEditor', () => {
             file: 'src/notes.txt',
             turnDiff: [{ file: 'src/notes.txt', patch }],
         });
-        expect(calls).toEqual([['openDiff', '', '/workspace/project/src/notes.txt', undefined, { line: 1, patch }]]);
+        expect(calls).toEqual([['openDiff', '', '/workspace/project/src/notes.txt', undefined, { line: 1, patch, snapshot: true }]]);
     });
 
     test('opens a file the turn diff does not list as it is', async () => {

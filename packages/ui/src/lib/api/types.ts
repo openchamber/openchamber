@@ -1402,7 +1402,7 @@ export interface EditorAPI {
     original: string,
     modified: string,
     label?: string,
-    options?: { line?: number; patch?: string },
+    options?: { line?: number; patch?: string; snapshot?: boolean },
   ): Promise<void>;
 }
 
