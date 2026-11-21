@@ -631,6 +631,157 @@ describe('fs write', () => {
   });
 });
 
+describe('fs write, delete, rename and mkdir stay inside the workspace through a directory link', () => {
+  const registerReal = (workspace) => {
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => workspace },
+      path,
+      fsPromises: nativeFs,
+      spawn: vi.fn(),
+      crypto: { randomUUID: () => 'job-0' },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: workspace }),
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: path.join(workspace, '.config'),
+    });
+    return getRoute;
+  };
+
+  let root;
+  let workspace;
+  let outside;
+
+  beforeEach(async () => {
+    root = await mkdtemp(path.join(tmpdir(), 'oc-fs-link-'));
+    workspace = path.join(root, 'workspace');
+    outside = path.join(root, 'outside');
+    await mkdir(workspace, { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await nativeFs.writeFile(path.join(outside, 'keep.txt'), 'outside');
+    // A junction needs no elevated rights on Windows; the escape is identical.
+    await nativeFs.symlink(outside, path.join(workspace, 'link'), process.platform === 'win32' ? 'junction' : 'dir');
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('refuses a write whose parent leaves the workspace through a link', async () => {
+    const getRoute = registerReal(workspace);
+    const res = createMockResponse();
+    await getRoute('POST', '/api/fs/write')({
+      body: { path: path.join(workspace, 'link', 'created.txt'), content: 'escaped' },
+    }, res);
+
+    expect(res.statusCode).toBe(403);
+    await expect(nativeFs.readFile(path.join(outside, 'created.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('refuses a delete whose parent leaves the workspace through a link', async () => {
+    const getRoute = registerReal(workspace);
+    const res = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({
+      body: { path: path.join(workspace, 'link', 'keep.txt') },
+    }, res);
+
+    expect(res.statusCode).toBe(403);
+    expect(await nativeFs.readFile(path.join(outside, 'keep.txt'), 'utf8')).toBe('outside');
+  });
+
+  it('refuses a rename whose source leaves the workspace through a link', async () => {
+    const getRoute = registerReal(workspace);
+    const res = createMockResponse();
+    await getRoute('POST', '/api/fs/rename')({
+      body: {
+        oldPath: path.join(workspace, 'link', 'keep.txt'),
+        newPath: path.join(workspace, 'moved.txt'),
+      },
+    }, res);
+
+    expect(res.statusCode).toBe(403);
+    expect(await nativeFs.readFile(path.join(outside, 'keep.txt'), 'utf8')).toBe('outside');
+    await expect(nativeFs.lstat(path.join(workspace, 'moved.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('refuses a rename whose destination leaves the workspace through a link', async () => {
+    const getRoute = registerReal(workspace);
+    await nativeFs.writeFile(path.join(workspace, 'inside.txt'), 'inside');
+    const res = createMockResponse();
+    await getRoute('POST', '/api/fs/rename')({
+      body: {
+        oldPath: path.join(workspace, 'inside.txt'),
+        newPath: path.join(workspace, 'link', 'moved.txt'),
+      },
+    }, res);
+
+    expect(res.statusCode).toBe(403);
+    expect(await nativeFs.readFile(path.join(workspace, 'inside.txt'), 'utf8')).toBe('inside');
+    await expect(nativeFs.lstat(path.join(outside, 'moved.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('refuses a mkdir whose parent leaves the workspace through a link', async () => {
+    const getRoute = registerReal(workspace);
+    const res = createMockResponse();
+    await getRoute('POST', '/api/fs/mkdir')({
+      body: { path: path.join(workspace, 'link', 'newdir') },
+    }, res);
+
+    expect(res.statusCode).toBe(403);
+    await expect(nativeFs.lstat(path.join(outside, 'newdir'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('creates inside a link to a workspace folder whose name starts with two dots', async () => {
+    const getRoute = registerReal(workspace);
+    await mkdir(path.join(workspace, '..notes'));
+    await nativeFs.symlink(path.join(workspace, '..notes'), path.join(workspace, 'notes'), process.platform === 'win32' ? 'junction' : 'dir');
+
+    const writeRes = createMockResponse();
+    await getRoute('POST', '/api/fs/write')({ body: { path: path.join(workspace, 'notes', 'a.txt'), content: 'note' } }, writeRes);
+    expect(writeRes.statusCode).toBe(200);
+    expect(await nativeFs.readFile(path.join(workspace, '..notes', 'a.txt'), 'utf8')).toBe('note');
+
+    const mkdirRes = createMockResponse();
+    await getRoute('POST', '/api/fs/mkdir')({ body: { path: path.join(workspace, 'notes', 'sub') } }, mkdirRes);
+    expect(mkdirRes.statusCode).toBe(200);
+    expect((await nativeFs.stat(path.join(workspace, '..notes', 'sub'))).isDirectory()).toBe(true);
+  });
+
+  it('accepts mkdir of the workspace root when the root is reached through a link', async () => {
+    const alias = path.join(root, 'alias');
+    await nativeFs.symlink(workspace, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const getRoute = registerReal(alias);
+    const res = createMockResponse();
+    await getRoute('POST', '/api/fs/mkdir')({ body: { path: alias } }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.path).toBe(alias);
+  });
+
+  it('still writes a nested file, deletes it, and removes only a symlink leaf', async () => {
+    const getRoute = registerReal(workspace);
+    const nested = path.join(workspace, 'src', 'deep', 'file.txt');
+
+    const writeRes = createMockResponse();
+    await getRoute('POST', '/api/fs/write')({ body: { path: nested, content: 'inside' } }, writeRes);
+    expect(writeRes.statusCode).toBe(200);
+    expect(await nativeFs.readFile(nested, 'utf8')).toBe('inside');
+
+    const deleteRes = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: nested } }, deleteRes);
+    expect(deleteRes.statusCode).toBe(200);
+
+    const leafLink = path.join(workspace, 'linked-folder');
+    await nativeFs.symlink(outside, leafLink, process.platform === 'win32' ? 'junction' : 'dir');
+    const linkRes = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: leafLink } }, linkRes);
+    expect(linkRes.statusCode).toBe(200);
+    await expect(nativeFs.lstat(leafLink)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await nativeFs.readFile(path.join(outside, 'keep.txt'), 'utf8')).toBe('outside');
+  });
+});
+
 describe('fs rename', () => {
   const registerRename = (fsPromises) => {
     const { app, getRoute } = createRouteRegistry();
@@ -2185,7 +2336,7 @@ describe('fs stat directory error handling', () => {
       await mkdir(path.join(directory, 'fs'));
       await mkdir(path.join(directory, 'git'));
       await mkdir(path.join(directory, 'shared'));
-      const helpers = ['routes', 'canonical-path', 'byte-range', 'preview-bridge', 'workspace-file-names', 'content-search', 'search'];
+      const helpers = ['routes', 'canonical-path', 'workspace-target', 'byte-range', 'preview-bridge', 'workspace-file-names', 'content-search', 'search'];
       const require = createRequire(import.meta.url);
       const compiler = path.join(path.dirname(require.resolve('typescript/package.json')), 'bin/tsc');
       execFileSync(process.execPath, [
@@ -2446,7 +2597,13 @@ describe('fs managed chats root', () => {
       fsPromises: {
         realpath: async directory => {
           if (directory === '/srv/chat-alias') return '/storage/chats';
-          throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+          if (directory.startsWith('/home/user/.config/openchamber')) {
+            throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+          }
+          if (directory.startsWith('/storage/chats/')) {
+            throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+          }
+          return directory;
         },
       },
     });
@@ -2454,6 +2611,26 @@ describe('fs managed chats root', () => {
     await mkdir({ body: { path: '/storage/chats/day/session-a' } }, response);
     expect(response.statusCode).toBe(200);
     expect(response.body.path).toBe('/storage/chats/day/session-a');
+  });
+
+  it('stops mkdir when the parent inside the chats root cannot be resolved', async () => {
+    const mkdirCalls = [];
+    const { mkdir } = registerWithChatsRoot({
+      managedChatsRoot: '/srv/openchamber-chats',
+      fsPromises: {
+        realpath: async directory => {
+          if (directory === '/srv/openchamber-chats/day') {
+            throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+          }
+          return directory;
+        },
+        mkdir: async (targetPath) => { mkdirCalls.push(targetPath); },
+      },
+    });
+    const response = createMockResponse();
+    await mkdir({ body: { path: '/srv/openchamber-chats/day/session-a' } }, response);
+    expect(response.statusCode).toBe(403);
+    expect(mkdirCalls).toEqual([]);
   });
 
   it('still rejects mkdir outside the workspace and all managed roots', async () => {
