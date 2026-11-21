@@ -72,12 +72,14 @@ type LeadDigest = z.infer<typeof digestSchema>;
 
 const readLead = (metadata: Metadata | undefined) => parseMetadata(leadSchema, metadata).data?.openchamber.lead ?? null;
 
-export const isLeadSession = (session: Session | null | undefined): boolean => readLead(session?.metadata) !== null;
+const readSessionLead = (session: Session | null | undefined) => (session?.parentID ? null : readLead(session?.metadata));
+
+export const isLeadSession = (session: Session | null | undefined): boolean => readSessionLead(session) !== null;
 
 const sameText = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
 
 export const getLeadDigest = (session: Session | null | undefined): LeadDigest | null => {
-  const lead = readLead(session?.metadata);
+  const lead = readSessionLead(session);
   const digest = lead?.digest;
   if (!digest) return null;
   const dismissed = new Set((lead.dismissed ?? []).map(sameText));

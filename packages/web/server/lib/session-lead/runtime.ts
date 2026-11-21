@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { readLead } from './metadata.js';
+import { OPERATOR_CHILD_KIND } from '../session-lineage.js';
 import type { LeadBriefStore } from './brief-store.js';
 import type { SessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
 import type { TranslatedEvent } from '../event-stream/translate-v2.js';
@@ -26,6 +27,7 @@ export interface SessionLeadRuntimeOptions {
   readCacheLifetime: (sessionId: string, directory: string) => Promise<number | null>;
   isSessionWarm?: ((sessionId: string, cacheLifetimeMs: number) => boolean) | undefined;
   listChildren: (sessionId: string) => Promise<LeadChild[]>;
+  clearInherited: (sessionId: string, parentId: string, directory: string) => Promise<{ changed: boolean }>;
   fetchImpl?: typeof fetch;
   now?: () => number;
   setTimer?: typeof setTimeout;
@@ -33,11 +35,14 @@ export interface SessionLeadRuntimeOptions {
   warn?: (...args: unknown[]) => void;
 }
 
+const metadataLinkSchema = z.object({ openchamber: z.object({ kind: z.enum(['workflow-agent', OPERATOR_CHILD_KIND]), parentID: z.string() }) });
+
 const sessionEventSchema = z.object({
-  type: z.enum(['session.idle', 'session.deleted', 'session.status']),
+  type: z.enum(['session.idle', 'session.deleted', 'session.status', 'session.created']),
   properties: z.object({
     sessionID: z.string().min(1),
     status: z.object({ type: z.string() }).optional(),
+    info: z.object({ parentID: z.string().optional(), metadata: metadataLinkSchema.optional().catch(undefined) }).optional(),
   }),
 });
 
@@ -85,6 +90,7 @@ export const createSessionLeadRuntime = ({
   readCacheLifetime,
   isSessionWarm,
   listChildren,
+  clearInherited,
   fetchImpl = fetch,
   now = Date.now,
   setTimer = setTimeout,
@@ -181,7 +187,13 @@ export const createSessionLeadRuntime = ({
   const processPayload = (payload: TranslatedEvent, directory: string) => {
     const event = sessionEventSchema.safeParse(payload);
     if (!event.success) return;
-    const { sessionID, status } = event.data.properties;
+    const { sessionID, status, info } = event.data.properties;
+    if (event.data.type === 'session.created') {
+      if (info?.parentID && info.metadata?.openchamber.parentID !== info.parentID) {
+        void clearInherited(sessionID, info.parentID, directory).catch((error) => warn('[session-lead] could not clear what a child copied from its parent:', error instanceof Error ? error.message : String(error)));
+      }
+      return;
+    }
     if (event.data.type === 'session.deleted') {
       cancel(sessionID);
       generations.delete(sessionID);

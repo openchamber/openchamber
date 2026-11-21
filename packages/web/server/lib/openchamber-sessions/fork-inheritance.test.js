@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ClientError } from '@opencode/client';
-import { applyForkInheritance, listForkMessages, sourceOwnedLinksPatch } from './fork-inheritance.js';
+import { applyForkInheritance, inheritedFromParentPatch, listForkMessages, sourceOwnedLinksPatch } from './fork-inheritance.js';
 
 describe('listForkMessages', () => {
   it('reads the fork transcript after a temporary OpenCode outage', async () => {
@@ -34,6 +34,22 @@ const harness = (metadata, overrides = {}) => {
   const run = () => applyForkInheritance({ sourceSessionID: 'ses_source', fork: { id: 'ses_fork', metadata }, ...deps });
   return { deps, run };
 };
+
+describe('inheritedFromParentPatch', () => {
+  it('clears from a new child everything that still equals its parent, and keeps what the child got of its own', () => {
+    const parent = { openchamber: { lead: { at: 1, digest: { now: ['x'] } }, work: { state: 'open' }, goal: { id: 'g', status: 'active' }, linked_issues: [{ id: 'a#1' }] } };
+    const decide = inheritedFromParentPatch(parent);
+    expect(decide({ openchamber: { ...parent.openchamber, kind: 'btw', originalSessionID: 'p' }, other: { kept: true } }))
+      .toEqual({ openchamber: { lead: null, work: null, goal: null, linked_issues: null } });
+    expect(decide({ openchamber: { kind: 'btw', work: { state: 'done' } } })).toBeNull();
+  });
+
+  it('drops a copied lead mark even after the parent rewrote its digest, and keeps a link the child added of its own', () => {
+    const parent = { openchamber: { lead: { at: 1, digest: { now: ['newer'] } }, linked_issues: [{ id: 'a#1' }] } };
+    expect(inheritedFromParentPatch(parent)({ openchamber: { lead: { at: 1, digest: { now: ['older'] } }, linked_issues: [{ id: 'a#1' }, { id: 'a#2' }] } }))
+      .toEqual({ openchamber: { lead: null, linked_issues: [{ id: 'a#2' }] } });
+  });
+});
 
 describe('sourceOwnedLinksPatch', () => {
   it('pauses an active goal so the fork does not pursue it in parallel', () => {

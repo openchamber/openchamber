@@ -24,6 +24,12 @@ entries (`../session-knowledge/`), the control service routes the actions
 - Only the user makes a session a lead (the session menu, or a draft opened
   with New lead). The lead actions refuse any other session with `409`, so an
   agent cannot turn itself or a child into a lead.
+- A lead has no parent. OpenCode copies a parent's metadata into every child
+  it creates (a subagent, for one), the lead mark and digest included, so the
+  runtime's `session.created` handler clears what a new child copied from its
+  parent (`inheritedFromParentPatch`, owned by `openchamber-sessions`), and the
+  UI never counts a session with a parent as a lead. A fork drops the
+  mark through `sourceOwnedLinksPatch`.
 - The brief is one markdown file per lead in `<data-dir>/leads/<id>.md`,
   outside the repository and outside Project knowledge. `lead.brief` replaces it
   whole or applies `edits` (`{ find, replace }`, each `find` exactly once, in

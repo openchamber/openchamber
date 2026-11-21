@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { Metadata, Session } from '@/lib/opencode/model';
-import { getLeadDigest, leadReplySchema, leadReplyText, withDismissedSuggestions } from './sessionLead';
+import { getLeadDigest, isLeadSession, leadReplySchema, leadReplyText, withDismissedSuggestions } from './sessionLead';
 
 type Digest = { needsYou: string[]; now: string[]; news: string[]; suggestions: string[]; updatedAt: number };
 
@@ -21,6 +21,13 @@ describe('lead digest', () => {
       needsYou: [{ question: 'Keep the old relay?', options: [] }],
       suggestions: ['Speed up CI'],
     });
+  });
+
+  test('a child that copied its parent\'s lead mark is no lead and shows no digest', () => {
+    const metadata = lead({ needsYou: [], now: ['x'], news: [], suggestions: [], updatedAt: 5 }, []);
+    expect(isLeadSession(session(metadata))).toBe(true);
+    expect(isLeadSession({ ...session(metadata), parentID: 'ses_lead' })).toBe(false);
+    expect(getLeadDigest({ ...session(metadata), parentID: 'ses_lead' })).toBeNull();
   });
 
   test('records a dismissal once, keeps the digest, and leaves a session that is no lead alone', () => {

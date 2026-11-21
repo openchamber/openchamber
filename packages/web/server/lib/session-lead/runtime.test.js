@@ -168,6 +168,7 @@ describe('sleep compaction', () => {
       return new Response('{}', { status: 404 });
     });
     const briefs = { read: async () => (brief instanceof Error ? Promise.reject(brief) : brief), remove: vi.fn(async () => undefined) };
+    const clearInherited = vi.fn(async () => ({ changed: true }));
     let clock = 1_000;
     let reads = 0;
     const runtime = createSessionLeadRuntime({
@@ -178,6 +179,7 @@ describe('sleep compaction', () => {
       readCacheLifetime: async () => 60_000,
       isSessionWarm: () => warm,
       listChildren: async () => [{ id: 'ses_child', title: 'Migrate git', status: { type: 'busy' } }],
+      clearInherited,
       fetchImpl,
       now: () => clock,
       setTimer: (run, delay) => { timers.push({ run, delay }); return timers.length; },
@@ -191,8 +193,19 @@ describe('sleep compaction', () => {
       clock += 90_000;
       await timers.at(-1).run();
     };
-    return { runtime, requests, briefs, timers, idle, fire, metadataReads: () => reads };
+    return { runtime, requests, briefs, timers, idle, fire, clearInherited, metadataReads: () => reads };
   };
+
+  it('asks to clear what a new child copied from its parent, and leaves a session without a parent or linked by metadata alone', async () => {
+    const { runtime, clearInherited } = setup();
+    const created = (info) => runtime.processPayload({ type: 'session.created', properties: { sessionID: 'ses_new', info } }, '/repo');
+    created({ id: 'ses_new', metadata: { openchamber: { lead: { at: 1 } } } });
+    expect(clearInherited).not.toHaveBeenCalled();
+    created({ id: 'ses_new', parentID: 'ses_operator', metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_operator' } } });
+    expect(clearInherited).not.toHaveBeenCalled();
+    created({ id: 'ses_new', parentID: 'ses_lead' });
+    expect(clearInherited).toHaveBeenCalledWith('ses_new', 'ses_lead', '/repo');
+  });
 
   it('compacts an idle lead past its cache and answers the hook with its own note once', async () => {
     const { runtime, requests, timers, idle, fire } = setup();
