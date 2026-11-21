@@ -752,11 +752,13 @@ export class SessionMessageLoader {
     const prefetched = getSessionPrefetch(target.directory, target.sessionID, this.runtimeKey)
     const entry: LoaderEntry = {
       target: { directory: target.directory, sessionID: target.sessionID },
+      // A prefetch record is metadata only: it holds no messages. Restoring `resolved` from it
+      // would claim history coverage for a store that was rebuilt since, and a single live event
+      // would then render as the whole transcript - a busy chat drawn empty with no loading or
+      // error state. Keep the pagination hints, but let the first open read the history again.
       snapshot: prefetched
         ? {
             ...createDefaultState(),
-            status: "ready",
-            resolved: true,
             limit: prefetched.limit,
             cursor: prefetched.cursor,
             complete: prefetched.complete,
