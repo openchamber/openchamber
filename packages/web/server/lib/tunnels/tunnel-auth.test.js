@@ -21,7 +21,10 @@ const activeAuth = () => {
   return auth;
 };
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 
 describe('tunnel authentication lifecycle', () => {
   it('exchanges a bootstrap token once, reads its cookie and revokes the session', () => {
@@ -99,6 +102,43 @@ describe('tunnel authentication lifecycle', () => {
     }
     expect(exchange()).toEqual({ ok: false, reason: 'rate-limited', retryAfter: 600 });
     expect(res.setHeader).not.toHaveBeenCalled();
+  });
+
+  it('keys the exchange budget on the peer when a private address rotates X-Forwarded-For', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const auth = activeAuth();
+    auth.issueBootstrapToken({ ttlMs: null });
+    const res = response();
+    const attempt = (forwardedFor) => {
+      const req = request(undefined, forwardedFor);
+      req.socket.remoteAddress = '192.168.1.50';
+      return auth.exchangeBootstrapToken({ req, res, token: 'invalid', sessionTtlMs: 1_000 });
+    };
+
+    for (let index = 0; index < 20; index += 1) {
+      expect(attempt(`203.0.113.${index}`)).toEqual({ ok: false, reason: 'invalid-token' });
+    }
+    expect(attempt('203.0.113.99')).toEqual({ ok: false, reason: 'rate-limited', retryAfter: 600 });
+  });
+
+  it('keeps separate exchange budgets for clients behind a configured LAN proxy', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    vi.stubEnv('OPENCHAMBER_TRUSTED_PROXIES', '172.18.0.2');
+    const auth = activeAuth();
+    auth.issueBootstrapToken({ ttlMs: null });
+    const res = response();
+    const attempt = (forwardedFor) => {
+      const req = request(undefined, forwardedFor);
+      req.socket.remoteAddress = '172.18.0.2';
+      req.headers['x-forwarded-for'] = forwardedFor;
+      return auth.exchangeBootstrapToken({ req, res, token: 'invalid', sessionTtlMs: 1_000 });
+    };
+
+    for (let index = 0; index < 20; index += 1) {
+      expect(attempt('203.0.113.31')).toEqual({ ok: false, reason: 'invalid-token' });
+    }
+    expect(attempt('203.0.113.31')).toEqual({ ok: false, reason: 'rate-limited', retryAfter: 600 });
+    expect(attempt('203.0.113.32')).toEqual({ ok: false, reason: 'invalid-token' });
   });
 
   it('preserves malformed cookie failures and ignores unrelated inherited cookie names', () => {
