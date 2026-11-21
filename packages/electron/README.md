@@ -597,8 +597,11 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   same as a target=_blank link, so the session's preload (`browser-panel-preload.cjs`, exposes nothing) marks every
   `window.open` that keeps its opener as a popup. A link aimed at a new tab is
   noopener by default and becomes a panel tab
-  (`openchamber:browser-panel-open-tab` to the renderer). Pages of an
-  isolated space keep everything in place, so nothing leaves the space's session.
+  (`openchamber:browser-panel-open-tab` to the renderer). The event carries
+  Electron's referrer URL and policy for the new tab's first load; a renderer
+  older than the shell ignores it. Pages of an isolated space keep everything in
+  place, so nothing leaves the space's session; a link loaded in place sends the
+  same referrer.
   Popups close with the window that opened them and do not count as app windows
   when closing the last one hides the app on macOS.
 

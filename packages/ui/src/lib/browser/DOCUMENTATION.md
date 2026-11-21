@@ -29,6 +29,8 @@ This folder is the UI half of the in-app browser and of agent browser control. T
 - Session-to-tab memory is module state only. After a reload a session falls back to its newest registered tab.
 - A dev-server wait retries only a loopback address with a connection-stage error. A tab restored from saved state never retries, and a tab nobody watches holds its retry without loading a page in the background.
 - Dev-server wait keys carry the directory, because tab ids repeat across projects as `browser:<url>`.
+- A link opened in a new panel tab (user, background or agent tab) sends the opening page's referrer, under that page's referrer policy, on the tab's first load. The referrer is kept in memory for the tab the link created and dropped when the tab mounts. A link to an address that already has a tab reveals that tab; when that tab is still blank or failed and loads the address again, that load sends the link's referrer under the link's policy, and a tab that shows a page is not reloaded. The referrer is not kept for that tab, a restored tab never gets one, and opening the address any other way drops one a never-mounted tab left behind. An open-tab event without a referrer, from an older desktop shell, opens the tab without one.
+- A tab opened from a link has one history entry once its first load commits or fails, so Back never returns to the blank page it attached at. That first commit or failure also restarts the dev-server wait, as a load someone asked for does, so settling on the blank page first does not end the wait for a local dev server's gateway.
 - Announcements carry the base path of an app; discovery carries the ports that actually listen. When discovery is available it decides which servers exist, and an announcement supplies the path for its port. When discovery returns nothing, announcements stand alone.
 - A tunnel failure is reported. The original loopback URL is never loaded as a fallback.
 - A crash recovery policy allows a bounded number of reloads within a window. Once the attempts are spent, the panel reports the crash.
@@ -160,6 +162,16 @@ The wait gives the client that holds the tab time to claim it. Without it, a cli
 ### Why a tab opened with an address is remembered only until it mounts
 
 A tab opened with an address makes its first load on purpose. The key is dropped once the tab has mounted, so a later remount of the same tab counts as a restore and does not retry.
+
+### Why a tab opened from a link loads after `dom-ready`
+
+Every other tab is created with its final URL in `src`: a hidden view loses an imperative navigation, and a changed `src` is not reliably honoured. `src` cannot carry a referrer policy, though, and a view without `src` never attaches. So `hooks/useBrowserTabReferrer.ts` attaches a tab opened from a link at `about:blank` and calls `loadURL` with `httpReferrer` once the guest fires `dom-ready`. Chromium still sends `Sec-Fetch-Site: none` for that load; the panel does not rewrite fetch-metadata headers.
+
+The blank history entry is cleared on the first main-frame `did-navigate`, or on the first main-frame `did-fail-load` other than `ERR_ABORTED`, because an error page commits without `did-navigate`. `ERR_ABORTED` means another navigation took over, and that navigation's commit clears it instead. A link that turns into a download starts a navigation and stops loading without a commit; the tab then stays at the blank page and behaves like an empty tab, with no history clearing or dev-server rearm waiting for a later address. A guest that crashes before the first page also stops loading without a commit, and only `render-process-gone` after it tells the two apart. Crash recovery reloads the blank page; that blank commit does not count, and its `dom-ready` asks for the address again with the referrer. Electron reports a crash's `did-stop-loading` before `render-process-gone`, so the hook asks `isCrashed()` when loading stops: a load that stopped in a living guest was handed off (a download), and a later crash of the idle blank page does not ask for the address again, so the download is fetched once. The listeners capture, so the history is one entry long by the time the navigation hook reads it for the same event.
+
+### Why the tab a link opened is found by comparing tab ids
+
+The panel store's open actions return nothing for user tabs, and the tab a link opens is the one that did not exist before the call. Comparing the directory's tab ids around the call finds it without a new store contract, and finds nothing when the link only revealed an existing tab. For the same reason the link's referrer reaches an existing tab's load request through `openWithBrowserTabLinkReferrer`, which holds it for the duration of the synchronous open call, instead of a referrer option on every open action.
 
 ### Why a stopped mobile tunnel listener needs no explicit stop
 
