@@ -584,6 +584,12 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   drops session cookies (no expiry) on quit, and many sign-ins live in one, so
   before quitting they are rewritten with an expiry (`browser-panel-cookies.mjs`),
   as Chrome keeps them when it continues where you left off.
+  Pages see a plain Chrome user agent, without the `OpenChamber/` and
+  `Electron/` tokens, because some sites refuse Electron. Google's sign-in
+  hosts (`accounts.google.com`, `accounts.youtube.com`) are the exception:
+  Google rejects an embedded browser that claims to be Chrome ("This browser
+  or app may not be secure") and lets one that names Electron through, so
+  requests to those hosts get the `Electron/` token back in their header.
 - `window.open` from a page in that session (`browserPanelWindowOpenTarget`): a
   scripted popup opens as a sandboxed child window of the app window, keeping
   `window.opener`, so a Google, GitHub or SSO sign-in can post its result back;

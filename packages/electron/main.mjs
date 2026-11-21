@@ -134,9 +134,9 @@ import { reconcileAppImageDesktopEntry } from './linux-desktop-entry.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
 import { keepSessionCookies } from './browser-panel-cookies.mjs';
 import {
+  applyBrowserPanelUserAgent,
   browserPanelPermissionAuditDetails,
   browserPanelWindowOpenTarget,
-  plainChromeUserAgent,
   shouldAllowBrowserPanelCertificateError,
   shouldAllowBrowserPanelPermission,
 } from './browser-panel-security.mjs';
@@ -1049,7 +1049,7 @@ const isPanelSession = (candidate) => panelSessions.has(candidate);
 const hardenPanelSession = (panelSession) => {
   if (panelSessions.has(panelSession)) return;
   panelSessions.add(panelSession);
-  panelSession.setUserAgent(plainChromeUserAgent(panelSession.getUserAgent()));
+  applyBrowserPanelUserAgent(panelSession, process.versions.electron);
 
   panelSession.setPermissionRequestHandler((contents, permission, callback, details) => {
     const allowed = shouldAllowBrowserPanelPermission({

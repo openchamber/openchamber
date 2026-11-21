@@ -55,3 +55,20 @@ export const plainChromeUserAgent = (userAgent) => String(userAgent || '')
   .replace(/\s(?:Electron|OpenChamber)\/\S+/gi, '')
   .replace(/\s{2,}/g, ' ')
   .trim();
+
+// external: https://developers.googleblog.com/2020/08/guidance-for-our-effort-to-block-less-secure-browser-and-apps.html Google sign-in rejects an embedded browser that sends another browser's user agent, so its hosts get the Electron token back.
+const GOOGLE_SIGN_IN_URLS = ['https://accounts.google.com/*', 'https://accounts.youtube.com/*'];
+
+export const electronUserAgent = (userAgent, electronVersion) => plainChromeUserAgent(userAgent)
+  .replace(/\sSafari\//, ` Electron/${electronVersion} Safari/`);
+
+export const applyBrowserPanelUserAgent = (panelSession, electronVersion) => {
+  const userAgent = plainChromeUserAgent(panelSession.getUserAgent());
+  panelSession.setUserAgent(userAgent);
+  const signInUserAgent = electronUserAgent(userAgent, electronVersion);
+  panelSession.webRequest.onBeforeSendHeaders({ urls: GOOGLE_SIGN_IN_URLS }, (details, callback) => {
+    const requestHeaders = Object.fromEntries(Object.entries(details.requestHeaders)
+      .filter(([name]) => name.toLowerCase() !== 'user-agent'));
+    callback({ requestHeaders: { ...requestHeaders, 'User-Agent': signInUserAgent } });
+  });
+};
