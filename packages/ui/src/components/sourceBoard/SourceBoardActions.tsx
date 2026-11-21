@@ -28,7 +28,7 @@ import { cn } from '@/lib/utils';
 import type { ChangeRequestSubmitRequirement, DiscussionCloseReason, DraftChangeRequestInput, SetStateInput, SourceControlCapabilities } from '@/lib/source-control/types';
 import { useChangeRequestDiffServing, useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
-import { branchActionsFor } from './branchAction';
+import { branchActionPayload, branchActionsFor } from './branchAction';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
@@ -255,13 +255,9 @@ export const SourceBoardActions: React.FC<{
         const label = referenceNumberLabel(openPull, descriptor);
         setBusy('branch');
         try {
-            const payload = {
-                ...context,
-                idempotencyKey: newMutationKey(),
-                target: { project: { owner: openPull.sourceRepo.owner, name: openPull.sourceRepo.repo }, number: openPull.number },
-            };
-            if (action === 'update') await sourceControl.changeRequestUpdateBranch({ ...payload, expectedHeadSha: openPull.headSha });
-            else await sourceControl.changeRequestRebase({ ...payload, expectedHeadSha: openPull.headSha });
+            const payload = { ...context, idempotencyKey: newMutationKey(), ...branchActionPayload(openPull) };
+            if (action === 'update') await sourceControl.changeRequestUpdateBranch(payload);
+            else await sourceControl.changeRequestRebase(payload);
             toast.success(t(action === 'update' ? 'sourceBoard.actions.branchUpdated' : 'sourceBoard.actions.rebased', { reference: label }));
         } catch (error) {
             toast.error(

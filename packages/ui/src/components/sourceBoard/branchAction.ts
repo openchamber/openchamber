@@ -16,3 +16,8 @@ export const branchActionsFor = (
         ...(features.rebase ? ['rebase' as const] : []),
     ];
 };
+
+export const branchActionPayload = (pull: { number: number; headSha: string; sourceRepo: { owner: string; repo: string } }) => ({
+    target: { project: { owner: pull.sourceRepo.owner, name: pull.sourceRepo.repo }, number: pull.number },
+    expectedHeadSha: pull.headSha,
+});

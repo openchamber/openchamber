@@ -199,7 +199,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }: {
         changeRequestEdit: presentation.features.changeRequestEdit === true,
         baseChange: presentation.features.baseChange === true,
         updateBranch: presentation.features.updateBranch === true,
-        rebase: false,
+        rebase: presentation.features.rebase === true,
         advancedSearch: false,
         commentEdit: capabilities.commentEdit === true,
         lock: false,

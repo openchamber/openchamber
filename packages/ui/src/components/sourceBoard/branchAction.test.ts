@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { branchActionsFor } from './branchAction';
+import { branchActionPayload, branchActionsFor } from './branchAction';
 
 const open = { state: 'open', draft: false };
 const both = { updateBranch: true, rebase: true };
@@ -34,5 +34,20 @@ describe('the branch actions under the item', () => {
         expect(branchActionsFor(open, both, { writeAccess: false })).toEqual([]);
         expect(branchActionsFor(open, both, { writeAccess: true })).toEqual(['update', 'rebase']);
         expect(branchActionsFor(open, both, { waitingMerge: true })).toEqual([]);
+    });
+});
+
+describe('branch action payload', () => {
+    test('carries the head SHA the picker saw, for both operations', () => {
+        const pull = { number: 2, headSha: 'a'.repeat(40), sourceRepo: { owner: 'acme', repo: 'app' } };
+        expect(branchActionPayload(pull)).toEqual({
+            target: { project: { owner: 'acme', name: 'app' }, number: 2 },
+            expectedHeadSha: 'a'.repeat(40),
+        });
+    });
+
+    test('reflects a head that moved since the preview loaded', () => {
+        expect(branchActionPayload({ number: 2, headSha: 'b'.repeat(40), sourceRepo: { owner: 'acme', repo: 'app' } }).expectedHeadSha)
+            .toBe('b'.repeat(40));
     });
 });

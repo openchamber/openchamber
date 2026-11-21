@@ -300,8 +300,8 @@ describe('extension source-control descriptors', () => {
       },
     });
     const published = publicProviderDescriptor(declared, 3, declared.extension);
-    // The standard table carries no close reason and no rebase.
-    expect(published.features).toMatchObject({ issueCloseReason: false, rebase: false, issueEdit: true, baseChange: true, updateBranch: true });
+    // The manifest has no close-reason key; rebase is dispatched by the standard table when declared.
+    expect(published.features).toMatchObject({ issueCloseReason: false, rebase: true, issueEdit: true, baseChange: true, updateBranch: true });
   });
 
   it('publishes the text edits an extension declares, and none it does not', () => {
