@@ -98,6 +98,7 @@ import { createTurnStartReader } from './lib/opencode/turn-start.js';
 import { createSessionActivityProbe } from './lib/opencode/session-activity.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
+import { createGoalPersistence } from './lib/session-goal/interruption.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
 import { createSessionWarmingRuntime } from './lib/session-warming/runtime.js';
 import { createSessionTodosRuntime } from './lib/session-todos/runtime.js';
@@ -1135,13 +1136,7 @@ const sessionGoalRuntime = createSessionGoalRuntime({
   classifierEndpoint: () => routingRuntime.classifierEndpoint(),
   jev: createJevClient({ timeoutMs: JEV_BACKGROUND_TIMEOUT_MS }),
   readSessionMetadata: readStoredSessionMetadata,
-  persistSessionGoal: async (sessionID, directory, goal, canWrite) => {
-    if (!canWrite) return persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory });
-    const result = await updateSessionMetadataWith(sessionID, (metadata) => (
-      canWrite(metadata) ? { openchamber: { goal } } : null
-    ), { directory });
-    return result.changed;
-  },
+  persistSessionGoal: createGoalPersistence(persistSessionMetadataPatch, updateSessionMetadataWith),
   emitGoalNotification: async ({ sessionId, directory, status, goal }) => {
     const settings = await readSettingsFromDisk();
     if (settings.notifyOnCompletion === false) {

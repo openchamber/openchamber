@@ -198,6 +198,7 @@ describe('createSessionMetadataStore', () => {
     await expect(store.setSessionMetadata('ses_1', { a: 1 })).rejects.toThrow('timeout');
     openCode.failRead = null;
     await expect(store.setSessionMetadata('ses_missing', { a: 1 })).rejects.toThrow('not found');
+    await expect(store.updateSessionMetadata('ses_missing', () => ({ a: 1 }))).rejects.toMatchObject({ _tag: 'SessionNotFoundError' });
 
     expect(openCode.write).not.toHaveBeenCalled();
     expect(openCode.sessions.get('ses_1')).toEqual({ keep: true });

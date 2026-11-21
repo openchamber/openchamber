@@ -39,8 +39,10 @@ the UI owns arming goals and presenting their state.
   turn, including subagent shells and images, holds the audit before it nudges
   the agent over running work.
 - A wakeup received during an in-flight tick remains pending until that tick
-  ends. Mid-goal edits leave its pending read intact, and an abort lets an
-  in-flight tick reach its own pause check, so cancellation cannot strand a goal.
+  ends. Mid-goal edits leave its pending read intact. An abort invalidates the
+  tick and pauses the goal even when a resumed tick is in flight, unless it is
+  the late interruption of an execution paused before Resume with no execution
+  started since.
 
 ## Goal payload (`metadata.openchamber.goal`)
 
@@ -139,10 +141,12 @@ before touching the filesystem). Rationale: metadata rides every
      settlement notification. A successful session read resets the counter.
      Updates for paused, cleared or settled goals and fresh or resumed active
      goals cancel the old retry window, as do session status events and a user
-     abort with no tick in flight. A mid-goal edit leaves the counter, the
-     armed retry timer and an in-flight read alone, since that tick is the
-     goal's only pending work; an abort during an in-flight read lets the tick
-     reach its own abort check and pause the goal;
+     abort. A mid-goal edit leaves the counter, the armed retry timer and an
+     in-flight read alone, since that tick is the goal's only pending work.
+     An abort invalidates the in-flight tick and separately pauses the goal.
+     A failed pause retries while later ticks wait; a new goal or Resume
+     cancels the pending pause, and a session OpenCode reports as gone ends
+     the retries;
    - authoritative live-activity check after the quiet window: re-read
      `/api/session/active`, bail if the parent resumed; then read OpenCode's
       job list (2.2.6+) for the whole subagent tree and bail while a
@@ -201,7 +205,7 @@ before touching the filesystem). Rationale: metadata rides every
      `tokensUsed = tokensCommitted + current segment`, kept monotonic so
      unflagged context shrinks never move the budget backwards;
    - a user abort pauses the goal instead of blocking it: the event path in
-     `processPayload` pauses immediately on the MessageAbortedError message
+     `processPayload` pauses on an interrupted execution event
      (before any tick could send a continuation over the user's explicit
      stop), with a tick-side safety net. Messages sent while paused leave
      the goal alone; Resume re-arms the loop, and resuming over an aborted
@@ -209,7 +213,7 @@ before touching the filesystem). Rationale: metadata rides every
     - terminal checks, cheapest first: assistant turn error → `blocked`;
       `tokensUsed >= tokenBudget` → `budgetLimited`;
       `turnsUsed >= ` the turn limit (Settings → Goal, `sessionGoalMaxAutoTurns`, 1–200, default 20; read on every tick) → `blocked`;
-    - error classification is independent of `finish`: `MessageAbortedError`
+    - error classification is independent of `finish`: `aborted` and `MessageAbortedError`
       keeps the pause/resume behavior; only a `finish: "length"` with no
       error, or `MessageOutputLengthError`, is an in-progress truncation that
       skips the audit and continues. Any other non-null error wins over a
@@ -280,7 +284,11 @@ before touching the filesystem). Rationale: metadata rides every
      re-check the tail, then `POST /api/session/:id/prompt` with the
      continuation prompt. v2 keeps the model and agent on the session, so the
      prompt runs on what the session already uses; nothing is re-selected —
-     the goal spends the session's own subscription.
+     the goal spends the session's own subscription. Only a user Stop or goal
+     Pause before the prompt is sent returns the reserved turn, through a store transaction
+     on the same goal that preserves later goal changes; a moved tail or a
+     failed final read keeps the turn charged. A failed return retries until
+     it lands, the goal is replaced, or Resume resets the turn count.
 4. Settling (`complete`/`blocked`/`budgetLimited`) fires the injected
    `emitGoalNotification` so the user hears about it even with the UI closed:
    desktop + UI broadcast + the standard push fanout (web-push with full
@@ -390,6 +398,10 @@ ordering used by create and scheduled goals.
   cannot be persisted or notified. The tick logs the failure and stops until
   another event or Resume arms it.
 
+- If the server stops after reserving a continuation turn and before the
+  reservation can be rolled back, the saved count can include an unsent turn.
+  A failed rollback retries while the server runs; the retry is not persisted.
+
 - Web-server feature: VS Code (extension-only) renders goal state via
   `session.updated` but does not run the loop.
 - A goal on a session with no assistant reply yet starts after the first
@@ -460,7 +472,18 @@ instructions require stopping commands that never finish before each final repor
 The accounting write precedes the prompt so a failed prompt leaves a saved turn
 count and waits for another idle tick. Reversing the order can double-charge a
 turn. A fresh tail read after the audit drops a continuation if the user sends
-another message meanwhile.
+another message meanwhile. A continuation the user stopped before it was sent
+returns its reserved turn inside the metadata write queue, so it does not
+overwrite a concurrent pause; any other dropped continuation keeps its turn.
+
+### Why a Resume ignores the interruption of an execution paused before it
+
+OpenCode acknowledges an interrupt before cleanup ends and reports it at
+settlement, which can land after the user already clicked Resume. A Pause made
+while the session was busy marks the stop as in flight; a Resume before
+settlement supersedes it, and the late interruption is dropped. Any execution
+started after Resume clears the mark, so a newer Stop always pauses. Matching
+by time instead fails because the event carries only its settlement time.
 
 ### Why failed session and activity reads retry before blocking
 

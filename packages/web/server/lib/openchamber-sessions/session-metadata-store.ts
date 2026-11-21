@@ -34,8 +34,11 @@ export const mergeMetadataPatch = (current: SessionMetadata | JsonValue | undefi
   return base;
 };
 
-const isSessionNotFound = (error: unknown): error is { _tag: 'SessionNotFoundError' } =>
+export const isSessionNotFound = (error: unknown): error is { _tag: 'SessionNotFoundError' } =>
   hasTag(error) && error._tag === 'SessionNotFoundError';
+
+const sessionNotFound = (id: string) =>
+  Object.assign(new Error(`session ${id} was not found`), { _tag: 'SessionNotFoundError' as const });
 
 export interface MetadataReadOptions {
   directory?: string;
@@ -221,7 +224,7 @@ export const createSessionMetadataStore = ({
     return runForSession(id, async () => {
       const fromLegacy = unmigrated.has(id);
       const current = fromLegacy ? unmigrated.get(id) : await openCode.read(id, { directory });
-      if (current === null) throw new Error(`session ${id} was not found`);
+      if (current === null) throw sessionNotFound(id);
       const merged = mergeMetadataPatch(current, patch);
       await openCode.write(id, merged, { directory });
       if (fromLegacy) await forgetLegacy(id);
@@ -237,7 +240,7 @@ export const createSessionMetadataStore = ({
     return runForSession(id, async () => {
       const fromLegacy = unmigrated.has(id);
       const current = fromLegacy ? unmigrated.get(id) : await openCode.read(id, { directory });
-      if (current === null) throw new Error(`session ${id} was not found`);
+      if (current === null) throw sessionNotFound(id);
       const patch = decide(current);
       if (!isPlainObject(patch)) return { metadata: current, changed: false };
       const merged = mergeMetadataPatch(current, patch);

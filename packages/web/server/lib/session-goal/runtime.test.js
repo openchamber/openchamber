@@ -77,7 +77,7 @@ afterEach(() => {
  * `/api/session/active` for busy state, and the three continuation calls.
  */
 // Without `jobs` it is an OpenCode before 2.2.6, which has no job list.
-const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200, shells = [], shellStatus = 200, jobs, sessionRead = async () => {}, sessionRecord = {} }) => {
+const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200, shells = [], shellStatus = 200, jobs, sessionRead = async () => {}, messageRead = async () => {}, sessionRecord = {} }) => {
   const calls = [];
   const json = (data, status = 200) => new Response(JSON.stringify({ location: { directory: '/repo' }, data }), {
     status,
@@ -102,7 +102,10 @@ const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus =
       if (jobs === undefined) return new Response(null, { status: 404 });
       return Response.json({ data: typeof jobs === 'function' ? jobs() : jobs });
     }
-    if (url.pathname.endsWith('/message')) return json({ data: [...messages].reverse(), cursor: null });
+    if (url.pathname.endsWith('/message')) {
+      await messageRead();
+      return json({ data: [...messages].reverse(), cursor: null });
+    }
     if (url.pathname === `/api/session/${SESSION_ID}`) {
       await sessionRead();
       return json({ id: SESSION_ID, location: { directory: '/repo' }, ...sessionRecord });
@@ -162,7 +165,10 @@ describe('session goal session-read recovery', () => {
     const metadata = { openchamber: { goal: activeGoal() } };
     const seam = wired(metadata);
     seam.persistSessionGoal.mockImplementation(async (_sessionId, _directory, goal) => {
-      metadata.openchamber.goal = goal;
+      const next = goal.update ? goal.update(metadata) : goal;
+      if (!next) return false;
+      metadata.openchamber.goal = next;
+      return true;
     });
     const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }) }));
     const runtime = makeRuntime({
@@ -331,11 +337,14 @@ describe('session goal session-read recovery', () => {
     expect(test.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
   });
 
-  it('pauses a goal whose user aborts while the tick reads the session', async () => {
+  it.each([
+    { type: 'aborted', message: 'Step interrupted' },
+    { name: 'MessageAbortedError', data: {} },
+  ])('pauses a goal whose user aborts while the tick reads the session: %j', async (error) => {
     const gate = Promise.withResolvers();
     const sessionRead = vi.fn().mockImplementationOnce(() => gate.promise).mockResolvedValue(undefined);
     const test = setup(sessionRead, {
-      messages: [assistantRecord({ finish: undefined, error: { name: 'MessageAbortedError', data: {} } })],
+      messages: [assistantRecord({ finish: undefined, error })],
     });
     await test.start();
     test.runtime.processPayload({
@@ -347,6 +356,295 @@ describe('session goal session-read recovery', () => {
 
     expect(test.metadata.openchamber.goal).toMatchObject({ status: 'paused' });
     expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it.each([
+    { stop: 'before Resume', newExecution: false, status: 'active', posts: 1 },
+    { stop: 'after Resume', newExecution: true, status: 'paused', posts: 0 },
+  ])('orders a Stop requested $stop against a resumed tick', async ({ newExecution, status, posts }) => {
+    const gate = Promise.withResolvers();
+    const test = setup(vi.fn().mockImplementationOnce(() => gate.promise).mockResolvedValue(undefined), {
+      messages: [assistantRecord({ finish: undefined, error: { type: 'aborted', message: 'Step interrupted' } })],
+    });
+    test.runtime.processPayload({ type: 'session.status', properties: { sessionID: SESSION_ID, status: { type: 'busy' } } });
+    test.metadata.openchamber.goal = activeGoal({ status: 'paused', statusReason: '' });
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', test.metadata);
+    test.metadata.openchamber.goal = activeGoal({ statusReason: 'resumed' });
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', test.metadata);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(test.sessionRead).toHaveBeenCalledTimes(1);
+    if (newExecution) {
+      test.runtime.processPayload({ type: 'session.status', properties: { sessionID: SESSION_ID, status: { type: 'busy' } } });
+    }
+    test.runtime.processPayload(idle());
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(test.metadata.openchamber.goal.status).toBe(status);
+    expect(test.calls.filter((call) => call.method === 'POST')).toHaveLength(posts);
+  });
+
+  it('honors an abort while a resumed goal reads the session', async () => {
+    const gate = Promise.withResolvers();
+    const test = setup(vi.fn().mockImplementationOnce(() => gate.promise).mockResolvedValue(undefined), {
+      messages: [assistantRecord({ finish: undefined, error: { type: 'aborted', message: 'Step interrupted' } })],
+    });
+    test.metadata.openchamber.goal = activeGoal({ statusReason: 'resumed' });
+    await test.start();
+    await vi.advanceTimersByTimeAsync(250);
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(test.metadata.openchamber.goal.status).toBe('paused');
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('does not start another tick while an abort pause is waiting to write', async () => {
+    const sessionGate = Promise.withResolvers();
+    const pauseGate = Promise.withResolvers();
+    const test = setup(vi.fn().mockImplementationOnce(() => sessionGate.promise).mockResolvedValue(undefined));
+    await test.start();
+    test.persistSessionGoal.mockImplementationOnce(async (_sessionId, _directory, { update }) => {
+      await pauseGate.promise;
+      const goal = update(test.metadata);
+      if (!goal) return false;
+      test.metadata.openchamber.goal = goal;
+      return true;
+    });
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    sessionGate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    test.runtime.processPayload(idle());
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(test.sessionRead).toHaveBeenCalledTimes(1);
+    pauseGate.resolve();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(test.metadata.openchamber.goal.status).toBe('paused');
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('retries a failed abort pause without continuing the goal', async () => {
+    const test = setup(vi.fn(async () => {}));
+    test.persistSessionGoal.mockRejectedValueOnce(new Error('metadata unavailable'));
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(test.metadata.openchamber.goal.status).toBe('paused');
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('stops retrying an abort pause once the session is gone', async () => {
+    const test = setup(vi.fn(async () => {}));
+    test.persistSessionGoal.mockRejectedValueOnce(Object.assign(new Error('session ses_1 was not found'), { _tag: 'SessionNotFoundError' }));
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels an abort retry when the user resumes', async () => {
+    const test = setup(vi.fn(async () => {}));
+    test.persistSessionGoal.mockRejectedValueOnce(new Error('metadata unavailable'));
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    test.metadata.openchamber.goal = activeGoal({ statusReason: 'resumed' });
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', test.metadata);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(test.metadata.openchamber.goal.status).toBe('active');
+    expect(test.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+  });
+
+  it('does not count a continuation paused during the final message read', async () => {
+    const gate = Promise.withResolvers();
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => gate.promise);
+    const test = setup(vi.fn(async () => {}), { messageRead });
+    await test.start();
+    expect(messageRead).toHaveBeenCalledTimes(2);
+    // The goal row's Pause on an idle session: OpenCode has nothing to
+    // interrupt, so only the paused goal reaches the runtime.
+    test.metadata.openchamber.goal = { ...test.metadata.openchamber.goal, status: 'paused', statusReason: '' };
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', test.metadata);
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(test.metadata.openchamber.goal).toMatchObject({ status: 'paused', turnsUsed: 0 });
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('reconciles a stop while the continuation accounting write is in flight', async () => {
+    const gate = Promise.withResolvers();
+    const test = setup(vi.fn(async () => {}));
+    test.persistSessionGoal.mockImplementationOnce(async (_sessionId, _directory, goal, canWrite) => {
+      expect(canWrite(test.metadata)).toBe(true);
+      test.metadata.openchamber.goal = goal;
+      await gate.promise;
+      return true;
+    });
+    await test.start();
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(test.metadata.openchamber.goal).toMatchObject({ status: 'paused', turnsUsed: 0 });
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('does not retry a failed rollback after runtime shutdown', async () => {
+    const gate = Promise.withResolvers();
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => gate.promise);
+    const test = setup(vi.fn(async () => {}), { messageRead });
+    await test.start();
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    test.runtime.stop();
+    test.persistSessionGoal.mockRejectedValueOnce(new Error('metadata unavailable'));
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(3);
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('keeps a continuation charged when the message tail changes without a stop', async () => {
+    const gate = Promise.withResolvers();
+    const messages = [assistantRecord()];
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => gate.promise);
+    const test = setup(vi.fn(async () => {}), { messages, messageRead });
+    await test.start();
+    messages.push({ id: 'msg_new', type: 'user', content: [] });
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(test.metadata.openchamber.goal.turnsUsed).toBe(1);
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(1);
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('retries failed continuation accounting rollback before the next tick', async () => {
+    const gate = Promise.withResolvers();
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => gate.promise);
+    const test = setup(vi.fn(async () => {}), { messageRead });
+    await test.start();
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    test.persistSessionGoal.mockRejectedValueOnce(new Error('metadata unavailable'));
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(test.metadata.openchamber.goal).toMatchObject({ status: 'paused', turnsUsed: 0 });
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('retries a pending rollback immediately on resume', async () => {
+    const gate = Promise.withResolvers();
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => gate.promise);
+    const test = setup(vi.fn(async () => {}), { messageRead });
+    await test.start();
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    test.persistSessionGoal.mockRejectedValueOnce(new Error('metadata unavailable'));
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    test.metadata.openchamber.goal = { ...test.metadata.openchamber.goal, status: 'active', statusReason: 'resumed' };
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/project', test.metadata);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(test.metadata.openchamber.goal.turnsUsed).toBe(0);
+  });
+
+  it('discards a queued rollback when Resume resets the turn count', async () => {
+    const gate = Promise.withResolvers();
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => gate.promise);
+    const test = setup(vi.fn(async () => {}), { messageRead });
+    await test.start();
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    test.persistSessionGoal.mockRejectedValueOnce(new Error('metadata unavailable'));
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    const writesBeforeResume = test.persistSessionGoal.mock.calls.length;
+    test.metadata.openchamber.goal = { ...test.metadata.openchamber.goal, status: 'active', statusReason: 'resumed', turnsUsed: 0 };
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/project', test.metadata);
+    await vi.advanceTimersByTimeAsync(15_000);
+    const laterWrites = test.persistSessionGoal.mock.calls.slice(writesBeforeResume);
+    expect(laterWrites.some((call) => 'update' in call[2])).toBe(false);
+    expect(test.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+    expect(test.metadata.openchamber.goal).toMatchObject({ status: 'active', turnsUsed: 1 });
+  });
+
+  it('does not lock a replacement goal behind an old continuation rollback', async () => {
+    const gate = Promise.withResolvers();
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => gate.promise);
+    const test = setup(vi.fn(async () => {}), { messageRead });
+    await test.start();
+    test.metadata.openchamber.goal = activeGoal({ id: 'replacement' });
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/project', test.metadata);
+    test.persistSessionGoal.mockRejectedValueOnce(new Error('metadata unavailable'));
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(1);
+    expect(test.metadata.openchamber.goal.id).toBe('replacement');
+  });
+
+  it('does not lock a reset resume behind an old continuation rollback', async () => {
+    const gate = Promise.withResolvers();
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => gate.promise);
+    const test = setup(vi.fn(async () => {}), { messageRead });
+    await test.start();
+    test.metadata.openchamber.goal = activeGoal({ statusReason: 'resumed' });
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/project', test.metadata);
+    test.persistSessionGoal.mockRejectedValueOnce(new Error('metadata unavailable'));
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a continuation charged after a failed final message read without a stop', async () => {
+    const messageRead = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('unavailable'));
+    const test = setup(vi.fn(async () => {}), { messageRead });
+    await test.start();
+    expect(test.metadata.openchamber.goal).toMatchObject({ status: 'active', turnsUsed: 1 });
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(1);
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('logs the abort pause only when the guarded write lands', async () => {
+    const test = setup(vi.fn(async () => {}), {
+      messages: [assistantRecord({ finish: undefined, error: { type: 'aborted', message: 'Step interrupted' } })],
+    });
+    test.persistSessionGoal.mockResolvedValueOnce(false);
+    await test.start();
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(1);
+    expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('paused after user abort'));
   });
 
   it('rechecks active status at the settlement write', async () => {
@@ -432,8 +730,6 @@ describe('session goal session-read recovery', () => {
     expect(test.persistSessionGoal).not.toHaveBeenCalled();
   });
 
-  // An abort is not here: the in-flight tick keeps its read so it can reach
-  // its own abort check and pause the goal (see the abort test above).
   for (const event of ['busy', 'pause', 'stop']) {
     it(`cancels recovery on ${event} during an in-flight read`, async () => {
       const gate = Promise.withResolvers();
@@ -458,6 +754,38 @@ describe('session goal session-read recovery', () => {
 });
 
 describe('session goal tick on v2 messages', () => {
+  it('blocks a goal after a non-abort assistant error', async () => {
+    quiet();
+    const { calls } = v2OpenCode({
+      messages: [assistantRecord({ finish: 'error', error: { type: 'unknown', message: 'Provider failed' } })],
+    });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const { runtime } = makeRuntime(seam);
+
+    await runTick(runtime);
+
+    expect(seam.persistSessionGoal.mock.calls.at(-1)?.[2]).toMatchObject({ status: 'blocked', statusReason: 'unknown' });
+    expect(calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('continues a resumed goal after an interrupted v2 turn', async () => {
+    quiet();
+    const { calls } = v2OpenCode({
+      messages: [
+        { id: 'msg_u1', sessionID: SESSION_ID, type: 'user', text: 'Finish the task', time: { created: 1 } },
+        assistantRecord({ finish: 'error', error: { type: 'aborted', message: 'Step interrupted' } }),
+      ],
+    });
+    const goal = activeGoal({ statusReason: 'resumed' });
+    const seam = wired({ openchamber: { goal } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }) }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+
+    await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal } });
+    await vi.waitFor(() => expect(calls.some((call) => call.method === 'POST' && call.path.endsWith('/prompt'))).toBe(true));
+    expect(seam.persistSessionGoal.mock.calls.some((call) => call[2].status === 'blocked')).toBe(false);
+  });
+
   it('reads the flat v2 assistant record, audits it, and continues on the same model and agent', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const { calls } = v2OpenCode({
