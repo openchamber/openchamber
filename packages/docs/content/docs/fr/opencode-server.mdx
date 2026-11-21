@@ -32,6 +32,41 @@ Si vous voulez seulement changer le port, définissez `OPENCODE_PORT` au lieu de
 
 Si `OPENCODE_HOST` n’a pas de port ou contient un chemin, OpenChamber l’ignore et revient au démarrage de son propre serveur. Surveillez les logs de démarrage pour un avertissement `[config]` si une connexion attendue ne se fait pas.
 
+## Partager un serveur avec VS Code
+
+L’application de bureau et l’extension VS Code démarrent normalement chacune leur propre serveur OpenCode. Sous Windows, certains plugins, dont `opencode-mem`, ne peuvent pas ouvrir la même base de données dans deux processus. Connectez les deux applications à un seul serveur pour éviter ce conflit.
+
+Le serveur partagé nécessite OpenCode 2.2.4 ou une version plus récente. Avec une version plus ancienne, les deux applications s’arrêtent sur l’écran « mettre à jour OpenCode ».
+
+1. Quittez OpenChamber Desktop et VS Code pour que leurs serveurs gérés s’arrêtent. Arrêtez aussi tout autre serveur OpenCode qui utilise les mêmes données de plugins, par exemple un serveur lancé dans un terminal. La TUI d’OpenCode lance aussi un serveur en arrière-plan qui continue de tourner après sa fermeture. Vérifiez-le avec `opencode service status` et arrêtez-le avec `opencode service stop`.
+2. Démarrez un serveur OpenCode et laissez-le tourner :
+
+   ```bash
+   opencode serve --port 4096
+   ```
+
+   OpenCode affiche l’adresse sur laquelle il écoute dans une ligne `server listening on`. Utilisez cette adresse partout où les étapes suivantes indiquent `http://localhost:4096`.
+
+   Si ni `OPENCODE_PASSWORD` ni `OPENCODE_SERVER_PASSWORD` n’est défini, OpenCode affiche aussi un `server password` généré. Si l’un des deux est défini, il n’affiche aucun mot de passe et le serveur utilise celui que vous avez défini. Gardez le mot de passe privé et utilisez-le dans les étapes suivantes.
+
+3. Lancez OpenChamber Desktop avec `OPENCODE_HOST=http://localhost:4096`, `OPENCODE_SKIP_START=true` et `OPENCODE_PASSWORD` contenant le mot de passe du serveur. Sous Windows, lancez-le depuis une fenêtre PowerShell :
+
+   ```powershell
+   $env:OPENCODE_HOST = 'http://localhost:4096'
+   $env:OPENCODE_SKIP_START = 'true'
+   $password = Read-Host 'OpenCode server password' -AsSecureString
+   $env:OPENCODE_PASSWORD = [System.Net.NetworkCredential]::new('', $password).Password
+   & "$env:LOCALAPPDATA\Programs\@openchamberelectron\OpenChamber.exe"
+   ```
+
+   Si vous avez installé Desktop ailleurs, utilisez le chemin de votre `OpenChamber.exe`.
+
+4. Lancez VS Code depuis la même fenêtre PowerShell avec `code`. Dans les paramètres de VS Code, définissez `openchamber.apiUrl` sur `http://localhost:4096`, puis exécutez **Developer: Reload Window**.
+
+Les deux applications utilisent maintenant le serveur à cette adresse. Laissez-le tourner tant que vous utilisez l’une d’elles. Lancez les deux applications depuis PowerShell comme aux étapes 3 et 4 à chaque fois : ouvert depuis le menu Démarrer, Desktop relance son propre serveur et VS Code n’a pas le mot de passe du serveur partagé. Si vous redémarrez le serveur sans mot de passe défini, il en affiche un nouveau ; utilisez celui-là. L’ancien nom `OPENCODE_SERVER_PASSWORD` fonctionne aussi quand `OPENCODE_PASSWORD` n’est pas défini. N’exposez pas le serveur sur un réseau non fiable. Cette configuration ne fonctionne pas avec le serveur que Desktop gère automatiquement, car son port et son mot de passe changent.
+
+Un serveur externe ne reçoit pas les plugins gérés par OpenChamber. Si l’une des applications ne se connecte pas, consultez [Connexion à OpenCode](/fr/troubleshooting/opencode-connection/).
+
 ## Gérer le serveur depuis la CLI
 
 ```bash
@@ -88,9 +123,9 @@ Arrêter le tunnel ne redémarre ni le service ni l’application.
 
 ## « OpenCode redémarre »
 
-Pendant que le serveur démarre ou redémarre, OpenChamber affiche l’état « OpenCode redémarre » et met les requêtes en pause jusqu’à ce qu’il soit prêt. C’est normal juste après un lancement ou un redémarrage. Si l’état ne disparaît jamais, consultez [Connexion à OpenCode](/troubleshooting/opencode-connection/).
+Pendant que le serveur démarre ou redémarre, OpenChamber affiche l’état « OpenCode redémarre » et met les requêtes en pause jusqu’à ce qu’il soit prêt. C’est normal juste après un lancement ou un redémarrage. Si l’état ne disparaît jamais, consultez [Connexion à OpenCode](/fr/troubleshooting/opencode-connection/).
 
 ## Pages liées
 
-- [Fournisseurs, modèles et agents](/providers/) — configurer ce avec quoi le serveur communique
-- [Connexion à OpenCode](/troubleshooting/opencode-connection/) — si la connexion ne se fait pas
+- [Fournisseurs, modèles et agents](/fr/providers/) — configurer ce avec quoi le serveur communique
+- [Connexion à OpenCode](/fr/troubleshooting/opencode-connection/) — si la connexion ne se fait pas

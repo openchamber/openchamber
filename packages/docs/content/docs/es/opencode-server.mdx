@@ -32,6 +32,41 @@ Si solo necesitas cambiar el puerto, define `OPENCODE_PORT` en lugar de `OPENCOD
 
 Si a `OPENCODE_HOST` le falta el puerto o tiene una ruta, OpenChamber lo ignora y recurre a iniciar su propio servidor. Observa los registros de arranque por si aparece una advertencia `[config]` cuando una conexión que esperabas no ocurrió.
 
+## Comparte un servidor con VS Code
+
+La app de escritorio y la extensión de VS Code normalmente inician servidores de OpenCode separados. En Windows, algunos plugins, como `opencode-mem`, no pueden abrir la misma base de datos en dos procesos. Conecta las dos apps a un solo servidor para evitar ese conflicto.
+
+El servidor compartido necesita OpenCode 2.2.4 o posterior. Con una versión más antigua, las dos apps se quedan en la pantalla de "actualizar OpenCode".
+
+1. Cierra OpenChamber Desktop y VS Code para que se detengan sus servidores gestionados. Detén también cualquier otro servidor de OpenCode que use los mismos datos de plugins, como uno que se ejecute en una terminal. La TUI de OpenCode también inicia un servidor en segundo plano que sigue en marcha después de cerrarla. Compruébalo con `opencode service status` y detenlo con `opencode service stop`.
+2. Inicia un servidor de OpenCode y déjalo en marcha:
+
+   ```bash
+   opencode serve --port 4096
+   ```
+
+   OpenCode imprime la dirección en la que escucha en una línea `server listening on`. Usa esa dirección donde los pasos siguientes digan `http://localhost:4096`.
+
+   Si no está definida ni `OPENCODE_PASSWORD` ni `OPENCODE_SERVER_PASSWORD`, OpenCode también imprime un `server password` generado. Si una de ellas está definida, no imprime ninguna contraseña y el servidor usa la que definiste. Mantén la contraseña en privado y úsala en los pasos siguientes.
+
+3. Inicia OpenChamber Desktop con `OPENCODE_HOST=http://localhost:4096`, `OPENCODE_SKIP_START=true` y `OPENCODE_PASSWORD` con la contraseña del servidor. En Windows, ábrelo desde una ventana de PowerShell:
+
+   ```powershell
+   $env:OPENCODE_HOST = 'http://localhost:4096'
+   $env:OPENCODE_SKIP_START = 'true'
+   $password = Read-Host 'OpenCode server password' -AsSecureString
+   $env:OPENCODE_PASSWORD = [System.Net.NetworkCredential]::new('', $password).Password
+   & "$env:LOCALAPPDATA\Programs\@openchamberelectron\OpenChamber.exe"
+   ```
+
+   Si instalaste Desktop en otro lugar, usa la ruta a tu `OpenChamber.exe`.
+
+4. Inicia VS Code desde la misma ventana de PowerShell con `code`. En la configuración de VS Code, define `openchamber.apiUrl` como `http://localhost:4096` y luego ejecuta **Developer: Reload Window**.
+
+Ahora las dos apps usan el servidor de esa dirección. Mantenlo en marcha mientras uses cualquiera de ellas. Inicia las dos apps desde PowerShell como en los pasos 3 y 4 cada vez: si las abres desde el menú Inicio, Desktop vuelve a iniciar su propio servidor y VS Code no tiene la contraseña del servidor compartido. Si reinicias el servidor sin una contraseña definida, imprime una nueva; usa esa. El nombre antiguo `OPENCODE_SERVER_PASSWORD` también funciona cuando `OPENCODE_PASSWORD` no está definida. No expongas el servidor a una red que no sea de confianza. Esto no funciona con el servidor que Desktop gestiona automáticamente, porque su puerto y su contraseña cambian.
+
+Un servidor externo no recibe los plugins gestionados de OpenChamber. Si alguna de las apps no se conecta, consulta [Conexión de OpenCode](/es/troubleshooting/opencode-connection/).
+
 ## Gestiona el servidor desde la CLI
 
 ```bash

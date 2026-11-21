@@ -32,6 +32,41 @@ Yalnızca bağlantı noktasını değiştirmek istiyorsanız `OPENCODE_PORT` ö�
 
 `OPENCODE_HOST` bağlantı noktasını içermiyorsa veya bir yol içeriyorsa OpenChamber bunu yok sayar ve kendi sunucusunu başlatmaya döner. Beklediğiniz bağlantı kurulmadıysa başlangıç günlüklerindeki `[config]` uyarısına bakın.
 
+## Tek bir sunucuyu VS Code ile paylaşın
+
+Masaüstü uygulaması ve VS Code eklentisi normalde ayrı OpenCode sunucuları başlatır. Windows'ta `opencode-mem` dahil bazı eklentiler aynı veritabanını iki süreçte açamaz. Bu çakışmayı önlemek için iki uygulamayı da tek bir sunucuya bağlayın.
+
+Paylaşılan sunucu için OpenCode 2.2.4 veya daha yenisi gerekir. Daha eski bir sürümle iki uygulama da "OpenCode'u güncelle" ekranında kalır.
+
+1. Yönettikleri sunucuların durması için OpenChamber Desktop'ı ve VS Code'u kapatın. Terminalde çalışan bir sunucu gibi aynı eklenti verilerini kullanan başka OpenCode sunucularını da durdurun. OpenCode TUI da kapattıktan sonra çalışmaya devam eden bir arka plan sunucusu başlatır. Bunu `opencode service status` ile kontrol edin ve `opencode service stop` ile durdurun.
+2. Bir OpenCode sunucusu başlatın ve çalışır durumda bırakın:
+
+   ```bash
+   opencode serve --port 4096
+   ```
+
+   OpenCode dinlediği adresi bir `server listening on` satırında yazdırır. Aşağıdaki adımlarda `http://localhost:4096` yazan her yerde bu adresi kullanın.
+
+   Ne `OPENCODE_PASSWORD` ne de `OPENCODE_SERVER_PASSWORD` ayarlıysa OpenCode ayrıca oluşturduğu bir `server password` yazdırır. Bunlardan biri ayarlıysa parola yazdırmaz ve sunucu sizin ayarladığınız parolayı kullanır. Parolayı gizli tutun ve sonraki adımlarda kullanın.
+
+3. OpenChamber Desktop'ı `OPENCODE_HOST=http://localhost:4096`, `OPENCODE_SKIP_START=true` ve sunucu parolasını içeren `OPENCODE_PASSWORD` ile başlatın. Windows'ta bir PowerShell penceresinden başlatın:
+
+   ```powershell
+   $env:OPENCODE_HOST = 'http://localhost:4096'
+   $env:OPENCODE_SKIP_START = 'true'
+   $password = Read-Host 'OpenCode server password' -AsSecureString
+   $env:OPENCODE_PASSWORD = [System.Net.NetworkCredential]::new('', $password).Password
+   & "$env:LOCALAPPDATA\Programs\@openchamberelectron\OpenChamber.exe"
+   ```
+
+   Desktop'ı başka bir yere kurduysanız kendi `OpenChamber.exe` dosyanızın yolunu kullanın.
+
+4. VS Code'u aynı PowerShell penceresinden `code` ile başlatın. VS Code ayarlarında `openchamber.apiUrl` değerini `http://localhost:4096` yapın, ardından **Developer: Reload Window** komutunu çalıştırın.
+
+İki uygulama da artık o adresteki sunucuyu kullanıyor. Uygulamalardan birini kullandığınız sürece sunucuyu çalışır durumda tutun. İki uygulamayı da her seferinde 3. ve 4. adımlardaki gibi PowerShell'den başlatın: Başlat menüsünden açılırsa Desktop yine kendi sunucusunu başlatır ve VS Code'un paylaşılan sunucunun parolası olmaz. Sunucuyu parola ayarlamadan yeniden başlatırsanız yeni bir parola yazdırır; onu kullanın. `OPENCODE_PASSWORD` ayarlı değilse eski ad `OPENCODE_SERVER_PASSWORD` de çalışır. Sunucuyu güvenilmeyen bir ağa açmayın. Bağlantı noktası ve parolası değiştiği için bu yöntem Desktop'ın otomatik yönettiği sunucuyla çalışmaz.
+
+Harici bir sunucu OpenChamber'ın yönettiği eklentileri almaz. Uygulamalardan biri bağlanamazsa [OpenCode bağlantısı](/tr/troubleshooting/opencode-connection/) sayfasına bakın.
+
 ## Sunucuyu CLI ile yönetin
 
 ```bash
@@ -88,9 +123,9 @@ Tüneli durdurmak hizmeti veya uygulamayı yeniden başlatmaz.
 
 ## "OpenCode yeniden başlatılıyor"
 
-Sunucu başlarken veya yeniden başlarken OpenChamber "OpenCode yeniden başlatılıyor" durumunu gösterir ve hazır olana kadar istekleri duraklatır. Bu, uygulama açıldıktan veya yeniden başlatıldıktan hemen sonra normaldir. Durum hiç kaybolmazsa [OpenCode bağlantısı](/troubleshooting/opencode-connection/) sayfasına bakın.
+Sunucu başlarken veya yeniden başlarken OpenChamber "OpenCode yeniden başlatılıyor" durumunu gösterir ve hazır olana kadar istekleri duraklatır. Bu, uygulama açıldıktan veya yeniden başlatıldıktan hemen sonra normaldir. Durum hiç kaybolmazsa [OpenCode bağlantısı](/tr/troubleshooting/opencode-connection/) sayfasına bakın.
 
 ## İlgili sayfalar
 
-- [Sağlayıcılar, modeller ve agentlar](/providers/), sunucunun konuşacağı hizmetleri ayarlayın
-- [OpenCode bağlantısı](/troubleshooting/opencode-connection/), bağlanmıyorsa
+- [Sağlayıcılar, modeller ve agentlar](/tr/providers/), sunucunun konuşacağı hizmetleri ayarlayın
+- [OpenCode bağlantısı](/tr/troubleshooting/opencode-connection/), bağlanmıyorsa
