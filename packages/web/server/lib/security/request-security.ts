@@ -21,7 +21,7 @@ export interface PublicOriginSettings {
   publicOrigin?: string;
 }
 
-export type RequestOriginChecker = (req: SecurityRequest) => boolean | Promise<boolean>;
+export type RequestOriginChecker = (req: SecurityRequest) => Promise<boolean>;
 
 const isString = (value: unknown): value is string => typeof value === 'string';
 
@@ -160,7 +160,7 @@ export const createRequestSecurityRuntime = (deps: RequestSecurityDependencies) 
     return { origins, hosts };
   };
 
-  const isRequestOriginAllowed = (req: SecurityRequest) => {
+  const isRequestOriginAllowed = async (req: SecurityRequest): Promise<boolean> => {
     const originHeader = isString(req.headers.origin) ? req.headers.origin.trim() : '';
     if (!originHeader) {
       return false;
@@ -187,9 +187,8 @@ export const createRequestSecurityRuntime = (deps: RequestSecurityDependencies) 
     const host = forwardedHost || firstHeaderValue(hostHeader, 'trim').trim().toLowerCase();
     if (host && host === origin.host.toLowerCase()) return true;
 
-    return getRequestOriginCandidates(req).then((candidates) => (
-      candidates.origins.has(origin.origin) || candidates.hosts.has(origin.host.toLowerCase())
-    ));
+    const candidates = await getRequestOriginCandidates(req);
+    return candidates.origins.has(origin.origin) || candidates.hosts.has(origin.host.toLowerCase());
   };
 
   return {

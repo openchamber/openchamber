@@ -15,6 +15,7 @@ import { noTimersRule } from "./rules/no-timers.ts";
 import { noValueofTypeEscapeRule } from "./rules/no-valueof-type-escape.ts";
 import { noVirtualizerReturnFromHooksRule } from "./rules/no-virtualizer-return-from-hooks.ts";
 import { noWireClientImportsRule } from "./rules/no-wire-client-imports.ts";
+import { originCheckAwaitedRule } from "./rules/origin-check-awaited.ts";
 import { serverJsSpecifiersRule } from "./rules/server-js-specifiers.ts";
 
 /**
@@ -40,6 +41,7 @@ const openchamberPlugin = eslintCompatPlugin({
     "no-valueof-type-escape": noValueofTypeEscapeRule,
     "no-virtualizer-return-from-hooks": noVirtualizerReturnFromHooksRule,
     "no-wire-client-imports": noWireClientImportsRule,
+    "origin-check-awaited": originCheckAwaitedRule,
     "server-js-specifiers": serverJsSpecifiersRule,
   },
 });
