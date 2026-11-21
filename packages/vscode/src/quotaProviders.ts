@@ -1076,7 +1076,7 @@ const resolveGeminiCliAuth = (auth: AuthFile): GoogleAuthSource | null => {
   const accessToken = asNonEmptyString(oauthObject.access) ?? asNonEmptyString(oauthObject.token);
   const refreshParts = parseGoogleRefreshToken(oauthObject.refresh);
 
-  if (!accessToken && !refreshParts.refreshToken) {
+  if ((oauthObject.methodID !== undefined && !['oauth', 'gemini-cli'].includes(String(oauthObject.methodID))) || (!accessToken && !refreshParts.refreshToken)) {
     return null;
   }
 
