@@ -6,6 +6,7 @@ import { BrowserPane } from '@/components/browser/BrowserPane';
 import { ChatView } from '@/components/views/ChatView';
 import { Icon } from '@/components/icon/Icon';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useGuestTabsInScope } from '@/hooks/useGuestSurfaces';
 import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
@@ -209,7 +210,7 @@ export const ContextSurfacePanes: React.FC = () => {
     () => (effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : ''),
     [effectiveDirectory],
   );
-  const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
+  const panelState = useGuestTabsInScope(useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined)));
   const draftSpace = useDraftSpaceTarget();
   const spacePreparing = draftSpace?.kind === 'preparing';
   const draftSpaceDirectory = draftSpace?.kind === 'ready' ? draftSpace.directory : null;

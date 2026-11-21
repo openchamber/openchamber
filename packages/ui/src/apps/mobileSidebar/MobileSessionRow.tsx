@@ -145,7 +145,7 @@ export const MobileSessionRow: React.FC<{
     selectMobileSession(session, row.projectId, actions.close);
   };
   const stopRename = () => useMobileSidebarRowsStore.getState().stopRename();
-  const guestActions = guestSessionActions(useGuestActions());
+  const guestActions = guestSessionActions(useGuestActions([directory, projectRoot]));
   const loadRecords = useSessionMessageRecordsForExport();
   const runGuestAction = (entry: GuestActionEntry) => {
     void runGuestSessionAction({

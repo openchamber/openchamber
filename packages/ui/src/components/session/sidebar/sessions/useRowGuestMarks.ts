@@ -5,6 +5,7 @@ import {
   mergeRowGuestMarks,
   type RowGuestMark,
 } from '@/lib/guests/marks';
+import { keepGuestItemsInScope, toGuestScopePaths } from '@/lib/guests/folders';
 import { useGuestMarksStore } from '@/lib/guests/marks-store';
 import { normalizePath } from '@/lib/pathNormalization';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
@@ -16,6 +17,8 @@ type RowGuestMarkKeys = {
   branch: string | null;
   folder: string | null;
   containerFolder: string | null;
+  scopeDirectory: string | null;
+  scopeProject: string | null;
 };
 
 type SessionRowMarkPlace = {
@@ -49,12 +52,15 @@ export const useSessionRowGuestMarks = (place: SessionRowMarkPlace): readonly Ro
     branch,
     folder: off ? null : directory,
     containerFolder: container,
+    scopeDirectory: directory,
+    scopeProject: place.projectRoot,
   });
 };
 
-export const useWorkRowGuestMarks = ({ space, projectId, directory, branch }: {
+export const useWorkRowGuestMarks = ({ space, projectId, projectPath, directory, branch }: {
   space: boolean;
   projectId: string | null;
+  projectPath: string | null;
   directory: string | null;
   branch: string | null;
 }): readonly RowGuestMark[] => {
@@ -65,18 +71,22 @@ export const useWorkRowGuestMarks = ({ space, projectId, directory, branch }: {
     branch: space ? null : liveBranch || branch,
     folder: space ? null : directory,
     containerFolder: null,
+    scopeDirectory: directory,
+    scopeProject: projectPath,
   });
 };
 
-const useRowGuestMarks = ({ sessionId, projectId, branch, folder, containerFolder }: RowGuestMarkKeys): readonly RowGuestMark[] => {
+const useRowGuestMarks = ({ sessionId, projectId, branch, folder, containerFolder, scopeDirectory, scopeProject }: RowGuestMarkKeys): readonly RowGuestMark[] => {
   const ofSession = useGuestMarksStore((state) => (sessionId ? state.bySession.get(sessionId) : undefined) ?? NO_ROW_GUEST_MARKS);
   const branchKey = projectId && branch ? guestBranchMarkKey(projectId, branch) : null;
   const ofBranch = useGuestMarksStore((state) => (branchKey ? state.byBranch.get(branchKey) : undefined) ?? NO_ROW_GUEST_MARKS);
   const ofFolder = useGuestMarksStore((state) => (folder ? state.byFolder.get(folder) : undefined) ?? NO_ROW_GUEST_MARKS);
   const container = containerFolder && containerFolder !== folder ? containerFolder : null;
   const ofContainer = useGuestMarksStore((state) => (container ? state.byFolder.get(container) : undefined) ?? NO_ROW_GUEST_MARKS);
+  const guests = useGuestMarksStore((state) => state.guests);
+  const scope = React.useMemo(() => toGuestScopePaths([scopeDirectory, scopeProject]), [scopeDirectory, scopeProject]);
   return React.useMemo(
-    () => mergeRowGuestMarks([ofSession, ofBranch, ofFolder, ofContainer]),
-    [ofSession, ofBranch, ofFolder, ofContainer],
+    () => keepGuestItemsInScope(mergeRowGuestMarks([ofSession, ofBranch, ofFolder, ofContainer]), guests, scope),
+    [ofSession, ofBranch, ofFolder, ofContainer, guests, scope],
   );
 };

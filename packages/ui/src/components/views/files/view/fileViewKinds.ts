@@ -1,5 +1,4 @@
-import { findGuestFileEditor } from '@/lib/guests/file-editors';
-import { useGuestsStore } from '@/lib/guests/store';
+import { findOpenGuestFileEditor } from '@/lib/guests/file-editors';
 
 export const isMarkdownFile = (path: string): boolean => {
   if (!path) return false;
@@ -10,7 +9,7 @@ export const isMarkdownFile = (path: string): boolean => {
 };
 
 export const opensInFileCanvas = (path: string | null | undefined): boolean => Boolean(
-  path && findGuestFileEditor(useGuestsStore.getState().guests, path),
+  path && findOpenGuestFileEditor(path),
 );
 
 export const isJsonFile = (path: string): boolean => {

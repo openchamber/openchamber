@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { isGuestActive } from './capabilities';
+import { isGuestInFolders } from './folders';
 import type { InstalledGuest } from './types';
 
 export type GuestMention = MentionsItem & { guestId: string; label: string };
@@ -18,7 +19,9 @@ const searchAnswerSchema = z.object({
 
 const resolveAnswerSchema = z.object({ text: z.string().min(1) });
 
-export const guestsOfferMentions = (guests: InstalledGuest[]): boolean => guests.some((guest) => guest.mentions && isGuestActive(guest));
+export const guestsOfferMentions = (guests: readonly InstalledGuest[], paths: readonly string[]): boolean => (
+  guests.some((guest) => guest.mentions && isGuestActive(guest) && isGuestInFolders(guest, paths))
+);
 
 export const searchGuestMentions = async (query: string, directory: string | null, signal: AbortSignal): Promise<GuestMention[]> => {
   const response = await runtimeFetch('/api/guests/mentions/search', {

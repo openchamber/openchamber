@@ -30,7 +30,7 @@ import { WorkflowsPanel } from '@/components/chat/workflows/WorkflowsPanel';
 import { SubagentsPanel } from '@/components/chat/subagents/SubagentsPanel';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRepositoryReferenceProvider } from '@/components/references/referenceSources';
-import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
+import { useGuestSurfaces, useGuestTabsInScope } from '@/hooks/useGuestSurfaces';
 import { cn, getRevealLabelKey } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
@@ -388,7 +388,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   );
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
 
-  const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
+  const panelState = useGuestTabsInScope(useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined)));
   const placement = useUIStore((state) => state.contextSurfaceZones);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const closeContextZone = useUIStore((state) => state.closeContextZone);

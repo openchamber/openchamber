@@ -39,5 +39,6 @@ export type GuestRecord = GuestPackage & {
   revision?: number;
   storageId?: unknown;
   enterpriseBlocked?: GuestCapability[];
+  folders?: string[] | undefined;
   update?: { version: string };
 };
