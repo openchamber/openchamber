@@ -2595,7 +2595,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.messageTransport.sse.description': 'שימוש ב-Server-Sent Events להזרמת הודעות.',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.label': 'מקופל',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.description': 'הפעילות מקופלת כברירת מחדל.',
-  'settings.openchamber.visual.option.activityRenderMode.text.label': 'עם טקסט',
+  'settings.openchamber.visual.option.activityRenderMode.text.label': 'הצגת הערות',
   'settings.openchamber.visual.option.activityRenderMode.summary.label': 'מורחב',
   'settings.openchamber.visual.option.activityRenderMode.summary.description': 'הפעילות מורחבת כברירת מחדל.',
   'settings.openchamber.visual.option.timeFormat.auto.label': 'אוטומטי',

@@ -2524,7 +2524,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.messageTransport.sse.description': 'Verwendet Server-Sent Events für das Streamen von Nachrichten.',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.label': 'Einklappen',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.description': 'Aktivität standardmäßig einklappen.',
-  'settings.openchamber.visual.option.activityRenderMode.text.label': 'Mit Text',
+  'settings.openchamber.visual.option.activityRenderMode.text.label': 'Notizen zeigen',
   'settings.openchamber.visual.option.activityRenderMode.summary.label': 'Erweitert',
   'settings.openchamber.visual.option.activityRenderMode.summary.description': 'Aktivität standardmäßig erweitern.',
   'settings.openchamber.visual.option.timeFormat.auto.label': 'Auto',

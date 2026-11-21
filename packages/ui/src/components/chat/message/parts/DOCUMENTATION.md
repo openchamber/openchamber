@@ -549,9 +549,9 @@ was removed; a stored `chatRenderMode: 'sorted'` reads as Collapsed Activity
 timeline without a turn disclosure. Collapsed adds one Activity header after
 completion or interruption while preserving the original rows, their order, and
 their individual controls. It adds no tool subgroups, side line, height cap, or
-inner scroller. Subagent calls alone do not make a turn collapsible. With text
+inner scroller. Subagent calls alone do not make a turn collapsible. Show notes
 is Collapsed with the agent's text kept in view (turn projection,
-*Why With text hoists the text and not folds the tools in groups*).
+*Why Show notes hoists the text and not folds the tools in groups*).
 
 The active turn has its Activity header from the first step. Folded, it shows
 only the latest 7 rows (a text, a reasoning block or a tool call each;

@@ -2611,7 +2611,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.messageTransport.sse.description': 'Server-Sent Events gebruiken voor het streamen van berichten.',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.label': 'Samengevouwen',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.description': 'Houd Activiteit standaard samengevouwen.',
-  'settings.openchamber.visual.option.activityRenderMode.text.label': 'Met tekst',
+  'settings.openchamber.visual.option.activityRenderMode.text.label': 'Notities tonen',
   'settings.openchamber.visual.option.activityRenderMode.summary.label': 'Uitgevouwen',
   'settings.openchamber.visual.option.activityRenderMode.summary.description': 'Vouw Activiteit standaard uit.',
   'settings.openchamber.visual.option.timeFormat.auto.label': 'Auto',

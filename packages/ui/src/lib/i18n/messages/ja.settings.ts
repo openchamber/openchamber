@@ -2614,7 +2614,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.messageTransport.sse.description': 'メッセージストリーミングに SSE を使用。',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.label': '折りたたみ',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.description': 'アクティビティをデフォルトで折りたたみ。',
-  'settings.openchamber.visual.option.activityRenderMode.text.label': 'テキスト付き',
+  'settings.openchamber.visual.option.activityRenderMode.text.label': 'メモを表示',
   'settings.openchamber.visual.option.activityRenderMode.summary.label': '展開',
   'settings.openchamber.visual.option.activityRenderMode.summary.description': 'アクティビティをデフォルトで展開。',
   'settings.openchamber.visual.option.timeFormat.auto.label': '自動',

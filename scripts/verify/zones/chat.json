@@ -1386,9 +1386,9 @@
       "id": "activity",
       "name": "Collapsed activity",
       "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/components/LiveTurnActivity.tsx", "packages/ui/src/components/chat/components/LiveActivityCollapse.tsx", "packages/ui/src/components/chat/components/useTurnFold.ts", "packages/ui/src/components/chat/lib/turns/timelineRows.ts", "packages/ui/src/components/sections/openchamber/ChatSettings.tsx"],
-      "what": "In Collapsed activity mode a finished turn hides its steps under an Activity header that opens and closes them; an opened turn stays open when the reader comes back to the session, and a search hit inside a closed turn opens it. With text hides only the tool rows: what the agent wrote between its steps stays in view, while it works and after.",
-      "reach": "Settings > Chat > Activity: Collapsed or With text, then open a session where the agent read, searched, edited and ran a command; Cmd/Ctrl+F searches the open chat.",
-      "proof": "The tool rows are hidden until Activity is clicked and hidden again on the second click; after visiting four other sessions Activity is still open; searching a step's text opens Activity and shows the step. In With text the agent's earlier lines show under a closed Activity and during a running turn, and the tool rows do not.",
+      "what": "In Collapsed activity mode a finished turn hides its steps under an Activity header that opens and closes them; an opened turn stays open when the reader comes back to the session, and a search hit inside a closed turn opens it. Show notes hides only the tool rows: what the agent wrote between its steps stays in view, while it works and after.",
+      "reach": "Settings > Chat > Activity: Collapsed or Show notes, then open a session where the agent read, searched, edited and ran a command; Cmd/Ctrl+F searches the open chat.",
+      "proof": "The tool rows are hidden until Activity is clicked and hidden again on the second click; after visiting four other sessions Activity is still open; searching a step's text opens Activity and shows the step. In Show notes the agent's earlier lines show under a closed Activity and during a running turn, and the tool rows do not.",
       "scenarios": [
         {
           "id": "toggle",
@@ -1416,13 +1416,13 @@
         {
           "id": "with-text",
           "kind": "path",
-          "title": "With text keeps what the agent wrote between its steps in view and the tool rows under Activity",
+          "title": "Show notes keeps what the agent wrote between its steps in view and the tool rows under Activity",
           "steps": [
             {"do": "open"},
             {"do": "click", "on": "sidebar.settings"},
             {"do": "click", "on": "dialog.button", "text": "Chat", "exact": true},
-            {"do": "click", "on": "settings.chip", "item": "chat.activity-default", "text": "With text"},
-            {"do": "see", "on": "settings.chipOn", "item": "chat.activity-default", "text": "With text"},
+            {"do": "click", "on": "settings.chip", "item": "chat.activity-default", "text": "Show notes"},
+            {"do": "see", "on": "settings.chipOn", "item": "chat.activity-default", "text": "Show notes"},
             {"do": "session.create", "as": "s", "title": "Chat activity with text"},
             {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
             {"do": "open", "session": "s"},
@@ -1438,13 +1438,13 @@
         {
           "id": "with-text-live",
           "kind": "path",
-          "title": "With text keeps the agent's earlier text in view while it is still working",
+          "title": "Show notes keeps the agent's earlier text in view while it is still working",
           "steps": [
             {"do": "open"},
             {"do": "click", "on": "sidebar.settings"},
             {"do": "click", "on": "dialog.button", "text": "Chat", "exact": true},
-            {"do": "click", "on": "settings.chip", "item": "chat.activity-default", "text": "With text"},
-            {"do": "see", "on": "settings.chipOn", "item": "chat.activity-default", "text": "With text"},
+            {"do": "click", "on": "settings.chip", "item": "chat.activity-default", "text": "Show notes"},
+            {"do": "see", "on": "settings.chipOn", "item": "chat.activity-default", "text": "Show notes"},
             {"do": "session.create", "as": "s", "title": "Chat activity with text live"},
             {"do": "open", "session": "s"},
             {"do": "session.send", "session": "s", "prompt": "List the files", "model": "perf/agent-20tools-wait3000ms-300cps", "wait": false},
@@ -1701,7 +1701,7 @@
       "id": "selection",
       "name": "Selecting text in an answer",
       "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/TextSelectionMenu.tsx", "packages/ui/src/components/chat/message/selectionMenuPosition.ts", "packages/ui/src/components/chat/message/parts/ShownToolCard.tsx"],
-      "what": "Selecting text in an answer opens a menu: Comment, By the way, Add to notes. So does text kept in view under Activity in With text mode.",
+      "what": "Selecting text in an answer opens a menu: Comment, By the way, Add to notes. So does text kept in view under Activity in Show notes mode.",
       "reach": "Drag across an answer's text.",
       "proof": "The menu shows over the selection.",
       "scenarios": [

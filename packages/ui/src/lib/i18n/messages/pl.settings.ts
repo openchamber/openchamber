@@ -1458,7 +1458,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.chatWidth.wider.label': 'Szersza',
   'settings.openchamber.visual.option.chatWidth.full.label': 'Pełna',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.description': 'Domyślnie utrzymuj aktywność zwiniętą.',
-  'settings.openchamber.visual.option.activityRenderMode.text.label': 'Z tekstem',
+  'settings.openchamber.visual.option.activityRenderMode.text.label': 'Pokaż notatki',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.label': 'Zwinięta',
   'settings.openchamber.visual.option.activityRenderMode.summary.description': 'Domyślnie rozwijaj aktywność.',
   'settings.openchamber.visual.option.activityRenderMode.summary.label': 'Rozwinięta',

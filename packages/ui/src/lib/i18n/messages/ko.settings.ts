@@ -2581,7 +2581,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.messageTransport.sse.description': '메시지 스트리밍에 Server-Sent Events를 사용합니다.',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.label': '접힘',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.description': 'Activity를 기본으로 접어 둡니다.',
-  'settings.openchamber.visual.option.activityRenderMode.text.label': '텍스트 포함',
+  'settings.openchamber.visual.option.activityRenderMode.text.label': '메모 표시',
   'settings.openchamber.visual.option.activityRenderMode.summary.label': '펼침',
   'settings.openchamber.visual.option.activityRenderMode.summary.description': 'Activity를 기본으로 펼칩니다.',
   'settings.openchamber.visual.option.timeFormat.auto.label': '자동',

@@ -322,7 +322,7 @@ describe('getShownPages', () => {
         expect(getShownPages([step, answer], answer)).toEqual([block]);
     });
 
-    test('With text keeps every visible text before the final answer in view', () => {
+    test('Show notes keeps every visible text before the final answer in view', () => {
         const note = text('Reading the helper first');
         const step = assistant('step', [note, text(' '), tool('read', 'read')], { finish: 'tool-calls' });
         const answer = assistant('answer', [text('Done')], { finish: 'stop' });

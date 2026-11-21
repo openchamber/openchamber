@@ -2638,7 +2638,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.messageTransport.sse.description': 'Use Server-Sent Events for message streaming.',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.label': 'Collapsed',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.description': 'Keep Activity collapsed by default.',
-  'settings.openchamber.visual.option.activityRenderMode.text.label': 'With text',
+  'settings.openchamber.visual.option.activityRenderMode.text.label': 'Show notes',
   'settings.openchamber.visual.option.activityRenderMode.summary.label': 'Expanded',
   'settings.openchamber.visual.option.activityRenderMode.summary.description': 'Expand Activity by default.',
   'settings.openchamber.visual.option.timeFormat.auto.label': 'Auto',

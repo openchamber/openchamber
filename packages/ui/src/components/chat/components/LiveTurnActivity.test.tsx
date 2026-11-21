@@ -231,7 +231,7 @@ describe('live Activity with the real message body', () => {
         restore();
     });
 
-    test('With text shows what the agent wrote between steps under a closed fold and returns it to its step when opened', async () => {
+    test('Show notes shows what the agent wrote between steps under a closed fold and returns it to its step when opened', async () => {
         const note: Part = { type: 'text', id: 'note', text: 'Reading the helper first', sessionID: 'session', messageID: 'progress', time: { start: 1, end: 2 } };
         const record = turn([
             assistant('progress', [note, readPart], 'tool-calls'),
@@ -255,7 +255,7 @@ describe('live Activity with the real message body', () => {
         expect(container.textContent?.split('Reading the helper first')).toHaveLength(2);
     });
 
-    test('With text keeps a stopped turn\'s later steps under the closed fold', async () => {
+    test('Show notes keeps a stopped turn\'s later steps under the closed fold', async () => {
         const note: Part = { type: 'text', id: 'note', text: 'Reading the helper first', sessionID: 'session', messageID: 'progress', time: { start: 1, end: 2 } };
         const record = turn([
             assistant('progress', [note], 'tool-calls'),

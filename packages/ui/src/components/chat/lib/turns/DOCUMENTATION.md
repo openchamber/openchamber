@@ -50,7 +50,7 @@ height estimates.
   text containing a UI block remain visible in chronological order; the final
   answer's text remains the answer. An `openui-lang literal` fence stays a code
   sample.
-- With text (`activityRenderMode: 'text'`) keeps every visible text before
+- Show notes (`activityRenderMode: 'text'`) keeps every visible text before
   the final answer in view the same way, in the order it was written: below the
   latest rows while the turn runs, between the Activity header and the answer
   once it settles, with the answer divider after it. Opening the fold returns
@@ -122,7 +122,7 @@ A top-level patch describes the whole call, so adding its counts to per-file
 numbers double-counts edits. Its counts belong to a single file only when the
 call touches one file; multi-file calls retain unknown per-file numbers.
 
-### Why With text hoists the text and not folds the tools in groups
+### Why Show notes hoists the text and not folds the tools in groups
 
 Readers opened Activity to look for what the agent wrote between its steps.
 Keeping that text in view reuses the path shown pages already take through a

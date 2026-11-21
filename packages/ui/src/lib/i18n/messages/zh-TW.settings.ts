@@ -2459,7 +2459,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.messageTransport.sse.description': '使用 Server-Sent Events 進行訊息串流傳輸。',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.label': '折疊',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.description': '預設折疊 Activity。',
-  'settings.openchamber.visual.option.activityRenderMode.text.label': '含文字',
+  'settings.openchamber.visual.option.activityRenderMode.text.label': '顯示備註',
   'settings.openchamber.visual.option.activityRenderMode.summary.label': '展開',
   'settings.openchamber.visual.option.activityRenderMode.summary.description': '預設展開 Activity。',
   'settings.openchamber.visual.option.timeFormat.auto.label': '自動',

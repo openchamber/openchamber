@@ -93,7 +93,7 @@ test('reasoning drawn as text when thinking blocks do not fold', () => {
     expect(open).toBeGreaterThan(400);
 });
 
-test('With text adds the kept lines to the answer row, or to the fold row of a turn without an answer', () => {
+test('Show notes adds the kept lines to the answer row, or to the fold row of a turn without an answer', () => {
     const line = 'A line the agent wrote between its steps.';
     const build = (messages: ChatMessageEntry[], keepActivityText: boolean): TimelineRow[] => {
         const turn = projectTurnRecords([

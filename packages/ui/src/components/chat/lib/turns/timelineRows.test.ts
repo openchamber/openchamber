@@ -121,7 +121,7 @@ describe('buildTimelineRows', () => {
         expect(opened.map((row) => row.key)).toEqual(['turn:user', 'fold:user', 'step:step', 'step:answer']);
     });
 
-    test('With text marks a closed fold\'s rows and leaves an opened fold as the steps ran', () => {
+    test('Show notes marks a closed fold\'s rows and leaves an opened fold as the steps ran', () => {
         const entry = turnEntry([
             assistant('step', [textPart('note', 'Reading first'), readPart], 'tool-calls'),
             assistant('answer', [textPart('final', 'Done')], 'stop'),
