@@ -49,6 +49,7 @@ import {
 } from '../share-pages/runtime.js';
 import { SECRET_REQUEST_CLOSED_IN_CHAT_NOTE } from '../openchamber-control/secret-request.js';
 import { secretRunCommand, secretRunCommandLine } from '../openchamber-control/secret-run.js';
+import { RENDER_PAGE_UI_DESCRIPTION } from './render-tool.js';
 import { SECRET_PARAMETER_PROPERTIES, SECRET_TOOL_DESCRIPTION } from './secret-tool.js';
 import { createCallbackAddress } from './callback-address.js';
 import { LEAD_COMPACTION_HOOK } from '../session-lead/agent-tool-plugin.js';
@@ -355,11 +356,6 @@ const RENDER_PAGE_LATER_DESCRIPTION = [
   "The VS Code extension shows such a page without answer controls, and inside an isolated space or a session another agent started with ownWork the call is refused; there, ask in text.",
   "Their answer reaches you later as a message in this session, with the page's title and what it asked, their summary and data: during your turn or as a new turn. Build the page as awaitAnswer's description says; a message the user writes meanwhile does not close it.",
   "What it asked is the page's static text, at most 2,000 characters, so write the question itself in the HTML, near the top, not with a script; the message says when it holds only part of the page.",
-].join(' ');
-
-const RENDER_PAGE_UI_DESCRIPTION = [
-  "Instead of html: one complete openui-lang program, the language of UI blocks, without the fence. Prefer it to html for a question: Choice and Input fields, drawn with the chat's own controls.",
-  "With awaitAnswer the call returns summary (the button and the values in words) and data: { button, value, values, note }: the pressed button's label and value, each field's value under its name, and the note the user added, if any.",
 ].join(' ');
 
 const RENDER_PARAMETER_PROPERTIES = {
