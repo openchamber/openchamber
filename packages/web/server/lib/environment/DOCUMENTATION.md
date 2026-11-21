@@ -68,9 +68,17 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
   then project variables. The lookup runs only when the store holds a
   project's variables or command, so the Git polling of a user who
   configured nothing, saved secrets aside, pays nothing. `forOpenCode()` answers `opencode service set env` variables under
-  the user variables. `applyToDirectory(dir, env)` is the overlay consumers
+  the user variables. `forClaudeQuota()` reads only `CLAUDE_CONFIG_DIR`, with
+  user over service over inherited precedence. It propagates Settings read
+  errors so quota cannot silently substitute the default account. The service
+  file stays best-effort, as it is for managed OpenCode. Enterprise mode reads
+  only the inherited value, without consulting either overlay source.
+  `applyToDirectory(dir, env)` is the overlay consumers
   call. `projectIdFor(dir)` answers the same project lookup alone, for the
   saved secrets.
+- `composition.ts`: `composeEnvironmentRuntime` creates the runtime and hands
+  it to Git and the Claude usage credential reader, which keep module-level
+  references.
 - `opencode-service-env.ts`: reads `env` from `service.json` in OpenCode's
   global config directory (the stable channel's file only). Not a published
   OpenCode contract; anything unexpected reads as no variables.
@@ -79,12 +87,16 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
   project save drops the command output the runtime kept only when it
   changes `variables` or `command`; removing a saved secret keeps it, since
   background spawns read that cache without running the command.
+  Saving or removing the user-level `CLAUDE_CONFIG_DIR` announces
+  `openchamber:quota-credentials-changed` without any environment values, only
+  when the effective home `forClaudeQuota()` resolves differs after the save.
 
 ## Who receives what
 
 | Process | Variables | Wired in |
 |---|---|---|
 | Managed OpenCode | service env, then user (none in enterprise mode) | `opencode/lifecycle.js` `getUserEnvironment` |
+| Claude usage credential reader | `CLAUDE_CONFIG_DIR` only: inherited, service, then user; inherited only in enterprise mode | `environment/composition.ts` `composeEnvironmentRuntime` |
 | Git commands in `git/service.js`, hooks included (push, pull and fetch run through `git/network-operations.js` with its own scrubbed environment and get none) | user, command output, project; minus the names simple-git refuses and the repository-location names | `git/service.js` `configureGitEnvironment` / `buildGitEnv(directory)` |
 | Terminal, project actions | user, command output, project | `terminal/runtime.js` `environmentRuntime` |
 | Worktree setup commands | same as Git | `git/service.js` `runWorktreeStartCommand` |

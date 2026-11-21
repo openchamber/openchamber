@@ -13,6 +13,7 @@ describe('environment routes', () => {
   let store;
   let runtime;
   let app;
+  let onClaudeConfigChanged;
 
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-environment-routes-'));
@@ -24,9 +25,12 @@ describe('environment routes', () => {
     };
     app = express();
     app.use(express.json());
+    onClaudeConfigChanged = vi.fn();
     registerEnvironmentRoutes(app, {
       store,
       runtime,
+      readClaudeConfigDir: () => store.userVariables().CLAUDE_CONFIG_DIR,
+      onClaudeConfigChanged,
       listProjects: async () => [{ id: 'path_project', path: '/repo' }],
     });
   });
@@ -48,6 +52,19 @@ describe('environment routes', () => {
   it('answers 400 for a malformed update', async () => {
     const response = await request(app).put('/api/environment').send({ variables: { 'BAD NAME': 'x' } });
     expect(response.status).toBe(400);
+    expect(onClaudeConfigChanged).not.toHaveBeenCalled();
+  });
+
+  it('announces a successfully saved or removed Claude home, without its value', async () => {
+    await request(app).put('/api/environment').send({ variables: { OTHER: 'value' } });
+    expect(onClaudeConfigChanged).not.toHaveBeenCalled();
+    await request(app).put('/api/environment').send({ variables: { CLAUDE_CONFIG_DIR: '/selected' } });
+    expect(onClaudeConfigChanged.mock.calls).toEqual([[]]);
+    // Saving the same home again leaves the effective selection as it was.
+    await request(app).put('/api/environment').send({ variables: { CLAUDE_CONFIG_DIR: '/selected' } });
+    expect(onClaudeConfigChanged.mock.calls).toEqual([[]]);
+    await request(app).put('/api/environment').send({ variables: { CLAUDE_CONFIG_DIR: null } });
+    expect(onClaudeConfigChanged.mock.calls).toEqual([[], []]);
   });
 
   it('answers 500 when the stored file is broken instead of an empty list', async () => {

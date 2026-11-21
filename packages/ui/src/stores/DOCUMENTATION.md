@@ -239,6 +239,20 @@ aborts pending requests and clears samples, even while an earlier credential
 refresh is pending. This invalidation bypasses catalog refresh coalescing so a
 previous account's answer cannot land in the new account's readout. Visible
 readouts request their replacement selection; a hidden tray waits until opened.
+Saving or removing `CLAUDE_CONFIG_DIR` in General Settings follows the same
+invalidation through `openchamber:quota-credentials-changed` on the control
+stream. Every connected client drops only the Claude sample and pending Claude
+read (`reconcileClaudeSelection`), including when the selected home cannot
+supply credentials; other providers keep their numbers and requests. A
+provider-list answer requested before the change no longer decides Claude, and
+with no readout visible the store forgets it loaded, so the next readout to open
+reads Claude again.
+Claude results carry a non-secret `selection` revision of the home they were
+read from. A failed refresh keeps the previous sample only while that revision
+matches, so a home changed during a control-stream gap, or edited in OpenCode's
+service file without any announcement, replaces the old account's numbers on
+the next read. A reconnect therefore rereads Claude when a readout is visible
+instead of clearing every provider.
 `lib/quota/fetchQuota.ts` validates response payloads and bounds the complete
 request, including JSON body delivery. Compact usage cards and Settings display
 refresh errors alongside retained data. The mobile popover makes at most one

@@ -190,9 +190,9 @@ import { createInsideSpaceTaskNaming, SPACE_TASK_TITLE_ROUTE } from './lib/space
 import { dockerHostOf } from './lib/spaces/places/ssh-host.js';
 import { SPACE_IDLE_EXIT_CODE } from './lib/spaces/layout.js';
 import { createSwitchController, registerSpaceRoutes } from './lib/spaces/routes.js';
-import { configureGitEnvironment, getCheckedOutBranch, getWorktreeBootstrapGateStatus, getWorktrees, isWorktreeDirectoryPinned, readRenameableGeneratedBranch, renameGeneratedWorktreeBranch, resolvePrimaryWorktreeRoot, setWorktreeTaskTitle } from './lib/git/service.js';
+import { getCheckedOutBranch, getWorktreeBootstrapGateStatus, getWorktrees, isWorktreeDirectoryPinned, readRenameableGeneratedBranch, renameGeneratedWorktreeBranch, resolvePrimaryWorktreeRoot, setWorktreeTaskTitle } from './lib/git/service.js';
 import { createEnvironmentStore } from './lib/environment/store.js';
-import { createEnvironmentRuntime } from './lib/environment/runtime.js';
+import { composeEnvironmentRuntime } from './lib/environment/composition.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
 import { OPENCODE_CONFIG_DIR } from './lib/opencode/config-files.js';
 import { createWorktreeBootstrapStore } from './lib/git/worktree-bootstrap-storage.js';
@@ -1660,7 +1660,7 @@ const listConfiguredProjects = async () => {
   const settings = await readSettingsFromDiskMigrated();
   return sanitizeProjects(settings?.projects || []) ?? [];
 };
-const environmentRuntime = createEnvironmentRuntime({
+const environmentRuntime = composeEnvironmentRuntime({
   store: environmentStore,
   listProjects: listConfiguredProjects,
   spawn,
@@ -1668,7 +1668,6 @@ const environmentRuntime = createEnvironmentRuntime({
   readOpenCodeServiceEnv: () => readOpenCodeServiceEnv(OPENCODE_CONFIG_DIR),
   isEnterpriseMode: () => isEnterpriseMode(),
 });
-configureGitEnvironment(environmentRuntime);
 const staticRoutesRuntime = createStaticRoutesRuntime({
   fs,
   path,

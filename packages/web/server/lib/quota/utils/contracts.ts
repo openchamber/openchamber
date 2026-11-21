@@ -47,6 +47,7 @@ export interface QuotaResult<ProviderId extends string | null = string, Provider
   error?: string;
   planLabel?: string;
   accountLabel?: string;
+  selection?: string;
 }
 
 export interface QuotaResultInput<ProviderId extends string | null = string, ProviderName extends string | null = string, Usage = ProviderUsage> {
