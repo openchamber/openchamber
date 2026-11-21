@@ -64,9 +64,7 @@ export function renderFileSourceEditor({ draft, editor, fileComments, fileDocume
                     });
                   }}
                   onViewDestroy={() => {
-                    if (editorViewRef.current) {
-                      editorViewRef.current = null;
-                    }
+                    editorViewRef.current = null;
                     setEditorViewReadyNonce((value) => value + 1);
                   }}
                   enableSearch

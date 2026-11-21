@@ -10,3 +10,4 @@ export * from './QuoteCommentMenu';
 export * from './useWholeFileComment';
 export * from './WholeFileCommentButton';
 export * from './wholeFileComment';
+export * from './useCodeSelectionComment';

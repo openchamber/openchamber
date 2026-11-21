@@ -70,7 +70,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ visible = true, onCloseFil
   const closeState = useFileCloseState();
   const navigationRequests = useFileNavigationRequests();
   const externalActions = useFileExternalActions({ scope, tabs, files, t });
-  const fileComments = useFileComments({ draft, editor, fileDocument, tabs, isMobile });
+  const fileComments = useFileComments({ draft, editor, fileDocument, tabs, isMobile, visible });
   const fileDirectory = useFileDirectory({ fileDocument, layout, scope, tabs, files });
   const uploads = useFileUploads({ fileDirectory, scope });
   const operations = useFileOperations({ fileDirectory, fileDocument, layout, scope, tabs, files, isMobile, t });
@@ -109,7 +109,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ visible = true, onCloseFil
   });
   const mobileKeyboard = useFileMobileKeyboard({ editor, isMobile });
   useFileEditorKeybinds({ editor, fileKinds, viewModes, isMobile });
-  const fileEditorExtensions = useFileEditorExtensions({ editor, fileLanguage, mobileKeyboard, scope, tabs, themes, files, git, isMobile, t });
+  const fileEditorExtensions = useFileEditorExtensions({ editor, fileComments, fileLanguage, mobileKeyboard, scope, tabs, themes, files, git, isMobile, t });
   const fileAssets = useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scope, tabs, viewModes, files, isMobile, runtime, t });
   const artifacts = useArtifactPreview({
     draft, fileAssets, fileDocument, fileFreshness, fileKinds, imageFullscreen, imageNavigation, layout, tabs, viewModes,
@@ -171,6 +171,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ visible = true, onCloseFil
       />
       {imageFullscreenViewer}
       {uploadElements}
+      {fileComments.codeSelectionComment.menu}
       {isMobile ? (
         showMobilePageContent ? (
           fileViewer
