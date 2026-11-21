@@ -34,6 +34,18 @@ afterAll(async () => {
   globalThis.fetch = realFetch;
 });
 
+test('a fragment that is not a valid escape reaches the click handler without an uncaught error', async () => {
+  await act(() => root.render(<I18nProvider>
+    <MarkdownContent content={'[Broken](#%zz)'} directory="/repo" mode="static" />
+  </I18nProvider>));
+  const link = host.querySelector('a');
+  if (!link) throw new Error('Missing rendered link');
+  const click = new window.MouseEvent('click', { bubbles: true, cancelable: true });
+  await act(() => { link.dispatchEvent(click); });
+
+  expect(click.defaultPrevented).toBe(true);
+});
+
 test('local href clicks prevent browser navigation and open decoded files through MarkdownLink', async () => {
   for (const [href, path] of [
     ['docs/%E4%B8%AD%E6%96%87.md', '/repo/docs/中文.md'],

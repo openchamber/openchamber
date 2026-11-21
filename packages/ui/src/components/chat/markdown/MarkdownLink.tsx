@@ -31,6 +31,8 @@ import { guestPanelOpensHere } from '@/lib/guests/phone';
 import { useGuestsStore } from '@/lib/guests/store';
 import { isBuiltInLink, runGuestLink } from './guestLinkClick';
 
+const decodeFragment = (value: string) => { try { return decodeURIComponent(value); } catch { return value; } };
+
 function useConfirmedInlineFile(raw: string, inputKind: FileReferenceSource = 'path'): string | null {
   const { directory, fileReferences, confirmFile } = useMarkdownPresentation();
   const runtimeKey = getRuntimeKey();
@@ -232,7 +234,7 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
     }
     if (href.startsWith('#') && !media?.documentAssets) {
       event.preventDefault();
-      const id = decodeURIComponent(href.slice(1));
+      const id = decodeFragment(href.slice(1));
       const root = event.currentTarget.closest('[data-markdown-content]');
       const target = root ? Array.from(root.querySelectorAll<HTMLElement>('[id]')).find((element) => element.id === id) : null;
       target?.scrollIntoView({ block: 'nearest' });
