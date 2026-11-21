@@ -1,10 +1,22 @@
 import { describe, expect, test } from 'bun:test';
 
-import { clampPercent, compactQuotaValueLabel, formatPercent, formatQuotaResetShort, formatQuotaValueLabel, formatWindowLabel } from './utils';
+import { clampPercent, compactQuotaValueLabel, formatPercent, formatQuotaResetShort, formatQuotaRowValue, formatQuotaValueLabel, formatQuotaWindowValueLabel, formatWindowLabel } from './utils';
+import type { UsageWindow } from '@/types';
 import { formatMessage } from '@/lib/i18n';
 import { dict } from '@/lib/i18n/messages/en';
 
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) => formatMessage(dict, key, params);
+
+const quotaWindow = (window: Partial<UsageWindow>): UsageWindow => ({
+  usedPercent: null,
+  remainingPercent: null,
+  windowSeconds: null,
+  resetAfterSeconds: null,
+  resetAt: null,
+  resetAtFormatted: null,
+  resetAfterFormatted: null,
+  ...window,
+});
 
 describe('quota utils', () => {
   test('formats semantic consumption with grouping and at most one decimal', () => {
@@ -35,6 +47,42 @@ describe('quota utils', () => {
   test('labels dollar usage separately from credits', () => {
     expect(formatWindowLabel('usage')).toBe('Usage');
     expect(formatWindowLabel('credits')).toBe('Credits');
+  });
+
+  test('labels monthly spending rows apart from the monthly cap', () => {
+    expect(formatWindowLabel('monthly')).toBe('Monthly');
+    expect(formatWindowLabel('monthly_total')).toBe('Monthly Total');
+    expect(formatWindowLabel('monthly_credits')).toBe('Monthly Credits');
+    expect(formatWindowLabel('monthly_byok')).toBe('Monthly BYOK');
+  });
+
+  test('formats the monthly total from the raw summed amount and keeps an unreadable amount unknown', () => {
+    expect(formatQuotaWindowValueLabel(
+      quotaWindow({ value: { kind: 'spend', spent: 14.297788398 + 212.345956722, limit: null } }), null, t,
+    )).toBe('$226.64 spent');
+    expect(formatQuotaWindowValueLabel(
+      quotaWindow({ value: { kind: 'spend', spent: 14.297788398, limit: null } }), null, t,
+    )).toBe('$14.30 spent');
+    expect(formatQuotaWindowValueLabel(
+      quotaWindow({ value: { kind: 'spend', spent: null, limit: null } }), null, t,
+    )).toBe('Unknown');
+  });
+
+  test('a usage row keeps the cap percent and otherwise uses money or the cap label', () => {
+    expect(formatQuotaRowValue(quotaWindow({ usedPercent: 40, valueLabel: '$5.00 / $30.00' }), 40, t)).toBe('40%');
+    expect(formatQuotaRowValue(
+      quotaWindow({ value: { kind: 'spend', spent: 226.64374512, limit: null } }), null, t,
+    )).toBe('$226.64 spent');
+    expect(formatQuotaRowValue(
+      quotaWindow({ value: { kind: 'spend', spent: null, limit: null } }), null, t,
+    )).toBe('Unknown');
+    expect(formatQuotaRowValue(quotaWindow({ valueLabel: '$0.00 / $0.00' }), null, t)).toBe('$0.00 / $0.00');
+  });
+
+  test('a set cap with an unreadable amount keeps its limit visible', () => {
+    const cap = quotaWindow({ value: { kind: 'spend', spent: null, limit: 30 } });
+    expect(formatQuotaWindowValueLabel(cap, null, t)).toBe('Unknown of $30.00');
+    expect(formatQuotaRowValue(cap, null, t)).toBe('Unknown of $30.00');
   });
 });
 

@@ -41,7 +41,7 @@ export interface UsageWindowGiftReset {
 
 export type UsageWindowValue =
   | { kind: 'requests'; count: number }
-  | { kind: 'spend'; spent: number; limit: number | null };
+  | { kind: 'spend'; spent: number | null; limit: number | null };
 
 export interface UsageWindow {
   usedPercent: number | null;
