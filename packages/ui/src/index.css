@@ -2084,7 +2084,9 @@ diffs-container {
 .markdown-content code[data-streamdown="inline-code"][data-openchamber-file-link="true"] {
   background-color: transparent !important;
   background-image: none;
-  padding-inline: 0;
+  /* Without a fill the padding only gave the reference an edge that starts
+     no text selection, so a drag from just above the path selected nothing. */
+  padding: 0;
 }
 
 /* Markdown links - use theme colors */

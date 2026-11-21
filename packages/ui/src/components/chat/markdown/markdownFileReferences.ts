@@ -14,14 +14,54 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useMarkdownPresentation, type FileReferenceSource } from './MarkdownPresentationContext';
 import { HighlightResultCache } from './highlightResultCache';
 import { hasTextSelectionInside } from '@/lib/textSelection';
+import { runNextTask } from '@/lib/timing/runNextTask';
+
+const DRAG_START_DISTANCE_PX = 4;
+let press: { reference: HTMLElement; tabIndex: string; x: number; y: number; dragged: boolean } | null = null;
 
 export function activateMarkdownFile(event: React.MouseEvent | React.KeyboardEvent, open: (external: boolean) => void): void {
   if ('key' in event && event.key !== 'Enter' && event.key !== ' ') return;
   event.preventDefault();
   event.stopPropagation();
-  if (!('key' in event) && hasTextSelectionInside(event.currentTarget.closest('[data-markdown-content]'))) return;
+  if (!('key' in event)) {
+    const pressed = event.detail > 0 && press && event.target instanceof Node && press.reference.contains(event.target) ? press : null;
+    if (event.detail > 0) press = null;
+    if (pressed && (pressed.dragged || Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) > DRAG_START_DISTANCE_PX)) return;
+    if (hasTextSelectionInside(event.currentTarget.closest('[data-markdown-content]'))) return;
+    if (pressed) {
+      pressed.reference.setAttribute('tabindex', pressed.tabIndex);
+      pressed.reference.focus({ preventScroll: true });
+    }
+  }
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
   open(isMac ? event.metaKey : event.ctrlKey);
+}
+
+export function releaseFileReferenceTabStop(event: React.PointerEvent): void {
+  press = null;
+  if (event.button !== 0 || !(event.target instanceof Element)) return;
+  const reference = event.target.closest<HTMLElement>('[data-openchamber-file-link="true"][tabindex]');
+  const tabIndex = reference?.getAttribute('tabindex');
+  if (!reference || tabIndex == null) return;
+  reference.removeAttribute('tabindex');
+  const gesture = { reference, tabIndex, x: event.clientX, y: event.clientY, dragged: false };
+  press = gesture;
+  const track = (move: PointerEvent) => {
+    if (move.pointerId === event.pointerId && Math.hypot(move.clientX - gesture.x, move.clientY - gesture.y) > DRAG_START_DISTANCE_PX) gesture.dragged = true;
+  };
+  const end = (done: PointerEvent) => {
+    if (done.pointerId !== event.pointerId) return;
+    window.removeEventListener('pointermove', track, true);
+    window.removeEventListener('pointerup', end, true);
+    window.removeEventListener('pointercancel', end, true);
+    if (done.type === 'pointercancel' && press === gesture) press = null;
+  };
+  window.addEventListener('pointermove', track, true);
+  window.addEventListener('pointerup', end, true);
+  window.addEventListener('pointercancel', end, true);
+  runNextTask(() => {
+    if (reference.isConnected) reference.setAttribute('tabindex', tabIndex);
+  });
 }
 
 const codePathCandidates = new HighlightResultCache<Array<{ raw: string; start: number }>>({ maxEntries: 64, maxBytes: 1024 * 1024 });
