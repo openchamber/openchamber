@@ -56,7 +56,7 @@ export const IntegrationsPage: React.FC = () => {
           title={t('settings.integrations.browse.hint')}
           onClick={openCatalog}
         >
-          <Icon name="store-2" className="size-4" />
+          <Icon name="apps-2-add" className="size-4" />
           {t('settings.integrations.browse.label')}
         </Button>
       ) : null}
