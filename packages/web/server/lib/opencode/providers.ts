@@ -17,6 +17,7 @@ import {
 import { isBoolean, isRecord, isString } from '../shared/object-guards.js';
 import type { OpenCodeConfigLayers } from './config-files.js';
 import type { ProviderEntity, ProviderModelEntity } from './config-v2.js';
+import { isModelModality, toModelModalities } from './model-modalities.js';
 
 export interface CustomProviderConfig {
   package: string;
@@ -59,13 +60,12 @@ const CUSTOM_PROVIDER_PACKAGES = new Set([
   '@opencode/ai/providers/anthropic',
   '@opencode/ai/providers/anthropic-compatible',
 ]);
-const MODEL_CAPABILITIES = new Set(['text', 'image', 'audio', 'video', 'pdf']);
 
 const isPositiveSafeInteger = (value: unknown): value is number =>
   Number.isSafeInteger(value) && Number(value) > 0;
 
-const isModelCapabilityList = (value: unknown): value is string[] =>
-  Array.isArray(value) && !value.some((entry) => !isString(entry) || !MODEL_CAPABILITIES.has(entry));
+const isStringList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every(isString);
 
 function providerExistsIn(config: OpenCodeConfigLayers['userConfig'], providerId: string) {
   return readSectionEntry(config, 'providers', providerId).value !== undefined;
@@ -166,10 +166,10 @@ function validateCustomProviderConfig<Config>(providerId: string, config: Config
       const input = modelValue.capabilities.input;
       const output = modelValue.capabilities.output;
       const tools = modelValue.capabilities.tools;
-      if (input !== undefined && !isModelCapabilityList(input)) {
+      if (input !== undefined && !isStringList(input)) {
         return { ok: false, error: `Model "${trimmedId}" input capabilities are invalid` };
       }
-      if (output !== undefined && !isModelCapabilityList(output)) {
+      if (output !== undefined && !isStringList(output)) {
         return { ok: false, error: `Model "${trimmedId}" output capabilities are invalid` };
       }
       if (tools !== undefined && !isBoolean(tools)) {
@@ -177,8 +177,8 @@ function validateCustomProviderConfig<Config>(providerId: string, config: Config
       }
       normalizedModel.capabilities = {
         tools: isBoolean(tools) ? tools : true,
-        input: input ?? ['text'],
-        output: output ?? ['text'],
+        input: input ? toModelModalities(input) : ['text'],
+        output: output ? toModelModalities(output) : ['text'],
       };
     }
     if (Array.isArray(modelValue.variants)) {
@@ -250,6 +250,20 @@ function validateClientCertificate(value: Parameters<typeof CLIENT_CERTIFICATE_S
   return { ok: true, value: certificate };
 }
 
+function assertStoredOrKnownModalities(
+  modelId: string,
+  capabilities: { input: string[]; output: string[] } | undefined,
+  stored: { input?: string[]; output?: string[] } | undefined,
+) {
+  if (!capabilities) return;
+  for (const target of ['input', 'output'] as const) {
+    const storedList = stored?.[target] ?? [];
+    if (capabilities[target].some((entry) => !isModelModality(entry) && !storedList.includes(entry))) {
+      throw Object.assign(new Error(`Model "${modelId}" ${target} capabilities are invalid`), { statusCode: 400 });
+    }
+  }
+}
+
 function mergeCustomProviderConfig(existingValue: Parameters<typeof toProviderEntity>[0], normalizedConfig: CustomProviderConfig): ProviderEntity {
   const existing = toProviderEntity(existingValue);
   const mergedSettings = { ...(existing.settings ?? {}), ...(normalizedConfig.settings ?? {}) } satisfies ProviderEntity['settings'];
@@ -261,6 +275,7 @@ function mergeCustomProviderConfig(existingValue: Parameters<typeof toProviderEn
     Object.entries(normalizedModels).map(([modelId, normalizedModel]) => {
       const existingModel = isRecord(existingModels[modelId]) ? existingModels[modelId] : {};
       const mergedModel = { ...existingModel, ...normalizedModel };
+      assertStoredOrKnownModalities(modelId, normalizedModel.capabilities, existingModels[modelId]?.capabilities);
       if (Array.isArray(mergedModel.variants) && mergedModel.variants.length === 0) {
         delete mergedModel.variants;
       }

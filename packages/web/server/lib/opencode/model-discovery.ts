@@ -5,6 +5,7 @@ import nodePath from 'node:path';
 import { Readable } from 'node:stream';
 import { z } from 'zod';
 import { getModelsMetadata } from './models-metadata.js';
+import { toModelModalities } from './model-modalities.js';
 import type { IncomingMessage, ClientRequest } from 'node:http';
 import type { JsonValue } from '../shared/json-values.js';
 import type {} from './dependency-contracts.js';
@@ -164,7 +165,7 @@ const buildLimit = (context: number | undefined, output: number | undefined) => 
 
 const buildCapabilities = (input: string[] | undefined, output: string[] | undefined, tools: boolean | undefined) => {
   if (!input && !output && tools === undefined) return undefined;
-  return { tools: tools ?? true, input: input ?? ['text'], output: output ?? ['text'] };
+  return { tools: tools ?? true, input: input ? toModelModalities(input) : ['text'], output: output ? toModelModalities(output) : ['text'] };
 };
 
 const withOptional = <Target, Key extends keyof Target>(target: Target, key: Key, value: Target[Key]) => {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { editableCapabilities } from './model-capabilities';
 import type { Model } from '@/lib/opencode/model';
 import type { CustomProviderIcon } from '@/lib/customProviderIcons';
 
@@ -233,8 +234,7 @@ export const modelRowFromDiscovery = (model: DiscoveredModel): ModelRow => {
     name: model.name !== model.id ? model.name : (metadata?.name ?? model.id),
     contextWindow: context ? String(context) : '',
     maxOutputTokens: output ? String(output) : '',
-    inputCapabilities: capabilities?.input ?? ['text'],
-    outputCapabilities: capabilities?.output ?? ['text'],
+    ...editableCapabilities(capabilities),
     tools: capabilities?.tools ?? true,
     capabilitiesKnown: Boolean(capabilities),
     ...(describedByProvider

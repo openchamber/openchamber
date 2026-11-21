@@ -209,4 +209,27 @@ describe('provider model discovery', () => {
       }),
     ]);
   });
+
+  // The OpenCode inference API lists image input as MIME types; the custom
+  // provider form only saves the five modality categories.
+  test('reads MIME-typed modalities as their categories', async () => {
+    const result = await discoverProviderModels({ baseURL: 'https://provider.test', enrich: false }, {
+      fetch: async () => new Response(JSON.stringify({ data: [
+        {
+          id: 'deepseek-v4.1-flash',
+          modalities: { input: ['text', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'], output: ['text'] },
+        },
+      ] }), { status: 200 }),
+    });
+    expect(result.models[0].capabilities).toEqual({ input: ['text', 'image'], output: ['text'], tools: true });
+  });
+
+  test('keeps reported modalities that name no category as reported', async () => {
+    const result = await discoverProviderModels({ baseURL: 'https://provider.test', enrich: false }, {
+      fetch: async () => new Response(JSON.stringify({ data: [
+        { id: 'embedder', modalities: { input: ['embedding'], output: ['embedding'] } },
+      ] }), { status: 200 }),
+    });
+    expect(result.models[0].capabilities).toEqual({ input: ['embedding'], output: ['embedding'], tools: true });
+  });
 });
