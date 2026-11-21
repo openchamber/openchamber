@@ -319,6 +319,7 @@ export function renderComposerForm({
                     {largeTextPasteOffer ? (
                         <LargeTextPasteChoice
                             key={largeTextPasteOffer.id}
+                            kind={largeTextPasteOffer.kind}
                             takeFocus={!isMobile}
                             expanded={isComposerExpanded}
                             onChoose={(action, explicitlyChosen) => largeTextPasteOffer.resolve(action, explicitlyChosen)}

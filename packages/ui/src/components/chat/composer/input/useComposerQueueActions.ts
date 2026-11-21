@@ -11,6 +11,7 @@ import type { useComposerInlineContext } from './useComposerInlineContext';
 import type { useComposerEditorState } from './useComposerEditorState';
 import type { useComposerDraftText } from './useComposerDraftText';
 import type { useComposerAttachmentWork } from './useComposerAttachmentWork';
+import type { useComposerLargePasteState } from './useComposerLargePasteState';
 import type { ComposerSendHandlers } from './composerSendHandlers';
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
@@ -46,6 +47,7 @@ import { recordLinkedReferences } from './recordLinkedReferences';
 type Dependencies = {
     inlineContext: Pick<ReturnType<typeof useComposerInlineContext>, 'isMobileCommentOpen' | 'hasDrafts' | 'attachmentsToSend' | 'inlineDraftTarget' | 'consumeDrafts'>;
     attachmentWork: Pick<ReturnType<typeof useComposerAttachmentWork>, 'waitForPendingAttachments'>;
+    largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteOffer'>;
     i18n: Pick<ReturnType<typeof useI18n>, 't'>;
     draftText: Pick<ReturnType<typeof useComposerDraftText>, 'setMessage' | 'confirmedMentionsRef' | 'composerText'>;
     editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
@@ -62,12 +64,13 @@ type Dependencies = {
 };
 
 export function useComposerQueueActions({
-    inlineContext, attachmentWork, i18n, draftText, editorState, sendHandlers, sendAvailability,
+    inlineContext, attachmentWork, largePasteState, i18n, draftText, editorState, sendHandlers, sendAvailability,
     sessionScope, queueState, language, selection, mentionAttachments, props, referenceDrafts,
     preferences,
 }: Dependencies) {
     const { isMobileCommentOpen, hasDrafts, attachmentsToSend, inlineDraftTarget, consumeDrafts } = inlineContext;
     const { waitForPendingAttachments } = attachmentWork;
+    const { largeTextPasteOffer } = largePasteState;
     const { t } = i18n;
     const { setMessage, confirmedMentionsRef, composerText } = draftText;
     const { composerRef } = editorState;
@@ -93,6 +96,7 @@ export function useComposerQueueActions({
 
     const handleQueueMessage = React.useCallback(async () => {
         if (isMobileCommentOpen()) return;
+        if (largeTextPasteOffer) return;
         if (await waitForPendingAttachments()) {
             void handleQueueMessageRef.current();
             return;
@@ -234,7 +238,7 @@ export function useComposerQueueActions({
         void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, linkedToQueue);
         if (currentSessionId) actionsNote?.commit(currentSessionId);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachmentsToSend, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, mentionableAgents, availableSkills, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, setLinkedReferencesFor, updateLinkedReferencesFor, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn, referenceLinksIn, composerText, setMessage, waitForPendingAttachments, projectActionsRef, handleSubmitRef, handleQueueMessageRef, confirmedMentionsRef, sendHeldByMissingFolderRef, composerRef]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachmentsToSend, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, mentionableAgents, availableSkills, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, setLinkedReferencesFor, updateLinkedReferencesFor, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn, referenceLinksIn, composerText, setMessage, waitForPendingAttachments, largeTextPasteOffer, projectActionsRef, handleSubmitRef, handleQueueMessageRef, confirmedMentionsRef, sendHeldByMissingFolderRef, composerRef]);
 
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
         const synthetic: SyntheticContextPart[] = [];

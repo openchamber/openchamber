@@ -262,7 +262,7 @@ export function useComposerPaste({
                 }
             };
 
-            setLargeTextPasteOffer({ id: offerId, resolve: resolveLargePaste });
+            setLargeTextPasteOffer({ id: offerId, kind: 'text', resolve: resolveLargePaste });
             return;
         }
 

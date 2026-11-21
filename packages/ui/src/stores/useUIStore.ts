@@ -18,7 +18,7 @@ export type { SessionRetentionAction } from './ui/types';
 export type { TimeFormatPreference } from './ui/types';
 export type { MobileKeepScreenAwake } from './ui/types';
 export type { FileEditorKeymap } from './ui/types';
-export type { LargeTextPasteBehavior } from './ui/types';
+export type { DocumentAttachBehavior, LargeTextPasteBehavior } from './ui/types';
 export type { ChatWidth } from './ui/types';
 export type { SessionGoalChecker } from './ui/types';
 export { normalizeContextPanelDirectoryKey } from './ui/contextTabs';

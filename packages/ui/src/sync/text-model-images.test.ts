@@ -20,7 +20,9 @@ describe("images for a model that cannot read them", () => {
   test("an image becomes a note naming the file OpenCode saved, under the same name", async () => {
     const written: Array<{ filename: string; bytes: string }> = []
     const write = spyOn(opencodeClient, "writeOpenCodeTempFiles").mockImplementation(async (_directory, files) => {
-      written.push(...files.map(({ filename, bytes }) => ({ filename, bytes: new TextDecoder().decode(bytes) })))
+      for (const { filename, bytes } of files) {
+        written.push({ filename, bytes: new TextDecoder().decode(bytes instanceof Uint8Array ? bytes : await bytes()) })
+      }
       return files.map(({ filename }) => ({ filename, path: `/tmp/opencode/openchamber/abc/${filename}` }))
     })
     restores.push(() => write.mockRestore())
