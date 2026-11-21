@@ -967,6 +967,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.folderItem.collapseAria': 'フォルダ{folderName}を折りたたむ',
   'sessions.sidebar.folderItem.namePlaceholder': 'フォルダ名',
   'sessions.sidebar.folderItem.newSessionAria': '{folderName}で新しいセッション',
+  'sessions.sidebar.folderItem.draftDestination': 'フォルダー {folderName} 内',
   'sessions.sidebar.folderItem.newSubfolderAria': '{folderName}に新しいサブフォルダ',
   'sessions.sidebar.folderItem.newSubfolder': '新しいサブフォルダ',
   'sessions.sidebar.folderItem.renameAria': 'フォルダ{folderName}の名前を変更',

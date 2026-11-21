@@ -967,6 +967,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.folderItem.collapseAria': 'Zwiń folder {folderName}',
   'sessions.sidebar.folderItem.namePlaceholder': 'Nazwa folderu',
   'sessions.sidebar.folderItem.newSessionAria': 'Nowa sesja w {folderName}',
+  'sessions.sidebar.folderItem.draftDestination': 'W folderze {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': 'Nowy pod-folder w {folderName}',
   'sessions.sidebar.folderItem.newSubfolder': 'Nowy pod-folder',
   'sessions.sidebar.folderItem.renameAria': 'Zmień nazwę folderu {folderName}',

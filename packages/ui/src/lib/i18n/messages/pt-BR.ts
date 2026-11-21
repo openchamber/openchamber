@@ -971,6 +971,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.folderItem.collapseAria": "Recolher pasta {folderName}",
   "sessions.sidebar.folderItem.namePlaceholder": "Nome de pasta",
   "sessions.sidebar.folderItem.newSessionAria": "Nova sessão em {folderName}",
+  "sessions.sidebar.folderItem.draftDestination": "Na pasta {folderName}",
   "sessions.sidebar.folderItem.newSubfolderAria": "Nova subpasta em {folderName}",
   "sessions.sidebar.folderItem.newSubfolder": "Nova subpasta",
   "sessions.sidebar.folderItem.renameAria": "Renomear pasta {folderName}",

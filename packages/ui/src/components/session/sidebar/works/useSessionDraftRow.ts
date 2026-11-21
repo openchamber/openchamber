@@ -31,7 +31,7 @@ export function useSessionDraftRow(draft: SessionDraft, onNavigate: () => void) 
     if (!isOpen) return;
     const identity = createChatDraftIdentity(getRuntimeKey(), draft.directory, workDraftComposerKey(draft.id));
     if (identity) clearChatDraft(identity, true);
-    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: draft.projectId ?? undefined, directoryOverride: draft.directory });
+    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: draft.projectId ?? undefined, directoryOverride: draft.directory, targetFolderId: draft.targetFolderId });
   };
   return { isOpen, firstLine, attachmentCount, label, open, discard };
 }

@@ -798,6 +798,7 @@ export const dict = {
   'sessions.sidebar.folderItem.collapseAria': 'Réduire le dossier {folderName}',
   'sessions.sidebar.folderItem.namePlaceholder': 'Nom du dossier',
   'sessions.sidebar.folderItem.newSessionAria': 'Nouvelle session dans {folderName}',
+  'sessions.sidebar.folderItem.draftDestination': 'Dans le dossier {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': 'Nouveau sous-dossier dans {folderName}',
   'sessions.sidebar.folderItem.newSubfolder': 'Nouveau sous-dossier',
   'sessions.sidebar.folderItem.renameAria': 'Renommer le dossier {folderName}',

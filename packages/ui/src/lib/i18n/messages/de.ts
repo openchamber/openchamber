@@ -872,6 +872,7 @@ export const dict = {
   'sessions.sidebar.folderItem.collapseAria': 'Ordner {folderName} einklappen',
   'sessions.sidebar.folderItem.namePlaceholder': 'Ordnername',
   'sessions.sidebar.folderItem.newSessionAria': 'Neue Sitzung in {folderName}',
+  'sessions.sidebar.folderItem.draftDestination': 'Im Ordner {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': 'Neuer Unterordner in {folderName}',
   'sessions.sidebar.folderItem.newSubfolder': 'Neuer Unterordner',
   'sessions.sidebar.folderItem.renameAria': 'Ordner {folderName} umbenennen',

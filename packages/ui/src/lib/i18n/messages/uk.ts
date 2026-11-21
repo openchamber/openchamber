@@ -971,6 +971,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.folderItem.collapseAria": "Згорнути папку {folderName}",
   "sessions.sidebar.folderItem.namePlaceholder": "Назва папки",
   "sessions.sidebar.folderItem.newSessionAria": "Нова сесія в {folderName}",
+  "sessions.sidebar.folderItem.draftDestination": "У папці {folderName}",
   "sessions.sidebar.folderItem.newSubfolderAria": "Нова підпапка в {folderName}",
   "sessions.sidebar.folderItem.newSubfolder": "Нова підпапка",
   "sessions.sidebar.folderItem.renameAria": "Перейменувати папку {folderName}",

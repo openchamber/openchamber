@@ -971,6 +971,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.folderItem.collapseAria": "Colapsar carpeta {folderName}",
   "sessions.sidebar.folderItem.namePlaceholder": "Nombre de carpeta",
   "sessions.sidebar.folderItem.newSessionAria": "Nueva sesión en {folderName}",
+  "sessions.sidebar.folderItem.draftDestination": "En la carpeta {folderName}",
   "sessions.sidebar.folderItem.newSubfolderAria": "Nueva subcarpeta en {folderName}",
   "sessions.sidebar.folderItem.newSubfolder": "Nueva subcarpeta",
   "sessions.sidebar.folderItem.renameAria": "Cambiar nombre carpeta {folderName}",

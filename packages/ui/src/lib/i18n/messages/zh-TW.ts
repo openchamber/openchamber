@@ -987,6 +987,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.folderItem.collapseAria': '摺疊資料夾 {folderName}',
   'sessions.sidebar.folderItem.namePlaceholder': '資料夾名稱',
   'sessions.sidebar.folderItem.newSessionAria': '在 {folderName} 中新增會話',
+  'sessions.sidebar.folderItem.draftDestination': '位於資料夾 {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': '在 {folderName} 中新增子資料夾',
   'sessions.sidebar.folderItem.newSubfolder': '新增子資料夾',
   'sessions.sidebar.folderItem.renameAria': '重新命名資料夾 {folderName}',

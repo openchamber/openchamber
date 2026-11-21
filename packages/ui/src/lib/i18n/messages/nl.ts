@@ -961,6 +961,7 @@ export const dict = {
   'sessions.sidebar.folderItem.collapseAria': 'Map {folderName} inklappen',
   'sessions.sidebar.folderItem.namePlaceholder': 'Mapnaam',
   'sessions.sidebar.folderItem.newSessionAria': 'Nieuwe sessie in {folderName}',
+  'sessions.sidebar.folderItem.draftDestination': 'In map {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': 'Nieuwe submap in {folderName}',
   'sessions.sidebar.folderItem.newSubfolder': 'Nieuwe submap',
   'sessions.sidebar.folderItem.renameAria': 'Map {folderName} hernoemen',

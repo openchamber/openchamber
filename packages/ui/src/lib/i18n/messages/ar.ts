@@ -886,6 +886,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.folderItem.collapseAria': 'طي المجلد {folderName}',
   'sessions.sidebar.folderItem.namePlaceholder': 'اسم المجلد',
   'sessions.sidebar.folderItem.newSessionAria': 'جلسة جديدة في {folderName}',
+  'sessions.sidebar.folderItem.draftDestination': 'في المجلد {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': 'مجلد فرعي جديد في {folderName}',
   'sessions.sidebar.folderItem.newSubfolder': 'مجلد فرعي جديد',
   'sessions.sidebar.folderItem.renameAria': 'إعادة تسمية المجلد {folderName}',

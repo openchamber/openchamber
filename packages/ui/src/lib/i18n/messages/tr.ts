@@ -881,6 +881,7 @@ export const dict = {
   'sessions.sidebar.folderItem.collapseAria': '{folderName} klasörünü daralt',
   'sessions.sidebar.folderItem.namePlaceholder': 'Klasör adı',
   'sessions.sidebar.folderItem.newSessionAria': '{folderName} içinde yeni session',
+  'sessions.sidebar.folderItem.draftDestination': '{folderName} klasöründe',
   'sessions.sidebar.folderItem.newSubfolderAria': '{folderName} içinde yeni alt klasör',
   'sessions.sidebar.folderItem.newSubfolder': 'Yeni alt klasör',
   'sessions.sidebar.folderItem.renameAria': '{folderName} klasörünü yeniden adlandır',
