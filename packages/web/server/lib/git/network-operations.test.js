@@ -2008,6 +2008,74 @@ process.exit(safe ? 0 : 1);
     });
   });
 
+  const gitlinkCloneFixture = async (cloneHasGitlink) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-submodule-gitlink-fetch-'));
+    temporaryDirectories.push(root);
+    const gitlink = 'b'.repeat(40);
+    const manifest = 'submodule.alpha.path\nvendor/alpha\0submodule.alpha.url\n../alpha.git\0';
+    let fetched = false;
+    const setupValue = setup({
+      validateGitAuxiliaryContext: vi.fn(async ({ rawEndpoint }) => ({
+        endpoint: rawEndpoint, endpointFingerprint: fingerprintRemoteUrl(rawEndpoint),
+        transportMode: 'managed', credentialId: 'child-credential', transportRevision: 'transport_one',
+      })),
+      spawnResponder: ({ args, options }) => {
+        const command = args.join(' ');
+        if (command.includes('config --blob HEAD:.gitmodules')) return options.cwd === root ? { code: 0, stdout: manifest } : { code: 1 };
+        if (command.includes('ls-tree -rz')) return options.cwd === root
+          ? { code: 0, stdout: `160000 commit ${gitlink}\tvendor/alpha\0` }
+          : { code: 0 };
+        if (command.includes('cat-file --batch-check')) {
+          return { code: 0, stdout: cloneHasGitlink || fetched ? `${gitlink} commit 240\n` : `${gitlink} missing\n` };
+        }
+        if (args.includes('fetch')) {
+          fetched = true;
+          return { code: 0 };
+        }
+        if (command.includes('checkout --force --detach')) {
+          return cloneHasGitlink || fetched ? { code: 0 } : { code: 128, stderr: `fatal: unable to read tree (${gitlink})` };
+        }
+        if (command.includes('rev-parse --verify HEAD')) return { code: 0, stdout: gitlink };
+        if (command.includes('ls-files -z')) return { code: 0 };
+        if (command.includes('HEAD:.lfsconfig') || command.includes('config --includes')) return { code: 1 };
+        if (command.includes('lfs version')) return { code: 1 };
+        return { code: 0 };
+      },
+    });
+    const result = await setupValue.service.hydrateBoundCheckout({
+      directory: root, parentRemoteName: 'publish',
+      repositoryAuthority: { repositoryId: 'repo_one', bindingRevision: 2, configRevision: 'config_one' },
+    });
+    const step = (name) => setupValue.calls.findIndex((call) => call.args.includes(name));
+    return { root, gitlink, result, setupValue, step };
+  };
+
+  it('fetches a gitlink commit the fresh clone lacks, such as one only a tag reaches, before checking it out', async () => {
+    const { root, gitlink, result, setupValue, step } = await gitlinkCloneFixture(false);
+
+    expect(result).toMatchObject({ status: 'succeeded', submodules: [{ path: 'vendor/alpha', status: 'succeeded' }] });
+    const fetch = setupValue.calls[step('fetch')];
+    expect(fetch.args.slice(-4)).toEqual(['--no-tags', '--', 'https://example.com/owner/alpha.git', gitlink]);
+    expect(fetch.options.cwd).toBe(path.join(root, 'vendor', 'alpha'));
+    expect(step('clone')).toBeLessThan(step('fetch'));
+    expect(step('fetch')).toBeLessThan(step('checkout'));
+    const { issue } = setupValue.credentialBroker;
+    expect(setupValue.credentialResolver.resolve).toHaveBeenCalledTimes(2);
+    expect(issue).toHaveBeenCalledTimes(2);
+    const [cloneLease, fetchLease] = issue.mock.results.map((outcome) => outcome.value);
+    expect(cloneLease.revoke.mock.invocationCallOrder[0]).toBeLessThan(issue.mock.invocationCallOrder[1]);
+    expect(fetchLease.revoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks out a gitlink commit the fresh clone contains without another transfer', async () => {
+    const { result, setupValue, step } = await gitlinkCloneFixture(true);
+
+    expect(result).toMatchObject({ status: 'succeeded', submodules: [{ path: 'vendor/alpha', status: 'succeeded' }] });
+    expect(step('clone')).not.toBe(-1);
+    expect(step('fetch')).toBe(-1);
+    expect(setupValue.credentialBroker.issue).toHaveBeenCalledTimes(1);
+  });
+
   it('quarantines and removes an operation-created child after clone failure', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-submodule-cleanup-'));
     temporaryDirectories.push(root);

@@ -12,7 +12,7 @@ import { gitLfsCredentialEndpointAliases, normalizeGitRemoteEndpoint, parseGitCr
 import { createNetworkOperationPlanner, isChangeReviewRemote } from './network-operation-plan.js';
 import { createNetworkOperationRegistry } from './network-operation-registry.js';
 import { createGitRedactor, redactGitText } from './redaction.js';
-import { parseSubmoduleManifest, SUBMODULE_DISCOVERY_LIMITS } from './submodule-discovery.js';
+import { createGitlinksStream, parseSubmoduleManifest, SUBMODULE_DISCOVERY_LIMITS } from './submodule-discovery.js';
 import { createLfsFileScanner, discoverLfs, scanLfsPushObjects, resolveLfsPushConfig, LFS_DISCOVERY_LIMITS, SAFE_FILTERS } from './lfs-discovery.js';
 import { resolveGitRelativeEndpoint } from './discovery-endpoint.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
@@ -150,7 +150,6 @@ const MANAGED_ENV_NAMES = new Set([
   'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'NETRC',
 ]);
 const SHA_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
-const GITLINK_PATTERN = /^160000 commit ([0-9a-f]{40}(?:[0-9a-f]{24})?)(?: +-\t|\t)([^]+)$/;
 const INDEX_FILE_MODES = new Set(['100644', '100755', '120000', '160000']);
 const LINE_ENDING_CONFIG_PATTERN = 'core\\.(autocrlf|eol|safecrlf|attributesfile)';
 
@@ -214,35 +213,6 @@ const createIndexFilesStream = (scanner: ReturnType<typeof createLfsFileScanner>
       if (remainder.length) throw operationError('INVALID_REQUEST', 'Tracked-file listing is incomplete', 409);
       await flush();
       return scanner.result();
-    },
-  });
-};
-const createGitlinksStream = () => {
-  let remainder: Buffer = Buffer.alloc(0);
-  let output = '';
-  return Object.freeze({
-    write(chunk: Buffer) {
-      const input = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      remainder = remainder.length ? Buffer.concat([remainder, input]) : input;
-      for (let separator; (separator = remainder.indexOf(0)) >= 0;) {
-        const record = remainder.subarray(0, separator).toString('utf8');
-        remainder = remainder.subarray(separator + 1);
-        if (record.includes('\ufffd')) throw operationError('INVALID_REQUEST', 'Tree listing is not valid UTF-8', 409);
-        const match = record.match(GITLINK_PATTERN);
-        if (!match) continue;
-        const entry = `${record}\0`;
-        if (Buffer.byteLength(output) + Buffer.byteLength(entry) > SUBMODULE_DISCOVERY_LIMITS.maxGitlinkBytes) {
-          throw operationError('SUBMODULE_DISCOVERY_LIMIT_EXCEEDED', 'Submodule gitlink listing exceeds its byte limit', 409);
-        }
-        output += entry;
-      }
-      if (remainder.length > SUBMODULE_DISCOVERY_LIMITS.maxGitlinkBytes) {
-        throw operationError('SUBMODULE_DISCOVERY_LIMIT_EXCEEDED', 'Tree listing record exceeds its byte limit', 409);
-      }
-    },
-    complete() {
-      if (remainder.length) throw operationError('INVALID_REQUEST', 'Tree listing is incomplete', 409);
-      return output;
     },
   });
 };
@@ -1233,8 +1203,8 @@ export function createNetworkOperations({
     return { authority, auxiliaryPlan, context, foundAfterPlanning };
   };
 
-  const auxiliaryTransfer = async (transfer: Awaited<ReturnType<typeof auxiliaryTransport>>, hydrationPlan: HydrationPlan, controls: ExecutionControls, args: string[], context: TransportContext, deadline: number) => {
-    const execute = () => commandResult(transfer.auxiliaryPlan, controls, args, context, deadline, { transfer: true });
+  const auxiliaryTransfer = async (transfer: Awaited<ReturnType<typeof auxiliaryTransport>>, hydrationPlan: HydrationPlan, controls: ExecutionControls, args: string[], context: TransportContext, deadline: number, options: { cwd?: string } = {}) => {
+    const execute = () => commandResult(transfer.auxiliaryPlan, controls, args, context, deadline, { transfer: true, ...options });
     if (!auditStore || !transfer.foundAfterPlanning) return execute();
     const { authority, auxiliaryPlan } = transfer;
     const endpointFingerprint = fingerprintRemoteUrl(auxiliaryPlan.rawEndpoint);
@@ -1548,6 +1518,7 @@ export function createNetworkOperations({
             let keepChild = childExists;
             let childIdentity: string | undefined;
             let childBirthtimeHolds = false;
+            let leasedContext: LeasedTransportContext | undefined = transfer.context;
             try {
               if (!childExists) {
                 await ensureSubmoduleParentDirectories(directory, module.path, controls, deadline);
@@ -1564,6 +1535,19 @@ export function createNetworkOperations({
                 'clone', '--no-checkout', '--no-tags', '--', endpoint.endpoint, childDirectory,
               ], { ...transfer.context, env: { ...transfer.context.env, GIT_LFS_SKIP_SMUDGE: '1' } }, deadline);
               await controls.markStepCompleted('transferred');
+              const gitlinkObject = await localGit(childDirectory, ['cat-file', '--batch-check'], controls, deadline,
+                { input: Buffer.from(`${module.gitlink}\n`) });
+              if (gitlinkObject === `${module.gitlink} missing\n`) {
+                leasedContext = undefined;
+                if (await safeRevoke(transfer.context, hydrationPlan.operationId)) rethrow(operationError('UNKNOWN', 'Submodule credential cleanup failed', 500));
+                const fetchTransfer = await auxiliaryTransport(
+                  childPlan(directory), 'submodule', endpoint.endpoint, controls, deadline, foundAfterPlanning,
+                );
+                leasedContext = fetchTransfer.context;
+                await auxiliaryTransfer(fetchTransfer, hydrationPlan, controls, [
+                  'fetch', '--no-tags', '--', endpoint.endpoint, module.gitlink,
+                ], fetchTransfer.context, deadline, { cwd: childDirectory });
+              }
               await localGit(childDirectory, ['checkout', '--force', '--detach', module.gitlink], controls, deadline, { disableLfsFilters: true });
               childHead = (await localGit(childDirectory, ['rev-parse', '--verify', 'HEAD'], controls, deadline)).trim().toLowerCase();
               if (childHead !== module.gitlink) {
@@ -1571,7 +1555,7 @@ export function createNetworkOperations({
               }
               keepChild = true;
             } finally {
-              const cleanupFailed = await safeRevoke(transfer.context, hydrationPlan.operationId);
+              const cleanupFailed = await safeRevoke(leasedContext, hydrationPlan.operationId);
               if (!keepChild && childIdentity) {
                 const cleanup = await quarantineAndClean(childDirectory, hydrationPlan.operationId, async (moved) => {
                   const stats = await fsImpl.lstat(moved);
