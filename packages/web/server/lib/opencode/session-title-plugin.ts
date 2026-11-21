@@ -32,6 +32,14 @@ const attachedContextOfShortFirstMessage = (messages) => {
     .slice(0, MAX_ATTACHED_CONTEXT_LENGTH)
 }
 
+/** Whether OpenCode's catalog prices this Zen model at zero. Free Zen models do not all end in -free (big-pickle). */
+const isFreeZenModel = async (ctx, model) => {
+  if (model?.providerID !== "opencode") return false
+  const catalog = await ctx.model.list().then((result) => result.data, () => [])
+  const info = catalog.find((entry) => entry.providerID === model.providerID && entry.id === model.id)
+  return Boolean(info?.cost?.length) && info.cost.every((tier) => tier.input === 0 && tier.output === 0)
+}
+
 export default {
   id: ${JSON.stringify(PLUGIN_ID)},
   setup: async (ctx) => {
@@ -48,9 +56,8 @@ export default {
       // Free OpenCode models failed to generate titles with a replaced system
       // prompt. Keep the native prompt and give the same style in the input.
       // A user-configured title prompt wins and must not be rewritten here.
-      if (draft.model?.providerID === "opencode" && draft.model.id.endsWith("-free")
-        && originalTitleSystem && draft.system.length === 1 && draft.system[0].text === TITLE_SYSTEM_PROMPT
-        && request?.role === "user") {
+      if (originalTitleSystem && draft.system.length === 1 && draft.system[0].text === TITLE_SYSTEM_PROMPT
+        && request?.role === "user" && await isFreeZenModel(ctx, draft.model)) {
         draft.system[0].text = originalTitleSystem
         request.content.push({ type: "text", text: TITLE_SYSTEM_PROMPT })
       }

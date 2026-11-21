@@ -12,8 +12,19 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
+const free = [{ input: 0, output: 0, cache: { read: 0, write: 0 } }];
+// OpenCode's catalog as plugins read it: free Zen models are priced at zero,
+// and not all of them carry a -free suffix.
+const catalog = [
+  { providerID: 'opencode', id: 'glm-5.3-flash-free', cost: free },
+  { providerID: 'opencode', id: 'big-pickle', cost: free },
+  { providerID: 'opencode', id: 'paid-model', cost: [{ input: 3, output: 15, cache: { read: 0.3, write: 3.75 } }] },
+  { providerID: 'other', id: 'glm-5.3-flash-free', cost: free },
+];
+const modelCatalog = { list: async () => ({ location: { directory: '/repo' }, data: catalog }) };
+
 /** Load the written plugin and register it against a fake plugin context. */
-const loadPlugin = async (sessionContext = async () => []) => {
+const loadPlugin = async (sessionContext = async () => [], model = modelCatalog) => {
   const instanceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-session-title-'));
   temporaryDirectories.push(instanceDir);
   const directory = await materializeSessionTitlePlugin({ fsPromises: fs, path, instanceDir });
@@ -21,6 +32,7 @@ const loadPlugin = async (sessionContext = async () => []) => {
   const transforms = [];
   const hooks = new Map();
   await plugin.setup({
+    model,
     agent: { transform: async (callback) => { transforms.push(callback); } },
     session: {
       hook: async (name, callback) => { hooks.set(name, callback); },
@@ -31,8 +43,8 @@ const loadPlugin = async (sessionContext = async () => []) => {
 };
 
 /** Load the written plugin and run its agent transform over the given agents. */
-const runTransform = async (agents) => {
-  const { directory, plugin, transforms, hooks } = await loadPlugin();
+const runTransform = async (agents, model) => {
+  const { directory, plugin, transforms, hooks } = await loadPlugin(undefined, model);
   const editor = {
     get: (id) => agents.get(id),
     update: (id, update) => update(agents.get(id)),
@@ -120,14 +132,31 @@ describe('session title plugin', () => {
     it('keeps OpenCode free-model titles working while retaining the title style', async () => {
       const title = { id: 'title', system: 'OpenCode title prompt' };
       const { hooks } = await runTransform(new Map([['title', title]]));
+      // The gateway answers no title to a replaced prompt on any free Zen model,
+      // big-pickle included, which has no -free suffix.
+      for (const id of ['glm-5.3-flash-free', 'big-pickle']) {
+        const draft = titleDraft('Explain what an API endpoint is.');
+        draft.model = { providerID: 'opencode', id, variant: 'default' };
+        draft.system = [{ type: 'text', text: title.system }];
+
+        await hooks.get('title')(draft);
+
+        expect(draft.system[0].text).toBe('OpenCode title prompt');
+        expect(draft.messages[0].content[1].text).toContain('labels a folder');
+      }
+    });
+
+    it('keeps OpenChamber\'s prompt when the model catalog cannot be read', async () => {
+      const title = { id: 'title', system: 'OpenCode title prompt' };
+      const { hooks } = await runTransform(new Map([['title', title]]), { list: async () => { throw new Error('offline'); } });
       const draft = titleDraft('Explain what an API endpoint is.');
-      draft.model = { providerID: 'opencode', id: 'glm-5.3-flash-free' };
+      draft.model = { providerID: 'opencode', id: 'big-pickle' };
       draft.system = [{ type: 'text', text: title.system }];
 
       await hooks.get('title')(draft);
 
-      expect(draft.system[0].text).toBe('OpenCode title prompt');
-      expect(draft.messages[0].content[1].text).toContain('labels a folder');
+      expect(draft.system[0].text).toBe(title.system);
+      expect(draft.messages[0].content).toHaveLength(1);
     });
 
     it('keeps user title overrides and other models unchanged', async () => {
@@ -168,6 +197,7 @@ describe('session title plugin', () => {
         let titleHook;
         const title = { id: 'title', system: original };
         await plugin.setup({
+          model: modelCatalog,
           agent: { transform: async (transform) => transform({ get: () => title, update: (_id, update) => update(title) }) },
           session: { hook: async (_name, hook) => { titleHook = hook; }, context: async () => [] },
         });

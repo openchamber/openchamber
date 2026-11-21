@@ -1536,12 +1536,17 @@ unless a decision below says why one differs.
   agent file, still wins. OpenCode activates configured plugins after its
   built-in agents and before its config agents, so the config writes the
   prompt after this plugin.
-- For an `opencode/*-free` title model, the hook restores OpenCode's original
-  system prompt and adds OpenChamber's style as a user text part. With OpenCode
-  2.2.7, the anonymous free model tested generated no title with a replacement
-  system prompt, but did with the original prompt and the same style in the
-  input. This applies only when the request still carries OpenChamber's prompt;
-  a user-configured prompt stays untouched.
+- For a free Zen title model, the hook restores OpenCode's original system
+  prompt and adds OpenChamber's style as a user text part. Zen's free tier
+  answers no title to a replaced system prompt, and does with the original
+  prompt and the same style in the input (checked on 2.2.7, and on 2.3.0 and
+  2.3.2 with `big-pickle` and `deepseek-v4.1-flash-free`). This applies only when the
+  request still carries OpenChamber's prompt; a user-configured prompt stays
+  untouched.
+- A free Zen model is an `opencode` model that OpenCode's catalog
+  (`ctx.model.list()`) prices at zero. The name says nothing reliable:
+  `big-pickle` is free without a `-free` suffix, and matching the suffix left
+  its sessions untitled. A failed catalog read keeps OpenChamber's prompt.
 - OpenCode titles from the first user message's text only. Context the user
   attached (a file comment, a browser annotation, PR checks) is admitted as
   synthetic messages right before that message (`sendMessage` in
