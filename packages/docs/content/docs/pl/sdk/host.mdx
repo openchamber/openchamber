@@ -36,6 +36,8 @@ To nie jest jednorazowy callback montowania. Zamontuj UI i zarejestruj subskrypc
 
 Tokeny dostępu nigdy nie pojawiają się tutaj ani w wyniku `request`.
 
+`ready.session` i `onSession` udostępniają też opcjonalne pola `context` i `tokens`. `context: { tokens, limit } | null` opisuje zajętość okna kontekstu po ostatnim kroku asystenta; `limit` ma wartość `null`, jeśli limit modelu jest nieznany. Po kompakcji `context` pozostaje `null` aż do następnego pomiaru. `tokens: { prompt, output, reasoning, cacheRead, cacheWrite, cacheHitPercent } | null` zawiera skumulowane zużycie tokenów sesji. `prompt` obejmuje wejście bez pamięci podręcznej oraz odczyty i zapisy z pamięci podręcznej. Bez tokenów promptu `cacheHitPercent` wynosi `null`. Przed pomiarem obie wartości są `null`; starsze hosty pomijają te pola. Zmiany trafiają przez `onSession`.
+
 `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` i `onItem` odtwarzają ostatnią wartość, gdy subskrybujesz późno, a potem odpalają się dalej przy każdej zmianie.
 
 `theme.tokens` zawiera `primaryText`, `successText`, `warningText`, `errorText` i `infoText`. Te wymagane pola zawierają kolory tekstu obliczone przez hosta dla neutralnych teł i delikatnie zabarwionych kontrolek zestawu UI, nie dla pełnych kolorowych wypełnień. `applyHostReady` stosuje je przy każdym nowym stanie. Zmienne CSS opisuje [zestaw UI](/sdk/ui/).

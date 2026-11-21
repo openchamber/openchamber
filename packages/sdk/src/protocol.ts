@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { guestSessionWorktreeSchema, guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceQuerySchema, guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
+import { guestSessionContextSchema, guestSessionTokenTotalsSchema, guestSessionWorktreeSchema, guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceQuerySchema, guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
 import { guestStatusControlEventSchema, guestStatusControlsSchema } from './status-control-schemas.ts';
 import { guestPopoverClosedEventSchema, guestPopoverDataSchema, guestPopoverRequestSchema } from './popover-schemas.ts';
 import { GUEST_COMMIT_SHA, GUEST_WALKTHROUGH_BASE_MAX } from './navigation.ts';
@@ -110,6 +110,8 @@ const sessionSnapshotSchema = z.object({
   busy: z.boolean().optional().default(false),
   model: z.string().min(1).max(GUEST_SESSION_MODEL_MAX).optional(),
   agent: z.string().min(1).max(GUEST_SESSION_AGENT_MAX).optional(),
+  context: guestSessionContextSchema.nullable().optional(),
+  tokens: guestSessionTokenTotalsSchema.nullable().optional(),
 }).nullable();
 
 const guestConnectionSchema = z.object({

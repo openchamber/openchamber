@@ -43,7 +43,6 @@ import {
   buildSessionMessage,
   buildSettingsMessage,
   guestSessionLifecyclePhase,
-  guestSessionModelId,
   toGuestSessionSnapshot,
 } from '@/lib/guests/host-bridge';
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
@@ -53,7 +52,7 @@ import { useHostDevice } from '@/lib/guests/useHostDevice';
 import { useHostTypography } from '@/lib/guests/useHostTypography';
 import { guestGenerate } from '@/lib/guests/generate';
 import { guestGenerateResults, lateGenerateResult, type GenerateOwner } from '@/lib/guests/generate-results';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { guestNavigationEffects } from '@/lib/guests/navigation';
 import { openGuestSurface } from '@/lib/guests/open-surface';
 import { openGuestUrl } from '@/lib/guests/open-url';
@@ -99,8 +98,8 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useChatSessionSelection } from '@/components/chat/chatColumnSession';
 import { isForegroundShellStopping } from '@/components/chat/message/parts/foregroundShellStop';
-import { useSessionSelector, useSessionStatus } from '@/sync/sync-context';
-import type { Session } from '@/lib/opencode/model';
+import { useSessionMessagesSelector, useSessionSelector, useSessionStatus } from '@/sync/sync-context';
+import { frameContext, frameContextLimit, frameSessionFields, sameFrameContextReading, sameFrameSessionFields, selectFrameContextReading } from '@/lib/guests/session-usage';
 import { GuestPopover } from './GuestPopover';
 import { GuestPopoverSheet } from './GuestPopoverSheet';
 import { DockedPanelSurfaceContext, usePageColors } from '@/hooks/usePageColors';
@@ -151,19 +150,6 @@ const readCssVar = (name: string, fallback: string): string => {
   return value || fallback;
 };
 
-type FrameSessionFields = { id?: string; title?: string; model?: string; agent?: string };
-
-const frameSessionFields = (session: Session | undefined): FrameSessionFields => ({
-  id: session?.id,
-  title: session?.title,
-  model: guestSessionModelId(session?.model),
-  agent: session?.agent,
-});
-
-const sameFrameSessionFields = (left: FrameSessionFields, right: FrameSessionFields): boolean => (
-  left.id === right.id && left.title === right.title && left.model === right.model && left.agent === right.agent
-);
-
 export const PluginPane: React.FC<PluginPaneProps> = ({
   mode,
   surface = 'panel',
@@ -197,6 +183,9 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const currentSessionId = actionItem && 'sessionId' in actionItem ? actionItem.sessionId : selectedSessionId;
   const session = useSessionSelector(currentSessionId, directory || undefined, frameSessionFields, sameFrameSessionFields);
   const sessionStatus = useSessionStatus(currentSessionId ?? '', directory || undefined);
+  const contextReading = useSessionMessagesSelector(currentSessionId ?? '', directory || undefined, selectFrameContextReading, sameFrameContextReading);
+  const contextLimit = useConfigStore((state) => frameContextLimit(contextReading, selectProvidersForDirectory(state, directory || undefined)));
+  const context = React.useMemo(() => frameContext(contextReading, contextLimit), [contextReading, contextLimit]);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const [activePopover, setActivePopover] = React.useState<{ request: GuestPopoverRequest; position: GuestPopoverPosition; entry: string; directory: string; activation: GuestPopoverActivation } | null>(null);
   const activePopoverRef = React.useRef<typeof activePopover>(null);
@@ -228,19 +217,19 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   }, [clearBadge, guestId, headless, surface]);
   const sessionBusy = sessionStatus?.type === 'busy' || sessionStatus?.type === 'retry';
   const lifecyclePhase = guestSessionLifecyclePhase(sessionStatus);
-  const sessionSnapshot = React.useMemo(
+  const sessionTitle = session?.title ?? (actionItem && 'sessionTitle' in actionItem ? actionItem.sessionTitle : undefined);
+  const baseSessionSnapshot = React.useMemo(
     () => toGuestSessionSnapshot(
       currentSessionId
-        ? {
-          id: session?.id ?? currentSessionId,
-          title: session?.title ?? (actionItem && 'sessionTitle' in actionItem ? actionItem.sessionTitle : undefined),
-          busy: sessionBusy,
-          model: session?.model,
-          agent: session?.agent,
-        }
+        ? { id: session?.id ?? currentSessionId, title: sessionTitle, busy: sessionBusy, model: session?.model, agent: session?.agent }
         : null,
     ),
-    [actionItem, currentSessionId, session, sessionBusy],
+    [currentSessionId, session?.agent, session?.id, session?.model, sessionBusy, sessionTitle],
+  );
+  const sessionTokens = session?.tokens ?? null;
+  const sessionSnapshot = React.useMemo(
+    () => (baseSessionSnapshot ? { ...baseSessionSnapshot, context, tokens: sessionTokens } : null),
+    [baseSessionSnapshot, context, sessionTokens],
   );
 
   const readableColors = React.useMemo(() => getReadableThemeColors(currentTheme), [currentTheme]);
@@ -299,7 +288,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     },
     locale,
     directory: directory || null,
-    session: sessionSnapshot,
+    session: baseSessionSnapshot,
     surface: headless && guest?.backgroundEntry ? 'background' : surface,
     connection,
     settings: oauthStatus?.settings ?? {},
@@ -309,7 +298,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     features,
     device,
     };
-  }, [block, connection, currentTheme, device, pageColors, readableColors, typography, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, sessionSnapshot, surface]);
+  }, [block, connection, currentTheme, device, pageColors, readableColors, typography, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, baseSessionSnapshot, surface]);
+  const hostState = React.useMemo<HostReadyContext>(() => ({ ...ready, session: sessionSnapshot }), [ready, sessionSnapshot]);
 
   const fileEditorEntry = surface === 'file' && fileEditor
     ? guest?.fileEditors?.find((editor) => editor.id === fileEditor.editorId)?.entry ?? null
@@ -330,8 +320,9 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     guestId, entry: guestEntry, instanceKey: frameKey, enabled: guestEnabled, origins: approvedOrigins, reuseDocument: surface === 'block' || headless,
   });
 
-  const readyRef = React.useRef(ready);
-  readyRef.current = ready;
+  const readyRef = React.useRef(hostState);
+  readyRef.current = hostState;
+  const sentSessionRef = React.useRef<HostReadyContext['session'] | undefined>(undefined);
   const directoryRef = React.useRef(directory);
   directoryRef.current = directory;
   const effectiveDirectoryRef = React.useRef(effectiveDirectory);
@@ -455,6 +446,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     postToGuest(buildReadyMessage(readyRef.current));
     postToGuest(buildDirectoryMessage(directoryRef.current || null));
     postToGuest(buildSessionMessage(readyRef.current.session));
+    sentSessionRef.current = readyRef.current.session;
     postToGuest(buildConnectionMessage(readyRef.current.connection));
     postToGuest(buildSettingsMessage(readyRef.current.settings));
     postToGuest(buildItemMessage(readyRef.current.item));
@@ -1038,9 +1030,17 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
 
   React.useEffect(() => () => stopOauthPoll(), [frameKey, stopOauthPoll]);
 
+  const pushedReadyRef = React.useRef<{ ready: HostReadyContext; directory: typeof directory } | null>(null);
   React.useEffect(() => {
-    pushHostState();
-  }, [pushHostState, ready, directory]);
+    const pushed = pushedReadyRef.current;
+    if (pushed?.ready !== ready || pushed.directory !== directory) {
+      pushedReadyRef.current = { ready, directory };
+      pushHostState();
+    } else if (sentSessionRef.current !== sessionSnapshot) {
+      sentSessionRef.current = sessionSnapshot;
+      postToGuest(buildSessionMessage(sessionSnapshot));
+    }
+  }, [pushHostState, postToGuest, ready, directory, sessionSnapshot]);
 
   React.useEffect(() => {
     if (headless || surface === 'status' || surface === 'file' || surface === 'popover' || surface === 'block' || surface === 'page' || catalogStatus !== 'ready' || guest?.entry) {

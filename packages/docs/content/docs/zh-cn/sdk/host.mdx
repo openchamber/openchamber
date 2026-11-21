@@ -36,6 +36,8 @@ const host = connectHost();
 
 访问令牌永远不会出现在这里，也不会出现在 `request` 的结果中。
 
+`ready.session` 和 `onSession` 还提供可选的 `context` 与 `tokens` 字段。`context: { tokens, limit } | null` 表示最近一次助手步骤后的上下文窗口占用量；如果不知道模型的窗口上限，`limit` 为 `null`。上下文压缩后，`context` 会保持 `null`，直到下一次测量。`tokens: { prompt, output, reasoning, cacheRead, cacheWrite, cacheHitPercent } | null` 包含会话累计的 token 用量。`prompt` 包括未缓存的输入以及缓存读写；没有提示词 token 时 `cacheHitPercent` 为 `null`。尚无测量数据时两个字段均为 `null`；旧版主机会省略这些字段。更新通过 `onSession` 推送。
+
 `onDirectory`、`onSession`、`onSessionLifecycle`、`onConnection`、`onSettings` 和 `onItem` 在你较晚订阅时会重放最新值，之后随变化持续触发。
 
 `theme.tokens` 包含 `primaryText`、`successText`、`warningText`、`errorText` 和 `infoText`。这些必填字段提供宿主计算的文字颜色，用于中性背景和 UI kit 的浅色控件，而非实心彩色填充。`applyHostReady` 会在每次快照中应用这些值。CSS 变量见 [UI kit](/sdk/ui/)。

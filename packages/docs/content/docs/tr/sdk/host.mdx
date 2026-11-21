@@ -36,6 +36,8 @@ Bu, yalnızca bir kez çalışan bir bağlama callback'i değildir. Arayüzü ve
 
 Erişim token'ları burada da, `request` sonucunda da asla görünmez.
 
+`ready.session` ve `onSession` isteğe bağlı `context` ve `tokens` alanlarını da sağlar. `context: { tokens, limit } | null`, son asistan adımından sonra bağlam penceresinin doluluk oranını gösterir; model sınırı bilinmiyorsa `limit` değeri `null` olur. Sıkıştırmadan sonra yeni ölçüme kadar `context` değeri `null` kalır. `tokens: { prompt, output, reasoning, cacheRead, cacheWrite, cacheHitPercent } | null`, oturumun birikimli token kullanımını içerir. `prompt` önbelleksiz girdiyi ve önbellek okuma/yazmalarını kapsar. Prompt tokenı yoksa `cacheHitPercent` değeri `null` olur. Ölçümden önce iki alan da `null` olur; eski host'lar bu alanları içermez. Değişiklikler `onSession` üzerinden bildirilir.
+
 `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` ve `onItem` geç abone olduğunuzda en son değeri yeniden gönderir, sonra değiştikçe tetiklenmeye devam eder.
 
 `theme.tokens`, `primaryText`, `successText`, `warningText`, `errorText` ve `infoText` alanlarını içerir. Bu zorunlu alanlar, host'un nötr arka planlar ve UI kit'in hafif renkli kontrolleri için hesapladığı metin renklerini taşır; düz renk dolguları için değildir. `applyHostReady` her durum güncellemesinde bunları uygular. CSS değişkenleri için [UI kit](/sdk/ui/) sayfasına bakın.

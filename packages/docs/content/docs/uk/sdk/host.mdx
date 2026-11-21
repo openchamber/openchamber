@@ -36,6 +36,8 @@ const host = connectHost();
 
 Токени доступу тут ніколи не з'являються, як і в результаті `request`.
 
+`ready.session` і `onSession` також надають необов'язкові поля `context` і `tokens`. `context: { tokens, limit } | null` показує заповнення контекстного вікна після останнього кроку асистента; `limit` дорівнює `null`, якщо межа моделі невідома. Після стиснення `context` залишається `null` до наступного вимірювання. `tokens: { prompt, output, reasoning, cacheRead, cacheWrite, cacheHitPercent } | null` містить накопичене використання токенів сеансу. `prompt` включає некешований ввід і читання та запис кешу. Без токенів запиту `cacheHitPercent` дорівнює `null`. До появи даних обидва значення `null`; старі хости пропускають поля. Зміни надходять через `onSession`.
+
 `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` і `onItem` віддають останнє значення, навіть якщо ви підписалися пізно, а далі спрацьовують при кожній зміні.
 
 `theme.tokens` містить `primaryText`, `successText`, `warningText`, `errorText` та `infoText`. Ці обов'язкові поля містять обчислені хостом кольори тексту для нейтрального фону й тонованих елементів UI-набору, а не суцільних кольорових заливок. `applyHostReady` застосовує їх із кожним знімком стану. CSS-змінні описані в [UI-наборі](/sdk/ui/).

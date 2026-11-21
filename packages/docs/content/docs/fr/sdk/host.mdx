@@ -36,6 +36,8 @@ Ce n'est pas un callback de montage unique. Montez l'interface et inscrivez les 
 
 Les tokens d'accès n'apparaissent jamais ici ni dans un résultat de `request`.
 
+`ready.session` et `onSession` fournissent aussi les champs facultatifs `context` et `tokens`. `context: { tokens, limit } | null` indique le remplissage de la fenêtre de contexte après la dernière étape de l'assistant ; `limit` vaut `null` si la limite du modèle est inconnue. Après une compaction, `context` reste `null` jusqu'à une nouvelle mesure. `tokens: { prompt, output, reasoning, cacheRead, cacheWrite, cacheHitPercent } | null` contient les totaux cumulés de la session. `prompt` comprend l'entrée non mise en cache et les lectures et écritures du cache. `cacheHitPercent` vaut `null` sans tokens de prompt. Les deux valeurs sont `null` avant toute mesure ; les anciens hôtes omettent ces champs. Les changements arrivent via `onSession`.
+
 `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` et `onItem` rejouent la dernière valeur quand vous vous abonnez tard, puis continuent à se déclencher à chaque changement.
 
 `theme.tokens` contient `primaryText`, `successText`, `warningText`, `errorText` et `infoText`. Ces champs obligatoires contiennent les couleurs de texte calculées par l'hôte pour les fonds neutres et les contrôles légèrement teintés du kit UI, pas pour les aplats de couleur vive. `applyHostReady` les applique à chaque instantané. Consultez le [kit UI](/sdk/ui/) pour les variables CSS.

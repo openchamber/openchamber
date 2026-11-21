@@ -36,6 +36,8 @@ Het is geen eenmalige callback voor het opbouwen van de interface. Bouw uw UI en
 
 Toegangstokens verschijnen hier nooit, ook niet in een `request`-resultaat.
 
+`ready.session` en `onSession` bieden ook de optionele velden `context` en `tokens`. `context: { tokens, limit } | null` geeft de vulling van het contextvenster na de laatste assistentstap aan; `limit` is `null` als de modellimiet onbekend is. Na compactie blijft `context` `null` tot een nieuwe meting. `tokens: { prompt, output, reasoning, cacheRead, cacheWrite, cacheHitPercent } | null` bevat de cumulatieve sessietotalen. `prompt` omvat ongecachete invoer en cachelees- en schrijfbewerkingen. `cacheHitPercent` is `null` zonder prompttokens. Beide waarden zijn `null` voordat ze bekend zijn; oudere hosts laten de velden weg. Wijzigingen komen binnen via `onSession`.
+
 `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` en `onItem` geven bij een late aanmelding eerst de recentste waarde door en blijven daarna wijzigingen melden.
 
 `theme.tokens` bevat `primaryText`, `successText`, `warningText`, `errorText` en `infoText`. Deze verplichte velden bevatten door de host berekende tekstkleuren voor neutrale achtergronden en lichtgekleurde UI-kitonderdelen, niet voor volle kleurvlakken. `applyHostReady` past ze bij elke momentopname toe. Zie [UI-kit](/nl/sdk/ui/) voor de CSS-variabelen.

@@ -4,7 +4,8 @@ import type { FileEditorChange, FileEditorDocument, FileSnapshotRequest, FileSna
 import type { GuestMicrophoneEndReason, MicrophoneOpenRequest, MicrophoneOpenResult } from './microphone.ts';
 import type { OpenCommitRequest, OpenWalkthroughRequest } from './navigation.ts';
 import type { GuestRunningShellsSnapshot, GuestShellOutputRequest, GuestShellOutputResult, GuestShellStopResult, GuestShellsSubscription } from './shells.ts';
-import type { GuestSessionWorktree, GuestStorageRequest, GuestStorageResult, GuestWorkspaceQuery, GuestWorkspaceSnapshot, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestWorktree } from './workspace.ts';
+import type { SessionSnapshot, GuestSessionWorktree, GuestStorageRequest, GuestStorageResult, GuestWorkspaceQuery, GuestWorkspaceSnapshot, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestWorktree } from './workspace.ts';
+export type { SessionSnapshot } from './workspace.ts';
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
 import type { GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest } from './popover.ts';
 
@@ -57,14 +58,6 @@ export type HostTheme = {
 export const START_SESSION_SENT = ['sent', 'no-model', 'skipped', 'failed'] as const;
 
 export type StartSessionSent = (typeof START_SESSION_SENT)[number];
-
-export type SessionSnapshot = {
-  id: string;
-  title: string;
-  busy: boolean;
-  model?: string;
-  agent?: string;
-};
 
 export type GuestHostSurface = 'panel' | 'dialog' | 'page' | 'background' | 'status' | 'file' | 'popover' | 'block';
 
