@@ -256,6 +256,22 @@ describe('list-backed references', () => {
     expect(detail.comments[0]?.thread).toMatchObject({ id: 'abc', resolved: true, canResolve: true, canReply: true, replies: [{ body: 'Done' }] });
   });
 
+  test("carries the context's reviews, and leaves them out when the host does not send them", async () => {
+    const page = await fetchListBackedReferencePage(reads(), context, provider, 'pull', DEFAULT_REPOSITORY_FILTER, '', null);
+    if (page.kind !== 'page' || !page.items[0]) throw new Error('expected a page');
+    const reviews = [
+      { id: 'R1', state: 'approved' as const, author: { login: 'mona' }, submittedAt: null },
+      { id: 'R2', state: 'dismissed' as const, author: { login: 'hubot' }, submittedAt: '2026-01-02T00:00:00Z' },
+    ];
+    const detail = await fetchListBackedReferenceDetail(reads({
+      changeRequestContext: async () => ({ identity, project, changeRequest: mergeRequest, issueComments: [], reviewComments: [], files: [], reviews }),
+    }), context, page.items[0]);
+    expect(detail.pull?.reviews).toEqual(reviews);
+
+    const silent = await fetchListBackedReferenceDetail(reads(), context, page.items[0]);
+    expect('reviews' in (silent.pull ?? {})).toBe(false);
+  });
+
   test('merge request rows carry their labels', async () => {
     const page = await fetchListBackedReferencePage(reads({
       changeRequestsList: async () => ({ items: [{ ...mergeRequest, labels: [{ name: 'bug', color: 'd73a4a' }] }], page: 1, hasMore: false }),

@@ -5,6 +5,7 @@ import { registerProviderRoutes } from './provider-routes.js';
 import { registerSourceControlRoutes } from './routes.js';
 import { createProviderDescriptors } from './provider-descriptors.js';
 import { createSourceControlProviders } from './provider-registry.js';
+import { buildExtensionDescriptor } from './extension-descriptor.js';
 import { gitlabDescriptor } from '../gitlab/descriptor.js';
 
 /**
@@ -288,3 +289,114 @@ describe('provider routes for change hosts', () => {
   });
 });
 
+
+const extensionContribution = (reviewThreads) => ({
+  wire: 1,
+  label: 'Forge',
+  terminology: { changeRequest: 'pullRequest', ci: 'checks' },
+  referencePrefix: { changeRequest: '#', issue: '#' },
+  repositoryPath: 'owner/name',
+  instances: {
+    defaultInstances: ['https://forge.example.com'],
+    custom: false,
+    allowLoopbackHttp: false,
+    allowPort: false,
+    placeholder: 'https://forge.example.com',
+  },
+  capabilities: {
+    projects: true, issues: true, changeRequests: true, draftChangeRequests: false,
+    merge: false, ci: false, comments: true, commentEdit: false, reviews: false,
+    state: true, labels: false, reviewers: false, changeRequestPatch: false, liveSummaries: false,
+    reviewThreads,
+  },
+  login: { kind: 'service', hint: 'Sign in with the forge CLI' },
+  transport: { httpsUsername: { kind: 'login' }, appendDotGitToHttpsClone: false },
+  limits: { commentMaxLength: 65_536, reviewerId: 'login', labelsMax: 20, reviewersMax: 10 },
+  trackedItems: { batchLimit: 25 },
+  presentation: {
+    abbreviation: 'PR',
+    promptNoun: 'pull request',
+    sharedNumberSpace: true,
+    urls: { changeRequest: ['/{owner}/{repo}/pulls/{number}'], issue: ['/{owner}/{repo}/issues/{number}'] },
+    features: { authorCanReview: false, issueCloseReason: false },
+    changeRequestTemplates: [],
+  },
+});
+
+const extensionWith = (reviewThreads) => buildExtensionDescriptor({
+  guestId: 'forge',
+  contribution: extensionContribution(reviewThreads),
+  guest: { name: 'Forge', version: '1.0.0' },
+});
+
+describe('extension provider routes', () => {
+  const origin = 'https://forge.example.com';
+
+  const routesFor = (descriptor) => {
+    const impl = {
+      ...fakeImplementation(),
+      auth: {
+        ...fakeImplementation().auth,
+        resolveAccount: vi.fn(async () => ({
+          instance: origin, accountId: 'account', credentialRevision: 1, providerUserId: `${origin}#7`,
+        })),
+      },
+      mutations: {
+        routes: ['/pr/thread/reply'],
+        prepare: vi.fn(() => ({ kind: 'change-request-thread-reply', input: {}, digest: () => 'a'.repeat(64) })),
+        resolveTarget: vi.fn(async () => ({ providerTarget: { owner: 'mona', name: 'teapot' }, target: { number: 5 } })),
+        perform: vi.fn(async () => ({})),
+        reconcile: vi.fn(async () => ({ state: 'succeeded' })),
+      },
+    };
+    const descriptors = createProviderDescriptors();
+    descriptors.attachExtension(descriptor);
+    const providers = createSourceControlProviders({
+      descriptors,
+      loaders: { [descriptor.id]: async () => ({ createProvider: () => impl }) },
+    });
+    const mutationExecutor = {
+      read: vi.fn(async () => null),
+      execute: vi.fn(async ({ record, perform }) => {
+        const result = await perform();
+        return { record: { ...record, result }, replayed: false };
+      }),
+    };
+    const app = express();
+    app.use(express.json());
+    registerSourceControlRoutes(app, {
+      providers,
+      bindingService: {
+        validateReadContext: vi.fn(),
+        validateMutationContext: vi.fn(async (body) => ({
+          provider: descriptor.id, instance: origin, accountId: 'account', repositoryId: 'repo',
+          bindingRevision: 1, primaryRemote: 'origin', directory: '/repo', idempotencyKey: body.idempotencyKey,
+          target: { number: 5 },
+        })),
+        accountUnavailable: vi.fn(),
+        accountConnected: vi.fn(),
+      },
+      identityProvisioning: { backfillAccountIdentities: vi.fn(), ensureAccountIdentity: vi.fn(), repointAccountIdentities: vi.fn() },
+      mutationExecutor,
+    });
+    return { app, impl };
+  };
+
+  it('serves /pr/thread/reply when the extension declares reviewThreads.reply', async () => {
+    const { app, impl } = routesFor(extensionWith({ start: false, reply: true, resolve: false }));
+    const response = await request(app).post('/api/source-control/ext-forge/pr/thread/reply')
+      .send({ instance: origin, idempotencyKey: 'key-1', threadId: 'thread-1', body: 'Agreed' })
+      .expect(200);
+    expect(response.body.status).toBe('succeeded');
+    expect(impl.mutations.prepare).toHaveBeenCalledWith(expect.objectContaining({ route: '/pr/thread/reply' }));
+  });
+
+  it('answers a stable 501 for /pr/thread/reply when the extension leaves reviewThreads off', async () => {
+    const { app, impl } = routesFor(extensionWith({ start: false, reply: false, resolve: false }));
+    const response = await request(app).post('/api/source-control/ext-forge/pr/thread/reply')
+      .send({ instance: origin, idempotencyKey: 'key-2', threadId: 'thread-1', body: 'Agreed' })
+      .expect(501);
+    expect(response.body.code).toBe('SOURCE_CONTROL_CAPABILITY_UNSUPPORTED');
+    expect(impl.mutations.prepare).not.toHaveBeenCalled();
+  });
+});

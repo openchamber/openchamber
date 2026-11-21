@@ -1,3 +1,4 @@
+export type { SourceControlReviewState, SourceControlReviewSummary } from './source-control-reviews.ts';
 
 export const BROWSER_PROVIDER_PATH = '/browser-control';
 
@@ -209,7 +210,6 @@ export const readBrowserProviderRequest = (body: string): BrowserProviderRequest
   return { requestId, action, parameters, context: readContext(context) } as BrowserProviderRequest;
 };
 
-
 export const SOURCE_CONTROL_PROVIDER_PATH = '/source-control';
 export const SOURCE_CONTROL_PROVIDER_WIRE_VERSION = 1;
 
@@ -231,7 +231,7 @@ export const SOURCE_CONTROL_PROVIDER_METHODS = [
   'readChangeRequestFile',
   'liveSummaries',
   'readChangeRequestHead',
-  'resolveChangeRequestSource',
+  'resolveChangeRequestSource', 'reviewState',
   'mutation.resolveTarget',
   'mutation.perform',
   'mutation.reconcile',
@@ -339,7 +339,7 @@ export type SourceControlProviderInputs = {
     issueRefs: Array<{ owner: string; repo: string; number: number }>;
   };
   readChangeRequestHead: ReadInput & { number: number };
-  resolveChangeRequestSource: ReadInput & { project: SourceControlProjectRef; number: number; expectedHeadSha: string };
+  resolveChangeRequestSource: ReadInput & { project: SourceControlProjectRef; number: number; expectedHeadSha: string }; reviewState: ReadInput & { number: number; project?: SourceControlProjectSelector };
   'mutation.resolveTarget': { context: SourceControlJsonObject; kind: string; input: SourceControlJsonObject; replayOf?: SourceControlJsonObject };
   'mutation.perform': MutationStepInput;
   'mutation.reconcile': MutationStepInput;

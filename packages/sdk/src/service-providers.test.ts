@@ -106,9 +106,9 @@ describe('source-control provider contract', () => {
     expect(readSourceControlProviderRequest(call({ session: { ...session, handle: '' } }))).toBeNull();
   });
 
-  test('forwards the auth hooks, the fifteen reads and the three mutation steps, each with its deadline', () => {
-    expect(SOURCE_CONTROL_PROVIDER_METHODS.filter((method) => !method.includes('.'))).toHaveLength(15);
-    expect(SOURCE_CONTROL_PROVIDER_METHODS).toHaveLength(21);
+  test('forwards the auth hooks, the sixteen reads and the three mutation steps, each with its deadline', () => {
+    expect(SOURCE_CONTROL_PROVIDER_METHODS.filter((method) => !method.includes('.'))).toHaveLength(16);
+    expect(SOURCE_CONTROL_PROVIDER_METHODS).toHaveLength(22);
     expect(isSourceControlProviderMethod('mutation.perform')).toBe(true);
     expect(isSourceControlProviderMethod('references')).toBe(false);
     expect(sourceControlProviderTimeoutMs('changeRequestStatus')).toBe(12_000);
@@ -248,6 +248,17 @@ describe('source-control provider contract', () => {
       submitRequirements: [{ name: 'Code-Review', status: 'unsatisfied' }],
       revisions: [{ number: 1, sha: 'd'.repeat(40), createdAt: '2026-10-01T00:00:00Z', ref: 'refs/changes/12/12/1' }],
     }).success).toBe(true);
+  });
+
+  test('a change request context checks the reviews it carries', () => {
+    const review = { id: '301', state: 'approved', author: { login: 'octo' }, submittedAt: '2026-10-03T10:00:00Z' };
+    expect(schemas.data.changeRequestContext.safeParse({ reviews: [review] }).success).toBe(true);
+    // Fields OpenChamber does not read still pass, including extra ones in an entry.
+    expect(schemas.data.changeRequestContext.safeParse({ reviews: [{ ...review, extra: 1 }], voteLabels: [] }).success).toBe(true);
+    expect(schemas.data.changeRequestContext.safeParse({ reviews: [{ ...review, state: 'pendingish' }] }).success).toBe(false);
+    expect(schemas.data.changeRequestContext.safeParse({ reviews: [{ ...review, id: '' }] }).success).toBe(false);
+    expect(schemas.data.changeRequestContext.safeParse({ reviews: [{ ...review, author: 'octo' }] }).success).toBe(false);
+    expect(schemas.data.changeRequestContext.safeParse({ reviews: 'none' }).success).toBe(false);
   });
 
   test('invalid reviewer states do not discard comments or references', () => {

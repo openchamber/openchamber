@@ -8,9 +8,6 @@ export type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
 import type {
   ChangeRequest,
   ChangeRequestContext,
-  ChangeRequestRevision,
-  ChangeRequestSubmitRequirement,
-  ChangeRequestVoteLabel,
   CISummary,
   Label,
   ChangeRequestStatus,
@@ -19,7 +16,6 @@ import type {
   IssueComment,
   MergeChangeRequestInput,
   PageResult,
-  PullRequestStack,
   ProjectUpstream,
   ReadyChangeRequestInput,
   DraftChangeRequestInput,
@@ -34,6 +30,7 @@ import type {
   ReviewCommentInput,
   ReviewCommentUpdateInput,
   ReviewDiscardInput,
+  ReviewDismissInput,
   SetDiscussionAnswerInput,
   SetDiscussionStateInput,
   SetStateInput,
@@ -69,6 +66,10 @@ import type {
   UpdateChangeRequestInput,
   UpdateIssueInput,
   UpdateDiscussionInput,
+  ChangeRequestRevision,
+  ChangeRequestSubmitRequirement,
+  ChangeRequestVoteLabel,
+  PullRequestStack,
 } from '../source-control/types';
 import type { SourceControlProviderDescriptor } from '../source-control/providers/descriptor';
 import type { TrackerAPI } from '../trackers/types';
@@ -1547,6 +1548,8 @@ export type RepositoryChangeRequestReference = RepositoryReferenceCommon & {
   revisionNumber?: number;
 };
 
+import type { RepositoryReferenceReview } from '../source-control/reviewSummary';
+
 export type ReviewCommentExcerpt = { startLine: number; lines: string[] };
 
 export type RepositoryReferenceComment = {
@@ -1570,6 +1573,7 @@ export type RepositoryReferenceThread = {
   resolved: boolean;
   canResolve: boolean;
   canReply: boolean;
+  outdated?: boolean;
   replies: RepositoryReferenceComment[];
 };
 
@@ -1583,6 +1587,7 @@ export type RepositoryReferenceDetail = {
     reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
     reviewers: RepositoryReferenceReviewer[];
     reviewerStates?: RepositoryReferenceReviewerState[];
+    reviews?: RepositoryReferenceReview[];
     additions: number;
     deletions: number;
     changedFiles: number;
@@ -1701,6 +1706,7 @@ export interface SourceControlAPI {
   changeRequestReviewCommentUpdate(payload: ReviewCommentUpdateInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestReviewCommentDelete(payload: ReviewCommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestReviewDiscard(payload: ReviewDiscardInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  changeRequestDismissReview(payload: ReviewDismissInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueComment(payload: CommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueCommentUpdate(payload: CommentUpdateInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueCommentDelete(payload: CommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;

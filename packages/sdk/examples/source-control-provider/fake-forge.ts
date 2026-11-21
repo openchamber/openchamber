@@ -35,6 +35,29 @@ type ForgeTimelineEvent = {
   ref_comment?: { created_at?: string; user?: ForgeTimelineUser };
 };
 
+type ForgeReviewComment = {
+  id: number;
+  body: string;
+  path: string;
+  line: number | null;
+  start_line: number | null;
+  side: 'LEFT' | 'RIGHT';
+  created_at: string;
+  user: { id: number; login: string };
+};
+
+type ForgeReview = {
+  id: number;
+  state: 'PENDING' | 'COMMENT' | 'APPROVED' | 'REQUEST_CHANGES' | 'REQUEST_REVIEW' | 'DISMISSED';
+  body: string;
+  user: { id: number; login: string };
+  commit_id: string;
+  comments: ForgeReviewComment[];
+  dismissed?: boolean;
+  stale?: boolean;
+  submitted_at?: string;
+};
+
 export type FakeForgeWrite = { method: string; path: string };
 
 export type FakeForge = {
@@ -42,6 +65,8 @@ export type FakeForge = {
   writes: FakeForgeWrite[];
   refuseToken(token: string): void;
   push(branch: string, sha: string): void;
+  /** Answer the next review read for the pull request with a 500, as an outage would. */
+  failNextReviews(number: number): void;
   close(): Promise<void>;
 };
 
@@ -105,6 +130,19 @@ export const startFakeForge = async (): Promise<FakeForge> => {
     },
   ];
   let commentId = 100;
+  let reviewSeq = 300;
+  let reviewCommentId = 500;
+  const failingReviews = new Set<number>();
+  const reviews = new Map<number, ForgeReview[]>([[2, [{
+    id: 300, state: 'COMMENT', body: 'Looks good', user: { id: 8, login: 'octo' }, commit_id: SHA_B, comments: [], dismissed: false,
+    submitted_at: '2026-10-02T10:00:00Z',
+  }, {
+    id: 301, state: 'APPROVED', body: '', user: { id: 8, login: 'octo' }, commit_id: SHA_B, comments: [],
+    submitted_at: '2026-10-03T10:00:00Z',
+  }, {
+    id: 302, state: 'REQUEST_CHANGES', body: 'Old concern', user: { id: 8, login: 'octo' }, commit_id: SHA_A, comments: [],
+    stale: true, submitted_at: '2026-10-01T10:00:00Z',
+  }]]]);
   let origin = '';
 
   const user = { ...FAKE_FORGE_USER, login: FAKE_FORGE_OWNER, avatar_url: '' };
@@ -287,6 +325,84 @@ export const startFakeForge = async (): Promise<FakeForge> => {
           return { filename: path, status: 'changed', additions, deletions, changes: additions + deletions };
         }), url, response) };
       }
+      if (action === 'reviews') {
+        const list = reviews.get(item.number) ?? [];
+        if (method === 'GET' && rest.length === 3) {
+          if (failingReviews.delete(item.number)) return { status: 500, body: { message: 'reviews are unavailable' } };
+          return { status: 200, body: list };
+        }
+        if (method === 'POST' && rest.length === 3) {
+          const body = await readBody(request);
+          if (body.event !== 'PENDING') return { status: 422, body: { message: 'only a pending review is created here' } };
+          reviewSeq += 1;
+          const review: ForgeReview = {
+            id: reviewSeq, state: 'PENDING', body: textOf(body.body), user: { id: user.id, login: user.login },
+            commit_id: item.pull.sha, comments: [],
+          };
+          list.push(review);
+          reviews.set(item.number, list);
+          writes.push({ method, path });
+          return { status: 201, body: review };
+        }
+        const review = list.find((entry) => entry.id === Number(rest[3]));
+        if (!review) return notFound;
+        if (method === 'DELETE' && rest.length === 4) {
+          if (review.state !== 'PENDING') return { status: 422, body: { message: 'only a pending review is discarded' } };
+          reviews.set(item.number, list.filter((entry) => entry.id !== review.id));
+          writes.push({ method, path });
+          return { status: 204, body: null };
+        }
+        if (method === 'POST' && rest.length === 5 && rest[4] === 'dismissals') {
+          const message = textOf((await readBody(request)).message);
+          if (!message) return { status: 422, body: { message: 'message is required' } };
+          review.state = 'DISMISSED';
+          review.dismissed = true;
+          writes.push({ method, path });
+          return { status: 200, body: review };
+        }
+        if (method === 'POST' && rest.length === 5 && rest[4] === 'undismissals') {
+          review.state = 'COMMENT';
+          review.dismissed = false;
+          writes.push({ method, path });
+          return { status: 200, body: review };
+        }
+        if (rest[4] === 'comments') {
+          if (method === 'GET' && rest.length === 5) return { status: 200, body: review.comments };
+          if (method === 'POST' && rest.length === 5) {
+            const body = await readBody(request);
+            const text = textOf(body.body);
+            if (!text) return { status: 422, body: { message: 'body is required' } };
+            reviewCommentId += 1;
+            const comment: ForgeReviewComment = {
+              id: reviewCommentId, body: text, path: textOf(body.path),
+              line: Number.isSafeInteger(body.line) ? Number(body.line) : null,
+              start_line: Number.isSafeInteger(body.start_line) ? Number(body.start_line) : null,
+              side: body.side === 'LEFT' ? 'LEFT' : 'RIGHT',
+              created_at: '2026-10-04T10:00:00Z', user: { id: user.id, login: user.login },
+            };
+            review.comments.push(comment);
+            writes.push({ method, path });
+            return { status: 201, body: comment };
+          }
+          if (rest.length === 6) {
+            const comment = review.comments.find((entry) => String(entry.id) === rest[5]);
+            if (!comment) return notFound;
+            if (method === 'PATCH') {
+              const text = textOf((await readBody(request)).body);
+              if (!text) return { status: 422, body: { message: 'body is required' } };
+              comment.body = text;
+              writes.push({ method, path });
+              return { status: 200, body: comment };
+            }
+            if (method === 'DELETE') {
+              review.comments = review.comments.filter((entry) => entry !== comment);
+              writes.push({ method, path });
+              return { status: 204, body: null };
+            }
+          }
+        }
+        return notFound;
+      }
       if (method === 'PATCH' && rest.length === 2) {
         const body = await readBody(request);
         const title = textOf(body.title);
@@ -399,6 +515,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       branches.set(branch, sha);
       for (const item of items) if (item.pull?.head === branch && item.pull.headRepo === 1 && item.state === 'open') item.pull.sha = sha;
     },
+    failNextReviews: (number) => { failingReviews.add(number); },
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 };

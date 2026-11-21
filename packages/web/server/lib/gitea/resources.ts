@@ -8,6 +8,7 @@ import {
   mapGiteaReviewBody, mapGiteaReviewComment, mapGiteaReviewerStates, mapGiteaUser, mapGiteaVerdict, splitUnifiedDiff, SUBMITTED_REVIEW_STATES,
 } from './mappers.js';
 import { resolveGiteaReposFromDirectory } from './repo.js';
+import { giteaReviewMethods, readReviewSummaries } from './review-summaries.js';
 import { readTimelineCommits, readTimelineReferences, withIssueReferences, withReferences } from './references.js';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
 import type { ProviderMutationContext, ProviderReadContext } from '../source-control/provider-contract.js';
@@ -81,7 +82,6 @@ const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
 const COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 interface ListStates { [state: string]: string | undefined }
 const LIST_STATES: ListStates = { open: 'open', closed: 'closed', merged: 'closed', all: 'all' };
-
 const carriesLabels = (item: Input, wanted: string[] | null | undefined) => !wanted
   || wanted.every((name) => {
     const labels = hasFields(item) ? item.labels : undefined;
@@ -110,7 +110,6 @@ function requireMapped<T>(value: T | null, message: string): T {
   if (!value) throw malformed(message);
   return value;
 }
-
 export function createGiteaResourceService({
   origin, client, resolveRepos = resolveGiteaReposFromDirectory, provider = 'gitea', providerLabel = 'Gitea', sshUrl = null,
 }: GiteaResourceOptions) {
@@ -468,6 +467,7 @@ export function createGiteaResourceService({
         changeRequest: request,
         issueComments,
         reviewComments,
+        reviews: readReviewSummaries(reviews, identity),
         files,
         diff: diffText,
         ci,
@@ -902,6 +902,7 @@ export function createGiteaResourceService({
       if (!plainObject(raw) || !integer(raw.id)) throw malformed(`${providerLabel} returned an invalid review`);
       return { commented: body !== undefined };
     },
+    ...giteaReviewMethods(client, reviewsPath),
 
     async reviewState(directory: string, number: number, project?: Selector, remote?: Remote) {
       const { target, raw } = await findPull(directory, number, project, { remote });

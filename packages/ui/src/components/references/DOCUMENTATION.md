@@ -60,6 +60,9 @@ React checks the store version again after subscribing. This catches an answer t
 | `referenceCache.ts` | Stale-while-revalidate lists and values. |
 | `liveReferences.ts` | The followed live state laid over listed items and PR statuses. |
 | `PullStackRows.tsx` | A PR's stack map in the preview. |
+| `ReferenceReviews.tsx` | A change request's reviews under its decision: each reviewer's state, the overflow menu that dismisses another account's review with a reason and restores a dismissed one where the host can, and the withdraw action for the viewer's own approval on a host that dismisses only its own. |
+| `reviewDismissal.ts` | Which reviews the viewer may dismiss, by the host's dismissal mode, and which are the viewer's own approval to withdraw. |
+| `ReferenceMetaRow.tsx` | The preview's label/value row, shared by the detail rows and the review list. |
 | `resolveComposerReferences.ts`, `useAttachReferences.ts` | Turning confirmed items into composer chips with their full context. |
 | `referencePickerItems.ts` | Item union (`source: 'repository'`, or `source: 'tracker'` with its `provider`), sources (`'repository'` or `` `tracker:${id}` ``), keys, number labels, state looks, filters. |
 

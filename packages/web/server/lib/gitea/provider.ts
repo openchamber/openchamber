@@ -69,6 +69,7 @@ type Steps = {
   '/pr/review/comment/update': ExistingStep<CommentId & Body>;
   '/pr/review/comment/delete': ExistingStep<CommentId>;
   '/pr/review/discard': ExistingStep;
+  '/pr/review/dismiss': ExistingStep<StandardMutationInput & { reviewId: string; dismissed: boolean }>;
   '/pr/comment': ExistingStep<Body>;
   '/issues/comment': ExistingStep<Body>;
   '/issues/update': ExistingStep<Title>;
@@ -161,8 +162,16 @@ function mutationOperations(): Operations {
       perform: (service, _normalized, resolved) => service.discardReview(call(resolved)),
       reconcile: unknownOutcome,
     },
+    '/pr/review/dismiss': {
+      perform: (service, normalized, resolved) => service.dismissReview(call(resolved, {
+        reviewId: normalized.reviewId, dismissed: normalized.dismissed, message: normalized.message,
+      })),
+      reconcile: (service, resolved, normalized) => service.reconcileReviewDismiss(
+        resolved.providerTarget, normalized.reviewId, normalized.dismissed,
+      ),
+    },
   } satisfies Pick<Operations, '/pr/create' | '/pr/update' | '/pr/merge' | '/pr/ready' | '/pr/draft' | '/pr/review'
-    | '/pr/review/comment' | '/pr/review/comment/update' | '/pr/review/comment/delete' | '/pr/review/discard'>;
+    | '/pr/review/comment' | '/pr/review/comment/update' | '/pr/review/comment/delete' | '/pr/review/discard' | '/pr/review/dismiss'>;
   const comment = (): Operation<ExistingStep<Body>> => ({
     perform: (service, normalized, resolved) => service.comment(call(resolved, { body: normalized.body })),
     reconcile: unknownOutcome,

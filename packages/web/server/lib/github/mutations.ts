@@ -12,12 +12,15 @@ import {
   requireProviderArray,
 } from './mappers.js';
 import { readPendingReview } from './review-draft.js';
+import { reconcileReviewDismiss, normalizeReviewDismiss, performReviewDismiss, resolveReviewDismiss } from './review-dismiss.js';
+import { readReviewThread, replyToReviewThread, setReviewThreadResolved } from './review-thread-actions.js';
 import { isSourceControlInteger } from '../source-control/input-guards.js';
 import type { SourceControlJson, SourceControlJsonObject, SourceControlMutationTarget } from '@openchamber/sdk';
 import type { AccountIdentity, ProviderDescriptor, ProviderMutationContext, ProviderSession } from '../source-control/provider-contract.js';
 import type { MutationCompletion, MutationRecord, MutationResult } from '../source-control/mutation-storage.js';
 import type { GitHubResourceOptions } from './resources.js';
 import type { GitHubEnvelope, Octokit, RestEndpointMethodTypes } from './contracts.js';
+import { fieldAt, gqlPath, requireField } from './contracts.js';
 import type { PullInput } from './mappers.js';
 
 type MutationTarget = SourceControlMutationTarget;
@@ -52,6 +55,8 @@ export interface GitHubMutationInput {
   labels?: string[]; reviewers?: string[]; replyTo?: string | undefined; state?: ItemState; reason?: SourceControlJson | undefined;
   commentId?: number | string; answer?: boolean; threadId?: string; resolved?: boolean; verdict?: SourceControlJson | undefined;
   path?: string; side?: ReviewPosition['side']; line?: number; startLine?: number;
+  reviewId?: string | number;
+  message?: string;
 }
 export interface GitHubMutationTarget {
   sourceProject?: Project | null;
@@ -87,15 +92,6 @@ const statusOf = (cause: unknown) => {
   return failureFields(error?.response)?.status ?? error?.status;
 };
 const isArray = (value: unknown): value is unknown[] => Array.isArray(value);
-const hasGraphQLField = <Key extends string>(value: unknown, _key: Key): value is { [Name in Key]?: unknown } =>
-  value != null;
-const fieldAt = <Key extends string>(value: GitHubEnvelope['data'], key: Key) =>
-  hasGraphQLField(value, key) ? value[key] : undefined;
-const gqlPath = (value: GitHubEnvelope['data'], ...keys: string[]) => keys.reduce<GitHubEnvelope['data']>(fieldAt, value);
-const requireField = <Value>(value: Value, name: string): NonNullable<Value> => {
-  if (value == null) throw new TypeError(`GitHub mutation field ${name} is missing`);
-  return value;
-};
 const isMergeMethod = (value: unknown): value is MergeMethod => value === 'merge' || value === 'squash' || value === 'rebase';
 const isJsonBoolean = (value: SourceControlJson | undefined): value is boolean =>
   Object.prototype.toString.call(value) === '[object Boolean]';
@@ -140,6 +136,7 @@ const ROUTE_OPERATIONS = Object.freeze({
   '/pr/review/comment/update': 'review-comment-update',
   '/pr/review/comment/delete': 'review-comment-delete',
   '/pr/review/discard': 'review-discard',
+  '/pr/review/dismiss': 'review-dismiss',
   '/pr/thread/reply': 'thread-reply',
   '/pr/thread/resolve': 'thread-resolve',
   '/pr/comment/update': 'change-request-comment-update',
@@ -382,6 +379,7 @@ function normalizeOperation(operation: string, body: SourceControlJsonObject, co
     return { input: { commentId }, digest: (target) => digestOf({ target, commentId }) };
   }
   if (operation === 'review-discard') return { input: {}, digest: (target) => digestOf({ target }) };
+  if (operation === 'review-dismiss') return normalizeReviewDismiss(body, digestOf, limits, mutationError);
   throw mutationError('Mutation kind is invalid');
 }
 
@@ -580,47 +578,6 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     }
   };
 
-  const REVIEW_THREAD_QUERY = `query($id: ID!) {
-  node(id: $id) {
-    __typename
-    ... on PullRequestReviewThread { isResolved pullRequest { number repository { name owner { login } } } }
-  }
-}`;
-  const readReviewThread = async (octokit: Octokit, threadId: string, project: Project, number: number) => {
-    let data: unknown;
-    try {
-      data = await octokit.graphql(REVIEW_THREAD_QUERY, { id: threadId });
-    } catch (error) {
-      const fields = failureFields(error);
-      if (!isArray(fields?.errors)) throw error;
-      data = fields?.data;
-    }
-    const node = fieldAt(data, 'node');
-    const pull = fieldAt(node, 'pullRequest');
-    const repository = fieldAt(pull, 'repository');
-    const login = gqlPath(repository, 'owner', 'login');
-    const name = fieldAt(repository, 'name');
-    if (fieldAt(node, '__typename') !== 'PullRequestReviewThread' || fieldAt(requireField(pull, 'pullRequest'), 'number') !== number
-      || !isProviderString(login) || !isProviderString(name)
-      || login.toLowerCase() !== project.owner.toLowerCase()
-      || name.toLowerCase() !== project.name.toLowerCase()) {
-      throw mutationError('Review thread is not on this pull request', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
-    }
-    return { isResolved: fieldAt(node, 'isResolved') };
-  };
-  const replyToReviewThread = async (octokit: Octokit, threadId: string, body: string) => {
-    let data: unknown;
-    try {
-      data = await octokit.graphql(
-        'mutation($threadId: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) { comment { id } } }',
-        { threadId, body },
-      );
-    } catch (error) {
-      throw graphqlRejection(error);
-    }
-    if (!isProviderString(gqlPath(data, 'addPullRequestReviewThreadReply', 'comment', 'id'))) throw invalidProviderPayload('GitHub returned an invalid reply');
-    return {};
-  };
   const PENDING_COMMENT_QUERY = `query($id: ID!) {
   node(id: $id) {
     __typename
@@ -706,17 +663,6 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       { id: pendingReviewId, event, body: body ?? null },
     );
     return gqlPath(data, 'submitPullRequestReview', 'pullRequestReview', 'state');
-  };
-  const setReviewThreadResolved = async (octokit: Octokit, threadId: string, resolved: boolean) => {
-    const field = resolved ? 'resolveReviewThread' : 'unresolveReviewThread';
-    let data: unknown;
-    try {
-      data = await octokit.graphql(`mutation($threadId: ID!) { ${field}(input: { threadId: $threadId }) { thread { isResolved } } }`, { threadId });
-    } catch (error) {
-      throw graphqlRejection(error);
-    }
-    if (gqlPath(data, field, 'thread', 'isResolved') !== resolved) throw invalidProviderPayload('GitHub returned an invalid thread state');
-    return {};
   };
   const DISCUSSION_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
@@ -981,8 +927,11 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       return sameNames(names, requireField(input.labels, 'labels')) ? { state: 'succeeded', result: {} } : unknownOutcome();
     }
     if (operation === 'thread-resolve') {
-      const thread = await readReviewThread(octokit, requireField(input.threadId, 'threadId'), project, requireField(target.number, 'number'));
+      const thread = await readReviewThread(octokit, requireField(input.threadId, 'threadId'), project, requireField(target.number, 'number'), mutationError);
       return thread.isResolved === input.resolved ? { state: 'succeeded', result: {} } : unknownOutcome();
+    }
+    if (operation === 'review-dismiss') {
+      return reconcileReviewDismiss(octokit, project, requireField(target.number, 'number'), Number(requireField(input.reviewId, 'reviewId')));
     }
     if (operation === 'labels' || operation === 'issue-labels') {
       const current = await octokit.rest.issues.listLabelsOnIssue({ owner: project.owner, repo: project.name, issue_number: requireField(target.number, 'number'), per_page: 100 });
@@ -1100,7 +1049,11 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     }
     const target = { ...baseTarget(context, expectedProject), number: pr.number, head: pr.head.ref, base: pr.base.ref, headSha: pr.head.sha };
     if (operation === 'thread-reply' || operation === 'thread-resolve') {
-      await readReviewThread(octokit, requireField(input.threadId, 'threadId'), expectedProject, target.number);
+      await readReviewThread(octokit, requireField(input.threadId, 'threadId'), expectedProject, target.number, mutationError);
+    }
+    if (operation === 'review-dismiss') {
+      await resolveReviewDismiss(octokit, expectedProject, target.number, Number(requireField(input.reviewId, 'reviewId')), mutationError);
+      return { providerTarget: {}, target };
     }
     if (operation === 'review-comment-update' || operation === 'review-comment-delete') {
       await requirePendingComment(octokit, graphqlId(input.commentId), expectedProject, target.number);
@@ -1231,9 +1184,11 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
         await graphqlWrite(octokit, 'mutation($id: ID!) { deleteDiscussionComment(input: { id: $id }) { clientMutationId } }', { id: input.commentId });
         return {};
       case 'thread-reply':
-        return replyToReviewThread(octokit, threadId(), body());
+        return replyToReviewThread(octokit, threadId(), body(), graphqlRejection);
       case 'thread-resolve':
-        return setReviewThreadResolved(octokit, threadId(), requireField(input.resolved, 'resolved'));
+        return setReviewThreadResolved(octokit, threadId(), requireField(input.resolved, 'resolved'), graphqlRejection);
+      case 'review-dismiss':
+        return performReviewDismiss(octokit, project, number(), Number(requireField(input.reviewId, 'reviewId')), requireField(input.message, 'message'));
       case 'discussion-comment':
         return commentOnDiscussion(octokit, discussion().id, input.body, input.replyTo);
       case 'discussion-state':

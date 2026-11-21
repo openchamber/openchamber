@@ -41,13 +41,14 @@ import { fetchPullStack } from './pull-stack.js';
 import { referencesField } from './references.js';
 import { parseReferenceLink } from './reference-links.js';
 import { fetchReviewState } from './review-draft.js';
+import { readReviewSummaries } from './review-summaries.js';
 import type { Octokit, RestEndpointMethodTypes } from '@octokit/rest';
 import type { ProviderImplementation, ProviderSession } from '../source-control/provider-contract.js';
 import type { ContributorProvenanceRead } from '../git/contributor-provenance-storage.js';
 import type { AcrossContext, AcrossGroup, DiscoveryRepository, GitHubEnvelope } from './contracts.js';
+import type { SourceControlReviewSummary } from '@openchamber/sdk';
 import type { CI } from './mappers.js';
 import { retainedEntry } from './contracts.js';
-
 type ResourceMethods = ProviderImplementation['resources'];
 type ResourceInput<Key extends keyof ResourceMethods> = Parameters<NonNullable<ResourceMethods[Key]>>[0];
 type Rest = RestEndpointMethodTypes;
@@ -95,6 +96,7 @@ export interface PullContext {
   reviewComments: ReturnType<typeof mapReviewComment>[];
   files: ReturnType<typeof mapFile>[];
   ci: CI | null;
+  reviews?: SourceControlReviewSummary[];
   diff?: string;
   stack?: Awaited<ReturnType<typeof fetchPullStack>>;
 }
@@ -133,7 +135,6 @@ const errorCodeStartsWith = (code: GitHubEnvelope['code'], prefix: string) => {
   return Boolean(method.call(code, prefix));
 };
 
-
 const GITHUB_COM = 'github.com';
 const PULL_LIST_STATES = new Set(['open', 'closed', 'merged', 'all']);
 const PULL_LIST_PEOPLE = new Set(['any', 'assigned', 'created', 'reviewRequested']);
@@ -147,7 +148,6 @@ export const responseError = <Body extends { error: unknown }>(status: number, b
 const sourceControlError = (message: string, code: string, status: number) => Object.assign(new Error(message), { code, status });
 
 const notInProject = () => responseError(400, { error: 'Repository is not part of this project' });
-
 const rateLimited = () => Object.assign(new Error('GitHub rate limited'), { status: 503 });
 
 const sameRepository = (left: Pick<DiscoveryRepository, 'owner' | 'repo'>, right: Pick<DiscoveryRepository, 'owner' | 'repo'>) => left.owner.toLowerCase() === right.owner.toLowerCase()
@@ -157,8 +157,6 @@ export const gitHubRefusalMessage = (error: GitHubEnvelope['data']) => {
   const message = errorField(errorField(errorField(error, 'response'), 'data'), 'message');
   return isProviderString(message) && message.trim() ? message : errorField(error, 'message');
 };
-
-
 
 export function createGitHubResources({
   load,
@@ -493,6 +491,7 @@ export function createGitHubResources({
         (await octokit.rest.pulls.listReviewComments({ ...route, pull_number: number, per_page: 100 }))?.data,
         'GitHub returned an invalid review comment list',
       ).map((comment) => mapReviewComment(requireGitHubReviewComment(comment), identity));
+      const reviews = await readReviewSummaries(octokit, route, number);
       const files = requireProviderArray<Rest['pulls']['listFiles']['response']['data'][number]>(
         (await octokit.rest.pulls.listFiles({ ...route, pull_number: number, per_page: 100 }))?.data,
         'GitHub returned an invalid pull request file list',
@@ -526,6 +525,7 @@ export function createGitHubResources({
         changeRequest: mapChangeRequest(prData, projectDTO, identity),
         issueComments,
         reviewComments,
+        reviews,
         files,
         ci,
       };

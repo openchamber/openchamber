@@ -27,6 +27,8 @@ function assertChangeCapabilities(descriptor: ProviderDescriptor) {
   if (capabilities.draftConversion !== undefined && capabilities.draftConversion !== true && capabilities.draftConversion !== false) throw invalid('draft conversion capability');
   if (capabilities.createVia !== undefined && !['api', 'push'].includes(capabilities.createVia)) throw invalid('create method');
   if (capabilities.discussions !== undefined && capabilities.discussions !== true && capabilities.discussions !== false) throw invalid('discussions capability');
+  if (capabilities.reviewDismiss !== undefined && !['others', 'own'].includes(capabilities.reviewDismiss)) throw invalid('review dismissal capability');
+  if (capabilities.reviewUndismiss !== undefined && capabilities.reviewUndismiss !== true) throw invalid('review undismiss capability');
   if (capabilities.discussions && (!capabilities.referencePicker || !descriptor.presentation.urls.discussion?.length)) {
     throw invalid('discussions capability: it needs the reference picker and discussion URLs');
   }
@@ -116,6 +118,13 @@ export function publicProviderDescriptor(descriptor: ProviderDescriptor, order: 
       changeRequestTemplates: [...presentation.features.changeRequestTemplates],
       changeRequestPatch: descriptor.capabilities.changeRequestPatch === true,
     },
+    capabilities: {
+      reviewThreads: {
+        start: descriptor.capabilities.reviewThreads?.start === true,
+        reply: descriptor.capabilities.reviewThreads?.reply === true,
+        resolve: descriptor.capabilities.reviewThreads?.resolve === true,
+      },
+    },
   };
   if (presentation.urls.resolve) published.urls.resolve = presentation.urls.resolve;
   if (legacyFlow) published.instances.legacyFlow = { instance: legacyFlow.instance, kind: legacyFlow.kind };
@@ -127,6 +136,8 @@ export function publicProviderDescriptor(descriptor: ProviderDescriptor, order: 
   }
   if (descriptor.repositoryPath === 'path') published.repository.pathStyle = 'path';
   const { capabilities } = descriptor;
+  if (capabilities.reviewDismiss !== undefined) published.capabilities.reviewDismiss = capabilities.reviewDismiss;
+  if (capabilities.reviewUndismiss === true) published.capabilities.reviewUndismiss = true;
   if (capabilities.reviewModel !== undefined) published.features.reviewModel = capabilities.reviewModel;
   if (capabilities.revisions !== undefined) published.features.revisions = capabilities.revisions;
   if (capabilities.createVia !== undefined) published.features.createByPush = capabilities.createVia === 'push';

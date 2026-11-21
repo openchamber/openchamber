@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { hasProperty } from './contracts.js';
 import type { PullRequestQuery } from './contracts.js';
+import type { ChangeRequestThreadSummary } from '../source-control/provider-contract.js';
 
 
 const THREAD_PAGE = 100;
@@ -100,7 +101,7 @@ const toThread = (thread: z.infer<typeof threadSchema>) => {
   const comments = thread.comments.nodes
     .filter((comment): comment is NonNullable<typeof comment> => comment !== null && comment.state !== 'PENDING')
     .map(({ id, body, createdAt, url, author: writer }) => ({ id, body, createdAt, url, author: toAuthor(writer) }));
-  return {
+  const value: ChangeRequestThreadSummary = {
     id: thread.id,
     path: thread.path,
     side: toSide(thread.diffSide),
@@ -111,6 +112,8 @@ const toThread = (thread: z.infer<typeof threadSchema>) => {
     canResolve: thread.isResolved ? thread.viewerCanUnresolve : thread.viewerCanResolve,
     comments,
   };
+  if (thread.isOutdated) value.outdated = true;
+  return value;
 };
 
 const toDraft = (pending: z.infer<typeof pendingSchema> | null, sides: ReadonlyMap<string, 'old' | 'new'>) => (pending ? {
@@ -154,7 +157,7 @@ export async function fetchReviewState({ octokit, owner, repo, number }: PullReq
     viewerIsAuthor: first.viewerDidAuthor,
     headSha: first.headRefOid,
     draft: toDraft(pending, sides),
-    threads: threads.filter((thread) => !thread.isOutdated).map(toThread).filter((thread) => thread.comments.length > 0),
+    threads: threads.map(toThread).filter((thread) => thread.comments.length > 0),
     truncated,
   };
 }
