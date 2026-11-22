@@ -12,6 +12,7 @@ import {
   requireProviderArray,
 } from './mappers.js';
 import { readPendingReview } from './review-draft.js';
+import { readIssueLabelPages, readPullListPages, readRequestedReviewerPages } from './collections.js';
 import { isSourceControlInteger } from '../source-control/input-guards.js';
 import type { SourceControlJson, SourceControlJsonObject, SourceControlMutationTarget } from '@openchamber/sdk';
 import type { AccountIdentity, ProviderDescriptor, ProviderMutationContext, ProviderSession } from '../source-control/provider-contract.js';
@@ -888,9 +889,8 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     return {};
   };
   const requestedReviewers = async (octokit: Octokit, project: Project, number: number) => {
-    const response = await octokit.rest.pulls.listRequestedReviewers({ owner: project.owner, repo: project.name, pull_number: number });
-    const users = response?.data?.users;
-    if (!Array.isArray(users) || users.some((user) => !isProviderString(user?.login))) {
+    const users = await readRequestedReviewerPages(octokit, { owner: project.owner, repo: project.name }, number);
+    if (users.some((user) => !isProviderString(user?.login))) {
       throw invalidProviderPayload('GitHub returned an invalid reviewer list');
     }
     return users.map((user) => user.login);
@@ -914,10 +914,9 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
 
   const reconcileCreate = async (octokit: ReturnType<GitHubMutationOptions['octokitOf']>, expectedProject: Project, sourceProject: Project, head: string | undefined, base: string | undefined): Promise<MutationCompletion> => {
     const params = {
-      owner: expectedProject.owner, repo: expectedProject.name, state: 'all' as const, head: `${sourceProject.owner}:${head}`, base, per_page: 100,
+      owner: expectedProject.owner, repo: expectedProject.name, state: 'all' as const, head: `${sourceProject.owner}:${head}`, base,
     };
-    const response = await octokit.rest.pulls.list(params);
-    const candidates = requireProviderArray(response?.data, 'GitHub returned an invalid pull request list')
+    const candidates = (await readPullListPages(octokit, params))
       .map((pr) => requireMutationPullRequest(pr, 'GitHub returned an invalid pull request', octokit))
       .filter((pr) => pr.head.ref === head && pr.base.ref === base)
       .filter((pr) => sameProject(pullTargetProject(pr), expectedProject))
@@ -985,8 +984,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       return thread.isResolved === input.resolved ? { state: 'succeeded', result: {} } : unknownOutcome();
     }
     if (operation === 'labels' || operation === 'issue-labels') {
-      const current = await octokit.rest.issues.listLabelsOnIssue({ owner: project.owner, repo: project.name, issue_number: requireField(target.number, 'number'), per_page: 100 });
-      const names = requireProviderArray(current?.data, 'GitHub returned an invalid label list').map((label) => fieldAt(label, 'name'));
+      const names = (await readIssueLabelPages(octokit, { owner: project.owner, repo: project.name }, requireField(target.number, 'number'))).map((label) => fieldAt(label, 'name'));
       return names.every(isProviderString) && sameNames(names, requireField(input.labels, 'labels')) ? { state: 'succeeded', result: {} } : unknownOutcome();
     }
     if (operation === 'reviewers') {

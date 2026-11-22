@@ -123,3 +123,35 @@ export const readPullFilePages = (octokit: Octokit, repo: RepoRoute, number: num
 
 /** The branch list keeps the fork's wording for its limit. */
 export const branchLimitError = () => new Error(`GitHub branch list reached the ${GITHUB_COLLECTION_MAX_COUNT}-branch safety limit and may be incomplete`);
+
+/** A board picker list that crosses the cap, for example `GitHub label list reached the 2000-label safety limit ...`. */
+const pickerLimitError = (noun: string) => () => new Error(`GitHub ${noun} list reached the ${GITHUB_COLLECTION_MAX_COUNT}-${noun} safety limit and may be incomplete`);
+
+/** A repository's labels for the board picker, every page under the cap. */
+export const readLabelPages = (octokit: Octokit, repo: RepoRoute) => readCappedCollection(pickerLimitError('label'), async (page) => requireProviderArray<Rest['issues']['listLabelsForRepo']['response']['data'][number]>(
+  (await octokit.rest.issues.listLabelsForRepo({ ...routeOf(repo), per_page: GITHUB_COLLECTION_PAGE_SIZE, page }))?.data, 'GitHub returned an invalid label list'));
+
+/** A repository's assignable people for the reviewer picker, every page under the cap. */
+export const readAssigneePages = (octokit: Octokit, repo: RepoRoute) => readCappedCollection(pickerLimitError('reviewer'), async (page) => requireProviderArray<Rest['issues']['listAssignees']['response']['data'][number]>(
+  (await octokit.rest.issues.listAssignees({ ...routeOf(repo), per_page: GITHUB_COLLECTION_PAGE_SIZE, page }))?.data, 'GitHub returned an invalid user list'));
+
+/** Pull requests matching a list filter, every page (#1595: a restart reconciles create from the complete candidate list). */
+export const readPullListPages = (octokit: Octokit, params: Omit<Rest['pulls']['list']['parameters'], 'page' | 'per_page'>) => readCappedCollection(
+  () => collectionLimitError('pull request'),
+  async (page) => requireProviderArray<Rest['pulls']['list']['response']['data'][number]>(
+    (await octokit.rest.pulls.list({ ...params, per_page: GITHUB_COLLECTION_PAGE_SIZE, page }))?.data, 'GitHub returned an invalid pull request list'),
+);
+
+/** The labels on an issue or pull request, every page (#1595: a labels reconcile never affirms from a page-1 prefix). */
+export const readIssueLabelPages = (octokit: Octokit, repo: RepoRoute, number: number) => readCappedCollection(
+  () => collectionLimitError('label'),
+  async (page) => requireProviderArray<Rest['issues']['listLabelsOnIssue']['response']['data'][number]>(
+    (await octokit.rest.issues.listLabelsOnIssue({ ...routeOf(repo), issue_number: number, per_page: GITHUB_COLLECTION_PAGE_SIZE, page }))?.data, 'GitHub returned an invalid label list'),
+);
+
+/** A pull request's requested reviewers, every page (#1595: a reviewer only on page 2 is still removed). */
+export const readRequestedReviewerPages = (octokit: Octokit, repo: RepoRoute, number: number) => readCappedCollection(
+  () => collectionLimitError('requested reviewer'),
+  async (page) => requireProviderArray<Rest['pulls']['listRequestedReviewers']['response']['data']['users'][number]>(
+    (await octokit.rest.pulls.listRequestedReviewers({ ...routeOf(repo), pull_number: number, per_page: GITHUB_COLLECTION_PAGE_SIZE, page }))?.data?.users, 'GitHub returned an invalid reviewer list'),
+);

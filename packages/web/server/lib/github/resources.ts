@@ -39,8 +39,9 @@ import {
 import { createContextCache } from './context-cache.js';
 import {
   branchLimitError, GITHUB_COLLECTION_PAGE_SIZE, readAnnotationPages, readCappedCollection, readCheckRunPages,
-  readIssueCommentPages, readPullFilePages, readReviewCommentPages, readWorkflowJobPages,
+  readAssigneePages, readIssueCommentPages, readLabelPages, readPullFilePages, readReviewCommentPages, readWorkflowJobPages,
 } from './collections.js';
+import { readPullDiff } from './pull-diff.js';
 import { fetchPullStack } from './pull-stack.js';
 import { referencesField } from './references.js';
 import { parseReferenceLink } from './reference-links.js';
@@ -495,11 +496,7 @@ export function createGitHubResources({
 
       let diff;
       if (includeDiff) {
-        const response = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
-          ...route, pull_number: number, headers: { accept: 'application/vnd.github.v3.diff' },
-        });
-        if (!isProviderString(response?.data)) throw invalidProviderPayload('GitHub returned an invalid pull request diff');
-        diff = response.data;
+        diff = await readPullDiff(octokit, route, number);
       }
 
       const result: PullContext = {
@@ -656,8 +653,7 @@ export function createGitHubResources({
       const { octokit } = accountOf(session);
       const repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote);
       if (!repo) throw notInProject();
-      const response = await octokit.rest.issues.listLabelsForRepo({ owner: repo.owner, repo: repo.repo, per_page: 100 });
-      return requireProviderArray<Rest['issues']['listLabelsForRepo']['response']['data'][number]>(response?.data, 'GitHub returned an invalid label list').flatMap((label) => {
+      return (await readLabelPages(octokit, repo)).flatMap((label) => {
         if (!isProviderString(label?.name) || !label.name) return [];
         return [isProviderString(label.color) && label.color ? { name: label.name, color: label.color } : { name: label.name }];
       });
@@ -667,8 +663,7 @@ export function createGitHubResources({
       const { octokit } = accountOf(session);
       const repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote);
       if (!repo) throw notInProject();
-      const response = await octokit.rest.issues.listAssignees({ owner: repo.owner, repo: repo.repo, per_page: 100 });
-      return requireProviderArray<Rest['issues']['listAssignees']['response']['data'][number]>(response?.data, 'GitHub returned an invalid user list').flatMap((user) => {
+      return (await readAssigneePages(octokit, repo)).flatMap((user) => {
         if (!isProviderString(user?.login) || !user.login) return [];
         return [isProviderString(user.avatar_url) && user.avatar_url
           ? { id: user.login, login: user.login, avatarUrl: user.avatar_url }
