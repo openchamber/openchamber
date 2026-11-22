@@ -1880,7 +1880,10 @@ export const registerFsRoutes = (app, dependencies) => {
       const canonicalProtectedRoots = await Promise.all(protectedRoots.map((root) => (
         canonicalDirectoryPath(root, fsPromises, path).catch(() => path.resolve(root))
       )));
-      if (canonicalProtectedRoots.some((root) => canonicalTarget === root)) {
+      // A recursive delete of a directory that contains a protected root
+      // (for example a relocated chats root under the config root) would
+      // remove that root too.
+      if (canonicalProtectedRoots.some((root) => isPathWithinRoot(root, canonicalTarget, path, os))) {
         return res.status(400).json({ error: 'Cannot delete a workspace or managed root' });
       }
 

@@ -2873,7 +2873,7 @@ describe('canonical managed roots with real filesystem aliases', () => {
 });
 
 describe('fs delete workspace containment', () => {
-  const setup = async context => {
+  const setup = async (context, { chatsSubpath } = {}) => {
     const root = await nativeFs.mkdtemp(path.join(tmpdir(), 'oc-fs-delete-containment-'));
     context.onTestFinished(() => nativeFs.rm(root, { recursive: true, force: true }));
     const workspace = path.join(root, 'workspace');
@@ -2888,9 +2888,24 @@ describe('fs delete workspace containment', () => {
       normalizeDirectoryPath: value => value,
       resolveProjectDirectory: async () => ({ directory: workspace }),
       openchamberUserConfigRoot: managedRoot,
+      managedChatsRoot: chatsSubpath ? path.join(managedRoot, chatsSubpath) : undefined,
     });
     return { getRoute, root, workspace, managedRoot };
   };
+
+  it('rejects deleting a directory that contains a relocated chats root', async context => {
+    const { getRoute, managedRoot } = await setup(context, { chatsSubpath: path.join('storage', 'chats') });
+    const chatsRoot = path.join(managedRoot, 'storage', 'chats');
+    const sentinel = path.join(chatsRoot, 'keep.txt');
+    await nativeFs.mkdir(chatsRoot, { recursive: true });
+    await nativeFs.writeFile(sentinel, 'chat sentinel');
+
+    const response = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: path.join(managedRoot, 'storage') } }, response);
+
+    expect(response.statusCode).toBe(400);
+    expect(await nativeFs.readFile(sentinel, 'utf8')).toBe('chat sentinel');
+  });
 
   it('rejects deletion through an intermediate symlink that escapes the workspace', async context => {
     const { getRoute, root, workspace } = await setup(context);
