@@ -1,6 +1,5 @@
 import React from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import {
   SETTINGS_HELPER_CLASS,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
@@ -32,7 +31,7 @@ const toMs = (value: number | undefined) => (value === undefined ? undefined : M
 const percent = (fraction: number | undefined) => (fraction === undefined ? undefined : Math.round(fraction * 1000) / 10);
 const fromPercent = (value: number | undefined) => (value === undefined ? undefined : Math.round(value * 10) / 1000);
 
-/** Expert-level pool settings, grouped by what they change: selection, failover, health, budgets and schedules. */
+/** Expert-level pool settings, grouped by what they change: selection, health, budgets and schedules. */
 export const PoolAdvancedFields: React.FC<{ route: ModelRoute; onChange: (route: ModelRoute) => void }> = ({ route, onChange }) => {
   const { t } = useI18n();
   const health: Health = route.health ?? {};
@@ -62,7 +61,7 @@ export const PoolAdvancedFields: React.FC<{ route: ModelRoute; onChange: (route:
     <div className="space-y-4">
       <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.advanced.help')}</p>
 
-      <SettingsFieldRow label={t('settings.pools.advanced.selection')} description={t('settings.pools.advanced.selectionInfo')} settingsItem="routing.pools-advanced">
+      <SettingsFieldRow label={t('settings.pools.advanced.selection')} description={t('settings.pools.advanced.selectionInfo')}>
         <Select
           value={route.selection ?? '__unset__'}
           onValueChange={(next) => onChange(setRouteField(route, 'selection', pickedValue(next)))}
@@ -96,49 +95,9 @@ export const PoolAdvancedFields: React.FC<{ route: ModelRoute; onChange: (route:
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <RangedNumberField
-          label={t('settings.pools.advanced.attempts')}
-          value={route.attempts}
-          min={1}
-          max={50}
-          placeholder="2"
-          onCommit={(value) => onChange(setRouteField(route, 'attempts', value))}
-        />
-        <RangedNumberField
-          label={t('settings.pools.advanced.hedge')}
-          value={seconds(route.hedgeAfterMs)}
-          min={1}
-          max={3600}
-          placeholder={t('settings.pools.advanced.off')}
-          onCommit={(value) => onChange(setRouteField(route, 'hedgeAfterMs', toMs(value)))}
-        />
-      </div>
-      <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.advanced.hedgeInfo')}</p>
-
       <div className="space-y-2">
         <p className={heading}>{t('settings.pools.advanced.health')}</p>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="flex min-w-0 flex-col gap-1">
-            <span className="typography-meta text-muted-foreground">{t('settings.pools.advanced.firstToken')}</span>
-            <div className="flex h-8 items-center gap-3">
-              <Switch
-                checked={health.firstTokenTimeoutMs === false}
-                onCheckedChange={(checked) => setHealth('firstTokenTimeoutMs', checked ? false : undefined)}
-                aria-label={t('settings.pools.advanced.firstTokenOff')}
-              />
-              <span className="typography-meta text-muted-foreground">{t('settings.pools.advanced.firstTokenOff')}</span>
-            </div>
-          </div>
-          <RangedNumberField
-            label={t('settings.pools.advanced.firstToken')}
-            value={typeof health.firstTokenTimeoutMs === 'number' ? seconds(health.firstTokenTimeoutMs) : undefined}
-            min={1}
-            max={3600}
-            placeholder="10"
-            disabled={health.firstTokenTimeoutMs === false}
-            onCommit={(value) => setHealth('firstTokenTimeoutMs', toMs(value))}
-          />
+        <div className="grid grid-cols-1 gap-3 @xl:grid-cols-2">
           <RangedNumberField
             label={t('settings.pools.advanced.maxResponse')}
             value={seconds(health.maxResponseTimeMs)}

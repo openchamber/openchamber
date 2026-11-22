@@ -11,41 +11,47 @@ import {
   routeReferenceID,
   setRouteField,
   setTargetEntry,
-  targetOptions,
+  targetEntry,
   targetReference,
   weightNamesTarget,
   withoutAbsentWeights,
   targetUntil,
   tuningToSave,
   withOptional,
-  withTargetOptions,
 } from './poolAdvanced';
+import { withMemberField } from './poolMembers';
 
-describe('target options', () => {
+// The member editor's field writer replaced the old per-target options form;
+// these are the guarantees that form gave and the config still relies on.
+describe('target entries', () => {
   test('a target without options stays a plain string', () => {
-    expect(withTargetOptions('openai/gpt-6-luna', {})).toBe('openai/gpt-6-luna');
-    expect(withTargetOptions({ model: 'openai/gpt-6-luna', defaultVariant: 'max' }, { defaultVariant: undefined })).toBe(
+    expect(withMemberField('openai/gpt-6-luna', 'defaultVariant', undefined)).toBe('openai/gpt-6-luna');
+    expect(withMemberField({ model: 'openai/gpt-6-luna', defaultVariant: 'max' }, 'defaultVariant', undefined)).toBe(
       'openai/gpt-6-luna',
     );
   });
 
   test('options are written onto the object form and read back', () => {
-    const saved = withTargetOptions('openai/gpt-6-luna', { defaultVariant: 'max', variants: { low: 'high' }, until: 1893575040000 });
+    const saved = withMemberField(
+      withMemberField(withMemberField('openai/gpt-6-luna', 'defaultVariant', 'max'), 'variants', { low: 'high' }),
+      'until',
+      1893575040000,
+    );
     expect(saved).toEqual({
       model: 'openai/gpt-6-luna',
       defaultVariant: 'max',
       variants: { low: 'high' },
       until: 1893575040000,
     });
-    expect(targetOptions(saved)).toEqual({ defaultVariant: 'max', variants: { low: 'high' }, until: 1893575040000 });
+    expect(targetEntry(saved)).toBe(saved);
+    expect(targetEntry('openai/gpt-6-luna')).toEqual({ model: 'openai/gpt-6-luna' });
     expect(targetUntil(saved)).toBe(1893575040000);
     expect(targetUntil('openai/gpt-6-luna')).toBeUndefined();
   });
 
   test('clearing every option returns the short form', () => {
     const object = { model: 'openai/gpt-6-luna', defaultVariant: 'max' };
-    expect(withTargetOptions(object, {})).toBe('openai/gpt-6-luna');
-    expect(withTargetOptions(object, { variants: {} })).toBe('openai/gpt-6-luna');
+    expect(withMemberField(object, 'defaultVariant', undefined)).toBe('openai/gpt-6-luna');
   });
 });
 

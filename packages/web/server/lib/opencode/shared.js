@@ -695,7 +695,38 @@ function parsedConfigEquals(text, desired) {
   return deepEqualJsonValue(parsed, desired);
 }
 
-function buildConfigFileContent(desired, existingRaw, existingParse) {
+// Some config maps have a visible order, such as model pools. Move only their
+// property nodes after the value edits so comments inside values and all trivia
+// between properties survive. Ordinary config objects stay order-insensitive.
+function reorderConfigProperties(text, desired, orderedPaths) {
+  let reordered = text;
+  for (const propertyPath of orderedPaths) {
+    const root = parseTree(reordered, [], { allowTrailingComma: true });
+    const object = findNodeAtLocation(root, propertyPath);
+    if (object?.type !== 'object' || !object.children) continue;
+    let next = desired;
+    for (const key of propertyPath) next = next?.[key];
+    if (!isPlainObject(next)) continue;
+    const keys = Object.keys(next);
+    const properties = object.children;
+    const currentKeys = properties.map((property) => property.children?.[0]?.value);
+    if (keys.length !== properties.length || keys.every((key, index) => key === currentKeys[index])) continue;
+    const bodies = new Map(properties.map((property) => [
+      property.children?.[0]?.value,
+      reordered.slice(property.offset, property.offset + property.length),
+    ]));
+    const edits = properties.map((property, index) => ({
+      offset: property.offset,
+      length: property.length,
+      content: bodies.get(keys[index]),
+    }));
+    if (edits.some((edit) => edit.content === undefined)) throw new Error('Could not preserve ordered config properties');
+    reordered = applyEdits(reordered, edits);
+  }
+  return reordered;
+}
+
+function buildConfigFileContent(desired, existingRaw, existingParse, orderedPaths) {
   if (!existingRaw.trim()) {
     return JSON.stringify(desired, null, 2);
   }
@@ -710,10 +741,10 @@ function buildConfigFileContent(desired, existingRaw, existingParse) {
 
   const edits = [];
   collectConfigEdits(existingParse.value, desired, [], edits);
-  if (edits.length === 0) {
+  if (edits.length === 0 && orderedPaths.length === 0) {
     return existingRaw;
   }
-  const rewritten = applyConfigEdits(existingRaw, edits);
+  const rewritten = reorderConfigProperties(applyConfigEdits(existingRaw, edits), desired, orderedPaths);
   if (parsedConfigEquals(rewritten, desired)) {
     return rewritten;
   }
@@ -721,7 +752,7 @@ function buildConfigFileContent(desired, existingRaw, existingParse) {
   return JSON.stringify(desired, null, 2);
 }
 
-function writeConfig(config, filePath = CONFIG_FILE) {
+function writeConfig(config, filePath = CONFIG_FILE, { orderedPaths = [] } = {}) {
   try {
     let existingRaw = '';
     let existingParse = null;
@@ -738,7 +769,7 @@ function writeConfig(config, filePath = CONFIG_FILE) {
     // A JSON round-trip normalizes the config at the write boundary: it drops
     // `undefined` values exactly like the serialized write would.
     const desired = JSON.parse(JSON.stringify(config));
-    const content = buildConfigFileContent(desired, existingRaw, existingParse);
+    const content = buildConfigFileContent(desired, existingRaw, existingParse, orderedPaths);
     // Enforce the cap on the serialized result too: writing a config that
     // crosses the read cap would strand the layer — later reads omit it as
     // CONFIG_FILE_TOO_LARGE and later writes refuse it, so the user could

@@ -11,6 +11,7 @@ const SEARCH_TARGET_TABS = new Map<string, RoutingTab>([
   ['routing.pools-targets', 'pools'],
   ['routing.pools-tuning', 'pools'],
   ['routing.pools-schedules', 'pools'],
+  ['routing.pools-rotation', 'pools'],
   ['pools.add-pool', 'pools'],
 ]);
 

@@ -1062,6 +1062,10 @@ export const createSettingsHelpers = (dependencies) => {
     if (recentEfforts) {
       result.recentEfforts = recentEfforts;
     }
+    // Same catalog-sized bound as hiddenModels and the UI boundary parser.
+    const modelDefaultVariants = z.record(z.string().regex(/^[^/#\s]+\/[^#\s]+$/), z.string().trim().min(1))
+      .refine((entries) => Object.keys(entries).length <= 1024).safeParse(candidate.modelDefaultVariants);
+    if (modelDefaultVariants.success) result.modelDefaultVariants = modelDefaultVariants.data;
     if (typeof candidate.diffLayoutPreference === 'string') {
       const mode = candidate.diffLayoutPreference.trim();
       if (mode === 'dynamic' || mode === 'inline' || mode === 'side-by-side') {

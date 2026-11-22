@@ -16,6 +16,7 @@ import { dict as trDict } from './messages/tr';
 import { dict as arDict } from './messages/ar';
 import { dict as heDict } from './messages/he';
 import { routingI18n } from './messages/routing.i18n';
+import { poolSettingsI18n } from './messages/pool-settings.i18n';
 import { sessionErrorRecoveryI18n } from './messages/session-error-recovery.i18n';
 
 const localeDictionaries = {
@@ -86,6 +87,24 @@ describe('i18n dictionaries', () => {
     }
 
     expect(mismatches).toEqual([]);
+  });
+
+  test('model pool pages are translated in every locale and keep their placeholders', () => {
+    // OpenCode syntax, the same in every language: variant ids and a match expression.
+    const literal = new Set(['settings.pools.effort.levelsPlaceholder', 'settings.pools.matching.matchPlaceholder']);
+    const placeholders = (text: string) => (text.match(/\{[a-zA-Z]+\}/g) ?? []).sort();
+    const english = Object.entries(poolSettingsI18n.en);
+    expect(english.length > 70).toBe(true);
+    for (const [locale, dictionary] of Object.entries(poolSettingsI18n)) {
+      const entries = new Map<string, string>(Object.entries(dictionary));
+      expect([...entries.keys()].sort()).toEqual(english.map(([key]) => key).sort());
+      for (const [key, englishText] of english) {
+        const text = entries.get(key) ?? '';
+        expect(text.trim()).toBeTruthy();
+        expect(placeholders(text)).toEqual(placeholders(englishText));
+        if (locale !== 'en' && !literal.has(key)) expect(`${locale} ${key} ${text}`).not.toBe(`${locale} ${key} ${englishText}`);
+      }
+    }
   });
 
   test('session recovery controls are translated in every locale', () => {
