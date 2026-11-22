@@ -180,10 +180,20 @@ mock.module("@/stores/useConfigStore", () => ({
   },
 }))
 
+// What a send hands to routing and goal saving, for the background-goal tests.
+const routedMessages: Array<{ sessionId: string; directory?: string | null; content: string }> = []
+const savedGoals: Array<{ sessionId: string; objective: string; tokenBudget: number | null; ignoreLimit?: boolean }> = []
+let materializeDraft: () => Promise<{ sessionId: string; directory: string | null; agent?: string }> = async () => {
+  throw new Error("materializeOpenDraftSession is not stubbed for a send")
+}
+let uiCurrentSessionId: string | null = null
+
 // Mock useSessionUIStore
 mock.module("./session-ui-store", () => ({
-  routeMessage: async () => {},
-  materializeOpenDraftSession: async () => { throw new Error("materializeOpenDraftSession is not stubbed for a send") },
+  routeMessage: async (input: { sessionId: string; directory?: string | null; content: string }) => {
+    routedMessages.push({ sessionId: input.sessionId, directory: input.directory, content: input.content })
+  },
+  materializeOpenDraftSession: async () => materializeDraft(),
   resolveVariantToRecord: () => undefined,
   expandSlashCommandGoalObjective: (content: string) => content,
   useSessionUIStore: {
@@ -193,7 +203,7 @@ mock.module("./session-ui-store", () => ({
         if (sessionId === "session-b") return "/other/project"
         return null
       },
-      currentSessionId: null,
+      currentSessionId: uiCurrentSessionId,
       setCurrentSession: (sessionId: string | null, directoryHint?: string | null) => {
         selectedSessions.push({ sessionId, directoryHint })
       },
@@ -283,11 +293,18 @@ mock.module("@/stores/useSessionTabsStore", () => ({
 }))
 
 mock.module("@/lib/sessionGoalActions", () => ({
-  setSessionGoal: async () => null,
+  setSessionGoal: async (
+    sessionId: string,
+    _directory: string | undefined,
+    input: { objective: string; tokenBudget: number | null; ignoreLimit?: boolean },
+  ) => {
+    savedGoals.push({ sessionId, objective: input.objective, tokenBudget: input.tokenBudget, ignoreLimit: input.ignoreLimit })
+    return { outcome: "saved", rewrittenSpec: null }
+  },
 }))
 
 mock.module("@/lib/goalWriter", () => ({
-  buildGoalIntroReminder: () => "",
+  buildGoalIntroReminder: (_tokenBudget: number | null, spec: string | null) => `goal-intro:${spec ?? ""}`,
 }))
 
 mock.module("@/lib/sessionKnowledgeApi", () => ({
@@ -314,7 +331,7 @@ mock.module("./selection-store", () => ({
 }))
 
 mock.module("./viewport-store", () => ({
-  useViewportStore: { getState: () => ({}) },
+  useViewportStore: { getState: () => ({}), setState: () => {} },
   getViewportSessionMemory: () => new Map(),
   viewportSessionKey: (sessionId: string) => sessionId,
 }))
@@ -3752,3 +3769,138 @@ describe("setSessionWorkState", () => {
     expect(globalUpsertedSessions).toHaveLength(0)
   })
 });
+
+// Oracle: the send contract in SendMessageOptions.pendingGoal. Nothing is
+// routed or saved until the goal settles; once it does, the message goes to
+// the session captured at submit time with the written spec as its goal; a
+// rejected goal sends nothing.
+describe("sendMessage with a goal still being written", () => {
+  type Outcome = { goal: { objective?: string; tokenBudget: number | null; settled?: boolean; briefAgent?: boolean; ignoreLimit?: boolean }; content: string | null }
+  const deferred = () => {
+    let resolve!: (value: Outcome) => void
+    let reject!: (error: Error) => void
+    const promise = new Promise<Outcome>((res, rej) => { resolve = res; reject = rej })
+    return { promise, resolve, reject }
+  }
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+  const spec = "## Objective\nShip it"
+
+  beforeEach(() => {
+    routedMessages.length = 0
+    savedGoals.length = 0
+    uiCurrentSessionId = null
+    materializeDraft = async () => { throw new Error("materializeOpenDraftSession is not stubbed for a send") }
+  })
+
+  test("a reply waits for its goal, then goes to the session it was sent from with the spec as its goal", async () => {
+    const { sendMessage } = await import("./session-actions")
+    const goal = deferred()
+    const sent = sendMessage("Ship it", "p", "m", undefined, undefined, undefined, undefined, undefined, "normal", {
+      sessionId: "session-a",
+      directory: "/test/project",
+      pendingGoal: goal.promise,
+    })
+    await flush()
+    expect(routedMessages).toEqual([])
+    expect(savedGoals).toEqual([])
+
+    // The user moved to another chat while the goal was written.
+    uiCurrentSessionId = "session-b"
+    goal.resolve({ goal: { objective: spec, tokenBudget: 5000, settled: true, briefAgent: true, ignoreLimit: true }, content: null })
+    await sent
+
+    expect(savedGoals).toEqual([{ sessionId: "session-a", objective: spec, tokenBudget: 5000, ignoreLimit: true }])
+    expect(routedMessages).toEqual([{ sessionId: "session-a", directory: "/test/project", content: "Ship it" }])
+  })
+
+  test("a spec sent as the message replaces the typed text", async () => {
+    const { sendMessage } = await import("./session-actions")
+    const goal = deferred()
+    const sent = sendMessage("Ship it", "p", "m", undefined, undefined, undefined, undefined, undefined, "normal", {
+      sessionId: "session-a",
+      pendingGoal: goal.promise,
+    })
+    goal.resolve({ goal: { objective: spec, tokenBudget: null, settled: true }, content: spec })
+    await sent
+
+    expect(routedMessages.map((message) => message.content)).toEqual([spec])
+    expect(savedGoals.map((saved) => saved.objective)).toEqual([spec])
+  })
+
+  test("a goal that is not written sends nothing", async () => {
+    const { sendMessage } = await import("./session-actions")
+    const goal = deferred()
+    const sent = sendMessage("Ship it", "p", "m", undefined, undefined, undefined, undefined, undefined, "normal", {
+      sessionId: "session-a",
+      pendingGoal: goal.promise,
+    })
+    goal.reject(new Error("No small model available"))
+
+    await expect(sent).rejects.toThrow("No small model available")
+    expect(routedMessages).toEqual([])
+    expect(savedGoals).toEqual([])
+  })
+
+  test("a draft creates its session at once and sends its first prompt only with the goal", async () => {
+    const { sendMessage } = await import("./session-actions")
+    const created: Array<{ sessionId: string; directory: string | null }> = []
+    let materialized = 0
+    materializeDraft = async () => {
+      materialized += 1
+      return { sessionId: "created", directory: "/test/project" }
+    }
+    const goal = deferred()
+    const sent = sendMessage("Ship it", "p", "m", undefined, undefined, undefined, undefined, undefined, "normal", {
+      // SAFETY: the draft path reads only `open` here; materializeOpenDraftSession, which reads the rest, is stubbed.
+      draftSnapshot: { open: true } as import("./session-ui-store").NewSessionDraftState,
+      pendingGoal: goal.promise,
+      onSessionCreated: (sessionId, directory) => { created.push({ sessionId, directory }) },
+    })
+    await flush()
+    expect(materialized).toBe(1)
+    expect(created).toEqual([{ sessionId: "created", directory: "/test/project" }])
+    expect(routedMessages).toEqual([])
+    expect(savedGoals).toEqual([])
+
+    uiCurrentSessionId = "session-b"
+    goal.resolve({ goal: { objective: spec, tokenBudget: null, settled: true, briefAgent: true }, content: null })
+    await sent
+
+    expect(savedGoals.map((saved) => saved.sessionId)).toEqual(["created"])
+    expect(routedMessages).toEqual([{ sessionId: "created", directory: "/test/project", content: "Ship it" }])
+  })
+
+  test("a draft whose goal is not written creates its session and sends nothing to it", async () => {
+    const { sendMessage } = await import("./session-actions")
+    materializeDraft = async () => ({ sessionId: "created", directory: "/test/project" })
+    const goal = deferred()
+    const sent = sendMessage("Ship it", "p", "m", undefined, undefined, undefined, undefined, undefined, "normal", {
+      // SAFETY: the draft path reads only `open` here; materializeOpenDraftSession, which reads the rest, is stubbed.
+      draftSnapshot: { open: true } as import("./session-ui-store").NewSessionDraftState,
+      pendingGoal: goal.promise,
+    })
+    goal.reject(new Error("cancelled"))
+
+    await expect(sent).rejects.toThrow("cancelled")
+    expect(routedMessages).toEqual([])
+    expect(savedGoals).toEqual([])
+  })
+
+  test("a slow goal does not hold later sends", async () => {
+    const { sendMessage } = await import("./session-actions")
+    const goal = deferred()
+    const waiting = sendMessage("Waiting task", "p", "m", undefined, undefined, undefined, undefined, undefined, "normal", {
+      sessionId: "session-a",
+      directory: "/test/project",
+      pendingGoal: goal.promise,
+    })
+    await sendMessage("Next task", "p", "m", undefined, undefined, undefined, undefined, undefined, "normal", {
+      sessionId: "session-b",
+      directory: "/other/project",
+    })
+    expect(routedMessages).toEqual([{ sessionId: "session-b", directory: "/other/project", content: "Next task" }])
+    goal.resolve({ goal: { objective: spec, tokenBudget: null, settled: true }, content: null })
+    await waiting
+    expect(routedMessages.map((message) => message.content)).toEqual(["Next task", "Waiting task"])
+  })
+})
