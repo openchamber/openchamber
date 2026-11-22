@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { SyncEvent } from '@/lib/opencode/events';
 import { normalizeProjectPath } from '@/lib/projectResolution';
 import type { FormRequest, PermissionRequest } from '@/lib/opencode/model';
+import { questionCallKey, questionFormCall } from '@/lib/opencode/question';
 import type { HostSessionStatusSnapshot } from '@/lib/opencode/session-status';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 
@@ -22,7 +23,8 @@ import { isSpaceDirectory } from '@/lib/spaces/space-route';
 // carry no more than this, and storing the full requests would make the two
 // feeds disagree on shape for no gain.
 export type BlockingPermissionRequest = Pick<PermissionRequest, 'id' | 'sessionID' | 'action' | 'resources' | 'save'>;
-export type BlockingFormRequest = Pick<FormRequest, 'id' | 'sessionID' | 'title'>;
+/** `call` names the agent's `question` call the form asks for (`questionCallKey`); the host seed does not carry it. */
+export type BlockingFormRequest = Pick<FormRequest, 'id' | 'sessionID' | 'title'> & { call?: string };
 /**
  * A page an agent showed that waits for the user's answer (render.page with
  * awaitAnswer). It blocks the agent like a form, so every surface shows it as
@@ -67,7 +69,11 @@ const normalizeDirectory = (directory: string): string => normalizeProjectPath(d
 const toBlockingPermission = ({ id, sessionID, action, resources, save }: PermissionRequest): BlockingPermissionRequest => (
   { id, sessionID, action, resources, save }
 );
-const toBlockingForm = ({ id, sessionID, title }: FormRequest): BlockingFormRequest => ({ id, sessionID, title });
+const toBlockingForm = (form: FormRequest): BlockingFormRequest => {
+  const { id, sessionID, title } = form;
+  const call = questionFormCall(form);
+  return call ? { id, sessionID, title, call: questionCallKey(call) } : { id, sessionID, title };
+};
 
 /**
  * Returns the list with the request added or replaced, or null when nothing

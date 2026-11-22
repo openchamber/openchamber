@@ -2903,11 +2903,12 @@ export async function replyToForm(
   }
 }
 
-export async function cancelForm(sessionId: string, formId: string): Promise<void> {
+/** `message` reaches the agent as the question's result and lets it go on; see `opencodeClient.cancelForm`. */
+export async function cancelForm(sessionId: string, formId: string, message?: string): Promise<void> {
   await waitForConnectionOrThrow()
   const directory = getRequestReplyDirectory("form", sessionId, formId)
   try {
-    if (await opencodeClient.cancelForm(sessionId, formId, directory) !== true) {
+    if (await opencodeClient.cancelForm(sessionId, formId, directory, message) !== true) {
       throw new Error("Form cancellation failed")
     }
     // A successful cancellation is authoritative; see replyToForm for the
@@ -2920,6 +2921,20 @@ export async function cancelForm(sessionId: string, formId: string): Promise<voi
     }
     throw error
   }
+}
+
+/** Every form the open directory stores hold, each with the session it waits in. */
+export function listPendingForms(): Array<{ sessionId: string; form: FormRequest }> {
+  const stores = _childStores
+  if (!stores) return []
+  const pending: Array<{ sessionId: string; form: FormRequest }> = []
+  for (const [, store] of stores.children) {
+    const formsBySession: Record<string, FormRequest[]> = store.getState().form ?? {}
+    for (const [sessionId, forms] of Object.entries(formsBySession)) {
+      for (const form of forms) pending.push({ sessionId, form })
+    }
+  }
+  return pending
 }
 
 /**

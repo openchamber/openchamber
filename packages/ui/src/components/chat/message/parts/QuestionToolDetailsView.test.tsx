@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { I18nProvider } from '@/lib/i18n';
 import { questionPrompts, type QuestionAnswer } from '@/lib/opencode/question';
-import { QuestionAnswerForm, QuestionToolDetailsView, type QuestionToolDetailsViewProps } from './QuestionToolDetailsView';
+import { type LateAnswer, QuestionAnswerForm, QuestionToolDetailsView, type QuestionToolDetailsViewProps } from './QuestionToolDetailsView';
 
 // Static renders, as in FormMarkdown.test.tsx: question text is Markdown,
 // whose renderer loads lazily through a Vite worker import that `bun test`
@@ -50,6 +50,8 @@ const renderView = (props: Partial<QuestionToolDetailsViewProps>) => renderToSta
       answers={null}
       errorText={null}
       canAnswer
+      closeReason={null}
+      onCopy={noop}
       startingAnswers={() => null}
       onKeep={noop}
       onSend={noop}
@@ -78,7 +80,8 @@ describe('QuestionToolDetailsView', () => {
       expect(text).toContain(expected);
     }
     expect(text).toContain('Not answered · The user dismissed this question');
-    expect(buttonLabels(html)).toEqual(['Answer']);
+    // A dismissed question can still be answered, and copied with any picks.
+    expect(buttonLabels(html)).toEqual(['Answer anyway', 'Copy questions and answers']);
   });
 
   test('an answered call marks what was chosen, shows a typed answer, and offers to answer again', () => {
@@ -89,7 +92,7 @@ describe('QuestionToolDetailsView', () => {
     expect(text).toContain('Your answer');
     expect(text).toContain('also run the e2e suite');
     expect(text).not.toContain('Not answered');
-    expect(buttonLabels(html)).toEqual(['Answer again']);
+    expect(buttonLabels(html)).toEqual(['Answer again', 'Copy questions and answers']);
   });
 
   test('a question the call left without an answer says so', () => {
@@ -102,7 +105,7 @@ describe('QuestionToolDetailsView', () => {
     const html = renderView({ errorText: 'The user dismissed this question', canAnswer: false });
 
     expect(textOf(html)).toContain('Which mode should it use?');
-    expect(buttonLabels(html)).toEqual([]);
+    expect(buttonLabels(html)).toEqual(['Copy questions and answers']);
   });
 
   test('the form opens on the answers given before', () => {
@@ -123,6 +126,47 @@ describe('QuestionToolDetailsView', () => {
 
   test('the form with nothing answered cannot send yet', () => {
     expect(/<button[^>]*disabled=""[^>]*>[\s\S]{0,200}Send answers/.test(renderForm(null))).toBe(true);
+  });
+
+  test('a timed-out question is greyed out, says it timed out, and offers to answer anyway', () => {
+    const html = renderView({ closeReason: 'timeout', errorText: 'The user dismissed this question' });
+    const text = textOf(html);
+
+    expect(html).toContain('data-question-timed-out=""');
+    expect(/<ol class="[^"]*opacity-50[^"]*grayscale/.test(html)).toBe(true);
+    expect(text).toContain('Timed out. The agent went on without your answers.');
+    // The cancel behind a timeout is not the user dismissing it.
+    expect(text).not.toContain('The user dismissed this question');
+    expect(text).toContain('Which mode should it use?');
+    expect(buttonLabels(html)).toEqual(['Answer anyway', 'Copy questions and answers']);
+  });
+
+  test('a question left to answer later is not greyed out, says the agent went on, and offers Answer', () => {
+    const html = renderView({ closeReason: 'later', errorText: 'The user will answer this question later.' });
+    const text = textOf(html);
+
+    expect(html).not.toContain('grayscale');
+    expect(text).toContain('Left to answer later. The agent went on; answer when you are ready.');
+    expect(text).not.toContain('The user will answer this question later.');
+    expect(buttonLabels(html)).toEqual(['Answer', 'Copy questions and answers']);
+  });
+
+  test('a question still shown normally is not greyed out', () => {
+    const html = renderView({ errorText: 'The user dismissed this question' });
+
+    expect(html).not.toContain('data-question-timed-out');
+    expect(html).not.toContain('grayscale');
+  });
+
+  test('the late-answer form asks how the agent should use the answers, defaulting to "if not done yet", with a note field', () => {
+    const html = renderForm(null);
+    const radio = (label: string) => html.match(new RegExp(`role="radio"[^>]*aria-checked="(true|false)"[^>]*aria-label="${label}"`))?.[1];
+
+    expect(radio('Consider them if not done yet')).toBe('true');
+    expect(radio('Do exactly this')).toBe('false');
+    expect(radio('FYI, what I would have done')).toBe('false');
+    expect(textOf(html)).toContain('Note for the agent (optional)');
+    expect(html).toContain('<textarea');
   });
 });
 
@@ -155,7 +199,7 @@ describe('QuestionToolDetailsView, buttons under the scroll box', () => {
 
     expect(inBox).toContain('Which checks run?');
     expect(inBox).toContain('Not answered · The user dismissed this question');
-    expect(buttonsUnderBox).toEqual(['Answer']);
+    expect(buttonsUnderBox).toEqual(['Answer anyway', 'Copy questions and answers']);
   });
 
   test('the open form scrolls its questions in the box, and Cancel and Send answers sit under it', () => {
@@ -198,6 +242,48 @@ describe('QuestionToolDetailsView, opened and closed', () => {
     await act(async () => button.click());
   };
 
+  test('Send answers carries the chosen meaning and the trimmed note with the answers', async () => {
+    // No question text, so nothing renders Markdown (see the note at the top).
+    const plainPrompts = questionPrompts({
+      questions: [{ header: 'Mode', question: '', multiple: false, options: [{ label: 'Fast', description: '' }, { label: 'Careful', description: '' }] }],
+    });
+    const sent: Array<{ answers: QuestionAnswer[]; late: LateAnswer }> = [];
+    await act(async () => root.render(
+      <I18nProvider>
+        <QuestionAnswerForm
+          prompts={plainPrompts}
+          starting={[['Careful']]}
+          isMobile={false}
+          renderScrollBox={renderScrollBox}
+          onCancel={noop}
+          onSend={(answers, late) => {
+            sent.push({ answers, late });
+          }}
+        />
+      </I18nProvider>,
+    ));
+
+    const exact = host.querySelector<HTMLButtonElement>('[role="radio"][aria-label="Do exactly this"]');
+    if (!exact) throw new Error(`No "Do exactly this" option in: ${host.textContent}`);
+    await act(async () => exact.click());
+    expect(exact.getAttribute('aria-checked')).toBe('true');
+
+    const textarea = host.querySelector('textarea');
+    if (!textarea) throw new Error('No note field');
+    const setValue = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+    await act(async () => {
+      textarea.focus();
+      setValue?.call(textarea, '  ship it before the release  ');
+      // React DOM reads `input` when it found a DOM at import, and a key
+      // event when it did not, which depends on the test files run before.
+      textarea.dispatchEvent(new window.Event('input', { bubbles: true }));
+      textarea.dispatchEvent(new window.KeyboardEvent('keyup', { bubbles: true }));
+    });
+
+    await click('Send answers');
+    expect(sent).toEqual([{ answers: [['Careful']], late: { mode: 'exact', note: 'ship it before the release' } }]);
+  });
+
   test('the answers to start from are read once each time the form opens, by the click that opens it', async () => {
     let reads = 0;
     const startingAnswers = () => {
@@ -215,6 +301,8 @@ describe('QuestionToolDetailsView, opened and closed', () => {
           answers={null}
           errorText={null}
           canAnswer
+          closeReason={null}
+      onCopy={noop}
           startingAnswers={startingAnswers}
           onKeep={onKeep}
           onSend={noop}
@@ -227,7 +315,7 @@ describe('QuestionToolDetailsView, opened and closed', () => {
     await render();
     expect(reads).toBe(0);
 
-    await click('Answer');
+    await click('Answer anyway');
     expect(reads).toBe(1);
 
     // The row renders again while the form stays open, as it does whenever
@@ -239,7 +327,7 @@ describe('QuestionToolDetailsView, opened and closed', () => {
     expect(kept).toEqual([[]]);
     expect(reads).toBe(1);
 
-    await click('Answer');
+    await click('Answer anyway');
     expect(reads).toBe(2);
   });
 });

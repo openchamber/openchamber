@@ -1804,8 +1804,15 @@ class OpencodeService {
     return true
   }
 
-  async cancelForm(sessionID: string, formID: string, directory?: string | null): Promise<boolean> {
-    await call("session.form.cancel", () => this.clientFor(directory).session.form.cancel({ sessionID, formID }))
+  /**
+   * Without a message the agent's step ends, as when the user dismisses a
+   * question; with one, the agent reads the message as the tool's result and
+   * goes on.
+   */
+  async cancelForm(sessionID: string, formID: string, directory?: string | null, message?: string): Promise<boolean> {
+    await call("session.form.cancel", () => this.clientFor(directory).session.form.cancel(
+      message === undefined ? { sessionID, formID } : { sessionID, formID, message },
+    ))
     return true
   }
 
