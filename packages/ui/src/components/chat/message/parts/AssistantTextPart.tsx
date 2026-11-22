@@ -1,4 +1,5 @@
 import React from 'react';
+import { EntryTimes } from '../EntryTimes';
 import type { Part } from '@/lib/opencode/model';
 import { MarkdownRenderer } from '../../MarkdownRenderer';
 import type { StreamPhase, ToolPopupContent } from '../types';
@@ -83,6 +84,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                 key={part.id || `${messageId}-text`}
             >
                 <GeneratedJsonResultCard result={generatedResult} />
+                <EntryTimes part={part} running={isStreaming} />
             </div>
         );
     }
@@ -95,6 +97,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
             // being written would leave the screen (useChatTimelineScroll).
             data-streaming-reply={isStreaming && part.type === 'text' ? '' : undefined}
         >
+            <EntryTimes part={part} running={isStreaming} />
             <MarkdownRenderer
                 content={displayTextContent}
                 part={part}

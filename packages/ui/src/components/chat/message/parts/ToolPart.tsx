@@ -1,5 +1,6 @@
 
 import React from 'react';
+import { EntryTimes } from '../EntryTimes';
 import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { cn } from '@/lib/utils';
@@ -1495,6 +1496,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
                     {shouldRenderResult && (
                         <div>
+                            <EntryTimes part={part} />
                             {isFileChangeTool(part.tool) && hasVisualDiffEntry ? (
                                 <div className="mb-1 flex items-center justify-end gap-2">
                                     <DiffViewToggle
@@ -1887,7 +1889,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
 
     return (
         <div ref={rowRef}>
-            {}
+            <EntryTimes part={part} />
             <div
                 className={cn(
                     'group/tool flex gap-1.5 pe-2 ps-px py-1.5 rounded-xl',

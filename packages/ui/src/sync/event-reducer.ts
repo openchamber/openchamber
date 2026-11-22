@@ -61,6 +61,9 @@ function getUpdatedDeltaFields(previous: Part, next: Part): string[] {
  * `start`; the start streamed earlier is the real one and stays.
  */
 function withStreamedStart(previous: Part, next: Part): Part {
+  if (previous.displayTime && next.displayTime) {
+    next = { ...next, displayTime: { ...previous.displayTime, ...next.displayTime } }
+  }
   if (next.type !== "text" && next.type !== "reasoning") return next
   if (previous.type !== next.type || !previous.time || !next.time) return next
   if (next.time.end === undefined || previous.time.start >= next.time.start) return next
@@ -249,6 +252,7 @@ function applyToolTransition(part: ToolPart, transition: ToolTransition): ToolPa
       return {
         ...part,
         executed: transition.executed,
+        displayTime: { start: part.displayTime?.start ?? transition.start },
         state: { status: "running", input: transition.input, time: { start: transition.start } },
       }
     case "progress":
@@ -261,6 +265,7 @@ function applyToolTransition(part: ToolPart, transition: ToolTransition): ToolPa
       return withoutUnshownResult({
         ...part,
         executed: transition.executed,
+        displayTime: { ...part.displayTime, end: transition.end },
         state: compact({
           status: "completed",
           input: state.input,
@@ -277,6 +282,7 @@ function applyToolTransition(part: ToolPart, transition: ToolTransition): ToolPa
       return withoutUnshownResult({
         ...part,
         executed: transition.executed,
+        displayTime: { ...part.displayTime, end: transition.end },
         state: compact({
           status: "error",
           input: state.input,
@@ -463,9 +469,12 @@ export function applyDirectoryEvent(
       const runningCompaction = info.role === "compaction" && info.status !== "running"
         ? findRunningCompactionIndex(messages)
         : -1
-      if (runningCompaction >= 0) {
+      if (runningCompaction >= 0 && info.role === "compaction") {
         const running = messages[runningCompaction]
-        info = { ...info, id: running.id, time: { ...running.time } }
+        // The settled record keeps the running one's start and adds when it ended.
+        const time: Extract<Message, { role: "compaction" }>["time"] = { created: running.time.created }
+        if (info.time.completed !== undefined) time.completed = info.time.completed
+        info = { ...info, id: running.id, time }
       }
       const messageIndex = findMessageIndex(messages, info.id)
       if (messageIndex >= 0) {

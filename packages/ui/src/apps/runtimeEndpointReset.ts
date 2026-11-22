@@ -43,6 +43,7 @@ import { resetBackgroundShells } from '@/sync/background-shells';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
+import { resetSessionActivityTimestamps } from '@/sync/session-activity-timestamps';
 import { syncDesktopSettings } from '@/lib/persistence';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 
@@ -99,6 +100,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   // Turn timings belong to the previous instance's sessions, and the reset also
   // restarts the resume window so the switch is treated as a fresh load.
   resetSessionActivityTiming();
+  resetSessionActivityTimestamps({ reload: true });
   usePermissionStore.getState().reset();
   useMessageQueueStore.getState().resetForRuntimeSwitch(detail.previousRuntimeKey);
   useFileSearchStore.getState().resetForRuntimeSwitch();
