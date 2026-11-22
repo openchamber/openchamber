@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { useI18n } from '@/lib/i18n';
-import { getModelPoolTargets, modelForRecoveryAnchor, nextModelPoolTarget, recoveryUserMessage, MODEL_ROUTE_PROVIDER_ID } from '@/lib/sessionErrorRecovery';
+import { failedModelsForPrompt, getModelPoolTargets, modelForRecoveryAnchor, nextModelPoolTarget, recoveryUserMessage, MODEL_ROUTE_PROVIDER_ID } from '@/lib/sessionErrorRecovery';
 import { useConfigStore, selectProvidersForDirectory } from '@/stores/useConfigStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -67,10 +67,18 @@ export const MessageRecoveryActions: React.FC<MessageRecoveryActionsProps> = ({ 
     [providers, selectedModel],
   );
   const isPool = selectedModel?.providerID === MODEL_ROUTE_PROVIDER_ID;
-  const failedModel = userMessage
-    ? modelForRecoveryAnchor(messages, anchorMessageId, userMessage.id)
-    : null;
-  const nextTarget = nextModelPoolTarget(poolTargets, failedModel);
+  const failedModels = React.useMemo(() => {
+    if (!userMessage) return [];
+    const failed = failedModelsForPrompt(messages, userMessage.id);
+    const anchorModel = modelForRecoveryAnchor(messages, anchorMessageId, userMessage.id);
+    return anchorModel && !failed.some((model) => model.providerID === anchorModel.providerID && model.id === anchorModel.id)
+      ? [...failed, anchorModel]
+      : failed;
+  }, [anchorMessageId, messages, userMessage]);
+  const nextTarget = nextModelPoolTarget(poolTargets, failedModels);
+  // Every target has run for this prompt: say so in plain sight instead of a
+  // disabled button whose reason only shows on hover.
+  const poolUsedUp = isPool && poolTargets.length > 1 && !nextTarget;
 
   const retry = React.useCallback(async (model: { providerID: string; id: string; variant?: string | null }) => {
     if (pending || !userMessage) return;
@@ -106,7 +114,7 @@ export const MessageRecoveryActions: React.FC<MessageRecoveryActionsProps> = ({ 
           className="w-full max-w-64"
         />
       )}
-      {isPool ? (
+      {isPool && !poolUsedUp ? (
         <Button
           type="button"
           variant="outline"
@@ -117,6 +125,13 @@ export const MessageRecoveryActions: React.FC<MessageRecoveryActionsProps> = ({ 
         >
           {t('chat.sessionErrorRecovery.nextPoolTarget')}
         </Button>
+      ) : null}
+      {poolUsedUp ? (
+        <p className="typography-meta w-full text-[var(--status-error-text)]">
+          {t('chat.sessionErrorRecovery.poolUsedUp', {
+            models: failedModels.map((model) => `${model.providerID}/${model.id}`).join(', '),
+          })}
+        </p>
       ) : null}
     </div>
   );

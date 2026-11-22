@@ -9,6 +9,7 @@ import { sidebarLayoutI18n } from './sidebar-layout.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
+import { poolSettingsI18n } from './pool-settings.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
@@ -151,6 +152,7 @@ export const dict: Record<I18nKey, string> = {
   ...projectKnowledgeI18n.pl,
   ...linearPanelI18n.pl,
   ...routingI18n.pl,
+  ...poolSettingsI18n.pl,
   ...pluginPanelI18n.pl,
   ...surfacePanelI18n.pl,
   ...fileArtifactsI18n.pl,

@@ -639,6 +639,9 @@
     "recentEfforts": {
       "scope": "profile"
     },
+    "modelDefaultVariants": {
+      "scope": "profile"
+    },
     "providerOrder": {
       "scope": "profile"
     },

@@ -2732,11 +2732,14 @@ export const useConfigStore = create<ConfigStore>()(
 
                 getDefaultVariantForModel: (providerId: string, modelId: string) => {
                     const state = get();
-                    return resolveConfiguredDefaultVariant({
+                    const defaults = {
                         ...getProjectDefaultsForConfigDirectory(fromDirectoryKey(state.activeDirectoryKey)),
                         settingsDefaultModel: state.settingsDefaultModel,
                         settingsDefaultVariant: state.settingsDefaultVariant,
-                    }, providerId, modelId);
+                    };
+                    const configured = resolveConfiguredDefaultVariant(defaults, providerId, modelId);
+                    const personal = useUIStore.getState().modelDefaultVariants[`${providerId}/${modelId}`];
+                    return configured ?? personal;
                 },
 
                 cycleCurrentVariant: () => {

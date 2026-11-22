@@ -46,20 +46,39 @@ export const getModelPoolTargets = (
 };
 
 /**
- * Advance in the pool's configured order from the concrete model that just
- * failed. If the failed attempt is not known, try the second configured target
- * (the first fallback); a one-target pool has no next choice.
+ * The next pool target in configured order after the models that already
+ * failed for this prompt. It never wraps back to the start: once the last
+ * target has failed, the pool is used up and the caller says so.
  */
 export const nextModelPoolTarget = (
   targets: readonly ModelSelection[],
-  failedModel?: Pick<ModelSelection, 'providerID' | 'id'> | null,
+  failedModels: readonly Pick<ModelSelection, 'providerID' | 'id'>[] = [],
 ): ModelSelection | null => {
   if (targets.length < 2) return null;
-  const failedIndex = failedModel
-    ? targets.findIndex((target) => target.providerID === failedModel.providerID && target.id === failedModel.id)
-    : -1;
-  const nextIndex = failedIndex >= 0 ? (failedIndex + 1) % targets.length : 1;
-  return targets[nextIndex] ?? null;
+  const failed = (target: Pick<ModelSelection, 'providerID' | 'id'>) =>
+    failedModels.some((model) => model.providerID === target.providerID && model.id === target.id);
+  const lastFailed = targets.reduce((last, target, index) => (failed(target) ? index : last), -1);
+  // Nothing known failed: the first target is the one that just ran.
+  const start = lastFailed >= 0 ? lastFailed + 1 : 1;
+  return targets.slice(start).find((target) => !failed(target)) ?? null;
+};
+
+/** The models that answered the prompt with an error, oldest first, each once. */
+export const failedModelsForPrompt = (
+  messages: readonly Message[],
+  userMessageID: string,
+): Pick<ModelSelection, 'providerID' | 'id'>[] => {
+  const start = messages.findIndex((message) => message.id === userMessageID);
+  if (start < 0) return [];
+  const failed: Pick<ModelSelection, 'providerID' | 'id'>[] = [];
+  for (const message of messages.slice(start + 1)) {
+    if (message.role === 'user') break;
+    if (message.role !== 'assistant' || !message.providerID || !message.modelID) continue;
+    if (!message.error && message.finish !== 'error') continue;
+    if (!failed.some((model) => model.providerID === message.providerID && model.id === message.modelID))
+      failed.push({ providerID: message.providerID, id: message.modelID });
+  }
+  return failed;
 };
 
 /** The prompt associated with an error anchor, or the latest prompt for a session-level notice. */

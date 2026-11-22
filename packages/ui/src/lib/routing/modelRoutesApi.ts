@@ -11,14 +11,21 @@ import { storedSchedulesSchema, type ScheduleListValue } from '@/lib/routing/sch
 export const AUTONOMY_LEVELS = ['fixed', 'rules', 'adaptive', 'predictive', 'agent'] as const;
 export type AutonomyLevel = (typeof AUTONOMY_LEVELS)[number];
 
+const variantMapSchema = z.record(z.string(), z.union([z.string(), z.literal(false)]));
+const contextLimitSchema = z.object({ context: z.number().int().positive() });
+const windowRefSchema = z.union([z.string(), z.object({ name: z.string(), invert: z.boolean().optional() })]);
 const targetSchema = z.union([
   z.string().min(1),
   z.object({
     model: z.string().min(1),
     defaultVariant: z.string().optional(),
-    variants: z.record(z.string(), z.string()).optional(),
+    variants: variantMapSchema.optional(),
     until: z.number().int().positive().optional(),
-  }),
+    exclude: z.array(z.string()).optional(),
+    limit: contextLimitSchema.optional(),
+    cache_format: z.enum(['anthropic', 'alibaba']).optional(),
+    window: windowRefSchema.optional(),
+  }).passthrough(),
 ]);
 
 const healthSchema = z
@@ -50,7 +57,7 @@ const budgetSchema = z
 export const POOL_DESCRIPTION_MAX_LENGTH = 200;
 export const POOL_DETAILS_MAX_LENGTH = 2000;
 
-const modelRouteSchema = z
+export const modelRouteSchema = z
   .object({
     name: z.string().optional(),
     // OpenChamber's own keys: what the pool is for, read by Jev when a routing
@@ -60,7 +67,18 @@ const modelRouteSchema = z
     // absent; otherwise one such value would block saving any pool.
     description: z.string().max(POOL_DESCRIPTION_MAX_LENGTH).regex(/^[^\r\n]*$/).optional().catch(undefined),
     details: z.string().max(POOL_DETAILS_MAX_LENGTH).optional().catch(undefined),
-    targets: z.array(targetSchema),
+    targets: z.array(targetSchema).optional(),
+    system: z.string().optional(),
+    include: z.array(z.string()).optional(),
+    exclude: z.array(z.string()).optional(),
+    contains: z.array(z.string()).optional(),
+    notContains: z.array(z.string()).optional(),
+    match: z.string().optional(),
+    levels: z.array(z.string()).optional(),
+    variantRules: z.array(z.object({ match: z.string(), map: variantMapSchema })).optional(),
+    cache_format: z.enum(['anthropic', 'alibaba']).optional(),
+    limit: contextLimitSchema.optional(),
+    nestedTimeout: z.enum(['longest', 'shortest']).optional(),
     autonomy: z.enum(AUTONOMY_LEVELS).optional(),
     selection: z.enum(['ordered', 'round-robin', 'weighted']).optional(),
     weights: z.record(z.string(), z.number()).optional(),
@@ -92,9 +110,17 @@ const modelRoutesStateSchema = z.object({
   otherRoutes: z.array(z.object({ path: z.string(), routes: z.record(z.string(), modelRouteSchema) })).optional(),
   otherSchedules: z.array(z.object({ path: z.string(), schedules: storedSchedulesSchema })).optional(),
   path: z.string().optional(),
+  timeouts: z.record(z.string(), z.object({
+    applied: z.union([z.number(), z.literal(false)]),
+    longest: z.union([z.number(), z.literal(false)]),
+    shortest: z.union([z.number(), z.literal(false)]),
+    nested: z.array(z.string()),
+  })).optional(),
 });
 
 type ModelRoutesState = z.infer<typeof modelRoutesStateSchema> & { available: boolean };
+/** The server's account of one pool's first-output wait: what OpenCode applies now, and what longest or shortest would pick from the pools it contains. */
+export type PoolTimeoutSummary = NonNullable<ModelRoutesState['timeouts']>[string];
 
 const errorPayloadSchema = z.object({ error: z.string().min(1) });
 

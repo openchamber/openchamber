@@ -243,6 +243,19 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, op
 
   if (!model) model = resolveFallbackModel(models, hiddenModels);
 
+  // The per-model default effort ranks last: an effort configured next to a
+  // default model or on the agent wins, and a model without one sends none,
+  // so the provider's own default applies.
+  if (model && variant === undefined) {
+    const modelDefaults = settings?.modelDefaultVariants;
+    const key = `${model.providerID}/${model.modelID}`;
+    // The settings writer only stores a provider/model → variant record; a
+    // hand-edited non-object simply has no own entry for the key.
+    if (modelDefaults && Object.hasOwn(modelDefaults, key)) {
+      variant = resolveVariant(models, model.providerID, model.modelID, modelDefaults[key]);
+    }
+  }
+
   return {
     agent: resolvedAgent?.id,
     model,

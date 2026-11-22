@@ -160,6 +160,12 @@ export const parseModelRefs = (limit: number): SettingsParser<ModelRef[]> => fro
   }),
 );
 
+// Same catalog-sized bound as hiddenModels; defaults never grow with turns.
+export const parseModelDefaultVariants = fromSchema(
+  z.record(z.string().regex(/^[^/#\s]+\/[^#\s]+$/), nonEmptyTrimmed)
+    .refine((entries) => Object.keys(entries).length <= 1024),
+);
+
 export const parseRecentEfforts = fromSchema(
   looseObject.transform((record) => {
     const result: Record<string, string[]> = {};

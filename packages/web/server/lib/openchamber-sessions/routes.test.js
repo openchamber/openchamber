@@ -1718,6 +1718,41 @@ describe('openchamber session routes', () => {
     });
   });
 
+  // Oracle: the precedence Settings states: an effort configured next to a
+  // default model wins; the model's own default effort fills only a gap.
+  it('falls back to the model default effort only when no other effort is configured', async () => {
+    useCatalog({
+      models: [{ id: 'default', modelID: 'default', providerID: 'openai', variants: [{ id: 'low' }, { id: 'high' }] }],
+    });
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/default',
+        modelDefaultVariants: { 'openai/default': 'low' },
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', prompt: 'Run this' }).expect(200);
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_123',
+      model: { id: 'default', providerID: 'openai', variant: 'low' },
+    });
+
+    sessionSwitchModelMock.mockClear();
+    const configured = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/default',
+        defaultVariant: 'high',
+        modelDefaultVariants: { 'openai/default': 'low' },
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(configured.app).post('/api/openchamber/sessions').send({ directory: '/repo/app', prompt: 'Run this' }).expect(200);
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_123',
+      model: { id: 'default', providerID: 'openai', variant: 'high' },
+    });
+  });
+
   it('applies the config default model variant when the prompt omits a model', async () => {
     useCatalog({
       config: [{

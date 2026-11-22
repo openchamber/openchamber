@@ -34,6 +34,24 @@ const writeFixture = (name, content) => {
   return filePath;
 };
 
+describe('ordered config maps', () => {
+  // Oracle: a parsed read retains the requested sequence; comments and sibling
+  // config text survive a reorder without a semantic value change.
+  it('persists a pool reorder and keeps comments inside each value', () => {
+    const filePath = writeFixture('ordered-pools.jsonc', '{\n  // keep sibling\n  "model": "p/m",\n  "experimental": { "model_routes": {\n    "fast": { /* fast note */ "targets": ["p/a"] },\n    "slow": { /* slow note */ "targets": ["p/b"] }\n  } }\n}');
+    const original = readConfigFile(filePath);
+    writeConfig({ ...original, experimental: { model_routes: {
+      slow: original.experimental.model_routes.slow, fast: original.experimental.model_routes.fast,
+    } } }, filePath, { orderedPaths: [['experimental', 'model_routes']] });
+    expect(Object.keys(readConfigFile(filePath).experimental.model_routes)).toEqual(['slow', 'fast']);
+    const text = fs.readFileSync(filePath, 'utf8');
+    expect(text).toContain('// keep sibling');
+    expect(text).toContain('"slow": { /* slow note */');
+    expect(text).toContain('"fast": { /* fast note */');
+    expect(readConfigFile(filePath).model).toBe('p/m');
+  });
+});
+
 describe('parseMdFile', () => {
   beforeEach(() => {
     fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
