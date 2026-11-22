@@ -31,6 +31,7 @@ import { createArchiveStore } from './archive-store.js';
 import { createIdleSessionReaper } from './idle-session-reaper.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { createOpenCodeSessionArchive, createSessionArchive } from './session-archive.js';
+import { createOpenCodeArchiveAt } from './opencode-archive-at.js';
 import { applyForkInheritance, listForkMessages } from './fork-inheritance.js';
 import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
@@ -860,7 +861,10 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
   };
   const sessionArchive = createSessionArchive({
     store: archiveStore,
-    openCode: injectedOpenCodeArchive || createOpenCodeSessionArchive({ clientFor }),
+    openCode: injectedOpenCodeArchive || createOpenCodeSessionArchive({
+      clientFor,
+      archiveAt: createOpenCodeArchiveAt({ baseUrl: openCodeBaseUrl, headers: getOpenCodeAuthHeaders }),
+    }),
     announce: broadcastArchived,
   });
   if (enableIdleSessionReaper && !injectedIdleSessionReaper) idleSessionReaper.start();

@@ -18,13 +18,15 @@ const FORGET_BATCH = 250;
 /** The archive file as it was before the first migration forgot anything; read-only, never overwritten. */
 export const MIGRATED_ARCHIVE_FILE_NAME = 'sessions-archive.migrated.json';
 
-type Outcome = 'confirmed' | 'missing' | 'failed' | 'unconfirmed' | 'gone';
+type Outcome = 'confirmed' | 'timeKept' | 'missing' | 'failed' | 'unconfirmed' | 'gone';
 
 export interface ArchiveMigrationResult {
   /** Entries still in the file after both passes; the next start retries them. */
   remaining: number;
   /** Entries OpenCode now holds as the file did (archived, or restored for an explicit unarchive). */
   confirmed: number;
+  /** Of those, archived entries OpenCode holds at the file's own time rather than its own. */
+  timeKept: number;
   /** Entries for sessions OpenCode does not have; forgotten, since nothing can show them. */
   missing: number;
   /** Entries whose push failed in both passes. */
@@ -59,9 +61,12 @@ export const createArchiveMigration = ({ store, openCode, runForSession, fsPromi
     }
   };
 
-  const pushAndConfirm = async (id: string, archived: boolean): Promise<Outcome> => {
+  const pushAndConfirm = async (id: string, entry: number | null): Promise<Outcome> => {
+    const archived = entry !== null;
     try {
-      await openCode.setArchived(id, archived);
+      // The original time where OpenCode takes one; an OpenCode that ignores it archives at its own time.
+      if (entry !== null && openCode.archiveAt) await openCode.archiveAt(id, entry);
+      else await openCode.setArchived(id, archived);
     } catch (error) {
       if (hasTag(error) && error._tag === 'SessionNotFoundError') return 'missing';
       console.warn(`[openchamber-sessions] could not carry the archive state of ${id} into OpenCode:`, describeFailure(error));
@@ -75,7 +80,8 @@ export const createArchiveMigration = ({ store, openCode, runForSession, fsPromi
       return 'failed';
     }
     if (readBack === undefined) return 'missing';
-    return isTimestamp(readBack) === archived ? 'confirmed' : 'unconfirmed';
+    if (isTimestamp(readBack) !== archived) return 'unconfirmed';
+    return entry !== null && readBack === entry ? 'timeKept' : 'confirmed';
   };
 
   const migrateOne = (id: string) => runForSession(id, async (): Promise<Outcome> => {
@@ -83,7 +89,7 @@ export const createArchiveMigration = ({ store, openCode, runForSession, fsPromi
     // first has already forgotten the entry and pushed its own state.
     const entry = await store.entry(id);
     if (entry === undefined) return 'gone';
-    return pushAndConfirm(id, entry !== null);
+    return pushAndConfirm(id, entry);
   });
 
   const runPass = async (ids: string[]) => {
@@ -101,7 +107,7 @@ export const createArchiveMigration = ({ store, openCode, runForSession, fsPromi
         if (id === undefined) continue;
         const outcome = await migrateOne(id);
         outcomes.set(id, outcome);
-        if (outcome === 'confirmed' || outcome === 'missing') acknowledged.push(id);
+        if (outcome === 'confirmed' || outcome === 'timeKept' || outcome === 'missing') acknowledged.push(id);
         if (acknowledged.length >= FORGET_BATCH) await flush();
       }
     };
@@ -113,7 +119,7 @@ export const createArchiveMigration = ({ store, openCode, runForSession, fsPromi
   return async (): Promise<ArchiveMigrationResult> => {
     const pending = Object.keys(await store.getAll());
     if (pending.length > 0 && !(await keepOriginal())) {
-      return { remaining: pending.length, confirmed: 0, missing: 0, failed: 0, unconfirmed: 0 };
+      return { remaining: pending.length, confirmed: 0, timeKept: 0, missing: 0, failed: 0, unconfirmed: 0 };
     }
     const first = await runPass(pending);
     const retry = [...first].filter(([, outcome]) => outcome === 'failed' || outcome === 'unconfirmed').map(([id]) => id);
@@ -122,7 +128,8 @@ export const createArchiveMigration = ({ store, openCode, runForSession, fsPromi
     const count = (outcome: Outcome) => [...final.values()].filter((value) => value === outcome).length;
     const result = {
       remaining: Object.keys(await store.getAll()).length,
-      confirmed: count('confirmed'),
+      confirmed: count('confirmed') + count('timeKept'),
+      timeKept: count('timeKept'),
       missing: count('missing'),
       failed: count('failed'),
       unconfirmed: count('unconfirmed'),

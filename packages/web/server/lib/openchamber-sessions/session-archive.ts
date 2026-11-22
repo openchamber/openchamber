@@ -31,9 +31,12 @@ export interface ArchiveReadOptions {
 export interface OpenCodeSessionArchive {
   setArchived: (sessionID: string, archived: boolean) => Promise<void>;
   readArchivedAt: (sessionID: string, options?: ArchiveReadOptions) => Promise<number | null | undefined>;
+  /** Archive at a given time (opencode-archive-at.ts); absent where OpenCode is reached another way. */
+  archiveAt?: ((sessionID: string, archivedAt: number) => Promise<void>) | undefined;
 }
 
-export const createOpenCodeSessionArchive = ({ clientFor }: { clientFor: () => SessionClient }): OpenCodeSessionArchive => ({
+export const createOpenCodeSessionArchive = ({ clientFor, archiveAt }: { clientFor: () => SessionClient; archiveAt?: OpenCodeSessionArchive['archiveAt'] }): OpenCodeSessionArchive => ({
+  archiveAt,
   setArchived: (sessionID, archived) => clientFor().session.update({ sessionID, archived }),
   readArchivedAt: async (sessionID, { signal } = {}) => {
     try {

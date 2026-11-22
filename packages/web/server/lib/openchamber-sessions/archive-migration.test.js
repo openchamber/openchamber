@@ -41,7 +41,7 @@ const openStore = (dataDir) => {
 
 const tagged = (tag) => Object.assign(new Error(tag), { _tag: tag });
 
-const fakeOpenCode = ({ sessions, failFor = () => null, applies = true } = {}) => {
+const fakeOpenCode = ({ sessions, failFor = () => null, applies = true, takesTime = false } = {}) => {
   const archivedAt = new Map(sessions.map((id) => [id, null]));
   let clock = 1_000;
   const openCode = {
@@ -54,6 +54,14 @@ const fakeOpenCode = ({ sessions, failFor = () => null, applies = true } = {}) =
     }),
     readArchivedAt: vi.fn(async (id) => (archivedAt.has(id) ? archivedAt.get(id) : undefined)),
   };
+  // archiveAt as OpenCode with #2686 serves it (takesTime) or as an older one that ignores the time.
+  openCode.archiveAt = vi.fn(async (id, at) => {
+    const failure = failFor(id);
+    if (failure) throw tagged(failure);
+    if (!archivedAt.has(id)) throw tagged('SessionNotFoundError');
+    if (archivedAt.get(id) !== null) return;
+    if (applies) archivedAt.set(id, takesTime ? at : (clock += 1));
+  });
   return openCode;
 };
 
@@ -86,10 +94,12 @@ describe('archive migration into OpenCode', () => {
     await createSessionArchive({ store: openStore(dataDir).store, openCode }).migrateLegacy();
     const after = new Map(openCode.archivedAt);
     openCode.setArchived.mockClear();
+    openCode.archiveAt.mockClear();
 
     await expect(createSessionArchive({ store: openStore(dataDir).store, openCode }).migrateLegacy()).resolves.toBe(0);
 
     expect(openCode.setArchived).not.toHaveBeenCalled();
+    expect(openCode.archiveAt).not.toHaveBeenCalled();
     expect(openCode.archivedAt).toEqual(after);
   });
 
@@ -172,6 +182,7 @@ describe('archive migration into OpenCode', () => {
     await createSessionArchive({ store: openStore(dataDir).store, openCode }).migrateLegacy();
 
     expect(openCode.setArchived).not.toHaveBeenCalled();
+    expect(openCode.archiveAt).not.toHaveBeenCalled();
     fs.chmodSync(filePath, 0o644);
     expect(fs.readFileSync(filePath, 'utf8')).toBe(before);
   });
@@ -185,6 +196,7 @@ describe('archive migration into OpenCode', () => {
     await createSessionArchive({ store: openStore(dataDir).store, openCode }).migrateLegacy();
 
     expect(openCode.setArchived).not.toHaveBeenCalled();
+    expect(openCode.archiveAt).not.toHaveBeenCalled();
     expect(openCode.archivedAt.get('ses_a')).toBe(9);
     const kept = fs.readdirSync(dataDir).filter((name) => name !== 'sessions-archive.json');
     expect(kept.map((name) => fs.readFileSync(path.join(dataDir, name), 'utf8'))).toContain('{"ses_a": 17000');
@@ -220,7 +232,37 @@ describe('archive migration into OpenCode', () => {
     await expect(migrate()).resolves.toMatchObject({ remaining: 20, confirmed: 0 });
 
     expect(openCode.setArchived).not.toHaveBeenCalled();
+    expect(openCode.archiveAt).not.toHaveBeenCalled();
     expect(fs.readFileSync(filePath, 'utf8')).toBe(before);
     expect(fs.existsSync(path.join(dataDir, MIGRATED_ARCHIVE_FILE_NAME))).toBe(false);
+  });
+  it('archives each session at its original time where OpenCode takes one, so the archive view keeps its order', async () => {
+    const ids = idsOf(500);
+    // Original times out of id order, as in a real archive.
+    const original = fileOf(ids, (index) => 1_700_000_000_000 + ((index * 7919) % 500) * 60_000);
+    const restored = idsOf(3, 'ses_restored_');
+    const { dataDir } = archiveFile({ ...original, ...Object.fromEntries(restored.map((id) => [id, null])) });
+    const openCode = fakeOpenCode({ sessions: [...ids, ...restored], takesTime: true });
+    for (const id of restored) openCode.archivedAt.set(id, 9);
+    const migrate = createArchiveMigration({ store: openStore(dataDir).store, openCode, runForSession: (_id, work) => work() });
+
+    // An explicit unarchive is confirmed as restored and never counted as a kept time.
+    await expect(migrate()).resolves.toMatchObject({ remaining: 0, confirmed: 503, timeKept: 500 });
+
+    for (const id of restored) openCode.archivedAt.delete(id);
+    expect(Object.fromEntries(openCode.archivedAt)).toEqual(original);
+    // The archive view sorts by time.archived, newest first (ArchiveView.tsx sortedSessions).
+    const byArchived = (times) => Object.entries(times).sort(([, a], [, b]) => b - a).map(([id]) => id);
+    expect(byArchived(Object.fromEntries(openCode.archivedAt))).toEqual(byArchived(original));
+  });
+
+  it('still archives through an OpenCode that ignores the time, and says the times were not kept', async () => {
+    const ids = idsOf(30);
+    const { dataDir } = archiveFile(fileOf(ids));
+    const openCode = fakeOpenCode({ sessions: ids, takesTime: false });
+    const migrate = createArchiveMigration({ store: openStore(dataDir).store, openCode, runForSession: (_id, work) => work() });
+
+    await expect(migrate()).resolves.toMatchObject({ remaining: 0, confirmed: 30, timeKept: 0 });
+    expect(archivedIn(openCode)).toHaveLength(30);
   });
 });
